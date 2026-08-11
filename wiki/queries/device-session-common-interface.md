@@ -2,8 +2,8 @@
 title: "Query: Would a Common Interface for Device Sessions Help?"
 type: query
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 5a9a304
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/entities/user_request.rs, VEN/src/services/user_request.rs, VEN/src/entities/device_session.rs, VEN/src/assets/ev.rs, VEN/src/state/mod.rs, VEN/src/tasks/planning/]
 tags: [query, device-session, architecture, milp]
 ---
@@ -51,3 +51,13 @@ wouldn't replace it.
 "sessions expiring soon" check — a thin trait exposing just `fn deadline(&self) ->
 DateTime<Utc>` could make sense then. Not speculatively now; nothing would consume it
 today.
+
+**BL-41 update (2026-08-05)**: `UserRequest` went from "a common interface that already
+existed" to "the only interface" for creating/ending EV/heater/shiftable sessions — the
+per-device `POST`/`DELETE /ev-session`, `/heater-target`, `/shiftable-loads` CRUD routes were
+removed once the UI's migration to `POST`/`DELETE /user-requests` was confirmed complete
+(the finding this query anticipated: those routes were dead surface duplicating the unified
+flow — see [[hems-planning]]). This doesn't change the answer above: the type-specific
+structs beneath `UserRequest` still diverge the same way, so a session-level trait still
+wouldn't shrink anything. It does remove one of the two competing entry points the divergence
+used to have to be reasoned about across.

@@ -2,9 +2,9 @@
 title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
-updated: 2026-07-11
-synced_commit: b1aba12
-sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs, VEN/src/state/mod.rs, VEN/src/services/obligation.rs]
+updated: 2026-08-09
+synced_commit: 329444a
+sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events/, VEN/src/entities/capacity.rs, VEN/src/state/mod.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---
 
@@ -14,8 +14,19 @@ The **only** VEN component that knows OpenADR HTTP, OAuth, and event payload for
 Transport lives in `VEN/src/vtn.rs` behind `VtnPort` (OAuth2 client-credentials with
 60 s expiry margin, one automatic 401/403 token-refresh retry, 409-upsert report
 semantics); parsing is pure functions in `VEN/src/controller/openadr_interface.rs`;
-the poll loop and change detection sit in `VEN/src/tasks/poll_events.rs`
-([[ven-hexagonal-architecture]]). Poll interval: `POLL_EVENTS_SECS`, default 30 s.
+the poll loop and change detection sit in `VEN/src/tasks/poll_events/` (`mod.rs`: the impure
+I/O loop; `detect.rs`: the pure change-detection core, split out under R-64 to stay under the
+`tasks/` 200-production-line cap) ([[ven-hexagonal-architecture]]). Poll interval:
+`POLL_EVENTS_SECS`, default 30 s.
+
+Every newly-seen event is now also recorded to [[history-store]] (R-64): `spawn_event_poll`
+takes an `Option<Arc<dyn HistoryPort>>`, and each event id first seen in a poll tick emits an
+`EventReceived` row through the same "new events this tick" loop that already built
+`OpenAdrArrived` trace events — no separate pass. Event polling itself is unconditional
+(rates/capacity/signals must keep flowing even when persistent history isn't configured);
+only the history write is skipped when `history` is `None`. `GET /history/events` and the VEN
+UI's "Events received" panel — both pre-existing but permanently empty before this — now
+show real data.
 
 ## Inbound: what is actually parsed
 

@@ -2,8 +2,8 @@
 title: Simulator
 type: component
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 50961b5
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/simulator/, VEN/src/state/mod.rs, VEN/src/routes/sim.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [simulator, physics, determinism]
 ---
@@ -65,6 +65,30 @@ deserialization — a false positive; the regression test now goes through `serd
 `SimState::to_sensor_snapshot`/`to_sim_snapshot`/`to_timeline_snapshot` moved out of
 `simulator/mod.rs` into `simulator/snapshot.rs` (file-size cap, `.claude/CLAUDE.md`) when
 [[real-measurement-mqtt]] threaded two new `Option<f64>` parameters through `SimState::tick`.
+
+## `POST /sim/inject` gate and call-source logging (R-65)
+
+`profile.simulator.sim_inject_enabled` (default `true`) is a master switch checked first in
+`routes/sim.rs::post_sim_inject`/`post_sim_inject_reset`: when `false`, every inject attempt
+gets a `403` instead of being applied. Every call — accepted or rejected — is logged at
+`warn!` (not `debug!`) with the caller's `ConnectInfo` peer address and an optional
+self-reported `source` string on `PostSimInjectBody` (e.g. `"ven-ui:PvPanel"`,
+`"e2e:pv_irradiance.feature:42"`); `source` is a pure diagnostic breadcrumb, never validated
+or persisted into `SimInjectState`. `ConnectInfo` only ever reflects the direct TCP peer — a
+caller behind the `ven-ui` nginx proxy shows up as nginx's address, so attributing a call
+through that proxy needs nginx's own access log too.
+
+This exists because `/sim/inject` repeatedly caused unattributed production PV-irradiance
+overrides on ven-1 with zero trace of the caller (`docs/history/project_journal.md`, "the
+ven-1 PV-injection mystery" — final root cause: a VEN UI integration test's `VITE_VEN_URL`
+fallback defaulted to ven-1's real production address when the env var was unset, so any
+`npm test` run anywhere on the LAN silently POSTed a real override into production). The gate
+and logging are durable defense-in-depth, independent of that specific root cause; `main.rs`
+also now waits on `SIGTERM` (not just `SIGINT`) before persisting sim state on shutdown, so a
+`docker compose up -d` container recreate no longer leaves `state.json` stale relative to the
+continuously-decaying PV-smoothing offset — the mechanism that produced several of the
+mystery's earlier false leads. `sim_inject_enabled` stays `false` on `VEN/profiles/ven-1.yaml`
+for a monitoring period (`docs/BACKLOG.md` GB-17) before being re-enabled.
 
 ## Role in planning
 

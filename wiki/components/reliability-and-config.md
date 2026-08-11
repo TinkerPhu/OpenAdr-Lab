@@ -2,8 +2,8 @@
 title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 50961b5
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/tasks/mod.rs, VEN/src/tasks/backoff.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/controller/milp_planner/mod.rs, VEN/src/services/hems.rs, VEN/src/config.rs, docs/guidelines/ERROR_HANDLING.md, docs/architecture/ven_milp_planner.md]
 tags: [reliability, config, error-handling, ven]
 ---
@@ -51,10 +51,14 @@ fleet debugging — `VtnPort`'s `Result<T, anyhow::Error>` contract is unchanged
 > not needed). `ProfileInvalid` simply stays reserved in `entities/error.rs` — no work
 > is tracked for it. See [[ven-code-vs-docs-audit]].
 
-A sibling case: `HvacService` (`services/hems.rs`) sketches the same session-lifecycle
-shape as `EvSessionService`, but `post_heater_target` sets the heater target directly
-instead of going through it — the type is never called. Also kept, not deleted;
-`docs/BACKLOG.md` BL-23 tracks the route-wiring-or-removal decision.
+A sibling case, now resolved differently than the two sat side-by-side originally: `EvSessionService` (the type `SessionConflict`/`NotFound` above actually came from) was deleted
+outright by BL-41 — session start/end moved entirely into the unified `/user-requests` flow
+(`state.cancel_request`, see [[hems-planning]]), leaving nothing for it to wrap. `HvacService`
+(`services/hems.rs`) is the one piece kept: its `set_heater_target`/`clear_heater_target`
+sketch the same session-lifecycle shape `EvSessionService` used to, still unwired to any
+route (`#[allow(dead_code)]`), still tracked by `docs/BACKLOG.md` BL-23. The
+`DomainError → (StatusCode, Json)` mapping that used to live beside both is now used only by
+`routes/hems/sessions.rs::delete_request`.
 
 ## Poll-loop backoff (Phase 2, WP2.1 — BL-03)
 
@@ -83,6 +87,7 @@ are collected and reported together, and the process exits non-zero before touch
 | Replan interval | `planner.replan_interval_s` (profile field, default 300) |
 | Peak-demand penalty rules | `planner.penalty_rules` (profile field, default `[]` = off) — see [[milp-planner]] |
 | Real-measurement feed enablement | `measurements.pv_enabled` / `.base_load_enabled` (profile fields, default `false`) — second gate alongside `{PV,BASE_LOAD}_MEASUREMENT_MQTT_HOST` env vars, see [[real-measurement-mqtt]] |
+| `POST /sim/inject` master switch | `simulator.sim_inject_enabled` (profile field, default `true`; `false` on `ven-1` — R-65) — see [[simulator]] |
 | Poll intervals | `POLL_EVENTS_SECS` / `POLL_PROGRAMS_SECS` / `POLL_REPORTS_SECS` env vars (30/30/60), backed off adaptively per-poll (see above) |
 | Poll-loop startup jitter | `POLL_STARTUP_JITTER_S` env var (default 0) — Phase 2 GB-09, one-time pre-loop delay so a fleet of VENs brought up together don't poll in lockstep; see [[fleet-tooling]] |
 | Obligation check interval | `OBLIGATION_CHECK_INTERVAL_S` = 5, named constant, `tasks/obligation.rs` |

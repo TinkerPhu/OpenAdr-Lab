@@ -2,8 +2,8 @@
 title: History store persistence format, time encoding, compaction, docker location
 type: query
 created: 2026-07-10
-updated: 2026-07-10
-synced_commit: 65afa27
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/history_store/schema.rs, VEN/src/history_store/mod.rs, VEN/src/tasks/history_sampler/accumulator.rs, VEN/src/main.rs, VEN/docker-compose.yml, VEN/src/profile/schema.rs, VEN/src/profile/defaults.rs]
 tags: [history, sqlite, time, retention, docker]
 ---
@@ -17,9 +17,18 @@ since this is a load-bearing operational question.
 
 ## Schema and time format
 
-Six tables (`VEN/src/history_store/schema.rs`, schema v1): `tick_samples`, `grid_samples`,
-`plan_snapshots`, `events_received`, `reports_sent`, `ledger_periods`. All timestamp
-columns are `INTEGER` — **Unix epoch seconds**, not milliseconds or ISO-8601 text.
+`VEN/src/history_store/schema.rs` is now at schema v8 (`PRAGMA user_version`, applied
+stepwise via `SCHEMA_V1`..`SCHEMA_V8`). The original v1 tables were `tick_samples`,
+`grid_samples`, `plan_snapshots`, `events_received`, `reports_sent`, `ledger_periods`; v2
+added `notifications`, v3 `user_settings`, v5/v6 extended `tick_samples` with PV curtailment
+columns. **v7 drops `plan_snapshots`** (R-63: its only writer was never called from any
+production path — `append_plan_snapshot`/`query_plans` and the route/UI panel reading it back
+were dead code, always empty). **v8 adds `forecast_accuracy_samples`**
+(`asset_id`, `lead_kind` [`near`/`far`], `target_ts`, `predicted_kw`, `predicted_at`,
+`actual_kw`, `actual_at`, indexed on `(asset_id, target_ts)`) — see [[history-store]]'s
+"Forecast accuracy tracking" section and `docs/architecture/VEN_ARCHITECTURE.md` §4.9a. All
+timestamp columns across every table are `INTEGER` — **Unix epoch seconds**, not
+milliseconds or ISO-8601 text.
 Conversion is centralized in `VEN/src/history_store/mod.rs`:
 
 ```rust
@@ -50,11 +59,13 @@ its mean toward zero.
 There is no tiered compaction (e.g. keep raw for a week, hourly after a month). Retention
 is a single cutoff, `HistoryConfig.retention_days` (`VEN/src/profile/schema.rs`,
 defaulting to 90 in `VEN/src/profile/defaults.rs`), applied by
-`SqliteHistoryStore::prune_before(cutoff)`: a `DELETE ... WHERE ts < ?` across all six
-tables, followed by `PRAGMA wal_checkpoint(PASSIVE)` to reclaim WAL space without blocking
-writers. This runs once per calendar day (the sampler's day-boundary check), not per
-write. The whole store is optional: `profile.history.enabled: false` skips constructing
-`SqliteHistoryStore` and spawning the sampler entirely.
+`SqliteHistoryStore::prune_before(cutoff)`: a `DELETE ... WHERE <ts-col> < ?` across seven
+tables (`tick_samples`, `grid_samples`, `events_received`, `reports_sent`, `ledger_periods`,
+`notifications`, `forecast_accuracy_samples` — `user_settings` is current-state, not
+time-series, so it's exempt), followed by `PRAGMA wal_checkpoint(PASSIVE)` to reclaim WAL
+space without blocking writers. This runs once per calendar day (the sampler's day-boundary
+check), not per write. The whole store is optional: `profile.history.enabled: false` skips
+constructing `SqliteHistoryStore` and spawning the sampler entirely.
 
 ## Docker location
 

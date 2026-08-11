@@ -2,8 +2,8 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 50961b5
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
@@ -135,8 +135,10 @@ carries a seedable `StdRng` so `power_model::random_voltage()` no longer draws f
 `thread_rng()` — closing the last live gaps against this project's determinism rule
 (`.claude/CLAUDE.md` §determinism: no code path depending on wall-clock/randomness without an
 injectable seam). One `Utc::now()` call site was found and classified as dead rather than
-fixed: `entities/site_meter.rs::SiteMeter` is never constructed anywhere, logged as R-62
-rather than wired up.
+fixed: `entities/site_meter.rs::SiteMeter` was never constructed anywhere. Rather than wire
+it up, R-62 deleted the file outright — its only genuinely-referenced type, `PowerSnapshot`
+(used by `OadrEventCache::dispatch_setpoints`, itself an unwired sketch — see
+[[openadr-interface]]), moved to `entities/capacity.rs`, the module of its one real consumer.
 
 ## Planning-side counterpart
 

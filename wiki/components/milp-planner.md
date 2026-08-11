@@ -2,8 +2,8 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 1b007b7
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
@@ -142,9 +142,10 @@ see [[milp-over-greedy]].
   signal, unaffected); `heater_milp.rs` gets a new `comfort_full_reward_eur_kwh` objective
   term at `z_heat_full[t]`, phase-gated to Phase 2 only (mirroring `w_tier_penalty_eur`'s own
   split — Phase 1 has no counterbalancing tier cost, so an unconditional reward would bias
-  Phase 1's coarse allocation for free). No curve / empty `comfort_rates` (legacy
-  `/ev-session`, `/heater-target` routes, VTN-commanded sessions) falls back to the passed-in
-  global defaults exactly. Rediscovered while wiring this: EV's `v_extra_eur_kwh` reward is
+  Phase 1's coarse allocation for free). No curve / empty `comfort_rates` (VTN-commanded
+  sessions, e.g. a `CHARGE_STATE_SETPOINT`-created `EvSession` — BL-41 removed the direct-CRUD
+  `/ev-session`/`/heater-target` create routes, see [[hems-planning]]) falls back to the
+  passed-in global defaults exactly. Rediscovered while wiring this: EV's `v_extra_eur_kwh` reward is
   structurally inert for driving allocation (R-18, `TECHNICAL_DEBTS.md`) — `e_ev_extra` is
   bounded only *above* by `e_extra_max_kwh × z_ev_core`, so the solver can bank the reward
   without changing real charging; `v_core_eur`/`z_ev_core` is the half genuinely coupled to

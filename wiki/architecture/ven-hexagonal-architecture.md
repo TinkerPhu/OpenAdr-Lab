@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 50961b5
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -34,7 +34,7 @@ inputs arrive only through the `AssetMilpContext` port. See [[milp-planner]] and
 | `VtnPort` | tasks/services → `vtn.rs` | fetch programs/events/reports, upsert reports (`controller/vtn_port.rs`) |
 | `AssetMilpContext` | planner input | solver receives `Vec<Box<dyn AssetMilpContext>>`; concrete asset types implement it in `assets/*.rs` (`controller/milp_planner/asset_port.rs`) |
 | `SolverPort` | services → `controller/milp_planner` | `solve(SolveRequest) -> Plan` (`controller/solver_port.rs`); `MilpSolver` (in `milp_planner/mod.rs`) is the real implementation, wrapping `run_planner()`; `services::PlanningService::solve_plan` is the only caller |
-| `HistoryPort` | domain/routes/tasks → `history_store` | append/query/prune for ticks, grid samples, plan snapshots, events, reports, ledger periods (`controller/history_port.rs`); `SqliteHistoryStore` is the real implementation, all methods synchronous (`rusqlite`), called from async contexts via `tokio::task::spawn_blocking` — see [[history-store]] |
+| `HistoryPort` | domain/routes/tasks → `history_store` | append/query/prune for ticks, grid samples, events received, reports sent, ledger periods, and forecast-accuracy samples (`controller/history_port.rs`); `SqliteHistoryStore` is the real implementation, all methods synchronous (`rusqlite`), called from async contexts via `tokio::task::spawn_blocking` — see [[history-store]] |
 | `WeatherForecastPort` | services/tasks → `weather.rs` | `latest()`/`is_alive()` (`controller/weather_port.rs`); `MqttWeatherAdapter` is the real implementation — see [[weather-forecast]] |
 | `MeasurementPort` | tasks/routes → `measurement.rs` | `latest_kw()`/`is_alive()` (`controller/measurement_port.rs`); `MqttMeasurementAdapter` is the real implementation, one instance per signal (PV, baseline load) — see [[real-measurement-mqtt]] |
 
