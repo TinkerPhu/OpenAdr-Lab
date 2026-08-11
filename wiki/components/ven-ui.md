@@ -2,9 +2,9 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-08-03
-synced_commit: 50961b5
-sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
+updated: 2026-08-09
+synced_commit: 329444a
+sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
 
@@ -35,11 +35,15 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   from `GET /arbiter-diagnostics` while enabled.
 - Phase 4 additions: `NotificationsBell` in the app bar (badge + feed panel, 10 s
   polling — the UI face of [[notifications]]); a `ComfortCurveCard` on the Devices
-  page (per-asset fill%/bid table plus a `ComfortCurveChart` visualization of the
+  page (per-asset fill%/bid table plus a `CurveChart` visualization of the
   curve, POST installs an override, Reset restores the built-in default —
-  WP4.2/BL-19); the EV/heater/shiftable dialogs gained a request-mode select
-  (`ModeSelect`, native `<select>` for testability) and the EV dialog a budget
-  field shown only for `MAX_COST` (WP4.1/BL-28).
+  WP4.2/BL-19); the request dialogs (created via the unified `POST /user-requests`
+  flow, see [[hems-planning]]) gained a request-mode select (`ModeSelect`, native
+  `<select>` for testability) and a budget field shown only for `MAX_COST`
+  (WP4.1/BL-28). BL-41 (2026-08-05) removed the per-device `/ev-session`
+  POST/DELETE, `/heater-target`, `/shiftable-loads` client methods/hooks once the
+  UI's migration to `/user-requests` was confirmed complete — the dialogs
+  themselves didn't change, only the now-dead API surface underneath them.
 - WP4.6 observability polish: `GridSignalStrip` on the Controller page (chips for
   active alert / SIMPLE / dispatch / capacity, from the `GET /signals` aggregate;
   renders nothing when idle), hatched+dimmed estimated-rate slots in the plan
@@ -54,6 +58,33 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   vitest ^4 / plugin-react ^5; vite 8's rolldown bundler mis-resolves a MUI
   default-import interop at bundle time (React #130 at runtime with all unit
   tests green), so the vite major is held at 7 until that interop is proven.
+
+## Chart kit
+
+Every chart in the app — Controller cells, History, the Devices comfort-curve preview, Raw
+Diagnostics — is built from one shared primitive kit plus three named compositions under
+`VEN/ui/src/components/charts/` (`TimeSeriesChart`, `StackedTimeSeriesChart`, `CurveChart`;
+the older `StackedAreaChart`/`ComfortCurveChart` names and locations are gone, renamed and
+moved here). Full architecture (why one kit, the cursor-correctness invariant that motivated
+it, per-composition behavior): `docs/architecture/chart_diagrams.md`. Two facts worth pulling
+up here rather than just linking:
+
+- **Data-presence filtering is generic, not per-caller.** `TimeSeriesChart` itself hides any
+  series with no non-null value anywhere in its data, for every current and future series a
+  caller declares — no chart writes its own `hasCostData`/`hasCo2Data`-style boolean (the
+  `generic-over-bespoke` rule in `.claude/CLAUDE.md`).
+- **Interactive legends** (`useLegendToggle`/`ChartLegend`, opt-in per composition instance
+  via `interactiveLegend`) let a user hide/show individual series by clicking a checkbox
+  legend entry; enabled on `AssetTimelineChart`, `TariffChart`, and
+  `GridAccumulatedCell`'s stacked chart, not on the Raw Diagnostics or `PlanPowerStack`
+  instances (out of that capability's shipped scope).
+- **`StackedTimeSeriesChart` doesn't get `TimeSeriesChart`'s automatic data-presence
+  filtering** (its `StackedAreaPoint` fields are always plain `number`, never `null`, so
+  there's no absence signal to filter on) — so its two callers each narrow the asset roster
+  they pass in themselves, via a shared `assetIdsWithTimelineData()` helper
+  (`GridAccumulatedCell.tsx`), before it reaches the chart. Without this, an asset with no
+  timeline data yet still got a legend entry with nothing plotted next to it — a legend/graph
+  drift bug found and fixed on the Controller "Accumulated Power" cell.
 
 ## Planner tab
 
@@ -82,6 +113,17 @@ deadline countdown/OVERDUE, an on-track/at-risk chip comparing the plan's
 `estimated_cost_eur` labeled "est." (per-session accumulated cost doesn't exist —
 BL-39). A `variant="condensed"` chip strip plus a read-only objective chip sits on the
 Dashboard (`dash-session-strip`, BL-36); the objective control stays on the Planner tab.
+
+**`PlanPowerStack`** shares its `StackedAreaPoint`-building logic
+(`buildStackedFromAllTimelines`) with the Controller's `GridAccumulatedCell` rather than
+building its own from `usePlan()`'s raw `Plan` object — the two independent
+implementations that existed before this consolidation is exactly what let one of them
+silently drop `net_export_kw` and show the grid line near zero under an autarky objective
+even while PV was heavily exporting (fixed: both now read the timeline's already-signed
+`net_import_kw − net_export_kw`, `controller/timeline.rs`). `PlanPowerStack` also no longer
+refetches the plan timeline on every render (a `useEffect` dependency bug), and PV stacks
+first — closest to the X axis — in every `StackedTimeSeriesChart` instance, matching how a
+reader visually reads "generation at the bottom, consumption piling up above it."
 
 Controller page: the PV asset's `AssetTimelineChart` shades hardware-capped, planned-curtailment,
 manual-override, and unplanned regions distinctly, reflecting `PvState.curtailment_source` from
@@ -124,9 +166,21 @@ per `docs/guidelines/REACT_GUIDELINES.md`; part of suite 1 in [[testing-strategy
 
 ## History page
 
-Phase 1 added a `History` page (`VEN/ui/src/pages/History.tsx`) that queries the new
+Phase 1 added a `History` page (`VEN/ui/src/pages/History.tsx`) that queries the
 `GET /history/*` routes and reuses the existing `AssetTimelineChart`/`TariffChart`
 components rather than introducing new chart code. It is a distinct concern from the
 live/forecast timeline above: History shows the durably-persisted operational record
-(ticks, grid samples, plan snapshots, events, reports), backed by the VEN-local SQLite
-store described in [[history-store]], not the in-memory simulator ring buffers.
+(ticks, grid samples, events, reports, forecast-accuracy samples), backed by the VEN-local
+SQLite store described in [[history-store]], not the in-memory simulator ring buffers.
+
+The page defaults to a rolling **last-24h** window on load (a "Last 24h" button returns to
+it explicitly) rather than requiring a manual date-range pick every visit — the common case
+("what just happened") needed zero interaction. Clicking either date control switches out of
+rolling mode into that fixed date and force-refreshes the charts, since a manually-picked
+date is a request for that exact window, not "keep following now." For the three assets
+forecast-accuracy-tracking tracks (PV, base_load, site-residual), `AssetTimelineChart`
+overlays near-lead (fine dotted) and far-lead (coarse dashed) forecast lines from
+`GET /history/forecast-accuracy` alongside the actual-power line — see [[history-store]]'s
+"Forecast accuracy tracking" section for the backend mechanism and
+`docs/architecture/chart_diagrams.md`'s "Forecast-accuracy overlay" note for how the overlay
+folds into the same cursor-correctness-safe merged data array as every other series.

@@ -2,9 +2,9 @@
 title: Notification Feed
 type: component
 created: 2026-07-12
-updated: 2026-07-31
-synced_commit: e9f5207
-sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events.rs, VEN/ui/src/pages/Notifications.tsx]
+updated: 2026-08-09
+synced_commit: 329444a
+sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events/, VEN/ui/src/pages/Notifications.tsx]
 tags: [notifications, ux, phase4]
 ---
 
@@ -48,7 +48,7 @@ deps ([[ven-hexagonal-architecture]]).
 | Trigger | Severity | Where |
 |---|---|---|
 | Newly-appearing grid-alert window | Alert | `tasks/poll_signals.rs` (once per window) |
-| VTN reachable → unreachable / back | Warn / Info | `tasks/poll_events.rs` via `notify::outage_transition` |
+| VTN reachable → unreachable / back | Warn / Info | `tasks/poll_events/mod.rs` via `notify::outage_transition` |
 | New warning on an **adopted** plan | Warning→Warn, Critical→Alert, Info suppressed | `services/notify.rs::notify_new_plan_warnings` (called from the plan cycle) |
 
 The plan-warning channel is the backbone: WP4.4's stale-rate warning and

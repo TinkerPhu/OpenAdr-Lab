@@ -2,8 +2,8 @@
 title: VEN Code vs Documentation Audit
 type: query
 created: 2026-07-05
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/, docs/architecture/VEN_ARCHITECTURE.md, .claude/CLAUDE.md]
 tags: [audit, drift, refactoring, ven]
 ---
@@ -87,9 +87,14 @@ should refactoring effort go?
    frozen+snap, planning-only). `/trace` split into `/trace/events` (ControllerEvent
    ring, capacity 500 — not 1000, and not setpoints) and `/trace/history`. Endpoints the
    doc doesn't know: `/timeline/all`, `/timeline/:asset_id`, `/forecast/:id`,
-   `/history/:id`, `/capability/:id`, `/plan/objective`, `/plan/events` (SSE),
-   `/plan/trigger`, `/ev-session`, `/ev-settings`, `/heater-target`, `/shiftable-loads`,
-   `/baseline-override`, `/sim/config/battery`. §5.2's "planner samples tariff with
+   `/history/:id`, `/history/forecast-accuracy`, `/capability/:id`, `/plan/objective`,
+   `/plan/events` (SSE), `/plan/trigger`, `/user-requests`, `/ev-session` (GET only,
+   kept for VTN-created sessions — see [[hems-planning]]), `/ev-settings`,
+   `/baseline-override`, `/sim/config/battery`. BL-41 (2026-08-05) removed the write-side
+   `/ev-session` POST/DELETE and all of `/heater-target`/`/shiftable-loads` once the UI
+   fully moved to the unified `POST`/`DELETE /user-requests` flow, so this list has both
+   grown (routes the doc never knew about) and shrunk (routes since removed as dead CRUD
+   surface) since the original audit. §5.2's "planner samples tariff with
    exact-interval containment at planner.rs:540" and "reporter emits latest snapshot
    only" both describe code that no longer exists.
 9. **Two-speed loop numbers.** Docs and [[hems-planning]] said "20 s periodic" replan;

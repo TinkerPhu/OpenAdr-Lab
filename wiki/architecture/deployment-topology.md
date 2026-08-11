@@ -2,9 +2,9 @@
 title: Deployment Topology
 type: architecture
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
-sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh]
+updated: 2026-08-09
+synced_commit: 329444a
+sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh, VEN/scale_out/node2/]
 tags: [deployment, docker, node1]
 ---
 
@@ -33,6 +33,20 @@ between parallel dev sessions: any docker build or test run there must hold the
 [[docker-host-lease-lock]] first (`scripts/docker_host_lock.sh`, `.claude/CLAUDE.md` §node1-lock). This is also the reason
 [[fleet-tooling]]'s live verification deliberately stopped at N=3 rather than N=10 —
 the Pi already runs ~20 of those unrelated containers with limited headroom.
+
+## Node2: build/test offload, not a second production stack
+
+**Node2** is a second docker host (`.claude/CLAUDE.md` §node2-lock) that runs `ven-4`
+through `ven-13` (`VEN/scale_out/node2/docker-compose.yml`) plus build/test load taken off
+Node1 — it shares the same [[docker-host-lease-lock]] mechanism as Node1, its own
+independent lock keyed by host, so the two can be used concurrently by different sessions.
+Node2 has no local VEN UI container: it proxies `/api/vens-registry` to Node1's real BFF
+over the LAN instead (`nginx/nginx.conf` there) rather than running a redundant nginx+UI
+image whose only reachable backend was Node1's anyway — one operator UI (on Node1) for the
+whole fleet, not one per host. `VEN/scale_out/node2/` also has `tests/`/`VTN/` sparse-checked
+out and the `openleadr-rs` submodule initialized, so all four [[testing-strategy]] suites run
+there, not just Rust unit tests — see `test-host-preference` in `.claude/CLAUDE.md` for when
+to prefer Node2 over Node1 for a build/test run.
 
 ## Development environments
 
