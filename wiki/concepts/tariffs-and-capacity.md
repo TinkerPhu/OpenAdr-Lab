@@ -2,10 +2,10 @@
 title: Tariffs and Capacity State
 type: concept
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
-sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs, VEN/src/entities/design_vocabulary.rs]
-tags: [tariff, capacity, domain]
+updated: 2026-08-11
+synced_commit: 9d2a538
+sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/controller/rate_schedule.rs, VEN/src/history_store/schema.rs]
+tags: [tariff, capacity, domain, envelope]
 ---
 
 # Tariffs and Capacity State
@@ -45,6 +45,25 @@ across boundary-straddling slots is available but not yet used there
 Both bound the [[milp-planner]]'s feasible region; reservations also flow back out as
 `IMPORT_/EXPORT_CAPACITY_RESERVATION` report payloads built from the live site envelope
 ([[openadr-interface]]).
+
+## Capacity-limit *schedule*, not just current state
+
+`parse_capacity_state` (above) collapses every active event into a single current-value
+scalar — it cannot answer "what limit applied at 14:32 yesterday" or "what will it be in
+2 hours." `controller/rate_schedule.rs::parse_capacity_schedule` keeps the full
+per-interval schedule instead (same priority-merge/cycle-looping core as
+`parse_rate_snapshots`, factored into a shared `collect_interval_groups` helper — the two
+parsers differ only in which OpenADR payload types they collect), served live via `GET
+/capacity/schedule` and rendered on the Controller/History tabs as the "Tariff &
+Envelope" diagram. Past values are persisted into `grid_samples`
+(`import_limit_kw`/`export_limit_kw`, schema v9) using tightest-value-wins per 1-minute
+window, not a mean — a capacity limit is usually absent, and averaging it against
+"unlimited" would be meaningless (same non-averaging pattern as PV curtailment's
+`generation_limit_kw` in `tick_samples`, schema v5). The VEN only ever *transports* this
+schedule — it has no opinion on how a VTN should compute it. What a real DNSP's envelope
+*algorithm* is actually based on, and whether this lab's own VTN should someday generate
+a plausible one rather than only relaying one, is an open external-research thread — see
+[[power-envelope-forecast-basis]].
 
 ## Stale data
 
