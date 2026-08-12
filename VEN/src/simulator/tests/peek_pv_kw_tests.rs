@@ -63,6 +63,7 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
 
     let pv_entry = sim
@@ -182,6 +183,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
 
     let pv_entry = sim
@@ -235,6 +237,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
     let pv_after_tick1 = sim
         .assets
@@ -267,6 +270,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
     let pv_after_tick2 = sim
         .assets
@@ -315,6 +319,7 @@ fn tick_applies_pv_generation_limit_override_to_asset() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
     let pv_power = sim
         .assets
@@ -354,6 +359,7 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
     // Tick 2: no active limit — PV must return to unclamped output.
     sim.tick(
@@ -376,6 +382,7 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
     let pv_power = sim
         .assets

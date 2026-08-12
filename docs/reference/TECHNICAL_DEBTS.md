@@ -76,7 +76,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | ID | Description | Affected files | Effort | Risk | Gain |
 |----|-------------|----------------|--------|------|------|
 | R-59 | No documented fail-safe behaviour on communication loss to the VTN or to an asset controller — found during the deviation-scenarios analysis. Assets appear to hold their last commanded setpoint by default, but this isn't a deliberate design, just the absence of any watchdog. Separate fault-handling/watchdog design, out of scope for the deviation arbiter specifically. | `VEN/src/vtn.rs`, `VEN/src/assets/` | Medium | Medium | Medium-High — comms loss is a real, foreseeable failure mode with currently undefined behavior |
-| R-60 | The heuristic base-load forecast (`services/heuristics.rs`, `AssetHeuristics.daytime_profile_kw`) has no error-feedback loop against measured actuals — it only ever backfills from history, never adjusts based on how wrong its own past predictions were. Found during the deviation-scenarios analysis (scenario E, base-load slow drift). | `VEN/src/services/heuristics.rs` | Medium | Low | Low-Medium — forecast accuracy improvement, no correctness risk today |
 
 ### Cross-crate duplication
 

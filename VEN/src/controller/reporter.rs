@@ -1090,6 +1090,7 @@ mod tests {
                 daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
                 seasonal_factor: 1.0,
                 last_updated: None,
+                recent_mean_abs_error_kw: None,
             },
         )]
         .into_iter()

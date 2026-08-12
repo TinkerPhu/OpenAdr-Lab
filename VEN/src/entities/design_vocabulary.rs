@@ -215,6 +215,15 @@ pub struct AssetHeuristics {
     /// Multiplier for current season (e.g. 1.2 = 20% more in winter)
     pub seasonal_factor: f64,
     pub last_updated: Option<DateTime<Utc>>,
+    /// R-60: recency-weighted mean absolute error between each tick's actual
+    /// `power_kw` and what the *previously learned* heuristic (the one in
+    /// effect at that tick's time, if any) would have predicted for it —
+    /// computed by `services::heuristics::learn_asset_heuristics`. `None`
+    /// when there was no previous heuristic to compare against (first-ever
+    /// learning run for this asset). Purely additive instrumentation: not
+    /// consumed by `sample_kw` or any other current reader — a future
+    /// consumer (e.g. planner uncertainty weighting) can act on it.
+    pub recent_mean_abs_error_kw: Option<f64>,
 }
 
 impl AssetHeuristics {
@@ -364,6 +373,7 @@ mod tests {
             daytime_profile_kw: [weekday_profile, vec![0.0; 24]],
             seasonal_factor: 1.1,
             last_updated: None,
+            recent_mean_abs_error_kw: None,
         };
 
         // 2023-01-02 08:00 UTC was a Monday.
@@ -379,6 +389,7 @@ mod tests {
             daytime_profile_kw: [vec![], vec![]],
             seasonal_factor: 1.0,
             last_updated: None,
+            recent_mean_abs_error_kw: None,
         };
         let now = Utc.with_ymd_and_hms(2023, 1, 2, 8, 0, 0).unwrap();
         assert_eq!(h.sample_kw(now), 0.0);
@@ -395,6 +406,7 @@ mod tests {
             daytime_profile_kw: [weekday_profile, weekend_profile],
             seasonal_factor: 1.0,
             last_updated: None,
+            recent_mean_abs_error_kw: None,
         };
 
         // 2023-01-02 was a Monday, 2023-01-07 a Saturday.

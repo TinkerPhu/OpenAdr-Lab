@@ -91,6 +91,7 @@ pub(crate) async fn tick_once(
             ctx.inject.base_load_kw,
             ctx.inject.base_load_alpha,
             ctx.base_load_measured_kw_now,
+            ctx.base_load_heuristic_kw_now,
         );
 
         let outcome = super::helpers::build_tick_setpoints(
@@ -148,6 +149,7 @@ pub(crate) async fn tick_once(
             resolved_pv_generation_limit.source,
             ctx.pv_measured_kw_now,
             ctx.base_load_measured_kw_now,
+            ctx.base_load_heuristic_kw_now,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

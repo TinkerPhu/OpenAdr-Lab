@@ -14,6 +14,12 @@ pub(crate) struct TickContext {
     pub weather_pv_kw_now: Option<f64>,
     pub pv_measured_kw_now: Option<f64>,
     pub base_load_measured_kw_now: Option<f64>,
+    /// BL-40: the site's learned base-load heuristic, sampled at this tick's
+    /// `now`, when one has been learned for `ids::ASSET_BASE_LOAD` (cold
+    /// start / never-learned yet is `None`). Resolved once here so both
+    /// `peek_base_load_kw` (pre-lock) and `SimState::tick` (in-lock) receive
+    /// the identical value — see design.md D1.
+    pub base_load_heuristic_kw_now: Option<f64>,
     pub plan_snap: Option<crate::entities::plan::Plan>,
     pub capacity_snap: crate::entities::capacity::OadrCapacityState,
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
@@ -48,12 +54,18 @@ pub(crate) async fn resolve_tick_context(
             now,
         )
         .await;
+    let base_load_heuristic_kw_now = state
+        .asset_heuristics()
+        .await
+        .get(crate::ids::ASSET_BASE_LOAD)
+        .map(|h| h.sample_kw(now));
 
     TickContext {
         inject,
         weather_pv_kw_now,
         pv_measured_kw_now,
         base_load_measured_kw_now,
+        base_load_heuristic_kw_now,
         plan_snap: state.active_plan().await,
         capacity_snap: state.capacity_state().await,
         dispatch_windows: state.dispatch_windows().await,
@@ -62,5 +74,59 @@ pub(crate) async fn resolve_tick_context(
         overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state).await,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::design_vocabulary::AssetHeuristics;
+    use chrono::TimeZone;
+    use std::collections::HashMap;
+
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap()
+    }
+
+    async fn resolve(state: &AppState) -> TickContext {
+        resolve_tick_context(
+            state,
+            now(),
+            &crate::controller::NoopWeatherPort,
+            None,
+            &crate::controller::NoopMeasurementPort,
+            false,
+            &crate::controller::NoopMeasurementPort,
+            false,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn base_load_heuristic_kw_now_is_none_without_a_learned_heuristic() {
+        let state = AppState::new();
+        let ctx = resolve(&state).await;
+        assert_eq!(ctx.base_load_heuristic_kw_now, None);
+    }
+
+    #[tokio::test]
+    async fn base_load_heuristic_kw_now_matches_sample_kw_when_heuristic_present() {
+        let state = AppState::new();
+        let heuristic = AssetHeuristics {
+            asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            daytime_profile_kw: [vec![0.7; 24], vec![0.9; 24]],
+            seasonal_factor: 1.05,
+            last_updated: Some(now()),
+            recent_mean_abs_error_kw: None,
+        };
+        let mut map = HashMap::new();
+        map.insert(crate::ids::ASSET_BASE_LOAD.to_string(), heuristic.clone());
+        state.set_asset_heuristics(map).await;
+
+        let ctx = resolve(&state).await;
+        assert_eq!(
+            ctx.base_load_heuristic_kw_now,
+            Some(heuristic.sample_kw(now()))
+        );
     }
 }

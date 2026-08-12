@@ -255,6 +255,7 @@ mod tests {
             daytime_profile_kw: [vec![kw; 24], vec![kw; 24]],
             seasonal_factor: 1.0,
             last_updated: None,
+            recent_mean_abs_error_kw: None,
         }
     }
 

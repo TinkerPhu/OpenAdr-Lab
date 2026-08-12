@@ -25,7 +25,77 @@ fn noon() -> DateTime<Utc> {
 #[test]
 fn peek_base_load_kw_returns_none_without_base_load_asset() {
     let sim = SimState::from_params(&[], noon());
-    assert_eq!(sim.peek_base_load_kw(noon(), 30.0, None, 0.1, None), None);
+    assert_eq!(
+        sim.peek_base_load_kw(noon(), 30.0, None, 0.1, None, None),
+        None
+    );
+}
+
+#[test]
+fn peek_base_load_kw_uses_heuristic_tier_when_measurement_absent() {
+    // BL-40: measurement absent, heuristic present — preview must reflect
+    // the heuristic tier, same D2 chain shape as `tick()`.
+    let sim = base_load_state(0.5);
+    let heuristic_kw = 7.7;
+
+    let preview = sim
+        .peek_base_load_kw(noon(), 30.0, None, 0.1, None, Some(heuristic_kw))
+        .expect("base_load asset is configured");
+    assert!(
+        (preview - heuristic_kw).abs() < 1e-9,
+        "with no measurement but a heuristic present, preview must equal the heuristic \
+         value ({heuristic_kw}), got {preview}"
+    );
+}
+
+#[test]
+fn peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier() {
+    // Parity: preview and committed tick must agree during a dropout when
+    // the heuristic tier is the one in effect (no measurement).
+    let mut sim = base_load_state(0.5);
+    let now = noon();
+    let dt_s = 30.0;
+    let base_load_alpha = 0.1;
+    let heuristic_kw = 3.3;
+
+    let preview = sim
+        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, Some(heuristic_kw))
+        .expect("base_load asset is configured");
+
+    sim.tick(
+        dt_s,
+        HashMap::new(),
+        now,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        base_load_alpha,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        PvCurtailmentSource::None,
+        None,               // pv_measured_kw
+        None,               // base_load_measured_kw
+        Some(heuristic_kw), // base_load_heuristic_kw
+    );
+
+    let bl_entry = sim
+        .assets
+        .iter()
+        .find(|e| e.id == crate::ids::ASSET_BASE_LOAD)
+        .expect("base_load asset entry must exist");
+    assert!(
+        (bl_entry.last_power_kw - preview).abs() < 1e-9,
+        "peek_base_load_kw ({preview}) must equal tick()'s actual base-load output ({}) for the \
+         heuristic tier during a dropout",
+        bl_entry.last_power_kw
+    );
 }
 
 #[test]
@@ -40,7 +110,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
     let base_load_alpha = 0.1;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None)
+        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, None)
         .expect("base_load asset is configured");
 
     sim.tick(
@@ -63,6 +133,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
 
     let bl_entry = sim
@@ -86,7 +157,7 @@ fn peek_base_load_kw_override_bypasses_decay() {
     sim.base_load_smoothing.load_offset_kw = 5.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, Some(2.0), 0.1, None)
+        .peek_base_load_kw(noon(), 30.0, Some(2.0), 0.1, None, None)
         .expect("base_load asset is configured");
     assert!(
         (preview - 2.0).abs() < 1e-9,
@@ -100,7 +171,7 @@ fn peek_base_load_kw_decays_toward_natural_profile() {
     sim.base_load_smoothing.load_offset_kw = 2.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, None, 0.1, None)
+        .peek_base_load_kw(noon(), 30.0, None, 0.1, None, None)
         .expect("base_load asset is configured");
     assert!(
         preview > 0.5 && preview < 2.5,
@@ -117,7 +188,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, 0.1, None)
+        .peek_base_load_kw(now, dt_s, None, 0.1, None, None)
         .expect("base_load asset is configured");
 
     sim.tick(
@@ -140,6 +211,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
     );
 
     let bl_entry = sim

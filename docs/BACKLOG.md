@@ -29,7 +29,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [BL-17](#bl-17-externaldatasource--grid-co2-intensity-forecast-ingestion) | Grid-CO2-aware planning from a real CO2-intensity forecast (weather/irradiance ingestion for PV is already implemented) | Medium | L | Medium–High — third-party API dependency, staleness/failure handling, provider not yet chosen |
-| [BL-40](#bl-40-base-load-measurement-dropout-should-fall-back-to-the-learned-heuristic-not-the-synthetic-spike-model) | A real-measurement feed dropout degrades gracefully to the site's own learned behavior instead of an invented spike curve | Medium | S–M | Low — reuses the existing measured→weather→sin 3-tier pattern, no schema change |
 
 ### VEN user (site operator) — comfort, control & trust
 
@@ -183,16 +182,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Low-Medium — pure UX clarity improvement for two personas; no behavior or data change.
 **Complexity:** Small for (a) — pure reordering/collapse; Medium for (b) — needs a slot↔trace-entry time-window correlation and filter state.
 **Verify:** (a) UI test: diagnostics sections render collapsed by default, user zone above the divider. (b) UI test: clicking a matrix slot filters the trace table to entries whose timestamp falls in that slot.
-
----
-
-### BL-40: Base-load measurement dropout should fall back to the learned heuristic, not the synthetic spike model
-**Req:** `VEN/src/simulator/mod.rs` (`SimState::tick`'s `BaseLoad` arm), `VEN/src/tasks/sim_tick/context.rs` (`resolve_tick_context`), `VEN/src/services/heuristics.rs` (`AssetHeuristics::sample_kw`), `docs/architecture/real_measurement_mqtt.md` ("Indirect path into the forecast")
-**Problem:** When ven-1's real MQTT base-load feed goes stale (`resolve_measured_kw` returns `None` past `MEASUREMENT_STALENESS_THRESHOLD`), `SimState::tick` currently falls all the way back to the synthetic `baseline_kw_profile + appliance_noise_kw(now)` spike model — an invented curve, not derived from this site at all. That fallback value is then written into `tick_samples` indistinguishably from a real reading (no provenance tag — see `KEY_LEARNINGS.md`'s "Real Measurements Feed the Planner Forecast Indirectly" entry) and re-learned by the next `learn_asset_heuristics` run, meaning a dropout doesn't just lose data for its own duration — it actively re-injects synthetic-shaped behavior into the EWMA-weighted learned profile for up to the following `rolling_window_days` (42).
-**Fix:** Feasible — the plumbing already exists in the right shape. `resolve_tick_context` already does async pre-lock reads for weather and measurements (`arbiter_glue::resolve_weather_pv_kw_now`, `resolve_measurements_now`); add one more: `state.asset_heuristics().await`, then `heuristics.get(ids::ASSET_BASE_LOAD).map(|h| h.sample_kw(now))`. Pass that through `TickContext` into `SimState::tick`, and change the `BaseLoad` arm's fallback chain from 2-tier (measured → synthetic) to 3-tier: measured (fresh) → learned heuristic (if `learn_asset_heuristics` has cleared cold-start) → synthetic spike model (true last resort, only before any heuristic has ever been learned for this VEN). Two caveats to design around: (1) `AssetHeuristics` is a 2-bucket (weekday/weekend) × hourly mean — the fallback during a dropout would look smoother/quantized to the hourly mean rather than reproducing today's minute-scale trapezoid noise, a stylistic tradeoff; (2) this still doesn't eliminate the missing-provenance-tag gap by itself (a dropout's fallback ticks still get silently re-learned with no origin marker) — but since the fallback is now itself derived from real measured history instead of an invented curve, a dropout stops actively degrading the learned profile and instead just modestly damps its resolution for that stretch.
-**Gain:** Medium — meaningfully shrinks the harm of the known measured/synthetic blending gap without needing the provenance-tagging work; makes "convergence" (see `real_measurement_mqtt.md`) robust to occasional feed dropouts instead of assuming perfect uptime.
-**Complexity:** Small–Medium — one new async read in `resolve_tick_context`, one new `TickContext` field, a 3-way `Option` chain replacing the existing 2-way one in `simulator/mod.rs`; no schema or profile changes. Mirrors an already-established pattern (measured → weather → sin-model 3-tier precedence for PV), so no new architectural shape is introduced.
-**Verify:** Unit test: `SimState::tick` with `measured_load_kw: None`, a populated `AssetHeuristics` for `base_load`, and a known `now` — asserts `entry.last_power_kw` equals `sample_kw(now)`, not the synthetic spike formula. A second test with no heuristic present (cold start) confirms the synthetic fallback still applies.
 
 ---
 

@@ -48,11 +48,19 @@ fn ewma_weight(age_days: f64, halflife_days: f64) -> f64 {
 /// `seasonal_factor` for `asset_id` from `rolling_window_days` of history.
 /// `Ok(None)` when fewer than `min_samples_for_confidence` ticks are
 /// available (cold-start).
+///
+/// `previous` (R-60): the heuristic that was in effect before this run, if
+/// any — already available to every call site via `AppState::asset_heuristics()`
+/// before it gets overwritten, so no new persistence is needed. Used to
+/// compute `recent_mean_abs_error_kw`: how far off `previous`'s predictions
+/// were from what this window's ticks actually did. `None` on the
+/// first-ever learning run for an asset (nothing to compare against yet).
 pub fn learn_asset_heuristics(
     history: &dyn HistoryPort,
     asset_id: &str,
     now: DateTime<Utc>,
     cfg: &HeuristicsConfig,
+    previous: Option<&AssetHeuristics>,
 ) -> Result<Option<AssetHeuristics>, DomainError> {
     let from = now - Duration::days(cfg.rolling_window_days as i64);
     let ticks = history.query_ticks(from, now, Some(asset_id))?;
@@ -123,11 +131,29 @@ pub fn learn_asset_heuristics(
         1.0
     };
 
+    let recent_mean_abs_error_kw = previous.map(|prev| {
+        let mut err_sum = 0.0_f64;
+        let mut err_weight = 0.0_f64;
+        for t in &ticks {
+            let age_days = (now - t.ts).num_seconds() as f64 / 86_400.0;
+            let w = ewma_weight(age_days, cfg.ewma_halflife_days);
+            let predicted = prev.sample_kw(t.ts);
+            err_sum += (t.power_kw - predicted).abs() * w;
+            err_weight += w;
+        }
+        if err_weight > 0.0 {
+            err_sum / err_weight
+        } else {
+            0.0
+        }
+    });
+
     Ok(Some(AssetHeuristics {
         asset_id: asset_id.to_string(),
         daytime_profile_kw,
         seasonal_factor,
         last_updated: Some(now),
+        recent_mean_abs_error_kw,
     }))
 }
 
@@ -202,7 +228,7 @@ mod tests {
     fn learn_asset_heuristics_cold_start_returns_none() {
         let port = MockHistoryPort::new();
         let cfg = HeuristicsConfig::default();
-        let result = learn_asset_heuristics(&port, "base_load", now(), &cfg).unwrap();
+        let result = learn_asset_heuristics(&port, "base_load", now(), &cfg, None).unwrap();
         assert!(
             result.is_none(),
             "no history at all must decline (cold-start)"
@@ -252,7 +278,7 @@ mod tests {
         port.append_tick_samples(&rows).unwrap();
 
         let cfg = HeuristicsConfig::default();
-        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg)
+        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg, None)
             .unwrap()
             .expect("4 weeks of 1-min samples must clear the cold-start gate");
 
@@ -322,7 +348,7 @@ mod tests {
         port.append_tick_samples(&rows).unwrap();
 
         let cfg = HeuristicsConfig::default();
-        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg)
+        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg, None)
             .unwrap()
             .expect("4 weeks of 1-min samples must clear the cold-start gate");
 
@@ -361,7 +387,7 @@ mod tests {
         port.append_tick_samples(&rows).unwrap();
 
         let cfg = HeuristicsConfig::default();
-        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg)
+        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg, None)
             .unwrap()
             .unwrap();
         assert!(
@@ -369,5 +395,109 @@ mod tests {
             "seasonal_factor should stay near 1.0 for a stationary pattern, got {}",
             heuristics.seasonal_factor
         );
+    }
+
+    // ── R-60: recent_mean_abs_error_kw ──────────────────────────────────
+
+    #[test]
+    fn learn_asset_heuristics_recent_error_is_low_for_a_stationary_pattern() {
+        let bl = base_load_with_coffee();
+        let end1 = now();
+        let start1 = end1 - Duration::days(28);
+        let rows1 =
+            generate_synthetic_backfill("base_load", start1, end1, base_load_power_kw_at(&bl));
+        let port1 = MockHistoryPort::new();
+        port1.append_tick_samples(&rows1).unwrap();
+        let cfg = HeuristicsConfig::default();
+        let heuristics1 = learn_asset_heuristics(&port1, "base_load", end1, &cfg, None)
+            .unwrap()
+            .expect("first run must clear cold-start");
+
+        // Second run one day later, same stationary model.
+        let end2 = end1 + Duration::days(1);
+        let start2 = end2 - Duration::days(28);
+        let rows2 =
+            generate_synthetic_backfill("base_load", start2, end2, base_load_power_kw_at(&bl));
+        let port2 = MockHistoryPort::new();
+        port2.append_tick_samples(&rows2).unwrap();
+        let heuristics2 =
+            learn_asset_heuristics(&port2, "base_load", end2, &cfg, Some(&heuristics1))
+                .unwrap()
+                .expect("second run must clear cold-start");
+
+        let err = heuristics2
+            .recent_mean_abs_error_kw
+            .expect("a previous heuristic was supplied, error must be computed");
+        assert!(
+            err < 0.2,
+            "stationary pattern should yield a low recent error near the synthetic \
+             model's own noise floor, got {err}"
+        );
+    }
+
+    #[test]
+    fn learn_asset_heuristics_recent_error_is_higher_after_a_step_change() {
+        let bl_low = base_load_with_coffee(); // baseline 0.3
+        let end1 = now();
+        let start1 = end1 - Duration::days(28);
+        let rows1 =
+            generate_synthetic_backfill("base_load", start1, end1, base_load_power_kw_at(&bl_low));
+        let port1 = MockHistoryPort::new();
+        port1.append_tick_samples(&rows1).unwrap();
+        let cfg = HeuristicsConfig::default();
+        let heuristics1 = learn_asset_heuristics(&port1, "base_load", end1, &cfg, None)
+            .unwrap()
+            .expect("first run must clear cold-start");
+
+        // Second run: same window length/config, but the site's baseline
+        // load stepped up materially (e.g. a new always-on appliance) — the
+        // heuristic learned on the older, lower-baseline portion should
+        // predict poorly against it.
+        let bl_high = BaseLoad::from_params(&BaseLoadParams {
+            baseline_kw: 3.0,
+            spikes: vec![coffee_spike()],
+            ..BaseLoadParams::default()
+        });
+        let end2 = end1 + Duration::days(1);
+        let start2 = end2 - Duration::days(28);
+        let rows2 =
+            generate_synthetic_backfill("base_load", start2, end2, base_load_power_kw_at(&bl_high));
+        let port2 = MockHistoryPort::new();
+        port2.append_tick_samples(&rows2).unwrap();
+        let heuristics2 =
+            learn_asset_heuristics(&port2, "base_load", end2, &cfg, Some(&heuristics1))
+                .unwrap()
+                .expect("second run must clear cold-start");
+
+        // Upper bound asserted for the stationary case above — a step
+        // change must clear it by a wide margin, not just nominally.
+        let stationary_case_upper_bound_kw = 0.2;
+        let err = heuristics2
+            .recent_mean_abs_error_kw
+            .expect("a previous heuristic was supplied, error must be computed");
+        assert!(
+            err > stationary_case_upper_bound_kw,
+            "a step change in baseline load should yield a measurably higher recent \
+             error than the stationary case, got {err}"
+        );
+    }
+
+    #[test]
+    fn sample_kw_output_unaffected_by_recent_mean_abs_error_kw_field() {
+        // R-60's field is purely additive instrumentation — it must not
+        // change `sample_kw`'s output for any existing input.
+        let base = AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw: [vec![0.5; 24], vec![0.7; 24]],
+            seasonal_factor: 1.2,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        };
+        let with_error = AssetHeuristics {
+            recent_mean_abs_error_kw: Some(1.5),
+            ..base.clone()
+        };
+        let t = now();
+        assert_eq!(base.sample_kw(t), with_error.sample_kw(t));
     }
 }

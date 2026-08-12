@@ -191,6 +191,7 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
             daytime_profile_kw: [profile_by_hour.clone(), profile_by_hour],
             seasonal_factor: 1.0,
             last_updated: Some(now),
+            recent_mean_abs_error_kw: None,
         },
     );
 
@@ -279,6 +280,7 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             daytime_profile_kw: [weekday_profile, weekend_profile],
             seasonal_factor: 1.0,
             last_updated: Some(tuesday),
+            recent_mean_abs_error_kw: None,
         },
     );
 
