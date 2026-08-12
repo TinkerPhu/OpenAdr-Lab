@@ -8788,3 +8788,43 @@ the change directory stays undeleted per the partial-completion rule. Next sessi
 push/merge authority should push the branch, run `--e2e`/`--resilience` on Node2, complete
 section 4's R-41 investigation, then finish closeout and delete the change directory.
 
+**2026-08-12 merge and closeout**: Node2 was locked by another session's `run_all_tests.sh
+--e2e`, so ran the full suite on Node1 instead (per `test-host-preference`'s fallback rule).
+`bash scripts/capture_ven1_logs.sh` archived `ven-1`'s pre-rebuild logs first (clean, no
+injection anomalies). First `run_all_tests.sh --e2e` invocation actually completed cleanly on
+Node1 (main pass: 266 scenarios passed/0 failed/1 skipped; `@isolated` pass had started) but
+the local background-shell wrapper watching it was killed by the harness before the final
+summary was captured, so the result couldn't be confirmed from the tail alone. Reran the
+full suite via `nohup ... &`/`disown` writing to a persistent logfile (per the
+`node-docker-hosts-separate-git-clones` memory's "detached long builds" guidance) instead of
+relying on a fragile background wrapper — completed in full this time: 54 features passed, 0
+failed, 1 skipped; 266 scenarios passed, 0 failed, 1 skipped (main pass); 3 scenarios passed,
+0 failed (`@isolated` pass); overall `1 passed, 0 failed, 0 skipped`.
+
+**R-41 investigation (section 4)**: grepped the full run's log for the historical failure
+signatures (`report_report_name_uindex`, `obligation report submission failed`, `obligation
+check failed`) — zero matches, versus the 18 scenario failures and 409 warn-storm originally
+observed 2026-07-17 under the identical full-suite conditions. GB-23's fix (dropping a report
+obligation from `AppState` on a confirmed VTN 404 instead of retrying it every ~5s
+indefinitely) removes the mechanism that produced the warn-storm: a since-deleted event's
+obligation no longer sits there forever generating repeated failed report-submission
+attempts (each colliding on `report_report_name_uindex`) that were starving/delaying the VEN's
+event-cache refresh for other, still-live events. Given a full, unmodified suite run now
+passes end-to-end with none of the original symptoms, R-41 is resolved by this change (not
+merely reduced) — removed its row from `docs/reference/TECHNICAL_DEBTS.md` (register
+convention: resolved items are removed, gaps in numbering stay, resolution recorded here).
+
+**Final verification**: `wsl cargo test -p ven-app` — 971/971 passed (unchanged from the prior
+pass, re-confirmed post-merge). `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -- -D warnings`, and the four VEN architecture-invariant greps all clean.
+`fix/report-obligation-lifecycle` was already rebased on `main` (no drift since the prior
+pass's commits), fast-forward merged, and pushed (`e683828..71b5a3b`). Deleted
+`openspec/changes/report-obligation-lifecycle/` — its capabilities (GB-23's 404-drop, R-43's
+`GET /history/reports`, GB-21's corrected payload-type strings) are already reflected in
+`docs/architecture/VEN_ARCHITECTURE.md`, `docs/REQUIREMENTS.md`, and the wiki pages touched by
+`d439d0c`, and this entry plus `KEY_LEARNINGS.md` carry the durable lessons forward. Cleaned
+up both worktree hosts: Node1 and the local worktree
+(`.claude/worktrees/agent-aa9a7957ac63e0109`) switched back to `main`/removed, and the merged
+`fix/report-obligation-lifecycle` branch deleted locally on both, per the
+no-lingering-worktrees rule.
+

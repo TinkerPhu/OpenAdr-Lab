@@ -1112,3 +1112,15 @@ outes/sim.rs causes a T1+T2 double-solve race:
   production-code fn whose only intended callers are `#[cfg(test)]`-gated helpers, gate the fn
   the same way — otherwise it silently fails clippy on every future PR touching that file, with
   a confusing "dead code" message that doesn't mention the test-support wiring.
+- **`scripts/audit_file_sizes.py` was clean earlier in a branch's life but failed at final
+  merge-verification time** (`report-obligation-lifecycle`, 2026-08-12): an early implementation
+  pass (`d439d0c`) threaded `HistoryPort` through `main.rs`, tripped the 500-line cap there, and
+  fixed it by extracting `domain_params.rs` — but a later small fix (`R-43`'s history-port
+  threading through `tasks/sim_tick/tick.rs`, +3 lines) pushed a *different* file
+  (`tick.rs`, tasks/ cap 200) 3 lines over, and the audit wasn't rerun after that commit before
+  the branch was merged. **Always rerun `python scripts/audit_file_sizes.py` as the very last
+  step before merging** (not just after the commit that seemed most likely to trip it) — any
+  commit that touches a file already near its cap can be the one that tips it over, and the
+  audit is cheap enough to run every time. Fixed post-merge by extracting the PHASE 6+7
+  counter-wrapper calls in `tick.rs` into one combined helper,
+  `post_lock::run_periodic_reports_and_persist` — a pure refactor, no behavior change.
