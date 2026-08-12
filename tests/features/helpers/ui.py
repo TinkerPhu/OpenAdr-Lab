@@ -198,6 +198,10 @@ class VenUi:
         self.page.click(tid("nav-planner"))
         self.page.wait_for_selector(tid("planner-heading"), timeout=45000)
 
+    def go_devices(self):
+        self.page.click(tid("nav-devices"))
+        self.page.wait_for_selector(tid("devices-page"), timeout=45000)
+
     def go_history(self):
         self.page.click(tid("nav-history"))
         self.page.wait_for_selector(tid("history-page"), timeout=45000)

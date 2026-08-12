@@ -176,6 +176,9 @@ vi.mock("../api/hooks", () => ({
       updated_at: null,
     },
   }),
+  useBaselineOverride: () => ({ data: null }),
+  usePostBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // ─── Wrapper ─────────────────────────────────────────────────────────────────
