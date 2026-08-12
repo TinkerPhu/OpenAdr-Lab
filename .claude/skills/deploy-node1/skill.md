@@ -31,15 +31,6 @@ scp VEN/ui/src/components/controller-v2/charts/TariffChart.tsx \
 
 ## Step 3 — Rebuild the affected service
 
-**TEMPORARY, while the ven-1 PV-injection mystery is open (docs/history/project_journal.md,
-"round 3"; remove once resolved, tracked in docs/BACKLOG.md): if `ven-1` is among the
-services being rebuilt, run `bash scripts/capture_ven1_logs.sh` first.** Rebuilding
-recreates the container and Docker deletes its logs on removal — Node1 has no log
-aggregator, so any undiscovered `/sim/inject` evidence sitting in the live container's
-logs is lost the moment you rebuild. The script archives them to
-`/srv/docker/ven1_log_archive/` on Node1 and prints any `sim/inject` lines inline; it
-takes a few seconds.
-
 Determine which Docker service needs rebuilding from the file paths:
 
 | Changed path prefix | Compose dir | Service(s) |
