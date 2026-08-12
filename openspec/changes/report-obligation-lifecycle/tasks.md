@@ -118,6 +118,11 @@
 - [ ] 3.7 Full E2E BDD (Node1 or Node2, per `test-host-preference`):
       `bash run_all_tests.sh --e2e`, confirming `ven_capacity_reservation.feature` and
       `ven_reporting_out.feature` pass with the corrected strings.
+      **Still blocked (2026-08-12 resume pass)**: Node1/Node2 are now both free, but this
+      session's instructions were explicit — commit only, do not push, do not merge to main.
+      Both hosts are separate git clones (per `node-docker-hosts-separate-git-clones` memory)
+      that only see pushed commits, so E2E can't run against this branch's code without
+      pushing it. Left unchecked; not attempted this pass.
 
 ## 4. R-41 — Investigate whether the GB-23 fix resolves/de-risks the E2E warn-storm
 
@@ -144,12 +149,24 @@
 - [ ] 5.1 Confirm all four suites pass: UI unit (n/a — no UI touched by this change, confirm and
       note), `wsl cargo test -p ven-app`, `--e2e`, `--resilience`
       (`bash run_all_tests.sh` full run).
-- [ ] 5.2 Update `docs/BACKLOG.md` to remove the resolved GB-21 and GB-23 rows (and R-43's
+      UI unit: n/a, confirmed — no UI touched. `wsl cargo test -p ven-app`: green, 971/971
+      (see 1.10/2.9/3.6). `--e2e`/`--resilience`: still outstanding — blocked by 3.7's
+      no-push constraint this pass.
+- [x] 5.2 Update `docs/BACKLOG.md` to remove the resolved GB-21 and GB-23 rows (and R-43's
       register line in `docs/reference/TECHNICAL_DEBTS.md`'s Implementation Task List, item 4,
       per its own "remove R-43 from this register" step).
-- [ ] 5.3 Add a `docs/history/project_journal.md` entry summarizing what was done, why, and any
+      Done in commit d439d0c — verified still in place this pass (grep for GB-21/GB-23 in
+      BACKLOG.md returns nothing; R-43's register line gone from TECHNICAL_DEBTS.md's
+      Implementation Task List, item 4).
+- [x] 5.3 Add a `docs/history/project_journal.md` entry summarizing what was done, why, and any
       key learnings (e.g. the `VtnHttpError` downcast pattern, if it proves reusable for future
       status-sensitive `VtnPort` call sites).
+      Done in commit d439d0c; `docs/reference/KEY_LEARNINGS.md` also carries the GB-21
+      capacity-reservation-vs-reservation-capacity distinction and the `VtnHttpError`
+      downcast pattern (search "GB-21"/"GB-23" in that file).
 - [ ] 5.4 Once merged and verified, delete this `openspec/changes/report-obligation-lifecycle/`
       change directory (including its `specs/`) per this project's no-lingering-plans workflow
       rule — its content has been waved into current-state docs by 5.2/5.3.
+      Not yet — 3.7/4/5.1's E2E confirmation is still outstanding, and this branch hasn't
+      merged to main. Per the partial-completion rule, only 5.2/5.3's now-done items were
+      checked off; the directory stays until 3.7, 4, and the rest of 5.1 are actually verified.
