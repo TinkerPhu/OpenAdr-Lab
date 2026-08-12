@@ -18,24 +18,15 @@ import {
   usePostBaselineOverride,
 } from "../../api/hooks";
 import type { BaselineSlot } from "../../api/types";
+import { isoToLocalInput, localInputToIso } from "../../utils/datetimeLocal";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** ISO 8601 (wire format) -> "YYYY-MM-DDTHH:mm" local value for a datetime-local input. */
-function isoToLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-/** datetime-local input value -> ISO 8601 (wire format). */
-function localInputToIso(local: string): string {
-  return new Date(local).toISOString();
-}
-
-function defaultLocalInput(): string {
-  return isoToLocalInput(new Date().toISOString());
+/** ISO 8601 timestamp for "now", truncated to minute precision. */
+function nowIsoMinute(): string {
+  const d = new Date();
+  d.setSeconds(0, 0);
+  return d.toISOString();
 }
 
 /** WP-BL-42: Devices page control surfacing the `/baseline-override` capability —
@@ -79,7 +70,10 @@ export function BaselineOverrideCard() {
                   type="datetime-local"
                   size="small"
                   value={isoToLocalInput(r.slot_start)}
-                  onChange={(e) => updateRow(i, { slot_start: localInputToIso(e.target.value) })}
+                  onChange={(e) => {
+                    const iso = localInputToIso(e.target.value);
+                    if (iso !== null) updateRow(i, { slot_start: iso });
+                  }}
                   InputLabelProps={{ shrink: true }}
                   inputProps={{ lang: "de", "data-testid": `baseline-slot-start-${i}` }}
                 />
@@ -109,7 +103,7 @@ export function BaselineOverrideCard() {
           size="small"
           data-testid="baseline-add-btn"
           onClick={() =>
-            setRows((rs) => [...rs, { slot_start: localInputToIso(defaultLocalInput()), add_kw: 0 }])
+            setRows((rs) => [...rs, { slot_start: nowIsoMinute(), add_kw: 0 }])
           }
         >
           Add slot

@@ -19,15 +19,14 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import type { CreateUserRequestBody, UserRequestMode, UserRequestWithSession } from "../../api/types";
 import { ModeSelect } from "./ModeSelect";
+import { dateToLocalInputValue } from "../../utils/datetimeLocal";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function defaultDateTime(hoursOffset: number): string {
   const d = new Date();
   d.setHours(d.getHours() + hoursOffset);
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
+  return dateToLocalInputValue(d);
 }
 
 function fmtDate(iso: string): string {

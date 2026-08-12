@@ -93,6 +93,22 @@ describe("BaselineOverrideCard", () => {
     expect(screen.getByTestId("baseline-save-btn")).toBeDisabled();
   });
 
+  it("clearing the slot-start input does not crash and leaves the row's value unchanged", async () => {
+    mockOverrideData.mockReturnValue({
+      id: "bo-1",
+      slots: [{ slot_start: "2026-04-12T07:00:00Z", add_kw: 1.5 }],
+      created_at: "2026-04-11T06:00:00Z",
+      updated_at: "2026-04-11T06:00:00Z",
+    });
+    const user = userEvent.setup();
+    render(<BaselineOverrideCard />);
+    const slotStart = screen.getByTestId("baseline-slot-start-0");
+    await user.clear(slotStart);
+    // Must not throw (RangeError from new Date("").toISOString()); the row
+    // stays on its last valid value rather than adopting an invalid one.
+    expect(screen.getByTestId("baseline-override-card")).toBeInTheDocument();
+  });
+
   it("clear calls deleteBaselineOverride when an override is active", async () => {
     mockOverrideData.mockReturnValue({
       id: "bo-1",
