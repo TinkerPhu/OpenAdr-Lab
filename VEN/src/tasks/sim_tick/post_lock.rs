@@ -70,8 +70,11 @@ pub(crate) async fn maybe_persist_sim_state(
 }
 
 /// PHASES 6+7 combined: periodic measurement reports, then periodic persist —
-/// folded into one call so `tick.rs` only carries one call site for both.
-#[allow(clippy::too_many_arguments)]
+/// folded into one call so `tick.rs` only carries one call site for both. Run
+/// concurrently via `tokio::join!`: the two wrappers touch disjoint state (VTN
+/// report submission vs. sim-state disk persist), so a tick that crosses both
+/// counters' thresholds pays the max of the two latencies, not their sum.
+#[allow(clippy::too_many_arguments)] // one param per already-independent tick input; see context.rs's TickContext precedent for the alternative
 pub(crate) async fn run_periodic_reports_and_persist(
     report_counter: u64,
     report_every_ticks: u64,
@@ -86,18 +89,18 @@ pub(crate) async fn run_periodic_reports_and_persist(
     sim: &Arc<Mutex<SimState>>,
     data_dir: &str,
 ) -> (u64, u64) {
-    let report_counter = maybe_run_measurement_reports(
-        report_counter,
-        report_every_ticks,
-        state,
-        sim_snap,
-        vtn,
-        ven_name,
-        now,
-        history,
-    )
-    .await;
-    let persist_counter =
-        maybe_persist_sim_state(persist_counter, persist_every_ticks, sim, data_dir).await;
+    let (report_counter, persist_counter) = tokio::join!(
+        maybe_run_measurement_reports(
+            report_counter,
+            report_every_ticks,
+            state,
+            sim_snap,
+            vtn,
+            ven_name,
+            now,
+            history,
+        ),
+        maybe_persist_sim_state(persist_counter, persist_every_ticks, sim, data_dir),
+    );
     (persist_counter, report_counter)
 }
