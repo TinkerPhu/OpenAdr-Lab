@@ -165,7 +165,7 @@ as-is. See `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` for a
 
 `USAGE`, `DEMAND`, `BASELINE`, `STORAGE_CHARGE_LEVEL`, `STORAGE_MAX_CHARGE_POWER`,
 `STORAGE_MAX_DISCHARGE_POWER`, `OPERATING_STATE`, `USAGE_FORECAST`,
-`IMPORT_CAPACITY_RESERVATION`, `EXPORT_CAPACITY_RESERVATION`.
+`IMPORT_RESERVATION_CAPACITY`, `EXPORT_RESERVATION_CAPACITY`.
 
 **OpenADR 3 Certification Profiles:** OpenADR 3 introduced named certification profiles to
 avoid ambiguous interpretations of payload types like `SIMPLE`. In OpenADR 2.0b, `SIMPLE`

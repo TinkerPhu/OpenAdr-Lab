@@ -2,7 +2,8 @@
 
 import requests
 from behave import given, then
-from features.helpers.api_client import vtn_post, VEN_BASE_URL, HTTP_TIMEOUT
+from features.helpers.api_client import vtn_post, ven_get, VEN_BASE_URL, HTTP_TIMEOUT
+from features.helpers.wait import poll_until
 
 
 @given('I create an event for the saved program with a reportDescriptor of type "{ptype}" and frequency {freq_s:d} seconds')
@@ -84,3 +85,24 @@ def step_every_interval_has_period_start(context):
         assert period.get("start"), (
             f"Interval {iv.get('id')} lacks intervalPeriod.start: {iv}"
         )
+
+
+# ── R-43: GET /history/reports reflects real submissions ───────────────────
+
+@then("VEN-1's report history includes an entry for the event")
+def step_history_reports_includes_event(context):
+    def fetch():
+        r = ven_get("/history/reports")
+        r.raise_for_status()
+        return r.json()
+
+    rows = poll_until(
+        fetch,
+        lambda rs: any(r.get("event_id") == context.saved_event_id for r in rs),
+        timeout=30,
+        interval=2,
+        description=f"GET /history/reports includes event {context.saved_event_id}",
+    )
+    assert any(r.get("event_id") == context.saved_event_id for r in rows), (
+        f"No /history/reports row for event {context.saved_event_id}: {rows}"
+    )

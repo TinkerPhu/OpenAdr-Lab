@@ -2,8 +2,8 @@
 title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
+updated: 2026-08-11
+synced_commit: 7380031
 sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events/, VEN/src/entities/capacity.rs, VEN/src/state/mod.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---
@@ -39,7 +39,7 @@ show real data.
 | `SIMPLE` (levels 0–3) | `SimpleWindow` — L1 caps import at a configurable % of contract, L2 at baseline, L3 at 0; highest level wins, alerts override (Phase 3, WP3.2) |
 | `DISPATCH_SETPOINT` | `DispatchWindow` — dispatcher steers the battery to the commanded net site power during the window, plan running underneath; alert wins precedence (Phase 3, WP3.4) |
 | `CHARGE_STATE_SETPOINT` | creates/updates an `EvSession` targeting the given SoC (fraction or percent); event deletion cancels the event-created session (Phase 3, WP3.4) |
-| `reportDescriptors` | `OadrReportObligation` per (event, payloadType), due after `frequency` seconds; `USAGE_FORECAST` and `IMPORT_/EXPORT_CAPACITY_RESERVATION` payload types serve plan-slot forecasts / envelope values (Phase 3, WP3.6) |
+| `reportDescriptors` | `OadrReportObligation` per (event, payloadType), due after `frequency` seconds; `USAGE_FORECAST` and `IMPORT_/EXPORT_RESERVATION_CAPACITY` payload types serve plan-slot forecasts / envelope values (Phase 3, WP3.6) |
 
 **Looping events**: when `event.intervalPeriod.duration` exceeds the intervals' total
 span (the spec's persistent-daily-prices pattern, `P9999Y`), the interval set is repeated
@@ -75,7 +75,7 @@ flagged in `docs/BACKLOG.md` BL-24).
   reportDescriptors, a **multi-interval** report resampled onto the obligation's
   interval grid via `TimeSeries::resample_uniform` — `USAGE`-family payloads as
   time-weighted-mean net site power, `STORAGE_CHARGE_LEVEL` as point-in-time SoC at
-  interval ends, `IMPORT_/EXPORT_CAPACITY_RESERVATION` from the live
+  interval ends, `IMPORT_/EXPORT_RESERVATION_CAPACITY` from the live
   `SiteFlexibilityEnvelope` (up/down kW).
 - Obligations **recur**: each due obligation is re-armed to its next `due_at`
   (`interval_duration_s` later) after reporting instead of being permanently fulfilled,

@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::{SimSnapshot, VtnPort};
+use crate::controller::{HistoryPort, SimSnapshot, VtnPort};
 use crate::simulator::SimState;
 use crate::state::AppState;
 
@@ -40,6 +40,7 @@ pub(crate) async fn maybe_run_measurement_reports(
     vtn: &dyn VtnPort,
     ven_name: &str,
     now: DateTime<Utc>,
+    history: Option<Arc<dyn HistoryPort>>,
 ) -> u64 {
     if report_every_ticks == 0 {
         return report_counter;
@@ -47,7 +48,7 @@ pub(crate) async fn maybe_run_measurement_reports(
     report_counter += 1;
     if report_counter >= report_every_ticks {
         report_counter = 0;
-        super::publish::run_measurement_reports(state, sim_snap, vtn, ven_name, now).await;
+        super::publish::run_measurement_reports(state, sim_snap, vtn, ven_name, now, history).await;
     }
     report_counter
 }
