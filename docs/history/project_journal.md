@@ -8828,3 +8828,53 @@ up both worktree hosts: Node1 and the local worktree
 `fix/report-obligation-lifecycle` branch deleted locally on both, per the
 no-lingering-worktrees rule.
 
+## BL-42: Baseline Override Devices UI
+
+Implemented `openspec/changes/baseline-override-devices-ui/` on `fix/baseline-override-devices-ui`
+(worktree `.claude/worktrees/agent-af75f29047db144df`). The backend `baseline_override` capability
+(`GET`/`POST`/`DELETE /baseline-override`, `VEN/src/routes/hems/baseline_override.rs`) and its VEN UI
+client + hooks (`baselineOverride`/`postBaselineOverride`/`deleteBaselineOverride` in `client.ts`,
+`useBaselineOverride`/`usePostBaselineOverride`/`useDeleteBaselineOverride` in `hooks.ts`) had existed
+for a while with zero consuming UI — a `no-half-built-features`/`ui-transparency` gap split off from
+BL-41 once investigation showed `baseline_override` is a standalone capability, not superseded by the
+unified `/user-requests` flow.
+
+Added `VEN/ui/src/components/devices/BaselineOverrideCard.tsx`, mirroring `ComfortCurveCard.tsx`'s
+established shape: `useBaselineOverride()` for read, a local `edited: BaselineSlot[] | null` overlay
+mirroring server state until the user edits, per-row `slot_start` (datetime-local input, converted
+to/from ISO 8601 at the component boundary — same idiom as `EvCard`/`HeaterCard`/`ShiftableLoadsCard`)
+and `add_kw` (unit-suffixed per the `naming` rule, already correct in the wire type) fields, add/remove
+row actions, Save (`usePostBaselineOverride`, disabled while pending or with zero rows) and Clear
+(`useDeleteBaselineOverride`, disabled while pending or with no active override) actions. No DTO
+renaming anywhere — `slot_start`/`add_kw` pass through verbatim per the `dto` rule. Mounted the card in
+`VEN/ui/src/pages/Devices.tsx`'s existing `Grid`, no new page-level props needed since the card owns its
+own hooks.
+
+Test-first: wrote `VEN/ui/src/__tests__/BaselineOverrideCard.test.tsx` against the not-yet-existing
+component first, confirmed it failed (`Failed to resolve import`), then implemented until green (7/7
+tests). Updated `VEN/ui/src/__tests__/Devices.test.tsx`'s `../api/hooks` mock to include the three new
+hooks (the test mocks the whole module, so mounting the card without updating the mock would have broken
+every existing Devices-page test). Full `VEN/ui` suite: 47 files / 533 tests passed, no regressions.
+`npm run lint`: 0 errors (10 pre-existing warnings in untouched files). `npm run build`: clean. `npx
+knip`: `useBaselineOverride`/`usePostBaselineOverride`/`useDeleteBaselineOverride` no longer appear in
+its unused-exports report, closing BL-42's verification bar.
+
+Added `tests/features/ven_ui_devices.feature` (`@ven-ui` tag) with three scenarios (card visible, empty
+state disables Clear, full add/fill/save/clear round trip), reusing the existing generic testid steps
+from `planner_ui_steps.py` and adding only the genuinely new ones in
+`tests/features/steps/ven_ui_devices_steps.py` (navigate-to-Devices via a new `VenUi.go_devices()`,
+reset-override-via-API, fill-field-by-testid, assert-field-value, assert-disabled, assert-visible-text).
+
+**E2E (task 4.3) deferred, not run this pass**: `docker_host_lock.sh status` showed both Node1 and Node2
+free, but this session's instructions explicitly prohibited pushing (to avoid a merge collision with
+another concurrently active session on `main`), and `run_all_tests.sh` does a `git pull` on the remote
+docker host before running — Node1/Node2 are separate git clones that only see pushed commits (same
+constraint hit in the report-obligation-lifecycle 2026-08-12 resume pass). E2E cannot run against this
+branch's commits without pushing them somewhere reachable by the remote hosts, which was out of scope
+for this pass. Left task 4.3 and 6.2 (live plan-invalidation check, same dependency) unchecked in
+`tasks.md`; the change directory is intentionally not deleted per the partial-completion rule. Everything
+else in `tasks.md` (sections 1–3, 5, 6.1/6.3/6.4) is checked off with this pass's results recorded
+inline. Updated `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`'s Devices card list to include
+"Baseline Override". Next session with push/merge authority should push the branch, run `--e2e` on
+Node2 (preferred) or Node1, complete 4.3/6.2, then finish closeout and delete the change directory.
+

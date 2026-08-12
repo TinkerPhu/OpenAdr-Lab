@@ -20,6 +20,7 @@ import { HeaterCard } from "../components/devices/HeaterCard";
 import { ShiftableLoadsCard } from "../components/devices/ShiftableLoadsCard";
 import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
 import { ArbiterSettingsCard } from "../components/devices/ArbiterSettingsCard";
+import { BaselineOverrideCard } from "../components/devices/BaselineOverrideCard";
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
 
 export function DevicesPage() {
@@ -90,6 +91,9 @@ export function DevicesPage() {
             putArbiterSettings={putArbiterMut.mutate}
             diagnostics={arbiterDiagnostics}
           />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <BaselineOverrideCard />
         </Grid>
       </Grid>
       <AllRequestsSection

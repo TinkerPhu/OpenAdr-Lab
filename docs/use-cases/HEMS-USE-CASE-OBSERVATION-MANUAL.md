@@ -17,7 +17,7 @@ This manual shows how to observe all 14 HEMS controller use cases using the live
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |
 | **Events** | Raw OpenADR events polled from VTN |
-| **Devices** | Per-device settings cards (EV overlay, Deviation Arbiter, Heater, Shiftable loads, Comfort curve) |
+| **Devices** | Per-device settings cards (EV overlay, Deviation Arbiter, Heater, Shiftable loads, Comfort curve, Baseline Override) |
 | **History** | Persisted per-asset/grid/event/report history over a selectable window; the PV, base_load, and site-residual charts additionally overlay the planner's near- and far-horizon forecast for each point against the actual measured value once it's reconciled — a way to see how well the planner's own forecasts held up, not just what happened |
 
 Under a **Diagnostics** nav group (WP-T1–T8): **VTN Status**, **Tasks**, **Event Log**,
