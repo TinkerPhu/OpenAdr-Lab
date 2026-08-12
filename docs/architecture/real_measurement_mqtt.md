@@ -147,20 +147,30 @@ wins, only fully suppressed by an actively-forced override) is unchanged
 from the weather feed and applies identically regardless of which base tier
 is active.
 
-### Baseline load: simple replace
+### Baseline load: 3-tier (measured > learned heuristic > synthetic)
 
 ```rust
 // simulator/mod.rs — SimState::tick's BaseLoad arm
 bl.measured_load_kw = base_load_measured_kw;
 let natural_base_kw = bl
     .measured_load_kw
+    .or(base_load_heuristic_kw)
     .unwrap_or_else(|| bl.baseline_kw_profile + bl.appliance_noise_kw(now));
 ```
 
-No intermediate "estimate" tier — a measured reading substitutes for the
-synthetic profile+noise base outright. The existing manual-override blend
-(`base_load_kw_override` / `BaseLoadSmoothingState`) still rides on top of
-whichever base is authoritative, unchanged.
+(BL-40) A measured reading outranks the site's own learned base-load
+heuristic (`AssetHeuristics::sample_kw`, resolved once per tick in
+`tasks/sim_tick/context.rs`'s `resolve_tick_context` and threaded into both
+`SimState::tick` and `peek_base_load_kw` as `base_load_heuristic_kw`, so the
+two never diverge for the same tick), which in turn outranks the synthetic
+profile+noise model — the same measured > modeled-from-real-history >
+invented-model precedence PV already uses. The heuristic tier is only
+available once `learn_asset_heuristics` has cleared its cold-start gate at
+least once for `ids::ASSET_BASE_LOAD`; before that, a dropout still falls
+all the way to the synthetic model, matching prior behavior exactly. The
+existing manual-override blend (`base_load_kw_override` /
+`BaseLoadSmoothingState`) still rides on top of whichever base is
+authoritative, unchanged.
 
 **Planner scope**: neither signal feeds the planner's forward horizon
 *directly* — a measurement is live ground truth for *now*, not a forecast
@@ -205,12 +215,20 @@ continuous, gap-free measurement uptime from the day the feed goes live:
 
 **Caveat — no measured/synthetic provenance tag.** If the MQTT feed drops
 out for longer than `MEASUREMENT_STALENESS_THRESHOLD` (5 min), the live tick
-silently falls back to the synthetic heuristic for that stretch, and that
-fallback value is recorded into `tick_samples` indistinguishable from a real
-reading — there is currently no column marking a sample's origin. So
-"fully converged" above assumes uninterrupted feed uptime; any outage
-quietly re-mixes some synthetic-era behavior back into the learned profile
-for the following 42 days, with no record of which samples caused it.
+now falls back to the site's own learned base-load heuristic first (BL-40's
+3-tier chain above) rather than straight to the synthetic model — so a
+dropout re-mixes *real, previously-learned* behavior back into
+`tick_samples` instead of an invented curve, once a heuristic has been
+learned at least once. That fallback value is still recorded into
+`tick_samples` indistinguishable from a directly-measured reading — there is
+currently no column marking a sample's origin, and this change does not add
+one. So "fully converged" above assumes uninterrupted feed uptime; an outage
+before any heuristic has ever been learned (cold start) still falls all the
+way to the synthetic model, and even once the heuristic tier is active, a
+sustained outage means the learned profile is fitting past-heuristic-derived
+samples rather than direct measurements — a strictly smaller drift than
+before, but not eliminated, with no record of which samples came from which
+tier.
 
 ## Wire contract
 

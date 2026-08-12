@@ -840,6 +840,52 @@ outes/sim.rs causes a T1+T2 double-solve race:
   but worth remembering before treating a "converged" learned heuristic as trustworthy after
   any known outage window.
 
+## Base-Load Dropout Fallback & Heuristic Error-Feedback (BL-40 / R-60, base-load-dropout-fallback, 2026-08-12)
+
+- **The exact gap flagged in the "Real Measurements..." entry above got closed, not just
+  documented.** BL-40 is the direct fix for the "no measured/synthetic provenance" fallout
+  described two entries up: a dropout no longer falls straight to the invented
+  `baseline_kw_profile + appliance_noise_kw(now)` spike model — it now tries the site's own
+  learned `AssetHeuristics::sample_kw(now)` first, only reaching the synthetic model as a true
+  last resort (cold start, before any heuristic has ever been learned). The missing
+  provenance *tag* on `tick_samples` is still not fixed (still no column marking a row's
+  origin, still explicitly out of scope) — but the thing that tag-less gap actually damaged
+  (re-learning invented behavior during an outage) is now structurally smaller, because the
+  fallback itself is derived from real history instead of a guess.
+- **Preview/commit parity across an async pre-lock boundary is a pattern worth naming.**
+  `peek_base_load_kw` (pre-lock preview, feeds the deviation arbiter) and `SimState::tick`
+  (in-lock commit) must resolve the exact same heuristic-tier value for the same `now`, or
+  the arbiter and the physics engine silently disagree during a dropout. The fix isn't
+  "make both query `state.asset_heuristics()`" — that would need an `.await` inside
+  `tick.rs`'s no-`.await` sim-lock block. It's: resolve the value **once**, pre-lock, in
+  `resolve_tick_context` (mirroring how `weather_pv_kw_now`/`base_load_measured_kw_now`
+  already work), store it on `TickContext`, and pass the *same* `Option<f64>` into both
+  functions as a new trailing parameter. One value, two consumers, no divergence possible —
+  the general shape for any "the arbiter must see what the physics engine is about to
+  commit" requirement, not just this one.
+- **A file-size-cap failure can show up in a file you didn't touch's neighbor.** Adding two
+  new tests to `simulator/tests.rs`'s `base_load_noise_tests` module pushed that *file*
+  (518 non-blank production lines pre-change, cap 500) over the top — even though
+  `simulator/mod.rs` itself (the file design.md's own Risk section flagged as the one to
+  watch) stayed comfortably under. `scripts/audit_file_sizes.py` only exempts by *path*
+  (any directory component literally named `tests`, e.g. `simulator/tests/*.rs`) — a
+  sibling file merely named `tests.rs` next to `mod.rs` doesn't qualify. Fix followed the
+  file's own established precedent (`peek_pv_kw_tests.rs`, `peek_base_load_kw_tests.rs`):
+  moved the whole `base_load_noise_tests` module out to
+  `simulator/tests/base_load_noise_tests.rs`. Always re-run the audit script after adding
+  tests to an already-large test file, not just after touching production files.
+- **R-60's split-or-proceed gate resolved to "proceed" because the check was concrete, not
+  a vibe.** design.md's D5 explicitly gated R-60 (heuristic error-feedback) on whether
+  `learn_asset_heuristics` needed the *previous* run's `AssetHeuristics` as a new input
+  without new persistence. Tracing the two actual call sites
+  (`tasks/heuristics_job::run_heuristics_once`, `routes/debug::preload_heuristics`) showed
+  both already read `state.asset_heuristics()` (the very thing being overwritten) right
+  there in the same function — moving that read one step earlier and passing it as
+  `previous: Option<&AssetHeuristics>` was the entire plumbing cost. No new storage, no new
+  port. The lesson: a scoping gate written as "trace the actual call sites, not the
+  abstract requirement" is verifiable in minutes and produces a real proceed/defer decision
+  instead of a guess.
+
 ## Container Restarts Masqueraded as Mystery PV Injections (ven-1, 2026-08-05 & 2026-08-07)
 
 - **A months-long "unexplained `/sim/inject` call" mystery on production ven-1 was never an

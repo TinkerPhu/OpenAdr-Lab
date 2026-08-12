@@ -456,6 +456,7 @@ mod tests {
                 daytime_profile_kw: [weekday_profile, vec![0.3; 24]],
                 seasonal_factor: 1.0,
                 last_updated: Some(ts(0)),
+                recent_mean_abs_error_kw: None,
             },
         );
 
@@ -477,6 +478,7 @@ mod tests {
                 daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
                 seasonal_factor: 1.5,
                 last_updated: Some(now),
+                recent_mean_abs_error_kw: None,
             },
         );
         let monday = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
@@ -501,6 +503,7 @@ mod tests {
                 daytime_profile_kw: [vec![0.3; 24], weekend_profile],
                 seasonal_factor: 1.0,
                 last_updated: Some(ts(0)),
+                recent_mean_abs_error_kw: None,
             },
         );
 
@@ -638,6 +641,7 @@ mod tests {
             daytime_profile_kw: [vec![0.7; 24], vec![0.7; 24]],
             seasonal_factor: 1.0,
             last_updated: Some(ts(0)),
+            recent_mean_abs_error_kw: None,
         }
     }
 
