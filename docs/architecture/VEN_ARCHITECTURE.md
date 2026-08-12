@@ -130,7 +130,7 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 | `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`) | ✅ implemented |
 | `STORAGE_CHARGE_LEVEL` | Point-in-time SoC (EV/battery) sampled at each obligation interval end | ✅ implemented |
 | `OPERATING_STATE` | Derived from sample freshness (`reporter.rs::operating_state`: fresh ≤ 120 s → ACTIVE, stale → UNAVAILABLE) — site-level mirror of the `DeviceResponsiveness` vocabulary | ✅ implemented |
-| `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
+| `IMPORT_RESERVATION_CAPACITY` / `EXPORT_RESERVATION_CAPACITY` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
 | `DEMAND` | — | ❌ not built |
 | `USAGE_FORECAST` | Plan-slot forecasts served at their native slot boundaries, descriptor-driven via the obligation machinery; `reportDescriptor.historical: false` on any usage-family payload also requests the forecast path | ✅ implemented |
 | `BASELINE` (WP5.4) | The event-blind heuristic forecast (`AssetHeuristics::sample_kw`, summed across assets) sampled on the obligation's interval grid — the counterfactual "what if no event" value, submitted alongside `USAGE` so `experiments/kpi.py`'s `event_impact_kwh` can quantify an event's actual impact. Each interval carries a `DATA_QUALITY` payload tagged `"HEURISTIC"` (the forecast's provenance, not a computed confidence score — see `docs/history/project_journal.md`'s WP5.4 entry for the design rationale) | ✅ implemented |

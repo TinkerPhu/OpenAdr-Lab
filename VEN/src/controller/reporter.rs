@@ -281,14 +281,21 @@ pub fn build_measurement_report_for_obligation(
         // width — a forecast has no meaning resampled onto history buckets).
         // No adopted plan yet → empty → caller re-arms and retries next cycle.
         "USAGE_FORECAST" => build_forecast_intervals(active_plan, "USAGE_FORECAST"),
-        "IMPORT_CAPACITY_RESERVATION" => {
+        // GB-21: the report-payload-type wire name is `IMPORT_RESERVATION_CAPACITY`
+        // (openleadr-wire's `ReportType` enum) — NOT `IMPORT_CAPACITY_RESERVATION`,
+        // which is a distinct *event* payload type (OpenADR 3.1 §Payload Type
+        // Enumerations: capacity "granted by the VTN" on an event, vs. capacity
+        // "requested" on a report). `openadr_interface.rs::parse_capacity_state`
+        // correctly keeps the other string for that reason — verified during
+        // GB-21 implementation, not conflated here.
+        "IMPORT_RESERVATION_CAPACITY" => {
             let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,
                 payloads: vec![
                     OadrReportPayload {
-                        r#type: "IMPORT_CAPACITY_RESERVATION".to_string(),
+                        r#type: "IMPORT_RESERVATION_CAPACITY".to_string(),
                         values: vec![serde_json::Value::from(up_w)],
                     },
                     OadrReportPayload {
@@ -298,14 +305,14 @@ pub fn build_measurement_report_for_obligation(
                 ],
             }]
         }
-        "EXPORT_CAPACITY_RESERVATION" => {
+        "EXPORT_RESERVATION_CAPACITY" => {
             let down_w = site_envelope.map(|e| e.down_kw * 1000.0).unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,
                 payloads: vec![
                     OadrReportPayload {
-                        r#type: "EXPORT_CAPACITY_RESERVATION".to_string(),
+                        r#type: "EXPORT_RESERVATION_CAPACITY".to_string(),
                         values: vec![serde_json::Value::from(down_w)],
                     },
                     OadrReportPayload {
@@ -693,7 +700,7 @@ mod tests {
         assert!(net.samples.is_empty());
     }
 
-    // ── IMPORT/EXPORT_CAPACITY_RESERVATION ────────────────────────
+    // ── IMPORT/EXPORT_RESERVATION_CAPACITY ────────────────────────
 
     #[test]
     fn test_reporter_import_capacity_reservation_from_envelope() {
@@ -705,7 +712,7 @@ mod tests {
             up_duration_s: None,
             down_duration_s: None,
         };
-        let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
+        let ob = make_obligation("e1", "p1", "IMPORT_RESERVATION_CAPACITY", 900);
         let report = build_measurement_report_for_obligation(
             &ob,
             &empty,
@@ -719,7 +726,7 @@ mod tests {
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 5000.0).abs() < 1.0, "expected 5000 W, got {val}");
-        assert_eq!(iv.payloads[0].r#type, "IMPORT_CAPACITY_RESERVATION");
+        assert_eq!(iv.payloads[0].r#type, "IMPORT_RESERVATION_CAPACITY");
     }
 
     #[test]
@@ -732,7 +739,7 @@ mod tests {
             up_duration_s: None,
             down_duration_s: None,
         };
-        let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
+        let ob = make_obligation("e1", "p1", "EXPORT_RESERVATION_CAPACITY", 900);
         let report = build_measurement_report_for_obligation(
             &ob,
             &empty,
@@ -746,13 +753,13 @@ mod tests {
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
-        assert_eq!(iv.payloads[0].r#type, "EXPORT_CAPACITY_RESERVATION");
+        assert_eq!(iv.payloads[0].r#type, "EXPORT_RESERVATION_CAPACITY");
     }
 
     #[test]
     fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
+        let ob = make_obligation("e1", "p1", "IMPORT_RESERVATION_CAPACITY", 900);
         let report = build_measurement_report_for_obligation(
             &ob,
             &empty,

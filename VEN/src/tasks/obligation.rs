@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::error;
 
 use crate::controller::reporter::AssetReportSample;
-use crate::controller::VtnPort;
+use crate::controller::{HistoryPort, VtnPort};
 use crate::services::ObligationService;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -19,6 +19,7 @@ pub(crate) fn spawn_obligation_check(
     sim: Arc<Mutex<SimState>>,
     vtn: Arc<dyn VtnPort>,
     ven_name: String,
+    history: Option<Arc<dyn HistoryPort>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval =
@@ -51,6 +52,7 @@ pub(crate) fn spawn_obligation_check(
                 vtn.as_ref(),
                 &ven_name,
                 now,
+                history.clone(),
             )
             .await
             {

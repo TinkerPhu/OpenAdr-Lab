@@ -1070,3 +1070,45 @@ outes/sim.rs causes a T1+T2 double-solve race:
   directory for existing step text before writing a new one with the same intent, even (or
   especially) if no `.feature` file currently references it — an orphaned step can mean "not
   yet reused," not "dead and safe to duplicate."
+
+- **The same OpenADR payload-type string can be correct in one direction and wrong in the
+  other** (GB-21, `report-obligation-lifecycle`, 2026-08-11/12): `IMPORT_CAPACITY_RESERVATION`/
+  `EXPORT_CAPACITY_RESERVATION` are the real, spec-correct *event* payload-type names (VTN→VEN,
+  "capacity granted") per OpenADR 3.1's payload-type enumeration — `controller/
+  openadr_interface.rs::parse_capacity_state` uses them correctly, and `ven_capacity_reservation
+  .feature` correctly creates events with those literal strings. `IMPORT_RESERVATION_CAPACITY`/
+  `EXPORT_RESERVATION_CAPACITY` (word order swapped) are the distinct *report* payload-type
+  names (VEN→VTN, "capacity requested") — `controller/reporter.rs` had the wrong one (GB-21's
+  actual bug). The two enums share nearly every word, which made design.md's own drafted task
+  list assume `openadr_interface.rs` needed the same string swap "if it pattern-matches these
+  strings" — it doesn't (only `parse_capacity_state` matches them, and that's the *other*,
+  correctly-named enum). Lesson: when a wire-string fix spans a repo, don't grep-and-replace by
+  string identity — trace each occurrence back to which direction (inbound event vs. outbound
+  report) and which spec enum it actually belongs to, especially when OpenADR 3 reuses near-
+  identical names for genuinely different payload-type enums.
+- **The `VtnHttpError` downcast pattern** (GB-23, same change): to let one call site
+  (`services/obligation.rs`) distinguish "VTN returned 404" from other failures without
+  retyping the whole `VtnPort` trait to `Result<_, DomainError>`, `vtn.rs`'s `http_error()` now
+  constructs `anyhow::Error::new(VtnHttpError { status, message })` — a small `std::error::Error`
+  newtype carrying the numeric `StatusCode` — instead of `anyhow::anyhow!(...)`. Callers that
+  need the status downcast via `err.downcast_ref::<VtnHttpError>()`; callers that don't care
+  keep working exactly as before (`Display` output is byte-identical to the old message format,
+  so no existing string-matching test broke). This is the pragmatic middle ground between "every
+  error is an opaque string" and "every port returns a typed domain error" — reusable any time a
+  single call site needs one structured fact out of an otherwise-opaque `anyhow` chain. Risk:
+  this only works if every non-2xx path in `vtn.rs` constructs its error via `http_error()` —
+  a future branch that calls `anyhow::bail!`/`anyhow::anyhow!` directly bypasses the downcast
+  silently (falls through to default retry behavior, not a crash) — worth a regression test per
+  call site that depends on the downcast, not just trusting the invariant holds.
+- **`cargo clippy --all-targets` doesn't compile `#[cfg(test)]`-gated modules for every
+  target** (same change, verification pass): `services/test_support` (including `mock_vtn.rs`)
+  is gated `#[cfg(test)] pub mod test_support;` in `services/mod.rs`, so it's absent from the
+  plain `ven-app` bin-target compilation clippy also runs under `--all-targets`. A `pub(crate)`
+  associated fn in non-test code (`VtnHttpError::new` in `vtn.rs`) whose *only* caller lives
+  inside that gated module reads as dead code in that bin-target pass, even though it's clearly
+  used from the crate's own test-support code and from real tests. Fix: gate the fn itself
+  `#[cfg(test)]` to match its only caller's gate, not `#[allow(dead_code)]` (which would hide a
+  genuine future regression if a real caller ever needed it). General rule: when adding a
+  production-code fn whose only intended callers are `#[cfg(test)]`-gated helpers, gate the fn
+  the same way — otherwise it silently fails clippy on every future PR touching that file, with
+  a confusing "dead code" message that doesn't mention the test-support wiring.

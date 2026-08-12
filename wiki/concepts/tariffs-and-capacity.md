@@ -3,7 +3,7 @@ title: Tariffs and Capacity State
 type: concept
 created: 2026-07-04
 updated: 2026-08-11
-synced_commit: 9d2a538
+synced_commit: 7380031
 sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/controller/rate_schedule.rs, VEN/src/history_store/schema.rs]
 tags: [tariff, capacity, domain, envelope]
 ---
@@ -43,7 +43,7 @@ across boundary-straddling slots is available but not yet used there
   and no struct fields (REQUIREMENTS.md §2.3 describes both sides).
 
 Both bound the [[milp-planner]]'s feasible region; reservations also flow back out as
-`IMPORT_/EXPORT_CAPACITY_RESERVATION` report payloads built from the live site envelope
+`IMPORT_/EXPORT_RESERVATION_CAPACITY` report payloads built from the live site envelope
 ([[openadr-interface]]).
 
 ## Capacity-limit *schedule*, not just current state

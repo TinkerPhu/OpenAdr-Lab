@@ -11,6 +11,7 @@ mod tick;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::controller::HistoryPort;
 use crate::controller::MeasurementPort;
 use crate::controller::VtnPort;
 use crate::controller::WeatherForecastPort;
@@ -38,6 +39,7 @@ pub(crate) fn spawn_sim_tick(
     base_load_measurement: Arc<dyn MeasurementPort>,
     base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
+    history: Option<Arc<dyn HistoryPort>>,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -79,6 +81,7 @@ pub(crate) fn spawn_sim_tick(
                 base_load_measurement.clone(),
                 base_load_measurement_enabled,
                 notifier.clone(),
+                history.clone(),
             )
             .await;
 
