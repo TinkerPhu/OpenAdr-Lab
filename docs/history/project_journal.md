@@ -8629,3 +8629,88 @@ one more producer to that same generic route entry would be inconsistent with ho
 treats this feed. `openspec/changes/reactive-correction-notifications/` deleted — implemented and
 unit/integration-tested (E2E pending per the note above).
 
+## BL-40 / R-60: Base-Load Dropout Fallback & Heuristic Error-Feedback (2026-08-12)
+
+Implemented `openspec/changes/base-load-dropout-fallback/` — BL-40 (bundled scope, primary)
+and R-60 (stretch scope, gated in the plan's own section 6).
+
+**The problem (BL-40)**: when ven-1's real MQTT base-load feed goes stale
+(`MEASUREMENT_STALENESS_THRESHOLD`, 5 min) or was never configured, `SimState::tick`'s
+`BaseLoad` arm fell straight back to the synthetic `baseline_kw_profile +
+appliance_noise_kw(now)` spike model — an invented curve unrelated to the site. That
+fallback value flowed unmarked into `tick_samples`, so the next daily
+`learn_asset_heuristics` run re-learned synthetic-shaped behavior into the site's own EWMA
+profile for up to `rolling_window_days` (42) per dropout.
+
+**The fix**: a third fallback tier — measured (fresh) → learned heuristic
+(`AssetHeuristics::sample_kw(now)`, once `learn_asset_heuristics` has cleared cold-start for
+`ids::ASSET_BASE_LOAD`) → synthetic spike model (true last resort) — mirroring the existing
+measured → weather → sin-model precedence already used for PV. Resolved once per tick in
+`resolve_tick_context` (`tasks/sim_tick/context.rs`, new `base_load_heuristic_kw_now` field
+on `TickContext`) and threaded as a new trailing `Option<f64>` parameter into both
+`SimState::tick` (`simulator/mod.rs`) and `peek_base_load_kw`
+(`simulator/base_load_preview.rs`) — one value, resolved pre-lock, consumed by both the
+in-lock physics commit and the pre-lock arbiter preview, so the existing
+`peek_base_load_kw_matches_tick_output_for_same_now` parity invariant keeps holding during a
+dropout, not just when a measurement is fresh or absent-with-no-heuristic. `tick.rs` passes
+`ctx.base_load_heuristic_kw_now` into both call sites.
+
+**R-60 gate decision: proceeded.** tasks.md section 6 required tracing the actual call
+sites of `learn_asset_heuristics` to confirm the previous run's `AssetHeuristics` is
+available without new persistence before attempting R-60. Both real call sites
+(`tasks/heuristics_job::run_heuristics_once`, `routes/debug::preload_heuristics`) already
+read `state.asset_heuristics()` — the very map about to be overwritten — in the same
+function, just after the learn call instead of before. Moving that read earlier and passing
+it as a new `previous: Option<&AssetHeuristics>` parameter was the entire plumbing cost — no
+new storage, no new port, no schema change. Implemented per design.md D5: an additive
+`pub recent_mean_abs_error_kw: Option<f64>` field on `AssetHeuristics`
+(`entities/design_vocabulary.rs`), computed inside `learn_asset_heuristics`'s existing pass
+over `ticks` as a recency-weighted (same EWMA half-life as the profile itself) mean absolute
+error between each tick's actual `power_kw` and what `previous.sample_kw(t.ts)` would have
+predicted. `None` on a first-ever run (nothing to compare against). Not yet consumed by
+`sample_kw` or any planner input — purely additive instrumentation for a future consumer.
+
+**Test-first**: every new behavior was written test-first per tasks.md's own ordering.
+Context resolution: `base_load_heuristic_kw_now_is_none_without_a_learned_heuristic`,
+`base_load_heuristic_kw_now_matches_sample_kw_when_heuristic_present`
+(`tasks/sim_tick/context.rs`). Tick 3-tier chain:
+`tick_uses_heuristic_tier_when_measurement_absent_but_heuristic_present`,
+`tick_falls_back_to_synthetic_when_neither_measurement_nor_heuristic_present`
+(moved into new `simulator/tests/base_load_noise_tests.rs` — see file-size note below).
+Preview parity: `peek_base_load_kw_uses_heuristic_tier_when_measurement_absent`,
+`peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier`
+(`simulator/tests/peek_base_load_kw_tests.rs`). R-60:
+`learn_asset_heuristics_recent_error_is_low_for_a_stationary_pattern`,
+`learn_asset_heuristics_recent_error_is_higher_after_a_step_change`,
+`sample_kw_output_unaffected_by_recent_mean_abs_error_kw_field`
+(`services/heuristics.rs`). All confirmed red before implementation, green after.
+
+**File-size cap deviation**: adding the two new tick tests to `simulator/tests.rs`'s
+existing `base_load_noise_tests` module pushed that *file* to 552 production lines (cap
+500) — `simulator/mod.rs` itself, the file design.md's Risk section flagged to watch, stayed
+at 387, comfortably under. Fixed by extracting `base_load_noise_tests` into its own file
+(`simulator/tests/base_load_noise_tests.rs`), matching the file's own existing precedent for
+`peek_pv_kw_tests.rs`/`peek_base_load_kw_tests.rs` (both already split out for the same
+reason). `scripts/audit_file_sizes.py` only exempts by path (`tests/` directory component),
+not by filename, so a same-named sibling file doesn't qualify — worth remembering before
+assuming "it's obviously test-only" is enough.
+
+**Verification**: `cargo fmt --check` clean, `cargo clippy --all-targets --all-features -D
+warnings` clean, `scripts/audit_file_sizes.py` passes, all four `ven-architecture` invariant
+greps empty/unaffected, full `ven-app` suite 966/966 passed (0 failed) plus the
+`architecture.rs` integration test 1/1, finished in ~117s. No E2E/resilience run needed or
+attempted — confirmed per tasks.md 8.1's own expectation: this change adds no new route, no
+new UI-visible behavior, and no new BDD-testable use case (internal fallback plumbing only:
+a `TickContext` field, two new function parameters, one additive `AssetHeuristics` field).
+
+**Bookkeeping**: BL-40 removed from `docs/BACKLOG.md` (both its User-Value table row and its
+detail section). R-60 removed from `docs/reference/TECHNICAL_DEBTS.md`'s "Deviation/fault
+handling & forecast feedback" table. `docs/architecture/real_measurement_mqtt.md`'s
+"Baseline load" section retitled to "3-tier (measured > learned heuristic > synthetic)" with
+updated code excerpt and precedence description, matching the PV section's structure; the
+"Indirect path into the forecast" section's provenance caveat rewritten to reflect that a
+dropout now re-mixes real, previously-learned behavior rather than an invented curve (the
+missing-provenance-tag gap itself remains unresolved, unchanged from before).
+`openspec/changes/base-load-dropout-fallback/` deleted — both BL-40 and R-60 fully
+implemented and tested, nothing partial to leave behind.
+

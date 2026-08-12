@@ -64,8 +64,17 @@ pub(crate) async fn preload_heuristics(
 
         let h = history.clone();
         let id = asset_id.to_string();
+        // R-60: same previous-heuristic lookup as the daily job — see
+        // `tasks::heuristics_job::run_heuristics_once`.
+        let previous = state.asset_heuristics().await.get(asset_id).cloned();
         let learned = tokio::task::spawn_blocking(move || {
-            learn_asset_heuristics(h.as_ref(), &id, now, &HeuristicsConfig::default())
+            learn_asset_heuristics(
+                h.as_ref(),
+                &id,
+                now,
+                &HeuristicsConfig::default(),
+                previous.as_ref(),
+            )
         })
         .await
         .expect("preload learn task must not panic")?;

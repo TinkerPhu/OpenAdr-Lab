@@ -27,6 +27,7 @@ impl SimState {
         base_load_kw_override: Option<f64>,
         base_load_alpha: f64,
         base_load_measured_kw: Option<f64>,
+        base_load_heuristic_kw: Option<f64>,
     ) -> Option<f64> {
         let bl_cfg = self.asset_configs.iter().find_map(|cfg| match cfg {
             AssetConfig::BaseLoad(bl) => Some(bl),
@@ -35,11 +36,13 @@ impl SimState {
 
         // Mirrors SimState::tick's AssetConfig::BaseLoad branch exactly: the
         // override folds into an offset relative to `natural_base_kw` (measured
-        // reading if present, else profile + simulated appliance noise), so a
-        // forced value lands exactly on `forced_kw`; without an override the
-        // existing offset decays via the same EMA used for PV's irradiance offset.
+        // reading, else the learned heuristic tier per BL-40, else profile +
+        // simulated appliance noise), so a forced value lands exactly on
+        // `forced_kw`; without an override the existing offset decays via the
+        // same EMA used for PV's irradiance offset.
         const PLAN_STEP_S: f64 = 300.0;
         let natural_base_kw = base_load_measured_kw
+            .or(base_load_heuristic_kw)
             .unwrap_or_else(|| bl_cfg.baseline_kw_profile + bl_cfg.appliance_noise_kw(now));
         let offset_kw = if let Some(forced_kw) = base_load_kw_override {
             forced_kw - natural_base_kw

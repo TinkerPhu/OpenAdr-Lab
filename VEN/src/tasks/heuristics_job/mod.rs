@@ -43,8 +43,18 @@ pub(crate) async fn run_heuristics_once(
     for asset_id in HEURISTIC_ASSET_IDS {
         let history = history.clone();
         let id = asset_id.to_string();
+        // R-60: fetch this asset's previously-learned heuristic (if any)
+        // before it gets overwritten below, so `learn_asset_heuristics` can
+        // compute how far off its own past predictions were.
+        let previous = state.asset_heuristics().await.get(asset_id).cloned();
         let result = tokio::task::spawn_blocking(move || {
-            learn_asset_heuristics(history.as_ref(), &id, now, &HeuristicsConfig::default())
+            learn_asset_heuristics(
+                history.as_ref(),
+                &id,
+                now,
+                &HeuristicsConfig::default(),
+                previous.as_ref(),
+            )
         })
         .await;
         match result {

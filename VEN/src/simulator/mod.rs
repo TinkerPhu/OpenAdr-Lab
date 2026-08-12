@@ -190,6 +190,10 @@ impl SimState {
     /// - `heater_emergency_curtail/absorb_override`: Behaviour C, see `Heater::apply_tick_overrides`.
     /// - `pv_measured_kw`/`base_load_measured_kw`: real-measurement MQTT feeds;
     ///   PV outranks `weather_pv_kw`, BaseLoad replaces the natural profile+noise base.
+    /// - `base_load_heuristic_kw`: BL-40's 3rd fallback tier — the site's learned
+    ///   base-load heuristic (`AssetHeuristics::sample_kw`), used for `natural_base_kw`
+    ///   only when `base_load_measured_kw` is absent; the synthetic spike model
+    ///   remains the true last resort when neither is available.
     ///
     /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
     #[allow(clippy::too_many_arguments)]
@@ -214,6 +218,7 @@ impl SimState {
         pv_curtailment_source: crate::entities::asset_params::PvCurtailmentSource,
         pv_measured_kw: Option<f64>,
         base_load_measured_kw: Option<f64>,
+        base_load_heuristic_kw: Option<f64>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -273,6 +278,7 @@ impl SimState {
                     bl.measured_load_kw = base_load_measured_kw;
                     let natural_base_kw = bl
                         .measured_load_kw
+                        .or(base_load_heuristic_kw)
                         .unwrap_or_else(|| bl.baseline_kw_profile + bl.appliance_noise_kw(now));
                     if let Some(forced_kw) = base_load_kw_override {
                         self.base_load_smoothing.load_offset_kw = forced_kw - natural_base_kw;
