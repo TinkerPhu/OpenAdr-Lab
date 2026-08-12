@@ -8769,3 +8769,22 @@ removed from `docs/reference/TECHNICAL_DEBTS.md`'s Implementation Task List (ite
 own entry left untouched pending section 4. Tasks 1.10, 2.9, 3.6 checked off in tasks.md with
 this pass's verification results recorded inline.
 
+**2026-08-12 resume pass (`fix/report-obligation-lifecycle`, worktree
+`.claude/worktrees/agent-aa9a7957ac63e0109`)**: two code-review findings on d439d0c fixed and
+committed (98ea2c5) — renamed 3 new tests off the `test_` prefix to match this project's
+`<function>_<scenario>` convention, and extracted the `ReportSent`-row-append-plus-
+`spawn_blocking` logic (duplicated near-identically across `obligation.rs`/`publish.rs`/
+`reports.rs`) into one shared `controller::history_port::record_report_sent` helper.
+971/971 Rust tests, fmt, clippy, file-size audit, and the four architecture-invariant greps
+all clean. Checked `openspec/changes/report-obligation-lifecycle/tasks.md` against the repo
+and found 5.2/5.3 already done in substance by d439d0c but left unchecked — ticked them off
+with a pointer to that commit. Node1 and Node2 were both free this pass (unlike the prior
+pass's "both occupied" reason), but 3.7/4/5.1's E2E confirmation is still not done: this
+session's instructions were commit-only, no push, no merge to main, and both docker hosts are
+separate git clones that only see pushed commits (per the `node-docker-hosts-separate-git-
+clones` memory) — so E2E can't be run against this branch's code without pushing it, which
+was explicitly out of scope. Left 3.7, section 4, and 5.1's E2E/resilience rows unchecked;
+the change directory stays undeleted per the partial-completion rule. Next session with
+push/merge authority should push the branch, run `--e2e`/`--resilience` on Node2, complete
+section 4's R-41 investigation, then finish closeout and delete the change directory.
+
