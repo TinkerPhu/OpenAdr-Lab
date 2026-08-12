@@ -71,9 +71,6 @@ pub struct AppCtx {
     pub pv_measurement_enabled: bool,
     pub base_load_measurement: Arc<dyn controller::MeasurementPort>,
     pub base_load_measurement_enabled: bool,
-    /// Master switch for `POST /sim/inject` and `/sim/inject/reset`, from
-    /// `profile.simulator.sim_inject_enabled`. See that field's doc comment.
-    pub sim_inject_enabled: bool,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -479,7 +476,6 @@ async fn main() -> anyhow::Result<()> {
         pv_measurement_enabled,
         base_load_measurement,
         base_load_measurement_enabled,
-        sim_inject_enabled: profile.simulator.sim_inject_enabled,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

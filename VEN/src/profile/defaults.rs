@@ -152,13 +152,8 @@ impl Default for SimulatorConfig {
             persist_every_s: default_persist_every(),
             report_interval_s: default_report_interval(),
             unmodelled_load_kw: 0.0,
-            sim_inject_enabled: default_sim_inject_enabled(),
         }
     }
-}
-
-pub(super) fn default_sim_inject_enabled() -> bool {
-    true
 }
 
 pub(super) fn default_tick() -> u64 {

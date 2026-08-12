@@ -208,11 +208,11 @@ export function useSimInject() {
   });
 }
 
-export function useSetSimInject(source: string) {
+export function useSetSimInject() {
   const { api } = useVenContext();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (patch: Partial<SimInjectState>) => api.postSimInject(patch, source),
+    mutationFn: (patch: Partial<SimInjectState>) => api.postSimInject(patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simInject"] });
       queryClient.refetchQueries({ queryKey: ["sim"] });
