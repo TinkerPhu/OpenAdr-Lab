@@ -8910,3 +8910,159 @@ Tasks 4.3 and 6.2 checked off with these results. `openspec/changes/baseline-ove
 deleted — implemented, unit/BDD-tested, and its content is reflected in
 `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` and this entry.
 
+
+## Full 13-VEN fleet deploy + S-1..S-6 experiment run (2026-08-12)
+
+**Trigger**: after the R-18 fix, the user asked to (1) bring Node2's VEN fleet up to
+current `main` if it wasn't already, (2) extend the experiment tooling (`experiments/
+run_experiment.py`, `kpi.py`) to cover the full 13-VEN fleet (Node1's `ven-1..3` +
+Node2's `ven-4..13`) instead of just Node1's 3, (3) design what to record so a
+scenario run's results can be judged expected-or-not, then (4) run S-1..S-6
+sequentially against the full fleet, unattended (~8h window). Work happened in a
+worktree (`worktrees/fleet-13-ven-experiment`, branch `fleet/13-ven-experiment-run`)
+rather than the main checkout — the main checkout had unrelated uncommitted WIP for
+the `reactive-correction-notifications` openspec change sitting in it that needed to
+stay untouched.
+
+### Deploy (Phase A)
+
+Local `main` was 2 commits ahead of `origin/main` (unpushed — included the R-18 fix)
+— pushed first so both hosts could pull it. Node1 was 8 commits behind, Node2 was 11
+— both fast-forwarded cleanly (`git pull --ff-only`, both hosts had clean working
+trees). Rebuilt and redeployed under the standard lease locks: Node1's `VTN/` and
+`VEN/` compose projects (ven-1..3 + VTN/BFF/UIs), Node2's `VEN/scale_out/node2/`
+compose project (ven-4..13). `bash scripts/capture_ven1_logs.sh` run before the
+Node1 `ven-1` rebuild per the standing rule. All 13 VENs came up healthy and
+`/vtn/status`-connected on the first try — no repeat of the earlier 401-degraded
+transient. Both hosts now on `738003104ecb8127aa15d7c39efd41a339399e32`.
+
+### Tooling extension (Phase B)
+
+`run_experiment.py`/`kpi.py` only ever addressed VENs on the host they ran on
+(Node1's `ven-1..3`, reading `history.sqlite` off the local bind mount and
+`docker exec`-ing `vtn-db-1` directly) — Node2's `ven-4..13` were invisible to the
+scripts. New `experiments/fleet_map.json` gives each of the 13 VENs a host/port/
+lan_ip/remote_data_root entry. `snapshot()` now takes an optional fleet map and
+routes each VEN through either the existing local file copy or a new `scp`-based
+remote pull; the recorder-CSV dump gained a `--pg-host` flag that wraps the
+`docker exec ... psql` call in `ssh` when not run locally.
+
+**Orchestration host**: the script's own docstring says it "runs ON the docker host
+(Node1)," matching `fleet.sh`'s convention. That assumption broke here — Node1 has
+no configured ssh trust to Node2 (`ssh Node1 "ssh Node2 ..."` failed to resolve the
+alias, and retrying with agent-forwarding hit `Permission denied (publickey)`), and
+setting up new cross-host ssh trust on shared production hosts wasn't something to
+do unprompted mid-task. The workstation running this session already had verified
+direct LAN HTTP and ssh/scp access to *both* Node1 and Node2, so the run was
+orchestrated from there instead — `fleet_map.json` marks every VEN (including
+Node1's own `ven-1..3`) as reached via its `Node1`/`Node2` ssh alias, and
+`--pg-host Node1` routes the recorder dump the same way. This works but means the
+"runs on Node1" docstring is now stale — filed as a backlog item (see below) rather
+than fixed by force, since the right fix (restore Node1-to-Node2 ssh trust vs.
+formalize off-host orchestration as the supported mode) is a judgment call for the
+user.
+
+**Diagnostics recording**: the point of this exercise beyond raw energy/cost KPIs
+was to be able to tell *why* a scenario's result looked the way it did. Explored
+what the VEN already exposes (`GET /plan`, `PlanReady` SSE) before adding anything —
+`solve_status`, free-text `warnings` (severity-tagged), `cost_breakdown` (incl. a
+`c_violations_eur` total), `objective_eur`/`friction_eur` are all already on the
+persisted `Plan` and served by `GET /plan`; `solver_ms` exists only on the
+`plan_ready` SSE event, not the persisted `Plan`. Per the user's explicit choice
+(asked directly rather than assumed), this pass reuses what already exists via a
+background poller rather than adding new VEN-side Rust instrumentation: a
+60s-interval poll of every VEN's `GET /plan` for the run's duration, appended as
+JSONL (`{ven}-plan-diagnostics.jsonl`), threaded so it runs alongside the existing
+scenario action loop. `kpi.py` gained `plan_diagnostics_summary()` — solve_status
+distribution, warning-severity counts, `c_violations_eur` mean/max per VEN, folded
+into the existing per-VEN KPI block. `solver_ms` capture (would need a persistent
+per-VEN SSE listener) and structured/typed violation fields were explicitly
+deferred — backlogged below.
+
+A 3-minute `smoke.yaml` dry run against all 13 VENs (multi-host snapshot + poller)
+surfaced one real, unrelated bug before the real runs started: `kpi.py`'s recorder-
+CSV reader hit Python's default 128 KiB `csv` field-size limit, because the
+recorder dump is the *whole* `lab_recorder.reports_received` table (not filtered to
+the run window) and this deployment's accumulated history contains a payload blob
+past that limit. Fixed with `csv.field_size_limit(10 * 1024 * 1024)` (not
+`sys.maxsize` — that overflows the C `long` `field_size_limit` uses internally on
+Windows). The unfiltered-dump root cause itself is backlogged, not fixed here (out
+of scope — a bigger change to the recorder query, not a one-line fix).
+
+Committed as `803c8c0` on `fleet/13-ven-experiment-run`.
+
+### The S-1 run got killed twice before it stuck
+
+The harness's own background-task tracking for the local (non-ssh) `run_experiment.py`
+process didn't survive across turns — both of the first two S-1 launches came back
+`status: killed` at ~90s in, well before the 30-minute scenario window closed, with
+no crash in the process's own output (empty log both times). Each left an orphaned
+VTN program + event behind (the script's cleanup `finally` block never got the
+chance to run) — cleaned up via direct `DELETE /events/{id}` and `DELETE /programs/
+{id}` calls both times before retrying. Worked around the same way the project
+already documents for remote long builds on separate git clones: launch fully
+detached (`nohup ... > log 2>&1 < /dev/null & disown`), then poll the PID
+(`Get-Process python`) and log file across turns instead of relying on the
+harness's own background-task completion notification. This held for all 5
+remaining scenario runs with zero further kills.
+
+### Results — S-1..S-6 against the full 13-VEN fleet
+
+Each run: 30 min real-time window, full fleet snapshot + `kpi.py` (`--baseline` =
+S-1) run immediately after. All 6 runs: **13/13 VENs present in every `kpis.json`,
+0 poll errors on the diagnostics poller, `solve_status: OPTIMAL` on every one of
+390 polled samples across the whole run (13 VENs x 30 polls) in every scenario —
+the solver never went infeasible or timed out anywhere in this run.**
+
+| Scenario | Fleet import (kWh) | Fleet cost (EUR) | Peak (kW, any VEN) | Sum shift vs S-1 (kWh) | Warnings | Max violation cost (EUR) |
+|---|---|---|---|---|---|---|
+| S-1 flat (baseline) | 5.526 | 0.749 | 3.900 | -- | 0 | 0 |
+| S-2 price_spike | 5.851 | 0.581 | 3.900 | -0.325 | 0 | 0 |
+| S-3 capacity_limit (3 kW/10min) | 1.548 | 0.187 | 2.150 | +3.978 | 2 (ven-3) | 57.76 |
+| S-4 alert (grid emergency) | 1.610 | 0.100 | 1.800 | +3.916 | 20 (ven-9/10/11/12) | 1000.00 |
+| S-5 dispatch (SIMPLE + setpoint) | 1.955 | -0.013 | 3.900 | +3.571 | 0 | 0 |
+| S-6 combined (spike+reservation+alert) | 2.812 | -0.254 | 4.257 | +2.713 | 29 (ven-2/3/9/10/11/12) | 1196.74 |
+
+Capacity limits and the emergency alert clearly shift load and cut fleet cost — a
+price signal alone (S-2) barely moved the fleet total, matching the earlier S-1..S-6
+run's finding (see the 2026-08-09/10 entry) that capacity/alert control beats price
+signals for peak shaving in this fleet.
+
+**The S-3/S-4/S-6 warnings are the diagnostics tooling doing its job, not a bug.**
+Every warning reads `"Grid capacity violation in N slot(s) - solver used slack"`,
+and every VEN that raised one is asset-mix-inflexible for the constraint in play:
+`ven-9` is `base_load`-only (no PV/battery/heater to shed at all — see `VEN/profiles/
+ven-9.yaml`), and `ven-10/11/12` are similarly light. When a capacity limit or
+emergency alert demands more shedding than a VEN's actual assets can deliver, the
+MILP correctly falls back to a slack variable (`solve_status` stays `OPTIMAL`, not
+`Infeasible`) and prices the shortfall into `c_violations_eur` rather than
+producing an infeasible plan — the fleet's asset-mix diversity (5/13 VENs have PV,
+3/13 have battery, per this file's Node2-growth entry) means "the fleet as a whole
+met the constraint" (visible in the aggregate KPIs above) can still coexist with
+"this specific inflexible VEN individually didn't." This is exactly the kind of
+per-VEN signal the `GET /plan` poller was built to surface that pure grid-power
+KPIs would have hidden.
+
+**Methodology finding — the S-4 negative-shift confound**: `ven-1`'s
+`energy_shifted_kwh` came back **-0.3615 kWh** in S-4 (imported *more* than its S-1
+baseline despite the emergency alert). Investigated rather than dismissed: `ven-1`'s
+`solve_status` was `OPTIMAL` for all 30 polls with zero warnings/violations in S-4,
+so this isn't a shed failure. The scenarios run in real wall-clock time (the sim
+clock has no injectable-time acceleration for this harness — see `run_experiment.py`'s
+own docstring), and S-1 ran at 21:57 UTC on 2026-08-11 while S-4 ran at 06:21 UTC
+the next day — a large natural time-of-day difference in PV/base-load that
+`energy_shifted_kwh`'s same-VEN-different-run diff can't distinguish from an actual
+event response. `ven-1` is one of the few VENs with PV (per its profile), which is
+exactly the asset most sensitive to a 21:57-vs-06:21 UTC time-of-day difference —
+consistent with this being the confound, not a regression. Backlogged: a same-
+wall-clock paired-control or same-time-of-day-rerun design would remove this
+confound for future runs.
+
+**Bookkeeping**: new backlog items filed in `docs/BACKLOG.md` (deferred structured
+plan-quality instrumentation, unfiltered recorder-CSV dump size, report_timeliness/
+event_impact_kwh nulls because scenarios don't request BASELINE/USAGE reports, the
+same-wall-clock-baseline idea, and the stale "runs on Node1" docstring). Tooling
+changes + this entry committed and pushed on `fleet/13-ven-experiment-run` — **not**
+merged to `main`; the branch is left for the user to review before merging. The
+worktree is left in place (not removed) for the same reason.
+

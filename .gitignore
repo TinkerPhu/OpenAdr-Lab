@@ -30,6 +30,7 @@ VEN/profiles/fleet-ven-*.yaml
 
 # experiments/run_experiment.py output (host-local run snapshots)
 experiments/results/
+experiments/run_logs/
 
 # Python
 __pycache__/
