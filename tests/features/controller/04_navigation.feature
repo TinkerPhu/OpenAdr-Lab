@@ -20,10 +20,7 @@ Feature: Controller V2 — Navigation and Layout Controls
     And I click the pin button on the EV asset cell again
     Then the EV asset cell is not in the pinned zone
 
-  @ven-ui
-  Scenario: Right section starts collapsed and can be expanded then collapsed
-    Then the EV asset cell right section is not visible
-    When I click the collapse right button on the EV asset cell
-    Then the EV asset cell right section is visible
-    When I click the collapse right button on the EV asset cell
-    Then the EV asset cell right section is not visible
+  # "Right section starts collapsed and can be expanded then collapsed" moved to
+  # features/isolated/controller_navigation.feature (GB-22, docs/BACKLOG.md) —
+  # flaked 3x under host-load contention during the main pass (browser 502/404s
+  # against real backend calls), passing cleanly every time in isolation.
