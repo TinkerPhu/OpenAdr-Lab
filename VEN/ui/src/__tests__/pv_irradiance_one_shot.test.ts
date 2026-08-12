@@ -48,7 +48,7 @@ afterAll(async () => {
   // Restore alpha to default so the running sim is not left in a test state.
   if (venReachable) {
     try {
-      await api.postSimInject({ pv_irradiance_alpha: 0.1 } as never, "test:pv_irradiance_one_shot.test.ts");
+      await api.postSimInject({ pv_irradiance_alpha: 0.1 } as never);
     } catch { /* best-effort */ }
   }
 });
@@ -78,10 +78,7 @@ describe("PV irradiance one-shot inject", () => {
       const injectIrradiance = injectingUp
         ? Math.min(naturalIrradiance + 0.3, 1.0)
         : Math.max(naturalIrradiance - 0.3, 0.0);
-      await api.postSimInject(
-        { pv_irradiance: injectIrradiance, pv_irradiance_alpha: 0.99 } as never,
-        "test:pv_irradiance_one_shot.test.ts"
-      );
+      await api.postSimInject({ pv_irradiance: injectIrradiance, pv_irradiance_alpha: 0.99 } as never);
 
       // 3. Wait ≥ 1 sim tick (tick period = 1 s) so the backend processes the inject.
       await sleep(1_500);
