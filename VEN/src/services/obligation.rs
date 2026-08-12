@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
+use crate::controller::history_port::record_report_sent;
 use crate::controller::reporter::AssetReportSample;
 use crate::controller::{HistoryPort, VtnPort};
-use crate::entities::history::ReportSent;
 use crate::state::AppState;
 use crate::vtn::VtnHttpError;
 
@@ -62,16 +62,13 @@ impl ObligationService {
                             payload_type = %ob.payload_type,
                             "obligation report submitted"
                         );
-                        if let Some(h) = history.clone() {
-                            let row = ReportSent {
-                                sent_at: now,
-                                report_type: ob.payload_type.clone(),
-                                event_id: ob.event_id.clone(),
-                                payload_json: String::new(),
-                            };
-                            let _ = tokio::task::spawn_blocking(move || h.append_report_sent(&row))
-                                .await;
-                        }
+                        record_report_sent(
+                            history.clone(),
+                            ob.payload_type.clone(),
+                            ob.event_id.clone(),
+                            now,
+                        )
+                        .await;
                     }
                     Err(e) => {
                         let is_not_found = e
