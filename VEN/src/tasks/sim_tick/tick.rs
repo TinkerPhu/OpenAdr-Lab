@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::dispatcher::resolve_pv_generation_limit_kw;
+use crate::controller::HistoryPort;
 use crate::controller::MeasurementPort;
 use crate::controller::SimulatorPort;
 use crate::controller::VtnPort;
@@ -35,6 +36,7 @@ pub(crate) async fn tick_once(
     base_load_measurement: Arc<dyn MeasurementPort>,
     base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
+    history: Option<Arc<dyn HistoryPort>>,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -206,6 +208,7 @@ pub(crate) async fn tick_once(
         vtn.as_ref(),
         &ven_name,
         now,
+        history,
     )
     .await;
     let persist_counter = super::post_lock::maybe_persist_sim_state(

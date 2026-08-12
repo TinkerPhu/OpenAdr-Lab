@@ -8714,3 +8714,58 @@ missing-provenance-tag gap itself remains unresolved, unchanged from before).
 `openspec/changes/base-load-dropout-fallback/` deleted — both BL-40 and R-60 fully
 implemented and tested, nothing partial to leave behind.
 
+## GB-23 / R-43 / GB-21 bundled fix: report-obligation lifecycle (2026-08-11/12)
+
+Implemented the `report-obligation-lifecycle` openspec change bundling three related backlog
+items sharing the same `vtn.rs`/report-submission code paths:
+
+- **GB-23** — a report obligation whose event the VTN has already deleted (confirmed HTTP 404
+  on `upsert_report`) now gets removed from `AppState`'s report-obligation set instead of
+  retrying indefinitely. Added `VtnHttpError` (`VEN/src/vtn.rs`), a small `std::error::Error`
+  newtype carrying the numeric `StatusCode`, constructed by `http_error()` for every non-2xx
+  response; `ObligationService::check_and_report` downcasts to it and, on 404 only, logs at
+  `info!` and calls the new `AppState::remove_obligation`. Non-404 failures (500s, connection
+  errors) are unaffected — `due_at` stays put, existing retry behavior unchanged. A 404 on one
+  obligation does not remove sibling obligations sharing the same `event_id`.
+- **R-43** — `HistoryPort::append_report_sent` is now actually wired into all three real
+  report-submission call sites, so `GET /history/reports` reflects real submissions instead of
+  staying permanently empty: `tasks/sim_tick/publish.rs::run_measurement_reports`,
+  `services/obligation.rs::check_and_report`, and `routes/reports.rs`'s `post_reports`/
+  `put_report`. All three are no-ops (not errors) when `HistoryPort` is `None`.
+- **GB-21** — `controller/reporter.rs`'s report-payload `type` strings were wrong:
+  `IMPORT_/EXPORT_CAPACITY_RESERVATION` (the *event*-side OpenADR 3.1 payload-type names) instead
+  of `IMPORT_/EXPORT_RESERVATION_CAPACITY` (the *report*-side names — word order swapped, a
+  distinct spec enum). Fixed in `reporter.rs` and the report-context BDD/doc/wiki occurrences.
+  `controller/openadr_interface.rs::parse_capacity_state` and `ven_capacity_reservation.feature`
+  were already correct (event-side) and needed no change — see `docs/reference/
+  KEY_LEARNINGS.md` for the full same-string-different-enum reasoning that narrowed this scope
+  during implementation.
+
+**Verification** (this pass, after resuming from an interruption): `wsl cargo test -j 2
+-p ven-app` — 971 passed, 0 failed. `cargo fmt --check` and `cargo clippy --all-targets
+--all-features -- -D warnings` both clean, but not on the first attempt:
+
+- fmt initially had a handful of un-formatted diffs in the new/changed test and task code
+  (multi-line `assert!`/`assert_eq!`/method-chain wrapping) — fixed by running `cargo fmt`.
+- clippy flagged `VtnHttpError::new` as dead code: `--all-targets` compiles the plain `ven-app`
+  bin target too, and that target excludes `services/test_support` (gated `#[cfg(test)]` in
+  `services/mod.rs`, which is `new`'s only caller via `mock_vtn.rs`). Fixed by gating `new`
+  itself `#[cfg(test)]` to match its only caller's gate — see the new KEY_LEARNINGS entry.
+- `scripts/audit_file_sizes.py` failed once: R-43's history-port threading through `main.rs`
+  pushed it to 507 production lines (cap 500). Fixed by extracting the pure, unrelated
+  `build_domain_params` helper into a new `VEN/src/domain_params.rs` — a straight move, no
+  behavior change, re-verified by the same test run. `main.rs` stays orchestration-only.
+
+**Scope deferred, not attempted this pass** (Node1/Node2 both occupied by another test run):
+task 3.7 (full E2E BDD covering `ven_capacity_reservation.feature` and `ven_reporting_out
+.feature` with the corrected GB-21 strings, plus the new R-43 `@r-43` scenario) and all of
+section 4 (R-41 investigation — whether GB-23's fix reduces/resolves the historical E2E
+warn-storm on `report_report_name_uindex`). Both remain unchecked in `openspec/changes/
+report-obligation-lifecycle/tasks.md`; the change directory is intentionally not deleted yet
+since it isn't fully done — per this project's partial-completion rule.
+
+**Bookkeeping**: GB-21 and GB-23 rows removed from `docs/BACKLOG.md`; R-43's register line
+removed from `docs/reference/TECHNICAL_DEBTS.md`'s Implementation Task List (item 4). R-41's
+own entry left untouched pending section 4. Tasks 1.10, 2.9, 3.6 checked off in tasks.md with
+this pass's verification results recorded inline.
+

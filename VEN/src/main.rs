@@ -2,6 +2,7 @@ mod assets;
 mod common;
 mod config;
 mod controller;
+mod domain_params;
 mod entities;
 mod history_store;
 mod ids;
@@ -20,6 +21,7 @@ mod weather;
 
 use crate::assets::ControlDescriptor;
 use config::Config;
+use domain_params::build_domain_params;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
@@ -28,8 +30,7 @@ use simulator::SimState;
 use std::collections::HashMap;
 
 use crate::controller::{SolverPort, VtnPort};
-use crate::entities::asset_params::AssetParams;
-use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
+use crate::entities::planner_params::PlannerObjective;
 use state::AppState;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -71,57 +72,6 @@ pub struct AppCtx {
     pub pv_measurement_enabled: bool,
     pub base_load_measurement: Arc<dyn controller::MeasurementPort>,
     pub base_load_measurement_enabled: bool,
-}
-
-fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
-    let sim_params = SimulatorParams {
-        tick_s: profile.simulator.tick_s,
-        persist_every_s: profile.simulator.persist_every_s,
-        report_interval_s: profile.simulator.report_interval_s,
-        unmodelled_load_kw: profile.simulator.unmodelled_load_kw,
-    };
-    let planner_params = PlannerParams {
-        plan_step_s: profile.planner.effective_step_s(),
-        plan_horizon_h: profile.planner.effective_horizon_h(),
-        replan_interval_s: profile.planner.replan_interval_s,
-        w_energy: profile.planner.w_energy,
-        w_ghg: profile.planner.w_ghg,
-        w_grid: profile.planner.w_grid,
-        c_bat_wear_eur_kwh: profile.planner.c_bat_wear_eur_kwh,
-        c_ev_startup_eur: profile.planner.c_ev_startup_eur,
-        c_bat_startup_eur: profile.planner.c_bat_startup_eur,
-        c_ev_ramp_eur_kw: profile.planner.c_ev_ramp_eur_kw,
-        c_bat_ramp_eur_kw: profile.planner.c_bat_ramp_eur_kw,
-        c_bat_ev_coexist_eur_kwh: profile.planner.c_bat_ev_coexist_eur_kwh,
-        w_viol: profile.planner.w_viol,
-        pen_imp_eur_kwh: profile.planner.pen_imp_eur_kwh,
-        pen_exp_eur_kwh: profile.planner.pen_exp_eur_kwh,
-        v_ev_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
-        v_ev_core_eur_kwh: profile.planner.v_ev_core_eur_kwh,
-        w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
-        c_ctrl_imp_malus_eur_kwh: profile.planner.c_ctrl_imp_malus_eur_kwh,
-        objective: profile.planner.objective,
-        plan_adoption_threshold_eur: profile.planner.plan_adoption_threshold_eur,
-        plan_adoption_decay_s: profile.planner.plan_adoption_decay_s,
-        phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
-        solver_timeout_s: profile.planner.solver_timeout_s,
-        planning_initial_delay_s: profile.planner.planning_initial_delay_s,
-        gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
-        simple_level1_import_cap_pct: profile.planner.simple_level1_import_cap_pct,
-        asap_lateness_eur_kwh_h: profile.planner.asap_lateness_eur_kwh_h,
-        v_ev_free_charge_eur_kwh: profile.planner.v_ev_free_charge_eur_kwh,
-        stale_rate_policy: profile.planner.stale_rate_policy.clone(),
-        stale_rate_safe_pctl: profile.planner.stale_rate_safe_pctl,
-        penalty_rules: profile.planner.penalty_rules.clone(),
-        plan_zones: profile.planner.plan_zones.clone().unwrap_or_else(|| {
-            let step_s = profile.planner.effective_step_s();
-            let total_s = profile.planner.effective_horizon_h() * 3600;
-            let slots = (total_s / step_s) as usize;
-            vec![crate::entities::plan::PlanZone { step_s, slots }]
-        }),
-    };
-    let asset_params = profile.asset_params();
-    (sim_params, planner_params, asset_params)
 }
 
 #[tokio::main]
@@ -328,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, sn) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, sn, hp) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -344,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
             base_load_measurement.clone(),
             base_load_measurement_enabled,
             notifier.clone(),
+            history_port.clone(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -362,21 +313,31 @@ async fn main() -> anyhow::Result<()> {
                 blm.clone(),
                 blme,
                 sn.clone(),
+                hp.clone(),
             )
         });
     }
     {
-        let (s, sim, v, vn) = (
+        let (s, sim, v, vn, h) = (
             state.clone(),
             sim_state.clone(),
             vtn_port.clone(),
             cfg.ven_name.clone(),
+            history_port.clone(),
         );
         tasks::supervised_spawn(
             "obligation_check",
             TASK_COOLDOWN_S,
             state.clone(),
-            move || tasks::spawn_obligation_check(s.clone(), sim.clone(), v.clone(), vn.clone()),
+            move || {
+                tasks::spawn_obligation_check(
+                    s.clone(),
+                    sim.clone(),
+                    v.clone(),
+                    vn.clone(),
+                    h.clone(),
+                )
+            },
         );
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));

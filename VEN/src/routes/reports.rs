@@ -8,8 +8,36 @@ use metrics::counter;
 use tracing::error;
 
 use crate::controller::vtn_port::OadrReportBody;
+use crate::controller::HistoryPort;
+use crate::entities::history::ReportSent;
 use crate::entities::report_submission::ReportSubmissionRecord;
 use crate::AppCtx;
+use std::sync::Arc;
+
+/// R-43 (design.md D3): append a `ReportSent` row, off the async runtime via
+/// `spawn_blocking`, guarded on `history` being configured. No-op (not an
+/// error) when history is disabled — matches every other optional-history
+/// call site in this codebase (e.g. `tasks/poll_events`, `history_sampler`).
+/// Takes `history` directly (not `&AppCtx`) so it stays unit-testable without
+/// standing up a full `AppCtx` (whose `vtn: VtnClient` field is concrete,
+/// not `dyn VtnPort` — out of this change's scope to retype, see design.md).
+async fn record_report_sent(
+    history: Option<Arc<dyn HistoryPort>>,
+    report_type: Option<String>,
+    event_id: Option<String>,
+    now: chrono::DateTime<Utc>,
+) {
+    let Some(history) = history else {
+        return;
+    };
+    let row = ReportSent {
+        sent_at: now,
+        report_type: report_type.unwrap_or_default(),
+        event_id: event_id.unwrap_or_default(),
+        payload_json: String::new(),
+    };
+    let _ = tokio::task::spawn_blocking(move || history.append_report_sent(&row)).await;
+}
 
 pub async fn get_reports(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.reports().await)
@@ -55,18 +83,20 @@ pub async fn post_reports(
         body.clientName.clone(),
     );
     let result = ctx.vtn.upsert_report(body).await;
+    let now = Utc::now();
     ctx.state
         .record_report_submission(submission_outcome(
             &result,
-            report_name,
-            event_id,
+            report_name.clone(),
+            event_id.clone(),
             client_name,
-            Utc::now(),
+            now,
         ))
         .await;
     match result {
         Ok(()) => {
             counter!("reports_sent_total").increment(1);
+            record_report_sent(ctx.history.clone(), report_name, event_id, now).await;
             (axum::http::StatusCode::CREATED, Json(echo)).into_response()
         }
         Err(e) => {
@@ -101,14 +131,16 @@ pub async fn put_report(
     match ctx.vtn.update_report(&id, body).await {
         Ok(result) => {
             counter!("reports_sent_total").increment(1);
+            let now = Utc::now();
             ctx.state
                 .record_report_submission(ReportSubmissionRecord::accepted(
-                    report_name,
-                    event_id,
+                    report_name.clone(),
+                    event_id.clone(),
                     client_name,
-                    Utc::now(),
+                    now,
                 ))
                 .await;
+            record_report_sent(ctx.history.clone(), report_name, event_id, now).await;
             (axum::http::StatusCode::OK, Json(result)).into_response()
         }
         Err(e) => {
@@ -134,10 +166,49 @@ pub async fn put_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::test_support::mock_history_port::MockHistoryPort;
     use crate::state::AppState;
 
     fn now() -> chrono::DateTime<Utc> {
         Utc::now()
+    }
+
+    // ── R-43: record_report_sent ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn record_report_sent_appends_a_row_when_history_configured() {
+        let history: Arc<dyn HistoryPort> = Arc::new(MockHistoryPort::new());
+        let ts = now();
+        record_report_sent(
+            Some(history.clone()),
+            Some("TELEMETRY_USAGE".to_string()),
+            Some("evt-1".to_string()),
+            ts,
+        )
+        .await;
+
+        let rows = history
+            .query_reports(
+                ts - chrono::Duration::seconds(1),
+                ts + chrono::Duration::seconds(1),
+            )
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].report_type, "TELEMETRY_USAGE");
+        assert_eq!(rows[0].event_id, "evt-1");
+    }
+
+    #[tokio::test]
+    async fn record_report_sent_no_op_when_history_not_configured() {
+        // Must not panic — this is the "no HistoryPort configured" scenario
+        // shared across every R-43 call site.
+        record_report_sent(
+            None,
+            Some("USAGE".to_string()),
+            Some("evt-1".to_string()),
+            now(),
+        )
+        .await;
     }
 
     #[test]

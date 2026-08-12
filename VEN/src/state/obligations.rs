@@ -38,6 +38,16 @@ impl AppState {
         }
     }
 
+    /// GB-23: remove a single obligation by id — used when the VTN has
+    /// confirmed (via 404 on report submission) that its source event/program
+    /// no longer exists. Unlike `retire_obligations_not_in`, this targets
+    /// exactly the one obligation whose own submission 404'd, not every
+    /// obligation sharing its `event_id` (design.md D2).
+    pub async fn remove_obligation(&self, id: uuid::Uuid) {
+        let mut hems = self.hems.write().await;
+        hems.report_obligations.retain(|o| o.id != id);
+    }
+
     /// Remove obligations whose parent event is no longer in the active poll set.
     pub async fn retire_obligations_not_in(
         &self,
@@ -58,5 +68,58 @@ impl AppState {
             .filter(|o| o.is_due(now))
             .cloned()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_obligation(id: uuid::Uuid, event_id: &str) -> OadrReportObligation {
+        OadrReportObligation {
+            id,
+            event_id: event_id.to_string(),
+            program_id: Some("prog-1".to_string()),
+            payload_type: "USAGE".to_string(),
+            reading_type: "DIRECT_READ".to_string(),
+            resource_name: None,
+            due_at: Utc::now(),
+            interval_duration_s: 900,
+            fulfilled: false,
+            created_at: Utc::now(),
+            historical: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_obligation_removes_only_the_matching_id() {
+        let state = AppState::new();
+        let id_a = uuid::Uuid::new_v4();
+        let id_b = uuid::Uuid::new_v4();
+        state
+            .add_obligations(vec![
+                make_obligation(id_a, "evt-a"),
+                make_obligation(id_b, "evt-b"),
+            ])
+            .await;
+
+        state.remove_obligation(id_a).await;
+
+        let obs = state.report_obligations().await;
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].id, id_b);
+    }
+
+    #[tokio::test]
+    async fn remove_obligation_no_op_when_id_not_present() {
+        let state = AppState::new();
+        let id_a = uuid::Uuid::new_v4();
+        state
+            .add_obligations(vec![make_obligation(id_a, "evt-a")])
+            .await;
+
+        state.remove_obligation(uuid::Uuid::new_v4()).await;
+
+        assert_eq!(state.report_obligations().await.len(), 1);
     }
 }

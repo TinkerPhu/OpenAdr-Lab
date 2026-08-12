@@ -78,6 +78,42 @@ fn log_if_vtn_unreachable(path: &str, e: &reqwest::Error) {
     }
 }
 
+/// GB-23 (design.md D1): carries the numeric HTTP status through the
+/// `anyhow::Error` chain so callers above the HTTP boundary (e.g.
+/// `services/obligation.rs`) can distinguish "not found" from other failure
+/// classes structurally — via `downcast_ref` — rather than parsing message
+/// strings. `Display` matches `http_error`'s pre-existing message format
+/// exactly, so every current assertion on error text keeps passing.
+#[derive(Debug)]
+pub(crate) struct VtnHttpError {
+    pub(crate) status: StatusCode,
+    message: String,
+}
+
+impl VtnHttpError {
+    /// Construct directly (not just via `http_error`) — used by
+    /// `MockVtn::with_upsert_error_status` so obligation-service tests can
+    /// simulate a specific VTN status (e.g. 404) without a real HTTP round-trip.
+    /// `cfg(test)`-gated: `mock_vtn.rs` (its only caller) is itself
+    /// `#[cfg(test)]`-gated via `services/mod.rs`, so this is dead code in
+    /// non-test builds without the same gate.
+    #[cfg(test)]
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for VtnHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for VtnHttpError {}
+
 /// Build the error for a non-2xx VTN response, logging a structured line
 /// either way: as parsed RFC 7807 fields if the body is problem+json shaped,
 /// or the raw body otherwise. Called at every "not `is_success()`" branch in
@@ -95,11 +131,14 @@ fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
                 problem_instance = problem.instance.as_deref().unwrap_or(""),
                 "VTN returned an RFC 7807 problem response"
             );
-            anyhow::anyhow!(
-                "{path} returned {status}: {} — {}",
-                problem.title.unwrap_or_default(),
-                problem.detail.unwrap_or_default()
-            )
+            anyhow::Error::new(VtnHttpError {
+                status,
+                message: format!(
+                    "{path} returned {status}: {} — {}",
+                    problem.title.unwrap_or_default(),
+                    problem.detail.unwrap_or_default()
+                ),
+            })
         }
         _ => {
             tracing::error!(
@@ -108,7 +147,10 @@ fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
                 body,
                 "VTN returned a non-2xx response"
             );
-            anyhow::anyhow!("{path} returned {status}: {body}")
+            anyhow::Error::new(VtnHttpError {
+                status,
+                message: format!("{path} returned {status}: {body}"),
+            })
         }
     }
 }
@@ -596,6 +638,26 @@ mod tests {
 
         let msg = err.to_string();
         assert!(msg.contains(&body), "message was: {msg}");
+    }
+
+    // ── GB-23 (design.md D1): VtnHttpError status downcast ──────────────────
+
+    #[test]
+    fn test_http_error_downcasts_to_vtn_http_error_with_404_status() {
+        let err = http_error("/reports/abc", StatusCode::NOT_FOUND, "not found");
+        let vtn_err = err
+            .downcast_ref::<VtnHttpError>()
+            .expect("http_error must produce a downcastable VtnHttpError");
+        assert_eq!(vtn_err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_http_error_downcasts_to_vtn_http_error_with_409_status() {
+        let err = http_error("/reports", StatusCode::CONFLICT, "conflict");
+        let vtn_err = err
+            .downcast_ref::<VtnHttpError>()
+            .expect("http_error must produce a downcastable VtnHttpError");
+        assert_eq!(vtn_err.status, StatusCode::CONFLICT);
     }
 
     // ── WP2.3: BL-25 VtnUnreachable classification ──────────────────────────
