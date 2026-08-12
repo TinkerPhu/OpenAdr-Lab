@@ -937,6 +937,23 @@ outes/sim.rs causes a T1+T2 double-solve race:
   was needed for tariff and CO2-intensity axes. Two helpers with different anchor semantics,
   not one helper with a flag — the doc comment on each explains which quantities it's for and
   why, so a future caller doesn't have to guess.
+
+## OpenSpec `validate --strict`: hard-wrapped requirement text hides SHALL/MUST (2026-08-12)
+
+- **The `openspec` CLI's requirement parser only reads the first physical line after `###
+  Requirement:` as the requirement's text** — it does not join a hard-wrapped paragraph before
+  checking for SHALL/MUST. A requirement written as prose spanning several lines (each ending in
+  a real `\n`, common when a proposal is authored with manual line wrapping around ~100 cols)
+  fails `validate --strict` with `must contain SHALL or MUST` whenever the SHALL/MUST verb happens
+  to land on the second or later physical line, even though the full paragraph clearly states the
+  requirement.
+- **Fix**: reflow the requirement's opening sentence so it leads with the SHALL/MUST clause
+  (e.g. "The system SHALL emit ... when X transitions...") and keep that clause on the first
+  physical line — a pure rewording, no semantic change. Don't rely on the paragraph "reading
+  fine" as prose; the validator is line-1-only regardless of how the rendered markdown looks.
+- **Practical habit**: run `openspec validate <change> --strict` (and `--json --deltas-only` to
+  see exactly what text the parser extracted) right after authoring a spec delta, before treating
+  the proposal as ready — this class of failure is invisible on a plain read-through.
 - **A third recurrence of the same root cause, one layer up the stack**
   (`openspec/changes/unify-plan-power-stack-grid/`, 2026-08-09): where the above bullets are
   about a chart component plotting two independently-indexed *arrays*, this was two
