@@ -200,26 +200,21 @@ pub(crate) async fn tick_once(
     .await;
 
     // PHASE 6: Periodic measurement reports (T049); PHASE 7: periodic persist.
-    let report_counter = super::post_lock::maybe_run_measurement_reports(
+    super::post_lock::run_periodic_reports_and_persist(
         report_counter,
         report_every_ticks,
+        persist_counter,
+        persist_every_ticks,
         &state,
         &snap_for_reports,
         vtn.as_ref(),
         &ven_name,
         now,
         history,
-    )
-    .await;
-    let persist_counter = super::post_lock::maybe_persist_sim_state(
-        persist_counter,
-        persist_every_ticks,
         &sim,
         &data_dir,
     )
-    .await;
-
-    (persist_counter, report_counter)
+    .await
 }
 
 #[cfg(test)]
