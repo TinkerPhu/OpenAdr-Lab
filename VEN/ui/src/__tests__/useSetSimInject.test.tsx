@@ -60,7 +60,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
 
   it("refetches ['timeline/all'] after a successful inject POST", async () => {
     const wrapper = makeWrapper(queryClient);
-    const { result } = renderHook(() => useSetSimInject("test"), { wrapper });
+    const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
       result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);
@@ -79,7 +79,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
 
   it("also refetches ['sim'] after a successful inject POST", async () => {
     const wrapper = makeWrapper(queryClient);
-    const { result } = renderHook(() => useSetSimInject("test"), { wrapper });
+    const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
       result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);
@@ -98,7 +98,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
 
   it("invalidates ['simInject'] after a successful inject POST", async () => {
     const wrapper = makeWrapper(queryClient);
-    const { result } = renderHook(() => useSetSimInject("test"), { wrapper });
+    const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
       result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);

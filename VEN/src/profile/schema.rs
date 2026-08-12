@@ -339,9 +339,6 @@ pub struct SimulatorConfig {
     /// Zero disables (residual is then structurally 0, the exact sum of modelled assets).
     #[serde(default)]
     pub unmodelled_load_kw: f64,
-    /// Master switch for `POST /sim/inject` (returns 403 when `false`); see R-65/project_journal.
-    #[serde(default = "super::defaults::default_sim_inject_enabled")]
-    pub sim_inject_enabled: bool,
 }
 
 /// Physical grid connection limits — meter / main breaker hard ceiling.
