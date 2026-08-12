@@ -68,3 +68,36 @@ pub(crate) async fn maybe_persist_sim_state(
     }
     persist_counter
 }
+
+/// PHASES 6+7 combined: periodic measurement reports, then periodic persist —
+/// folded into one call so `tick.rs` only carries one call site for both.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_periodic_reports_and_persist(
+    report_counter: u64,
+    report_every_ticks: u64,
+    persist_counter: u64,
+    persist_every_ticks: u64,
+    state: &AppState,
+    sim_snap: &SimSnapshot,
+    vtn: &dyn VtnPort,
+    ven_name: &str,
+    now: DateTime<Utc>,
+    history: Option<Arc<dyn HistoryPort>>,
+    sim: &Arc<Mutex<SimState>>,
+    data_dir: &str,
+) -> (u64, u64) {
+    let report_counter = maybe_run_measurement_reports(
+        report_counter,
+        report_every_ticks,
+        state,
+        sim_snap,
+        vtn,
+        ven_name,
+        now,
+        history,
+    )
+    .await;
+    let persist_counter =
+        maybe_persist_sim_state(persist_counter, persist_every_ticks, sim, data_dir).await;
+    (persist_counter, report_counter)
+}
