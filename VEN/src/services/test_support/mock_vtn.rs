@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_vtn_returns_configured_status_error_downcastable() {
+    async fn mock_vtn_returns_configured_status_error_downcastable() {
         let mock = MockVtn::new().with_upsert_error_status(StatusCode::NOT_FOUND, "gone");
         let body = OadrReportBody {
             programID: "prog-1".to_string(),

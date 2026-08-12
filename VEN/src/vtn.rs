@@ -643,7 +643,7 @@ mod tests {
     // ── GB-23 (design.md D1): VtnHttpError status downcast ──────────────────
 
     #[test]
-    fn test_http_error_downcasts_to_vtn_http_error_with_404_status() {
+    fn http_error_downcasts_to_vtn_http_error_with_404_status() {
         let err = http_error("/reports/abc", StatusCode::NOT_FOUND, "not found");
         let vtn_err = err
             .downcast_ref::<VtnHttpError>()
@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn test_http_error_downcasts_to_vtn_http_error_with_409_status() {
+    fn http_error_downcasts_to_vtn_http_error_with_409_status() {
         let err = http_error("/reports", StatusCode::CONFLICT, "conflict");
         let vtn_err = err
             .downcast_ref::<VtnHttpError>()
