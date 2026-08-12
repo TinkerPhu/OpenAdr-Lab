@@ -6,11 +6,11 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::controller;
+use crate::controller::history_port::record_report_sent;
 use crate::controller::HistoryPort;
 use crate::controller::SimSnapshot;
 use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::history::ReportSent;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
@@ -178,15 +178,7 @@ pub(crate) async fn run_measurement_reports(
         let event_id = report.eventID.clone().unwrap_or_default();
         match vtn.upsert_report(report).await {
             Ok(()) => {
-                if let Some(h) = history.clone() {
-                    let row = ReportSent {
-                        sent_at: now,
-                        report_type: report_name,
-                        event_id,
-                        payload_json: String::new(),
-                    };
-                    let _ = tokio::task::spawn_blocking(move || h.append_report_sent(&row)).await;
-                }
+                record_report_sent(history.clone(), report_name, event_id, now).await;
             }
             Err(e) => error!("measurement report submission failed: {e:#}"),
         }

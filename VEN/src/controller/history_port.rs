@@ -12,6 +12,8 @@
 // WP1.2's history-sampler task; landing the port + adapter as their own
 // reviewable commit first.
 #![allow(dead_code)]
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 
 use crate::entities::history::{
@@ -119,4 +121,29 @@ pub trait HistoryPort: Send + Sync {
         let _ = (from, to, asset_id, lead_kind);
         Ok(Vec::new())
     }
+}
+
+/// R-43 (design.md D3): append a `ReportSent` row, off the async runtime via
+/// `spawn_blocking`, guarded on `history` being configured. No-op (not an
+/// error) when history is disabled — matches every other optional-history
+/// call site in this codebase (e.g. `tasks/poll_events`, `history_sampler`).
+/// Shared by every report-submission call site (`services/obligation.rs`,
+/// `tasks/sim_tick/publish.rs`, `routes/reports.rs`) so the row shape and
+/// no-op-on-disabled behavior stay in one place.
+pub async fn record_report_sent(
+    history: Option<Arc<dyn HistoryPort>>,
+    report_type: String,
+    event_id: String,
+    sent_at: DateTime<Utc>,
+) {
+    let Some(history) = history else {
+        return;
+    };
+    let row = ReportSent {
+        sent_at,
+        report_type,
+        event_id,
+        payload_json: String::new(),
+    };
+    let _ = tokio::task::spawn_blocking(move || history.append_report_sent(&row)).await;
 }
