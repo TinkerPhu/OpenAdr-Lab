@@ -48,7 +48,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [GB-04](#general-backlog) | VTN UI stays responsive as event history grows (SQL-side filtering instead of post-filter Rust) | Low | S | Low |
-| [GB-05](#general-backlog) | Faster triage — Events page can filter to active events, not just text-search | Low | S | Low |
 | [BL-24](#bl-24-oadrprogramconfigoadreventcacheoadrcapacityrequest-wiring) | Would let the VTN request/receive capacity reservations from the VEN — no such workflow exists today | Low | S if removed / unknown if built | Low — no consumer yet; recommend leaving parked until a real feature needs it |
 
 ### No direct user value — internal cleanup/consistency (do opportunistically, don't prioritize)
@@ -59,7 +58,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-23](#bl-23-hvacservice--route-wiring-or-removal-of-the-unused-impl) | Consistency-only decision, no behavior change either way | None |
 | [BL-26](#bl-26-assetstate-entities--resolve-the-name-collision-with-the-live-assetsassetstate) | Dead type shadowing a live one's name | None |
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
-| [GB-07](#general-backlog) | Dev/ops convenience (container setup script), not user-facing | Low |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
 | [GB-16](#general-backlog) | `npm audit` findings in `VEN/ui` (brace-expansion, react-router) — dependency hygiene, not user-facing | Low-Medium |
 
@@ -220,8 +218,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | Item | Gain | Priority |
 |---|---|---|---|
 | GB-04 | DB-level optimization: add `ends_at timestamptz` index so `?active=true` runs in SQL, not post-filter Rust | Low | Low (not needed until event table is large) |
-| GB-05 | VTN UI: filter past events from event table (the Events page search box matches text only — no active/past filtering) | Low | Low |
-| GB-07 | Add setup script to bring up all required containers (fleet.sh covers only the fleet VENs; VTN stack + base VENs are separate compose invocations) | Low | Low |
 | GB-09 | Per-profile VEN poll interval override. The original motivation ("N VENs don't poll in lockstep") is met via the one-time `POLL_STARTUP_JITTER_S` stagger; a per-profile interval override remains unbuilt and nothing currently needs it | Low | Low |
 | GB-11 | Remaining AI-SW-Development alignment items (from the retired root alignment-plan.md, Pass 3): backlog-handling + tool-installation + archive-folder notes in CLAUDE.md; USER_STORIES.md; RISK_ANALYSIS.md; PROMPT_LIBRARY.md; changelog decision (journal-as-changelog note); security-review cadence; automated code-review hook; file-header descriptions on key VEN modules | Low | Low |
 | GB-12 | BDD scenario for `Plan.solve_status == Infeasible` on `/plan`/`/plan/events`. Unit-level coverage exists (`run_planner_infeasible_constraints_fallback_no_panic` plus new solve_status assertions); no BDD scenario forces an infeasible solve today because doing so needs a fixture heavier than the existing `InfeasibleBatCtx` test double, which isn't exposed at the BDD/E2E layer | Low | Low |
