@@ -14,10 +14,19 @@ scenario itself, so kpi.py's energy_shifted_kwh has a same-VEN baseline
 captured minutes -- not hours -- away in wall-clock time. This roughly
 doubles the script's total runtime; pass --no-paired-baseline to skip it.
 
-Runs ON the docker host (Node1), same convention as fleet.sh:
+GB-29: for a single-host run (VENs on Node1 only), this can run ON that
+docker host, same convention as fleet.sh. For a multi-host fleet (Node1 +
+Node2), it instead runs OFF-host, e.g. from a workstation that can reach
+both docker hosts over LAN/ssh but isn't one of them itself -- Node1 has no
+configured ssh trust to Node2, so `ssh Node1 "ssh Node2 ..."` isn't an
+option. `--fleet-map` (experiments/fleet_map.json) routes each VEN's
+snapshot to a local copy or a remote scp/ssh pull per its "host" entry, and
+`--pg-host` routes the recorder-DB dump through ssh when not run on the
+VTN's own host:
     python3 experiments/run_experiment.py --scenario experiments/scenarios/s2_price_spike.yaml
     ... --vens ven-1,ven-2,ven-3            # which VEN data dirs to snapshot
     ... --out experiments/results           # output root
+    ... --fleet-map experiments/fleet_map.json --pg-host Node1  # multi-host run
 
 Steps: create a program, replay the scenario's actions at their offsets,
 wait out the window, delete the created events/program, then snapshot each
@@ -155,7 +164,17 @@ def _snapshot_remote(out_dir, ven, ssh_host, remote_data_root):
             # -wal/-shm sidecars are optional (may not exist if nothing pending checkpoint)
 
 
-def snapshot(out_dir, vens, pg_container, ven_data_root, fleet_map=None, pg_host="local"):
+# GB-26: reports_received/events_published grow unboundedly with deployment
+# age (unfiltered dumps hit ~122 MB on this deployment's accumulated
+# history), so every run's snapshot is filtered to its own [t_from, t_to)
+# window via each table's own timestamp column. ven_snapshots is a
+# PK-per-VEN "latest state" table, not an append log, so it's exempt --
+# there's exactly one row per VEN regardless of window width.
+_TABLE_TIME_COL = {"reports_received": "received_at", "events_published": "seen_at"}
+
+
+def snapshot(out_dir, vens, pg_container, ven_data_root, fleet_map=None, pg_host="local",
+             t_from=None, t_to=None):
     """Copy VEN sqlite stores + dump lab_recorder tables to CSV.
 
     `fleet_map` (parsed experiments/fleet_map.json's "vens" dict), when given,
@@ -164,7 +183,11 @@ def snapshot(out_dir, vens, pg_container, ven_data_root, fleet_map=None, pg_host
     Node1-only behavior). `pg_host`: "local" runs `docker exec` directly
     (script running on the VTN's own host); any other value is an ssh alias
     to run it on instead (script running off-host, e.g. from a workstation
-    that can reach both docker hosts but isn't one of them)."""
+    that can reach both docker hosts but isn't one of them).
+
+    `t_from`/`t_to` (GB-26), when both given, restrict the reports_received
+    and events_published dumps to that window instead of the whole table's
+    history -- see _TABLE_TIME_COL above."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for ven in vens:
         entry = (fleet_map or {}).get(ven, {"host": "local"})
@@ -173,7 +196,11 @@ def snapshot(out_dir, vens, pg_container, ven_data_root, fleet_map=None, pg_host
         else:
             _snapshot_remote(out_dir, ven, entry["host"], entry["remote_data_root"])
     for table in ("reports_received", "events_published", "ven_snapshots"):
-        copy_sql = f"COPY (SELECT * FROM lab_recorder.{table}) TO STDOUT WITH CSV HEADER"
+        time_col = _TABLE_TIME_COL.get(table)
+        where = ""
+        if time_col and t_from is not None and t_to is not None:
+            where = f" WHERE {time_col} >= '{iso(t_from)}' AND {time_col} < '{iso(t_to)}'"
+        copy_sql = f"COPY (SELECT * FROM lab_recorder.{table}{where}) TO STDOUT WITH CSV HEADER"
         if pg_host == "local":
             cmd = ["docker", "exec", pg_container, "psql", "-U", "openadr", "openadr", "-c", copy_sql]
         else:
@@ -392,7 +419,8 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
             diag_stop.set()
             diag_thread.join(timeout=args.plan_poll_interval_s + 10)
 
-    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host)
+    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host,
+             t_from=t0, t_to=datetime.now(timezone.utc))
     meta = {
         "scenario": scenario_label,
         "started_at": iso(t0),
