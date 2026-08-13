@@ -6,7 +6,13 @@ recorder CSVs. KPIs per VEN:
   - energy_import_kwh / energy_export_kwh over the window
   - cost_eur (import*tariff - export*tariff, per 1-min sample)
   - peak_import_kw, load_factor (mean/peak import)
-  - energy_shifted_kwh vs a baseline run (same-window import delta, needs --baseline)
+  - energy_shifted_kwh vs a baseline run (same-window import delta). Defaults to the
+    GB-28 paired baseline run_experiment.py writes alongside the run (--paired-baseline,
+    on by default -- {run}-baseline/, minutes away in wall-clock time), overridable with
+    an explicit --baseline. A cross-run baseline captured hours away (e.g. a separately
+    scheduled S-1) still confounds this VEN with real time-of-day drift (solar/base-load
+    cycles) -- GB-28 only shrinks that gap to the paired window's own duration, it
+    doesn't eliminate it; a true fix needs injectable sim time, out of scope here.
   - compliance_latency_s: first grid-sample timestamp after each non-price
     event where import dropped >= 20% below the pre-event minute (rough
     signal->response measure; None when no constraining event in the run)
@@ -294,7 +300,13 @@ def main():
 
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run", required=True)
-    p.add_argument("--baseline", help="an s1_flat run dir for energy_shifted_kwh")
+    p.add_argument(
+        "--baseline",
+        help="a run dir for energy_shifted_kwh. Defaults to the GB-28 paired baseline "
+             "run_experiment.py writes alongside --run (<run>-baseline/), if present; "
+             "pass explicitly to compare against something else instead (e.g. an s1_flat "
+             "run, for scenarios run with --no-paired-baseline)",
+    )
     p.add_argument(
         "--manifest",
         help="WP4.5: fleet manifest.json with persona tags — adds a per-persona KPI block",
@@ -305,9 +317,15 @@ def main():
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     t_from, t_to = window(meta)
 
+    baseline_dir_arg = args.baseline
+    if not baseline_dir_arg:
+        auto_baseline = Path(str(run_dir) + "-baseline")
+        if (auto_baseline / "run.json").exists():
+            baseline_dir_arg = str(auto_baseline)
+
     baseline = {}
-    if args.baseline:
-        bdir = Path(args.baseline)
+    if baseline_dir_arg:
+        bdir = Path(baseline_dir_arg)
         bmeta = json.loads((bdir / "run.json").read_text(encoding="utf-8"))
         bfrom, bto = window(bmeta)
         for ven in bmeta["vens"]:

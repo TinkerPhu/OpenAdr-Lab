@@ -9066,3 +9066,68 @@ changes + this entry committed and pushed on `fleet/13-ven-experiment-run` — *
 merged to `main`; the branch is left for the user to review before merging. The
 worktree is left in place (not removed) for the same reason.
 
+## GB-28 fix: paired-baseline window for `energy_shifted_kwh` (2026-08-13)
+
+**Trigger**: the user asked which of the newly-filed backlog items was most
+pressing; answered GB-28 (renumbered from GB-27 — other agents had claimed
+GB-21..24 on `main` in the meantime, resolved by rebasing this branch onto
+current `main` and renumbering this session's own items to GB-25..29; see the
+rebase note above). User then asked to implement it, planned first, reviewed
+before merging.
+
+**Fix**: `run_experiment.py` gained a `run_window()` helper (extracted from the
+old single-window `main()` body, no behavior change to the window logic itself)
+and a `--paired-baseline` flag (default on). When enabled, every scenario run
+now spends one extra `duration_minutes` window with zero events posted,
+immediately *before* the scenario's own window, snapshotted to a sibling
+`{run_dir}-baseline/` directory. `kpi.py` auto-discovers that sibling directory
+for `energy_shifted_kwh` when `--baseline` isn't given explicitly, falling back
+to the old behavior (no baseline) if it's absent. This shrinks the baseline-to-
+scenario gap from hours (the 8.5h S-1-vs-S-4 gap that surfaced the bug) to the
+width of one window (~30 min for S-1..S-6) — a large reduction, not a full
+elimination; the docstring/backlog explicitly say so, since a true fix needs
+injectable sim time through the whole tick/poll path, out of scope here.
+
+**Design choice — same-VEN adjacent baseline, not a cross-VEN control**:
+confirmed via source read that the VTN does support per-VEN event targeting
+(`targets: [{"type":"VEN_NAME","values":[...]}]`, enforced server-side in the
+embedded `openleadr-rs` fork), so an in-run "control VEN" excluded from the
+event was a real option. Rejected — the 13 VENs have deliberately
+heterogeneous asset profiles (5/13 have PV, 3 of those have battery, `ven-9` is
+base-load-only, no two share a profile), so "VEN A untouched" can't stand in
+for "VEN B without the event." A same-VEN comparison is the only
+methodologically sound one available without a bigger architectural change.
+
+**Verification**: live smoke-test run (`smoke.yaml`, 3 min × 2 windows) against
+the full 13-VEN fleet. `{run_dir}-baseline/` came back with 13/13 VEN
+snapshots and its own plan-diagnostics files, exactly like a normal run.
+`kpi.py --run {run_dir}` (no explicit `--baseline`) auto-picked up the sibling
+baseline and populated `energy_shifted_kwh` for every VEN present.
+
+**Found during verification, not part of this fix**: `kpi.py`'s output was
+missing `ven-1` — 12/13 VENs, not 13. Investigated rather than assumed benign:
+`ven-1`'s `grid_samples` table hadn't been written to in ~8.8h, and its
+`/health` endpoint showed `storage: degraded`. Root cause: the running
+`ven-ven-1-1` container (`StartedAt: 2026-08-12T20:51:18Z` — recreated by some
+other session, not this one) has its `/data` bind mount pointing at
+`/srv/docker/openadr_lab_main-deploy/VEN/data/ven-1`, a path that doesn't exist
+anywhere on Node1's filesystem (confirmed via `stat`) — Docker silently mounted
+it as an empty directory. Container logs confirm: `sim persist failed: No such
+file or directory` / `persist write failed: No such file or directory`
+repeating every ~15s since that timestamp, while VTN polling/events/reports
+(which don't touch `/data`) kept working fine, masking the problem from a
+casual `/health` glance. `ven-1`'s real data (through the last known-good
+write) is still intact at the canonical `/srv/docker/openadr_lab/VEN/data/
+ven-1/` — not touched, not remediated; flagged to the user rather than
+restarted unilaterally, since it's live shared infrastructure another session
+may still depend on. `kpi.py` handled the missing VEN gracefully (silent
+exclusion, not a crash) — no code change needed for that part; it's exactly
+the degrade-gracefully behavior you'd want.
+
+**Bookkeeping**: GB-28 row removed from `docs/BACKLOG.md` (the in-scope,
+actionable fix is done; the residual "needs injectable sim time" gap is
+already out-of-scope-by-design, not a new open item). The `ven-1` data-mount
+incident is not filed as a new backlog item here — left for the user to decide
+how to remediate first, since acting on it (or even fully diagnosing it
+further) wasn't this session's call to make unilaterally.
+

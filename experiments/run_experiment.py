@@ -8,6 +8,12 @@ externally drivable without an injectable clock through the whole tick/poll
 path — the spike result from the phase plan. S-1..S-6 are therefore short
 same-day windows (default 30 min each) rather than simulated days.
 
+GB-28: by default (--paired-baseline), each run first spends one more
+duration_minutes-long window with no events posted, immediately before the
+scenario itself, so kpi.py's energy_shifted_kwh has a same-VEN baseline
+captured minutes -- not hours -- away in wall-clock time. This roughly
+doubles the script's total runtime; pass --no-paired-baseline to skip it.
+
 Runs ON the docker host (Node1), same convention as fleet.sh:
     python3 experiments/run_experiment.py --scenario experiments/scenarios/s2_price_spike.yaml
     ... --vens ven-1,ven-2,ven-3            # which VEN data dirs to snapshot
@@ -285,6 +291,80 @@ def setup_persona_sessions(manifest_path, host):
     return ven_names, teardown
 
 
+def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label, program_name, actions):
+    """Run one real-time window against the VTN: create a throwaway program,
+    post `actions` (each translated via build_event) at their offsets, wait
+    out the window, clean up, then snapshot. `actions=[]` runs a pure
+    no-intervention window -- used by the GB-28 paired baseline below, and
+    reusable for any future baseline-only scenario.
+
+    Runs the plan-diagnostics poller (if `fleet_map` given) and writes
+    `run.json` + the fleet snapshot into `run_dir`, exactly like the
+    single-window flow this replaces."""
+    t0 = datetime.now(timezone.utc)
+
+    diag_stop = None
+    diag_thread = None
+    if fleet_map:
+        import threading
+        run_dir.mkdir(parents=True, exist_ok=True)
+        diag_stop = threading.Event()
+        diag_thread = threading.Thread(
+            target=poll_plan_diagnostics,
+            args=(run_dir, ven_names, fleet_map, args.plan_poll_interval_s, diag_stop),
+            daemon=True,
+        )
+        diag_thread.start()
+
+    token = get_token(args.vtn_url, "any-business", "any-business")
+    r = requests.post(
+        f"{args.vtn_url}/programs",
+        headers=auth(token),
+        json={"programName": program_name},
+        timeout=10,
+    )
+    r.raise_for_status()
+    program_id = r.json()["id"]
+    created_events = []
+
+    try:
+        pending = sorted(actions, key=lambda a: a["at_minute"])
+        for action in pending:
+            target = t0 + timedelta(minutes=action["at_minute"])
+            wait_s = (target - datetime.now(timezone.utc)).total_seconds()
+            if wait_s > 0:
+                time.sleep(wait_s)
+            body = build_event(program_id, action, datetime.now(timezone.utc))
+            eid = post_event(args.vtn_url, token, body)
+            created_events.append(eid)
+            print(f"  +{action['at_minute']:>3} min  {action['type']}  event={eid}")
+
+        end = t0 + timedelta(minutes=duration_min)
+        wait_s = (end - datetime.now(timezone.utc)).total_seconds()
+        if wait_s > 0:
+            print(f"  waiting out the window ({int(wait_s)}s remaining) ...")
+            time.sleep(wait_s)
+    finally:
+        # Deletion == cancellation in OpenADR 3; always clean up.
+        token = get_token(args.vtn_url, "any-business", "any-business")
+        for eid in created_events:
+            requests.delete(f"{args.vtn_url}/events/{eid}", headers=auth(token), timeout=10)
+        requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
+        if diag_stop:
+            diag_stop.set()
+            diag_thread.join(timeout=args.plan_poll_interval_s + 10)
+
+    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host)
+    meta = {
+        "scenario": scenario_label,
+        "started_at": iso(t0),
+        "duration_minutes": duration_min,
+        "vens": ven_names,
+        "events": created_events,
+    }
+    (run_dir / "run.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scenario", required=True)
@@ -314,6 +394,15 @@ def main():
              "and GET /plan is polled on every VEN for the run's duration.",
     )
     p.add_argument("--plan-poll-interval-s", type=int, default=60)
+    p.add_argument(
+        "--paired-baseline", action=argparse.BooleanOptionalAction, default=True,
+        help="GB-28: run a same-duration, no-event window immediately before the "
+             "scenario (same VENs), snapshotted to {run_dir}-baseline/, so kpi.py's "
+             "energy_shifted_kwh compares against a baseline captured minutes -- not "
+             "hours -- away in wall-clock time instead of a separately-run S-1. "
+             "Roughly doubles this script's total runtime. Use --no-paired-baseline "
+             "for quick dry runs or scenarios that are themselves baseline-only.",
+    )
     args = p.parse_args()
 
     fleet_map = None
@@ -325,83 +414,44 @@ def main():
     duration_min = scenario["duration_minutes"]
     t0 = datetime.now(timezone.utc)
     run_dir = Path(args.out) / f"{t0.strftime('%Y%m%d-%H%M')}-{name}"
-    print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
 
-    persona_teardown = None
     vens_explicit = "--vens" in sys.argv
     if fleet_map and not vens_explicit:
         ven_names = sorted(fleet_map.keys(), key=lambda v: int(v.split("-")[1]))
     else:
         ven_names = args.vens.split(",")
+
+    persona_teardown = None
     if args.personas:
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
         ven_names = sorted(set(ven_names) | set(fleet_names))
 
-    diag_stop = None
-    diag_thread = None
-    if fleet_map:
-        import threading
-        run_dir.mkdir(parents=True, exist_ok=True)
-        diag_stop = threading.Event()
-        diag_thread = threading.Thread(
-            target=poll_plan_diagnostics,
-            args=(run_dir, ven_names, fleet_map, args.plan_poll_interval_s, diag_stop),
-            daemon=True,
-        )
-        diag_thread.start()
-
-    token = get_token(args.vtn_url, "any-business", "any-business")
-    r = requests.post(
-        f"{args.vtn_url}/programs",
-        headers=auth(token),
-        json={"programName": f"exp-{name}-{t0.strftime('%H%M%S')}"},
-        timeout=10,
-    )
-    r.raise_for_status()
-    program_id = r.json()["id"]
-    created_events = []
-
     try:
-        pending = sorted(scenario["actions"], key=lambda a: a["at_minute"])
-        for action in pending:
-            target = t0 + timedelta(minutes=action["at_minute"])
-            wait_s = (target - datetime.now(timezone.utc)).total_seconds()
-            if wait_s > 0:
-                time.sleep(wait_s)
-            body = build_event(program_id, action, datetime.now(timezone.utc))
-            eid = post_event(args.vtn_url, token, body)
-            created_events.append(eid)
-            print(f"  +{action['at_minute']:>3} min  {action['type']}  event={eid}")
+        baseline_dir = None
+        if args.paired_baseline:
+            baseline_dir = Path(str(run_dir) + "-baseline")
+            print(f"=== paired baseline for {name}: {duration_min} min, no events ===")
+            run_window(
+                args, ven_names, fleet_map, duration_min, baseline_dir,
+                scenario_label=f"{name}-baseline",
+                program_name=f"exp-{name}-baseline-{datetime.now(timezone.utc).strftime('%H%M%S')}",
+                actions=[],
+            )
 
-        end = t0 + timedelta(minutes=duration_min)
-        wait_s = (end - datetime.now(timezone.utc)).total_seconds()
-        if wait_s > 0:
-            print(f"  waiting out the window ({int(wait_s)}s remaining) ...")
-            time.sleep(wait_s)
+        print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
+        run_window(
+            args, ven_names, fleet_map, duration_min, run_dir,
+            scenario_label=name,
+            program_name=f"exp-{name}-{datetime.now(timezone.utc).strftime('%H%M%S')}",
+            actions=scenario["actions"],
+        )
     finally:
-        # Deletion == cancellation in OpenADR 3; always clean up.
-        token = get_token(args.vtn_url, "any-business", "any-business")
-        for eid in created_events:
-            requests.delete(f"{args.vtn_url}/events/{eid}", headers=auth(token), timeout=10)
-        requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
         if persona_teardown:
             persona_teardown()
-        if diag_stop:
-            diag_stop.set()
-            diag_thread.join(timeout=args.plan_poll_interval_s + 10)
 
-    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host)
-    meta = {
-        "scenario": name,
-        "started_at": iso(t0),
-        "duration_minutes": duration_min,
-        "vens": ven_names,
-        "events": created_events,
-        "personas": args.personas,
-    }
-    (run_dir / "run.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"=== snapshot written to {run_dir} ===")
-    print(f"Next: python3 experiments/kpi.py --run {run_dir} [--baseline <s1 run dir>]")
+    baseline_hint = str(baseline_dir) if baseline_dir else "<s1 run dir>"
+    print(f"Next: python3 experiments/kpi.py --run {run_dir} [--baseline {baseline_hint}]")
 
 
 if __name__ == "__main__":
