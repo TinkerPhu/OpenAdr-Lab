@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Button, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, Typography,
+  TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -12,8 +12,13 @@ import { JsonDialog } from "../components/JsonDialog";
 import { EventFormDialog } from "../components/EventFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
+type ActiveFilter = "all" | "active" | "past";
+
 export function EventsPage() {
-  const { data: events = [], dataUpdatedAt } = useEvents();
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
+  const { data: events = [], dataUpdatedAt } = useEvents(
+    activeFilter === "all" ? undefined : activeFilter === "active",
+  );
   const { data: programs = [] } = usePrograms();
   const createMut = useCreateEvent();
   const updateMut = useUpdateEvent();
@@ -98,17 +103,31 @@ export function EventsPage() {
       </Stack>
 
       <Paper sx={{ p: 2 }}>
-        <TextField
-          label="Search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          size="small"
-          fullWidth
-          inputProps={{
-            "data-testid": "events-search",
-            "aria-label": "Search events",
-          }}
-        />
+        <Stack direction="row" spacing={2} alignItems="center">
+          <TextField
+            label="Search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            size="small"
+            fullWidth
+            inputProps={{
+              "data-testid": "events-search",
+              "aria-label": "Search events",
+            }}
+          />
+          <ToggleButtonGroup
+            value={activeFilter}
+            exclusive
+            size="small"
+            onChange={(_, value: ActiveFilter | null) => value && setActiveFilter(value)}
+            data-testid="events-active-filter"
+            aria-label="Filter events by active status"
+          >
+            <ToggleButton value="all" data-testid="events-filter-all">All</ToggleButton>
+            <ToggleButton value="active" data-testid="events-filter-active">Active</ToggleButton>
+            <ToggleButton value="past" data-testid="events-filter-past">Past</ToggleButton>
+          </ToggleButtonGroup>
+        </Stack>
       </Paper>
 
       <TableContainer component={Paper}>

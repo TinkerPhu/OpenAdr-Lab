@@ -48,11 +48,11 @@ export function useDeleteProgram() {
   });
 }
 
-export function useEvents() {
+export function useEvents(active?: boolean) {
   const { api } = useBffContext();
   return useQuery({
-    queryKey: ["events"],
-    queryFn: () => api.events(),
+    queryKey: ["events", active ?? "all"],
+    queryFn: () => api.events(active),
     refetchInterval: 10_000,
   });
 }
