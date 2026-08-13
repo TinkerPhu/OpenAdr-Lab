@@ -65,7 +65,21 @@ def post_event(base, token, body):
     return r.json()["id"]
 
 
-def build_event(program_id, action, start):
+# GB-27: attached to the first event of a window (--request-reports, on by
+# default) so the VEN actually has an obligation to report against --
+# without a reportDescriptor on some event, extract_report_obligations()
+# never creates one and report_lag_stats()/event_impact_kwh() stay null
+# forever. frequency is *seconds*, not an ISO 8601 duration (a documented
+# past gotcha) -- 300s keeps reports well inside every scenario's 30 min
+# window. historical=false on BASELINE requests a forecast (the M&V
+# counterfactual), not a replay of past data.
+REPORT_DESCRIPTORS = [
+    {"payloadType": "BASELINE", "readingType": "DIRECT_READ", "frequency": 300, "historical": False},
+    {"payloadType": "USAGE", "readingType": "DIRECT_READ", "frequency": 300},
+]
+
+
+def build_event(program_id, action, start, report_descriptors=None):
     """Translate one scenario action into an OpenADR event body."""
     t = action["type"]
     if t == "price_series":
@@ -81,7 +95,10 @@ def build_event(program_id, action, start):
             }
             for i, v in enumerate(action["values_eur_kwh"])
         ]
-        return {"programID": program_id, "eventName": "exp-price", "intervals": intervals}
+        body = {"programID": program_id, "eventName": "exp-price", "intervals": intervals}
+        if report_descriptors:
+            body["reportDescriptors"] = report_descriptors
+        return body
 
     window = {
         "start": iso(start),
@@ -94,12 +111,15 @@ def build_event(program_id, action, start):
         "simple": ("SIMPLE", action.get("level")),
         "dispatch": ("DISPATCH_SETPOINT", action.get("setpoint_kw")),
     }[t]
-    return {
+    body = {
         "programID": program_id,
         "eventName": f"exp-{t.replace('_', '-')}",
         "intervalPeriod": window,
         "intervals": [{"id": 0, "payloads": [{"type": payload[0], "values": [payload[1]]}]}],
     }
+    if report_descriptors:
+        body["reportDescriptors"] = report_descriptors
+    return body
 
 
 def _snapshot_local(out_dir, ven, ven_data_root):
@@ -291,12 +311,23 @@ def setup_persona_sessions(manifest_path, host):
     return ven_names, teardown
 
 
-def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label, program_name, actions):
+def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label, program_name, actions,
+               report_descriptors=None):
     """Run one real-time window against the VTN: create a throwaway program,
     post `actions` (each translated via build_event) at their offsets, wait
     out the window, clean up, then snapshot. `actions=[]` runs a pure
     no-intervention window -- used by the GB-28 paired baseline below, and
     reusable for any future baseline-only scenario.
+
+    `report_descriptors` (GB-27), when given, is attached to the first event
+    posted so the VEN has something to report BASELINE/USAGE against. For a
+    pure no-intervention window (`actions=[]`) there is no first action to
+    attach it to, so one is synthesized: a SIMPLE level=0 event spanning the
+    whole window -- level 0 is the spec's "normal operations" SIMPLE level
+    (`docs/openadr_3_0_specs/2_OpenADR 3.0 Definition v3.0.1.md`), and the
+    planner's SIMPLE-level handling (`milp_planner/inputs.rs`) treats any
+    level other than 1/2/3 as the unrestricted contractual cap -- a genuine
+    no-op for planning, unlike posting a real price/capacity/alert event.
 
     Runs the plan-diagnostics poller (if `fleet_map` given) and writes
     `run.json` + the fleet snapshot into `run_dir`, exactly like the
@@ -329,12 +360,19 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
 
     try:
         pending = sorted(actions, key=lambda a: a["at_minute"])
-        for action in pending:
+        if not pending and report_descriptors:
+            noop = {"type": "simple", "level": 0, "duration_minutes": duration_min, "at_minute": 0}
+            body = build_event(program_id, noop, t0, report_descriptors)
+            eid = post_event(args.vtn_url, token, body)
+            created_events.append(eid)
+            print(f"  +  0 min  report-only (SIMPLE level=0)  event={eid}")
+        for i, action in enumerate(pending):
             target = t0 + timedelta(minutes=action["at_minute"])
             wait_s = (target - datetime.now(timezone.utc)).total_seconds()
             if wait_s > 0:
                 time.sleep(wait_s)
-            body = build_event(program_id, action, datetime.now(timezone.utc))
+            descriptors = report_descriptors if i == 0 else None
+            body = build_event(program_id, action, datetime.now(timezone.utc), descriptors)
             eid = post_event(args.vtn_url, token, body)
             created_events.append(eid)
             print(f"  +{action['at_minute']:>3} min  {action['type']}  event={eid}")
@@ -403,7 +441,17 @@ def main():
              "Roughly doubles this script's total runtime. Use --no-paired-baseline "
              "for quick dry runs or scenarios that are themselves baseline-only.",
     )
+    p.add_argument(
+        "--request-reports", action=argparse.BooleanOptionalAction, default=True,
+        help="GB-27: attach a reportDescriptors array (BASELINE + USAGE, 300s frequency) "
+             "to the first event of every window (including the paired baseline's "
+             "synthetic SIMPLE level=0 event), so report_lag_stats/event_impact_kwh in "
+             "kpi.py actually get data instead of coming back null. Use "
+             "--no-request-reports to skip.",
+    )
     args = p.parse_args()
+
+    report_descriptors = REPORT_DESCRIPTORS if args.request_reports else None
 
     fleet_map = None
     if args.fleet_map:
@@ -436,6 +484,7 @@ def main():
                 scenario_label=f"{name}-baseline",
                 program_name=f"exp-{name}-baseline-{datetime.now(timezone.utc).strftime('%H%M%S')}",
                 actions=[],
+                report_descriptors=report_descriptors,
             )
 
         print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
@@ -444,6 +493,7 @@ def main():
             scenario_label=name,
             program_name=f"exp-{name}-{datetime.now(timezone.utc).strftime('%H%M%S')}",
             actions=scenario["actions"],
+            report_descriptors=report_descriptors,
         )
     finally:
         if persona_teardown:
