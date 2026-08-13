@@ -13,6 +13,7 @@
 
 mod forecast_accuracy;
 mod notifications;
+mod plan_history;
 mod schema;
 mod settings;
 mod ticks;
@@ -24,13 +25,13 @@ use rusqlite::{params, Connection};
 
 use crate::controller::HistoryPort;
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
-    TickSample,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
 use schema::{
-    SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8,
-    SCHEMA_V9, SCHEMA_VERSION,
+    SCHEMA_V1, SCHEMA_V10, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7,
+    SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
 };
 
 type GridSampleRow = (
@@ -126,6 +127,10 @@ impl SqliteHistoryStore {
         if version < 9 {
             conn.execute_batch(SCHEMA_V9)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v9: {e}")))?;
+        }
+        if version < 10 {
+            conn.execute_batch(SCHEMA_V10)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v10: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -445,6 +450,20 @@ impl HistoryPort for SqliteHistoryStore {
         forecast_accuracy::query(&conn, from, to, asset_id, lead_kind)
     }
 
+    fn append_plan_history(&self, rows: &[PlanHistorySample]) -> Result<(), DomainError> {
+        let mut conn = self.lock()?;
+        plan_history::append(&mut conn, rows)
+    }
+
+    fn query_plan_history(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PlanHistorySample>, DomainError> {
+        let conn = self.lock()?;
+        plan_history::query(&conn, from, to)
+    }
+
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
         let conn = self.lock()?;
         let cutoff_unix = to_unix(cutoff);
@@ -457,6 +476,7 @@ impl HistoryPort for SqliteHistoryStore {
             ("ledger_periods", "period_end"),
             ("notifications", "created_at"),
             ("forecast_accuracy_samples", "target_ts"),
+            ("plan_history", "created_at"),
         ] {
             let sql = format!("DELETE FROM {table} WHERE {col} < ?1");
             let n = conn
@@ -496,9 +516,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            table_count, 8,
+            table_count, 9,
             "expected 5 tables from schema v1 (plan_snapshots dropped by v7, R-63) + \
-             notifications (v2) + user_settings (v3) + forecast_accuracy_samples (v8)"
+             notifications (v2) + user_settings (v3) + forecast_accuracy_samples (v8) + \
+             plan_history (v10, GB-25)"
         );
     }
 
@@ -1190,5 +1211,114 @@ mod tests {
         let got = store.query_notifications(None, 2, None).unwrap();
         let msgs: Vec<_> = got.iter().map(|n| n.message.as_str()).collect();
         assert_eq!(msgs, vec!["b", "c"]);
+    }
+
+    // ── plan_history (GB-25) ─────────────────────────────────────────────────
+
+    fn plan_history_sample(
+        created_at: DateTime<Utc>,
+    ) -> crate::entities::history::PlanHistorySample {
+        use crate::entities::plan::{SolveStatus, WarningKind};
+        crate::entities::history::PlanHistorySample {
+            plan_id: uuid::Uuid::new_v4(),
+            created_at,
+            trigger: "PERIODIC".to_string(),
+            solver_ms: Some(123),
+            solve_status: SolveStatus::Optimal,
+            objective_eur: 1.5,
+            friction_eur: 0.1,
+            mip_gap_target: Some(0.02),
+            warning_count: 1,
+            warning_kinds: vec![WarningKind::StaleRateEstimate],
+            c_energy_eur: Some(1.0),
+            c_grid_eur: Some(0.1),
+            c_wear_eur: Some(0.05),
+            c_violations_eur: Some(0.0),
+            c_peak_penalty_eur: Some(0.0),
+        }
+    }
+
+    #[test]
+    fn test_append_and_query_plan_history_roundtrip() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        let row = plan_history_sample(ts(100));
+        store
+            .append_plan_history(std::slice::from_ref(&row))
+            .unwrap();
+        let rows = store.query_plan_history(ts(0), ts(200)).unwrap();
+        assert_eq!(rows, vec![row]);
+    }
+
+    #[test]
+    fn test_query_plan_history_time_range_exclusive_upper_bound() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_plan_history(&[plan_history_sample(ts(1000))])
+            .unwrap();
+        assert!(store
+            .query_plan_history(ts(0), ts(1000))
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.query_plan_history(ts(0), ts(1001)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_append_and_query_plan_history_preserves_no_warnings_and_null_solver_ms() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        let mut row = plan_history_sample(ts(100));
+        row.solver_ms = None;
+        row.warning_count = 0;
+        row.warning_kinds = vec![];
+        store.append_plan_history(&[row.clone()]).unwrap();
+        let rows = store.query_plan_history(ts(0), ts(200)).unwrap();
+        assert_eq!(rows, vec![row]);
+    }
+
+    #[test]
+    fn test_prune_before_deletes_plan_history_by_created_at() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_plan_history(&[plan_history_sample(ts(1)), plan_history_sample(ts(10_000))])
+            .unwrap();
+        let deleted = store.prune_before(ts(5000)).unwrap();
+        assert_eq!(deleted, 1);
+        let remaining = store.query_plan_history(ts(0), ts(20_000)).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].created_at, ts(10_000));
+    }
+
+    #[test]
+    fn test_migrate_v10_creates_plan_history_table() {
+        // Build a v9 database by hand (pre-plan_history state), then let
+        // from_connection run the v10 migration against it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.execute_batch(schema::SCHEMA_V4).unwrap();
+        conn.execute_batch(schema::SCHEMA_V5).unwrap();
+        conn.execute_batch(schema::SCHEMA_V6).unwrap();
+        conn.execute_batch(schema::SCHEMA_V7).unwrap();
+        conn.execute_batch(schema::SCHEMA_V8).unwrap();
+        conn.execute_batch(schema::SCHEMA_V9).unwrap();
+        conn.pragma_update(None, "user_version", 9).unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v9→v10 migration");
+        let exists: i64 = store
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='plan_history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "plan_history table should be created by v10");
+
+        // Table is immediately usable post-migration.
+        store
+            .append_plan_history(&[plan_history_sample(ts(100))])
+            .unwrap();
+        assert_eq!(store.query_plan_history(ts(0), ts(200)).unwrap().len(), 1);
     }
 }

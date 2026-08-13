@@ -436,7 +436,7 @@ impl PlanningService {
     /// Accepts `objective` explicitly since it lives in `AppCtx`, not `AppState`.
     #[allow(clippy::too_many_arguments)]
     pub async fn adopt_if_warranted(
-        plan: Plan,
+        mut plan: Plan,
         trigger: &PlanTrigger,
         trigger_reason: &str,
         threshold_eur: f64,
@@ -448,6 +448,11 @@ impl PlanningService {
         event_tx: &PlannerEventTx,
         now: DateTime<Utc>,
     ) -> PlanCycleResult {
+        // GB-25: stamp the real solve time before either the SSE emit or adoption below reads
+        // it, so both the live event and the persisted Plan/plan-history row agree. Mirrors how
+        // `results.rs` already stamps `mip_gap_target` at construction time.
+        plan.solver_ms = Some(solver_ms);
+
         // Emit PlanReady before gate evaluation so SSE clients always receive it.
         let _ = event_tx.send(PlannerEvent::PlanReady {
             plan_id: plan.id,
@@ -1305,5 +1310,39 @@ mod tests {
             }
             other => panic!("expected PlanReady, got {other:?}"),
         }
+    }
+
+    // GB-25: solver_ms must be stamped on the Plan itself (not just the transient SSE event)
+    // before it's adopted, so both the persisted plan-history row and `GET /plan` carry it.
+    #[tokio::test]
+    async fn adopt_if_warranted_stamps_solver_ms_on_the_adopted_plan() {
+        let now = fixed_now();
+        let plan = make_plan(1.0, 0.0);
+        let state = AppState::new();
+        let (tx, _rx) = tokio::sync::broadcast::channel(4);
+        let event_tx: PlannerEventTx = Arc::new(tx);
+
+        let result = PlanningService::adopt_if_warranted(
+            plan,
+            &crate::entities::asset::PlanTrigger::Periodic,
+            "test",
+            0.0,
+            300.0,
+            0.0,
+            42,
+            PlannerObjective::MinCost,
+            &state,
+            &event_tx,
+            now,
+        )
+        .await;
+
+        assert_eq!(result.plan.solver_ms, Some(42));
+        let active = state.active_plan().await;
+        assert_eq!(
+            active.map(|p| p.solver_ms),
+            Some(Some(42)),
+            "the plan installed as active must carry solver_ms too"
+        );
     }
 }

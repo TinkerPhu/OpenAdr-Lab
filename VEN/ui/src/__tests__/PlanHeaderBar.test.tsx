@@ -190,6 +190,39 @@ describe("PlanHeaderBar", () => {
     expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
   });
 
+  // GB-25: solver_ms/mip_gap_target are now persisted on the Plan itself.
+  it("renders solver_ms when present on the plan", () => {
+    render(<PlanHeaderBar plan={makePlan({ solver_ms: 123 })} />);
+    expect(screen.getByTestId("plan-solver-ms").textContent).toMatch(/123ms/);
+  });
+
+  it("does not render solver_ms when absent", () => {
+    render(<PlanHeaderBar plan={makePlan({ solver_ms: undefined })} />);
+    expect(screen.queryByTestId("plan-solver-ms")).toBeNull();
+  });
+
+  it("renders mip_gap_target as a percentage when present on the plan", () => {
+    render(<PlanHeaderBar plan={makePlan({ mip_gap_target: 0.02 })} />);
+    expect(screen.getByTestId("plan-mip-gap-target").textContent).toMatch(/2\.0%/);
+  });
+
+  it("does not render mip_gap_target when absent", () => {
+    render(<PlanHeaderBar plan={makePlan({ mip_gap_target: undefined })} />);
+    expect(screen.queryByTestId("plan-mip-gap-target")).toBeNull();
+  });
+
+  it("renders a warning's kind chip when the warning carries one", async () => {
+    const user = userEvent.setup({});
+    const plan = makePlan({
+      warnings: [
+        { severity: "CRITICAL", kind: "SOLVER_INFEASIBLE", message: "MILP solver failed", suggested_action: null },
+      ],
+    });
+    render(<PlanHeaderBar plan={plan} />);
+    await user.click(screen.getByTestId("plan-warnings-expand"));
+    expect(screen.getByTestId("plan-warning-0-kind").textContent).toBe("SOLVER_INFEASIBLE");
+  });
+
   it("infeasible chip and the critical warning coexist when the warnings list is expanded", async () => {
     const user = userEvent.setup({});
     const plan = makePlan({

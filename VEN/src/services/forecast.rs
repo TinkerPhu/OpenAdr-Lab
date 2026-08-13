@@ -10,7 +10,7 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::controller::{HistoryPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
-use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind};
+use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind, PlanHistorySample};
 use crate::entities::plan::Plan;
 use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
@@ -59,15 +59,55 @@ pub async fn finish_plan_cycle(
     if let Some(history) = history {
         let samples = record_forecast_accuracy_samples(&cycle.plan, &heuristics, wall_now);
         if !samples.is_empty() {
+            let h = history.clone();
             let res =
-                tokio::task::spawn_blocking(move || history.append_forecast_samples(&samples))
-                    .await;
+                tokio::task::spawn_blocking(move || h.append_forecast_samples(&samples)).await;
             match res {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => tracing::warn!("forecast-accuracy sample write failed: {e}"),
                 Err(e) => tracing::warn!("forecast-accuracy sample write task panicked: {e}"),
             }
         }
+
+        // GB-25: one plan-history row per cycle (adopted or not — this is a solve-quality
+        // trend, not a dispatch-history view). Same best-effort, log-and-continue contract.
+        let row = build_plan_history_sample(&cycle.plan);
+        let res = tokio::task::spawn_blocking(move || history.append_plan_history(&[row])).await;
+        match res {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!("plan-history row write failed: {e}"),
+            Err(e) => tracing::warn!("plan-history row write task panicked: {e}"),
+        }
+    }
+}
+
+/// GB-25: build the one `PlanHistorySample` row for a resolved plan cycle. `created_at`
+/// comes from `plan.created_at` (already clock-injected via `services::planning`) — never a
+/// fresh `Utc::now()` call, per the determinism rule.
+fn build_plan_history_sample(plan: &Plan) -> PlanHistorySample {
+    // Serialize via serde (SCREAMING_SNAKE_CASE, e.g. "PERIODIC") rather than Rust's Debug
+    // format, so the stored value matches the same wire vocabulary `GET /plan` already uses
+    // (dto rule: no separate normalized vocabulary per layer).
+    let trigger = serde_json::to_value(plan.trigger.clone())
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{:?}", plan.trigger));
+    PlanHistorySample {
+        plan_id: plan.id,
+        created_at: plan.created_at,
+        trigger,
+        solver_ms: plan.solver_ms,
+        solve_status: plan.solve_status,
+        objective_eur: plan.objective_eur,
+        friction_eur: plan.friction_eur,
+        mip_gap_target: plan.mip_gap_target,
+        warning_count: plan.warnings.len() as u32,
+        warning_kinds: plan.warnings.iter().map(|w| w.kind).collect(),
+        c_energy_eur: Some(plan.cost_breakdown.c_energy_eur),
+        c_grid_eur: Some(plan.cost_breakdown.c_grid_eur),
+        c_wear_eur: Some(plan.cost_breakdown.c_wear_eur),
+        c_violations_eur: Some(plan.cost_breakdown.c_violations_eur),
+        c_peak_penalty_eur: Some(plan.cost_breakdown.c_peak_penalty_eur),
     }
 }
 
@@ -348,6 +388,8 @@ mod tests {
             cost_breakdown: CostBreakdown::default(),
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         }
     }
 
@@ -390,6 +432,61 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    // ── build_plan_history_sample (GB-25) ──────────────────────────────────
+
+    #[test]
+    fn build_plan_history_sample_carries_solver_ms_status_and_warning_kinds() {
+        use crate::entities::plan::{PlanWarning, SolveStatus, WarningKind, WarningSeverity};
+        let mut plan = make_plan_with_slots(vec![]);
+        plan.solver_ms = Some(77);
+        plan.solve_status = SolveStatus::Optimal;
+        plan.mip_gap_target = Some(0.02);
+        plan.warnings = vec![
+            PlanWarning {
+                severity: WarningSeverity::Warning,
+                kind: WarningKind::StaleRateEstimate,
+                message: "stale".to_string(),
+                suggested_action: None,
+            },
+            PlanWarning {
+                severity: WarningSeverity::Critical,
+                kind: WarningKind::SolverInfeasible,
+                message: "infeasible".to_string(),
+                suggested_action: None,
+            },
+        ];
+        plan.cost_breakdown.c_energy_eur = 1.5;
+        plan.cost_breakdown.c_peak_penalty_eur = 0.3;
+
+        let row = build_plan_history_sample(&plan);
+
+        assert_eq!(row.plan_id, plan.id);
+        assert_eq!(row.created_at, plan.created_at);
+        assert_eq!(row.trigger, "PERIODIC");
+        assert_eq!(row.solver_ms, Some(77));
+        assert_eq!(row.solve_status, SolveStatus::Optimal);
+        assert_eq!(row.mip_gap_target, Some(0.02));
+        assert_eq!(row.warning_count, 2);
+        assert_eq!(
+            row.warning_kinds,
+            vec![
+                WarningKind::StaleRateEstimate,
+                WarningKind::SolverInfeasible
+            ]
+        );
+        assert_eq!(row.c_energy_eur, Some(1.5));
+        assert_eq!(row.c_peak_penalty_eur, Some(0.3));
+    }
+
+    #[test]
+    fn build_plan_history_sample_none_solver_ms_on_a_fallback_plan() {
+        // fallback_plan (results.rs) never sets solver_ms — must stay None, not a synthesized 0.
+        let mut plan = make_plan_with_slots(vec![]);
+        plan.solver_ms = None;
+        let row = build_plan_history_sample(&plan);
+        assert_eq!(row.solver_ms, None);
     }
 
     #[test]

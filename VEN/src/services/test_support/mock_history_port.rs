@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 
 use crate::controller::HistoryPort;
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
-    TickSample,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
@@ -26,6 +26,7 @@ pub struct MockHistoryPort {
     ledger_periods: Mutex<Vec<LedgerPeriod>>,
     notifications: Mutex<Vec<UserNotification>>,
     forecast_samples: Mutex<Vec<ForecastAccuracySample>>,
+    plan_history: Mutex<Vec<PlanHistorySample>>,
     /// 030: when set, append methods fail with `StorageError` — for testing
     /// the storage-failure notification producer.
     fail_storage: std::sync::atomic::AtomicBool,
@@ -84,6 +85,12 @@ impl MockHistoryPort {
     #[allow(dead_code)] // available for future sampler-level tests, mirroring appended_grid/appended_events
     pub fn appended_forecast_samples(&self) -> Vec<ForecastAccuracySample> {
         self.forecast_samples.lock().unwrap().clone()
+    }
+
+    /// All plan-history rows appended so far, in insertion order (GB-25).
+    #[allow(dead_code)] // available for future route/service-level tests, mirroring appended_grid
+    pub fn appended_plan_history(&self) -> Vec<PlanHistorySample> {
+        self.plan_history.lock().unwrap().clone()
     }
 }
 
@@ -281,6 +288,27 @@ impl HistoryPort for MockHistoryPort {
             .collect())
     }
 
+    fn append_plan_history(&self, rows: &[PlanHistorySample]) -> Result<(), DomainError> {
+        self.storage_result("insert plan history")?;
+        self.plan_history.lock().unwrap().extend_from_slice(rows);
+        Ok(())
+    }
+
+    fn query_plan_history(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PlanHistorySample>, DomainError> {
+        Ok(self
+            .plan_history
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.created_at >= from && r.created_at < to)
+            .cloned()
+            .collect())
+    }
+
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
         let mut total: u64 = 0;
         let mut ticks = self.ticks.lock().unwrap();
@@ -317,6 +345,12 @@ impl HistoryPort for MockHistoryPort {
         let before = forecast_samples.len();
         forecast_samples.retain(|r| r.target_ts >= cutoff);
         total += (before - forecast_samples.len()) as u64;
+        drop(forecast_samples);
+
+        let mut plan_history = self.plan_history.lock().unwrap();
+        let before = plan_history.len();
+        plan_history.retain(|r| r.created_at >= cutoff);
+        total += (before - plan_history.len()) as u64;
 
         Ok(total)
     }
@@ -535,6 +569,46 @@ mod tests {
             Some(2.5),
             "first reconciliation must stick"
         );
+    }
+
+    fn plan_history_sample(created_at: DateTime<Utc>) -> PlanHistorySample {
+        use crate::entities::plan::SolveStatus;
+        PlanHistorySample {
+            plan_id: uuid::Uuid::new_v4(),
+            created_at,
+            trigger: "PERIODIC".to_string(),
+            solver_ms: Some(50),
+            solve_status: SolveStatus::Optimal,
+            objective_eur: 1.0,
+            friction_eur: 0.0,
+            mip_gap_target: Some(0.02),
+            warning_count: 0,
+            warning_kinds: vec![],
+            c_energy_eur: None,
+            c_grid_eur: None,
+            c_wear_eur: None,
+            c_violations_eur: None,
+            c_peak_penalty_eur: None,
+        }
+    }
+
+    #[test]
+    fn test_append_and_query_plan_history_roundtrip() {
+        let port = MockHistoryPort::new();
+        let row = plan_history_sample(ts(100));
+        port.append_plan_history(std::slice::from_ref(&row))
+            .unwrap();
+        assert_eq!(port.query_plan_history(ts(0), ts(200)).unwrap(), vec![row]);
+    }
+
+    #[test]
+    fn test_prune_before_removes_plan_history_by_created_at() {
+        let port = MockHistoryPort::new();
+        port.append_plan_history(&[plan_history_sample(ts(1))])
+            .unwrap();
+        let deleted = port.prune_before(ts(1000)).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(port.query_plan_history(ts(0), ts(2000)).unwrap().is_empty());
     }
 
     #[test]

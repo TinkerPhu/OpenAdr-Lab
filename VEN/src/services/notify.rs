@@ -100,13 +100,17 @@ pub fn new_plan_warnings(
     prev: Option<&crate::entities::plan::Plan>,
     cur: &crate::entities::plan::Plan,
 ) -> Vec<(UserNotificationSeverity, String)> {
-    use crate::entities::plan::WarningSeverity;
-    let prev_msgs: Vec<&str> = prev
-        .map(|p| p.warnings.iter().map(|w| w.message.as_str()).collect())
+    use crate::entities::plan::{WarningKind, WarningSeverity};
+    // GB-25: dedup on `kind`, not `message` — the message text can carry
+    // per-cycle interpolated numbers (thresholds, window times), so a warning
+    // that's really "the same" across two plan cycles would otherwise be
+    // treated as new every time its numbers moved.
+    let prev_kinds: Vec<WarningKind> = prev
+        .map(|p| p.warnings.iter().map(|w| w.kind).collect())
         .unwrap_or_default();
     cur.warnings
         .iter()
-        .filter(|w| !prev_msgs.contains(&w.message.as_str()))
+        .filter(|w| !prev_kinds.contains(&w.kind))
         .filter_map(|w| match w.severity {
             WarningSeverity::Critical => Some((UserNotificationSeverity::Alert, w.message.clone())),
             WarningSeverity::Warning => Some((UserNotificationSeverity::Warn, w.message.clone())),
@@ -294,7 +298,11 @@ mod tests {
     }
 
     fn plan_with_warnings(
-        warnings: Vec<(crate::entities::plan::WarningSeverity, &str)>,
+        warnings: Vec<(
+            crate::entities::plan::WarningSeverity,
+            crate::entities::plan::WarningKind,
+            &str,
+        )>,
     ) -> crate::entities::plan::Plan {
         let mut p: crate::entities::plan::Plan = serde_json::from_value(serde_json::json!({
             "id": uuid::Uuid::new_v4().to_string(),
@@ -322,23 +330,31 @@ mod tests {
         .expect("test Plan must deserialize");
         p.warnings = warnings
             .into_iter()
-            .map(|(severity, message)| crate::entities::plan::PlanWarning {
-                severity,
-                message: message.to_string(),
-                suggested_action: None,
-            })
+            .map(
+                |(severity, kind, message)| crate::entities::plan::PlanWarning {
+                    severity,
+                    kind,
+                    message: message.to_string(),
+                    suggested_action: None,
+                },
+            )
             .collect();
         p
     }
 
     #[test]
     fn test_new_plan_warnings_reports_only_new_non_info() {
+        use crate::entities::plan::WarningKind as K;
         use crate::entities::plan::WarningSeverity as W;
-        let prev = plan_with_warnings(vec![(W::Warning, "EV behind schedule")]);
+        let prev = plan_with_warnings(vec![(
+            W::Warning,
+            K::StaleRateEstimate,
+            "EV behind schedule",
+        )]);
         let cur = plan_with_warnings(vec![
-            (W::Warning, "EV behind schedule"), // carried over → not re-notified
-            (W::Critical, "MILP solver failed"),
-            (W::Info, "plan updated"), // Info → never surfaced
+            (W::Warning, K::StaleRateEstimate, "EV behind schedule"), // carried over (same kind) → not re-notified
+            (W::Critical, K::SolverInfeasible, "MILP solver failed"),
+            (W::Info, K::Other, "plan updated"), // Info → never surfaced
         ]);
         let out = new_plan_warnings(Some(&prev), &cur);
         assert_eq!(
@@ -351,9 +367,33 @@ mod tests {
     }
 
     #[test]
-    fn test_new_plan_warnings_without_prev_reports_all_non_info() {
+    fn test_new_plan_warnings_dedups_on_kind_even_if_message_text_changed() {
+        // GB-25: two cycles' worth of the "same" penalty warning carry different
+        // interpolated numbers in the message — dedup must key on `kind`, not text.
+        use crate::entities::plan::WarningKind as K;
         use crate::entities::plan::WarningSeverity as W;
-        let cur = plan_with_warnings(vec![(W::Warning, "deadline at risk")]);
+        let prev = plan_with_warnings(vec![(
+            W::Warning,
+            K::PeakPenaltyExceeded,
+            "Penalty rule 'r1' exceeded in window 10:00-10:15: peak 5.0 kW > threshold 4.0 kW (€1.00 accepted)",
+        )]);
+        let cur = plan_with_warnings(vec![(
+            W::Warning,
+            K::PeakPenaltyExceeded,
+            "Penalty rule 'r1' exceeded in window 10:15-10:30: peak 6.0 kW > threshold 4.0 kW (€2.00 accepted)",
+        )]);
+        let out = new_plan_warnings(Some(&prev), &cur);
+        assert!(
+            out.is_empty(),
+            "same kind carried over must not re-notify even though the message text differs"
+        );
+    }
+
+    #[test]
+    fn test_new_plan_warnings_without_prev_reports_all_non_info() {
+        use crate::entities::plan::WarningKind as K;
+        use crate::entities::plan::WarningSeverity as W;
+        let cur = plan_with_warnings(vec![(W::Warning, K::BudgetShortfall, "deadline at risk")]);
         let out = new_plan_warnings(None, &cur);
         assert_eq!(
             out,

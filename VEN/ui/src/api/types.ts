@@ -265,6 +265,15 @@ export type PlannerObjective =
 
 export type SolveStatus = "OPTIMAL" | "INFEASIBLE";
 
+/** GB-25 — stable, machine-readable classification of a `PlanWarning`. */
+export type WarningKind =
+  | "SOLVER_INFEASIBLE"
+  | "STALE_RATE_ESTIMATE"
+  | "BUDGET_SHORTFALL"
+  | "CAPACITY_VIOLATION"
+  | "PEAK_PENALTY_EXCEEDED"
+  | "OTHER";
+
 export type Plan = {
   id: string;
   created_at: string;
@@ -273,12 +282,37 @@ export type Plan = {
   slots: PlanTimeSlot[];
   summary: PlanSummary;
   envelopes: FlexibilityEnvelope[];
-  warnings: Array<{ severity: string; message: string; suggested_action: string | null }>;
+  warnings: Array<{ severity: string; kind?: WarningKind; message: string; suggested_action: string | null }>;
   objective_eur: number;
   friction_eur: number;
   solve_status: SolveStatus;
   /** WP6.3 (BL-09) — active peak-demand penalty rules; empty when the feature is not configured. */
   penalty_rules_active?: Array<{ rule_id: string; threshold_kw: number }>;
+  /** GB-25 — wall-clock milliseconds the MILP solve took for this plan cycle. */
+  solver_ms?: number | null;
+  /** GB-25 — the solver's configured MIP-gap tolerance at solve time (proxy, not the
+   * achieved gap — see docs/reference/TECHNICAL_DEBTS.md). */
+  mip_gap_target?: number | null;
+};
+
+/** GB-25 — one row of persisted plan-quality history (`GET /history/plans`). See
+ * `entities::history::PlanHistorySample` and docs/architecture/VEN_ARCHITECTURE.md §4.9a. */
+export type PlanHistorySample = {
+  plan_id: string;
+  created_at: number;
+  trigger: string;
+  solver_ms: number | null;
+  solve_status: SolveStatus;
+  objective_eur: number;
+  friction_eur: number;
+  mip_gap_target: number | null;
+  warning_count: number;
+  warning_kinds: WarningKind[];
+  c_energy_eur: number | null;
+  c_grid_eur: number | null;
+  c_wear_eur: number | null;
+  c_violations_eur: number | null;
+  c_peak_penalty_eur: number | null;
 };
 
 export type AssetLedger = {

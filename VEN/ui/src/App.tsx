@@ -25,6 +25,7 @@ import { PlannerPage } from "./pages/Planner";
 import { WeatherPage } from "./pages/Weather";
 import { MeasurementPage } from "./pages/Measurement";
 import { DevicesPage } from "./pages/Devices";
+import { PlanHistoryPage } from "./pages/PlanHistory";
 
 type VenContextType = {
   venUrl: string;
@@ -255,6 +256,7 @@ export default function App() {
                 { to: "/tasks", label: "Tasks", testId: "nav-tasks" },
                 { to: "/event-log", label: "Event Log", testId: "nav-event-log" },
                 { to: "/measurement", label: "Measurements", testId: "nav-measurement" },
+                { to: "/plan-history", label: "Plan History", testId: "nav-plan-history" },
               ]}
             />
             <Button component={Link} to="/notifications" data-testid="nav-notifications">
@@ -277,6 +279,7 @@ export default function App() {
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/event-log" element={<EventLogPage />} />
             <Route path="/history" element={<HistoryPage />} />
+            <Route path="/plan-history" element={<PlanHistoryPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Routes>
         </Container>

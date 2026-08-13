@@ -447,6 +447,8 @@ mod tests {
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         }
     }
 
@@ -522,6 +524,8 @@ mod tests {
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         };
         let result = zones_from_plan(Some(&plan), now);
         assert_eq!(result.len(), 3, "3-zone plan must produce 3 zone entries");
@@ -627,6 +631,8 @@ mod tests {
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         }
     }
 

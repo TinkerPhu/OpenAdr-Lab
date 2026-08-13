@@ -9,6 +9,28 @@ use crate::entities::planner_params::{PenaltyRuleParams, PlannerObjective, Plann
 // so all existing `use super::types::*` callers still resolve it.
 pub use super::asset_port::MilpLoadMode;
 
+/// GB-25: the MILP solver's configured optimality-gap tolerance, shared by all
+/// three solve call sites (`solver_phase1`, `solver_phase2`, `solver_duals`) and
+/// persisted on `Plan.mip_gap_target` as a proxy for solve quality — the
+/// *configured* target, not the achieved gap on any given solve (good_lp/highs
+/// expose no achieved-gap query; see `docs/reference/TECHNICAL_DEBTS.md`).
+pub(crate) const MIP_GAP_TARGET: f64 = 0.02;
+
+/// WP6.3 (BL-09) — the penalty rules active for this plan, for UI consumption. Kept here
+/// (rather than `results.rs`, its only caller) to stay under that file's 500-production-line
+/// cap; `results.rs` pulls it in via `use super::types::*`.
+pub(crate) fn active_penalty_rules(
+    inputs_penalty_rules: &[PenaltyRuleParams],
+) -> Vec<crate::entities::plan::ActivePenaltyRule> {
+    inputs_penalty_rules
+        .iter()
+        .map(|r| crate::entities::plan::ActivePenaltyRule {
+            rule_id: r.rule_id.clone(),
+            threshold_kw: r.threshold_kw,
+        })
+        .collect()
+}
+
 /// Phase 1 objective coefficients (economic cost). Derived from PlannerConfig / PlannerObjective.
 #[derive(Debug, Clone)]
 pub(crate) struct Phase1Weights {

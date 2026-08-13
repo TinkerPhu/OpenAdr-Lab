@@ -5,6 +5,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::entities::plan::{SolveStatus, WarningKind};
 
 /// One asset's mean power (and, where applicable, SoC/temperature) over a
 /// 1-minute downsample window.
@@ -122,6 +125,34 @@ pub struct ForecastAccuracySample {
     pub predicted_at: DateTime<Utc>,
     pub actual_kw: Option<f64>,
     pub actual_at: Option<DateTime<Utc>>,
+}
+
+/// GB-25 — one row of plan-quality history: solve time, solver outcome, MIP gap
+/// proxy, and diagnostic cost/warning summary, recorded once per plan cycle
+/// (adopted or not — `query_plan_history` is a solve-time/quality trend, not a
+/// dispatch-history view; `GET /plan` remains the source of truth for what's
+/// actually active). `warning_kinds` is stored as a comma-joined TEXT column in
+/// SQLite — narrower than a join table, since the only consumer is a UI
+/// per-cycle summary, not per-warning queries. See
+/// `docs/architecture/VEN_ARCHITECTURE.md` §4.9a for the pattern this follows
+/// (`forecast_accuracy_samples`) and why `plan_snapshots` (R-63) was not reused.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanHistorySample {
+    pub plan_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub trigger: String,
+    pub solver_ms: Option<u64>,
+    pub solve_status: SolveStatus,
+    pub objective_eur: f64,
+    pub friction_eur: f64,
+    pub mip_gap_target: Option<f64>,
+    pub warning_count: u32,
+    pub warning_kinds: Vec<WarningKind>,
+    pub c_energy_eur: Option<f64>,
+    pub c_grid_eur: Option<f64>,
+    pub c_wear_eur: Option<f64>,
+    pub c_violations_eur: Option<f64>,
+    pub c_peak_penalty_eur: Option<f64>,
 }
 
 #[cfg(test)]

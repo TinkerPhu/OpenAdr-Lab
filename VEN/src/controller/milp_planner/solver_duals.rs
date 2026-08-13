@@ -362,7 +362,7 @@ pub(crate) fn solve_marginal_costs(
         &penalty_vars,
     );
     let model = model.with_time_limit(timeout_s);
-    let model = model.with_mip_gap(0.02)?;
+    let model = model.with_mip_gap(MIP_GAP_TARGET as f32)?;
     let mut solution = model.solve()?;
     let dual = solution.compute_dual();
 
