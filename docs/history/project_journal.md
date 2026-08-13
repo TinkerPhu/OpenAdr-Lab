@@ -8875,6 +8875,38 @@ for this pass. Left task 4.3 and 6.2 (live plan-invalidation check, same depende
 `tasks.md`; the change directory is intentionally not deleted per the partial-completion rule. Everything
 else in `tasks.md` (sections 1–3, 5, 6.1/6.3/6.4) is checked off with this pass's results recorded
 inline. Updated `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`'s Devices card list to include
-"Baseline Override". Next session with push/merge authority should push the branch, run `--e2e` on
-Node2 (preferred) or Node1, complete 4.3/6.2, then finish closeout and delete the change directory.
+"Baseline Override".
+
+## BL-42 closeout: review fixes + E2E verification (2026-08-13)
+
+Code review of the above pass found three real issues, all fixed: (1) the slot-start `onChange`
+eagerly called `.toISOString()` on every keystroke, crashing with `RangeError` when the field was
+cleared or mid-edit — `localInputToIso` now returns `null` on an invalid date and the handler skips
+the update, matching how `EvCard`/`HeaterCard`/`ShiftableLoadsCard` convert once at submit rather
+than per-keystroke; (2) the local↔ISO datetime-local conversion was a fourth near-identical copy
+(the other three already existed in those sibling cards) — extracted to
+`VEN/ui/src/utils/datetimeLocal.ts` and adopted by all four cards, per the `generic-over-bespoke`
+rule; (3) "Add slot" did a redundant ISO→local→ISO round-trip just to truncate to minute precision,
+simplified to a direct `nowIsoMinute()` helper. Added a regression test for the crash. 534/534 UI
+tests (was 533+1 new), lint 0 errors, build clean.
+
+Pushed and ran `DOCKER_HOST=Node2 bash run_all_tests.sh --e2e`. All three of this change's own new
+scenarios passed cleanly both times. The first full run coincided with Node2's permanently-resident
+10-VEN fleet experiment (`worktrees/fleet-13-ven-experiment`) restarting all 10 containers
+simultaneously — confirmed via `docker events` (`exec_die` at 01:50 across `node2-ven-4..13`) — which
+broke DNS resolution inside the test stack's own docker network (`Failed to resolve 'test-vtn'`) and
+cascaded to 195/269 scenario failures unrelated to this change. Also found, while investigating: the
+recurring `04_navigation.feature` flake (GB-22, third occurrence) — fixed for good this time by
+moving it to `features/isolated/controller_navigation.feature` with `@isolated`. A clean retry after
+Node2 stabilized still showed 40/270 failures, every one the identical `poll_until(VEN sees a
+just-created VTN object)` timeout across features this change never touched (alerts, reports, rate
+system, resilience, UI use cases) — filed as **GB-24** (`docs/BACKLOG.md`): Node2's 3.7 GiB RAM
+appears structurally tight once the fleet experiment's 10 idle containers are added to a full E2E
+stack, not just a one-off contention spike. Verified this is environmental, not a regression, by
+confirming zero overlap between the 40 failing scenarios and anything this change (or any of the
+session's other three changes) touched.
+
+Tasks 4.3 and 6.2 checked off with these results. `openspec/changes/baseline-override-devices-ui/`
+deleted — implemented, unit/BDD-tested, and its content is reflected in
+`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` and this entry.
 
