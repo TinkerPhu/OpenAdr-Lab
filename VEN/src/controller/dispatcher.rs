@@ -622,6 +622,8 @@ mod tests {
             cost_breakdown: CostBreakdown::default(),
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         }
     }
 
@@ -674,6 +676,8 @@ mod tests {
                 cost_breakdown: CostBreakdown::default(),
                 solve_status: crate::entities::plan::SolveStatus::Optimal,
                 penalty_rules_active: vec![],
+                solver_ms: None,
+                mip_gap_target: None,
             }
         };
         let sp = build_setpoints(&plan, &sim, None, now);
@@ -753,6 +757,8 @@ mod tests {
             cost_breakdown: CostBreakdown::default(),
             solve_status: crate::entities::plan::SolveStatus::Optimal,
             penalty_rules_active: vec![],
+            solver_ms: None,
+            mip_gap_target: None,
         }
     }
 

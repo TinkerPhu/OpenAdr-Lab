@@ -693,6 +693,53 @@ data-merge/LOCF mechanism every multi-series chart in `VEN/ui` is built on — s
 and "Special features → Forecast-accuracy overlay" sections for the full mechanism and why
 it's structured this way.
 
+### 4.9b Plan-Quality History (schema v10, GB-25)
+
+Tracks solve time, solver outcome, and warning trend across plan cycles over time — the gap
+`plan_snapshots` (dropped as dead code, R-63; see 4.9a above) would have filled, but with
+narrow typed columns rather than a full plan JSON blob, following the `forecast_accuracy_samples`
+pattern instead of reviving that table. Persisted in the `plan_history` table (`plan_id`,
+`created_at`, `trigger`, `solver_ms`, `solve_status`, `objective_eur`, `friction_eur`,
+`mip_gap_target`, `warning_count`, `warning_kinds`, `c_energy_eur`, `c_grid_eur`, `c_wear_eur`,
+`c_violations_eur`, `c_peak_penalty_eur`), indexed on `created_at`; pruned alongside the other
+history tables via `prune_before`, keyed on `created_at`. `warning_kinds` is a comma-joined TEXT
+column (SCREAMING_SNAKE_CASE `WarningKind` values) rather than a join table — the only consumer
+is a per-cycle UI summary, not per-warning queries.
+
+**`Plan.solver_ms` / `Plan.mip_gap_target`** — both now persisted fields on `Plan` itself
+(`entities/plan.rs`), not just the transient `plan_ready` SSE event. `solver_ms` is stamped in
+`PlanningService::adopt_if_warranted` before either the SSE emit or `state.set_active_plan`, so
+the live event, `GET /plan`, and the plan-history row all agree. `mip_gap_target` is stamped at
+`Plan` construction time in `controller::milp_planner::results` from the shared
+`controller::milp_planner::types::MIP_GAP_TARGET` constant (`0.02`) — the same value passed to
+`good_lp`'s `with_mip_gap` at all three solve call sites (`solver_phase1`, `solver_phase2`,
+`solver_duals`). This is a proxy only: the *configured* tolerance, not the *achieved* gap on any
+given solve — `good_lp`/`highs` expose no achieved-gap query today (tracked as debt in
+`docs/reference/TECHNICAL_DEBTS.md`).
+
+**`PlanWarning.kind`** — a typed `WarningKind` enum (`SOLVER_INFEASIBLE`, `STALE_RATE_ESTIMATE`,
+`BUDGET_SHORTFALL`, `CAPACITY_VIOLATION`, `PEAK_PENALTY_EXCEEDED`, `OTHER`) alongside the existing
+free-text `message`, stamped at each of the 5 real `PlanWarning` construction sites in
+`controller::milp_planner::results`. `services::notify::new_plan_warnings` dedups newly-surfaced
+warnings on `kind` rather than `message` — a warning's message text can carry per-cycle
+interpolated numbers (thresholds, window times), so two cycles' worth of "the same" warning would
+otherwise look new every time its numbers moved.
+
+**Capture** — every plan cycle (adopted or not — this is a solve-quality trend, not a dispatch
+history view), `finish_plan_cycle` (`services/forecast.rs`) builds one `PlanHistorySample` from
+the resolved `Plan` and writes it through `HistoryPort::append_plan_history` off the async
+runtime (`spawn_blocking`), best-effort (log-and-continue on failure) — the same pattern as
+`forecast_accuracy_samples`'s capture step above. `created_at` comes from `plan.created_at`
+(already clock-injected), never a fresh `Utc::now()` call.
+
+**Route**: `GET /history/plans?from=&to=` (see DOCUMENTATION.md §History Store for the full
+persisted-history route list) — `resolve_range`, same contract as the other `/history/*` routes.
+
+**UI**: a dedicated Diagnostics nav page (`/plan-history`, `VEN/ui/src/pages/PlanHistory.tsx`) —
+a solve-time trend chart plus a per-cycle table with a warning-kind chip per warning. The live
+Planner page's `PlanHeaderBar` also renders the persisted `solver_ms`/`mip_gap_target` and a kind
+chip per warning, alongside the existing severity chip and free-text message.
+
 ### 4.10 Operational Diagnostics (WP-T1–T8, `docs/history/project_journal.md` — search "WP-T")
 
 Backend-process/task health and operational status, distinct from HEMS controller state (4.7) —
