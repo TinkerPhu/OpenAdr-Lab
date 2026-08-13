@@ -5,8 +5,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
-    ActivePenaltyRule, AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot,
-    PlanWarning, PlanningHorizon, SolveStatus, WarningSeverity,
+    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
+    SolveStatus, WarningKind, WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
@@ -15,19 +15,6 @@ use super::asset_port::{
 };
 use super::envelopes::build_plan_envelopes;
 use super::types::*;
-
-/// WP6.3 (BL-09) — the penalty rules active for this plan, for UI consumption.
-fn active_penalty_rules(
-    inputs_penalty_rules: &[crate::entities::planner_params::PenaltyRuleParams],
-) -> Vec<ActivePenaltyRule> {
-    inputs_penalty_rules
-        .iter()
-        .map(|r| ActivePenaltyRule {
-            rule_id: r.rule_id.clone(),
-            threshold_kw: r.threshold_kw,
-        })
-        .collect()
-}
 
 /// Fallback plan returned when the MILP solver fails.
 /// When `inputs` is `Some`, emits populated slots with zero allocations
@@ -64,6 +51,7 @@ pub(crate) fn fallback_plan(
     };
     let warning = PlanWarning {
         severity: WarningSeverity::Critical,
+        kind: WarningKind::SolverInfeasible,
         message: reason,
         suggested_action: None,
     };
@@ -133,6 +121,8 @@ pub(crate) fn fallback_plan(
         cost_breakdown: CostBreakdown::default(),
         solve_status: SolveStatus::Infeasible,
         penalty_rules_active,
+        solver_ms: None,
+        mip_gap_target: Some(MIP_GAP_TARGET),
     }
 }
 
@@ -437,6 +427,7 @@ pub(crate) fn translate_to_plan(
     if let Some(msg) = &inputs.stale_rate_warning {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
+            kind: WarningKind::StaleRateEstimate,
             message: msg.clone(),
             suggested_action: None,
         });
@@ -445,6 +436,7 @@ pub(crate) fn translate_to_plan(
     if let Some(msg) = &inputs.budget_warning {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
+            kind: WarningKind::BudgetShortfall,
             message: msg.clone(),
             suggested_action: Some("raise the budget or lower the target SoC".to_string()),
         });
@@ -452,6 +444,7 @@ pub(crate) fn translate_to_plan(
     if violation_count > 0 {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
+            kind: WarningKind::CapacityViolation,
             message: format!(
                 "Grid capacity violation in {violation_count} slot(s) — solver used slack"
             ),
@@ -470,6 +463,7 @@ pub(crate) fn translate_to_plan(
                 let peak_kw = rule.threshold_kw + slack_kw;
                 warnings.push(PlanWarning {
                     severity: WarningSeverity::Warning,
+                    kind: WarningKind::PeakPenaltyExceeded,
                     message: format!(
                         "Penalty rule '{}' exceeded in window {}–{}: peak {:.1} kW > threshold {:.1} kW (€{:.2} accepted)",
                         rule.rule_id,
@@ -517,5 +511,7 @@ pub(crate) fn translate_to_plan(
         cost_breakdown,
         solve_status: SolveStatus::Optimal,
         penalty_rules_active,
+        solver_ms: None,
+        mip_gap_target: Some(MIP_GAP_TARGET),
     }
 }

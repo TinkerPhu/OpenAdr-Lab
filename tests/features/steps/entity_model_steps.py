@@ -171,6 +171,19 @@ def step_response_status(context, code):
     )
 
 
+@then('the response JSON array\'s first item has field "{field_path}"')
+def step_response_json_array_first_item_has_field(context, field_path):
+    data = context.last_response_json
+    assert isinstance(data, list) and len(data) > 0, (
+        f"Expected a non-empty JSON array, got {type(data)}: {data!r}"
+    )
+    val = _resolve_nested(data[0], field_path)
+    assert val is not None, (
+        f"Expected field '{field_path}' on the array's first item, got None. "
+        f"Item: {data[0]!r}"
+    )
+
+
 @then('the response JSON has field "{field_path}"')
 def step_response_json_has_field(context, field_path):
     data = context.last_response_json

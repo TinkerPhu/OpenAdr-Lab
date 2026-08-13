@@ -389,6 +389,17 @@ export function useHistoryForecastAccuracy(from: string, to: string, assetId?: s
   });
 }
 
+/** GB-25: per-plan-cycle solve-quality history (solve time, solver outcome, MIP-gap proxy,
+ * cost/warning summary), `[from, to)`. */
+export function useHistoryPlans(from: string, to: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/plans", api.baseUrl, from, to],
+    queryFn: () => api.historyPlans({ from, to }),
+    refetchInterval: false,
+  });
+}
+
 export function useObligations() {
   const { api } = useVenContext();
   return useQuery({

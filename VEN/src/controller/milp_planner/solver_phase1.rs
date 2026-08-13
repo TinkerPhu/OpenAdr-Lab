@@ -166,7 +166,7 @@ pub(crate) fn solve_phase1(
         &penalty_vars,
     );
     model = model.with_time_limit(timeout_s);
-    model = model.with_mip_gap(0.02)?;
+    model = model.with_mip_gap(MIP_GAP_TARGET as f32)?;
     let solution = model.solve()?;
 
     Ok(read_solve_output(

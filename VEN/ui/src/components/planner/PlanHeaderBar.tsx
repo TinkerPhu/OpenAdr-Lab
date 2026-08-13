@@ -120,6 +120,22 @@ export function PlanHeaderBar({ plan }: Props) {
           {(plan.summary.total_co2_g / 1000).toFixed(2)} kg CO₂
         </Typography>
 
+        {/* GB-25: solver diagnostics persisted on the plan itself, not just the transient
+            PlanReady SSE event. Omitted (not shown as "—") when absent, same convention as
+            the other optional chips on this row. */}
+        {plan.solver_ms != null && (
+          <Typography data-testid="plan-solver-ms" variant="caption" color="text.secondary">
+            solve: {plan.solver_ms}ms
+          </Typography>
+        )}
+        {plan.mip_gap_target != null && (
+          <Tooltip title="Solver's configured MIP-gap tolerance for this cycle — a proxy, not the achieved gap.">
+            <Typography data-testid="plan-mip-gap-target" variant="caption" color="text.secondary">
+              gap target: {(plan.mip_gap_target * 100).toFixed(1)}%
+            </Typography>
+          </Tooltip>
+        )}
+
         {/* Warnings badge + expand button */}
         {hasWarnings && (
           <Tooltip title={`${plan.warnings.length} warning${plan.warnings.length > 1 ? "s" : ""}`}>
@@ -158,6 +174,15 @@ export function PlanHeaderBar({ plan }: Props) {
                 sx={{ mb: 0.5 }}
               >
                 <Chip label={w.severity} color={severityColor(w.severity)} size="small" sx={{ mt: 0.25 }} />
+                {w.kind && (
+                  <Chip
+                    data-testid={`plan-warning-${i}-kind`}
+                    label={w.kind}
+                    variant="outlined"
+                    size="small"
+                    sx={{ mt: 0.25 }}
+                  />
+                )}
                 <Box>
                   <Typography variant="caption" display="block">{w.message}</Typography>
                   {w.suggested_action && (

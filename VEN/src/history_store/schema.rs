@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 9;
+pub(super) const SCHEMA_VERSION: i64 = 10;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -147,4 +147,32 @@ CREATE INDEX idx_forecast_accuracy_target ON forecast_accuracy_samples(asset_id,
 pub(super) const SCHEMA_V9: &str = "
 ALTER TABLE grid_samples ADD COLUMN import_limit_kw REAL;
 ALTER TABLE grid_samples ADD COLUMN export_limit_kw REAL;
+";
+
+/// GB-25: per-plan-cycle solve-quality history — solve time, solver outcome, the
+/// configured MIP-gap proxy (see `controller::milp_planner::types::MIP_GAP_TARGET`), and a
+/// diagnostic cost/warning summary. `warning_kinds` is a comma-joined TEXT column, narrower
+/// than a join table (see `entities::history::PlanHistorySample`'s doc comment). Deliberately
+/// not a revival of the dropped `plan_snapshots` table (R-63, SCHEMA_V7 above) — narrow typed
+/// columns instead of a full plan JSON blob, following the `forecast_accuracy_samples`
+/// pattern (SCHEMA_V8) — see `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
+pub(super) const SCHEMA_V10: &str = "
+CREATE TABLE plan_history (
+    plan_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    trigger TEXT NOT NULL,
+    solver_ms INTEGER,
+    solve_status TEXT NOT NULL,
+    objective_eur REAL NOT NULL,
+    friction_eur REAL NOT NULL,
+    mip_gap_target REAL,
+    warning_count INTEGER NOT NULL,
+    warning_kinds TEXT NOT NULL DEFAULT '',
+    c_energy_eur REAL,
+    c_grid_eur REAL,
+    c_wear_eur REAL,
+    c_violations_eur REAL,
+    c_peak_penalty_eur REAL
+);
+CREATE INDEX idx_plan_history_created_at ON plan_history(created_at);
 ";

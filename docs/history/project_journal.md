@@ -9299,6 +9299,104 @@ exercised the exact `t_from`/`snapshot()` call path this reuses.
 
 **Bookkeeping**: GB-26 and GB-29 rows removed from `docs/BACKLOG.md`.
 
+## GB-25 fix: persisted plan-quality history (2026-08-13)
+
+**Trigger**: implementing an approved, fully-specified plan for GB-25 — a
+VEN's plan quality (solve time, warnings, MILP gap tolerance) was visible only
+live: `solver_ms` existed solely on the transient `plan_ready` SSE event,
+never on the persisted `Plan`/`GET /plan`; `PlanWarning` was free-text
+(`message: String`) with no typed `kind`; no MILP optimality-gap field existed
+anywhere; and the one table that would have stored plan history
+(`plan_snapshots`) had been dropped as dead code (R-63) — its only writer was
+never called from production, so it was always empty.
+
+**Four confirmed design decisions** (fixed before implementation, not
+re-litigated during it):
+
+1. **Dedup switches to `kind`.** `services/notify.rs`'s `new_plan_warnings`
+   previously deduped newly-surfaced warnings on `PlanWarning.message`; a
+   warning's message text can carry per-cycle interpolated numbers (thresholds,
+   window times), so two cycles' worth of "the same" warning looked new every
+   time its numbers moved. Switched the dedup key to the new typed `kind`.
+2. **`WarningKind` covers only what's actually raised today**: a 6-variant enum
+   (`SolverInfeasible`, `StaleRateEstimate`, `BudgetShortfall`,
+   `CapacityViolation`, `PeakPenaltyExceeded`, plus `Other` as an unused-today
+   catch-all) mapped 1:1 onto the 5 real `PlanWarning{...}` construction sites
+   in `controller::milp_planner::results` — no speculative variants for
+   warnings the codebase doesn't actually raise.
+3. **UI location: a new Diagnostics nav page** (`/plan-history`), not a tab
+   inside the live Planner page — plan history is a distinct diagnostic
+   surface from "what's the plan doing right now."
+4. **MILP gap: proxy only, explicitly out of scope to do better.** Persist
+   `mip_gap_target` (the solver's configured tolerance, `0.02`) + `solve_status`.
+   The `0.02` literal, previously duplicated across `solver_phase1.rs`,
+   `solver_phase2.rs`, and `solver_duals.rs`, was extracted to one shared
+   `controller::milp_planner::types::MIP_GAP_TARGET` constant reused by all
+   three `with_mip_gap` call sites. Querying a real *achieved* MILP gap from
+   `good_lp`/`highs` is explicitly out of scope — persisting the configured
+   target is only a proxy; filed as follow-up debt (R-65) and backlog item
+   GB-31.
+
+**Implementation**: `entities/plan.rs` gained `WarningKind`, `PlanWarning.kind`,
+and `Plan.solver_ms`/`Plan.mip_gap_target` (both `#[serde(default)]` so old
+persisted/serialized plans still deserialize). `entities/history.rs` gained
+`PlanHistorySample` (mirroring the `ForecastAccuracySample` struct already in
+that file, per the `forecast_accuracy_samples` pattern documented in
+`docs/architecture/VEN_ARCHITECTURE.md` §4.9a — the design that pattern's own
+doc comment says was chosen *over* reviving `plan_snapshots`).
+`history_store/schema.rs` gained `SCHEMA_V10` (`plan_history` table,
+`warning_kinds` stored as a comma-joined TEXT column rather than a join table
+— the only consumer is a per-cycle UI summary, not per-warning queries) and a
+new `history_store/plan_history.rs` module for its `append`/`query`, wired into
+`HistoryPort` and `SqliteHistoryStore` the same way `forecast_accuracy.rs` is.
+`services::planning::adopt_if_warranted` stamps `plan.solver_ms` before either
+the `PlanReady` SSE emit or `state.set_active_plan`, so the live event, the
+persisted `Plan`, and the plan-history row all agree; `mip_gap_target` is
+stamped at `Plan` construction time in `results.rs` instead (it's known before
+the solve, not after). `services::forecast::finish_plan_cycle` builds and
+persists one `PlanHistorySample` per plan cycle (adopted or not — this is a
+solve-quality trend, not a dispatch-history view) right alongside its existing
+forecast-accuracy write, same best-effort/log-and-continue contract.
+`GET /history/plans?from=&to=` mirrors the existing `/history/forecast-accuracy`
+route's shape exactly. On the UI side: `PlanHistory.tsx` (solve-time trend
+chart + per-cycle table with a warning-kind chip per warning) under a new
+"Plan History" Diagnostics nav entry, and `PlanHeaderBar.tsx` (the live
+Planner page) now renders the persisted `solver_ms`/`mip_gap_target` and a
+kind chip per warning alongside the existing severity chip and message.
+
+**Deviation from the plan's file-size estimate**: `results.rs` crossed the
+500-production-line cap by 7 lines once the `kind` stamping and
+`mip_gap_target` assembly landed. Fixed by moving the small, self-contained
+`active_penalty_rules` helper (pure `PenaltyRuleParams` → `ActivePenaltyRule`
+mapping, WP6.3/BL-09, unrelated to this change's own logic) out to
+`controller::milp_planner::types`, which every `milp_planner` submodule
+already pulls in via `use super::types::*` — no call-site changes needed
+beyond the move itself.
+
+**Verification**: `wsl cargo test -p ven-app` — 1003 + 1 passed, 0 failed
+(under `wsl_lock.sh` discipline, `-j 2`; the lease expired mid-build once
+during the UI-test detour and was re-acquired before continuing, per the
+project's shared-WSL convention). `cargo fmt --check` and
+`cargo clippy --all-targets --all-features -- -D warnings` both clean.
+`scripts/audit_file_sizes.py` passed after the `results.rs` split above.
+`cd VEN/ui && npm test` — 547/547 passed; `npm run lint` — 0 errors (the same
+pre-existing `react-refresh/only-export-components` warning class every other
+page-plus-helper-exports file in this codebase already carries, e.g.
+`History.tsx`). A new BDD scenario
+("Operator reviews historical plan quality after a plan cycle runs",
+`tests/features/ven_history.feature`) plus two smaller `/history/plans`
+route scenarios were added; E2E verification via Node1 (`run_all_tests.sh
+--e2e`) was not attempted this session — left for the next Node1-lock
+window, noted rather than skipped silently.
+
+**Bookkeeping**: GB-25 row removed from `docs/BACKLOG.md`; new low-priority
+row GB-31 added for the real-achieved-MILP-gap follow-up (decision 4 above).
+`docs/reference/TECHNICAL_DEBTS.md` gained R-65, cross-referencing GB-31,
+documenting the gap-proxy-only decision as tracked debt (mirroring how R-63
+documented the `plan_snapshots` removal). `docs/architecture/VEN_ARCHITECTURE.md`
+gained §4.9b describing the `plan_history` table, its route, and the UI
+surfaces, following §4.9a's format.
+
 ## GB-30: opt-in VEN coverage tooling, first run + consolidated report (2026-08-13/14)
 
 Answered a user question about code coverage — none existed anywhere for this project's own

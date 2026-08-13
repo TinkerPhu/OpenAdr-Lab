@@ -94,6 +94,8 @@ pub fn build_router(ctx: AppCtx) -> Router {
             "/history/forecast-accuracy",
             get(hems::get_history_forecast_accuracy),
         )
+        // GB-25: per-plan-cycle solve-quality history.
+        .route("/history/plans", get(hems::get_history_plans))
         .route("/history/:asset_id", get(assets::get_asset_history))
         .route("/capability/:asset_id", get(assets::get_asset_capability))
         .route(

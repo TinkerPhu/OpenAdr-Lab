@@ -170,6 +170,31 @@ pub async fn get_history_forecast_accuracy(
     }
 }
 
+/// GET /history/plans?from=&to= — one row per plan cycle (solve time, solver outcome, MIP-gap
+/// proxy, cost/warning summary) in `[from, to)`. See `docs/architecture/VEN_ARCHITECTURE.md`
+/// §4.9a and `entities::history::PlanHistorySample` (GB-25).
+pub async fn get_history_plans(
+    State(ctx): State<AppCtx>,
+    Query(params): Query<HistoryRangeParams>,
+) -> impl IntoResponse {
+    let Some(history) = ctx.history.clone() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
+    };
+    let (from, to) = match resolve_range(&params) {
+        Ok(r) => r,
+        Err((status, msg)) => return error(status, msg),
+    };
+    let result = tokio::task::spawn_blocking(move || history.query_plan_history(from, to)).await;
+    match result {
+        Ok(Ok(rows)) => Json(rows).into_response(),
+        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("task panicked: {e}"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

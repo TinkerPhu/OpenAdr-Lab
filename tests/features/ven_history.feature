@@ -61,6 +61,26 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     Then the response status is 400
 
   @history
+  Scenario: GET /history/plans returns a JSON array within the default range
+    When I GET /history/plans from the VEN
+    Then the response status is 200
+
+  @history
+  Scenario: GET /history/plans with an unparseable "from" is rejected
+    When I GET /history/plans?from=not-a-date from the VEN
+    Then the response status is 400
+
+  @history
+  Scenario: Operator reviews historical plan quality after a plan cycle runs (GB-25)
+    When I poll VEN /plan until field "solver_ms" is present
+    Then the response JSON has field "solver_ms"
+    And the response JSON has field "mip_gap_target"
+    When I poll VEN /history/plans until it is a non-empty array
+    Then the response JSON array's first item has field "solver_ms"
+    And the response JSON array's first item has field "solve_status"
+    And the response JSON array's first item has field "warning_kinds"
+
+  @history
   Scenario: The live in-memory history route still resolves for a real asset id
     When I GET /history/ev from the VEN
     Then the response status is 200

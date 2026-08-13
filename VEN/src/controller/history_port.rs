@@ -17,8 +17,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
-    TickSample,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
@@ -119,6 +119,24 @@ pub trait HistoryPort: Send + Sync {
         lead_kind: Option<ForecastLeadKind>,
     ) -> Result<Vec<ForecastAccuracySample>, DomainError> {
         let _ = (from, to, asset_id, lead_kind);
+        Ok(Vec::new())
+    }
+
+    /// GB-25: persist one row of plan-quality history per plan cycle. Default no-op so
+    /// history-less test doubles keep compiling; the SQLite store and `MockHistoryPort` override.
+    fn append_plan_history(&self, rows: &[PlanHistorySample]) -> Result<(), DomainError> {
+        let _ = rows;
+        Ok(())
+    }
+
+    /// GB-25: `[from, to)` plan-history rows, ordered by `created_at`. Default empty, same
+    /// rationale as `append_plan_history`.
+    fn query_plan_history(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PlanHistorySample>, DomainError> {
+        let _ = (from, to);
         Ok(Vec::new())
     }
 }

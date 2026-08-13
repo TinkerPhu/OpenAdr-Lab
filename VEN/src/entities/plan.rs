@@ -217,12 +217,45 @@ pub enum WarningSeverity {
     Critical,
 }
 
+/// Stable, machine-readable classification of a `PlanWarning` (GB-25).
+///
+/// Covers exactly the 5 real construction sites in
+/// `controller::milp_planner::results` today, plus `Other` as a catch-all for
+/// any future warning that hasn't earned its own variant yet. `services::notify`
+/// dedups new-vs-carried-over warnings on `kind` (not `message`, which can
+/// carry per-cycle interpolated numbers).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WarningKind {
+    /// `results::fallback_plan` — the MILP solver failed and this is the infeasibility fallback.
+    SolverInfeasible,
+    /// WP4.4 (BL-07) — the tariff/CO2 rate used for one or more slots was filled by the
+    /// StaleRatePolicy rather than a fresh VTN-reported value.
+    StaleRateEstimate,
+    /// WP4.1-c (BL-28) — the MAX_COST budget could not be met at the target SoC.
+    BudgetShortfall,
+    /// Grid import/export capacity was exceeded in one or more slots; the solver used slack.
+    CapacityViolation,
+    /// WP6.3 (BL-09) — a penalty-rule threshold was still exceeded after solving (penalty accepted).
+    PeakPenaltyExceeded,
+    /// Reserved for future warning sites not yet classified above.
+    Other,
+}
+
 /// A warning generated during planning (§6.5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanWarning {
     pub severity: WarningSeverity,
+    #[serde(default = "WarningKind::default_other")]
+    pub kind: WarningKind,
     pub message: String,
     pub suggested_action: Option<String>,
+}
+
+impl WarningKind {
+    fn default_other() -> Self {
+        WarningKind::Other
+    }
 }
 
 /// Decomposed MILP objective cost components for diagnostics.
@@ -301,6 +334,17 @@ pub struct Plan {
     /// Empty when the feature is not configured.
     #[serde(default)]
     pub penalty_rules_active: Vec<ActivePenaltyRule>,
+    /// GB-25 — wall-clock milliseconds the MILP solve took for this plan cycle.
+    /// `None` for plans built outside `services::planning::adopt_if_warranted`
+    /// (e.g. hand-built test fixtures) — never a synthesized `0`.
+    #[serde(default)]
+    pub solver_ms: Option<u64>,
+    /// GB-25 — the solver's configured MIP gap tolerance (`MIP_GAP_TARGET`) at
+    /// the time this plan was solved. A proxy only: the *configured* target,
+    /// not the *achieved* gap on this particular solve (good_lp/highs expose no
+    /// achieved-gap query today — see `docs/reference/TECHNICAL_DEBTS.md`).
+    #[serde(default)]
+    pub mip_gap_target: Option<f64>,
 }
 
 impl SolveStatus {
