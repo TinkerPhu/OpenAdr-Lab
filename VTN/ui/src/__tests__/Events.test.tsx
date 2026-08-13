@@ -16,7 +16,7 @@ const mockPrograms = [
   { id: "p2", programName: "Program Beta", createdDateTime: "2026-01-02" },
 ];
 
-const useEventsMock = vi.fn(() => ({
+const useEventsMock = vi.fn((_active?: boolean) => ({
   data: mockEvents,
   dataUpdatedAt: Date.now(),
 }));
@@ -26,7 +26,7 @@ const updateMock = vi.fn();
 const deleteMock = vi.fn();
 
 vi.mock("../api/hooks", () => ({
-  useEvents: () => useEventsMock(),
+  useEvents: (active?: boolean) => useEventsMock(active),
   usePrograms: () => ({ data: mockPrograms, dataUpdatedAt: Date.now() }),
   useCreateEvent: () => ({ mutate: createMock, isPending: false }),
   useUpdateEvent: () => ({ mutate: updateMock, isPending: false }),
@@ -234,6 +234,30 @@ describe("EventsPage", () => {
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+  });
+
+  it("defaults to the All filter and requests all events", () => {
+    renderEvents();
+    expect(useEventsMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it("requests only active events when Active filter is selected", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("events-filter-active"));
+    expect(useEventsMock).toHaveBeenLastCalledWith(true);
+  });
+
+  it("requests only past events when Past filter is selected", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("events-filter-past"));
+    expect(useEventsMock).toHaveBeenLastCalledWith(false);
+  });
+
+  it("switches back to All events after selecting a filter", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("events-filter-active"));
+    await userEvent.click(screen.getByTestId("events-filter-all"));
+    expect(useEventsMock).toHaveBeenLastCalledWith(undefined);
   });
 
   it("submits create event with all fields", async () => {
