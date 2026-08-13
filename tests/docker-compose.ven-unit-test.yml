@@ -16,6 +16,13 @@
 #
 # To wipe the cache and force a full recompile:
 #   docker compose -f tests/docker-compose.ven-unit-test.yml down -v
+#
+# Coverage (opt-in, GB-30 in docs/BACKLOG.md — NOT part of the default suite):
+#   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-coverage
+#   report lands in ./coverage/ven/ on the docker host (tarpaulin-report.html + .json).
+#   Uses its own cache volumes (ven-coverage-cargo-*), deliberately not shared with
+#   ven-unit-test's — tarpaulin's instrumented build can't reuse a plain cargo-test
+#   cache anyway, so sharing would just thrash both on every toggle.
 ###############################################################################
 
 name: ven-unit-test
@@ -35,7 +42,25 @@ services:
           cpus: '1.5'
           memory: 1500M
 
+  ven-coverage:
+    build:
+      context: ../VEN
+      dockerfile: ../tests/Dockerfile.ven-coverage
+    volumes:
+      - ven-coverage-cargo-registry:/usr/local/cargo/registry
+      - ven-coverage-cargo-git:/usr/local/cargo/git
+      - ven-coverage-cargo-target:/app/target
+      - ./coverage/ven:/app/coverage
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1500M
+
 volumes:
   ven-cargo-registry:
   ven-cargo-git:
   ven-cargo-target:
+  ven-coverage-cargo-registry:
+  ven-coverage-cargo-git:
+  ven-coverage-cargo-target:

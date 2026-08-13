@@ -3,11 +3,18 @@
 # Run all tests in the OpenADR Lab project.
 #
 # Usage:
-#   bash run_all_tests.sh              # run everything
+#   bash run_all_tests.sh              # run everything (does NOT include --coverage)
 #   bash run_all_tests.sh --local      # local tests only (UI unit tests)
 #   bash run_all_tests.sh --e2e        # E2E behave tests only
 #   bash run_all_tests.sh --resilience # resilience tests only
 #   bash run_all_tests.sh --rust       # openleadr-rs cargo tests only
+#   bash run_all_tests.sh --coverage   # VEN cargo-tarpaulin coverage report only (opt-in,
+#                                       # GB-30 in docs/BACKLOG.md — never runs as part of
+#                                       # the bare/no-flag "everything" invocation: it's a
+#                                       # separate instrumented build, ~2-4x slower than a
+#                                       # plain cargo test, that doesn't share cargo's
+#                                       # incremental-compilation cache with the normal
+#                                       # test build)
 #
 # Prerequisites:
 #   - Node.js + npm installed locally (for UI tests)
@@ -99,6 +106,7 @@ RUN_LOCAL=true
 RUN_E2E=true
 RUN_RESILIENCE=true
 RUN_RUST=true
+RUN_COVERAGE=false   # opt-in only — never enabled by the bare/no-flag "everything" run
 
 if [[ $# -gt 0 ]]; then
     RUN_LOCAL=false; RUN_E2E=false; RUN_RESILIENCE=false; RUN_RUST=false
@@ -108,9 +116,10 @@ if [[ $# -gt 0 ]]; then
             --e2e)        RUN_E2E=true ;;
             --resilience) RUN_RESILIENCE=true ;;
             --rust)       RUN_RUST=true ;;
+            --coverage)   RUN_COVERAGE=true ;;
             --help|-h)
-                echo "Usage: bash run_all_tests.sh [--local] [--e2e] [--resilience] [--rust]"
-                echo "  No flags = run all. Flags can be combined."
+                echo "Usage: bash run_all_tests.sh [--local] [--e2e] [--resilience] [--rust] [--coverage]"
+                echo "  No flags = run all except --coverage (opt-in only). Flags can be combined."
                 exit 0 ;;
             *) echo "Unknown flag: $arg"; exit 1 ;;
         esac
@@ -126,7 +135,7 @@ echo -e "${BOLD}╚════════════════════�
 # The docker host is shared between worktrees/sessions; serialize access.
 # Aborts (exit 2) if the lock stays held past the wait limit — rerun to retry.
 
-if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST; }; then
+if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COVERAGE; }; then
     header "Acquiring $_DOCKER_LABEL lock"
     LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
     trap 'LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
@@ -183,6 +192,30 @@ if $RUN_RUST; then
         fi
     else
         skip "openleadr-rs cargo tests (cannot reach $_DOCKER_LABEL)"
+    fi
+fi
+
+# ── VEN Coverage (opt-in, GB-30) ────────────────────────────────────────────
+# Never runs as part of the bare/no-flag "everything" invocation — see the
+# --coverage usage note at the top of this file and docs/BACKLOG.md GB-30.
+
+if $RUN_COVERAGE; then
+    header "VEN Coverage (cargo-tarpaulin, docker: $_DOCKER_LABEL)"
+    if can_reach_docker; then
+        if ! $_DOCKER_IS_LOCAL; then
+            echo "  Syncing latest code to $_DOCKER_LABEL..."
+            run_docker_cmd "cd $DOCKER_DIR && git pull --recurse-submodules" 2>&1
+        fi
+        echo "  Building and running instrumented coverage build (first run ~20 min; separate cache from the normal unit-test build)..."
+        COV_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-coverage 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.ven-unit-test.yml down 2>&1; exit \$RESULT"
+        if run_docker_cmd "$COV_CMD"; then
+            pass "VEN coverage report generated"
+            echo "  Report: $DOCKER_DIR/coverage/ven/tarpaulin-report.html (+ .json) on $_DOCKER_LABEL"
+        else
+            fail "VEN coverage report generation"
+        fi
+    else
+        skip "VEN coverage (cannot reach $_DOCKER_LABEL)"
     fi
 fi
 

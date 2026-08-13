@@ -32,6 +32,9 @@ VEN/profiles/fleet-ven-*.yaml
 experiments/results/
 experiments/run_logs/
 
+# cargo-tarpaulin coverage reports (GB-30, docs/BACKLOG.md — host-local, regenerated per run)
+coverage/
+
 # Python
 __pycache__/
 *.pyc
