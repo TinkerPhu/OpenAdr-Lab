@@ -1,0 +1,45 @@
+###############################################################################
+# Dockerfile for running VEN (Rust backend) cargo test coverage (cargo-tarpaulin).
+#
+# Build context: ../VEN  (the VEN directory)
+# Used by: tests/docker-compose.ven-unit-test.yml (ven-coverage service)
+#
+# Deliberately separate from Dockerfile.ven-unit-test / its cache volumes:
+# tarpaulin instruments the build with different compile settings than a
+# plain `cargo test`, so it can't share cargo's incremental-compilation
+# cache anyway (see GB-30, docs/BACKLOG.md) — sharing volumes would just
+# thrash both caches on every toggle between the two commands.
+#
+# Usage (on Node1/Node2):
+#   cd /srv/docker/openadr_lab
+#   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-coverage
+###############################################################################
+
+FROM rust:1.90-bookworm
+
+# HiGHS and aws-lc-rs need cmake + clang; bookworm provides them.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        libclang-dev \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pinned per the project's dependency-pinning rule (docs: "dependencies").
+RUN cargo install cargo-tarpaulin --version "^0.31" --locked
+
+WORKDIR /app
+
+COPY . .
+
+# Keep parallelism low to avoid OOM linker failures on Node1
+# (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
+ENV RUST_BACKTRACE=1
+
+# --out Html for humans, --out Json for later automated analysis (GB-30).
+# --output-dir is bind-mounted by the compose service so the report survives
+# past the container's --rm.
+CMD ["cargo", "tarpaulin", "--jobs", "2", "--timeout", "300", \
+     "--out", "Html", "--out", "Json", "--output-dir", "/app/coverage"]
