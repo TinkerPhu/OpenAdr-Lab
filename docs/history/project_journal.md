@@ -8910,7 +8910,6 @@ Tasks 4.3 and 6.2 checked off with these results. `openspec/changes/baseline-ove
 deleted — implemented, unit/BDD-tested, and its content is reflected in
 `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` and this entry.
 
-
 ## Full 13-VEN fleet deploy + S-1..S-6 experiment run (2026-08-12)
 
 **Trigger**: after the R-18 fix, the user asked to (1) bring Node2's VEN fleet up to
@@ -9190,4 +9189,71 @@ look for a genuinely non-zero value, not attempted here (out of scope for this
 fix's own verification).
 
 **Bookkeeping**: GB-27 row removed from `docs/BACKLOG.md`.
+
+## GB-04, GB-05, GB-07: small backlog batch (2026-08-13)
+
+Picked up three low-effort, low-priority `docs/BACKLOG.md` items together in one worktree
+(`worktrees/gb-04-05-07-backlog`), since none needed each other but all were small enough to
+batch. Checked `docs/reference/TECHNICAL_DEBTS.md` first per the `refactoring` rule — nothing
+in this area (VTN events route/UI, container setup) was listed, so no prerequisite refactor.
+
+**GB-05** (VTN UI Events page active/past filter): threaded the BFF's already-existing
+`GET /api/events?active=` query param through `BffApi.events()` → `useEvents()` → a
+`ToggleButtonGroup` (All/Active/Past) on the Events page. Straightforward — the backend side
+was already built and just unused by the UI. 23/23 Events tests pass (4 new), full VTN UI
+suite 71/71, build and eslint clean.
+
+**GB-07** (setup script): added `scripts/setup_all.sh`, chaining the README's 3 manual steps
+(VTN stack → seed → VEN stack) with health-check waits between each, mirroring `fleet.sh`'s own
+bring-up pattern (`--fresh` to reset the DB first, `--skip-seed` to skip demo data). `fleet.sh`
+already covered scale-out fleet VEN bring-up; this fills the gap for the base README stack.
+Referenced from `README.md`'s Setup section as the one-command alternative to the manual steps.
+
+**GB-04** (SQL-side active/past event filtering, `openleadr-rs` submodule): the real finding
+here wasn't just a performance optimization — `PgEventStorage::retrieve_all` applied
+`OFFSET`/`LIMIT` in SQL and only *then* filtered the fetched page for active/past status in
+Rust, so `?active=` combined with pagination could silently return a short or wrong page (a
+correctness bug, not just an inefficiency, though small-scale enough that nobody had hit it in
+practice). Fix: added an `ends_at` column (migration
+`20260813000000_event_ends_at.sql`), computed by a new `EventContent::ends_at()` in
+`openleadr-wire` (replaces the old private `is_event_active` bool check with the same fallback
+rules — event-level `intervalPeriod` wins if present; else, if every interval has its own
+`intervalPeriod` with a duration, the event ends when the last one does; any open-ended
+interval or missing per-interval timing makes the whole event open-ended/"always active") and
+kept in sync on every `create()`/`update()`. `retrieve_all`'s `WHERE` clause now filters on
+`ends_at` directly, ahead of `OFFSET`/`LIMIT`. Existing rows are backfilled for the common case
+(event-level `intervalPeriod` with a duration) via a SQL cast — Postgres accepts ISO 8601
+duration text as an `interval` literal directly, so no duration-parsing logic needed
+duplicating in SQL; events with no event-level timing keep the "always active" NULL fallback
+until next touched, since reproducing the per-interval fallback logic in a one-time backfill
+wasn't worth it for what should be a small legacy set.
+
+Verification required more infrastructure than the fix itself: `sqlx::query_as!`/`query!`
+macros type-check against either a live DB or the committed `.sqlx` offline cache, and the
+cache needed regenerating since the queries changed. Full sequence (captured in
+`KEY_LEARNINGS.md`'s SQLx Offline Cache section): migrated a throwaway Postgres via `psql`
+directly (not the app binary, which wouldn't compile yet), installed `sqlx-cli` pinned to
+0.8.6 (the version matching this repo's `sqlx`, since latest `sqlx-cli` needs a newer rustc
+than the pinned `rust:1.90-alpine` image), ran `cargo sqlx prepare --workspace`, then verified
+with a `SQLX_OFFLINE=true` build. Also found and fixed along the way: the raw-SQL
+`fixtures/events.sql` test fixture bypasses `create()`/`update()` entirely, so it needed
+`ends_at` backfilled by hand to stay representative of real app-created data. Added 3 new
+integration tests (`active_filter_true_get_all`, `active_filter_false_get_all`,
+`active_filter_combined_with_pagination` — the last one is the actual pagination-bug
+regression test) plus 6 unit tests for `EventContent::ends_at()`. Full verification: the
+official `docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm
+cargo-test` flow on Node2 (mirrors `run_all_tests.sh --rust`/CI exactly) passed clean —
+`openleadr-client` + `openleadr-wire` (30 tests) + `openleadr-vtn` (123 tests), 0 failures.
+`cargo fmt --check` and `clippy --all-targets -- -D warnings` both clean.
+
+Two Node2-specific process issues surfaced and are recorded in `KEY_LEARNINGS.md`: a `docker
+run` left running when its SSH/Bash-tool call was killed by a timeout kept running
+server-side, invisible until `docker ps` — caused one accidental duplicate build sharing the
+same cache volumes before being caught; and Node2's `openleadr-rs` checkout had no push
+credentials for its HTTPS remote, worked around by fetching the new commit back to the local
+machine via `git fetch ssh://Node2/srv/docker/openadr_lab/openleadr-rs <branch>` and pushing
+from there instead of provisioning credentials on the shared host.
+
+All three items' `docs/BACKLOG.md` entries removed (both their "User-Value View" and "General
+Backlog" rows).
 
