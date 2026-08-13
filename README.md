@@ -61,6 +61,12 @@ If you already cloned without `--recursive`:
 git submodule update --init
 ```
 
+**One-command setup:** `bash scripts/setup_all.sh` runs steps 2–4 below (VTN
+stack, seed, VEN stack) in one go, waiting for each service to become
+healthy before continuing. Use `--fresh` to reset the VTN database first, or
+`--skip-seed` to skip seeding. Run the steps manually instead if you want to
+inspect each stage:
+
 ### 2. Deploy the VTN stack
 
 The VTN stack includes PostgreSQL, the openleadr-rs VTN, the BFF proxy, and the VTN operator UI.
