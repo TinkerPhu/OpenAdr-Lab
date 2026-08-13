@@ -308,8 +308,27 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 - Non-curtailable: ignores dispatcher setpoint.
 - Power output:
   ```
-  power_kw = −(rated_kw × irradiance)   [negative = export]
+  dc_potential_kw = rated_kw × irradiance
+  power_kw = −min(dc_potential_kw, inverter_max_kw)   [negative = export]
   ```
+  `inverter_max_kw` is the inverter's true AC output ceiling — distinct from `rated_kw`, the
+  installed DC panel peak — and defaults to `rated_kw` when unset, so an unconfigured profile
+  is unaffected. The clamp applies everywhere DC potential is computed (physics, forecast,
+  MILP input) and always runs *before* any commanded `export_limit_kw`, so a system that's
+  deliberately DC/AC-oversized clips at its own hardware ceiling independent of, and
+  distinguishable from, an externally-imposed curtailment.
+- `resolve_pv_export_limit_kw` (`controller/dispatcher.rs`) tags the resolved per-tick export
+  limit with a `PvCurtailmentSource` at the moment it's resolved — `None` (no limit below the
+  inverter ceiling), `Plan` (the plan's own target), or `Capacity` (a live VTN/capacity cap the
+  plan didn't anticipate). `PvState` carries both `export_limit_kw` and `curtailment_source` as
+  per-tick state (not live config on `PvInverter`), so a historical reconstruction from
+  `AssetHistoryBuffer` reports what was actually active at that past tick, not whatever the
+  live value happens to be now. Both are persisted into `tick_samples` (schema v5); within a
+  1-minute sampling window the accumulator's priority is `Capacity > Plan > None`, so a brief
+  unplanned event is never averaged away by a plan-sourced majority. The Controller page's PV
+  timeline (`AssetTimelineChart.tsx`) shades all three states distinctly: hardware-capped
+  (neutral/informational), planned curtailment (amber), unplanned curtailment (red, past
+  points only).
 - Irradiance auto-model (when not overridden):
   ```
   irradiance = max(0, sin(π × (hour − 6) / 12))   for hour ∈ [6, 18]
@@ -340,7 +359,8 @@ baseline. `pv_alpha` controls the half-life of the perturbation after release.
 
 | Parameter | Default | Unit | Description |
 |---|---|---|---|
-| `rated_kw` | 5.0 | kW | Peak rated output |
+| `rated_kw` | 5.0 | kW | Peak rated output (installed DC panel peak) |
+| `inverter_max_kw` | `rated_kw` | kW | Inverter's true AC output ceiling; a hardware-side clamp distinct from `rated_kw`, applied before any commanded export limit |
 
 ### Inject Overrides (`POST /sim/inject`)
 
