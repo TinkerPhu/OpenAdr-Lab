@@ -9131,3 +9131,63 @@ incident is not filed as a new backlog item here — left for the user to decide
 how to remediate first, since acting on it (or even fully diagnosing it
 further) wasn't this session's call to make unilaterally.
 
+## GB-27 fix: reportDescriptors so scenario runs actually get reports (2026-08-13)
+
+**Trigger**: second half of the same "which is most pressing" follow-up — after
+GB-28, the user asked to implement GB-27 the same way (plan, implement, review,
+merge).
+
+**Root cause** (confirmed via source read, `VEN/src/controller/vtn_port.rs` +
+`openadr_interface.rs`): a VEN only submits BASELINE/USAGE reports for an event
+that carries a `reportDescriptors` array on the *event* body — program-level
+reportDescriptors are spec-legal but not read by this VEN's model at all
+(`OadrProgram` has no such field). `experiments/run_experiment.py`'s
+`build_event()` never set this key, so no scenario run had ever produced a
+reportable obligation; `report_lag_stats()`/`event_impact_kwh()` always
+returned `None`/`null` — not because they're broken, but because nothing was
+ever archived for them to read.
+
+**Fix**: new `REPORT_DESCRIPTORS` constant (BASELINE `historical: false` +
+USAGE, both `frequency: 300` seconds — confirmed via `extract_report_
+obligations()` that frequency is seconds, not an ISO 8601 duration, a
+documented past gotcha; also confirmed `due_at = now + frequency`, so the
+*first* report only fires after a full frequency interval — 300s comfortably
+inside every 30-min scenario window, but too long for the 3-min `smoke.yaml`,
+which is why verification used a real scenario instead). `build_event()`
+gained an optional `report_descriptors` param; `run_window()` attaches it to
+the first event of `actions` when present (new `--request-reports` flag,
+default on). For the GB-28 paired-baseline window (`actions=[]`, no events at
+all otherwise), a synthetic **SIMPLE level=0** event spanning the whole window
+carries the descriptors instead — confirmed via `docs/openadr_3_0_specs/
+2_OpenADR 3.0 Definition v3.0.1.md` that level 0 means "normal operations" per
+spec, and via `VEN/src/controller/milp_planner/inputs.rs`'s `simple_cap`
+match arm that any level other than 1/2/3 falls through to the unrestricted
+contractual cap — a genuine no-op for planning, unlike posting a real
+price/capacity/alert event which would itself become a confound.
+
+**Verification**: live 30-min `s1_flat` run (`--no-paired-baseline`, since
+GB-28's own window-pairing mechanics were already verified separately) against
+the full 13-VEN fleet. `kpi.py`'s output: `report_timeliness` populated with
+130 samples (`median_s: -532.7`, `max_s: 72.4`, `min_s: -1145.5` — the
+negative lags are expected, not a bug: `report_lag_s` is computed against
+each interval's own timing, and a `historical: false` BASELINE report is a
+*forecast* for a future interval, so it's legitimately received before that
+interval's nominal time). `event_impact_kwh` populated (non-null) for all
+12 VENs present. Investigated the raw recorder rows rather than trusting the
+non-null check alone: a first ad-hoc query without time-window filtering
+picked up unrelated historical report rows from days earlier (a reminder that
+`report_lag_stats`/`_report_energy_kwh` deliberately filter by `received_at`
+for exactly this reason) — redone properly windowed, confirmed 60 real
+BASELINE and 60 real USAGE payload intervals for `ven-4` inside the actual run
+window. Every VEN's `event_impact_kwh` came back exactly `0.0` — expected, not
+a red flag: S-1 is the no-control-signal baseline scenario itself, so a
+well-calibrated forecast should closely track actual usage when nothing
+unusual is happening; this is the "no signal → no impact" sanity result, the
+same caveat WP5.4's own proposal flagged going in ("simulated households may
+be too regular, making the heuristic-baseline counterfactual look artificially
+good"). A scenario with a real event (S-4, S-6) would be the next place to
+look for a genuinely non-zero value, not attempted here (out of scope for this
+fix's own verification).
+
+**Bookkeeping**: GB-27 row removed from `docs/BACKLOG.md`.
+
