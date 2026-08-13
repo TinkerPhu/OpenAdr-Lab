@@ -77,8 +77,9 @@ export class BffApi {
     if (!r.ok) throw new Error(`deleteProgram ${r.status}`);
   }
 
-  async events(): Promise<VtnEvent[]> {
-    const r = await this.getReq("/api/events");
+  async events(active?: boolean): Promise<VtnEvent[]> {
+    const path = active === undefined ? "/api/events" : `/api/events?active=${active}`;
+    const r = await this.getReq(path);
     if (!r.ok) throw new Error(`events ${r.status}`);
     return r.json();
   }
