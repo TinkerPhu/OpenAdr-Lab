@@ -9257,3 +9257,45 @@ from there instead of provisioning credentials on the shared host.
 All three items' `docs/BACKLOG.md` entries removed (both their "User-Value View" and "General
 Backlog" rows).
 
+## GB-26 + GB-29 fixes: windowed recorder dump, stale orchestration docstring (2026-08-13)
+
+Two small follow-ups from the same fleet-experiment tooling session, both
+trivial per the user's own assessment before implementing.
+
+**GB-26**: `run_experiment.py`'s `snapshot()` dumped the entire
+`lab_recorder.reports_received`/`events_published`/`ven_snapshots` tables via
+unfiltered `COPY ... TO STDOUT`, so every run paid a dump cost that scaled
+with total deployment history, not run length (hit ~122 MB for
+`reports_received` alone in an earlier 3-min smoke test). Fixed by adding a
+`_TABLE_TIME_COL` map (`reports_received.received_at`,
+`events_published.seen_at`) and an optional `t_from`/`t_to` pair on
+`snapshot()`; when both are given, the `COPY` query gains a
+`WHERE <time_col> >= t_from AND <time_col> < t_to` clause. `ven_snapshots` is
+exempt — it's a PK-per-VEN "latest state" table (one row per VEN, overwritten
+in place), not an append log, so a time filter there would just risk
+excluding a VEN's only row if its last write happened to fall outside the
+window. `run_window()`'s call site now passes `t_from=t0` (the window's own
+start) and `t_to=datetime.now(timezone.utc)` (the actual moment snapshotting
+begins, not the nominal `end` — deliberately a little wider than the nominal
+window so nothing arriving during the cleanup/event-deletion step gets
+clipped).
+
+**GB-29**: the module docstring claimed the script "Runs ON the docker host
+(Node1), same convention as `fleet.sh`" — stale since the 2026-08-12 full
+13-VEN run, which had to be orchestrated off-host (a workstation reaching
+both Node1 and Node2 over LAN/ssh) because Node1 has no ssh trust to Node2.
+Rewrote the docstring to describe both modes: on-host for a single-host run,
+off-host via `--fleet-map`/`--pg-host` for a multi-host fleet — matching what
+the script has actually done since GB-29 was filed. No behavior change,
+docs-only.
+
+**Verification**: both are syntax/doc-level changes with no new runtime
+branch beyond the existing `--paired-baseline`/`--request-reports` machinery
+already exercised in the GB-28/GB-27 verification runs above; confirmed via
+`python3 -c "import ast; ast.parse(...)"` that the file still parses cleanly.
+No live re-run performed — the `WHERE` clause only narrows what a pre-existing
+non-empty query already returns, and the GB-27 verification run above already
+exercised the exact `t_from`/`snapshot()` call path this reuses.
+
+**Bookkeeping**: GB-26 and GB-29 rows removed from `docs/BACKLOG.md`.
+
