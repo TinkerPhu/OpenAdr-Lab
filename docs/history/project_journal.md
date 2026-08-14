@@ -9867,3 +9867,97 @@ here rather than silently left stale.
 full entry); also fixed a stray duplicate `---` separator left over from an
 earlier bookkeeping edit in this same file, found while removing this row.
 
+## Fleet run 2 (Part B): redeploy + S-1..S-8 live run (2026-08-14)
+
+Live redeploy + run following the "Fleet run 2 tooling (Part A)" entry
+above. Both hosts were confirmed stale before starting (`GET /plan` on
+ven-1/ven-4 had no `solver_ms`/`mip_gap_target`, `/history/plans` 404'd) and
+on unrelated leftover branches (`fix/gb-25-plan-history` on Node1,
+`fix/sim-persist-plan-context-tests` on Node2, both clean working trees) —
+switched both to `main` and pulled before rebuilding.
+
+**Redeploy**: `docker_host_lock.sh` held on both Node1 and Node2
+(`-l 600`) for the whole window. Rebuilt + redeployed Node1's VTN and VEN
+(ven-1..3) compose projects and Node2's `VEN/scale_out/node2` (ven-4..13).
+Verified before running anything: all 13 VENs healthy and VTN-connected,
+`solver_ms`/`mip_gap_target` present on `GET /plan`, `GET /history/plans`
+returns 200, and `ven-9`'s new `penalty_rules` block is live
+(`penalty_rules_active` shows `s7-peak-guard`, threshold 0.3 kW).
+
+**Two live bugs found and fixed forward, both merged to `main` mid-run**:
+
+1. `poll_plan_diagnostics()` crashed (`AttributeError` on `None.get()`)
+   whenever `GET /plan` returns a bare `null` — which every VEN does until
+   its first plan cycle completes, i.e. every freshly-redeployed VEN. The
+   exception silently killed the whole poller thread (all VENs, not just the
+   one still warming up) a few seconds into the very first scenario. Fixed
+   by treating a `null` plan body as an explicit "no plan yet" record instead
+   of letting it raise. Required killing and relaunching the run once (the
+   very first S-1 attempt); the resulting orphaned VTN program/event were
+   found and deleted manually before relaunching.
+2. `report_lag_stats()`/`event_impact_kwh()` only filtered recorder rows by
+   `received_at` time window, not by which VTN event/program they actually
+   belonged to. Node1's VTN is shared with other pre-existing test programs
+   (e.g. a leftover `test-rd-check` fixture); its own periodic report
+   traffic landed inside this run's time window purely by coincidence and
+   got counted, producing `report_timeliness.min_s` values in the millions
+   of seconds (a stale interval reference on that unrelated program's
+   reports). Found by eyeballing S-1's `kpis.json` output after the run
+   finished — every scenario's `min_s` was wildly wrong in the same way, a
+   clear tell it wasn't scenario-specific. Fixed by threading an `event_ids`
+   set (sourced from `run.json`'s own `"events"` list, already recorded by
+   `run_experiment.py`) through both functions, filtering on each report's
+   `payload_json.eventID`. Re-ran `kpi.py` for all 8 scenarios after the fix
+   (no need to re-run the live fleet — the recorder CSVs were already
+   snapshotted); `min_s` values are now all within the actual run window
+   (-925 to -1213 s) across every scenario. Also fixed the same
+   non-true-median bug (`s[len(s)//2]` vs `statistics.median()`) caught
+   earlier in Part A's review, this time in `report_lag_stats`.
+
+**Run**: all 8 scenarios (S-1..S-8, ~7h45m total — S-1 ran
+`--no-paired-baseline` since it's the baseline itself) completed with
+`exited rc=0`, no further errors. Orchestrated off-host as a single
+sequential detached script (`nohup bash run_all_scenarios.sh`) rather than
+launching each scenario as its own tracked process, specifically to avoid
+the ScheduleWakeup-coordination race documented in the GB-25 Part B entry
+below — one process, one log file, one line of monitoring truth. Progress
+was checked periodically against the log plus a direct VTN `/programs`
+lookup (the log is fully stdout-buffered when piped to a file, so it goes
+quiet for the ~25-55 min a scenario is mid-window and only flushes at exit —
+looked "frozen" repeatedly but never actually was).
+
+**Results — did the new diversity/stats actually materialize?** Yes.
+Aggregate `warning_kind_counts` across all 8 scenarios:
+`PEAK_PENALTY_EXCEEDED: 5664` (ven-9's new `penalty_rules`, firing on every
+plan cycle in every scenario exactly as designed — its 0.3 kW threshold sits
+below ven-9's own 0.5 kW baseline with no controllable asset to shed it),
+`CAPACITY_VIOLATION: 48` (S-3/S-4/S-6/S-7, as before), `BUDGET_SHORTFALL: 5`
+(S-8 only — the new `budget_shortfall` action against ven-11 fired
+correctly; confirmed independently via `ven-11`'s own `/user-requests`,
+`mode: MAX_COST`, `budget_eur: 0.01`, status `CANCELLED` post-cleanup).
+`SOLVER_INFEASIBLE`/`STALE_RATE_ESTIMATE`/`OTHER` stayed at 0 — expected
+(nothing in this run's scenarios pushes the solver to genuine infeasibility
+or a stale-rate condition). Compare to the 2026-08-12 run: `solve_status`
+was `OPTIMAL` on all 390 samples with almost no warning diversity at all —
+this run's data is substantially richer for exactly the plan-quality
+questions GB-25 was built to answer.
+
+`solver_ms`/`mip_gap_target_sanity`/`forecast_accuracy` all populated with
+real data for the first time (e.g. ven-1/S-1: solver_ms median 2554.5 ms,
+`mip_gap_target` constant at 0.02 as GB-31 documented, `pv:near` forecast
+MAE 1.12 kW / bias -1.12 kW — a genuine PV under-forecast signal, not
+previously visible anywhere in this tooling).
+
+**Cleanup**: no orphaned VTN programs remained after the run (each
+scenario's own `finally` block deletes its events/program); both
+`docker_host_lock`s released; both hosts left on `main`. A leftover junk
+result directory from the killed first S-1 attempt
+(`20260814-1150-s1_flat/`, poller-crash JSONL only, no `run.json`) was
+deleted before running `kpi.py` across the real 8.
+
+**Not done / left open**: GB-24 (Node2 E2E-vs-fleet contention) — the lock
+held for this run's duration mitigated it for this run specifically, still
+open on the backlog. GB-31 (`mip_gap_target` proxy-not-achieved-gap) —
+this run's `mip_gap_target_sanity` check confirms the known limitation,
+doesn't address it.
+
