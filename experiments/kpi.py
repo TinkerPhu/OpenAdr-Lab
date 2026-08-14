@@ -101,9 +101,17 @@ def _parse_iso8601_duration_hours(s):
     return total_s / 3600.0
 
 
-def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type):
+def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=None):
     """Sum a VEN's `report_type` report intervals (values in W) into kWh,
-    restricted to rows whose `received_at` falls in [t_from, t_to)."""
+    restricted to rows whose `received_at` falls in [t_from, t_to). `event_ids`
+    (when given), further restricts to reports whose payload's `eventID`
+    belongs to this run's own events -- Node1's VTN is shared with other
+    pre-existing/concurrent test programs, whose own periodic report traffic
+    can otherwise leak into the time window purely by coincidence of when it
+    happened to arrive (found live during the fleet-run-2 S-1..S-8 run: an
+    unrelated leftover 'test-rd-check' program's reports, with a stale
+    interval reference producing report_lag_s in the millions of seconds,
+    were being time-windowed into this run's own report_timeliness stats)."""
     if not csv_path.exists():
         return None
     total_kwh = 0.0
@@ -123,6 +131,8 @@ def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type):
                 payload = json.loads(row["payload_json"])
             except (KeyError, ValueError):
                 continue
+            if event_ids is not None and payload.get("eventID") not in event_ids:
+                continue
             for resource in payload.get("resources", []):
                 for interval in resource.get("intervals", []):
                     period = interval.get("intervalPeriod") or {}
@@ -138,20 +148,26 @@ def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type):
     return total_kwh if found else None
 
 
-def event_impact_kwh(csv_path, t_from, t_to, ven_name):
+def event_impact_kwh(csv_path, t_from, t_to, ven_name, event_ids=None):
     """WP5.4: Σ(baseline − actual) over the run window, from archived BASELINE
     and USAGE reports. `None` when no BASELINE reports were archived for this
-    VEN in the window (nothing to compare against)."""
-    baseline_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "BASELINE")
+    VEN in the window (nothing to compare against). See `_report_energy_kwh`
+    for why `event_ids` matters on a shared VTN."""
+    baseline_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "BASELINE", event_ids)
     if baseline_kwh is None:
         return None
-    usage_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "USAGE") or 0.0
+    usage_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "USAGE", event_ids) or 0.0
     return round(baseline_kwh - usage_kwh, 4)
 
 
-def report_lag_stats(csv_path, t_from, t_to):
+def report_lag_stats(csv_path, t_from, t_to, event_ids=None):
     """Only reports the recorder received during the run window count —
-    the archive holds every report ever seen, including ancient ones."""
+    the archive holds every report ever seen, including ancient ones.
+    `event_ids` (when given) further restricts to this run's own events, for
+    the same reason `_report_energy_kwh` does — see its docstring. Without
+    this, a shared VTN's unrelated concurrent report traffic can produce
+    wildly wrong lag values (observed live: report_lag_s in the millions of
+    seconds from a leftover test program's stale interval reference)."""
     if not csv_path.exists():
         return None
     lags = []
@@ -164,6 +180,13 @@ def report_lag_stats(csv_path, t_from, t_to):
                 continue
             if not (t_from <= ts < t_to + 60):
                 continue
+            if event_ids is not None:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (KeyError, ValueError):
+                    continue
+                if payload.get("eventID") not in event_ids:
+                    continue
             v = row.get("report_lag_s")
             if v not in (None, "", r"\N"):
                 try:
@@ -175,7 +198,7 @@ def report_lag_stats(csv_path, t_from, t_to):
     lags.sort()
     return {
         "count": len(lags),
-        "median_s": round(lags[len(lags) // 2], 1),
+        "median_s": round(statistics.median(lags), 1),
         "max_s": round(max(lags), 1),
         "min_s": round(min(lags), 1),
     }
@@ -347,7 +370,7 @@ def _self_check():
     t0 = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc).timestamp()
     t_from, t_to = int(t0), int(t0) + 1800  # 30-minute window
 
-    def row(report_type, received_offset_s, payload_type, value_w, duration):
+    def row(report_type, received_offset_s, payload_type, value_w, duration, event_id=None):
         received = datetime.fromtimestamp(
             t0 + received_offset_s, tz=timezone.utc
         ).isoformat()
@@ -363,6 +386,8 @@ def _self_check():
                 }
             ]
         }
+        if event_id is not None:
+            payload["eventID"] = event_id
         return {
             "report_id": "r1",
             "modification_date_time": "2026-01-01T10:00:00Z",
@@ -397,6 +422,25 @@ def _self_check():
             writer.writerows(rows2)
         impact2 = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
         assert impact2 is None, f"expected None (no BASELINE archived), got {impact2}"
+
+        # Scenario 3: a shared VTN can carry another program's concurrent
+        # report traffic that happens to fall in the same time window --
+        # event_ids restricts to this run's own event, so the unrelated
+        # "other-evt" BASELINE row (which alone would otherwise flip the
+        # result) is excluded and only "our-evt"'s rows count.
+        rows3 = [
+            row("baseline-report", 60, "BASELINE", 2000.0, "PT15M", event_id="our-evt"),
+            row("usage-report", 90, "USAGE", 1000.0, "PT15M", event_id="our-evt"),
+            row("baseline-report", 100, "BASELINE", 999000.0, "PT15M", event_id="other-evt"),
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows3[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows3)
+        impact3 = event_impact_kwh(csv_path, t_from, t_to, "ven-1", event_ids={"our-evt"})
+        assert impact3 == 0.25, f"expected 0.25 (other-evt excluded), got {impact3}"
+        impact3_unfiltered = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
+        assert impact3_unfiltered != 0.25, "unfiltered call should differ once other-evt is mixed in"
 
     print("kpi.py self-check OK: event_impact_kwh")
 
@@ -500,6 +544,12 @@ def main():
     run_dir = Path(args.run)
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     t_from, t_to = window(meta)
+    # Restrict report-derived KPIs to this run's own VTN events -- Node1's
+    # VTN is shared with other concurrent/leftover test programs, whose
+    # report traffic can otherwise leak into the time window. `or None` so an
+    # older run.json without an "events" key (or a run with none) falls back
+    # to the unfiltered behavior rather than matching nothing.
+    event_ids = set(meta.get("events", [])) or None
 
     baseline_dir_arg = args.baseline
     if not baseline_dir_arg:
@@ -530,7 +580,7 @@ def main():
         if ven in baseline:
             k["energy_shifted_kwh"] = round(baseline[ven] - k["energy_import_kwh"], 4)
         impact = event_impact_kwh(
-            run_dir / "recorder-reports_received.csv", t_from, t_to, ven
+            run_dir / "recorder-reports_received.csv", t_from, t_to, ven, event_ids
         )
         if impact is not None:
             k["event_impact_kwh"] = impact
@@ -545,7 +595,7 @@ def main():
         out["vens"][ven] = k
 
     out["report_timeliness"] = report_lag_stats(
-        run_dir / "recorder-reports_received.csv", t_from, t_to
+        run_dir / "recorder-reports_received.csv", t_from, t_to, event_ids
     )
 
     # WP4.5: persona segmentation — mean KPIs per persona group so the
