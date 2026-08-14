@@ -551,6 +551,27 @@ export function useArbiterDiagnostics(enabled: boolean) {
   });
 }
 
+/** BL-43: live site-level headroom snapshot — a diagnostic value, not driven
+ * by the Controller page's own unified 2s timer. */
+export function useFlexibility() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["flexibility", api.baseUrl],
+    queryFn: () => api.flexibility(),
+    refetchInterval: 10_000,
+  });
+}
+
+/** BL-43: the site-headroom ring, for the "Site Headroom" chart. */
+export function useFlexibilityHistory() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["flexibility_history", api.baseUrl],
+    queryFn: () => api.flexibilityHistory(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useBaselineOverride() {
   const { api } = useVenContext();
   return useQuery({

@@ -28,6 +28,8 @@ vi.mock("../components/controller/charts/AssetTimelineChart", () => ({
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useSimSchema: () => ({ data: {} }),
+  useFlexibility: () => ({ data: undefined }),
+  useFlexibilityHistory: () => ({ data: [] }),
 }));
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

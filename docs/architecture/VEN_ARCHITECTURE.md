@@ -632,6 +632,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 | DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
 | GET | `/flexibility` | 5 | `SiteFlexibilityEnvelope` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
+| GET | `/flexibility/history` | 5 | BL-43: `SiteFlexibilitySample[]` — the bounded in-memory ring (`AppState::flexibility_history`, 1h @ ~1s cadence, oldest first) every `/flexibility` write is also appended to, since the live snapshot alone has nothing to plot as a line |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |

@@ -10,7 +10,7 @@ use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
 };
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
 use crate::entities::sim_inject::SimInjectState;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
@@ -25,6 +25,7 @@ use tokio::sync::RwLock;
 mod arbiter;
 mod connection;
 mod event_log;
+mod flexibility_history;
 mod grid_signals;
 mod heuristics;
 mod obligations;
@@ -160,6 +161,10 @@ pub struct AppState {
             >,
         >,
     >,
+    /// BL-43: bounded ring of `SiteFlexibilityEnvelope` snapshots, oldest first —
+    /// `HemsState::site_envelope` only ever holds the latest one.
+    pub flexibility_history:
+        Arc<RwLock<crate::entities::ring_buffer::RingBuffer<SiteFlexibilitySample>>>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -209,6 +214,11 @@ impl AppState {
             report_submissions: Arc::new(RwLock::new(
                 crate::entities::ring_buffer::RingBuffer::new(
                     report_submissions::REPORT_SUBMISSION_RING_CAP,
+                ),
+            )),
+            flexibility_history: Arc::new(RwLock::new(
+                crate::entities::ring_buffer::RingBuffer::new(
+                    flexibility_history::FLEXIBILITY_HISTORY_RING_CAP,
                 ),
             )),
         }
@@ -440,6 +450,7 @@ impl AppState {
     }
 
     pub async fn set_site_envelope(&self, env: SiteFlexibilityEnvelope) {
+        self.record_flexibility_sample(&env).await;
         self.hems.write().await.site_envelope = Some(env);
     }
 

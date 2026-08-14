@@ -545,6 +545,23 @@ export type BaselineOverride = {
 
 export type CreateBaselineOverrideBody = { slots: BaselineSlot[] };
 
+/** BL-43: live site-level headroom, `GET /flexibility` — instant-only, no forward
+ * schedule (distinct from the per-device `FlexibilityEnvelope` below). */
+export type SiteFlexibilityEnvelope = {
+  ts: string;
+  up_kw: number;
+  down_kw: number;
+  up_duration_s: number | null;
+  down_duration_s: number | null;
+};
+
+/** One historical sample of `SiteFlexibilityEnvelope`, `GET /flexibility/history`. */
+export type SiteFlexibilitySample = {
+  ts: string;
+  up_kw: number;
+  down_kw: number;
+};
+
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 
 /** Per-device schedulability metadata emitted at plan time (VEN/src/entities/plan.rs FlexibilityEnvelope). */
