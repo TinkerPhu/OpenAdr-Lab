@@ -9580,3 +9580,97 @@ calibrated against an actual bad run's memory profile.
 
 **Bookkeeping**: GB-24 row removed from `docs/BACKLOG.md`.
 
+## Fleet run 2 tooling (Part A) — 2026-08-14
+
+Follow-up to the 2026-08-12 full 13-VEN fleet run: that run's plan-quality
+stats were data-poor (solve_status OPTIMAL on all 390 samples, few
+warnings), and GB-25 (`solver_ms`/`mip_gap_target`/typed `warning_kinds`,
+`GET /history/plans`) has since landed on `main` but the live fleet
+deployment still runs pre-GB-25 code. This piece of work (done in worktree
+`worktrees/fleet-run-2-tooling`, branch `feat/fleet-run-2-tooling`) builds
+the tooling/scenario/profile changes a fresh redeploy + 8-scenario run
+(S-1..S-8) will use — no live deploy, no fleet run, done here.
+
+**Profile**: `VEN/profiles/ven-9.yaml` (base-load-only, no controllable
+asset) gained a `penalty_rules` block — 0.3 kW threshold, 30-min window,
+1 EUR/kW — deliberately below its own 0.5 kW baseline so a PeakPenaltyExceeded
+warning is guaranteed once redeployed. Exact shape matched against
+`VEN/profiles/penalty_test.yaml`'s existing fixture.
+
+**Scenarios**: `experiments/scenarios/s7_stress.yaml` (tight 1.5 kW capacity
+limit overlapping a grid-emergency alert) added, matching `s3_capacity_limit`/
+`s4_alert`'s existing field shapes exactly.
+
+`experiments/scenarios/s8_budget.yaml` was added as its **own** scenario
+rather than a 4th action folded into S-7 — keeps BudgetShortfall's own stats
+separable per-scenario from CapacityViolation/PeakPenaltyExceeded's in the
+`warning_kind_counts` KPI (kpi.py's `plan_history_summary`), since S-7's own
+actions already produce those two kinds.
+
+**New `budget_shortfall` action type** (`experiments/run_experiment.py`):
+unlike every other action type, this bypasses the VTN — a direct
+`POST /user-requests` on the target VEN's own HTTP API (no auth header
+needed; confirmed by reading the route registration in
+`VEN/src/routes/mod.rs` — `/user-requests` isn't behind bearer-token auth)
+with a deliberately too-tight budget, to force a real `BudgetShortfall` plan
+warning. New helpers `post_user_request`/`delete_user_request` mirror
+`post_event`'s shape; `run_window()`'s action loop and `finally` cleanup got
+a parallel `created_requests` list alongside `created_events`.
+
+Key correctness finding from reading `VEN/src/controller/milp_planner/inputs.rs`'s
+`budget_warning` and `VEN/src/assets/ev_milp.rs`: `budget_eur` only reaches
+the MILP budget constraint (and therefore the warning) when the EV session's
+`mode` is `MAX_COST` — every other mode ignores `session.budget_eur` entirely.
+Also, contrary to the initial plan draft, the MILP's core-energy shortfall
+comes from `session.target_soc` (via `core_kwh = (target_soc − current_soc) *
+battery_kwh` in `ev_milp.rs`), **not** from `target_energy_kwh` — passing
+`target_energy_kwh` alone in the POST body leaves `target_soc` at its default
+(0.9) and has no effect on the MILP's core-energy computation for the EV
+asset. So the actual POST body sets `mode: "MAX_COST"` and `target_soc`
+(0.80, matching ven-11's own `soc_target`) rather than `target_energy_kwh`;
+the scenario YAML's `target_soc` field reflects this. Confirmed the
+mechanism itself already has coverage — `tests/features/ven_request_modes.feature`
+scenario "MAX_COST budget shortfall raises a user notification" exercises the
+exact same `mode=MAX_COST` + low `budget_eur` combination end-to-end.
+
+**Plan-history + forecast-accuracy fetch**: `fetch_plan_history`/
+`fetch_forecast_accuracy` pull `GET /history/plans`/`GET /history/forecast-accuracy`
+per VEN (gated on `--fleet-map`, same as the existing `poll_plan_diagnostics`)
+right after `run_window()`'s existing `snapshot()` call, same `t_from`/`t_to`
+window. `poll_plan_diagnostics`'s docstring corrected — its "solver_ms would
+need an SSE listener" note was stale since GB-25; it's now documented as the
+live-progress fallback, not the analysis source of record.
+
+**kpi.py**: new `plan_history_summary()` (reads `{ven}-plan-history.json`,
+verified field-for-field against `entities::history::PlanHistorySample` —
+`warning_kinds` serializes as SCREAMING_SNAKE_CASE strings e.g.
+`"BUDGET_SHORTFALL"`, easy to consume as plain strings) computes
+solver_ms/mip_gap_target-sanity/solve_status_counts/warning_kind_counts/cost
+stats, all null-tolerant. New `forecast_accuracy_summary()` (reads
+`{ven}-forecast-accuracy.json`, verified against `ForecastAccuracySample`)
+groups by `(asset_id, lead_kind)` and computes MAE + bias (signed, to catch
+systematic over/under-forecast direction), excluding unreconciled
+(`actual_kw is None`) rows silently. `main()` tries `plan_history_summary()`
+first, falls back to the existing `plan_diagnostics_summary()` (unchanged,
+now documented as the fallback) when it returns `None` — the
+`k["plan_diagnostics"]` key name is unchanged either way. Self-check
+(`python experiments/kpi.py --self-check`) extended with synthetic fixtures
+for both new functions, including a deliberately non-constant
+`mip_gap_target` (flags a WARN, doesn't error) and a warning_count/
+`len(warning_kinds)` mismatch check.
+
+**Verification**: no local Docker available on this workstation (`docker
+version` fails), so no local single-VEN stack was brought up. Verified
+instead via (a) `python experiments/kpi.py --self-check` — passes, including
+the new fixtures' assertions; (b) `python -m py_compile` on both changed
+scripts; (c) careful cross-reference of every Rust field name/route/mode
+condition this tooling depends on, reading the actual current-`main` source
+rather than trusting the plan draft's field-name notes (which is how the
+`target_soc` vs `target_energy_kwh` finding above was caught); (d) confirming
+existing BDD (`ven_request_modes.feature`) and Rust unit coverage
+(`milp_planner/tests/penalty.rs`, `solver.rs`) already exercise the
+underlying `budget_warning`/`penalty_rules` mechanisms this tooling drives.
+Live-fleet dry-run verification (confirming a real deploy actually fires
+BudgetShortfall/PeakPenaltyExceeded through this new tooling) is deferred to
+Part B (redeploy + run), not done here.
+

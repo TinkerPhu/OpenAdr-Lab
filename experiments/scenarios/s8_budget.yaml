@@ -1,0 +1,21 @@
+# S-8 — Budget shortfall: deliberately under-budgeted EV MAX_COST request on
+# ven-11, direct to that VEN's own /user-requests (NOT a VTN event — see
+# run_experiment.py's budget_shortfall action handling), to force a real
+# BudgetShortfall plan warning. Kept as its own scenario (not folded into
+# S-7) so BudgetShortfall's own stats stay separable from
+# CapacityViolation/PeakPenaltyExceeded's in the per-scenario
+# warning_kind_counts KPI.
+name: s8_budget
+description: EV MAX_COST budget shortfall on ven-11 (direct /user-requests, no VTN event)
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.25, 0.25, 0.25]
+    interval_minutes: 10
+  - at_minute: 5
+    type: budget_shortfall
+    duration_minutes: 20
+    target_ven: ven-11
+    budget_eur: 0.01
+    target_soc: 0.80
