@@ -116,6 +116,7 @@ pub fn build_asset_contexts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::milp_planner::asset_port::{AssetKind, AssetMilpParams};
 
     #[test]
     fn apply_pending_pv_inject_noop_when_no_pv_asset() {
@@ -133,5 +134,177 @@ mod tests {
         let inject = SimInjectState::default();
         apply_pending_pv_inject(&mut sim_snap, &inject, Utc::now());
         // No panic is the assertion — nothing else observable without a PV asset.
+    }
+
+    #[test]
+    fn apply_pending_pv_inject_sets_offset_and_alpha_from_forced_irradiance() {
+        use crate::entities::asset_params::{AssetParams, PvParams};
+
+        let now = Utc::now();
+        let mut sim_snap = SimState::from_params(&[AssetParams::Pv(PvParams::default())], now);
+        let inject = SimInjectState {
+            pv_irradiance: Some(0.9),
+            pv_irradiance_alpha: 0.25,
+            ..Default::default()
+        };
+
+        apply_pending_pv_inject(&mut sim_snap, &inject, now);
+
+        let natural = PvInverter::natural_irradiance_at(now);
+        let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV).unwrap();
+        match cfg {
+            AssetConfig::Pv(pv) => {
+                assert!(
+                    (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
+                    "offset must be forced-minus-natural irradiance"
+                );
+                assert!((pv.pv_alpha - 0.25).abs() < 1e-9);
+            }
+            other => panic!("expected Pv config, got {other:?}"),
+        }
+    }
+
+    fn cum_seconds(n: usize, step_s: i64) -> Vec<i64> {
+        (0..=n as i64).map(|i| i * step_s).collect()
+    }
+
+    #[test]
+    fn build_asset_contexts_returns_one_per_milp_capable_asset_and_skips_others() {
+        use crate::entities::asset_params::{
+            AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams,
+        };
+
+        let now = Utc::now();
+        let params = vec![
+            AssetParams::Battery(BatteryParams {
+                id: "battery".into(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 3.0,
+                max_discharge_kw: 3.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 0.95,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: None,
+            }),
+            AssetParams::Heater(HeaterParams {
+                id: "heater".into(),
+                ..Default::default()
+            }),
+            AssetParams::Ev(EvParams {
+                id: "ev".into(),
+                ..Default::default()
+            }),
+            AssetParams::BaseLoad(BaseLoadParams {
+                id: "base_load".into(),
+                baseline_kw: 1.0,
+                spikes: vec![],
+            }),
+        ];
+        let sim_snap = SimState::from_params(&params, now);
+        let planner = PlannerParams::default();
+        let cum_s = cum_seconds(4, 600);
+
+        let contexts = build_asset_contexts(
+            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0, 0.07, 0.03, &[],
+        );
+
+        assert_eq!(
+            contexts.len(),
+            3,
+            "base_load is not MILP-capable and must be skipped, not produce a context"
+        );
+        let mut got: Vec<(String, AssetKind)> = contexts
+            .iter()
+            .map(|c| (c.asset_id().to_string(), c.asset_kind()))
+            .collect();
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            got,
+            vec![
+                ("battery".to_string(), AssetKind::Battery),
+                ("ev".to_string(), AssetKind::Ev),
+                ("heater".to_string(), AssetKind::Heater),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_asset_contexts_selects_c_terminal_by_asset_type_not_a_single_shared_value() {
+        use crate::entities::asset_params::{AssetParams, BatteryParams, HeaterParams};
+
+        let now = Utc::now();
+        let params = vec![
+            AssetParams::Battery(BatteryParams {
+                id: "battery".into(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 3.0,
+                max_discharge_kw: 3.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 0.95,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: None,
+            }),
+            AssetParams::Heater(HeaterParams {
+                id: "heater".into(),
+                ..Default::default()
+            }),
+        ];
+        let sim_snap = SimState::from_params(&params, now);
+        let planner = PlannerParams::default();
+        let cum_s = cum_seconds(4, 600);
+
+        // Deliberately distinct values so a bug that used one shared c_terminal
+        // for every asset (instead of selecting per AssetConfig variant) would
+        // fail this assertion.
+        let contexts = build_asset_contexts(
+            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0,
+            /* heater_c_terminal_eur_kwh */ 0.07,
+            /* battery_c_terminal_eur_kwh */ 0.03,
+            &[],
+        );
+
+        let heater_ctx = contexts
+            .iter()
+            .find(|c| c.asset_kind() == AssetKind::Heater)
+            .expect("heater context must be present");
+        match heater_ctx.milp_params(4, now) {
+            AssetMilpParams::Heater(scalars) => {
+                assert!(
+                    (scalars.c_terminal_eur_kwh - 0.07).abs() < 1e-9,
+                    "heater must receive heater_c_terminal_eur_kwh, not battery's value"
+                );
+            }
+            other => panic!("expected Heater scalars, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_asset_contexts_extracts_min_ev_charge_kw_from_ev_asset_params() {
+        use crate::entities::asset_params::{AssetParams, EvParams};
+
+        let now = Utc::now();
+        let params = vec![AssetParams::Ev(EvParams {
+            id: "ev".into(),
+            min_charge_kw: 2.2,
+            ..Default::default()
+        })];
+        let sim_snap = SimState::from_params(&params, now);
+        let planner = PlannerParams::default();
+        let cum_s = cum_seconds(4, 600);
+
+        let contexts = build_asset_contexts(
+            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0, 0.0, 0.0, &[],
+        );
+
+        let ev_ctx = &contexts[0];
+        match ev_ctx.milp_params(4, now) {
+            AssetMilpParams::Ev(scalars) => {
+                assert!(
+                    (scalars.p_min_kw - 2.2).abs() < 1e-9,
+                    "min_ev_charge_kw must be scanned out of asset_params and threaded through"
+                );
+            }
+            other => panic!("expected Ev scalars, got {other:?}"),
+        }
     }
 }
