@@ -4,6 +4,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState, GridState,
     HistoryPoint,
 };
+use crate::entities::asset::PowerAdjustability;
 
 /// Grid virtual asset.
 ///
@@ -96,10 +97,17 @@ impl Asset for Grid {
             AssetState::Grid(g) => AssetCapability {
                 max_export_kw: g.export_limit_kw, // ≤ 0
                 max_import_kw: g.import_limit_kw, // ≥ 0
+                // Not a real device the VEN dispatches — see this fn's own
+                // doc comment above. Not reachable via GET /capability/:id
+                // either (Grid isn't in AssetConfig).
+                adjustability: PowerAdjustability::None,
+                power_steps_kw: vec![],
             },
             _ => AssetCapability {
                 max_export_kw: 0.0,
                 max_import_kw: 0.0,
+                adjustability: PowerAdjustability::None,
+                power_steps_kw: vec![],
             },
         }
     }

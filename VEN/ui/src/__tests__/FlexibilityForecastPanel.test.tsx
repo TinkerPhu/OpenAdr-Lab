@@ -48,6 +48,8 @@ describe("FlexibilityForecastPanel", () => {
           max_export_kw: 0,
           min_export_kw: 0,
           is_fixed: false,
+          adjustability: "STEPLESS",
+          power_steps_kw: [],
         },
       },
     ]);
@@ -81,6 +83,8 @@ describe("FlexibilityForecastPanel", () => {
           max_export_kw: 0,
           min_export_kw: 0,
           is_fixed: true,
+          adjustability: "STEPPED",
+          power_steps_kw: [0, 1.25, 2.5],
         },
       },
     ]);
@@ -99,6 +103,8 @@ describe("FlexibilityForecastPanel", () => {
           max_export_kw: 0,
           min_export_kw: 0,
           is_fixed: false,
+          adjustability: "STEPPED",
+          power_steps_kw: [0, 3, 6],
         },
       },
     ]);
@@ -108,5 +114,51 @@ describe("FlexibilityForecastPanel", () => {
     const row = screen.getByTestId("flexibility-row-heater");
     expect(row).toHaveTextContent("6.00 kW");
     expect(row).toHaveTextContent("3.00 kW");
+  });
+
+  // ── BL-27: Adjustability column ───────────────────────────────────────────
+
+  it("shows the discrete levels for a Stepped asset", () => {
+    mockCapabilities.mockReturnValue([
+      {
+        data: {
+          max_import_kw: 2.5,
+          min_import_kw: 1.25,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+          adjustability: "STEPPED",
+          power_steps_kw: [0, 1.25, 2.5],
+        },
+      },
+    ]);
+    mockForecasts.mockReturnValue([]);
+    renderPanel(["heater"]);
+
+    expect(screen.getByTestId("adjustability-heater")).toHaveTextContent(
+      "Stepped (0/1.25/2.5 kW)",
+    );
+  });
+
+  it("shows a plain classification label with no levels for a Stepless asset", () => {
+    mockCapabilities.mockReturnValue([
+      {
+        data: {
+          max_import_kw: 7.4,
+          min_import_kw: 1.4,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+          adjustability: "STEPLESS",
+          power_steps_kw: [],
+        },
+      },
+    ]);
+    mockForecasts.mockReturnValue([]);
+    renderPanel(["ev"]);
+
+    const cell = screen.getByTestId("adjustability-ev");
+    expect(cell).toHaveTextContent("Stepless");
+    expect(cell).not.toHaveTextContent("kW)");
   });
 });
