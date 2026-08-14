@@ -29,6 +29,7 @@ import argparse
 import csv
 import json
 import sqlite3
+import statistics
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -200,7 +201,7 @@ def plan_history_summary(run_dir, ven):
     if solver_ms_vals:
         s = sorted(solver_ms_vals)
         solver_ms = {
-            "median": s[len(s) // 2],
+            "median": statistics.median(s),
             "max": max(s),
             "mean": round(sum(s) / len(s), 1),
         }
@@ -434,7 +435,7 @@ def _self_check():
         (run_dir / "ven-1-plan-history.json").write_text(json.dumps(plan_rows), encoding="utf-8")
         summary = plan_history_summary(run_dir, "ven-1")
         assert summary["cycles"] == 3, summary
-        assert summary["solver_ms"] == {"median": 120, "max": 120, "mean": 100.0}, summary["solver_ms"]
+        assert summary["solver_ms"] == {"median": 100.0, "max": 120, "mean": 100.0}, summary["solver_ms"]
         assert summary["mip_gap_target_sanity"] == {
             "distinct_values": [0.02, 0.05], "constant": False,
         }, summary["mip_gap_target_sanity"]
