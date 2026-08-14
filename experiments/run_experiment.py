@@ -28,10 +28,20 @@ VTN's own host:
     ... --out experiments/results           # output root
     ... --fleet-map experiments/fleet_map.json --pg-host Node1  # multi-host run
 
-Steps: create a program, replay the scenario's actions at their offsets,
-wait out the window, delete the created events/program, then snapshot each
-VEN's history.sqlite plus the lab_recorder tables (CSV via psql in the
-vtn-db container).
+Steps: create a program, replay the scenario's actions at their offsets
+(one action type, `budget_shortfall`, bypasses the VTN entirely -- see
+below), wait out the window, delete the created events/program/requests,
+snapshot each VEN's history.sqlite plus the lab_recorder tables (CSV via
+psql in the vtn-db container), then (GB-25, --fleet-map only) pull each
+VEN's `GET /history/plans` and `GET /history/forecast-accuracy` for the
+same window into per-VEN JSON files.
+
+`budget_shortfall` (S-8): unlike every other action type, this does NOT go
+through the VTN -- it's a direct `POST /user-requests` against one target
+VEN's own HTTP API, with a deliberately too-tight budget, so that VEN's own
+MILP planner raises a real BudgetShortfall plan warning (see
+VEN/src/controller/milp_planner/inputs.rs's `budget_warning`). Requires
+--fleet-map (the target VEN's base URL is resolved from it).
 """
 
 import argparse
@@ -131,6 +141,30 @@ def build_event(program_id, action, start, report_descriptors=None):
     return body
 
 
+def post_user_request(base_url, body):
+    """POST {base_url}/user-requests directly against a VEN's own HTTP API --
+    unlike every other action type (which goes through the VTN via
+    build_event/post_event), this talks straight to the target VEN. Used by
+    the `budget_shortfall` scenario action to force a real BudgetShortfall
+    plan warning (VEN/src/controller/milp_planner/inputs.rs's
+    `budget_warning`). No auth header: /user-requests is a same-host
+    VEN-local endpoint, not behind the VTN's bearer-token auth. Returns the
+    created request's id."""
+    r = requests.post(f"{base_url}/user-requests", json=body, timeout=10)
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def delete_user_request(base_url, request_id):
+    """Best-effort cleanup for post_user_request, mirroring the event/program
+    deletion in run_window's `finally` block (and setup_persona_sessions'
+    teardown()) -- never raises, a cleanup failure must not abort the run."""
+    try:
+        requests.delete(f"{base_url}/user-requests/{request_id}", timeout=10)
+    except requests.RequestException as e:
+        print(f"WARN: user-request cleanup {base_url}/{request_id}: {e}")
+
+
 def _snapshot_local(out_dir, ven, ven_data_root):
     src = Path(ven_data_root) / ven / "history.sqlite"
     if not src.exists():
@@ -221,6 +255,65 @@ def _ven_base_url(entry):
     return f"http://{entry['lan_ip']}:{entry['port']}"
 
 
+def fetch_plan_history(out_dir, vens, fleet_map, t_from, t_to):
+    """GB-25: pull each VEN's `GET /history/plans?from=&to=` for the run
+    window into `{ven}-plan-history.json` -- one row per plan cycle, with
+    solver_ms/mip_gap_target/typed warning_kinds (see
+    entities::history::PlanHistorySample and VEN_ARCHITECTURE.md §4.9a).
+    This is kpi.py's primary source for plan_history_summary(); the
+    poll_plan_diagnostics() poller below is retained only for live progress
+    visibility during an unattended run, not as the analysis source of
+    record. Gated on `fleet_map` (same as poll_plan_diagnostics) since only
+    it provides per-VEN base URLs. Never aborts the run: any failure
+    (request exception, non-200 including the route's own possible 503
+    "history store disabled") prints a WARN and continues."""
+    for ven in vens:
+        entry = fleet_map.get(ven, {"host": "local", "port": None})
+        if entry.get("port") is None:
+            continue
+        base = _ven_base_url(entry)
+        try:
+            r = requests.get(
+                f"{base}/history/plans",
+                params={"from": iso(t_from), "to": iso(t_to)},
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except requests.RequestException as e:
+            print(f"WARN: plan-history fetch {ven}: {e}")
+            continue
+        (out_dir / f"{ven}-plan-history.json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
+
+
+def fetch_forecast_accuracy(out_dir, vens, fleet_map, t_from, t_to):
+    """Same shape as fetch_plan_history, for `GET /history/forecast-accuracy`
+    (entities::history::ForecastAccuracySample rows) -- no asset_id/lead_kind
+    filter applied here; kpi.py's forecast_accuracy_summary() groups by
+    (asset_id, lead_kind) itself. Never aborts the run on failure."""
+    for ven in vens:
+        entry = fleet_map.get(ven, {"host": "local", "port": None})
+        if entry.get("port") is None:
+            continue
+        base = _ven_base_url(entry)
+        try:
+            r = requests.get(
+                f"{base}/history/forecast-accuracy",
+                params={"from": iso(t_from), "to": iso(t_to)},
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except requests.RequestException as e:
+            print(f"WARN: forecast-accuracy fetch {ven}: {e}")
+            continue
+        (out_dir / f"{ven}-forecast-accuracy.json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
+
+
 def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
     """Background poll loop (runs for the scenario's duration): every
     `interval_s`, GET /plan on each VEN and append the fields useful for
@@ -229,12 +322,13 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
     objective/friction, penalty_rules_active. One file per VEN so kpi.py can
     summarize per VEN like it does for grid_samples.
 
-    Known gap (kept out of scope here, see BACKLOG.md): solver_ms only exists
-    on the `plan_ready` SSE event (`GET /plan/events`), not on `GET /plan`
-    itself — a persistent per-VEN SSE listener would be needed to capture it,
-    which is more moving parts than an unattended multi-hour poll loop
-    should carry. Polling /plan is enough to see solve_status/warning
-    trends; solver timing is deferred.
+    GB-25 superseded this as the analysis source of record: solver_ms,
+    mip_gap_target, and typed warning_kinds are now available in bulk via
+    `GET /history/plans` (see fetch_plan_history() above), fetched once per
+    window instead of polled. This live poller is retained specifically for
+    progress visibility during an unattended run (watching solve_status /
+    warning trends as they happen), not as where kpi.py's plan-quality KPIs
+    come from.
     """
     handles = {ven: open(out_dir / f"{ven}-plan-diagnostics.jsonl", "a", encoding="utf-8") for ven in vens}
     try:
@@ -356,6 +450,11 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
     level other than 1/2/3 as the unrestricted contractual cap -- a genuine
     no-op for planning, unlike posting a real price/capacity/alert event.
 
+    One action type, `budget_shortfall`, does not become a VTN event at all:
+    it's posted straight to its `target_ven`'s own `/user-requests` (via
+    post_user_request) and tracked/cleaned up separately from
+    `created_events` -- see the action loop below. Requires `fleet_map`.
+
     Runs the plan-diagnostics poller (if `fleet_map` given) and writes
     `run.json` + the fleet snapshot into `run_dir`, exactly like the
     single-window flow this replaces."""
@@ -384,6 +483,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
     r.raise_for_status()
     program_id = r.json()["id"]
     created_events = []
+    created_requests = []  # (base_url, request_id) — budget_shortfall's /user-requests, not VTN events
 
     try:
         pending = sorted(actions, key=lambda a: a["at_minute"])
@@ -398,6 +498,39 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
             wait_s = (target - datetime.now(timezone.utc)).total_seconds()
             if wait_s > 0:
                 time.sleep(wait_s)
+
+            if action["type"] == "budget_shortfall":
+                # Bypasses the VTN entirely — direct POST to the target VEN's
+                # own /user-requests, deliberately under-budgeted so its MILP
+                # planner raises a real BudgetShortfall warning.
+                target_ven = action["target_ven"]
+                entry = (fleet_map or {}).get(target_ven)
+                if entry is None or entry.get("port") is None:
+                    print(f"WARN: budget_shortfall target_ven={target_ven} not in --fleet-map — skipped")
+                    continue
+                base = _ven_base_url(entry)
+                now_a = datetime.now(timezone.utc)
+                window_end = t0 + timedelta(minutes=duration_min)
+                action_end = now_a + timedelta(minutes=action.get("duration_minutes", duration_min))
+                # A few minutes before the scenario window closes, whichever is sooner.
+                latest_end = min(action_end, window_end - timedelta(minutes=2))
+                body = {
+                    "asset_id": "ev",
+                    # MAX_COST mode is what actually routes budget_eur into the EV
+                    # MILP context (services/user_request.rs create_ev ->
+                    # assets/ev_milp.rs) and triggers budget_warning in
+                    # milp_planner/inputs.rs — target_soc (not target_energy_kwh)
+                    # drives the resulting core-energy shortfall computation there.
+                    "target_soc": action.get("target_soc", 0.8),
+                    "mode": "MAX_COST",
+                    "budget_eur": action["budget_eur"],
+                    "deadlines": [{"latest_end": iso(latest_end)}],
+                }
+                rid = post_user_request(base, body)
+                created_requests.append((base, rid))
+                print(f"  +{action['at_minute']:>3} min  budget_shortfall  ven={target_ven}  request={rid}")
+                continue
+
             descriptors = report_descriptors if i == 0 else None
             body = build_event(program_id, action, datetime.now(timezone.utc), descriptors)
             eid = post_event(args.vtn_url, token, body)
@@ -415,12 +548,18 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
         for eid in created_events:
             requests.delete(f"{args.vtn_url}/events/{eid}", headers=auth(token), timeout=10)
         requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
+        for base, rid in created_requests:
+            delete_user_request(base, rid)
         if diag_stop:
             diag_stop.set()
             diag_thread.join(timeout=args.plan_poll_interval_s + 10)
 
+    t_end = datetime.now(timezone.utc)
     snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host,
-             t_from=t0, t_to=datetime.now(timezone.utc))
+             t_from=t0, t_to=t_end)
+    if fleet_map:
+        fetch_plan_history(run_dir, ven_names, fleet_map, t0, t_end)
+        fetch_forecast_accuracy(run_dir, ven_names, fleet_map, t0, t_end)
     meta = {
         "scenario": scenario_label,
         "started_at": iso(t0),

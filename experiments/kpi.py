@@ -180,13 +180,120 @@ def report_lag_stats(csv_path, t_from, t_to):
     }
 
 
+def plan_history_summary(run_dir, ven):
+    """GB-25/GB-31: summarize a run_experiment.py --fleet-map fetch of
+    GET /history/plans (see fetch_plan_history in run_experiment.py) —
+    {ven}-plan-history.json, an array of PlanHistorySample rows
+    (VEN/src/entities/history.rs). This is the primary source for
+    `k["plan_diagnostics"]` in main() below; plan_diagnostics_summary()
+    (the live /plan poller) is the fallback for runs without --fleet-map.
+    Returns None when no plan-history file exists for this VEN."""
+    path = run_dir / f"{ven}-plan-history.json"
+    if not path.exists():
+        return None
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    if not rows:
+        return None
+
+    solver_ms_vals = [r["solver_ms"] for r in rows if r.get("solver_ms") is not None]
+    solver_ms = None
+    if solver_ms_vals:
+        s = sorted(solver_ms_vals)
+        solver_ms = {
+            "median": s[len(s) // 2],
+            "max": max(s),
+            "mean": round(sum(s) / len(s), 1),
+        }
+
+    mip_gap_values = sorted({r["mip_gap_target"] for r in rows if r.get("mip_gap_target") is not None})
+    mip_gap_target_sanity = {
+        "distinct_values": mip_gap_values,
+        "constant": len(mip_gap_values) <= 1,
+    }
+    if not mip_gap_target_sanity["constant"]:
+        print(f"WARN: {ven} mip_gap_target is not constant across plan-history rows: {mip_gap_values}")
+
+    solve_status_counts = {}
+    for r in rows:
+        status = r.get("solve_status")
+        if status:
+            solve_status_counts[status] = solve_status_counts.get(status, 0) + 1
+
+    warning_kind_counts = {}
+    warning_kinds_total = 0
+    for r in rows:
+        for k in r.get("warning_kinds") or []:
+            warning_kind_counts[k] = warning_kind_counts.get(k, 0) + 1
+            warning_kinds_total += 1
+
+    warning_count_total = sum(r.get("warning_count") or 0 for r in rows)
+    if warning_count_total != warning_kinds_total:
+        print(
+            f"WARN: {ven} plan-history warning_count total ({warning_count_total}) != "
+            f"sum(len(warning_kinds)) ({warning_kinds_total}) — possible data/serialization inconsistency"
+        )
+
+    cost_fields = ("c_energy_eur", "c_grid_eur", "c_wear_eur", "c_violations_eur", "c_peak_penalty_eur")
+    cost_stats = {}
+    for field in cost_fields:
+        vals = [r[field] for r in rows if r.get(field) is not None]
+        if vals:
+            cost_stats[field] = {"mean": round(sum(vals) / len(vals), 4), "max": round(max(vals), 4)}
+
+    return {
+        "cycles": len(rows),
+        "solver_ms": solver_ms,
+        "mip_gap_target_sanity": mip_gap_target_sanity,
+        "solve_status_counts": solve_status_counts,
+        "warning_kind_counts": warning_kind_counts,
+        "warning_count_total": warning_count_total,
+        "cost_stats": cost_stats,
+    }
+
+
+def forecast_accuracy_summary(run_dir, ven):
+    """GB-25: summarize a run_experiment.py --fleet-map fetch of
+    GET /history/forecast-accuracy (see fetch_forecast_accuracy in
+    run_experiment.py) — {ven}-forecast-accuracy.json, an array of
+    ForecastAccuracySample rows (VEN/src/entities/history.rs), grouped by
+    (asset_id, lead_kind). Rows with actual_kw still null (unreconciled near
+    the end of a run window) are expected, not an error, and are silently
+    excluded. Returns None when the file is missing or has zero reconciled
+    samples — same "nothing to compare yet" convention as event_impact_kwh."""
+    path = run_dir / f"{ven}-forecast-accuracy.json"
+    if not path.exists():
+        return None
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    groups = {}
+    for r in rows:
+        if r.get("actual_kw") is None:
+            continue
+        key = (r.get("asset_id"), r.get("lead_kind"))
+        groups.setdefault(key, []).append(r)
+
+    if not groups:
+        return None
+
+    out = {}
+    for (asset_id, lead_kind), grp in groups.items():
+        errors = [r["predicted_kw"] - r["actual_kw"] for r in grp]
+        out[f"{asset_id}:{lead_kind}"] = {
+            "n": len(grp),
+            "mae_kw": round(sum(abs(e) for e in errors) / len(errors), 4),
+            "bias_kw": round(sum(errors) / len(errors), 4),
+        }
+    return out
+
+
 def plan_diagnostics_summary(run_dir, ven):
-    """Summarize a run_experiment.py --fleet-map poll of GET /plan (see
-    poll_plan_diagnostics): solve_status distribution, warning counts by
-    severity, and c_violations_eur stats — this is the "is this VEN's plan
-    quality expected or not" signal, distinct from the grid-power KPIs above.
-    Returns None when no diagnostics file exists for this VEN (e.g. a run
-    without --fleet-map)."""
+    """Fallback/live-poller view: summarize a run_experiment.py --fleet-map
+    poll of GET /plan (see poll_plan_diagnostics): solve_status distribution,
+    warning counts by severity, and c_violations_eur stats — this is the "is
+    this VEN's plan quality expected or not" signal, distinct from the
+    grid-power KPIs above. Used by main() only when plan_history_summary()
+    (the GB-25 GET /history/plans-backed primary source) returns None, e.g.
+    for a run without --fleet-map. Returns None when no diagnostics file
+    exists for this VEN."""
     path = run_dir / f"{ven}-plan-diagnostics.jsonl"
     if not path.exists():
         return None
@@ -292,6 +399,82 @@ def _self_check():
 
     print("kpi.py self-check OK: event_impact_kwh")
 
+    with tempfile.TemporaryDirectory() as tmp:
+        run_dir = Path(tmp)
+
+        # plan_history_summary: 3 rows, one with a null solver_ms (skipped
+        # gracefully), non-constant mip_gap_target (flagged, not an error),
+        # two warning_kinds rows whose Σlen matches warning_count (no WARN).
+        plan_rows = [
+            {
+                "plan_id": "p1", "created_at": "2026-01-01T10:00:00Z", "trigger": "periodic",
+                "solver_ms": 120, "solve_status": "OPTIMAL", "objective_eur": 1.0,
+                "friction_eur": 0.1, "mip_gap_target": 0.02, "warning_count": 1,
+                "warning_kinds": ["BUDGET_SHORTFALL"],
+                "c_energy_eur": 0.5, "c_grid_eur": 0.2, "c_wear_eur": 0.01,
+                "c_violations_eur": None, "c_peak_penalty_eur": None,
+            },
+            {
+                "plan_id": "p2", "created_at": "2026-01-01T10:05:00Z", "trigger": "periodic",
+                "solver_ms": None, "solve_status": "INFEASIBLE", "objective_eur": 0.0,
+                "friction_eur": 0.0, "mip_gap_target": 0.05, "warning_count": 0,
+                "warning_kinds": [],
+                "c_energy_eur": None, "c_grid_eur": None, "c_wear_eur": None,
+                "c_violations_eur": None, "c_peak_penalty_eur": None,
+            },
+            {
+                "plan_id": "p3", "created_at": "2026-01-01T10:10:00Z", "trigger": "periodic",
+                "solver_ms": 80, "solve_status": "OPTIMAL", "objective_eur": 0.8,
+                "friction_eur": 0.05, "mip_gap_target": 0.02, "warning_count": 1,
+                "warning_kinds": ["CAPACITY_VIOLATION"],
+                "c_energy_eur": 0.4, "c_grid_eur": 0.1, "c_wear_eur": 0.0,
+                "c_violations_eur": 0.3, "c_peak_penalty_eur": None,
+            },
+        ]
+        (run_dir / "ven-1-plan-history.json").write_text(json.dumps(plan_rows), encoding="utf-8")
+        summary = plan_history_summary(run_dir, "ven-1")
+        assert summary["cycles"] == 3, summary
+        assert summary["solver_ms"] == {"median": 120, "max": 120, "mean": 100.0}, summary["solver_ms"]
+        assert summary["mip_gap_target_sanity"] == {
+            "distinct_values": [0.02, 0.05], "constant": False,
+        }, summary["mip_gap_target_sanity"]
+        assert summary["solve_status_counts"] == {"OPTIMAL": 2, "INFEASIBLE": 1}
+        assert summary["warning_kind_counts"] == {"BUDGET_SHORTFALL": 1, "CAPACITY_VIOLATION": 1}
+        assert summary["warning_count_total"] == 2
+        assert summary["cost_stats"]["c_violations_eur"] == {"mean": 0.3, "max": 0.3}
+        assert "c_peak_penalty_eur" not in summary["cost_stats"]  # all-None column excluded
+
+        assert plan_history_summary(run_dir, "ven-missing") is None
+
+        # forecast_accuracy_summary: 2 reconciled "ev:near" rows + 1
+        # unreconciled row (actual_kw null -> excluded silently).
+        fa_rows = [
+            {
+                "asset_id": "ev", "lead_kind": "near", "target_ts": "2026-01-01T10:05:00Z",
+                "predicted_kw": 3.0, "predicted_at": "2026-01-01T10:00:00Z",
+                "actual_kw": 2.5, "actual_at": "2026-01-01T10:06:00Z",
+            },
+            {
+                "asset_id": "ev", "lead_kind": "near", "target_ts": "2026-01-01T10:10:00Z",
+                "predicted_kw": 2.0, "predicted_at": "2026-01-01T10:05:00Z",
+                "actual_kw": 2.4, "actual_at": "2026-01-01T10:11:00Z",
+            },
+            {
+                "asset_id": "ev", "lead_kind": "near", "target_ts": "2026-01-01T10:15:00Z",
+                "predicted_kw": 2.2, "predicted_at": "2026-01-01T10:10:00Z",
+                "actual_kw": None, "actual_at": None,
+            },
+        ]
+        (run_dir / "ven-1-forecast-accuracy.json").write_text(json.dumps(fa_rows), encoding="utf-8")
+        fa_summary = forecast_accuracy_summary(run_dir, "ven-1")
+        assert fa_summary["ev:near"]["n"] == 2, fa_summary
+        assert fa_summary["ev:near"]["mae_kw"] == 0.45, fa_summary  # mean(|0.5|, |-0.4|)
+        assert fa_summary["ev:near"]["bias_kw"] == 0.05, fa_summary  # mean(0.5, -0.4)
+
+        assert forecast_accuracy_summary(run_dir, "ven-missing") is None
+
+    print("kpi.py self-check OK: plan_history_summary, forecast_accuracy_summary")
+
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
@@ -350,9 +533,14 @@ def main():
         )
         if impact is not None:
             k["event_impact_kwh"] = impact
-        diag = plan_diagnostics_summary(run_dir, ven)
+        diag = plan_history_summary(run_dir, ven)
+        if diag is None:
+            diag = plan_diagnostics_summary(run_dir, ven)
         if diag is not None:
             k["plan_diagnostics"] = diag
+        fa = forecast_accuracy_summary(run_dir, ven)
+        if fa is not None:
+            k["forecast_accuracy"] = fa
         out["vens"][ven] = k
 
     out["report_timeliness"] = report_lag_stats(

@@ -1128,3 +1128,18 @@ outes/sim.rs causes a T1+T2 double-solve race:
   audit is cheap enough to run every time. Fixed post-merge by extracting the PHASE 6+7
   counter-wrapper calls in `tick.rs` into one combined helper,
   `post_lock::run_periodic_reports_and_persist` — a pure refactor, no behavior change.
+- **EV MAX_COST budget shortfall is driven by `target_soc`, not `target_energy_kwh`**
+  (fleet-run-2-tooling, 2026-08-14): `POST /user-requests` accepts both
+  `target_soc` and `target_energy_kwh` as ways to express the EV's goal, but
+  for the EV asset the MILP planner's core-energy computation
+  (`VEN/src/assets/ev_milp.rs`: `core_kwh = (session.target_soc − current_soc)
+  * battery_kwh`) reads only `session.target_soc` (defaults to 0.9 if
+  omitted) — `target_energy_kwh` in the request body is stored on the
+  `UserRequest` record but never reaches this computation for EV. Also,
+  `budget_eur` only reaches the MILP's budget constraint (and therefore the
+  `BudgetShortfall` warning in `milp_planner/inputs.rs`'s `budget_warning`)
+  when the request's `mode` is `"MAX_COST"` — every other mode ignores
+  `session.budget_eur` entirely even if it's set. When constructing a
+  user-request body intended to trigger a specific MILP-visible outcome for
+  an EV, always set `target_soc` and `mode` explicitly — don't assume
+  `target_energy_kwh` alone has an effect.

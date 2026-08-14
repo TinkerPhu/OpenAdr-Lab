@@ -19,3 +19,8 @@ planner:
       slots: 96   # 16 h at 10-min resolution
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
+  penalty_rules:
+    - rule_id: s7-peak-guard
+      threshold_kw: 0.3
+      measurement_window_s: 1800   # 30 min, matches S-7's duration
+      penalty_eur_per_kw: 1.0
