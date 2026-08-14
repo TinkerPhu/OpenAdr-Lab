@@ -205,7 +205,18 @@ mod tests {
         let cum_s = cum_seconds(4, 600);
 
         let contexts = build_asset_contexts(
-            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0, 0.07, 0.03, &[],
+            &sim_snap,
+            4,
+            &cum_s,
+            now,
+            None,
+            None,
+            &params,
+            &planner,
+            0.0,
+            0.07,
+            0.03,
+            &[],
         );
 
         assert_eq!(
@@ -257,7 +268,15 @@ mod tests {
         // for every asset (instead of selecting per AssetConfig variant) would
         // fail this assertion.
         let contexts = build_asset_contexts(
-            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0,
+            &sim_snap,
+            4,
+            &cum_s,
+            now,
+            None,
+            None,
+            &params,
+            &planner,
+            0.0,
             /* heater_c_terminal_eur_kwh */ 0.07,
             /* battery_c_terminal_eur_kwh */ 0.03,
             &[],
@@ -293,7 +312,18 @@ mod tests {
         let cum_s = cum_seconds(4, 600);
 
         let contexts = build_asset_contexts(
-            &sim_snap, 4, &cum_s, now, None, None, &params, &planner, 0.0, 0.0, 0.0, &[],
+            &sim_snap,
+            4,
+            &cum_s,
+            now,
+            None,
+            None,
+            &params,
+            &planner,
+            0.0,
+            0.0,
+            0.0,
+            &[],
         );
 
         let ev_ctx = &contexts[0];
