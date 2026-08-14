@@ -9464,3 +9464,75 @@ fixes + E2E verification"). Unlike GB-21/GB-23, this wasn't a merge
 resurrection — the implementing commit simply never removed the BACKLOG.md
 row. Removed it now (both the summary-table line and the full entry).
 
+## BL-43: SiteFlexibilityEnvelope — flexibility headroom diagram (2026-08-14)
+
+**Trigger**: `GET /flexibility` (live site-level headroom, `up_kw`/`down_kw`,
+recomputed every dispatcher tick) had zero UI surface — `client.ts#flexibility()`
+was never called, and mistyped as `Promise<FlexibilityEnvelope[]>` (the
+unrelated per-device planning-time type) instead of the single
+`SiteFlexibilityEnvelope` object the route returns. Violated both
+`ui-transparency` and `no-half-built-features`.
+
+**Backend**: added `SiteFlexibilitySample { ts, up_kw, down_kw }`
+(`entities/plan.rs`) plus a bounded in-memory ring, `AppState::flexibility_history`
+(`state/flexibility_history.rs`, capacity 3600 — 1h at the dispatcher's ~1s tick
+cadence), mirroring `state/report_submissions.rs`'s pattern exactly except for
+oldest-first ordering (time-series consumption, vs. that ring's newest-first
+log view). Hooked the ring push into `AppState::set_site_envelope` itself
+rather than its two call sites (`services/forecast.rs`, `tasks/sim_tick/publish.rs`)
+so every write is recorded regardless of trigger. New route
+`GET /flexibility/history` (always 200, empty array before the first tick).
+In-memory only, not persisted to SQLite — same tier as `event_log`/`notifications`,
+a live diagnostic rather than post-restart-analysis data, so no `history_store`
+schema migration.
+
+**Frontend — chart primitive**: `TimeSeriesChart` had no shaded-range primitive
+at all (checked: no `<Area>` usage anywhere in the codebase). Per
+`generic-over-bespoke`, added a first-class `bands?: TimeSeriesBandSpec[]` prop
+(`{ key, axisId, lower, upper, color, fillOpacity? }`, accessor-function
+convention matching `TimeSeriesSeriesSpec.dataKey`) rendering one recharts
+`<Area>` per band with a tuple-valued `dataKey` (`[lower(row), upper(row)]`),
+placed before the `<Line>` map so lines draw on top of the fill — reusable by
+any future band-style chart, not a one-off hack through the existing
+`extraReferenceAreas` escape hatch.
+
+Also extracted `clipRowsToWindow`/`ensureNonEmptyRows` from
+`tariffChartShared.ts`'s `TariffTimePoint`-typed `clipToWindow`/`ensureNonEmpty`
+into generic `TimestampedRow`-typed versions in `mergeSeries.ts` (the shared
+home for that primitive) — `tariffChartShared.ts`'s own functions now delegate
+to them, unchanged for existing callers. Needed because the new chart uses the
+newer `TimestampedRow`/`mergeTimestampedSeries` merge convention rather than
+the older flat-field `TariffTimePoint` one, and window-clipping is a generic
+concern that shouldn't be duplicated per convention.
+
+**Frontend — the diagram**: `SiteHeadroomChart.tsx` merges `allTimelines["grid"]`
+(already threaded to every grid cell; structurally a `TimestampedRow[]`, used
+directly as the merge base — no conversion needed) with the new history via
+`mergeTimestampedSeries`/`locfFillKeys` (LOCF is required: the ~1s-cadence
+headroom history and the coarser-resolution grid timeline don't align by exact
+timestamp). Renders a single grid-power line plus one band
+(`[power_kw − up_kw, power_kw + down_kw]`). `GridHeadroomCell.tsx` follows the
+`GridTariffCell`/`GridRatesCell`/`GridAccumulatedCell` sibling pattern exactly
+(pin/tall-toggle, `grid:headroom` cellId), wired into `Controller.tsx`'s pinned
+and unpinned branches. Added `useFlexibility()`/`useFlexibilityHistory()` hooks
+(10s poll — a diagnostic value, not driven by the page's own 2s unified timer).
+
+**Test fallout**: four existing tests wholesale-mock `../api/hooks` and render
+`ControllerPage` (`AssetCell.test.tsx`, `Controller.test.tsx`,
+`GridAccumulatedCell.test.tsx`, `GridTariffCell.test.tsx`) — added the two new
+hook mocks to each so `Controller.tsx`'s new hook calls don't crash them.
+
+**Verification**: `wsl cargo test -p ven-app` — 1005 + 1 passed, 0 failed.
+`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
+both clean. `scripts/audit_file_sizes.py` passed. `cd VEN/ui && npm test` —
+554/554 passed (one own-test expectation bug caught and fixed: `fmtDuration`
+correctly renders 3600s as "1.0 h", not "60 min" — the test's assumption was
+wrong, not the code). `npm run lint` — 0 errors, all warnings pre-existing.
+Architecture invariant greps (profile/assets import boundaries) all clean.
+No BDD scenario: confirmed sibling grid-level chart cells have no dedicated
+`.feature` coverage either — vitest is the established verification tier here.
+
+**Bookkeeping**: BL-43 row removed from `docs/BACKLOG.md` (summary table +
+full entry). `docs/architecture/VEN_ARCHITECTURE.md`'s route table gained the
+`GET /flexibility/history` row.
+

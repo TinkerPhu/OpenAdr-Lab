@@ -194,6 +194,27 @@ pub struct SiteFlexibilityEnvelope {
     pub down_duration_s: Option<u64>,
 }
 
+/// One historical sample of a `SiteFlexibilityEnvelope`, retained in a bounded
+/// in-memory ring (`AppState::flexibility_history`, BL-43) so the UI can plot a
+/// live headroom band over time — `SiteFlexibilityEnvelope` itself is
+/// instant-only and has no forward schedule (see its own doc comment).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiteFlexibilitySample {
+    pub ts: DateTime<Utc>,
+    pub up_kw: f64,
+    pub down_kw: f64,
+}
+
+impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
+    fn from(env: &SiteFlexibilityEnvelope) -> Self {
+        Self {
+            ts: env.ts,
+            up_kw: env.up_kw,
+            down_kw: env.down_kw,
+        }
+    }
+}
+
 /// Outcome of the MILP solve that produced a `Plan`.
 ///
 /// Two states only — the codebase has no distinct heuristic-solve path today
