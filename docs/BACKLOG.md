@@ -35,7 +35,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | Medium | M | Low–Medium — every asset's `capability()` impl must report it |
-| [BL-42](#bl-42-baseline-override-needs-a-devices-tab-ui-surface) | Direct per-slot baseline-load-forecast override, already live/tested on the backend, gets a real UI control on the Devices tab | Medium | M | Low — backend already proven, UI-only addition |
 | [BL-43](#bl-43-siteflexibilityenvelope--flexibility-headroom-diagram) | A live "how much could the VEN flex right now" band on the Controller/History grid-power chart — currently a dead endpoint with zero UI | Medium | M | Low — needs new history retention for `up_kw`/`down_kw` plus a visible grid-power line to anchor the band to |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
@@ -189,16 +188,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Medium — the budget bar's current "est." label undermines user trust in the number; real accounting would let the session board be trusted at a glance.
 **Complexity:** Medium — a new accounting invariant plus persistence questions (interacts with R-24).
 **Verify:** Unit test: a session accumulating N ticks at known power/tariff reports Σ(power × Δt × tariff); UI budget bar switches from "est." to actual once the field exists.
-
----
-
-### BL-42: `baseline_override` needs a Devices-tab UI surface
-**Req:** `VEN/src/routes/hems/baseline_override.rs` (`GET`/`POST`/`DELETE /baseline-override`); `tests/features/ven_device_sessions.feature`'s baseline-override coverage if present, else needs its own; `VEN/ui/src/api/client.ts` (`baselineOverride`/`postBaselineOverride`/`deleteBaselineOverride`); `VEN/ui/src/api/hooks.ts` (`useBaselineOverride`/`usePostBaselineOverride`/`useDeleteBaselineOverride`); `VEN/ui/src/pages/Devices.tsx`
-**Problem:** Split off from BL-41 (2026-08-05) once investigation showed `baseline_override` is *not* superseded by the unified `/user-requests` flow the way EV session/heater target/shiftable load are — `CreateUserRequestBody`/`SessionType` have no baseline-override equivalent at all. It's a genuinely distinct, standalone capability (bulk per-slot `add_kw` adjustments to the baseline-load forecast, `entities::device_session::{BaselineOverride, BaselineSlot}`) that's live, working, and backend-tested, but has zero UI surface — the client method + hooks were built but never called from any page.
-**Fix:** Add a control on the Devices tab (`Devices.tsx`, alongside the other per-device request forms already there) that lets a user set/clear a baseline override — likely a simple per-slot table/editor (`slot_start` + `add_kw` rows) posting to the existing `postBaselineOverride`/`deleteBaselineOverride` hooks, which already exist and need no backend changes.
-**Gain:** Medium — real backend capability (manual baseline-forecast correction) becomes usable; also closes the last `no-half-built-features` gap from the original BL-41 finding.
-**Complexity:** Medium — UI-only, but a new per-slot editor control is more than a trivial form.
-**Verify:** UI test asserting the new control calls `postBaselineOverride`/`deleteBaselineOverride`; manual check that setting an override changes the next plan's baseline-load input; `knip` reports these 3 hooks as used afterward.
 
 ---
 
