@@ -274,6 +274,8 @@ describe("PlannerPage", () => {
     const user = userEvent.setup();
     render(<PlannerPage />);
 
+    // BL-38: Decision Trace is now nested inside the collapsed Diagnostics zone.
+    await user.click(screen.getByText("Diagnostics"));
     const summary = screen.getByText(/Decision Trace/);
     await user.click(summary);
 
@@ -293,7 +295,99 @@ describe("PlannerPage", () => {
     const user = userEvent.setup();
     render(<PlannerPage />);
 
+    await user.click(screen.getByText("Diagnostics"));
     await user.click(screen.getByText(/Decision Trace/));
     expect(screen.getByText("No trace events yet")).toBeInTheDocument();
+  });
+
+  // ── BL-38: user/diagnostic layout split ───────────────────────────────────
+
+  it("renders the diagnostics zone collapsed by default, below the user zone", () => {
+    render(<PlannerPage />);
+    const userZone = screen.getByTestId("planner-user-zone");
+    const diagnostics = screen.getByTestId("planner-diagnostics-accordion");
+    expect(userZone).toBeInTheDocument();
+    expect(diagnostics).toBeInTheDocument();
+    // User zone precedes the diagnostics accordion in document order.
+    expect(
+      userZone.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Diagnostics content (e.g. the trigger-timeline root) is not visible until expanded.
+    expect(screen.getByTestId("trigger-timeline")).not.toBeVisible();
+  });
+
+  it("expanding the diagnostics zone reveals the decision matrix and trigger history", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+    await user.click(screen.getByText("Diagnostics"));
+    expect(screen.getByTestId("trigger-timeline")).toBeVisible();
+    expect(screen.getByTestId("matrix-empty")).toBeVisible();
+  });
+
+  // ── BL-38: matrix-slot → trace filtering ──────────────────────────────────
+
+  it("clicking a matrix slot filters the trace table to that slot's window", async () => {
+    const plan = makeMockPlan();
+    plan.slots = [
+      makeSlot({ slot_index: 0, start: "2026-04-04T10:00:00Z", end: "2026-04-04T10:05:00Z" }),
+      makeSlot({ slot_index: 1, start: "2026-04-04T10:05:00Z", end: "2026-04-04T10:10:00Z" }),
+    ];
+    vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
+    const inSlot0: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:02:00Z", trigger_reason: "Periodic", total_slots: 2 };
+    const inSlot1: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:07:00Z", trigger_reason: "Periodic", total_slots: 2 };
+    vi.mocked(useTrace).mockReturnValue({ data: [inSlot0, inSlot1] } as unknown as ReturnType<typeof useTrace>);
+
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+    await user.click(screen.getByText("Diagnostics"));
+    await user.click(screen.getByText(/Decision Trace/));
+    expect(screen.getByTestId("trace-row-0")).toBeInTheDocument();
+    expect(screen.getByTestId("trace-row-1")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("matrix-slot-0"));
+
+    expect(screen.getByText(/1 events/)).toBeInTheDocument();
+    expect(screen.getByTestId("trace-row-0")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-row-1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("trace-slot-filter-chip")).toBeInTheDocument();
+  });
+
+  it("clicking the same slot again clears the filter", async () => {
+    const plan = makeMockPlan();
+    plan.slots = [
+      makeSlot({ slot_index: 0, start: "2026-04-04T10:00:00Z", end: "2026-04-04T10:05:00Z" }),
+    ];
+    vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
+    vi.mocked(useTrace).mockReturnValue({ data: mockTraceEntries } as unknown as ReturnType<typeof useTrace>);
+
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+    await user.click(screen.getByText("Diagnostics"));
+    await user.click(screen.getByTestId("matrix-slot-0"));
+    expect(screen.getByTestId("trace-slot-filter-chip")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("matrix-slot-0"));
+    expect(screen.queryByTestId("trace-slot-filter-chip")).not.toBeInTheDocument();
+  });
+
+  it("the filter chip's delete button clears the filter without re-toggling the slot", async () => {
+    const plan = makeMockPlan();
+    plan.slots = [
+      makeSlot({ slot_index: 0, start: "2026-04-04T10:00:00Z", end: "2026-04-04T10:05:00Z" }),
+    ];
+    vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
+    vi.mocked(useTrace).mockReturnValue({ data: mockTraceEntries } as unknown as ReturnType<typeof useTrace>);
+
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+    await user.click(screen.getByText("Diagnostics"));
+    await user.click(screen.getByTestId("matrix-slot-0"));
+
+    const chip = screen.getByTestId("trace-slot-filter-chip");
+    // MUI Chip renders exactly one <svg> (the delete icon) when onDelete is set.
+    const deleteIcon = chip.querySelector("svg");
+    await user.click(deleteIcon!);
+
+    expect(screen.queryByTestId("trace-slot-filter-chip")).not.toBeInTheDocument();
   });
 });

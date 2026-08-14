@@ -49,9 +49,16 @@ function MatrixLegend() {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type Props = { plan: Plan | null | undefined };
+type Props = {
+  plan: Plan | null | undefined;
+  /** BL-38: currently trace-filtered slot, for the header row's selection highlight. */
+  selectedSlotStart?: string | null;
+  /** BL-38: click a slot's tariff-header cell to filter the Decision Trace to that
+   * slot's [start, end) window; click the already-selected slot again to clear it. */
+  onSlotSelect?: (slot: { start: string; end: string } | null) => void;
+};
 
-export function PlanDecisionMatrix({ plan }: Props) {
+export function PlanDecisionMatrix({ plan, selectedSlotStart = null, onSlotSelect }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedAlloc, setSelectedAlloc] = useState<{ alloc: AssetAllocation; slotStart: string } | null>(null);
 
@@ -236,32 +243,44 @@ export function PlanDecisionMatrix({ plan }: Props) {
                 })}
               </Box>
 
-              {/* Tariff header row */}
+              {/* Tariff header row — BL-38: also the per-slot click target that
+                  filters the Decision Trace to this slot's [start, end) window. */}
               <Box data-testid="matrix-tariff-header" sx={{ display: "flex" }}>
-                {allSlots.map((slot, ci) => (
-                  <Tooltip
-                    key={ci}
-                    title={`${new Date(slot.start).toLocaleTimeString()} — ${slot.import_tariff_eur_kwh.toFixed(3)} €/kWh${slot.rate_estimated ? " (estimated — beyond tariff coverage, WP4.4 stale-rate fill)" : ""}`}
-                  >
-                    <Box
-                      data-testid={slot.rate_estimated ? `tariff-cell-est-${ci}` : undefined}
-                      sx={{
-                        width: CELL_W,
-                        height: CELL_H,
-                        bgcolor: tariffColor(slot.import_tariff_eur_kwh, tariffMin, tariffMax),
-                        // WP4.4: estimated rates are visually distinct — dimmed
-                        // with a diagonal hatch so stale-tariff fills are never
-                        // mistaken for real published rates.
-                        opacity: slot.rate_estimated ? 0.45 : 1,
-                        backgroundImage: slot.rate_estimated
-                          ? "repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0 2px, transparent 2px 5px)"
-                          : undefined,
-                        flexShrink: 0,
-                        border: "1px solid rgba(0,0,0,0.06)",
-                      }}
-                    />
-                  </Tooltip>
-                ))}
+                {allSlots.map((slot, ci) => {
+                  const isSelected = selectedSlotStart === slot.start;
+                  return (
+                    <Tooltip
+                      key={ci}
+                      title={`${new Date(slot.start).toLocaleTimeString()} — ${slot.import_tariff_eur_kwh.toFixed(3)} €/kWh${slot.rate_estimated ? " (estimated — beyond tariff coverage, WP4.4 stale-rate fill)" : ""}${onSlotSelect ? " — click to filter Decision Trace" : ""}`}
+                    >
+                      <Box
+                        data-testid={slot.rate_estimated ? `tariff-cell-est-${ci}` : `matrix-slot-${ci}`}
+                        onClick={
+                          onSlotSelect
+                            ? () => onSlotSelect(isSelected ? null : { start: slot.start, end: slot.end })
+                            : undefined
+                        }
+                        sx={{
+                          width: CELL_W,
+                          height: CELL_H,
+                          bgcolor: tariffColor(slot.import_tariff_eur_kwh, tariffMin, tariffMax),
+                          // WP4.4: estimated rates are visually distinct — dimmed
+                          // with a diagonal hatch so stale-tariff fills are never
+                          // mistaken for real published rates.
+                          opacity: slot.rate_estimated ? 0.45 : 1,
+                          backgroundImage: slot.rate_estimated
+                            ? "repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0 2px, transparent 2px 5px)"
+                            : undefined,
+                          flexShrink: 0,
+                          cursor: onSlotSelect ? "pointer" : undefined,
+                          border: isSelected ? "2px solid" : "1px solid rgba(0,0,0,0.06)",
+                          borderColor: isSelected ? "primary.main" : undefined,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </Tooltip>
+                  );
+                })}
               </Box>
 
               {/* Marginal-cost row — shadow price on the power-balance constraint (§5.2) */}

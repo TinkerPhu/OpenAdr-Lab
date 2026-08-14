@@ -9801,3 +9801,69 @@ elsewhere in the Devices tab, not budget-vs-spend trackers, so left unchanged.
 **Bookkeeping**: BL-39 row removed from `docs/BACKLOG.md` (summary table +
 full entry).
 
+## BL-38: Planner tab layout — user/diagnostic split and matrix-slot→trace linking (2026-08-14)
+
+**Trigger**: `Planner.tsx` interleaved user-facing elements (objective, power
+stack, session progress) with diagnostic surfaces (trigger timeline, decision
+matrix, trace table) — noise for the operator persona, controls buried for
+the debugging persona. Answering "what happened in slot 14:35?" needed
+manually cross-reading the decision matrix and the trace table by eye.
+
+**(a) Layout split**: reordered into a `planner-user-zone` (`PlannerStatusBar`,
+`PlanPowerStack`, `SessionProgressBoard`, right after the objective
+selector/legend) followed by a `Divider`, then a single outer
+`planner-diagnostics-accordion` (collapsed by default, same pattern as the
+existing trace accordion) wrapping `PlanHeaderBar`, `PlanTriggerTimeline`,
+`PlanDecisionMatrix`, and the pre-existing (now doubly-nested) trace
+accordion. Nesting one collapsed accordion inside another collapsed accordion
+turned out to interact correctly with `jest-dom`'s `toBeVisible()` (walks the
+full ancestor chain) — confirmed via the existing `"renders trace accordion
+collapsed by default"` test passing unmodified.
+
+**(b) Slot→trace linking**: `PlanDecisionMatrix` gained two optional props,
+`selectedSlotStart`/`onSlotSelect`, wired onto its existing tariff-header row
+(already one cell per slot with a tooltip — the natural per-slot click
+target, no new visual row needed). Clicking a cell calls
+`onSlotSelect({start, end})`; clicking the already-selected cell again calls
+`onSlotSelect(null)` (toggle-off). `Planner.tsx` lifts `selectedSlotWindow`
+state and derives `filteredEvents` via `event.ts ∈ [start, end)` (`Date.getTime()`
+comparison, not string comparison — avoids any ISO-format edge cases), passed
+to `TraceTable` instead of the raw `events` array; a dismissible `Chip` in the
+Decision Trace accordion's own summary shows the active filter
+(`trace-slot-filter-chip`, `stopPropagation()` on both its click and delete
+so it doesn't also toggle the accordion it sits inside).
+
+**Test-id compromise**: the tariff-header cell already had a conditional
+`data-testid={rate_estimated ? \`tariff-cell-est-\${i}\` : undefined}`
+(WP4.4, asserted by an existing test). Rather than replace it and break that
+test, the non-estimated branch now gets `matrix-slot-${i}` instead of
+`undefined` — same conditional, just a second concrete value instead of a
+gap — preserving the old assertion exactly while giving every "normal" cell
+a stable click target.
+
+**Test fallout**: two existing `PlannerPage.test.tsx` tests
+(`"expands trace accordion to show table"`, `"shows empty state in trace
+table when no events"`) clicked straight into the trace accordion's own
+summary; updated both to first click "Diagnostics" to expand the new outer
+accordion, matching the real two-level expand a user now performs.
+
+**Verification**: `cd VEN/ui && npm test` — 564/564 passed, including 6 new
+tests (2 layout-split, 4 slot→trace: filters correctly, toggles off on
+re-click, chip appears/disappears, chip delete doesn't re-toggle the slot)
+plus 3 new component-level `PlanDecisionMatrix` unit tests
+(`onSlotSelect` called with the right window, toggle-to-null, inert when the
+prop is absent). `npm run lint` — 0 errors, same pre-existing warnings.
+Pure frontend change — no VEN Rust code touched, no backend verification
+needed. No BDD scenario: same precedent as BL-42/BL-43 this session — vitest
+is the established tier for this class of UI-only layout/interaction change.
+
+**Known drift**: `wiki/queries/planner-tab-purpose.md` still lists BL-38 as
+an open backlog improvement — left unedited here since wiki maintenance has
+its own `/wiki-sync` workflow (read `index.md`, check inbound links, bump
+`synced_commit`) that's out of scope for a backlog-implementation pass; noted
+here rather than silently left stale.
+
+**Bookkeeping**: BL-38 row removed from `docs/BACKLOG.md` (summary table +
+full entry); also fixed a stray duplicate `---` separator left over from an
+earlier bookkeeping edit in this same file, found while removing this row.
+
