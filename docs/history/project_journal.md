@@ -9434,3 +9434,20 @@ user chose not to scope in for this pass.
 **Bookkeeping**: `docs/guidelines/TESTING.md` gained a "Coverage (opt-in)" section describing
 the flag and pointing at the dated report file; GB-30 row removed from `docs/BACKLOG.md`.
 
+## docs: remove stale GB-21/GB-23 rows from BACKLOG.md (2026-08-14)
+
+While starting a planned implementation pass on GB-23, found both GB-21 (report
+payload-type wire-schema mismatch) and GB-23 (report obligation not cleared on
+404) were already implemented and merged to `main` on 2026-08-12
+(`2fa0b61`, "fix: GB-23 drop obligations on 404, R-43 wire report history,
+GB-21 fix capacity-reservation report payload names") — their BACKLOG.md rows
+were correctly removed at the time (`5af6ef7`'s bookkeeping note says so), but
+reappeared via `bdfd7fc` ("docs: record full 13-VEN fleet deploy + S-1..S-6
+experiment run"), whose branch had rebased against a pre-2fa0b61 `main` and
+resurrected the deleted rows through a 3-way merge that didn't recognize the
+deletion as intentional. No code change needed — `VEN/src/services/obligation.rs`
+already carries the 404-drop logic and its dedicated test suite
+(`due_obligation_404_is_removed_not_rearmed` et al.), and `controller/reporter.rs`
+already has the corrected `IMPORT_RESERVATION_CAPACITY`/`EXPORT_RESERVATION_CAPACITY`
+strings. Removed both rows again.
+
