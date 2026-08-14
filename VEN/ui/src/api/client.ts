@@ -1,7 +1,8 @@
 import type {
   VtnEvent, Program, Report, ReportSubmission, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
-  UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
+  UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
+  SiteFlexibilityEnvelope, SiteFlexibilitySample,
   EvSettings, UpdateEvSettingsBody,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
@@ -324,9 +325,16 @@ export class VenApi {
     return { zones: envelope.zones, timelines };
   }
 
-  async flexibility(): Promise<FlexibilityEnvelope[]> {
+  async flexibility(): Promise<SiteFlexibilityEnvelope | null> {
     const r = await this.getReq("/flexibility");
+    if (r.status === 204) return null;
     if (!r.ok) throw new Error(`flexibility ${r.status}`);
+    return r.json();
+  }
+
+  async flexibilityHistory(): Promise<SiteFlexibilitySample[]> {
+    const r = await this.getReq("/flexibility/history");
+    if (!r.ok) throw new Error(`flexibility/history ${r.status}`);
     return r.json();
   }
 

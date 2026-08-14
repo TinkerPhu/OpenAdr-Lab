@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema, useFlexibility, useFlexibilityHistory } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller/dataBuilders";
 import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
@@ -12,6 +12,7 @@ import { GridTariffCell } from "../components/controller/GridTariffCell";
 import { GridRatesCell } from "../components/controller/GridRatesCell";
 import { GridSignalStrip } from "../components/controller/GridSignalStrip";
 import { GridAccumulatedCell } from "../components/controller/GridAccumulatedCell";
+import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
 import { FlexibilityForecastPanel } from "../components/controller/FlexibilityForecastPanel";
 import type { SimInjectState } from "../api/types";
 
@@ -20,6 +21,8 @@ export function ControllerPage() {
   const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
   const { data: simInject } = useSimInject();
+  const { data: flexibility } = useFlexibility();
+  const { data: flexibilityHistory = [] } = useFlexibilityHistory();
   const { mutate: setSimInject } = useSetSimInject();
   const { mutate: resetAssetSoc } = useResetAssetSoc();
   // Prefetch sim schema so controls are available instantly when right sections expand.
@@ -183,6 +186,20 @@ export function ControllerPage() {
         />
       );
     }
+    if (cellId === "grid:headroom") {
+      return (
+        <GridHeadroomCell
+          key={cellId}
+          envelope={flexibility}
+          history={flexibilityHistory}
+          gridTimeline={allTimelines["grid"] ?? []}
+          nowMs={nowMs}
+          extended={expanded}
+          pinned
+          onTogglePin={() => handleTogglePin("grid:headroom")}
+        />
+      );
+    }
     if (cellId.startsWith("asset:")) {
       const assetId = cellId.replace("asset:", "") as AssetId;
       const summary = assetSummaries.find((s) => s.assetId === assetId);
@@ -266,6 +283,18 @@ export function ControllerPage() {
             gridPowerKw={sim.grid.net_power_w / 1000}
             zones={zones}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
+          />
+        )}
+
+        {!pinnedCellIds.includes("grid:headroom") && (
+          <GridHeadroomCell
+            envelope={flexibility}
+            history={flexibilityHistory}
+            gridTimeline={allTimelines["grid"] ?? []}
+            nowMs={nowMs}
+            extended={expanded}
+            pinned={false}
+            onTogglePin={() => handleTogglePin("grid:headroom")}
           />
         )}
 

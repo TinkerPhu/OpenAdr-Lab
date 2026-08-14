@@ -1,5 +1,6 @@
 import type { TariffTimePoint } from "../types";
 import type { TimestampedRow } from "../../charts/mergeSeries";
+import { clipRowsToWindow, ensureNonEmptyRows } from "../../charts/mergeSeries";
 
 /** X-axis tick label — shared by every Grid Signals / Grid Rates chart. */
 export function formatTs(ts: number) {
@@ -33,18 +34,7 @@ export function clipToWindow(
   tMin: number,
   tMax: number
 ): TimestampedRow[] {
-  const rows = data.map(toRow);
-  const upToEnd = rows.filter((p) => p.ts <= tMax);
-  // Pin the left-anchor to tMin so recharts never sees a data point outside
-  // [tMin, tMax]. Without this, recharts expands the X-axis domain to fit the
-  // anchor's original timestamp, shifting the NOW line rightward relative to
-  // all other charts that share the same domain.
-  const lastBefore = upToEnd
-    .filter((p) => p.ts < tMin)
-    .slice(-1)
-    .map((p) => ({ ...p, ts: tMin }));
-  const inWindow = upToEnd.filter((p) => p.ts >= tMin);
-  return [...lastBefore, ...inWindow];
+  return clipRowsToWindow(data.map(toRow), tMin, tMax);
 }
 
 /**
@@ -76,10 +66,5 @@ export function ensureNonEmpty(
   tMin: number,
   tMax: number
 ): TimestampedRow[] {
-  return rows.length > 0
-    ? rows
-    : [
-        { ts: tMin, values: {} },
-        { ts: tMax, values: {} },
-      ];
+  return ensureNonEmptyRows(rows, tMin, tMax);
 }

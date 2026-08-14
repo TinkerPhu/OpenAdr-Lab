@@ -66,6 +66,8 @@ vi.mock("../api/hooks", () => ({
   useResetAssetSoc: () => ({ mutate: vi.fn() }),
   useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
+  useFlexibility: () => ({ data: undefined }),
+  useFlexibilityHistory: () => ({ data: [] }),
   // WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id, GET /forecast.
   useAssetCapabilities: () => [],
   useAssetForecasts: () => ({ data: [] }),

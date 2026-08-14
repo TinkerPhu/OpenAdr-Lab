@@ -322,3 +322,11 @@ pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
         None => StatusCode::NO_CONTENT.into_response(),
     }
 }
+
+/// GET /flexibility/history — BL-43: the site-headroom ring
+/// (`AppState::flexibility_history`), oldest first, for the "Site Headroom"
+/// diagram. Distinct from `GET /flexibility`, which is a single live snapshot.
+/// Always 200 — an empty array before the first dispatcher tick.
+pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.flexibility_history().await)
+}

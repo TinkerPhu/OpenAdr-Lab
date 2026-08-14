@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import {
+  Area,
   ComposedChart,
   Line,
   XAxis,
@@ -56,6 +57,18 @@ export interface TimeSeriesSeriesSpec {
   formatter?: (value: number) => string;
 }
 
+/** A shaded min/max range around a value, e.g. a headroom/flexibility band —
+ * generic per `.claude/CLAUDE.md`'s `generic-over-bespoke` rule so any future
+ * band-style chart reuses this instead of a one-off `<Area>`. */
+export interface TimeSeriesBandSpec {
+  key: string;
+  axisId: string;
+  lower: (row: TimestampedRow) => number | null | undefined;
+  upper: (row: TimestampedRow) => number | null | undefined;
+  color: string;
+  fillOpacity?: number;
+}
+
 interface TimeSeriesChartProps {
   /** Pre-merged, timestamp-keyed rows — build with `mergeTimestampedSeries`/`locfFillKeys`
    * before passing in. This component never accepts a second, independent data array for
@@ -69,6 +82,8 @@ interface TimeSeriesChartProps {
   xAxisTicks?: number[];
   axes: TimeSeriesAxisSpec[];
   series: TimeSeriesSeriesSpec[];
+  /** Shaded min/max bands, rendered under every `series` line. */
+  bands?: TimeSeriesBandSpec[];
   /** Omit to render no NOW line — only meaningful for charts with a live "now" concept. */
   nowMs?: number;
   /** Which axis the NOW line and zone shading are drawn against — any axis id works,
@@ -108,6 +123,7 @@ export function TimeSeriesChart({
   xAxisTicks,
   axes,
   series,
+  bands,
   nowMs,
   referenceAxisId,
   zones,
@@ -187,6 +203,25 @@ export function TimeSeriesChart({
             />
           )}
           {legend && !interactiveLegend && <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />}
+
+          {bands?.map((b) => (
+            <Area
+              key={b.key}
+              yAxisId={b.axisId}
+              type="monotone"
+              dataKey={(row: TimestampedRow) => {
+                const lo = b.lower(row);
+                const hi = b.upper(row);
+                return lo == null || hi == null ? [null, null] : [lo, hi];
+              }}
+              name={b.key}
+              stroke="none"
+              fill={b.color}
+              fillOpacity={b.fillOpacity ?? 0.15}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+          ))}
 
           {visibleSeries.map((s) => (
             <Line

@@ -12,10 +12,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-const { lines, legends, tooltips } = vi.hoisted(() => ({
+const { lines, legends, tooltips, areas } = vi.hoisted(() => ({
   lines: [] as Array<Record<string, unknown>>,
   legends: [] as Array<Record<string, unknown>>,
   tooltips: [] as Array<Record<string, unknown>>,
+  areas: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
@@ -32,6 +33,10 @@ vi.mock("recharts", () => ({
   ReferenceLine: () => null,
   Line: (props: Record<string, unknown>) => {
     lines.push(props);
+    return null;
+  },
+  Area: (props: Record<string, unknown>) => {
+    areas.push(props);
     return null;
   },
   Legend: (props: Record<string, unknown> & { content?: ReactNode }) => {
@@ -246,5 +251,69 @@ describe("TimeSeriesChart — per-series tooltip formatter", () => {
     );
     const formatter = tooltips[0].formatter as (v: number, n: string) => [string, string];
     expect(formatter(2, "power")).toEqual(["fallback:2", "power"]);
+  });
+});
+
+describe("TimeSeriesChart — bands (BL-43)", () => {
+  beforeEach(() => {
+    lines.length = 0;
+    areas.length = 0;
+  });
+
+  it("renders one Area per band, with a [lower, upper] tuple dataKey accessor", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        bands={[
+          {
+            key: "headroom",
+            axisId: "power",
+            lower: (r) => (r.values?.power ?? 0) - 1,
+            upper: (r) => (r.values?.power ?? 0) + 1,
+            color: "#8BC34A",
+          },
+        ]}
+      />
+    );
+    expect(areas).toHaveLength(1);
+    const band = areas[0];
+    expect(band.name).toBe("headroom");
+    expect(band.fill).toBe("#8BC34A");
+    expect(band.stroke).toBe("none");
+    const dataKey = band.dataKey as (row: TimestampedRow) => [number | null, number | null];
+    expect(dataKey(data[0])).toEqual([0, 2]); // power=1 -> [1-1, 1+1]
+    expect(dataKey(data[1])).toEqual([1, 3]); // power=2 -> [2-1, 2+1]
+  });
+
+  it("a band with a null bound at a row yields a [null, null] pair, not a partial range", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        bands={[
+          {
+            key: "headroom",
+            axisId: "power",
+            lower: () => null,
+            upper: (r) => (r.values?.power ?? 0) + 1,
+            color: "#8BC34A",
+          },
+        ]}
+      />
+    );
+    const dataKey = areas[0].dataKey as (row: TimestampedRow) => [number | null, number | null];
+    expect(dataKey(data[0])).toEqual([null, null]);
+  });
+
+  it("no bands prop renders no Area elements", () => {
+    render(
+      <TimeSeriesChart data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} />
+    );
+    expect(areas).toHaveLength(0);
   });
 });

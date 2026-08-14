@@ -35,7 +35,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | Medium | M | Low–Medium — every asset's `capability()` impl must report it |
-| [BL-43](#bl-43-siteflexibilityenvelope--flexibility-headroom-diagram) | A live "how much could the VEN flex right now" band on the Controller/History grid-power chart — currently a dead endpoint with zero UI | Medium | M | Low — needs new history retention for `up_kw`/`down_kw` plus a visible grid-power line to anchor the band to |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | Low-Medium | S (layout) / M (slot→trace) | Low — UI-only |
@@ -188,16 +187,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Medium — the budget bar's current "est." label undermines user trust in the number; real accounting would let the session board be trusted at a glance.
 **Complexity:** Medium — a new accounting invariant plus persistence questions (interacts with R-24).
 **Verify:** Unit test: a session accumulating N ticks at known power/tariff reports Σ(power × Δt × tariff); UI budget bar switches from "est." to actual once the field exists.
-
----
-
-### BL-43: `SiteFlexibilityEnvelope` — flexibility headroom diagram
-**Req:** `VEN/src/controller/envelope.rs` (`compute_envelope`); `VEN/src/entities/plan.rs` (`SiteFlexibilityEnvelope`); `VEN/src/routes/hems/sessions.rs` (`GET /flexibility`); `VEN/ui/src/api/client.ts` (`flexibility()`)
-**Problem:** Found 2026-08-10 while scoping the Controller-tab tariff-chart split (see `docs/history/project_journal.md`). `GET /flexibility` returns the VEN's own live headroom (`up_kw`/`down_kw` — how much grid import could be reduced/increased right now, computed fresh from asset state every dispatcher tick) but has zero UI surface: `client.ts#flexibility()` is never called, and is typed as `Promise<FlexibilityEnvelope[]>` (the unrelated per-device planning-time type) when the endpoint actually returns a single `SiteFlexibilityEnvelope` object — a real type mismatch, not just dead code. Distinct from the `IMPORT_CAPACITY_LIMIT`/`EXPORT_CAPACITY_LIMIT` "Dynamic Operating Envelope" (the Controller tab's direct-VTN-signal/envelope diagram, landed 2026-08-10): this one is VEN-derived, valid only for the current instant, with no forward schedule. Recommended as the immediate follow-up to that work, since both are chart/envelope work in the same area of the UI and the naming collision ("envelope" meaning two different things) is easiest to get right while the first one is still fresh.
-**Fix:** (1) Fix the `client.ts` type mismatch. (2) Retain `up_kw`/`down_kw` history per tick (new small ring buffer, or extend the existing grid ring buffer) — today only the latest snapshot is kept, so there's nothing to plot as a line yet. (3) Surface a visible grid-power line (currently grid power is only consumed internally to derive cost/CO2 rate, never plotted on its own) and render the envelope as a `[gridPowerKw − up_kw, gridPowerKw + down_kw]` band around it — a new "Site Headroom" diagram, not folded into the tariff/rates split.
-**Gain:** Medium — a real backend capability (live flex headroom) becomes visible; matches `ui-transparency` (every backend capability needs a UI surface).
-**Complexity:** Medium — history retention + a new chart; smaller than the capacity-limit schedule work since the compute side already exists.
-**Verify:** UI test asserting the band renders from live `up_kw`/`down_kw`; manual check that the band widens/narrows as assets approach their power limits.
 
 ---
 

@@ -74,6 +74,42 @@ export function mergeTimestampedSeries(
  * own timestamp grid — without this, `connectNulls` would draw the line but hovering the
  * plateau between two real samples would show no value, disagreeing with what's drawn.
  */
+/**
+ * Clip a timestamp-sorted row array to [tMin, tMax] — recharts does not clip
+ * rendered data to the XAxis domain itself, so without this a chart auto-scales
+ * to the full data extent. Keeps the last point before tMin as a left anchor,
+ * pinned to tMin, so a stepAfter/line series starts at the correct value at the
+ * window's left edge instead of shifting the NOW line relative to other charts
+ * sharing the same domain.
+ */
+export function clipRowsToWindow(
+  rows: TimestampedRow[],
+  tMin: number,
+  tMax: number
+): TimestampedRow[] {
+  const upToEnd = rows.filter((p) => p.ts <= tMax);
+  const lastBefore = upToEnd
+    .filter((p) => p.ts < tMin)
+    .slice(-1)
+    .map((p) => ({ ...p, ts: tMin }));
+  const inWindow = upToEnd.filter((p) => p.ts >= tMin);
+  return [...lastBefore, ...inWindow];
+}
+
+/** Ensure at least a 2-point range so recharts can render the NOW line when data is empty. */
+export function ensureNonEmptyRows(
+  rows: TimestampedRow[],
+  tMin: number,
+  tMax: number
+): TimestampedRow[] {
+  return rows.length > 0
+    ? rows
+    : [
+        { ts: tMin, values: {} },
+        { ts: tMax, values: {} },
+      ];
+}
+
 export function locfFillKeys(rows: TimestampedRow[], keys: string[]): TimestampedRow[] {
   const last: Record<string, number | null> = {};
   for (const k of keys) last[k] = null;
