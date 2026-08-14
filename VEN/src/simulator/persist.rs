@@ -158,7 +158,10 @@ mod tests {
             .unwrap();
 
         let result = load(data_dir).await;
-        assert!(result.is_none(), "corrupt file must fall back to None, not panic or error out");
+        assert!(
+            result.is_none(),
+            "corrupt file must fall back to None, not panic or error out"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -206,8 +209,7 @@ mod tests {
         let asset_params = [AssetParams::Battery(new_params)];
         let sim_params = SimulatorParams::default();
 
-        let restarted =
-            load_with_params(data_dir, &sim_params, &asset_params, now()).await;
+        let restarted = load_with_params(data_dir, &sim_params, &asset_params, now()).await;
 
         let (entry, cfg) = restarted.find_asset("battery").unwrap();
         match &entry.state {
@@ -248,8 +250,7 @@ mod tests {
         let asset_params = [battery_params("battery-new")];
         let sim_params = SimulatorParams::default();
 
-        let restarted =
-            load_with_params(data_dir, &sim_params, &asset_params, now()).await;
+        let restarted = load_with_params(data_dir, &sim_params, &asset_params, now()).await;
 
         assert!(
             restarted.find_asset("battery-old").is_none(),
