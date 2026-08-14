@@ -9451,3 +9451,16 @@ already carries the 404-drop logic and its dedicated test suite
 already has the corrected `IMPORT_RESERVATION_CAPACITY`/`EXPORT_RESERVATION_CAPACITY`
 strings. Removed both rows again.
 
+## docs: remove stale BL-42 row from BACKLOG.md (2026-08-14)
+
+Same pattern as the GB-21/GB-23 cleanup above, found while starting a planned
+implementation pass on BL-42: `BaselineOverrideCard.tsx` (132 lines, wired
+into `Devices.tsx`) and its test (`__tests__/BaselineOverrideCard.test.tsx`)
+already fully implement the per-slot Devices-tab editor BL-42 asked for —
+`feat(ui): add BaselineOverrideCard to Devices page (BL-42)` (`150f318`) plus
+a follow-up review-fix commit (`b370e38`), both already narrated in this
+journal ("BL-42: Baseline Override Devices UI", "BL-42 closeout: review
+fixes + E2E verification"). Unlike GB-21/GB-23, this wasn't a merge
+resurrection — the implementing commit simply never removed the BACKLOG.md
+row. Removed it now (both the summary-table line and the full entry).
+
