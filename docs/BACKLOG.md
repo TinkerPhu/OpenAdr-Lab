@@ -34,7 +34,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | Low-Medium | S (layout) / M (slot→trace) | Low — UI-only |
 | [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | Low | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
@@ -168,14 +167,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Verify:** (a) UI test: diagnostics sections render collapsed by default, user zone above the divider. (b) UI test: clicking a matrix slot filters the trace table to entries whose timestamp falls in that slot.
 
 ---
-
-### BL-39: Per-session accumulated-cost accounting (real budget bar)
-**Req:** `VEN/ui/src/components/sessions/SessionProgressBoard.tsx` (BudgetLine); `VEN/src/controller/monitor.rs` (AssetLedger); `docs/reference/TECHNICAL_DEBTS.md` R-24 (ledger clock/persistence)
-**Problem:** The session board's budget bar compares the user's budget against `estimated_cost_eur` (a plan-time estimate, labeled "est.") because no per-session accumulated cost exists anywhere: the `AssetLedger` accumulates per asset since startup with no session attribution, resets on restart, and the plan envelope's `budget_remaining_eur` is a placeholder. Spun off from the BL-36 resolution — the SessionProgressBoard rebuild deliberately excluded this.
-**Fix:** Either extend the monitor ledger with session-scoped accumulation (attribute each tick's asset cost to the active session id), or derive it on demand from the history store windowed on `session.created_at` × recorded tariffs. Decide only if enforcement-grade budget tracking is actually needed; the estimate may be good enough.
-**Gain:** Medium — the budget bar's current "est." label undermines user trust in the number; real accounting would let the session board be trusted at a glance.
-**Complexity:** Medium — a new accounting invariant plus persistence questions (interacts with R-24).
-**Verify:** Unit test: a session accumulating N ticks at known power/tariff reports Σ(power × Δt × tariff); UI budget bar switches from "est." to actual once the field exists.
 
 ---
 

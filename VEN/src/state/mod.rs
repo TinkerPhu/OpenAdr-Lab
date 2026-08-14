@@ -710,6 +710,7 @@ mod tests {
             status: UserRequestStatus::Active,
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
             interruptible: false,
             tolerance_min: None,
             budget_eur: None,

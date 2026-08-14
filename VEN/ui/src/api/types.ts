@@ -426,6 +426,9 @@ export type UserRequest = {
   status: UserRequestStatus;
   estimated_cost_eur: number;
   estimated_co2_g: number;
+  /** BL-39: real money spent so far, accumulated per dispatcher tick from
+   * this request's own asset — distinct from the plan-time estimate above. */
+  accumulated_cost_eur: number;
   interruptible: boolean;
   tolerance_min: number | null;
   budget_eur: number | null;

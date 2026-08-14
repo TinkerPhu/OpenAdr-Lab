@@ -26,6 +26,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     status: "ACTIVE",
     estimated_cost_eur: 1.8,
     estimated_co2_g: 300,
+    accumulated_cost_eur: 0.9,
     interruptible: true,
     tolerance_min: null,
     budget_eur: null,
@@ -177,12 +178,13 @@ describe("SessionProgressBoard", () => {
     expect(screen.getByTestId("session-deadline-req-ev-01")).toHaveTextContent("OVERDUE");
   });
 
-  it("shows an estimated budget line when a budget is set", () => {
-    const req = makeEvRequest({ budget_eur: 2.5 });
+  it("shows a real accumulated-cost budget line when a budget is set", () => {
+    // BL-39: renders accumulated_cost_eur (real spend), not estimated_cost_eur.
+    const req = makeEvRequest({ budget_eur: 2.5, accumulated_cost_eur: 0.9 });
     render(<SessionProgressBoard requests={[req]} />);
     const budget = screen.getByTestId("session-budget-req-ev-01");
-    expect(budget).toHaveTextContent("€1.80 / €2.50");
-    expect(budget).toHaveTextContent("est.");
+    expect(budget).toHaveTextContent("€0.90 / €2.50");
+    expect(budget).not.toHaveTextContent("est.");
   });
 
   it("omits the budget line when no budget or cost cap is set", () => {

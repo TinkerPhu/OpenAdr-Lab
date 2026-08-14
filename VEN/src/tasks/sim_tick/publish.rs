@@ -123,10 +123,13 @@ pub(crate) async fn publish_sim_tick_result(
 
     state.update_sim(sim_snap.clone()).await;
 
-    // Post-tick: consolidated ledger accounting
+    // Post-tick: consolidated ledger accounting, plus (BL-39) per-session
+    // accumulated cost for any active UserRequest sharing the ledger's tick.
     let mut ledger = state.asset_ledger().await;
-    controller::monitor::record_tick(&mut ledger, &sim_snap, rates_snap, dt_s, now);
+    let mut requests = state.active_requests().await;
+    controller::monitor::record_tick(&mut ledger, &mut requests, &sim_snap, rates_snap, dt_s, now);
     state.set_asset_ledger(ledger).await;
+    state.set_active_requests(requests).await;
 
     // Refresh site envelope (computed in-lock from final sim state).
     state.set_site_envelope(envelope).await;
