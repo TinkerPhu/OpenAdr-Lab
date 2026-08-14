@@ -6,6 +6,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::asset::PowerAdjustability;
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 
@@ -219,6 +220,21 @@ impl Heater {
         AssetCapability {
             max_export_kw: 0.0,
             max_import_kw,
+            adjustability: PowerAdjustability::Stepped,
+            // Full physical tier set (0 / mid / max) regardless of the current
+            // temperature-driven ceiling above — a hardware fact, not a live
+            // feasibility range. Same mid-resolution fallback as
+            // flexibility_floor_inner (mid_kw == 0.0 means old persisted JSON
+            // predating this field).
+            power_steps_kw: vec![
+                0.0,
+                if self.mid_kw > 0.0 {
+                    self.mid_kw
+                } else {
+                    self.max_kw / 2.0
+                },
+                self.max_kw,
+            ],
         }
     }
 
@@ -534,6 +550,39 @@ mod tests {
             temperature_c,
             actual_power_kw,
         }
+    }
+
+    // ── capability (BL-27) ───────────────────────────────────────────────────
+
+    #[test]
+    fn capability_reports_stepped_adjustability_with_three_tiers() {
+        let heater = default_heater(); // mid_kw=1.25, max_kw=2.5
+        let cap = heater.capability_inner(&state_at(21.5, 0.0)); // normal band
+        assert_eq!(cap.adjustability, PowerAdjustability::Stepped);
+        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]);
+    }
+
+    #[test]
+    fn capability_power_steps_kw_unaffected_by_overheat_or_too_cold_ceiling() {
+        // power_steps_kw is the hardware's physical tier set — it doesn't
+        // collapse when the live ceiling (max_import_kw) does.
+        let heater = default_heater();
+        let overheated = heater.capability_inner(&state_at(23.5, 0.0));
+        assert_eq!(overheated.max_import_kw, 0.0);
+        assert_eq!(overheated.power_steps_kw, vec![0.0, 1.25, 2.5]);
+
+        let too_cold = heater.capability_inner(&state_at(19.0, 0.0));
+        assert_eq!(too_cold.max_import_kw, heater.min_power_kw);
+        assert_eq!(too_cold.power_steps_kw, vec![0.0, 1.25, 2.5]);
+    }
+
+    #[test]
+    fn capability_power_steps_kw_falls_back_to_half_max_kw_when_mid_kw_unset() {
+        // mid_kw == 0.0 means old persisted JSON predating the field.
+        let mut heater = default_heater();
+        heater.mid_kw = 0.0;
+        let cap = heater.capability_inner(&state_at(21.5, 0.0));
+        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]); // max_kw/2 == 1.25
     }
 
     // ── flexibility_floor ─────────────────────────────────────────────────────

@@ -34,7 +34,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | Medium | M | Low–Medium — every asset's `capability()` impl must report it |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | Low-Medium | S (layout) / M (slot→trace) | Low — UI-only |
@@ -137,16 +136,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** None (cleanup only) — dead type shadowing a live one's name, no behavior change.
 **Complexity:** Small — comparison against the live type, then either deletion or a small field migration.
 **Verify:** `cargo build` clean; no behavior change (nothing references it today).
-
----
-
-### BL-27: `PowerAdjustability` + `PowerRange` — device control-mode classification
-**Req:** `entities/design_vocabulary.rs` (`PowerAdjustability`, `PowerRange`)
-**Problem:** Not a duplicate of the live `AssetCapability` (`assets/mod.rs`) as might be assumed at a glance — `AssetCapability` only carries instantaneous `max_import_kw`/`max_export_kw`, no discrete-step list and no semantic classification of *how* an asset can be controlled (on/off vs. stepped vs. continuously variable vs. curtail-only vs. advisory-only). `PowerAdjustability`/`PowerRange.power_steps_kw` sketch a real, currently-missing capability: exposing control-mode metadata (e.g. to the UI, so a stepped charger's slider snaps to real levels instead of rendering continuous).
-**Fix:** If wanted, add `adjustability: PowerAdjustability` and `power_steps_kw: Vec<f64>` to the live `ControlDescriptor`/`AssetCapability` path (`assets/mod.rs`) rather than reviving these as separate entities-level types.
-**Gain:** Medium — fixes a real UI correctness issue (misleading continuous sliders on stepped devices), improving user trust in the controls.
-**Complexity:** Medium — touches every asset's `capability()` implementation to report ranked/stepped power correctly.
-**Verify:** UI test: a stepped-charger control descriptor exposes discrete levels; a stepless one doesn't.
 
 ---
 

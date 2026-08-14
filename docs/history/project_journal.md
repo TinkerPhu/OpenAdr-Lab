@@ -9674,3 +9674,72 @@ Live-fleet dry-run verification (confirming a real deploy actually fires
 BudgetShortfall/PeakPenaltyExceeded through this new tooling) is deferred to
 Part B (redeploy + run), not done here.
 
+## BL-27: PowerAdjustability + PowerRange — device control-mode classification (2026-08-14)
+
+**Trigger**: `AssetCapability` (`assets/mod.rs`) only carried the instantaneous
+`max_export_kw`/`max_import_kw` ceiling — no metadata on *how* an asset can be
+controlled. Checked first whether BL-27's "misleading continuous slider"
+framing pointed at a real UI bug: neither `ControlDescriptor`/`control_schema()`
+(the sim-inject override sliders — temperature setpoints, SoC target,
+switches) nor `AssetCapability`'s only UI consumer
+(`FlexibilityForecastPanel.tsx`, a read-only table) has a power-level slider
+today, so no slider is actually being misled. The concrete, in-scope fix is
+what BL-27's own Fix section specifies regardless: wire the classification
+into `AssetCapability` end-to-end — real diagnostic value (an operator can
+finally see the heater is a genuine 3-tier hardware relay, `0/mid/max`,
+confirmed via `heater.rs`'s own `step_inner` quantization comment) and the
+right foundation if a real per-device slider is ever built.
+
+**Moved `PowerAdjustability`** out of `entities/design_vocabulary.rs`'s
+dead-code quarantine into `entities/asset.rs` (the existing home for live
+asset-classification enums — `AssetType`, `CompletionPolicy`, `PlanTrigger`),
+since it stops being an "unreferenced sketch" once wired into live code.
+Left `PowerRange`/`AssetProfile` untouched in `design_vocabulary.rs` — a much
+larger sketch, not what this item asks for.
+
+**`AssetCapability` gained** `adjustability: PowerAdjustability` and
+`power_steps_kw: Vec<f64>`, which forced dropping its `#[derive(Copy)]`
+(kept `Clone`) — checked first that all production usage is contained within
+`assets/*.rs` (none in `routes/`/`controller/`/`services/` outside tests), so
+this was a mechanical, low-risk change; `cargo check` confirmed zero breakage.
+Every asset's `capability_inner()`/`capability()` now reports its real
+classification explicitly (no `Default` fallback, forcing intentional
+declaration per the item's own Verify note): `battery`/`ev` → `Stepless`
+(continuous, `ev`'s `min_charge_kw` is a floor not a step); `heater` →
+`Stepped`, `power_steps_kw = [0.0, mid, max_kw]` (the full physical tier set,
+unaffected by the live temperature-driven ceiling — verified with a dedicated
+test asserting the steps stay `[0, 1.25, 2.5]` even in the overheat/too-cold
+branches where `max_import_kw` collapses to 0/`min_power_kw`); `pv` →
+`Croppable` (continuously curtailable, matches the enum's own doc example);
+`base_load`/`grid` → `None` (uncontrollable/not-VEN-dispatched — `grid` isn't
+reachable via `GET /capability/:id` anyway, it's not in `AssetConfig`).
+
+**Route + UI**: `routes/assets.rs::get_asset_capability`'s hand-built JSON gained
+the two fields. `FlexibilityForecastPanel.tsx` gained an "Adjustability" column
+— a `Chip` (same pattern as the existing forecast-source chip) rendering
+"Stepped (0/1.25/2.5 kW)" for stepped assets (the levels are the point of
+showing it) or a plain title-cased label otherwise.
+
+**Process note**: this worktree started a fresh HiGHS C++ build from scratch
+(no shared `target/` across worktrees) — pointed `CARGO_TARGET_DIR` at
+`/mnt/c/DriveD/Tinker/.cargo-target-shared` (outside any worktree, no config
+files touched) for this and subsequent builds this session, safe under the
+existing `wsl_lock.sh` discipline since it already serializes all WSL cargo
+usage project-wide. Cut the `cargo check`/`test`/`clippy` cycle from ~15 min
+each to under 2 min after the first warm build.
+
+**Verification**: `wsl cargo test -p ven-app` — 1012 + 1 passed (target dir
+warm; ran once more filtered to `capability` and once full, both clean).
+`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D
+warnings`, `scripts/audit_file_sizes.py` all clean. `cd VEN/ui && npm test` —
+556/556 passed; `npm run lint` — 0 errors, same 11 pre-existing warnings.
+Architecture invariant greps clean.
+
+**Aside**: found `.claude/CLAUDE.md`'s claim that `assets/mod.rs` is on the
+file-size-audit allowlist is stale — `scripts/audit_file_sizes.py`'s
+`ALLOWLIST` is actually empty now. Not fixed here (out of scope for this
+item; `assets/mod.rs` is well under the cap regardless at 417 raw lines).
+
+**Bookkeeping**: BL-27 row removed from `docs/BACKLOG.md` (summary table +
+full entry).
+

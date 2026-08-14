@@ -3,6 +3,7 @@ import {
 } from "@mui/material";
 import { useAssetCapabilities, useAssetForecasts } from "../../api/hooks";
 import { ASSET_LABELS } from "./types";
+import type { AssetCapability } from "../../api/types";
 
 // WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
 // and GET /forecast, both previously unused. Shows "how much can this device
@@ -23,6 +24,18 @@ function formatSource(source: string): string {
     .join(" ");
 }
 
+/** BL-27: "Stepped (0/1.5/3 kW)" for Stepped assets (the levels are the whole
+ * point — a bare "Stepped" chip wouldn't tell the operator what the tiers
+ * are); plain title-case label for every other classification. */
+function formatAdjustability(cap: AssetCapability): string {
+  const label = formatSource(cap.adjustability);
+  if (cap.adjustability !== "STEPPED" || cap.power_steps_kw.length === 0) {
+    return label;
+  }
+  const levels = cap.power_steps_kw.map((kw) => kw.toString()).join("/");
+  return `${label} (${levels} kW)`;
+}
+
 export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
   const capabilityResults = useAssetCapabilities(assetIds);
   const { data: forecasts = [] } = useAssetForecasts();
@@ -35,12 +48,13 @@ export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell colSpan={6}>
+            <TableCell colSpan={7}>
               <Typography variant="subtitle1">Flexibility &amp; Forecast</Typography>
             </TableCell>
           </TableRow>
           <TableRow>
             <TableCell>Asset</TableCell>
+            <TableCell>Adjustability</TableCell>
             <TableCell align="right">Max import</TableCell>
             <TableCell align="right">Min import</TableCell>
             <TableCell align="right">Max export</TableCell>
@@ -55,6 +69,13 @@ export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
             return (
               <TableRow key={assetId} data-testid={`flexibility-row-${assetId}`}>
                 <TableCell>{ASSET_LABELS[assetId] ?? assetId}</TableCell>
+                <TableCell data-testid={`adjustability-${assetId}`}>
+                  {cap ? (
+                    <Chip size="small" label={formatAdjustability(cap)} />
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
                 <TableCell align="right">
                   {cap ? `${cap.max_import_kw.toFixed(2)} kW${cap.is_fixed ? " (fixed)" : ""}` : "—"}
                 </TableCell>
