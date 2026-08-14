@@ -35,7 +35,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
-| [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | Low-Medium | S (layout) / M (slot→trace) | Low — UI-only |
 | [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | Low | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
 | [GB-09](#general-backlog) | Fleet operators get a per-profile poll-interval override | Low | S | Low — current jitter already covers the motivating case, so low urgency |
 
@@ -155,18 +154,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Low — incremental notification coverage, and blocked on that machinery existing first.
 **Complexity:** Small once the producing machinery exists.
 **Verify:** Test per producer: the triggering condition emits exactly one notification of the expected severity.
-
----
-
-### BL-38: Planner tab layout — user/diagnostic split and matrix-slot→trace linking
-**Req:** `VEN/ui/src/pages/Planner.tsx`; wiki `queries/planner-tab-purpose.md`
-**Problem:** User-facing elements (objective, power stack, session progress) are interleaved with diagnostic surfaces (trigger timeline, decision matrix, trace table), so the operator persona sees noise and the debugging persona scrolls past controls. Additionally, answering "what happened in slot 14:35?" requires manually cross-reading the decision matrix and the trace table.
-**Fix:** (a) Reorder into a user zone on top (objective + legend, power stack, session progress) and a diagnostics zone below a divider, collapsed by default like the existing trace accordion. (b) Make decision-matrix slots clickable, filtering the TraceTable to entries relevant to that slot's window.
-**Gain:** Low-Medium — pure UX clarity improvement for two personas; no behavior or data change.
-**Complexity:** Small for (a) — pure reordering/collapse; Medium for (b) — needs a slot↔trace-entry time-window correlation and filter state.
-**Verify:** (a) UI test: diagnostics sections render collapsed by default, user zone above the divider. (b) UI test: clicking a matrix slot filters the trace table to entries whose timestamp falls in that slot.
-
----
 
 ---
 

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
 import type { AssetAllocation, Plan } from "../api/types";
 
@@ -176,6 +176,44 @@ describe("PlanDecisionMatrix", () => {
     render(<PlanDecisionMatrix plan={plan} />);
     expect(screen.getByTestId("tariff-cell-est-1")).toBeInTheDocument();
     expect(screen.queryByTestId("tariff-cell-est-0")).not.toBeInTheDocument();
+  });
+
+  // ─── BL-38: slot selection ──────────────────────────────────────────────────
+
+  it("without onSlotSelect, tariff-header cells are not clickable and no highlight renders", () => {
+    render(<PlanDecisionMatrix plan={makePlan()} />);
+    // No onClick handler is wired — clicking must not throw.
+    const cell = screen.getByTestId("matrix-slot-0");
+    expect(cell).toBeInTheDocument();
+  });
+
+  it("clicking a slot calls onSlotSelect with that slot's [start, end) window", async () => {
+    const user = userEvent.setup();
+    const onSlotSelect = vi.fn();
+    render(<PlanDecisionMatrix plan={makePlan()} onSlotSelect={onSlotSelect} />);
+
+    await user.click(screen.getByTestId("matrix-slot-0"));
+
+    expect(onSlotSelect).toHaveBeenCalledWith({
+      start: "2026-04-04T10:00:00Z",
+      end: "2026-04-04T10:05:00Z",
+    });
+  });
+
+  it("clicking the already-selected slot calls onSlotSelect with null", async () => {
+    const user = userEvent.setup();
+    const onSlotSelect = vi.fn();
+    render(
+      <PlanDecisionMatrix
+        plan={makePlan()}
+        selectedSlotStart="2026-04-04T10:00:00Z"
+        onSlotSelect={onSlotSelect}
+      />,
+    );
+
+    await user.click(screen.getByTestId("matrix-slot-0"));
+
+    expect(onSlotSelect).toHaveBeenCalledWith(null);
   });
 
   // ─── Peak-demand row (WP6.3, BL-09) ────────────────────────────────────────
