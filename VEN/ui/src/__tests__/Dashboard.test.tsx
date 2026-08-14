@@ -55,6 +55,7 @@ const mockActiveRequest = {
   status: "ACTIVE",
   estimated_cost_eur: 1.8,
   estimated_co2_g: 300,
+  accumulated_cost_eur: 0.9,
   interruptible: true,
   tolerance_min: null,
   budget_eur: null,

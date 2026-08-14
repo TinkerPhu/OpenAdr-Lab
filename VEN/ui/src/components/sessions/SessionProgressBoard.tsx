@@ -119,21 +119,21 @@ function DeadlineDisplay({ req }: { req: UserRequestWithSession }) {
   );
 }
 
-// ─── Budget line (estimated cost vs user budget — no accumulated-cost source) ─
+// ─── Budget line (BL-39: real accumulated cost, not a plan-time estimate) ─────
 
 function BudgetLine({ req }: { req: UserRequestWithSession }) {
   const budget = req.budget_eur ?? req.max_total_cost_eur;
   if (budget == null) return null;
 
-  const pct = budget > 0 ? (req.estimated_cost_eur / budget) * 100 : 0;
+  const pct = budget > 0 ? (req.accumulated_cost_eur / budget) * 100 : 0;
   const color = pct > 90 ? "error" : "primary";
 
   return (
     <Box data-testid={`session-budget-${req.id}`}>
       <Stack direction="row" justifyContent="space-between">
-        <Typography variant="caption" color="text.secondary">Budget (est.)</Typography>
+        <Typography variant="caption" color="text.secondary">Budget</Typography>
         <Typography variant="caption" color="text.secondary">
-          €{req.estimated_cost_eur.toFixed(2)} / €{budget.toFixed(2)}
+          €{req.accumulated_cost_eur.toFixed(2)} / €{budget.toFixed(2)}
         </Typography>
       </Stack>
       <LinearProgress variant="determinate" value={Math.min(pct, 100)} color={color} sx={{ height: 4, borderRadius: 2 }} />

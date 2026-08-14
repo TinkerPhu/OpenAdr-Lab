@@ -164,6 +164,7 @@ pub fn create_from_body(
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,
         estimated_co2_g: 0.0,
+        accumulated_cost_eur: 0.0,
         interruptible,
         tolerance_min,
         budget_eur: body.budget_eur,

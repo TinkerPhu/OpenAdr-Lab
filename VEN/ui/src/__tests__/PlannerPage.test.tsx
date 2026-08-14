@@ -82,6 +82,7 @@ function makeMockRequest(): UserRequestWithSession {
     status: "ACTIVE",
     estimated_cost_eur: 1.0,
     estimated_co2_g: 300,
+    accumulated_cost_eur: 0.4,
     interruptible: true,
     tolerance_min: null,
     budget_eur: null,

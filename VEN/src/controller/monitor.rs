@@ -4,8 +4,15 @@ use crate::controller::SimSnapshot;
 /// `record_tick` updates the cumulative per-asset energy ledger from the
 /// current simulation snapshot. Packet attribution has been removed;
 /// device sessions (EvSession, HeaterTarget) are managed directly.
+///
+/// BL-39: the same per-tick import cost this function already computes for
+/// the asset ledger is also attributed to any `UserRequest` targeting that
+/// asset (`req.asset_id`, `UserRequestStatus::Active` only) via
+/// `req.accumulated_cost_eur` — one cost computation, two consumers, rather
+/// than a second independent accounting path.
 use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use chrono::{DateTime, Utc};
 
 const NEAR_ZERO_KW: f64 = 1e-3;
@@ -14,9 +21,12 @@ use std::collections::HashMap;
 const DEFAULT_IMPORT_PRICE: f64 = 0.20;
 const DEFAULT_CO2_G_KWH: f64 = 300.0;
 
-/// Update the per-asset cumulative energy ledger from the current sim snapshot.
+/// Update the per-asset cumulative energy ledger from the current sim snapshot,
+/// and (BL-39) attribute each asset's import cost to any active `UserRequest`
+/// targeting it.
 pub fn record_tick(
     ledger: &mut HashMap<String, AssetLedgerEntry>,
+    requests: &mut [UserRequest],
     sim: &SimSnapshot,
     tariffs: &[TariffSnapshot],
     dt_s: f64,
@@ -44,11 +54,24 @@ pub fn record_tick(
             .entry(asset_id.clone())
             .or_insert_with(|| AssetLedgerEntry::new(asset_id, now));
         entry.energy_kwh += kw.abs() * dt_h;
+        let import_cost_eur = if kw > 0.0 {
+            kw * dt_h * import_tariff
+        } else {
+            0.0
+        };
         if kw > 0.0 {
-            entry.cost_eur += kw * dt_h * import_tariff;
+            entry.cost_eur += import_cost_eur;
             entry.co2_g += kw * dt_h * co2_rate;
         }
         entry.updated_at = Some(now);
+
+        if import_cost_eur > 0.0 {
+            for req in requests.iter_mut() {
+                if req.status == UserRequestStatus::Active && req.asset_id == *asset_id {
+                    req.accumulated_cost_eur += import_cost_eur;
+                }
+            }
+        }
     }
 }
 
@@ -90,7 +113,7 @@ mod tests {
         let sub_threshold = NEAR_ZERO_KW * 0.5;
         let sim = make_sim("ev", sub_threshold);
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &sim, &[], 1.0, Utc::now());
+        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now());
         assert!(
             ledger.is_empty(),
             "ledger must not accumulate sub-threshold power"
@@ -102,7 +125,7 @@ mod tests {
         let above_threshold = NEAR_ZERO_KW * 2.0;
         let sim = make_sim("ev", above_threshold);
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &sim, &[], 1.0, Utc::now());
+        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now());
         let entry = ledger
             .get("ev")
             .expect("ledger must have an entry for above-threshold power");
@@ -131,7 +154,7 @@ mod tests {
             co2_g_kwh: Some(400.0),
         };
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &sim, &[tariff], 3600.0, now);
+        record_tick(&mut ledger, &mut [], &sim, &[tariff], 3600.0, now);
 
         let entry = ledger.get("battery").expect("battery ledger entry");
         // energy = 5 kW * 1 h = 5 kWh
@@ -152,5 +175,116 @@ mod tests {
             "co2_g: expected 2000.0, got {}",
             entry.co2_g
         );
+    }
+
+    // ── BL-39: per-session accumulated cost ─────────────────────────────────
+
+    fn make_request(asset_id: &str, status: UserRequestStatus) -> UserRequest {
+        let now = Utc::now();
+        UserRequest {
+            id: uuid::Uuid::new_v4(),
+            asset_id: asset_id.to_string(),
+            target_soc: None,
+            target_energy_kwh: 0.0,
+            desired_power_kw: 0.0,
+            deadlines: vec![],
+            mode: Default::default(),
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: None,
+            session_type: None,
+            comfort_rates: vec![],
+            status,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn active_request_accumulates_cost_matching_its_own_asset_over_n_ticks() {
+        use crate::entities::tariff_snapshot::TariffSnapshot;
+        use chrono::Duration;
+
+        let now = Utc::now();
+        let tariff = TariffSnapshot {
+            interval_start: now - Duration::seconds(60),
+            interval_end: now + Duration::seconds(3600),
+            import_tariff_eur_kwh: Some(0.30),
+            export_tariff_eur_kwh: Some(0.10),
+            co2_g_kwh: Some(400.0),
+        };
+        let mut ledger = HashMap::new();
+        let mut requests = vec![make_request("ev", UserRequestStatus::Active)];
+
+        // 3 ticks of 900s (15 min) each, 3 kW import: Σ(power × Δt × tariff)
+        for _ in 0..3 {
+            let sim = make_sim("ev", 3.0);
+            record_tick(
+                &mut ledger,
+                &mut requests,
+                &sim,
+                std::slice::from_ref(&tariff),
+                900.0,
+                now,
+            );
+        }
+
+        // 3 × (3 kW × 0.25 h × 0.30 €/kWh) = 3 × 0.225 = 0.675 €
+        assert!(
+            (requests[0].accumulated_cost_eur - 0.675).abs() < 1e-9,
+            "expected 0.675, got {}",
+            requests[0].accumulated_cost_eur
+        );
+    }
+
+    #[test]
+    fn only_the_matching_asset_id_request_accumulates() {
+        let sim = make_sim("ev", 3.0);
+        let mut ledger = HashMap::new();
+        let mut requests = vec![
+            make_request("ev", UserRequestStatus::Active),
+            make_request("heater", UserRequestStatus::Active),
+        ];
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
+
+        assert!(
+            requests[0].accumulated_cost_eur > 0.0,
+            "ev request must accumulate"
+        );
+        assert_eq!(
+            requests[1].accumulated_cost_eur, 0.0,
+            "heater request must not accumulate another asset's cost"
+        );
+    }
+
+    #[test]
+    fn non_active_request_does_not_accumulate() {
+        let sim = make_sim("ev", 3.0);
+        let mut ledger = HashMap::new();
+        let mut requests = vec![make_request("ev", UserRequestStatus::Completed)];
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
+
+        assert_eq!(
+            requests[0].accumulated_cost_eur, 0.0,
+            "a Completed session must not keep accumulating"
+        );
+    }
+
+    #[test]
+    fn exporting_asset_does_not_accumulate_cost_for_its_request() {
+        // Export (negative power) is revenue, not a cost the budget bar tracks.
+        let sim = make_sim("battery", -3.0);
+        let mut ledger = HashMap::new();
+        let mut requests = vec![make_request("battery", UserRequestStatus::Active)];
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
+
+        assert_eq!(requests[0].accumulated_cost_eur, 0.0);
     }
 }
