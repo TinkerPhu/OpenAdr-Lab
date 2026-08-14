@@ -81,10 +81,17 @@ pub struct ControlDescriptor {
 /// reports 0.0 for that direction's field — never a copy of the other
 /// direction's live value. The two fields are only ever equal by coincidence
 /// (both genuinely 0), never by construction.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetCapability {
     pub max_export_kw: f64,
     pub max_import_kw: f64,
+    /// BL-27: how this asset can be controlled — on/off, stepped, continuous,
+    /// curtail-only, etc. A static classification of the device's control mode,
+    /// independent of the live ceiling above.
+    pub adjustability: crate::entities::asset::PowerAdjustability,
+    /// For `Stepped` adjustability: explicit discrete import levels in kW
+    /// (ascending, including 0.0). Empty for every other adjustability.
+    pub power_steps_kw: Vec<f64>,
 }
 
 impl AssetCapability {

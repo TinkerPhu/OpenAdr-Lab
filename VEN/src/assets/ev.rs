@@ -6,6 +6,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::asset::PowerAdjustability;
 use crate::entities::asset_params::EvParams;
 
 /// Snap a commanded EV setpoint to 0 if it falls strictly between 0 and the minimum
@@ -122,6 +123,8 @@ impl EvCharger {
             return AssetCapability {
                 max_export_kw: 0.0,
                 max_import_kw: 0.0,
+                adjustability: PowerAdjustability::Stepless,
+                power_steps_kw: vec![],
             };
         }
         AssetCapability {
@@ -135,6 +138,8 @@ impl EvCharger {
             } else {
                 self.max_charge_kw
             },
+            adjustability: PowerAdjustability::Stepless,
+            power_steps_kw: vec![],
         }
     }
 
@@ -334,6 +339,20 @@ mod tests {
             pending_command_kw: actual_power_kw,
         };
         (cfg, state)
+    }
+
+    #[test]
+    fn capability_reports_stepless_adjustability_plugged_and_unplugged() {
+        for (plugged, soc) in [(true, 0.5), (false, 0.5)] {
+            let (ev, state) = make_ev(plugged, soc, 0.0);
+            let cap = ev.capability_inner(&state);
+            assert_eq!(
+                cap.adjustability,
+                PowerAdjustability::Stepless,
+                "plugged={plugged}"
+            );
+            assert!(cap.power_steps_kw.is_empty(), "plugged={plugged}");
+        }
     }
 
     #[test]

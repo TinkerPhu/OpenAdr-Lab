@@ -6,6 +6,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::asset::PowerAdjustability;
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 
 fn f64_infinity() -> f64 {
@@ -157,6 +158,8 @@ impl PvInverter {
         AssetCapability {
             max_export_kw: state.actual_power_kw, // e.g. -2.0
             max_import_kw: 0.0,
+            adjustability: PowerAdjustability::Croppable,
+            power_steps_kw: vec![],
         }
     }
 
@@ -408,6 +411,8 @@ impl Asset for PvInverter {
                 AssetCapability {
                     max_export_kw: power_kw,
                     max_import_kw: power_kw,
+                    adjustability: PowerAdjustability::Croppable,
+                    power_steps_kw: vec![],
                 },
             ));
         }
@@ -489,6 +494,19 @@ mod tests {
         let cap = pv.capability_inner(&state);
         assert_eq!(cap.max_import_kw, 0.0);
         assert_eq!(cap.max_export_kw, -4.2);
+    }
+
+    #[test]
+    fn capability_reports_croppable_adjustability_with_no_power_steps() {
+        let (pv, _) = make_pv(10.0);
+        let state = PvState {
+            actual_power_kw: -4.2,
+            generation_limit_kw: None,
+            curtailment_source: PvCurtailmentSource::None,
+        };
+        let cap = pv.capability_inner(&state);
+        assert_eq!(cap.adjustability, PowerAdjustability::Croppable);
+        assert!(cap.power_steps_kw.is_empty());
     }
 
     #[test]

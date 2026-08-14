@@ -4,23 +4,15 @@
 //! describes current VEN behaviour — do not cite any of these as shipped behaviour in
 //! docs or elsewhere. Each type has a tracked implementation plan in `docs/BACKLOG.md`
 //! (see the BL-14 through BL-3x range for the item covering it).
+//!
+//! `PowerAdjustability` moved to `entities::asset` (BL-27) once it became live,
+//! referenced code — `AssetProfile` below still uses it via that import, but the
+//! enum itself is no longer a sketch.
 #![allow(dead_code)]
 
-use crate::entities::asset::ComfortRate;
+use crate::entities::asset::{ComfortRate, PowerAdjustability};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-/// How adjustable an asset's power consumption/generation is (§1.2).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum PowerAdjustability {
-    None,           // observe only (e.g. cooking stove, fixed load)
-    Recommendation, // VEN can suggest but not enforce (e.g. washing machine)
-    OnOff,          // binary switching — equivalent to Stepped with [0, MaxPower]
-    Stepped,        // discrete power levels (e.g. 0/3/6 kW pump, step-controlled charger)
-    Stepless,       // continuously adjustable within [min_kw, max_kw]
-    Croppable,      // can be curtailed downward only (e.g. PV — can't exceed natural output)
-}
 
 /// How a user expressed an energy task request (§1.9).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

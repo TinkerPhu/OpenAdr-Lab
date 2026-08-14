@@ -660,12 +660,26 @@ export type ReportObligation = {
   historical: boolean;
 };
 
+/** BL-27: device control-mode classification — static, independent of the live
+ * max/min_*_kw feasible range above. */
+export type PowerAdjustability =
+  | "NONE"
+  | "RECOMMENDATION"
+  | "ON_OFF"
+  | "STEPPED"
+  | "STEPLESS"
+  | "CROPPABLE";
+
 export type AssetCapability = {
   max_import_kw: number;
   max_export_kw: number;
   min_import_kw: number;
   min_export_kw: number;
   is_fixed: boolean;
+  adjustability: PowerAdjustability;
+  /** Explicit discrete import levels in kW (ascending, including 0.0) — only
+   * meaningful for `adjustability === "STEPPED"`, empty otherwise. */
+  power_steps_kw: number[];
 };
 
 export type ForecastSource =

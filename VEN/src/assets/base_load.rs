@@ -8,6 +8,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::asset::PowerAdjustability;
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
 
 /// One configured appliance's daily draw: a trapezoidal power pulse
@@ -186,6 +187,8 @@ impl BaseLoad {
         AssetCapability {
             max_export_kw: 0.0,
             max_import_kw: state.actual_power_kw,
+            adjustability: PowerAdjustability::None,
+            power_steps_kw: vec![],
         }
     }
 
@@ -402,6 +405,17 @@ mod tests {
         let cap = bl.capability_inner(&state);
         assert_eq!(cap.max_export_kw, 0.0);
         assert_eq!(cap.max_import_kw, 0.87);
+    }
+
+    #[test]
+    fn capability_reports_no_adjustability_with_no_power_steps() {
+        let bl = base_load_with_spikes(vec![]);
+        let state = BaseLoadState {
+            actual_power_kw: 0.87,
+        };
+        let cap = bl.capability_inner(&state);
+        assert_eq!(cap.adjustability, PowerAdjustability::None);
+        assert!(cap.power_steps_kw.is_empty());
     }
 
     #[test]

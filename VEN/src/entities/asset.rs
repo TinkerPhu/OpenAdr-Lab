@@ -16,6 +16,21 @@ pub enum AssetType {
     GenericProducer, // fallback
 }
 
+/// How adjustable an asset's power consumption/generation is (§1.2). Reported
+/// per-asset by `assets::AssetCapability.adjustability` (BL-27) — moved here
+/// from `entities/design_vocabulary.rs`'s dead-code quarantine once it became
+/// live, referenced code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PowerAdjustability {
+    None,           // observe only (e.g. cooking stove, fixed load)
+    Recommendation, // VEN can suggest but not enforce (e.g. washing machine)
+    OnOff,          // binary switching — equivalent to Stepped with [0, MaxPower]
+    Stepped,        // discrete power levels (e.g. 0/3/6 kW pump, step-controlled charger)
+    Stepless,       // continuously adjustable within [min_kw, max_kw]
+    Croppable,      // can be curtailed downward only (e.g. PV — can't exceed natural output)
+}
+
 /// How to handle completion when the last DeadlineTier expires (§1.10).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

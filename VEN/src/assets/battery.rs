@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::asset::PowerAdjustability;
 use crate::entities::asset_params::BatteryParams;
 
 /// Battery storage config. Bidirectional.
@@ -92,6 +93,8 @@ impl Battery {
             } else {
                 self.max_charge_kw
             },
+            adjustability: PowerAdjustability::Stepless,
+            power_steps_kw: vec![],
         }
     }
 
@@ -272,6 +275,14 @@ mod tests {
             c_terminal_eur_kwh: None,
         };
         (Battery::from_params(&cfg), Battery::initial_state(&cfg))
+    }
+
+    #[test]
+    fn capability_reports_stepless_adjustability_with_no_power_steps() {
+        let (bat, state) = make_battery_cfg(0.5);
+        let cap = bat.capability_inner(&state);
+        assert_eq!(cap.adjustability, PowerAdjustability::Stepless);
+        assert!(cap.power_steps_kw.is_empty());
     }
 
     #[test]
