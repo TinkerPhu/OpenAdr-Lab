@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary,
   Alert, Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
@@ -205,6 +205,18 @@ export function PlannerPage() {
   const [objective, setObjective] = useState<PlannerObjective>("min_cost");
   const [plannerStatus, setPlannerStatus] = useState<PlannerStatus>({ phase: "idle" });
   const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatus>({ active: false });
+  // BL-38: matrix-slot → trace filter. null = no filter (TraceTable shows everything).
+  const [selectedSlotWindow, setSelectedSlotWindow] = useState<{ start: string; end: string } | null>(null);
+
+  const filteredEvents = useMemo(() => {
+    if (!selectedSlotWindow) return events ?? [];
+    const startMs = new Date(selectedSlotWindow.start).getTime();
+    const endMs = new Date(selectedSlotWindow.end).getTime();
+    return (events ?? []).filter((e) => {
+      const ts = new Date(e.ts).getTime();
+      return ts >= startMs && ts < endMs;
+    });
+  }, [events, selectedSlotWindow]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local objective from server plan; no loop risk
@@ -280,26 +292,13 @@ export function PlannerPage() {
 
       <ObjectiveLegend />
 
-      <Stack spacing={3} divider={<Divider />}>
+      {/* ── User zone: the controls and progress a site operator actually needs ── */}
+      <Stack spacing={3} divider={<Divider />} data-testid="planner-user-zone">
         {/* Planner Status (Plan E) */}
         <PlannerStatusBar status={plannerStatus} />
 
-        {/* Plan Header */}
-        <PlanHeaderBar plan={plan} />
-
         {/* Power Stack Chart */}
         <PlanPowerStack plan={plan} />
-
-        {/* Trigger Timeline */}
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            Trigger History
-          </Typography>
-          <PlanTriggerTimeline events={events ?? []} />
-        </Box>
-
-        {/* Decision Matrix */}
-        <PlanDecisionMatrix plan={plan} />
 
         {/* Session Progress Board */}
         <Box>
@@ -308,19 +307,67 @@ export function PlannerPage() {
           </Typography>
           <SessionProgressBoard requests={requests ?? []} plan={plan ?? undefined} sim={sim ?? undefined} />
         </Box>
-
-        {/* Decision Trace (collapsible) */}
-        <Accordion defaultExpanded={false} data-testid="trace-accordion">
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle2" color="text.secondary">
-              Decision Trace ({events?.length ?? 0} events)
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails sx={{ p: 0 }}>
-            <TraceTable entries={events ?? []} />
-          </AccordionDetails>
-        </Accordion>
       </Stack>
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* ── Diagnostics zone: "why did the plan change / what happened" surfaces —
+          collapsed by default, same pattern as the trace accordion it contains. ── */}
+      <Accordion defaultExpanded={false} data-testid="planner-diagnostics-accordion">
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle1" color="text.secondary">
+            Diagnostics
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={3} divider={<Divider />}>
+            {/* Plan Header */}
+            <PlanHeaderBar plan={plan} />
+
+            {/* Trigger Timeline */}
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Trigger History
+              </Typography>
+              <PlanTriggerTimeline events={events ?? []} />
+            </Box>
+
+            {/* Decision Matrix — click a slot to filter the Decision Trace below */}
+            <PlanDecisionMatrix
+              plan={plan}
+              selectedSlotStart={selectedSlotWindow?.start ?? null}
+              onSlotSelect={setSelectedSlotWindow}
+            />
+
+            {/* Decision Trace (collapsible) */}
+            <Accordion defaultExpanded={false} data-testid="trace-accordion">
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Decision Trace ({filteredEvents.length} events)
+                  </Typography>
+                  {selectedSlotWindow && (
+                    <Chip
+                      size="small"
+                      color="primary"
+                      data-testid="trace-slot-filter-chip"
+                      label={`Slot ${new Date(selectedSlotWindow.start).toLocaleTimeString()}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onDelete={(e) => {
+                        e.stopPropagation();
+                        setSelectedSlotWindow(null);
+                      }}
+                    />
+                  )}
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                <TraceTable entries={filteredEvents} />
+              </AccordionDetails>
+            </Accordion>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       {/* Correction Banner (Plan F: Layer 1) — Snackbar overlay, no layout shift */}
       <CorrectionBanner status={correctionStatus} />
