@@ -16,7 +16,23 @@ bash run_all_tests.sh --e2e          # E2E behave integration tests
 bash run_all_tests.sh --resilience   # failure recovery tests
 bash run_all_tests.sh --rust         # openleadr-rs cargo tests
 bash run_all_tests.sh --local --e2e  # combine flags
+bash run_all_tests.sh --coverage     # VEN cargo-tarpaulin coverage report (opt-in, see below)
 ```
+
+### Coverage (opt-in)
+
+`--coverage` runs the VEN Rust test pyramid under `cargo-tarpaulin` instrumentation and
+writes an HTML + JSON report to `coverage/ven/` on the docker host (gitignored, host-local).
+It is **never** part of the bare/no-flag "everything" run and has its own docker cache
+volumes (`tests/docker-compose.ven-unit-test.yml`'s `ven-coverage` service) — tarpaulin's
+instrumented build uses different `RUSTFLAGS` than a plain `cargo test`, so it can't share
+the normal `ven-unit-test` cache, and toggling it costs a full recompile either way.
+
+A committed, consolidated snapshot lives at `docs/history/coverage_report_<date>.md`
+(regenerate rather than hand-edit — see that file's own "Regenerating" section). Coverage is
+not an enforced gate for this project (`.claude/CLAUDE.md`: "no enforced coverage floor —
+keep domain and application layer tests meaningful"); this is a visibility tool, not a merge
+requirement.
 
 ---
 
