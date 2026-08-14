@@ -9743,3 +9743,61 @@ item; `assets/mod.rs` is well under the cap regardless at 417 raw lines).
 **Bookkeeping**: BL-27 row removed from `docs/BACKLOG.md` (summary table +
 full entry).
 
+## BL-39: Per-session accumulated-cost accounting — real budget bar (2026-08-14)
+
+**Trigger**: `SessionProgressBoard.tsx`'s `BudgetLine` compared a session's
+budget against `estimated_cost_eur` (a plan-time projection, labeled "est.")
+because no per-session accumulated cost existed anywhere — `AssetLedger`
+accumulates per asset since startup with no session attribution. Undermined
+trust in the number ("est." next to what looks like a spend tracker).
+
+**Design decision**: `UserRequest` already carries `asset_id: String` directly
+(one request : one asset, confirmed in `entities/user_request.rs`), so
+attribution is a direct lookup, not a new indirection layer. Extended
+`controller::monitor::record_tick` — which already computes each asset's
+per-tick import cost for the `AssetLedger` — to also accept
+`requests: &mut [UserRequest]` and add that same `import_cost_eur` to
+`req.accumulated_cost_eur` for any request whose `asset_id` matches and whose
+`status == Active` (Completed/Cancelled sessions stop accumulating — a closed
+session's number shouldn't keep moving because its asset is now doing
+something else, e.g. opportunistic charging). One cost computation, two
+consumers, chosen over the BACKLOG item's other listed option (deriving it
+retroactively from history-store data) since that would need a second,
+independent tariff-lookup/cost-formula path with more moving parts for no
+extra correctness. Export (negative power) is excluded, same as the ledger's
+own `cost_eur` convention — it's revenue, not spend a budget cap should track.
+
+**Implementation**: `entities/user_request.rs` gained
+`accumulated_cost_eur: f64` (`#[serde(default)]`, old persisted requests
+deserialize as 0.0) — added explicitly at all 7 `UserRequest {...}`
+construction sites across `controller/user_request.rs`,
+`routes/hems/sessions.rs`, `services/user_request.rs` (×3), `state/mod.rs`,
+`controller/monitor.rs`'s own tests, rather than relying on a `Default` impl,
+since every site should intentionally start a request at 0.0 rather than
+silently inherit whatever a blanket default happened to be.
+`tasks/sim_tick/publish.rs`'s existing ledger get/set-around-`record_tick`
+pattern extended the same way for `active_requests`. `#[serde(flatten)]` on
+`UserRequestWithSession` (`routes/hems/mod.rs`) means the new field reaches
+the wire with no route changes. `SessionProgressBoard.tsx`'s `BudgetLine` now
+reads `accumulated_cost_eur`, dropped the "est." label and its "no
+accumulated-cost source" comment.
+
+**Verification**: `wsl cargo test -p ven-app` — 1016 + 1 passed, including 4
+new `controller::monitor` tests (Σ(power × Δt × tariff) over N ticks; only the
+matching-`asset_id` request accumulates, a sibling on a different asset
+doesn't; a non-Active request doesn't; an exporting asset doesn't). `cargo
+fmt`/`clippy --all-targets --all-features -- -D warnings` clean (one clippy
+fix: `std::slice::from_ref` instead of a per-iteration `tariff.clone()` in the
+loop test). `scripts/audit_file_sizes.py` passed. `cd VEN/ui && npm test` —
+556/556 passed (updated 4 existing `UserRequestWithSession` test fixtures
+across `Dashboard`/`Devices`/`PlannerPage`/`SessionProgressBoard` test files
+for the new required field; rewrote the one test asserting the old "est."
+label to assert its absence instead). `npm run lint` — 0 errors, same
+pre-existing warnings. Architecture invariant greps clean. Confirmed
+`EvCard`/`HeaterCard`/`AllRequestsSection`'s own `estimated_cost_eur` displays
+are correctly out of scope — they're honestly labeled "Est." estimates
+elsewhere in the Devices tab, not budget-vs-spend trackers, so left unchanged.
+
+**Bookkeeping**: BL-39 row removed from `docs/BACKLOG.md` (summary table +
+full entry).
+

@@ -62,6 +62,13 @@ pub struct UserRequest {
     pub status: UserRequestStatus,
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,
+    /// BL-39: real money spent so far on this session, accumulated per
+    /// dispatcher tick from this request's `asset_id`'s actual import power
+    /// (`controller::monitor::record_tick`) — distinct from `estimated_cost_eur`
+    /// above, which is a plan-time projection. `#[serde(default)]` so old
+    /// persisted requests deserialize as 0.0.
+    #[serde(default)]
+    pub accumulated_cost_eur: f64,
     // ── Leeway fields (§8.2 / ven_asset_interface_spec §7) ──────────────────
     pub interruptible: bool,        // planner may pause/resume this packet
     pub tolerance_min: Option<i64>, // ±N minutes around deadline acceptable
