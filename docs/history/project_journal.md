@@ -9299,3 +9299,40 @@ exercised the exact `t_from`/`snapshot()` call path this reuses.
 
 **Bookkeeping**: GB-26 and GB-29 rows removed from `docs/BACKLOG.md`.
 
+## GB-30: opt-in VEN coverage tooling, first run + consolidated report (2026-08-13/14)
+
+Answered a user question about code coverage — none existed anywhere for this project's own
+VEN/VTN code, only for the `openleadr-rs` submodule's own upstream CI. Filed as GB-30, then
+implemented per a follow-up discussion about the tradeoffs of adding it.
+
+**Tooling**: a new `ven-coverage` docker service (`tests/docker-compose.ven-unit-test.yml`,
+`tests/Dockerfile.ven-coverage`) runs the VEN cargo test suite under `cargo-tarpaulin`
+instrumentation, with its own cache volumes deliberately separate from `ven-unit-test`'s —
+tarpaulin's instrumented build uses different `RUSTFLAGS` than a plain `cargo test`, so a
+shared cache would just thrash on every toggle between the two. Wired into `run_all_tests.sh`
+as `--coverage`, kept out of the bare/no-flag "everything" run: the instrumented build/run is
+itself 2–4× slower than plain `cargo test`, and switching the flag on/off forces a full
+from-scratch recompile either way given the separate cache. Report emits both HTML and JSON
+to `coverage/ven/` on the docker host (gitignored, host-local).
+
+**First run** (Node2, under the usual `docker_host_lock.sh` lease): **992 tests, 0 failed;
+66.93% line coverage (5431/8114)**. Consolidated the per-file JSON/log output into a committed
+markdown snapshot, `docs/history/coverage_report_2026-08-14.md` — module-level rollup, the 23
+zero-coverage files (all either wiring exercised only at the E2E/BDD layer, e.g. `main.rs`,
+`routes/*`, or task-loop bodies covered by their own BDD scenarios rather than unit tests, per
+the `determinism` rule), and the full 150-file table. `routes/` (20.9%) and `tasks/` (53.5%)
+sit lowest for exactly that reason — not a real gap, just out of this report's scope — while
+`controller/` (88.1%, the MILP planner/dispatcher/arbiter) and the domain-heavy `entities/`,
+`profile/`, `state/` modules carry the highest coverage, matching where the project's own
+testing philosophy (`.claude/CLAUDE.md`: "no enforced coverage floor — keep domain and
+application layer tests meaningful") says rigor matters most.
+
+**Scope decision**: explicitly limited to the VEN Rust test pyramid (cargo-tarpaulin's native
+territory), not a merged figure across UI vitest coverage and E2E/BDD-exercised code paths —
+the latter would need instrumenting the running binary itself (e.g. `cargo-llvm-cov` reading
+E2E/behave traffic) plus a separate JS coverage tool merge, real additional engineering the
+user chose not to scope in for this pass.
+
+**Bookkeeping**: `docs/guidelines/TESTING.md` gained a "Coverage (opt-in)" section describing
+the flag and pointing at the dated report file; GB-30 row removed from `docs/BACKLOG.md`.
+
