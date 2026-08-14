@@ -9536,3 +9536,47 @@ No BDD scenario: confirmed sibling grid-level chart cells have no dedicated
 full entry). `docs/architecture/VEN_ARCHITECTURE.md`'s route table gained the
 `GET /flexibility/history` row.
 
+## GB-24: pre-flight capacity check for run_all_tests.sh on Node2 (2026-08-14)
+
+**Trigger**: GB-24 documented two full `--e2e` runs against Node2 that ran
+15–40+ minutes fully degraded (195/269 and 40/270 spurious scenario failures)
+when they coincided with load from the resident 10-VEN fleet experiment
+(`VEN/scale_out/node2/`). Of the three options GB-24 listed (pre-flight check,
+move/pause the fleet, require Node1), picked the pre-flight check — self
+contained in `run_all_tests.sh`, doesn't touch the separately-owned fleet
+experiment's own lifecycle.
+
+**Live grounding**: before writing the threshold, checked Node2's actual state
+(`ssh Node2 "free -m"` and `docker ps`) rather than guessing — 3794 MB total
+RAM, 2482–2919 MB available across two checks minutes apart, with the 10
+resident fleet containers (`node2-ven-4-1`..`node2-ven-13-1`, compose project
+`node2`) running alongside one other session's test container. Also found
+Node2's `docker_host_lock` was live-held by another concurrent session
+(`fix/sim-persist-plan-context-tests`, unrelated simulator-test work) during
+this investigation — left it untouched, all checks here were read-only
+(`docker ps`/`free -m`, no docker state changes).
+
+**Fix**: added a capacity check right after the existing lock-acquisition
+block, gated by the same condition (only remote hosts this suite already
+locks). Scoped to the actual causal mechanism, not a blind memory floor: only
+aborts when fleet containers (`docker ps --filter
+label=com.docker.compose.project=node2`) are present *and* available memory
+is below `MIN_AVAILABLE_MEM_MB=800` — a host that's merely busy for an
+unrelated single-session reason (no fleet containers) is not blocked, since
+`docker_host_lock` already serializes that case. Verified the exact quoting
+survives an ssh round-trip (`awk "/^Mem:/{print \$7}"` inside a single-quoted
+outer command, so `$7` isn't expanded locally) by running the two literal
+commands against Node2 live: correctly reported `FLEET_COUNT=10 AVAIL_MB=2919`
+(no abort, since 2919 > 800).
+
+**Verification**: `bash -n run_all_tests.sh` (syntax check) — clean. No unit
+test harness exists for this script (matches `docker_host_lock.sh`/`wsl_lock.sh`
+precedent — infra tooling verified by direct invocation, not covered by the
+Rust/UI/BDD pyramid). `shellcheck` unavailable in this environment (checked
+both native Windows and WSL) — not run. Filed `R-66`
+(`docs/reference/TECHNICAL_DEBTS.md`) for the `MIN_AVAILABLE_MEM_MB=800`
+heuristic itself, since it's a first-pass estimate from live observation, not
+calibrated against an actual bad run's memory profile.
+
+**Bookkeeping**: GB-24 row removed from `docs/BACKLOG.md`.
+

@@ -139,6 +139,30 @@ if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COV
     header "Acquiring $_DOCKER_LABEL lock"
     LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
     trap 'LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
+
+    # GB-24: fails fast if Node2's resident fleet experiment (VEN/scale_out/node2/,
+    # node2-ven-*) is running alongside genuinely tight memory — this combination
+    # degraded two full E2E runs (195/269, 40/270 spurious scenario failures, both
+    # environmental) instead of failing fast. A host that's merely busy for another
+    # reason (single active session, no fleet containers) is NOT blocked — that case
+    # is already serialized by the lock above.
+    MIN_AVAILABLE_MEM_MB=800  # heuristic floor, see docs/reference/TECHNICAL_DEBTS.md
+    header "Pre-flight: $_DOCKER_LABEL capacity check"
+    FLEET_COUNT=$(run_docker_cmd 'docker ps --filter "label=com.docker.compose.project=node2" -q | wc -l' 2>/dev/null || echo 0)
+    AVAIL_MB=$(run_docker_cmd 'free -m | awk "/^Mem:/{print \$7}"' 2>/dev/null || echo 99999)
+    if [[ "$FLEET_COUNT" -gt 0 && "$AVAIL_MB" -lt "$MIN_AVAILABLE_MEM_MB" ]]; then
+        echo -e "${RED}${BOLD}ABORT${NC}: $_DOCKER_LABEL has $FLEET_COUNT resident fleet VEN"
+        echo "  container(s) (VEN/scale_out/node2/) running alongside only ${AVAIL_MB} MB"
+        echo "  available (floor: ${MIN_AVAILABLE_MEM_MB} MB) — GB-24: this combination"
+        echo "  degrades the E2E/resilience/rust suite unpredictably instead of failing"
+        echo "  fast (documented: 195/269 and 40/270 spurious scenario failures, both"
+        echo "  environmental)."
+        echo ""
+        echo "  Options: stop the fleet experiment first, run against DOCKER_HOST=Node1"
+        echo "  instead, or re-run once more memory frees up."
+        exit 3
+    fi
+    echo "  OK — ${FLEET_COUNT} fleet VEN(s) resident, ${AVAIL_MB} MB available (floor ${MIN_AVAILABLE_MEM_MB} MB)"
 fi
 
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────
