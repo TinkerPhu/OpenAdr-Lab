@@ -345,6 +345,14 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
                 except requests.RequestException as e:
                     record = {"ts": iso(datetime.now(timezone.utc)), "ven": ven, "error": str(e)}
                 else:
+                    if plan is None:
+                        # No plan cycle has completed yet for this VEN (e.g. just
+                        # redeployed) -- GET /plan returns a bare `null`, not an
+                        # HTTP error, so this isn't caught by the except above.
+                        record = {"ts": iso(datetime.now(timezone.utc)), "ven": ven, "error": "no plan yet"}
+                        handles[ven].write(json.dumps(record) + "\n")
+                        handles[ven].flush()
+                        continue
                     record = {
                         "ts": iso(datetime.now(timezone.utc)),
                         "ven": ven,
