@@ -126,29 +126,54 @@ fn dedup_key(value: &Value) -> Option<(String, String)> {
     Some((id, modified))
 }
 
-/// Parse the simple `PT#H#M#S` ISO-8601 duration subset the VEN reporter
-/// emits (`format_iso8601_duration`). Unknown shapes parse as 0 seconds.
-fn parse_pt_duration_s(s: &str) -> i64 {
-    let Some(rest) = s.strip_prefix("PT") else {
-        return 0;
-    };
+/// Walk one duration segment's chars, accumulating digits and multiplying by
+/// the unit each digit run's trailing letter maps to via `seconds_for`.
+/// Letters `seconds_for` maps to `None` (e.g. `Y`/`M` in the date segment,
+/// approximated as 0 — see `parse_pt_duration_s`) contribute nothing.
+fn sum_digit_units(s: &str, seconds_for: impl Fn(char) -> Option<i64>) -> i64 {
     let mut total = 0i64;
     let mut num = String::new();
-    for c in rest.chars() {
+    for c in s.chars() {
         if c.is_ascii_digit() {
             num.push(c);
         } else {
             let v: i64 = num.parse().unwrap_or(0);
             num.clear();
-            total += match c {
-                'H' => v * 3600,
-                'M' => v * 60,
-                'S' => v,
-                _ => 0,
-            };
+            total += v * seconds_for(c).unwrap_or(0);
         }
     }
     total
+}
+
+/// Parse an ISO-8601 duration in either the VEN reporter's compact form
+/// (`format_iso8601_duration`, e.g. `"PT5M"`) or the fully-qualified
+/// `P[n]Y[n]M[n]DT[n]H[n]M[n]S` form the VTN normalizes durations to once a
+/// report round-trips through it (e.g. `"P0Y0M0DT0H5M0S"`) — both shapes are
+/// seen in practice, since `record_reports` fetches reports back from the
+/// VTN rather than reading the VEN's raw POST body. Years/months are
+/// approximated as 0 (this project's report intervals are minute/hour-scale
+/// and never populate them, matching the same approximation in
+/// `experiments/kpi.py`'s duration parser). Unknown shapes parse as 0
+/// seconds.
+fn parse_pt_duration_s(s: &str) -> i64 {
+    let Some(rest) = s.strip_prefix('P') else {
+        return 0;
+    };
+    let (date_part, time_part) = match rest.split_once('T') {
+        Some((date, time)) => (date, time),
+        None => (rest, ""),
+    };
+    let date_s = sum_digit_units(date_part, |c| match c {
+        'D' => Some(86400),
+        _ => None,
+    });
+    let time_s = sum_digit_units(time_part, |c| match c {
+        'H' => Some(3600),
+        'M' => Some(60),
+        'S' => Some(1),
+        _ => None,
+    });
+    date_s + time_s
 }
 
 /// WP3.7 — SG-3 timeliness: seconds between the end of the newest reported
@@ -405,6 +430,11 @@ mod tests {
         assert_eq!(parse_pt_duration_s("PT15M"), 900);
         assert_eq!(parse_pt_duration_s("PT1H30M"), 5400);
         assert_eq!(parse_pt_duration_s("garbage"), 0);
+        // Fully-qualified form the VTN normalizes durations to once a
+        // report round-trips through it (real archived-report shape).
+        assert_eq!(parse_pt_duration_s("P0Y0M0DT0H5M0S"), 300);
+        assert_eq!(parse_pt_duration_s("P0Y0M0DT1H30M0S"), 5400);
+        assert_eq!(parse_pt_duration_s("P0Y0M1DT0H0M0S"), 86400);
     }
 
     #[test]
@@ -413,7 +443,7 @@ mod tests {
         let v = json!({
             "createdDateTime": "2026-01-01T10:15:30Z",
             "resources": [{"intervals": [{
-                "intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "PT15M"}
+                "intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "P0Y0M0DT0H15M0S"}
             }]}]
         });
         assert_eq!(report_submission_lag_s(&v), Some(30.0));
@@ -425,7 +455,7 @@ mod tests {
         let v = json!({
             "createdDateTime": "2026-01-01T10:00:00Z",
             "resources": [{"intervals": [{
-                "intervalPeriod": {"start": "2026-01-01T10:55:00Z", "duration": "PT5M"}
+                "intervalPeriod": {"start": "2026-01-01T10:55:00Z", "duration": "P0Y0M0DT0H5M0S"}
             }]}]
         });
         assert_eq!(report_submission_lag_s(&v), Some(-3600.0));
@@ -436,8 +466,8 @@ mod tests {
         let v = json!({
             "createdDateTime": "2026-01-01T10:30:00Z",
             "resources": [{"intervals": [
-                {"intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "PT15M"}},
-                {"intervalPeriod": {"start": "2026-01-01T10:15:00Z", "duration": "PT15M"}}
+                {"intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "P0Y0M0DT0H15M0S"}},
+                {"intervalPeriod": {"start": "2026-01-01T10:15:00Z", "duration": "P0Y0M0DT0H15M0S"}}
             ]}]
         });
         assert_eq!(report_submission_lag_s(&v), Some(0.0));

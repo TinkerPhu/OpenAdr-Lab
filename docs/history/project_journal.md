@@ -10077,3 +10077,60 @@ own follow-up step); GB-33 itself; a true SoC-deadline-miss comfort metric
 counts used as the available proxy for now); the 30-day-scale test the user
 flagged as the longer-term goal beyond the 24h scenario.
 
+## GB-32: BFF `report_lag_s` duration parser — same sibling bug as `kpi.py`'s, server-side
+
+**Trigger:** The `kpi.py` duration-parsing fix above (leading-`"PT"`-only
+parser silently zeroing every fully-qualified-form duration) prompted
+checking whether the BFF has the same bug in its own duration parsing —
+`VTN/bff/src/recorder.rs::parse_pt_duration_s` feeds
+`report_submission_lag_s`, archived as the `report_lag_s` column in
+`lab_recorder.reports_received` (the SG-3 timeliness metric). It did: same
+`"PT"`-only prefix check, same silent `0` on the VTN's fully-qualified
+`P[n]Y[n]M[n]DT[n]H[n]M[n]S` form, same root cause (`record_reports` fetches
+reports back from the VTN via `GET /reports`, which normalizes durations to
+the full form, rather than reading the VEN's raw POST body which uses the
+compact `"PT5M"` form). Every `report_lag_s` value ever recorded to date was
+silently wrong (`window_end` collapsed to `interval.start` instead of
+`interval.start + duration`, an error of up to one report interval,
+300–900s typical).
+
+**Design:** Considered reusing `openleadr_wire::Duration`'s own parsing, but
+the BFF has zero dependency on any openleadr-rs crate today (it talks to the
+VTN as raw `serde_json::Value` over HTTP), and the submodule wasn't checked
+out in the working worktree — adding that dependency sight-unseen for this
+fix would be more scope and risk than the fix itself. Instead mirrored
+`kpi.py`'s fix *shape* (recognize the full form, approximate Y/M as 0 since
+report intervals are minute/hour-scale and never populate them) without
+adding a `regex` crate dependency, since the BFF has none today and this
+project's dependency-review rule applies to every new import. Extracted a
+small `sum_digit_units` helper (walk one duration segment's chars,
+accumulate digits, multiply by the unit each digit run's trailing letter
+maps to) and called it once for an optional date segment (before a `'T'`
+split, `D` → 86400s) and once for the time segment (`H`/`M`/`S`, same
+mapping as the original code) — a natural two-phase extension of the
+original hand-rolled loop, no new crate.
+
+**Implementation:** `VTN/bff/src/recorder.rs` — replaced
+`parse_pt_duration_s`'s body and updated its doc comment to describe the
+full form; added `sum_digit_units` as a shared helper. Extended (not just
+supplemented) the existing 4 unit tests per this project's test-first
+discipline: `test_parse_pt_duration_s_variants` gained 3 full-form
+assertions (`"P0Y0M0DT0H5M0S"` → 300, `"P0Y0M0DT1H30M0S"` → 5400,
+`"P0Y0M1DT0H0M0S"` → 86400, exercising the new `D` handling) alongside the
+existing compact-form ones; the 3 `report_submission_lag_s` tests had their
+`"duration"` fixtures changed from compact to full form (the real shape the
+VTN actually returns), with identical expected lag values — the fix changes
+which input shapes parse correctly, not the intended lag semantics.
+
+**Verification:** `wsl cargo test -p vtn-bff` (all 13 `recorder` tests
+green, including the updated fixtures), `cargo fmt --check`, `cargo clippy
+--all-targets --all-features -- -D warnings` (clean), `scripts
+/audit_file_sizes.py` (pass).
+
+**Bookkeeping:** Removed GB-32's row from `docs/BACKLOG.md`. **Known caveat,
+not addressed by this fix:** already-archived `report_lag_s` rows in
+`lab_recorder.reports_received` (recorded before this fix landed) remain
+silently wrong — this change only fixes parsing going forward, it does not
+backfill or correct historical rows. Anyone analyzing historical SG-3
+timeliness data should treat pre-fix `report_lag_s` values as unreliable.
+
