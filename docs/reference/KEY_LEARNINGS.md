@@ -1143,3 +1143,18 @@ outes/sim.rs causes a T1+T2 double-solve race:
   user-request body intended to trigger a specific MILP-visible outcome for
   an EV, always set `target_soc` and `mode` explicitly — don't assume
   `target_energy_kwh` alone has an effect.
+- **Archived OpenADR report durations aren't the VEN's own compact ISO 8601
+  form** (fleet-run-2, 2026-08-14): the VEN's own reporter emits compact
+  durations (`format_iso8601_duration` in `VEN/src/controller/reporter.rs`,
+  e.g. `"PT5M"`), but once a report round-trips through the VTN and lands in
+  `lab_recorder.reports_received` (and from there into any experiment
+  snapshot), its `intervalPeriod.duration` shows up as the fully-qualified
+  ISO 8601 form instead (e.g. `"P0Y0M0DT0H5M0S"`). A duration parser that
+  only recognizes a leading `"PT"` silently treats every such interval as
+  zero-length — `experiments/kpi.py`'s `_parse_iso8601_duration_hours` did
+  exactly this, making `event_impact_kwh` compute exactly `0.0` kWh for
+  every VEN in every scenario of the fleet-run-2 S-1..S-8 run (looked like a
+  plausible "no impact" result until the *uniformity* across wildly
+  different scenarios gave it away). Anything parsing an OpenADR duration
+  string from data that's passed through the VTN (not straight from the VEN)
+  must handle the full `P[n]Y[n]M[n]DT[n]H[n]M[n]S` form, not just `PT...`.
