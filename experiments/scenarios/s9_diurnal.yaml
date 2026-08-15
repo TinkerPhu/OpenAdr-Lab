@@ -1,0 +1,32 @@
+# S-9 — Diurnal: a full real day's price curve (duck-curve shape: cheap
+# midday from solar oversupply, expensive evening peak) plus a plausible
+# evening import cap and a plausible midday export cap.
+#
+# MUST be launched with `--start-at <local midnight, as UTC>` (Europe/Zurich
+# — the lab's real geo coordinates, docs/architecture/weather_forecast.md)
+# and `--no-paired-baseline` (a 24h paired baseline would double this to
+# 48h). The `at_minute` offsets below are wall-clock-from-midnight; the
+# simulator's PV output tracks real solar position for this lab's actual
+# location, so launching at any other time misaligns the scripted price/
+# capacity steps against the real generation curve they're meant to line
+# up with.
+name: s9_diurnal
+description: 24h duck-curve price shape + evening import cap + midday export cap
+tier: realistic
+duration_minutes: 1440
+actions:
+  - at_minute: 0
+    type: price_series
+    # 00-04 overnight / 04-08 morning ramp / 08-12 morning peak demand /
+    # 12-16 midday solar glut (cheapest) / 16-20 evening peak (priciest) /
+    # 20-24 evening decline.
+    values_eur_kwh: [0.15, 0.20, 0.28, 0.08, 0.40, 0.22]
+    interval_minutes: 240
+  - at_minute: 660          # 11:00 — ramp in ahead of the midday PV peak
+    type: export_capacity_limit
+    export_kw: 6.0          # below ven-1's 12.5 kW inverter max — real curtailment, not a no-op
+    duration_minutes: 300   # through 16:00
+  - at_minute: 1080         # 18:00 — evening demand peak
+    type: capacity_limit
+    import_kw: 4.0           # above base-load-only VENs, below EV-charging-at-peak VENs
+    duration_minutes: 240    # through 22:00

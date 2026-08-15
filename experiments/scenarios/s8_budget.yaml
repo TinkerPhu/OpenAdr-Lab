@@ -7,6 +7,7 @@
 # warning_kind_counts KPI.
 name: s8_budget
 description: EV MAX_COST budget shortfall on ven-11 (direct /user-requests, no VTN event)
+tier: stress
 duration_minutes: 30
 actions:
   - at_minute: 0

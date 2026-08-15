@@ -2,6 +2,7 @@
 # "energy shifted" KPI is computed against this run's import profile.
 name: s1_flat
 description: Flat tariff baseline, no control signals
+tier: realistic
 duration_minutes: 30
 actions:
   - at_minute: 0

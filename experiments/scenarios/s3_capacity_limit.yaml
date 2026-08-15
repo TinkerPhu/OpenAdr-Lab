@@ -1,6 +1,7 @@
 # S-3 — Hard capacity limit: flat price, 3 kW import cap mid-window.
 name: s3_capacity_limit
 description: IMPORT_CAPACITY_LIMIT 3 kW for 10 minutes
+tier: realistic
 duration_minutes: 30
 actions:
   - at_minute: 0

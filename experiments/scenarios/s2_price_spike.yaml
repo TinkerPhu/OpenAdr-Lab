@@ -2,6 +2,7 @@
 # shifting (storage arbitrage, EV/heater timing).
 name: s2_price_spike
 description: Price spike mid-window, no capacity constraints
+tier: realistic
 duration_minutes: 30
 actions:
   - at_minute: 0
