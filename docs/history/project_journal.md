@@ -10134,3 +10134,47 @@ silently wrong — this change only fixes parsing going forward, it does not
 backfill or correct historical rows. Anyone analyzing historical SG-3
 timeliness data should treat pre-fix `report_lag_s` values as unreliable.
 
+## GB-16: npm audit fixes in VEN/ui and VTN/ui
+
+**Trigger:** GB-16 (filed 2026-08-03) framed this as a low-effort
+`npm audit fix` — `brace-expansion` (high, dev-only) and
+`react-router`/`react-router-dom` (moderate, runtime-shipped) — both
+"typically a patch/minor bump." Re-running `npm audit` in both UIs
+(2026-08-16) found the picture had moved: 7 vulnerabilities now (3
+moderate, 4 high) — `brace-expansion`, `js-yaml` (new advisory), `nanoid`,
+`postcss`, `react-router`/`react-router-dom` (different CVEs than GB-16
+originally cited, same package family), `undici` (new).
+
+**Design:** `npm audit fix --dry-run` (no `--force`) in both UIs confirmed
+`brace-expansion`/`js-yaml`/`nanoid`/`postcss`/`undici` all resolve via
+lockfile-only patch bumps, matching GB-16's original effort estimate. But
+`react-router`/`react-router-dom` did not move past `6.30.4` even after the
+fix — confirmed via `npm view react-router-dom versions` that `6.30.4` is
+the latest 6.x release and is itself still inside the vulnerable range; the
+only fix is the v7 major line (`7.18.x`), a real breaking-change migration
+(data-router APIs, hook/export changes), not a hygiene bump. Rather than
+force an untested major dependency bump into a "run npm audit fix" item,
+split it out: fixed everything patchable here, opened **GB-34** for the
+react-router v7 migration itself and **R-67** (`TECHNICAL_DEBTS.md`) as its
+cross-reference record, following the same R-65↔GB-31 pattern.
+
+**Implementation:** `npm audit fix` (no `--force`) in `VEN/ui/` and
+`VTN/ui/` — `package-lock.json`-only changes in both (confirmed via `git
+diff --stat`, no `package.json` touched). While verifying `npm run lint`
+in `VTN/ui`, found one pre-existing, unrelated lint error (`Events.test.tsx`,
+introduced 2026-08-13, an unused `_active` mock parameter) blocking a clean
+zero-errors bar — fixed opportunistically (removed the unused parameter;
+the mock's body never used it) since it was trivial and unrelated to
+anything in this item's actual scope.
+
+**Verification:** `npm test` + `npm run lint` in both `VEN/ui` (564 tests)
+and `VTN/ui` (71 tests) — all green, 0 lint errors in both (pre-existing
+warnings only, unrelated to this change). `npm audit` post-fix: 0
+vulnerabilities in both UIs except the documented, accepted react-router
+finding (tracked as GB-34).
+
+**Bookkeeping:** Removed GB-16's row from `docs/BACKLOG.md`; added GB-34's
+row; added R-67 to `TECHNICAL_DEBTS.md`; updated the stale "Dependency
+Vulnerabilities — 2026-07-16" npm rows (had claimed "0 vulnerabilities"
+for both UIs since that date, inaccurate since GB-16 was filed 2026-08-03).
+

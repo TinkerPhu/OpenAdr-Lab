@@ -16,7 +16,7 @@ const mockPrograms = [
   { id: "p2", programName: "Program Beta", createdDateTime: "2026-01-02" },
 ];
 
-const useEventsMock = vi.fn((_active?: boolean) => ({
+const useEventsMock = vi.fn(() => ({
   data: mockEvents,
   dataUpdatedAt: Date.now(),
 }));
