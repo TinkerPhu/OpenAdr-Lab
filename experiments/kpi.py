@@ -49,10 +49,17 @@ def window(run_meta):
 
 
 def grid_rows(db_path, t_from, t_to):
+    """Columns 0-4 (ts, import_kw, export_kw, import_tariff_eur_kwh,
+    export_tariff_eur_kwh) are the original WP3.8 shape most callers use;
+    columns 5-6 (import_limit_kw, export_limit_kw — the DOE capacity limit
+    active in each 1-min window, `NULL` when none was) are appended at the
+    end rather than inserted, so `ven_kpis()`'s positional indexing doesn't
+    shift."""
     con = sqlite3.connect(db_path)
     try:
         return con.execute(
-            "SELECT ts, import_kw, export_kw, import_tariff_eur_kwh, export_tariff_eur_kwh"
+            "SELECT ts, import_kw, export_kw, import_tariff_eur_kwh, export_tariff_eur_kwh,"
+            " import_limit_kw, export_limit_kw"
             " FROM grid_samples WHERE ts >= ? AND ts < ? ORDER BY ts",
             (t_from, t_to),
         ).fetchall()
@@ -77,6 +84,131 @@ def ven_kpis(db_path, t_from, t_to):
         "cost_eur": round(cost, 4),
         "peak_import_kw": round(peak, 3),
         "load_factor": round(mean / peak, 3) if peak > 0 else None,
+    }
+
+
+def grid_envelope_compliance(db_path, t_from, t_to, direction):
+    """Stakeholder KPI reframe: 'did this VEN stay under the grid operator's
+    declared capacity envelope' — for `direction="import"`, `import_kw` vs.
+    `import_limit_kw`; for `direction="export"`, `export_kw` vs.
+    `export_limit_kw`. Export is not an afterthought: an uncurtailed PV
+    export spike is a real overvoltage/appliance-damage risk, not just a
+    grid-stability one, so this is called once per direction, not import-only.
+    Restricted to samples where a limit was actually active (`*_limit_kw` not
+    `NULL`); `None` when no sample in the window ever had one set (nothing to
+    score, not zero compliance)."""
+    actual_idx, limit_idx = (1, 5) if direction == "import" else (2, 6)
+    rows = grid_rows(db_path, t_from, t_to)
+    scored = [(r[actual_idx], r[limit_idx]) for r in rows if r[limit_idx] is not None]
+    if not scored:
+        return None
+    dt_h = 1.0 / 60.0
+    under = sum(1 for actual, limit in scored if actual <= limit)
+    overshoot_kwh = sum(max(0.0, actual - limit) for actual, limit in scored) * dt_h
+    return {
+        "samples_under_limit": under,
+        "samples_with_limit": len(scored),
+        "compliance_pct": round(100.0 * under / len(scored), 1),
+        "overshoot_kwh": round(overshoot_kwh, 4),
+    }
+
+
+_LATENCY_ACTION_TYPES = {
+    "import": {"alert", "capacity_limit", "capacity_reservation"},
+    "export": {"export_capacity_limit"},
+}
+
+
+def compliance_latency_s(db_path, t_from, t_to, actions, direction):
+    """Stakeholder KPI reframe: 'how fast did this VEN react once the grid
+    operator signaled a constraint' — first grid sample after a qualifying
+    action (see `_LATENCY_ACTION_TYPES`) whose import/export magnitude has
+    dropped >= 20% below the sample immediately preceding the action's start.
+    `actions` is `run.json["actions"]` (`run_experiment.py`'s new
+    action-start log). Finally implements the KPI this module's docstring
+    has described, import-only and unbuilt, since WP3.8 -- and is the first
+    time an export-side signal-response latency exists at all.
+
+    A pre-action baseline at or below zero has nothing left to shed, so it
+    counts as immediately compliant (`latency_s: 0.0`) rather than a
+    mathematically meaningless '20% below zero'. `latency_s: None` (not a
+    dropped row) means a qualifying action fired but no compliant sample was
+    ever found in the window -- a real non-response, kept visible."""
+    qualifying = [a for a in actions if a.get("type") in _LATENCY_ACTION_TYPES[direction]]
+    if not qualifying:
+        return []
+    rows = grid_rows(db_path, t_from, t_to)
+    actual_idx = 1 if direction == "import" else 2
+    out = []
+    for action in qualifying:
+        start_ts = datetime.strptime(action["started_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        ).timestamp()
+        pre_val = None
+        for r in rows:
+            if r[0] <= start_ts:
+                pre_val = r[actual_idx]
+            else:
+                break
+        latency_s = None
+        if pre_val is not None and pre_val <= 0:
+            latency_s = 0.0
+        elif pre_val is not None:
+            threshold = pre_val * 0.8
+            for r in rows:
+                if r[0] <= start_ts:
+                    continue
+                if r[actual_idx] <= threshold:
+                    latency_s = round(r[0] - start_ts, 1)
+                    break
+        out.append({
+            "action_type": action["type"],
+            "at_minute": action["at_minute"],
+            "latency_s": latency_s,
+        })
+    return out
+
+
+def tariff_response_correlation(db_path, t_from, t_to):
+    """Stakeholder KPI reframe (energy-business side): does this VEN's
+    import actually track the prevailing tariff -- the thing demand response
+    is for. `pearson_r` (expected negative for good price-following
+    behaviour) plus a plain-language companion: mean import in the cheapest
+    priced tercile of the window vs. the most expensive tercile, as a %
+    difference. `None` when fewer than 5 distinct price points are in the
+    window -- correlation is meaningless on a near-flat series (most
+    `realistic`-tier 30 min scenarios only vary price 2-3 times; the
+    24h `s9_diurnal` scenario exists specifically to give this KPI enough
+    price variation to say something)."""
+    rows = grid_rows(db_path, t_from, t_to)
+    pairs = [(r[3], r[1]) for r in rows if r[3] is not None]
+    if len({p[0] for p in pairs}) < 5:
+        return None
+    n = len(pairs)
+    mean_x = sum(p[0] for p in pairs) / n
+    mean_y = sum(p[1] for p in pairs) / n
+    var_x = sum((p[0] - mean_x) ** 2 for p in pairs)
+    var_y = sum((p[1] - mean_y) ** 2 for p in pairs)
+    pearson_r = None
+    if var_x > 0 and var_y > 0:
+        cov = sum((p[0] - mean_x) * (p[1] - mean_y) for p in pairs)
+        pearson_r = round(cov / (var_x**0.5 * var_y**0.5), 3)
+    ordered = sorted(pairs, key=lambda p: p[0])
+    tercile = n // 3
+    cheap_mean = expensive_mean = pct_diff = None
+    if tercile > 0:
+        cheap = ordered[:tercile]
+        expensive = ordered[-tercile:]
+        cheap_mean = round(sum(p[1] for p in cheap) / len(cheap), 3)
+        expensive_mean = round(sum(p[1] for p in expensive) / len(expensive), 3)
+        if expensive_mean:
+            pct_diff = round(100.0 * (cheap_mean - expensive_mean) / abs(expensive_mean), 1)
+    return {
+        "n": n,
+        "pearson_r": pearson_r,
+        "cheap_tercile_mean_import_kw": cheap_mean,
+        "expensive_tercile_mean_import_kw": expensive_mean,
+        "cheap_vs_expensive_pct": pct_diff,
     }
 
 
@@ -556,6 +688,68 @@ def _self_check():
 
     print("kpi.py self-check OK: plan_history_summary, forecast_accuracy_summary")
 
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "ven-1-history.sqlite"
+        con = sqlite3.connect(db_path)
+        con.execute(
+            "CREATE TABLE grid_samples (ts INTEGER NOT NULL, import_kw REAL NOT NULL,"
+            " export_kw REAL NOT NULL, import_tariff_eur_kwh REAL, export_tariff_eur_kwh REAL,"
+            " co2_g_kwh REAL, import_limit_kw REAL, export_limit_kw REAL)"
+        )
+        # 10 one-minute samples starting at t0. Minutes 0-4: import ramps
+        # 5.0 -> 3.0 kW against a 4.0 kW import_limit_kw (breaches minutes
+        # 0-1, complies from minute 2). Minutes 0-4: export flat at 6.0 kW
+        # against an 8.0 kW export_limit_kw (always compliant, exercises the
+        # other direction independently). Minutes 5-9: no limit active on
+        # either leg (limit columns NULL) -- must not count toward compliance.
+        rows = [
+            (t0 + i * 60, imp, 6.0, 0.10 + 0.01 * i, 0.05, None, limit_imp, 8.0 if i < 5 else None)
+            for i, (imp, limit_imp) in enumerate(
+                [(5.0, 4.0), (4.5, 4.0), (4.0, 4.0), (3.5, 4.0), (3.0, 4.0)]
+                + [(2.0, None)] * 5
+            )
+        ]
+        con.executemany(
+            "INSERT INTO grid_samples VALUES (?,?,?,?,?,?,?,?)",
+            [(int(ts), imp, exp, itar, etar, co2, ilim, elim) for ts, imp, exp, itar, etar, co2, ilim, elim in rows],
+        )
+        con.commit()
+        con.close()
+
+        compliance = grid_envelope_compliance(db_path, int(t0), int(t0) + 600, "import")
+        assert compliance == {
+            "samples_under_limit": 3, "samples_with_limit": 5,
+            "compliance_pct": 60.0, "overshoot_kwh": round((1.0 + 0.5) / 60.0, 4),
+        }, compliance
+
+        export_compliance = grid_envelope_compliance(db_path, int(t0), int(t0) + 600, "export")
+        assert export_compliance == {
+            "samples_under_limit": 5, "samples_with_limit": 5,
+            "compliance_pct": 100.0, "overshoot_kwh": 0.0,
+        }, export_compliance
+
+        # An action starting at minute 0 (import 5.0 kW pre-baseline, 20%
+        # drop threshold = 4.0 kW) first complies at minute 2 (4.0 <= 4.0),
+        # i.e. 120s latency.
+        started_at = datetime.fromtimestamp(t0, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        actions = [{"at_minute": 0, "type": "capacity_limit", "started_at": started_at}]
+        latency = compliance_latency_s(db_path, int(t0), int(t0) + 600, actions, "import")
+        assert latency == [{"action_type": "capacity_limit", "at_minute": 0, "latency_s": 120.0}], latency
+
+        # export direction: no export_capacity_limit action present -> [].
+        assert compliance_latency_s(db_path, int(t0), int(t0) + 600, actions, "export") == []
+
+        # Only 5 distinct import tariffs across 10 samples (0.10..0.14, then
+        # repeats aren't present here -- each of the 10 rows has a distinct
+        # value 0.10+0.01*i) -> 10 distinct values, correlation computable.
+        # import_kw trends down as tariff rises -> negative correlation.
+        corr = tariff_response_correlation(db_path, int(t0), int(t0) + 600)
+        assert corr["n"] == 10, corr
+        assert corr["pearson_r"] < 0, corr
+        assert corr["cheap_tercile_mean_import_kw"] > corr["expensive_tercile_mean_import_kw"], corr
+
+    print("kpi.py self-check OK: grid_envelope_compliance, compliance_latency_s, tariff_response_correlation")
+
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
@@ -586,6 +780,8 @@ def main():
     # older run.json without an "events" key (or a run with none) falls back
     # to the unfiltered behavior rather than matching nothing.
     event_ids = set(meta.get("events", [])) or None
+    actions = meta.get("actions", [])  # [] for run.json written before this KPI reframe
+    tier = meta.get("tier", "realistic")  # old runs predate scenario tiering -- assume realistic
 
     baseline_dir_arg = args.baseline
     if not baseline_dir_arg:
@@ -603,9 +799,9 @@ def main():
             if db.exists():
                 k = ven_kpis(db, bfrom, bto)
                 if k:
-                    baseline[ven] = k["energy_import_kwh"]
+                    baseline[ven] = {"energy_import_kwh": k["energy_import_kwh"], "cost_eur": k["cost_eur"]}
 
-    out = {"scenario": meta["scenario"], "vens": {}}
+    out = {"scenario": meta["scenario"], "meta": {"tier": tier}, "vens": {}}
     for ven in meta["vens"]:
         db = run_dir / f"{ven}-history.sqlite"
         if not db.exists():
@@ -613,22 +809,74 @@ def main():
         k = ven_kpis(db, t_from, t_to)
         if k is None:
             continue
+
+        # Grid stakeholder: envelope compliance + signal-response latency,
+        # both directions -- export gets equal billing with import (an
+        # uncurtailed PV export spike is an overvoltage risk, not just a
+        # grid-stability one).
+        grid_regulation = {
+            "import": grid_envelope_compliance(db, t_from, t_to, "import"),
+            "export": grid_envelope_compliance(db, t_from, t_to, "export"),
+            "latency_s": {
+                "import": compliance_latency_s(db, t_from, t_to, actions, "import"),
+                "export": compliance_latency_s(db, t_from, t_to, actions, "export"),
+            },
+        }
+
+        # Energy-business stakeholder: does import track the tariff curve.
+        energy_business = {"tariff_response": tariff_response_correlation(db, t_from, t_to)}
         if ven in baseline:
-            k["energy_shifted_kwh"] = round(baseline[ven] - k["energy_import_kwh"], 4)
+            energy_business["energy_shifted_kwh"] = round(
+                baseline[ven]["energy_import_kwh"] - k["energy_import_kwh"], 4
+            )
+
+        # VEN stakeholder: what participating cost this household, in money
+        # and (proxy) comfort.
+        ven_impact = {"cost_eur": k["cost_eur"]}
+        if ven in baseline:
+            ven_impact["cost_eur_delta"] = round(baseline[ven]["cost_eur"] - k["cost_eur"], 4)
         impact = event_impact_kwh(
             run_dir / "recorder-reports_received.csv", t_from, t_to, ven, event_ids
         )
         if impact is not None:
-            k["event_impact_kwh"] = impact
+            ven_impact["event_impact_kwh"] = impact
+
+        # Mechanism health: is the planner itself working correctly --
+        # explicitly separate from "is the fleet's behaviour good" above, so
+        # warnings from a deliberately-forced stress fixture (tier=stress)
+        # don't read as a behavioural failure.
+        mechanism_health = {}
         diag = plan_history_summary(run_dir, ven)
         if diag is None:
             diag = plan_diagnostics_summary(run_dir, ven)
         if diag is not None:
-            k["plan_diagnostics"] = diag
+            mechanism_health["plan_diagnostics"] = diag
+            # BUDGET_SHORTFALL count as the available comfort-shortfall
+            # proxy (a true "did the EV reach its target by its deadline"
+            # metric needs new VEN instrumentation -- see plan's out-of-scope).
+            warning_kinds = diag.get("warning_kind_counts")
+            if warning_kinds is not None:
+                ven_impact["budget_shortfall_warnings"] = warning_kinds.get("BUDGET_SHORTFALL", 0)
+            # Cost of compliance: already-collected per-plan-cycle cost
+            # fields (GB-25), just regrouped under the VEN's own viewpoint.
+            compliance_cost = {
+                f: diag["cost_stats"][f]
+                for f in ("c_violations_eur", "c_peak_penalty_eur", "c_wear_eur")
+                if f in diag.get("cost_stats", {})
+            }
+            if compliance_cost:
+                ven_impact["compliance_cost_eur"] = compliance_cost
         fa = forecast_accuracy_summary(run_dir, ven)
         if fa is not None:
-            k["forecast_accuracy"] = fa
-        out["vens"][ven] = k
+            mechanism_health["forecast_accuracy"] = fa
+
+        out["vens"][ven] = {
+            "raw": k,
+            "grid_regulation": grid_regulation,
+            "energy_business": energy_business,
+            "ven_impact": ven_impact,
+            "mechanism_health": mechanism_health,
+        }
 
     out["report_timeliness"] = report_lag_stats(
         run_dir / "recorder-reports_received.csv", t_from, t_to, event_ids
@@ -640,10 +888,14 @@ def main():
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
         persona_of = {v["ven_name"]: v.get("persona") for v in manifest["vens"]}
         groups = {}
-        for ven, k in out["vens"].items():
+        for ven, v in out["vens"].items():
             persona = persona_of.get(ven)
             if persona:
-                groups.setdefault(persona, []).append(k)
+                flat = {
+                    **v["raw"],
+                    "energy_shifted_kwh": v["energy_business"].get("energy_shifted_kwh"),
+                }
+                groups.setdefault(persona, []).append(flat)
         metrics = ("energy_import_kwh", "cost_eur", "peak_import_kw", "energy_shifted_kwh")
         out["personas"] = {
             persona: {
@@ -651,7 +903,7 @@ def main():
                 **{
                     f"mean_{m}": round(sum(k[m] for k in ks) / len(ks), 4)
                     for m in metrics
-                    if all(m in k for k in ks)
+                    if all(k.get(m) is not None for k in ks)
                 },
             }
             for persona, ks in sorted(groups.items())
