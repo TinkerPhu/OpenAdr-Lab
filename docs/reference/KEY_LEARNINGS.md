@@ -1158,3 +1158,28 @@ outes/sim.rs causes a T1+T2 double-solve race:
   different scenarios gave it away). Anything parsing an OpenADR duration
   string from data that's passed through the VTN (not straight from the VEN)
   must handle the full `P[n]Y[n]M[n]DT[n]H[n]M[n]S` form, not just `PT...`.
+- **OpenADR interval-timing parsers need the event-level `intervalPeriod`
+  fallback, not just the per-interval one — check if a sibling parser in the
+  same file already has it** (GB-33, 2026-08-16): a single-window OpenADR
+  event (every non-price scenario action `experiments/run_experiment.py`
+  sends — capacity limits, alerts, dispatch — and, per spec, any real
+  one-window DR event) is allowed to set `intervalPeriod` only at the event
+  level, on a bare interval with none of its own. `VEN/src/controller/
+  rate_schedule.rs`'s `collect_interval_groups` (shared by
+  `parse_capacity_schedule`/`parse_rate_snapshots`) required `interval.
+  intervalPeriod` unconditionally and silently skipped anything without
+  it — meaning `grid_samples.import_limit_kw`/`export_limit_kw` had never
+  been populated on any VEN, ever, despite the planner correctly enforcing
+  every capacity event it saw (a *different* parser, `parse_capacity_state`,
+  handles real enforcement and never needed per-interval timing, so the
+  functional behavior masked the history-column gap completely). The fix
+  pattern already existed a few functions away in the same file —
+  `parse_alert_windows` already did `interval.intervalPeriod.as_ref()
+  .or(event.intervalPeriod.as_ref())` — it just hadn't been applied to the
+  capacity/rate schedule path. When adding or reviewing any OpenADR
+  interval-timing parser, check whether a sibling parser in the same module
+  already solved the event-level-fallback problem before assuming the
+  per-interval field will always be present; test fixtures that always set
+  `intervalPeriod` on every interval (as this file's own pre-existing tests
+  did) won't catch this — the fixture needs to match the single-interval,
+  event-level-only shape real single-window events actually send.
