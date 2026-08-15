@@ -126,6 +126,11 @@ def build_event(program_id, action, start, report_descriptors=None):
     payload = {
         "capacity_limit": ("IMPORT_CAPACITY_LIMIT", action.get("import_kw")),
         "capacity_reservation": ("IMPORT_CAPACITY_RESERVATION", action.get("import_kw")),
+        # Mirrors capacity_limit but for the export leg -- the VEN already
+        # implements EXPORT_CAPACITY_LIMIT end-to-end (openadr_interface.rs,
+        # GridSample.export_limit_kw); this scenario tooling just never
+        # exercised it before (see the stakeholder KPI-reframe plan).
+        "export_capacity_limit": ("EXPORT_CAPACITY_LIMIT", action.get("export_kw")),
         "alert": (action.get("alert_type", "ALERT_GRID_EMERGENCY"), "experiment alert"),
         "simple": ("SIMPLE", action.get("level")),
         "dispatch": ("DISPATCH_SETPOINT", action.get("setpoint_kw")),
@@ -441,7 +446,7 @@ def setup_persona_sessions(manifest_path, host):
 
 
 def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label, program_name, actions,
-               report_descriptors=None):
+               report_descriptors=None, tier="realistic"):
     """Run one real-time window against the VTN: create a throwaway program,
     post `actions` (each translated via build_event) at their offsets, wait
     out the window, clean up, then snapshot. `actions=[]` runs a pure
@@ -465,7 +470,13 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
 
     Runs the plan-diagnostics poller (if `fleet_map` given) and writes
     `run.json` + the fleet snapshot into `run_dir`, exactly like the
-    single-window flow this replaces."""
+    single-window flow this replaces.
+
+    `run.json["actions"]` records each posted action's wall-clock start
+    (`{"at_minute", "type", "started_at"}`), consumed by kpi.py's
+    `compliance_latency_s` to measure signal-to-response time. `tier`
+    (`"realistic"` or `"stress"`, from the scenario YAML) is passed straight
+    through into `run.json["tier"]` so kpi.py/a report can group runs by it."""
     t0 = datetime.now(timezone.utc)
 
     diag_stop = None
@@ -492,6 +503,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
     program_id = r.json()["id"]
     created_events = []
     created_requests = []  # (base_url, request_id) — budget_shortfall's /user-requests, not VTN events
+    actions_log = []  # {"at_minute", "type", "started_at"} — see run.json["actions"] in the docstring
 
     try:
         pending = sorted(actions, key=lambda a: a["at_minute"])
@@ -536,13 +548,22 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
                 }
                 rid = post_user_request(base, body)
                 created_requests.append((base, rid))
+                actions_log.append({
+                    "at_minute": action["at_minute"], "type": action["type"],
+                    "started_at": iso(now_a),
+                })
                 print(f"  +{action['at_minute']:>3} min  budget_shortfall  ven={target_ven}  request={rid}")
                 continue
 
             descriptors = report_descriptors if i == 0 else None
-            body = build_event(program_id, action, datetime.now(timezone.utc), descriptors)
+            started_at = datetime.now(timezone.utc)
+            body = build_event(program_id, action, started_at, descriptors)
             eid = post_event(args.vtn_url, token, body)
             created_events.append(eid)
+            actions_log.append({
+                "at_minute": action["at_minute"], "type": action["type"],
+                "started_at": iso(started_at),
+            })
             print(f"  +{action['at_minute']:>3} min  {action['type']}  event={eid}")
 
         end = t0 + timedelta(minutes=duration_min)
@@ -574,6 +595,8 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
         "duration_minutes": duration_min,
         "vens": ven_names,
         "events": created_events,
+        "actions": actions_log,
+        "tier": tier,
     }
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -624,7 +647,23 @@ def main():
              "kpi.py actually get data instead of coming back null. Use "
              "--no-request-reports to skip.",
     )
+    p.add_argument(
+        "--start-at",
+        help="ISO 8601 UTC instant (e.g. 2026-08-20T22:00:00Z) to sleep until before "
+             "the *scenario* window's actions start (the paired baseline, if any, still "
+             "runs immediately). For scenarios whose behaviour depends on real solar "
+             "time (e.g. a diurnal price curve or an export-capacity test that needs to "
+             "overlap actual peak PV output), this is how the run is anchored to local "
+             "midnight / pre-solar-noon rather than whenever the script happens to be "
+             "launched. Errors immediately if the timestamp is already in the past.",
+    )
     args = p.parse_args()
+
+    start_at = None
+    if args.start_at:
+        start_at = datetime.strptime(args.start_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if start_at <= datetime.now(timezone.utc):
+            p.error(f"--start-at {args.start_at} is already in the past")
 
     report_descriptors = REPORT_DESCRIPTORS if args.request_reports else None
 
@@ -660,7 +699,14 @@ def main():
                 program_name=f"exp-{name}-baseline-{datetime.now(timezone.utc).strftime('%H%M%S')}",
                 actions=[],
                 report_descriptors=report_descriptors,
+                tier=scenario.get("tier", "realistic"),
             )
+
+        if start_at:
+            wait_s = (start_at - datetime.now(timezone.utc)).total_seconds()
+            if wait_s > 0:
+                print(f"  waiting for --start-at {args.start_at} ({int(wait_s)}s) ...")
+                time.sleep(wait_s)
 
         print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
         run_window(
@@ -669,6 +715,7 @@ def main():
             program_name=f"exp-{name}-{datetime.now(timezone.utc).strftime('%H%M%S')}",
             actions=scenario["actions"],
             report_descriptors=report_descriptors,
+            tier=scenario.get("tier", "realistic"),
         )
     finally:
         if persona_teardown:

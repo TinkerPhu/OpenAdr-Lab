@@ -1,0 +1,23 @@
+# S-10 — Export stress: tight export cap during a simulated high-PV window.
+# Mirrors S-7's role for the import leg, but for export/over-voltage risk —
+# exercises grid_envelope_compliance(direction="export") and export-side
+# compliance_latency_s with at least one deliberately hard case, the way S-7
+# already does for import.
+#
+# Launch shortly before local solar noon (Europe/Zurich, see s9_diurnal.yaml
+# for why) via `--start-at`, so the window actually overlaps real peak PV
+# output — an export cap tested at night or in low sun is not a test of
+# anything.
+name: s10_overexport
+description: Tight 1.0 kW export cap for 30 min during simulated peak PV
+tier: stress
+duration_minutes: 40
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.20, 0.20]
+    interval_minutes: 20
+  - at_minute: 5
+    type: export_capacity_limit
+    export_kw: 1.0
+    duration_minutes: 30

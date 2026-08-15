@@ -9979,3 +9979,101 @@ open on the backlog. GB-31 (`mip_gap_target` proxy-not-achieved-gap) —
 this run's `mip_gap_target_sanity` check confirms the known limitation,
 doesn't address it.
 
+## Reframe fleet-experiment KPIs around stakeholder goals (2026-08-15)
+
+Reviewing fleet-run-2's warning counts with the user (PEAK_PENALTY_EXCEEDED
+on every scenario, CAPACITY_VIOLATION on four of eight, one
+BUDGET_SHORTFALL) surfaced that the report read as "the fleet is failing"
+when most of that volume was actually by design: `ven-9`'s `penalty_rules`
+threshold sits below its own fixed base load with no controllable asset to
+shed with, `s8_budget.yaml`'s budget is 2-3 orders of magnitude under a real
+EV charge's cost, and `s7_stress.yaml`'s capacity cap was chosen specifically
+to force a violation — all three added in the previous round specifically to
+prove the warning-kind *mechanism* fires end-to-end, a job that's done but
+was never visually separated from "how does the fleet behave under plausible
+conditions" in the report.
+
+Separately, `kpis.json` never actually answered what each of the three
+project stakeholders cares about: the grid operator (capacity-envelope
+compliance, both import *and* export — the user flagged export as the more
+pressing of the two, since an uncurtailed PV spike risks overvoltage/
+appliance damage on top of grid stability, not just import overshoot), the
+energy-business side (does the fleet actually track the tariff curve), and
+the VEN/household side (what did participating cost in money or comfort).
+
+**Implementation** (`experiments/kpi.py`, `experiments/run_experiment.py`,
+scenario YAML — no VEN/VTN Rust changes; every new number is computed from
+data already flowing into `history.sqlite`/`{ven}-plan-history.json`):
+
+- `grid_envelope_compliance(db, t_from, t_to, direction)` and
+  `compliance_latency_s(db, t_from, t_to, actions, direction)`, each called
+  once per `"import"`/`"export"` direction. The latter finally implements
+  the signal-to-response KPI this module's own docstring has described,
+  unbuilt, since WP3.8.
+- `tariff_response_correlation(db, t_from, t_to)` — Pearson correlation plus
+  a cheap-vs-expensive-tercile % figure, plain Python (no new dependency).
+  Returns `None` under 5 distinct price points, which every existing 30-min
+  scenario is — the reason for the new 24h scenario below.
+- `run_experiment.py` gained a new `export_capacity_limit` scenario action
+  (the VEN already implements `EXPORT_CAPACITY_LIMIT` end-to-end; the
+  experiment tooling had simply never exercised it), a per-action
+  `run.json["actions"]` start-time log (feeds `compliance_latency_s`), a
+  `tier: realistic|stress` passthrough from scenario YAML, and a
+  `--start-at <ISO8601>` sleep-until option — needed because the simulator's
+  PV tracks real solar position for the lab's actual coordinates
+  (`docs/architecture/weather_forecast.md`, Europe/Zurich), so a diurnal
+  scenario's scripted steps only land correctly if launched at a
+  deliberately chosen wall-clock time, not whenever the script happens to
+  run.
+- All 8 existing scenarios tagged `tier:` (S-1/2/3/5/6 realistic, S-4/7/8
+  stress). Two new scenarios: `s9_diurnal.yaml` (24h duck-curve price shape
+  + evening import cap + midday export cap, `tier: realistic`, launched at
+  local midnight) and `s10_overexport.yaml` (tight export cap during
+  simulated peak PV, `tier: stress`, mirrors S-7's role for the export leg,
+  launched pre-solar-noon).
+- `kpi.py`'s `main()` restructured each VEN's entry into `raw` (the original
+  flat metering numbers) plus four interpretive buckets: `grid_regulation`,
+  `energy_business`, `ven_impact` (extended with a `cost_eur_delta` vs.
+  baseline, `budget_shortfall_warnings` as the available comfort-shortfall
+  proxy, and `compliance_cost_eur` — GB-25's already-collected
+  `c_violations_eur`/`c_peak_penalty_eur`/`c_wear_eur` regrouped under the
+  VEN's own viewpoint rather than left as raw plan-diagnostic numbers), and
+  `mechanism_health` (the pre-existing plan/forecast diagnostics, explicitly
+  separated so a stress-fixture's warnings stop reading as a fleet defect).
+  `kpis.json`'s new top-level `meta.tier` lets a reader group by tier
+  without re-parsing scenario YAML.
+- `--self-check` extended with import- and export-direction fixtures for
+  the two new grid functions plus a tariff-correlation case, all against a
+  real temp SQLite `grid_samples` table (not a mock) to catch schema
+  mismatches; all green.
+
+**Verification against real data**: rather than wait for a new live run,
+regenerated `kpis.json` for all 8 of fleet-run-2's existing result
+directories with the new code — no crashes, backward-compatible with
+`run.json` files that predate `"actions"`/`"tier"` (default `[]`/
+`"realistic"`). `ven_impact`/`energy_business`/`mechanism_health` all show
+real per-VEN numbers as expected.
+
+**GB-33, found during this verification**: `grid_regulation.import`/
+`.export` came back `null` for every VEN in every one of the 8 regenerated
+runs — including S-3/S-6/S-7, which explicitly posted `IMPORT_CAPACITY_
+LIMIT`/`RESERVATION` events. Traced to the data, not the new KPI code:
+`grid_samples.import_limit_kw`/`export_limit_kw` (added schema v9) have
+**never once been non-null**, on any VEN, across that VEN's entire
+history.sqlite (confirmed on ven-1: 0 non-null rows out of 47k+). The
+plumbing exists end-to-end (dispatcher tracks it, state stores it, the
+history-sampler accumulator reads it) but the interval match never actually
+fires at sample time, for either leg — not chased to a precise root cause
+mid this Python-only change; filed as GB-33 (`docs/BACKLOG.md`) for its own
+Rust debugging session. This is a real limitation on today's headline
+finding: the grid-operator-facing KPI the user called the most pressing
+question is implemented and self-check-verified, but returns nothing
+against live data until GB-33 is fixed.
+
+**Not done / left open**: running `s9_diurnal.yaml`/`s10_overexport.yaml`
+live against the fleet (a real time/lock-hold commitment, scheduled as its
+own follow-up step); GB-33 itself; a true SoC-deadline-miss comfort metric
+(would need new VEN session-outcome instrumentation, `BUDGET_SHORTFALL`
+counts used as the available proxy for now); the 30-day-scale test the user
+flagged as the longer-term goal beyond the 24h scenario.
+
