@@ -293,4 +293,148 @@ mod handle_tests {
         }
         assert!(actual_kw > 0.0);
     }
+
+    fn soc_of(state: &AssetState) -> f64 {
+        match state {
+            AssetState::Battery(s) => s.soc,
+            other => panic!("expected Battery state, got {other:?}"),
+        }
+    }
+
+    // ── Asset trait defaults: simulate_forward / simulate_free / capability_trajectory ──
+    //
+    // AssetHandle doesn't override these -- they're the trait's own default
+    // implementations (real accumulation/projection logic used by lookahead
+    // precompute), exercised here via a battery-backed handle rather than tested
+    // in isolation, since they only make sense in terms of a concrete Asset.
+
+    #[test]
+    fn simulate_forward_reports_pre_step_state_paired_with_post_step_actual_power() {
+        // capacity=10kWh, max_charge=5kW, RTE=1.0, min_soc=0.1, initial soc=0.2.
+        // Three setpoints (two 1h windows + a trailing zero-duration point) at a
+        // constant 3 kW charge -- deliberately picks a non-obvious contract: each
+        // TrajectoryPoint pairs the state *before* its window's step with the
+        // *actual* (possibly clamped) power achieved *during* that step, not the
+        // state after. Getting this backwards would silently corrupt every lookahead
+        // precompute consumer.
+        let config = make_battery_config(10.0, 5.0);
+        let t0 = Utc::now();
+        let initial = make_battery_state(0.2, 0.0);
+        let history = AssetHistoryBuffer::new(3600);
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &initial,
+            history: &history,
+        };
+
+        let setpoints = [
+            (t0, 3.0),
+            (t0 + Duration::hours(1), 3.0),
+            (t0 + Duration::hours(2), 3.0),
+        ];
+        let traj = handle.simulate_forward(&initial, &setpoints);
+
+        assert_eq!(traj.points.len(), 3);
+
+        assert_eq!(traj.points[0].ts, t0);
+        assert!((traj.points[0].power_kw - 3.0).abs() < 1e-9);
+        assert!((soc_of(&traj.points[0].state) - 0.2).abs() < 1e-9); // pre-step SoC
+
+        assert_eq!(traj.points[1].ts, t0 + Duration::hours(1));
+        assert!((traj.points[1].power_kw - 3.0).abs() < 1e-9);
+        assert!((soc_of(&traj.points[1].state) - 0.5).abs() < 1e-9); // 0.2 + 3kWh/10kWh
+
+        assert_eq!(traj.points[2].ts, t0 + Duration::hours(2));
+        assert!((soc_of(&traj.points[2].state) - 0.8).abs() < 1e-9); // 0.5 + 3kWh/10kWh
+    }
+
+    #[test]
+    fn simulate_forward_reports_clamped_actual_power_not_the_requested_setpoint() {
+        // Requesting 20 kW on a battery whose max_charge_kw is 5.0 must show up in
+        // the trajectory as the clamped 5.0, not the raw (infeasible) request --
+        // this is the whole reason simulate_forward reports "actual", not "requested".
+        let config = make_battery_config(10.0, 5.0);
+        let t0 = Utc::now();
+        let initial = make_battery_state(0.2, 0.0);
+        let history = AssetHistoryBuffer::new(3600);
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &initial,
+            history: &history,
+        };
+
+        let setpoints = [(t0, 20.0), (t0 + Duration::hours(1), 20.0)];
+        let traj = handle.simulate_forward(&initial, &setpoints);
+
+        assert_eq!(traj.points.len(), 2);
+        assert!(
+            (traj.points[0].power_kw - 5.0).abs() < 1e-9,
+            "power must be clamped to max_charge_kw, got {}",
+            traj.points[0].power_kw
+        );
+    }
+
+    #[test]
+    fn simulate_free_holds_soc_steady_at_zero_setpoint() {
+        // simulate_free's default impl is simulate_forward([(now,0.0),(now+dur,0.0)]) --
+        // for a battery, idling at 0 kW must never drift SoC (no self-discharge model),
+        // pinning down that "free run" really means "untouched", not "drains/charges".
+        let config = make_battery_config(10.0, 5.0);
+        let now = Utc::now();
+        let initial = make_battery_state(0.5, 0.0);
+        let history = AssetHistoryBuffer::new(3600);
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &initial,
+            history: &history,
+        };
+
+        let traj = handle.simulate_free(&initial, Duration::hours(2), now);
+
+        assert_eq!(traj.points.len(), 2);
+        for p in &traj.points {
+            assert!((p.power_kw - 0.0).abs() < 1e-9);
+            assert!((soc_of(&p.state) - 0.5).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn capability_trajectory_projects_n_steps_reflecting_evolving_state() {
+        // A battery starting already at soc=1.0 (full): idling still yields
+        // max_import_kw=0.0 at every step, because capability is a step function
+        // of state, not a constant -- this verifies capability_trajectory actually
+        // re-derives capability() from the *stepped* state at each point, not just
+        // returning the initial capability() n times.
+        let config = make_battery_config(10.0, 5.0);
+        let now = Utc::now();
+        let initial = make_battery_state(1.0, 0.0);
+        let history = AssetHistoryBuffer::new(3600);
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &initial,
+            history: &history,
+        };
+
+        let points = handle.capability_trajectory(
+            &initial,
+            Duration::hours(2),
+            Duration::hours(1),
+            now,
+        );
+
+        assert_eq!(points.len(), 2); // duration/resolution = 2h/1h = 2 steps
+        assert_eq!(points[0].0, now + Duration::hours(1));
+        assert_eq!(points[1].0, now + Duration::hours(2));
+        for (_, cap) in &points {
+            assert!(
+                (cap.max_import_kw - 0.0).abs() < 1e-9,
+                "already-full battery must show zero import capability at every projected step"
+            );
+            assert!((cap.max_export_kw + 5.0).abs() < 1e-9); // still able to discharge
+        }
+    }
 }
