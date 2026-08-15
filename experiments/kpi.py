@@ -28,6 +28,7 @@ Writes kpis.json into the run dir and prints a table.
 import argparse
 import csv
 import json
+import re
 import sqlite3
 import statistics
 import sys
@@ -79,26 +80,40 @@ def ven_kpis(db_path, t_from, t_to):
     }
 
 
+_ISO8601_DURATION_RE = re.compile(
+    r"^P(?:(?P<years>\d+)Y)?(?:(?P<months>\d+)M)?(?:(?P<days>\d+)D)?"
+    r"(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?)?$"
+)
+
+
 def _parse_iso8601_duration_hours(s):
-    """Minimal PT#H#M#S parser, mirroring VEN's parse_pt_duration_s. Unknown
-    shapes parse as 0."""
-    if not s or not s.startswith("PT"):
+    """Full ISO 8601 duration parser (years down to fractional seconds).
+    Handles both the VEN's own compact reporter output (`PT5M`, no all-zero
+    date fields) AND the fully-qualified form (`P0Y0M0DT0H5M0S`) that
+    archived reports_received rows actually carry once a duration has been
+    round-tripped through the VTN's own wire types — found live during the
+    fleet-run-2 results review: the previous PT-prefix-only parser silently
+    returned 0.0 for every P0Y... row, so `event_impact_kwh` had been
+    computing 0.0 for every VEN in every scenario, always -- not a real
+    "no impact" result, a parsing bug (see KEY_LEARNINGS.md). 30-day months,
+    365-day years -- approximate; these experiment scenarios only ever
+    produce minute/hour-scale report intervals, so the Y/M/D fields are
+    expected to stay at 0 in practice and this approximation's error never
+    actually matters here. Unknown/unmatched shapes parse as 0."""
+    if not s or not s.startswith("P"):
         return 0.0
-    total_s = 0
-    num = ""
-    for c in s[2:]:
-        if c.isdigit():
-            num += c
-        else:
-            v = int(num) if num else 0
-            num = ""
-            if c == "H":
-                total_s += v * 3600
-            elif c == "M":
-                total_s += v * 60
-            elif c == "S":
-                total_s += v
-    return total_s / 3600.0
+    m = _ISO8601_DURATION_RE.match(s)
+    if not m:
+        return 0.0
+    parts = {k: float(v) if v else 0.0 for k, v in m.groupdict().items()}
+    return (
+        parts["years"] * 365 * 24
+        + parts["months"] * 30 * 24
+        + parts["days"] * 24
+        + parts["hours"]
+        + parts["minutes"] / 60.0
+        + parts["seconds"] / 3600.0
+    )
 
 
 def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=None):
@@ -441,6 +456,27 @@ def _self_check():
         assert impact3 == 0.25, f"expected 0.25 (other-evt excluded), got {impact3}"
         impact3_unfiltered = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
         assert impact3_unfiltered != 0.25, "unfiltered call should differ once other-evt is mixed in"
+
+        # Scenario 4: archived reports_received rows carry the fully-qualified
+        # ISO 8601 duration form (e.g. "P0Y0M0DT0H5M0S"), not the VEN's own
+        # compact "PT5M" -- found live during the fleet-run-2 results review,
+        # where this made event_impact_kwh silently compute 0.0 for every VEN
+        # in every scenario (the old parser only recognized a leading "PT").
+        rows4 = [
+            row("baseline-report", 60, "BASELINE", 2000.0, "P0Y0M0DT0H15M0S", event_id="e4"),
+            row("usage-report", 90, "USAGE", 1000.0, "P0Y0M0DT0H15M0S", event_id="e4"),
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows4[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows4)
+        impact4 = event_impact_kwh(csv_path, t_from, t_to, "ven-1", event_ids={"e4"})
+        assert impact4 == 0.25, f"expected 0.25 from the full-form duration, got {impact4}"
+
+    assert _parse_iso8601_duration_hours("P0Y0M0DT0H5M0S") == 1 / 12, "full-form 5-minute duration"
+    assert _parse_iso8601_duration_hours("PT5M") == 1 / 12, "compact-form 5-minute duration"
+    assert _parse_iso8601_duration_hours("") == 0.0
+    assert _parse_iso8601_duration_hours("garbage") == 0.0
 
     print("kpi.py self-check OK: event_impact_kwh")
 
