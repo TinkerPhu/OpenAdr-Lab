@@ -9955,6 +9955,24 @@ result directory from the killed first S-1 attempt
 (`20260814-1150-s1_flat/`, poller-crash JSONL only, no `run.json`) was
 deleted before running `kpi.py` across the real 8.
 
+**Third bug, found reviewing the results themselves**: `event_impact_kwh`
+was exactly `0.0` for every VEN in every one of the 8 scenarios — uniform
+enough across wildly different conditions (price spikes, capacity limits,
+alerts, a deliberate budget shortfall) to be suspicious rather than a real
+"well-calibrated forecast" result. Root cause: archived report intervals
+carry the fully-qualified ISO 8601 duration form (`"P0Y0M0DT0H5M0S"`), not
+the VEN's own compact `"PT5M"` the reporter actually emits — the VTN
+round-trip normalizes it. `_parse_iso8601_duration_hours` only recognized a
+leading `"PT"`, so every interval silently parsed as zero-length, zeroing
+out the whole energy sum regardless of the real power values. Fixed with a
+regex-based parser covering the full form; added a regression test (`P0Y...`
+vs `PT...` both resolving to the same duration) to `--self-check`; re-ran
+`kpi.py` on all 8 result directories (no live re-run needed). `event_impact_kwh`
+now shows real, scenario-varied non-zero values (e.g. S-7 ranges -5.21 to
++6.36 kWh across the fleet). Recorded in `KEY_LEARNINGS.md` since it'll trip
+up anything else that parses a duration from `lab_recorder`-archived data
+rather than straight from the VEN.
+
 **Not done / left open**: GB-24 (Node2 E2E-vs-fleet contention) — the lock
 held for this run's duration mitigated it for this run specifically, still
 open on the backlog. GB-31 (`mip_gap_target` proxy-not-achieved-gap) —
