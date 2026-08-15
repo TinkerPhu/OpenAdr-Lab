@@ -70,7 +70,18 @@ fn collect_interval_groups(
         let mut base: Vec<IntervalEntry> = Vec::new();
 
         for interval in &event.intervals {
-            let ip = match interval.intervalPeriod.as_ref() {
+            // GB-33: a single-interval event (every capacity_limit/reservation
+            // event this project's own experiment tooling sends, and any
+            // spec-compliant one-window DR event) is allowed to set
+            // `intervalPeriod` only at the event level, not per-interval. Only
+            // fall back for that narrow, unambiguous case — a multi-interval
+            // event without per-interval periods has spec-ambiguous sequential
+            // timing nothing here needs to guess at (see
+            // test_parse_capacity_schedule_does_not_guess_for_multi_interval_events).
+            let event_level_fallback = (event.intervals.len() == 1)
+                .then_some(event.intervalPeriod.as_ref())
+                .flatten();
+            let ip = match interval.intervalPeriod.as_ref().or(event_level_fallback) {
                 Some(ip) => ip,
                 None => continue,
             };

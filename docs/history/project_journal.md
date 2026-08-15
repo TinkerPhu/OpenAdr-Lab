@@ -10178,3 +10178,51 @@ row; added R-67 to `TECHNICAL_DEBTS.md`; updated the stale "Dependency
 Vulnerabilities — 2026-07-16" npm rows (had claimed "0 vulnerabilities"
 for both UIs since that date, inaccurate since GB-16 was filed 2026-08-03).
 
+## GB-33: capacity-limit schedule silently dropped every experiment event (2026-08-16)
+
+Root-caused and fixed the gap flagged as GB-33 in the previous entry:
+`grid_samples.import_limit_kw`/`export_limit_kw` had never once been
+populated on any VEN, despite scenarios like S-3/S-6/S-7 posting real
+`IMPORT_CAPACITY_LIMIT` events and the planner correctly enforcing them
+(`CAPACITY_VIOLATION` warnings fired as expected — the real constraint
+pipeline was never affected, only this history column).
+
+**Root cause**, traced via `poll_events/detect.rs` → `parse_capacity_schedule`
+→ `rate_schedule.rs`'s shared `collect_interval_groups`: that function
+required each `interval` to carry its own `intervalPeriod`
+(`interval.intervalPeriod.as_ref()`, `None => continue`), with no fallback to
+the event-level `intervalPeriod`. `experiments/run_experiment.py`'s
+`build_event()` — and, per the OpenADR 3 spec, any single-window capacity/
+alert/dispatch event — sets `intervalPeriod` only at the event level for a
+single bare interval, exactly the shape every non-price scenario action in
+this project sends. Price events worked fine because `price_series` always
+gives each interval its own `intervalPeriod`, which masked the gap for
+months: only the capacity-schedule/tariff-schedule path (`collect_interval_
+groups`) was missing it, while `parse_alert_windows` (a few functions away
+in the same file) already had the correct `interval.intervalPeriod.as_ref()
+.or(event.intervalPeriod.as_ref())` fallback — the fix pattern already
+existed in the codebase, just not applied everywhere it needed to be.
+
+**Fix** (`VEN/src/controller/rate_schedule.rs`): fall back to the event-level
+`intervalPeriod` only for the single-interval case — a multi-interval event
+without per-interval periods has spec-ambiguous sequential timing nothing in
+this project emits or needs, so the fallback deliberately doesn't guess at
+it. Two regression tests added to `openadr_interface.rs` (test-first: written
+and confirmed failing before the fix, per project convention) — one
+asserting the real single-interval/event-level shape now round-trips
+correctly, one asserting the multi-interval case still returns nothing
+rather than guessing. Both pre-existing `parse_capacity_schedule` tests
+(which always gave each interval its own `intervalPeriod`) kept passing
+unchanged — the gap they never covered is exactly what the new tests close.
+
+**Verification:** full `cargo test` (1028 passed, 0 failed), `cargo fmt
+--check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+`scripts/audit_file_sizes.py` all clean. Not yet re-verified against a live
+run (would need a fresh scenario execution to populate real
+`grid_samples.import_limit_kw`/`export_limit_kw` rows) — the KPI reframe's
+`grid_regulation` block should now populate correctly once one runs; that
+check is deferred to whenever `s9_diurnal`/`s10_overexport` (or any of
+S-3/S-6/S-7) next actually executes against the live fleet.
+
+**Bookkeeping:** Removed GB-33's row from `docs/BACKLOG.md`.
+
