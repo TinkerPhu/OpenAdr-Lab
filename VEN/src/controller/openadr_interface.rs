@@ -773,6 +773,85 @@ mod tests {
         assert!(snapshots.is_empty());
     }
 
+    // GB-33: `experiments/run_experiment.py`'s `build_event()` (and, per the
+    // OpenADR 3 spec, any single-window capacity event) sets `intervalPeriod`
+    // only at the EVENT level, not on the lone interval itself -- unlike the
+    // fixtures above (and every PRICE event this project's own tooling
+    // sends), which always give each interval its own `intervalPeriod`. That
+    // gap meant `grid_samples.import_limit_kw`/`export_limit_kw` had never
+    // once been populated on any VEN, across the whole deployment's history
+    // (confirmed empirically, see docs/BACKLOG.md GB-33) -- the real
+    // functional enforcement (`parse_capacity_state`, feeding the planner)
+    // was unaffected since it never required per-interval timing, but the
+    // schedule this test covers silently dropped every such event.
+    #[test]
+    fn test_parse_capacity_schedule_falls_back_to_event_level_interval_period() {
+        let events = json!([
+            {
+                "id": "evt-cap-single",
+                "programID": "prog-1",
+                "intervalPeriod": {
+                    "start": "2025-01-01T10:00:00Z",
+                    "duration": "PT20M"
+                },
+                "intervals": [
+                    {
+                        "id": 0,
+                        "payloads": [
+                            {"type": "IMPORT_CAPACITY_LIMIT", "values": [1.5]}
+                        ]
+                    }
+                ]
+            }
+        ]);
+        let snapshots = parse_capacity_schedule(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
+        assert_eq!(
+            snapshots.len(),
+            1,
+            "event-level intervalPeriod must be used as a fallback"
+        );
+        assert_eq!(snapshots[0].import_limit_kw, Some(1.5));
+        assert_eq!(
+            snapshots[0].interval_start,
+            "2025-01-01T10:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            snapshots[0].interval_end,
+            "2025-01-01T10:20:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    // A multi-interval event without per-interval `intervalPeriod`s is a
+    // genuinely different, spec-ambiguous case (sequential offsets from the
+    // event start) -- this project's own tooling never emits that shape, so
+    // the fallback deliberately stays narrow to the single-interval case
+    // rather than guessing at multi-interval semantics nothing exercises.
+    #[test]
+    fn test_parse_capacity_schedule_does_not_guess_for_multi_interval_events() {
+        let events = json!([
+            {
+                "id": "evt-cap-multi",
+                "programID": "prog-1",
+                "intervalPeriod": {
+                    "start": "2025-01-01T10:00:00Z",
+                    "duration": "PT2H"
+                },
+                "intervals": [
+                    {"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]},
+                    {"id": 1, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [3.0]}]}
+                ]
+            }
+        ]);
+        let snapshots = parse_capacity_schedule(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
+        assert!(snapshots.is_empty());
+    }
+
     #[test]
     fn test_parse_capacity_state_import_limit() {
         let events = json!([
