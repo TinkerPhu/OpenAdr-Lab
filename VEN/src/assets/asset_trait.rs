@@ -419,12 +419,8 @@ mod handle_tests {
             history: &history,
         };
 
-        let points = handle.capability_trajectory(
-            &initial,
-            Duration::hours(2),
-            Duration::hours(1),
-            now,
-        );
+        let points =
+            handle.capability_trajectory(&initial, Duration::hours(2), Duration::hours(1), now);
 
         assert_eq!(points.len(), 2); // duration/resolution = 2h/1h = 2 steps
         assert_eq!(points[0].0, now + Duration::hours(1));

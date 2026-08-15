@@ -376,7 +376,10 @@ mod tests {
             max_marginal_co2: 200.0,
         }];
         let mut body = base_body();
-        body.comfort_rates = Some(vec![ComfortRateInput { fill: 1.0, bid: 0.5 }]);
+        body.comfort_rates = Some(vec![ComfortRateInput {
+            fill: 1.0,
+            bid: 0.5,
+        }]);
         let req = create_from_body(body, &[s], now()).unwrap();
         assert_eq!(req.comfort_rates.len(), 1);
         assert!((req.comfort_rates[0].fill - 1.0).abs() < 1e-9);
