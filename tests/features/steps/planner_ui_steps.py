@@ -18,12 +18,19 @@ def step_navigate_planner(context):
 def step_expand_diagnostics(context):
     """BL-38 nested the plan header, trigger timeline, and decision matrix
     inside a Diagnostics accordion that is collapsed by default; expand it
-    before asserting on any of that content. The click must be scoped to
-    the accordion's own testid — a bare 'text=Diagnostics' selector also
-    matches the VEN UI nav sidebar's unrelated "Diagnostics" menu group."""
+    before asserting on any of that content. When collapsed, the accordion's
+    own rendered box is exactly the summary bar's height, so a real click on
+    the accordion element itself (coordinate-based, not a text/testid
+    sub-selector — a bare 'text=Diagnostics' also matches the VEN UI nav
+    sidebar's unrelated "Diagnostics" menu group) lands on the summary and
+    toggles it. Verify via MUI's Mui-expanded class so this fails fast
+    instead of surfacing later as an unrelated hidden-element timeout."""
     page = context.browser_page
-    page.wait_for_selector(tid("planner-diagnostics-accordion"), timeout=45000)
-    page.click(f'{tid("planner-diagnostics-accordion")} >> text="Diagnostics"')
+    accordion = page.wait_for_selector(tid("planner-diagnostics-accordion"), timeout=45000)
+    accordion.click()
+    page.wait_for_selector(
+        f'{tid("planner-diagnostics-accordion")}.Mui-expanded', timeout=10000
+    )
 
 
 @then('I see a nav button with testid "{testid}"')
