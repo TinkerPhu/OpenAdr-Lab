@@ -42,30 +42,6 @@ def step_expand_diagnostics(context):
         }""",
         timeout=10000,
     )
-    debug = page.evaluate(
-        """() => {
-            function info(el) {
-                if (!el) return null;
-                const r = el.getBoundingClientRect();
-                const cs = getComputedStyle(el);
-                return {
-                    tag: el.tagName, cls: el.className, testid: el.getAttribute('data-testid'),
-                    w: r.width, h: r.height,
-                    display: cs.display, visibility: cs.visibility, overflow: cs.overflow, opacity: cs.opacity,
-                };
-            }
-            const accordion = document.querySelector('[data-testid="planner-diagnostics-accordion"]');
-            const collapse = accordion ? accordion.querySelector('.MuiCollapse-root') : null;
-            const details = collapse ? collapse.querySelector('.MuiAccordionDetails-root') : null;
-            const matrix = document.querySelector('[data-testid="decision-matrix"]');
-            const btn = document.querySelector('[data-testid="matrix-collapse-btn"]');
-            const chain = [];
-            let node = btn;
-            while (node && chain.length < 12) { chain.push(info(node)); node = node.parentElement; }
-            return { accordion: info(accordion), collapse: info(collapse), details: info(details), matrix: info(matrix), btn: info(btn), chain };
-        }"""
-    )
-    print(f"[DIAGNOSTIC accordion debug] {debug}")
 
 
 @then('I see a nav button with testid "{testid}"')
