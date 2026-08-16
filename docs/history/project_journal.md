@@ -10486,3 +10486,70 @@ reporting) verification tracked separately as this feature's remaining work.
 closed as "already implemented, hardened staleness parity + tests" rather
 than the originally-scoped external-API ingestion.
 
+## Site Headroom: real forward-looking per-slot forecast (4 pieces)
+
+**Trigger:** The Site Headroom chart's shaded band had constant thickness
+everywhere — it plots `SiteFlexibilityEnvelope`, an instant-only value with no
+forward schedule, drawn with a `hoursForward` window implying a forecast that
+never existed. The future portion was just the last known value LOCF-forward-
+filled flat next to a genuinely-forecasted grid-power line. Extensive design
+discussion (assets are only usable once at each moment; PV can only
+contribute `down_kw` via curtailment margin, never `up_kw`; shiftable loads
+contribute `down_kw` at every not-yet-run slot with a valid alternate start
+and `up_kw` only at their scheduled slot when genuine slack remains before
+`latest_end`; every slot's up/down is an independent point-in-time
+counterfactual, not a conserved multi-slot budget) converged on: recompute a
+full per-slot trajectory fresh every dispatcher tick, anchored to each asset's
+real current state via `Asset::simulate_forward`/`capability_trajectory`
+driven by the active plan's own setpoint schedule — never reading `Plan`'s
+stale solve-time snapshot.
+
+**Piece 1 (bug fixes):** `SiteHeadroomChart.tsx`'s `locfFillKeys` omitted
+`"gridPowerKw"`, so the past band never rendered even though `GET
+/flexibility/history` was returning real data — `upKw`/`downKw` were densely
+filled but `gridPowerKw` stayed real-only at sparse resampled timestamps, so
+the band's lower/upper accessors almost never had both non-null on the same
+row. `PvInverter::capability_trajectory` also had `max_import_kw: power_kw`
+instead of `0.0` (PV can never import), untested until now.
+
+**Piece 2 (backend forward-trajectory):** New `controller/envelope_forecast.rs`
+(pure `compute_headroom_forecast`, domain ring) and `simulator/forecast.rs`
+(infra, builds `AssetForecastFrame`s via `simulate_forward`/
+`capability_trajectory`, EV additionally zeroed past its live session
+deadline since `EvState::plugged` is never toggled by pure physics
+projection). New `SiteFlexibilityForecastSlot` (`entities/plan.rs`), wired
+through `tasks/sim_tick/` (`forecast_wiring.rs` kept `tick.rs` under its
+200-line cap) into a new replace-on-tick `AppState::site_headroom_forecast`
+and `GET /flexibility/forecast`. Rebasing onto an unrelated upstream commit
+mid-piece surfaced a new `PvParams.co2_g_kwh` field my test fixture didn't
+set, and pushed `tick.rs` over its cap again from a new `pv_co2_g_kwh` tick
+parameter — both fixed as part of the same commit.
+
+**Piece 3 (history persistence):** `SCHEMA_V11` adds `up_kw`/`down_kw` REAL
+columns to `grid_samples`, mean-shaped like `import_kw`/`export_kw` (not
+tightest-value like the DOE limit columns from `SCHEMA_V9`). The history
+sampler reads the live `SiteFlexibilityEnvelope` each tick and folds it into
+the window's mean. `tasks/history_sampler/accumulator.rs` stayed under its
+200-line cap without needing the anticipated `grid_acc.rs` split.
+
+**Piece 4 (frontend consumption):** `SiteHeadroomChart.tsx` gained a
+`forecast` prop merged into the same past/future series pipeline as
+`history`, so the future band now shows genuine per-slot values instead of a
+flat LOCF extension. `Controller.tsx` wires a new `useFlexibilityForecast()`
+hook through `GridHeadroomCell`. `History.tsx` gained a "Site Headroom"
+section reusing `SiteHeadroomChart`, fed by the newly persisted
+`grid_samples.up_kw`/`down_kw` fields (pre-migration rows filtered out rather
+than plotted as a fake zero band).
+
+**Verification:** Each piece run independently on Node1 (`wsl_lock.sh`-guarded):
+`cargo fmt --check`, `cargo clippy -D warnings`, `scripts/audit_file_sizes.py`,
+`wsl cargo test -p ven-app` (1092 → 1095 → still 1095 passed across Pieces
+2–3; Piece 1 already merged separately). VEN UI: `npm test` (582 passed),
+`eslint` (0 errors), `tsc --noEmit`, `npm run build`. Deployed to Node1 after
+every piece (rebuild `ven-1/2/3` + `ui`, restart `ui` for nginx
+re-resolution); `GET /flexibility/forecast` and `GET /history/grid` verified
+live against real per-slot data post-deploy.
+
+**Bookkeeping:** No `BACKLOG.md` item to remove — this originated from live
+user feedback on the Controller page, not a tracked backlog entry.
+
