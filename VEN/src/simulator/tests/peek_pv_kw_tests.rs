@@ -13,6 +13,7 @@ fn pv_state(rated_kw: f64) -> SimState {
             id: crate::ids::ASSET_PV.to_string(),
             rated_kw,
             inverter_max_kw: rated_kw,
+            co2_g_kwh: 0.0,
         })],
         noon(),
     )

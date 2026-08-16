@@ -66,6 +66,7 @@ impl AssetProfile {
                 id: c.id.clone(),
                 rated_kw: c.rated_kw,
                 inverter_max_kw: c.inverter_max_kw.unwrap_or(c.rated_kw),
+                co2_g_kwh: c.co2_g_kwh,
             }),
             AssetProfile::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams {
                 id: c.id.clone(),
@@ -262,10 +263,12 @@ pub struct PvConfig {
     pub rated_kw: f64,
     /// Inverter's true AC output capability (kW), distinct from `rated_kw` (installed DC panel
     /// peak) — real installations routinely run an inverter rated below panel peak (deliberate
-    /// DC/AC oversizing). Defaults to `rated_kw` (no hardware ceiling below panel peak) when
-    /// omitted, so existing profiles are unaffected.
+    /// DC/AC oversizing). Defaults to `rated_kw` when omitted, so existing profiles are unaffected.
     #[serde(default)]
     pub inverter_max_kw: Option<f64>,
+    /// PV embodied carbon, gCO2eq/kWh — reporting-only, not in the planner objective.
+    #[serde(default = "super::defaults::default_pv_co2_g_kwh")]
+    pub co2_g_kwh: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

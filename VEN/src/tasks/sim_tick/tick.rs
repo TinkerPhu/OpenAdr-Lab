@@ -31,6 +31,7 @@ pub(crate) async fn tick_once(
     tick_s: u64,
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
+    pv_co2_g_kwh: f64,
     pv_measurement: Arc<dyn MeasurementPort>,
     pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
@@ -173,13 +174,8 @@ pub(crate) async fn tick_once(
     // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
     let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
     super::arbiter_glue::record_arbiter_outcome(&state, &notifier, arbiter_summary, now).await;
-    super::arbiter_glue::apply_residual_escalation(
-        &state,
-        &trigger_tx,
-        &absorbed_kwh_by_asset,
-        now,
-    )
-    .await;
+    super::arbiter_glue::apply_residual_escalation(&state, &trigger_tx, &absorbed_kwh_by_asset, now)
+        .await;
 
     // PHASE 1 (post-lock): clear one-shot inject fields.
     super::post_lock::clear_inject_fields(&state, cleared_fields, pv_clear, base_clear).await;
@@ -196,6 +192,7 @@ pub(crate) async fn tick_once(
         &ctx.rates_snap,
         dt_s,
         now,
+        pv_co2_g_kwh,
     )
     .await;
 

@@ -648,6 +648,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 id: "pv".into(),
                 rated_kw: 6.0,
                 inverter_max_kw: 6.0,
+                co2_g_kwh: 0.0,
             }),
             AssetProfile::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),

@@ -109,6 +109,12 @@ impl Profile {
                             ));
                         }
                     }
+                    if c.co2_g_kwh < 0.0 {
+                        errors.push(format!(
+                            "pv.co2_g_kwh must be >= 0.0, got {}",
+                            c.co2_g_kwh
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -533,6 +539,42 @@ assets:
     id: pv
     rated_kw: 5.0
     inverter_max_kw: 4.0
+"#;
+        let p2: Profile = serde_yaml::from_str(yaml2).unwrap();
+        assert!(p2.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fails_for_negative_pv_co2_g_kwh() {
+        let yaml = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+    co2_g_kwh: -1.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("co2_g_kwh")));
+    }
+
+    #[test]
+    fn validate_passes_when_pv_co2_g_kwh_unset_or_zero() {
+        let yaml = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.validate().is_ok());
+
+        let yaml2 = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+    co2_g_kwh: 0.0
 "#;
         let p2: Profile = serde_yaml::from_str(yaml2).unwrap();
         assert!(p2.validate().is_ok());

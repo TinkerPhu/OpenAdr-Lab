@@ -291,6 +291,7 @@ mod pv_weather_blend_tests {
                 id: crate::ids::ASSET_PV.to_string(),
                 rated_kw,
                 inverter_max_kw: rated_kw,
+                co2_g_kwh: 0.0,
             })],
             Utc::now(),
         )

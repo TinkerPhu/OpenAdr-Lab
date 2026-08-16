@@ -49,6 +49,7 @@ mod tests {
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
+            0.0,  // pv_co2_g_kwh
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
@@ -106,6 +107,7 @@ mod tests {
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
+            0.0,  // pv_co2_g_kwh
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
@@ -161,6 +163,7 @@ mod tests {
                     id: crate::ids::ASSET_PV.to_string(),
                     rated_kw: 5.0,
                     inverter_max_kw: 5.0,
+                    co2_g_kwh: 0.0,
                 }),
             ],
             chrono::Utc::now(),
@@ -270,6 +273,7 @@ mod tests {
             1,
             Arc::new(crate::controller::NoopWeatherPort),
             None,
+            0.0, // pv_co2_g_kwh
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             Arc::new(crate::controller::NoopMeasurementPort),

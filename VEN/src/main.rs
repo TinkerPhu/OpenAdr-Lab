@@ -122,6 +122,15 @@ async fn main() -> anyhow::Result<()> {
     }
     let profile = Arc::new(profile);
     let (sim_params, planner_params, asset_params) = build_domain_params(&profile);
+    // BL-17: PV embodied-carbon reporting is a per-asset profile scalar resolved once
+    // at startup, same pattern as `min_ev_charge_kw` in `simulator/plan_context.rs`.
+    let pv_co2_g_kwh = asset_params
+        .iter()
+        .find_map(|p| match p {
+            entities::asset_params::AssetParams::Pv(pv) => Some(pv.co2_g_kwh),
+            _ => None,
+        })
+        .unwrap_or(0.0);
     let grid_max_import_kw = profile.grid.max_import_kw;
     let grid_max_export_kw = profile.grid.max_export_kw;
 
@@ -278,7 +287,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, sn, hp) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -289,6 +298,7 @@ async fn main() -> anyhow::Result<()> {
             planner_event_tx.clone(),
             weather_port.clone(),
             profile.weather_pv_params(),
+            pv_co2_g_kwh,
             pv_measurement.clone(),
             pv_measurement_enabled,
             base_load_measurement.clone(),
@@ -308,6 +318,7 @@ async fn main() -> anyhow::Result<()> {
                 etx.clone(),
                 wp.clone(),
                 wpp,
+                pvco2,
                 pvm.clone(),
                 pvme,
                 blm.clone(),
