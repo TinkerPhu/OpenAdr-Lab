@@ -27,7 +27,7 @@ export function EventLogPage() {
           Event Log
         </Typography>
         <Typography variant="body2" color="text.secondary" data-testid="event-log-last-updated">
-          Last updated: {lastUpdated} (auto-refresh 10s)
+          Last updated: {lastUpdated} (live)
         </Typography>
       </div>
 

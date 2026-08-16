@@ -10317,3 +10317,43 @@ passes combined (nothing dropped or duplicated in the move); all 22
 **Bookkeeping:** Removed GB-22's row from `docs/BACKLOG.md`; added GB-35's
 row for the deferred broader long-`poll_until` audit.
 
+## GB-13: Wire the Event Log's SSE stream into the VEN UI
+
+**Trigger:** `useEventLog()`'s own comment said wiring the backend's
+already-working `GET /events/log/events` SSE route into the UI was "left
+for a follow-up" — it still polled every 10s.
+
+**Design:** The SSE stream is live-forward-only (no `Last-Event-ID`/
+replay, confirmed against `notifications.rs`'s identical bridge pattern),
+so a pure-SSE switch would drop events emitted before the `EventSource`
+connects. Kept the initial `GET /events/log` fetch (unchanged) as a seed
+and layered a live SSE subscription on top, merging new entries into the
+same React Query cache entry via `queryClient.setQueryData` — this let
+`useEventLog()` keep its existing `data`/`dataUpdatedAt` return shape, so
+`EventLogPage` needed no restructuring. `usePlannerEvents`
+(`VEN/ui/src/api/hooks.ts`), the only existing SSE-consumption precedent,
+is a bare callback hook with no initial-fetch step — not directly
+reusable here since this hook needs an actual list, not just a callback.
+Capped the client-side list at 200 (`EVENT_LOG_CLIENT_CAP`, mirroring the
+backend's own `EVENT_LOG_RING_CAP`) so a long-lived connection doesn't
+grow it unbounded, and de-dup entries by `id` to handle the unavoidable
+race between the initial GET and an SSE message for the same entry.
+
+**Implementation:** `VEN/ui/src/api/hooks.ts::useEventLog` — initial
+`useQuery` (no `refetchInterval`) plus a `useEffect`-managed `EventSource`
+appending/de-duping/capping into the query cache, closed on unmount.
+`EventLog.tsx`'s "Last updated" caption changed from "(auto-refresh 10s)"
+to "(live)". No backend changes — the route already existed and is
+already proven working via `usePlannerEvents`'s identical bridge pattern.
+
+**Verification:** Test-first — wrote `useEventLog.test.tsx` (a minimal
+`MockEventSource` class, no existing polyfill in this codebase) covering
+initial seed, SSE append + `dataUpdatedAt` bump, GET/SSE race de-dup, the
+200-entry cap, and EventSource cleanup on unmount; confirmed all 5
+new-behavior cases failed against the old polling implementation before
+writing the fix. `EventLog.test.tsx`'s existing 4 tests (hook-mocked,
+unaffected by the internal change) stayed green. Full `VEN/ui` suite (570
+tests), `npm run lint` (0 errors), `npm run build` all clean.
+
+**Bookkeeping:** Removed GB-13's row from `docs/BACKLOG.md`.
+
