@@ -16,10 +16,10 @@ const mockPrograms = [
   { id: "p2", programName: "Program Beta", createdDateTime: "2026-01-02" },
 ];
 
-const useEventsMock = vi.fn(() => ({
-  data: mockEvents,
-  dataUpdatedAt: Date.now(),
-}));
+const useEventsMock = vi.fn((active?: boolean) => {
+  void active;
+  return { data: mockEvents, dataUpdatedAt: Date.now() };
+});
 
 const createMock = vi.fn();
 const updateMock = vi.fn();
