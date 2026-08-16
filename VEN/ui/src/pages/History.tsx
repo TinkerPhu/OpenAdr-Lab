@@ -9,9 +9,10 @@ import {
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvelopeChart";
 import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
+import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
-import type { ForecastAccuracySample } from "../api/types";
+import type { ForecastAccuracySample, SiteFlexibilitySample } from "../api/types";
 
 /** forecast-accuracy-tracking: only these three assets get near/far forecast samples
  * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
@@ -125,6 +126,24 @@ export function HistoryPage() {
     [grid]
   );
 
+  // Site-headroom-forecast Piece 3/4: persisted mean up_kw/down_kw, null before that
+  // migration landed — filtered out rather than plotted as a fake zero band.
+  const gridPowerTimeline: AssetTimelinePoint[] = useMemo(
+    () => grid.map((row) => ({ ts: row.ts, values: { power_kw: row.import_kw - row.export_kw } })),
+    [grid]
+  );
+  const headroomHistory: SiteFlexibilitySample[] = useMemo(
+    () =>
+      grid
+        .filter((row) => row.up_kw !== null && row.down_kw !== null)
+        .map((row) => ({
+          ts: new Date(row.ts).toISOString(),
+          up_kw: row.up_kw as number,
+          down_kw: row.down_kw as number,
+        })),
+    [grid]
+  );
+
   return (
     <Box sx={{ p: 2 }} data-testid="history-page">
       <Typography variant="h5" gutterBottom>History</Typography>
@@ -169,6 +188,15 @@ export function HistoryPage() {
         hoursBack={24}
         hoursForward={0}
         xAxisTickIntervalMinutes={30}
+      />
+
+      <Typography variant="h6" sx={{ mt: 3 }}>Site Headroom</Typography>
+      <SiteHeadroomChart
+        gridTimeline={gridPowerTimeline}
+        history={headroomHistory}
+        nowMs={toMs}
+        hoursBack={24}
+        hoursForward={0}
       />
 
       {[...ticksByAsset.entries()].map(([assetId, points]) => {

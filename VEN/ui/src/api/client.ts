@@ -2,7 +2,7 @@ import type {
   VtnEvent, Program, Report, ReportSubmission, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
-  SiteFlexibilityEnvelope, SiteFlexibilitySample,
+  SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
   EvSettings, UpdateEvSettingsBody,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
@@ -335,6 +335,12 @@ export class VenApi {
   async flexibilityHistory(): Promise<SiteFlexibilitySample[]> {
     const r = await this.getReq("/flexibility/history");
     if (!r.ok) throw new Error(`flexibility/history ${r.status}`);
+    return r.json();
+  }
+
+  async flexibilityForecast(): Promise<SiteFlexibilityForecastSlot[]> {
+    const r = await this.getReq("/flexibility/forecast");
+    if (!r.ok) throw new Error(`flexibility/forecast ${r.status}`);
     return r.json();
   }
 

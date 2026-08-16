@@ -565,6 +565,16 @@ export type SiteFlexibilitySample = {
   down_kw: number;
 };
 
+/** One forward-looking per-slot forecast sample, `GET /flexibility/forecast` —
+ * re-derived fresh every dispatcher tick from the active plan's own setpoint
+ * schedule, distinct from both `SiteFlexibilityEnvelope` (instant-only) and
+ * `SiteFlexibilitySample` (the past ring). */
+export type SiteFlexibilityForecastSlot = {
+  ts: string;
+  up_kw: number;
+  down_kw: number;
+};
+
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 
 /** Per-device schedulability metadata emitted at plan time (VEN/src/entities/plan.rs FlexibilityEnvelope). */
@@ -623,6 +633,10 @@ export type HistoryGridSample = {
    * null if no capacity event was applicable during it (history-envelope-persistence). */
   import_limit_kw: number | null;
   export_limit_kw: number | null;
+  /** site-headroom-forecast Piece 3: mean instant site-flexibility headroom over this
+   * window (SCHEMA_V11), null before that migration recorded a dispatcher tick. */
+  up_kw: number | null;
+  down_kw: number | null;
 };
 
 export type ForecastAccuracySample = {

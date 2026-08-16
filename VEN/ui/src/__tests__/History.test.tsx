@@ -18,6 +18,22 @@ const mockGrid = [
     co2_g_kwh: 300,
     import_limit_kw: 5.0,
     export_limit_kw: null,
+    up_kw: 4.0,
+    down_kw: 1.5,
+  },
+  {
+    // Pre-migration row: up_kw/down_kw not yet recorded — must be filtered out,
+    // not plotted as a fake zero headroom band.
+    ts: Date.UTC(2026, 0, 1, 5),
+    import_kw: 1.0,
+    export_kw: 0.0,
+    import_tariff_eur_kwh: 0.25,
+    export_tariff_eur_kwh: 0.05,
+    co2_g_kwh: 300,
+    import_limit_kw: null,
+    export_limit_kw: null,
+    up_kw: null,
+    down_kw: null,
   },
 ];
 const mockEvents = [
@@ -86,6 +102,12 @@ describe("HistoryPage", () => {
     // this replaced: rendering must not throw and the chart section must still mount.
     renderHistory();
     expect(screen.getByTestId("tariff-envelope-chart")).toBeInTheDocument();
+  });
+
+  it("renders the Site Headroom chart section", () => {
+    renderHistory();
+    expect(screen.getByText("Site Headroom")).toBeInTheDocument();
+    expect(screen.getByTestId("site-headroom-chart")).toBeInTheDocument();
   });
 
   it("renders events and reports tables with the mocked rows", () => {

@@ -602,6 +602,16 @@ export function useFlexibilityHistory() {
   });
 }
 
+/** Forward-looking per-slot headroom trajectory, for the "Site Headroom" chart's future band. */
+export function useFlexibilityForecast() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["flexibility_forecast", api.baseUrl],
+    queryFn: () => api.flexibilityForecast(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useBaselineOverride() {
   const { api } = useVenContext();
   return useQuery({

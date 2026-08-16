@@ -1,5 +1,5 @@
 import type { AssetTimelinePoint } from "../types";
-import type { SiteFlexibilitySample } from "../../../api/types";
+import type { SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../../../api/types";
 import type { NamedSample, TimestampedRow } from "../../charts/mergeSeries";
 import {
   mergeTimestampedSeries,
@@ -19,6 +19,9 @@ interface SiteHeadroomChartProps {
   gridTimeline: AssetTimelinePoint[];
   /** BL-43: the site-headroom ring (`GET /flexibility/history`), oldest first. */
   history: SiteFlexibilitySample[];
+  /** Forward-looking per-slot trajectory (`GET /flexibility/forecast`); optional so
+   * this component still works wherever only the past ring is available. */
+  forecast?: SiteFlexibilityForecastSlot[];
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
@@ -34,6 +37,7 @@ interface SiteHeadroomChartProps {
 export function SiteHeadroomChart({
   gridTimeline,
   history,
+  forecast = [],
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
@@ -56,17 +60,34 @@ export function SiteHeadroomChart({
     key: "downKw",
     value: s.down_kw,
   }));
+  // Forecast supplies genuine future per-slot values instead of letting LOCF
+  // flat-extend the last historical sample across the whole forward window.
+  const forecastUpSamples: NamedSample[] = forecast.map((s) => ({
+    ts: new Date(s.ts).getTime(),
+    key: "upKw",
+    value: s.up_kw,
+  }));
+  const forecastDownSamples: NamedSample[] = forecast.map((s) => ({
+    ts: new Date(s.ts).getTime(),
+    key: "downKw",
+    value: s.down_kw,
+  }));
 
-  const merged = mergeTimestampedSeries(gridRows, [...upSamples, ...downSamples]);
-  // LOCF: the ~1s-cadence headroom history and the coarser-resolution grid
-  // timeline won't align by exact timestamp — without this, most grid-power
-  // rows would have no band value at all. gridPowerKw itself must be filled
-  // too (not just upKw/downKw): the band's lower/upper accessors require
-  // gridPowerKw non-null on the SAME row as upKw/downKw, and since real grid
-  // rows are sparse relative to the dense history rows, leaving gridPowerKw
-  // real-only meant almost no row ever had both — the band rendered nothing.
-  // Consistent with the line's own default `type="stepAfter"` rendering: a
-  // forward-filled step value is exactly what that shape already implies.
+  const merged = mergeTimestampedSeries(gridRows, [
+    ...upSamples,
+    ...downSamples,
+    ...forecastUpSamples,
+    ...forecastDownSamples,
+  ]);
+  // LOCF now only bridges minor timestamp misalignment between the headroom
+  // samples (history/forecast) and the coarser-resolution grid timeline —
+  // gridPowerKw itself must be filled too (not just upKw/downKw): the band's
+  // lower/upper accessors require gridPowerKw non-null on the SAME row as
+  // upKw/downKw, and since real grid rows are sparse relative to the dense
+  // history rows, leaving gridPowerKw real-only meant almost no row ever had
+  // both — the band rendered nothing. Consistent with the line's own default
+  // `type="stepAfter"` rendering: a forward-filled step value is exactly what
+  // that shape already implies.
   const filled = locfFillKeys(merged, ["upKw", "downKw", "gridPowerKw"]);
   const clipped = clipRowsToWindow(filled, tMin, tMax);
   const chartData = ensureNonEmptyRows(clipped, tMin, tMax);

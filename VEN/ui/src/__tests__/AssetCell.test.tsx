@@ -30,6 +30,7 @@ vi.mock("../api/hooks", () => ({
   useSimSchema: () => ({ data: {} }),
   useFlexibility: () => ({ data: undefined }),
   useFlexibilityHistory: () => ({ data: [] }),
+  useFlexibilityForecast: () => ({ data: [] }),
 }));
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

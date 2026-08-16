@@ -7,11 +7,21 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
-import type { SiteFlexibilityEnvelope, SiteFlexibilitySample } from "../api/types";
+import type { SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../api/types";
 
 vi.mock("../components/controller/charts/SiteHeadroomChart", () => ({
-  SiteHeadroomChart: ({ history }: { history: SiteFlexibilitySample[] }) => (
-    <div data-testid="site-headroom-chart" data-history-len={String(history.length)} />
+  SiteHeadroomChart: ({
+    history,
+    forecast,
+  }: {
+    history: SiteFlexibilitySample[];
+    forecast: SiteFlexibilityForecastSlot[];
+  }) => (
+    <div
+      data-testid="site-headroom-chart"
+      data-history-len={String(history.length)}
+      data-forecast-len={String(forecast.length)}
+    />
   ),
 }));
 
@@ -28,12 +38,17 @@ const history: SiteFlexibilitySample[] = [
   { ts: "2026-01-01T10:00:00Z", up_kw: 5.5, down_kw: 2.25 },
 ];
 
+const forecast: SiteFlexibilityForecastSlot[] = [
+  { ts: "2026-01-01T10:05:00Z", up_kw: 4.8, down_kw: 3.1 },
+];
+
 describe("GridHeadroomCell", () => {
   it("shows placeholders when no envelope is available yet", () => {
     render(
       <GridHeadroomCell
         envelope={undefined}
         history={[]}
+        forecast={[]}
         gridTimeline={[]}
         nowMs={Date.now()}
         extended={false}
@@ -51,6 +66,7 @@ describe("GridHeadroomCell", () => {
       <GridHeadroomCell
         envelope={envelope}
         history={history}
+        forecast={[]}
         gridTimeline={[]}
         nowMs={Date.now()}
         extended={false}
@@ -69,6 +85,7 @@ describe("GridHeadroomCell", () => {
       <GridHeadroomCell
         envelope={envelope}
         history={history}
+        forecast={[]}
         gridTimeline={[]}
         nowMs={Date.now()}
         extended={false}
@@ -79,6 +96,22 @@ describe("GridHeadroomCell", () => {
     expect(screen.getByTestId("site-headroom-chart")).toHaveAttribute("data-history-len", "2");
   });
 
+  it("threads the forecast array through to SiteHeadroomChart", () => {
+    render(
+      <GridHeadroomCell
+        envelope={envelope}
+        history={history}
+        forecast={forecast}
+        gridTimeline={[]}
+        nowMs={Date.now()}
+        extended={false}
+        pinned={false}
+        onTogglePin={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("site-headroom-chart")).toHaveAttribute("data-forecast-len", "1");
+  });
+
   it("calls onTogglePin when the pin button is clicked", async () => {
     const user = userEvent.setup();
     const onTogglePin = vi.fn();
@@ -86,6 +119,7 @@ describe("GridHeadroomCell", () => {
       <GridHeadroomCell
         envelope={envelope}
         history={history}
+        forecast={[]}
         gridTimeline={[]}
         nowMs={Date.now()}
         extended={false}
