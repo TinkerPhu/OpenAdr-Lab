@@ -151,7 +151,11 @@ pub(crate) fn build_milp_inputs(
         "GHG data",
     );
     // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh.
-    let g_co2: Vec<f64> = co2_stale_outcome.values.iter().map(|v| v / 1000.0).collect();
+    let g_co2: Vec<f64> = co2_stale_outcome
+        .values
+        .iter()
+        .map(|v| v / 1000.0)
+        .collect();
 
     let mut c_exp = Vec::with_capacity(n);
     let mut p_pv = Vec::with_capacity(n);

@@ -77,7 +77,11 @@ impl ComfortRate {
     /// breakpoint queries return the stored value; mid-curve queries interpolate linearly
     /// between the two bracketing points; queries outside the stored range clamp to the
     /// nearest boundary breakpoint.
-    fn interpolate_at_fill(rates: &[ComfortRate], fill: f64, extract: impl Fn(&ComfortRate) -> f64) -> f64 {
+    fn interpolate_at_fill(
+        rates: &[ComfortRate],
+        fill: f64,
+        extract: impl Fn(&ComfortRate) -> f64,
+    ) -> f64 {
         if fill <= rates[0].fill {
             return extract(&rates[0]);
         }

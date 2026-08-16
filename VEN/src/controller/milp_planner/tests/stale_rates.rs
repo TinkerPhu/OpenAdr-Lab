@@ -193,7 +193,10 @@ fn test_co2_coverage_independent_of_import_coverage() {
         "CO2 coverage ends before the horizon — warning expected"
     );
     assert!(
-        inp.co2_stale_rate_warning.as_deref().unwrap().contains("GHG"),
+        inp.co2_stale_rate_warning
+            .as_deref()
+            .unwrap()
+            .contains("GHG"),
         "warning names the GHG data source"
     );
 }
