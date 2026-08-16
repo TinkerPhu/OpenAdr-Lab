@@ -130,14 +130,30 @@ pub(crate) fn build_milp_inputs(
     let stale_outcome = super::stale_rates::apply_stale_rate_policy(
         &planner.stale_rate_policy,
         planner.stale_rate_safe_pctl,
-        tariffs,
+        &tariffs.import_eur_kwh,
+        tariffs.import_coverage_end,
         &slot_bounds,
         0.25,
+        "Tariff data",
     );
-    let c_imp = stale_outcome.c_imp_eur_kwh;
+    let c_imp = stale_outcome.values;
+
+    // BL-17 closeout: CO2 intensity gets the same staleness-policy parity as
+    // the import tariff, instead of silently holding the last known value
+    // forward forever. Default 300.0 g/kWh matches the pre-existing fallback.
+    let co2_stale_outcome = super::stale_rates::apply_stale_rate_policy(
+        &planner.stale_rate_policy,
+        planner.stale_rate_safe_pctl,
+        &tariffs.co2_g_kwh,
+        tariffs.co2_coverage_end,
+        &slot_bounds,
+        300.0,
+        "GHG data",
+    );
+    // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh.
+    let g_co2: Vec<f64> = co2_stale_outcome.values.iter().map(|v| v / 1000.0).collect();
 
     let mut c_exp = Vec::with_capacity(n);
-    let mut g_co2 = Vec::with_capacity(n);
     let mut p_pv = Vec::with_capacity(n);
     let mut p_base = Vec::with_capacity(n);
     let mut p_residual = Vec::with_capacity(n);
@@ -157,15 +173,6 @@ pub(crate) fn build_milp_inputs(
                 .time_weighted_mean(slot_t, slot_end)
                 .or_else(|| tariffs.export_eur_kwh.interpolate_at(slot_t))
                 .unwrap_or(0.08),
-        );
-        // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh
-        g_co2.push(
-            tariffs
-                .co2_g_kwh
-                .time_weighted_mean(slot_t, slot_end)
-                .or_else(|| tariffs.co2_g_kwh.interpolate_at(slot_t))
-                .unwrap_or(300.0)
-                / 1000.0,
         );
         // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
@@ -396,6 +403,7 @@ pub(crate) fn build_milp_inputs(
         c_imp_eur_kwh: c_imp,
         rate_stale: stale_outcome.rate_stale,
         stale_rate_warning: stale_outcome.warning,
+        co2_stale_rate_warning: co2_stale_outcome.warning,
         budget_warning,
         c_exp_eur_kwh: c_exp,
         g_imp_kgco2_kwh: g_co2,

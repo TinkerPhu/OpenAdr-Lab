@@ -11,6 +11,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         c_imp_eur_kwh: vec![0.25; n],
         rate_stale: vec![false; n],
         stale_rate_warning: None,
+        co2_stale_rate_warning: None,
         budget_warning: None,
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
@@ -243,6 +244,47 @@ fn solve_battery_arbitrage() {
     assert!(
         dis_in_expensive > 0.5,
         "battery should discharge in expensive period, got {dis_in_expensive:.4} kWh"
+    );
+}
+
+/// BL-17 closeout: proves `g_imp_kgco2_kwh` × `w_ghg` is load-bearing in the
+/// objective, not just parsed-and-ignored (the exact class of bug BL-34's own
+/// postmortem warns about — see `docs/reference/KEY_LEARNINGS.md`). Tariff is
+/// flat (no price signal at all); only GHG intensity varies. A battery should
+/// charge in the clean slots and discharge in the dirty ones purely because
+/// `w_ghg > 0` makes that choice cheaper in the objective.
+#[test]
+fn battery_arbitrage_driven_by_ghg_intensity_alone() {
+    let mut inputs = make_solver_inputs(4, 1.0); // base = 1.0 kW
+    inputs.c_imp_eur_kwh = vec![0.20; 4]; // flat price — no price signal
+    inputs.g_imp_kgco2_kwh = vec![0.10, 0.10, 0.50, 0.50]; // clean then dirty grid
+    inputs.e_bat_nom_kwh = Some(5.0);
+    inputs.e_bat_init_kwh = Some(0.0);
+    inputs.e_bat_min_kwh = Some(0.0);
+    inputs.e_bat_max_kwh = Some(5.0);
+    inputs.p_bat_ch_max_kw = Some(5.0);
+    inputs.p_bat_dis_max_kw = Some(5.0);
+    inputs.eff_bat_ch = Some(1.0);
+    inputs.eff_bat_dis = Some(1.0);
+
+    let weights = Phase1Weights {
+        w_ghg: 5.0, // large enough to dominate the flat price term
+        ..make_phase1_weights()
+    };
+
+    let result = solve_phase1(&inputs, &weights, &contexts_from_inputs(&inputs), 60.0);
+    assert!(result.is_ok(), "solver failed: {:?}", result.err());
+    let out = result.unwrap();
+
+    let dis_in_dirty = out.p_bat_dis_kw[2] + out.p_bat_dis_kw[3];
+    assert!(
+        dis_in_dirty > 0.5,
+        "battery should discharge in the high-carbon slots when w_ghg > 0, got {dis_in_dirty:.4}"
+    );
+    let ch_in_clean = out.p_bat_ch_kw[0] + out.p_bat_ch_kw[1];
+    assert!(
+        ch_in_clean > 0.5,
+        "battery should charge in the low-carbon slots when w_ghg > 0, got {ch_in_clean:.4}"
     );
 }
 
