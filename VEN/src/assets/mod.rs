@@ -11,6 +11,7 @@ pub mod base_load;
 pub mod battery;
 mod battery_milp;
 pub mod ev;
+mod ev_comfort;
 mod ev_milp;
 pub mod grid;
 pub mod heater;
@@ -387,6 +388,7 @@ impl AssetConfig {
         lambda_sw: f64,
         c_terminal_eur_kwh: f64,
         heater_anchor: Vec<Option<f64>>,
+        w_ghg_eur_kg: f64,
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
             Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(
@@ -406,6 +408,7 @@ impl AssetConfig {
                 v_ev_core_eur_kwh,
                 asap_lateness_eur_kwh_h,
                 v_ev_free_charge_eur_kwh,
+                w_ghg_eur_kg,
             ))),
             Self::Heater(cfg) => Some(Box::new(HeaterMilpContext::from_state(
                 state,
@@ -417,6 +420,7 @@ impl AssetConfig {
                 lambda_sw,
                 c_terminal_eur_kwh,
                 heater_anchor,
+                w_ghg_eur_kg,
             ))),
             _ => None,
         }
