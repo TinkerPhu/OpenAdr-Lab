@@ -10357,3 +10357,43 @@ tests), `npm run lint` (0 errors), `npm run build` all clean.
 
 **Bookkeeping:** Removed GB-13's row from `docs/BACKLOG.md`.
 
+## GB-20: `fleet.sh down --purge` fails to delete fleet VEN data files
+
+**Trigger:** `fleet.sh down --purge`'s plain `rm -rf
+"$VEN_DIR"/data/fleet-ven-*` silently failed to delete anything — Docker
+auto-creates a missing bind-mount host dir as `root:root`, and
+`VEN/Dockerfile` runs the VEN process as non-root `uid 2000`, so the
+regular host user running `fleet.sh` couldn't remove either. Containers
+still tore down cleanly and the script printed its normal "Fleet stopped
+and purged" success message regardless — the failure was completely
+silent.
+
+**Design:** Rather than requiring host-level `sudo` (a new deployment
+assumption `fleet.sh` didn't previously need), delete the data via a
+throwaway `busybox` container, which runs as root by default when an
+image sets no `USER` — keeps the fix self-contained to Docker, which
+`fleet.sh` already depends on entirely.
+
+**Implementation:** Added `purge_fleet_data()` to `fleet.sh`, bind-mounting
+the whole `VEN/data` directory into a `docker run --rm busybox sh -c
+'rm -rf /data/fleet-ven-*'` and calling it from `cmd_down`'s purge branch
+in place of the direct `rm -rf`. The profile YAML/compose-file/manifest
+deletions stay unchanged (host-Python-written, never hit this problem).
+
+**Verification:** No unit-test harness exists for `fleet.sh` in this
+repo, so verified end-to-end on Node1 (needs the live VTN for
+provisioning — Node2 has no persistent VTN, confirmed by first trying
+there and hitting a connection-refused on `localhost:8200`): `fleet.sh up
+2` → confirmed `VEN/data/fleet-ven-*` created `root:root`-owned (the
+exact bug precondition, `ls -la` as the non-root `pi` user) → `fleet.sh
+down --purge` → confirmed the directories, profile YAMLs, compose file,
+and manifest were all actually gone afterward (the real regression check,
+since the old bug printed the identical success message while leaving
+them behind). Re-ran `up`/`down` (no `--purge`) to confirm the
+data-preserving path is unchanged. Confirmed the main production stack
+(`vtn-vtn-1`, `ven-ven-1-1`/`-2-1`/`-3-1`, `vtn-bff-1`, `vtn-db-1`, and
+all unrelated household containers) stayed untouched throughout — the
+fleet compose file is a separate Compose project.
+
+**Bookkeeping:** Removed GB-20's row from `docs/BACKLOG.md`.
+
