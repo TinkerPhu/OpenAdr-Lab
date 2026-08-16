@@ -4,6 +4,11 @@ Feature: Planner Visualization Page
   The Planner page gives engineers and operators full transparency into the HEMS planner:
   why each asset was scheduled, what caused replans, packet progress, and plan health.
 
+  # BL-38 nested the plan header, trigger timeline, and decision matrix inside
+  # a Diagnostics accordion collapsed by default (see planner-diagnostics-accordion
+  # in VEN/ui/src/pages/Planner.tsx) — scenarios asserting on that content must
+  # expand it first via "I expand the Planner Diagnostics section".
+
   Background:
     Given the VEN UI is open
 
@@ -20,10 +25,12 @@ Feature: Planner Visualization Page
 
   Scenario: Plan header section is visible on Planner page
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then I see an element with testid "plan-header"
 
   Scenario: Plan header shows trigger badge and summary values
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then I see an element with testid "plan-trigger-badge"
     And I see an element with testid "plan-age"
     And I see an element with testid "plan-cost"
@@ -34,14 +41,17 @@ Feature: Planner Visualization Page
 
   Scenario: Trigger timeline section is visible on Planner page
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then I see an element with testid "trigger-timeline"
 
   Scenario: Trigger timeline shows at least one event chip
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then at least one trigger chip is visible
 
   Scenario: Clicking a trigger chip shows detail popover
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     And I click the first trigger chip
     Then I see an element with testid "trigger-popover"
 
@@ -49,15 +59,18 @@ Feature: Planner Visualization Page
 
   Scenario: Decision matrix section is visible on Planner page
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then I see an element with testid "decision-matrix"
 
   Scenario: Decision matrix renders asset rows and tariff header
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then the decision matrix shows at least one asset row
     And the decision matrix shows the tariff header row
 
   Scenario: Decision matrix collapse button is present
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     Then I see an element with testid "matrix-collapse-btn"
 
   # "Clicking a matrix cell with a step opens the step detail drawer" moved
@@ -67,6 +80,7 @@ Feature: Planner Visualization Page
 
   Scenario: Decision matrix collapses and expands
     When I navigate to the Planner page
+    And I expand the Planner Diagnostics section
     And I click the element with testid "matrix-collapse-btn"
     Then the decision matrix cells are hidden
     When I click the element with testid "matrix-collapse-btn"
