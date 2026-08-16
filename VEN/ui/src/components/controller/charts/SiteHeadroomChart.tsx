@@ -60,8 +60,14 @@ export function SiteHeadroomChart({
   const merged = mergeTimestampedSeries(gridRows, [...upSamples, ...downSamples]);
   // LOCF: the ~1s-cadence headroom history and the coarser-resolution grid
   // timeline won't align by exact timestamp — without this, most grid-power
-  // rows would have no band value at all.
-  const filled = locfFillKeys(merged, ["upKw", "downKw"]);
+  // rows would have no band value at all. gridPowerKw itself must be filled
+  // too (not just upKw/downKw): the band's lower/upper accessors require
+  // gridPowerKw non-null on the SAME row as upKw/downKw, and since real grid
+  // rows are sparse relative to the dense history rows, leaving gridPowerKw
+  // real-only meant almost no row ever had both — the band rendered nothing.
+  // Consistent with the line's own default `type="stepAfter"` rendering: a
+  // forward-filled step value is exactly what that shape already implies.
+  const filled = locfFillKeys(merged, ["upKw", "downKw", "gridPowerKw"]);
   const clipped = clipRowsToWindow(filled, tMin, tMax);
   const chartData = ensureNonEmptyRows(clipped, tMin, tMax);
 

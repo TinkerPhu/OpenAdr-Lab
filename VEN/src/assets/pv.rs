@@ -410,7 +410,7 @@ impl Asset for PvInverter {
                 t,
                 AssetCapability {
                     max_export_kw: power_kw,
-                    max_import_kw: power_kw,
+                    max_import_kw: 0.0,
                     adjustability: PowerAdjustability::Croppable,
                     power_steps_kw: vec![],
                 },
@@ -1151,6 +1151,35 @@ mod tests {
                 cap.max_export_kw >= -4.0 - 1e-9,
                 "trajectory must not exceed inverter_max_kw, got {}",
                 cap.max_export_kw
+            );
+        }
+    }
+
+    #[test]
+    fn capability_trajectory_max_import_kw_is_always_zero() {
+        // PV can never import, regardless of the (negative) export forecast value at
+        // any projected step — capability_inner already reports this correctly;
+        // capability_trajectory must not silently mirror the export value into
+        // max_import_kw instead of the trait-documented "0.0 for a direction the
+        // asset can't move in at all" invariant.
+        let (mut pv, state_inner) = make_pv(10.0);
+        // Force a guaranteed non-zero (negative/export) power_kw at every step,
+        // independent of the sin model's real time-of-day — a bug that mirrors
+        // power_kw into max_import_kw only shows up when power_kw != 0.0.
+        pv.irradiance_offset = 1.0;
+        pv.pv_alpha = 0.0; // no decay — offset stays saturating every slot
+        let state = AssetState::Pv(state_inner);
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1), Utc::now());
+        assert!(
+            traj.iter().any(|(_, cap)| cap.max_export_kw < 0.0),
+            "fixture must produce nonzero export at some step, or this test proves nothing"
+        );
+        for (_, cap) in &traj {
+            assert_eq!(
+                cap.max_import_kw, 0.0,
+                "PV max_import_kw must always be 0.0, got {}",
+                cap.max_import_kw
             );
         }
     }
