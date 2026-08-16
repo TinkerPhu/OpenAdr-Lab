@@ -251,9 +251,13 @@ known rates, `DEFER_TO_FLEXIBLE` prices stale slots at the max known rate so fir
 load avoids them, and `HEURISTIC_FORECAST` is a documented stub behaving like
 `LAST_KNOWN` until learned rate patterns land (BL-14). Stale slots set
 `PlanTimeSlot.rate_estimated = true` and raise a stable-text plan warning
-(feeds the notification dedup). Export and CO₂ rates keep Step/LOCF hold; slots
-with no tariff data at all fall back to hardcoded defaults (0.25 €/kWh import,
-0.08 €/kWh export, 300 g/kWh CO₂).
+(feeds the notification dedup). The grid CO₂ signal (`GHG` events,
+`TariffTimeSeries.co2_coverage_end`) applies the same `apply_stale_rate_policy`
+machinery independently of the import tariff — CO₂ and import data can end at
+different times, so each raises its own stable-text warning
+(`MilpInputs.stale_rate_warning` / `.co2_stale_rate_warning`). Export rate keeps
+Step/LOCF hold; slots with no tariff data at all fall back to hardcoded defaults
+(0.25 €/kWh import, 0.08 €/kWh export, 300 g/kWh CO₂).
 
 #### 2.3.1 Session Intent in the MILP
 
@@ -270,6 +274,23 @@ constraints — the solver does not iterate over session objects directly:
 
 Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
 by the Dispatcher and reporting layer — not by the solver.
+
+**Comfort-curve reward (BL-19/BL-34/BL-17):** `EvSession`/`HeaterTarget.comfort_rates`
+(`entities::asset::ComfortRate { fill, max_marginal_price, max_marginal_co2 }`, a
+piecewise-linear willingness-to-pay curve — see `POST /assets/:id/comfort_curve`,
+`POST /user-requests`) resolves via `ComfortRate::value_at_fill`/`co2_value_at_fill`
+into per-asset MILP reward terms, monetizing both axes into €/kWh (the CO₂ axis via
+the profile's `w_ghg` weight, €/kgCO2) before they ever reach the objective — the
+solver only ever sees €. Heater rewards full-tier operation
+(`comfort_full_reward_eur_kwh` / `comfort_full_co2_reward_eur_kwh` ×
+`z_heat_full[t]`); EV rewards core/extra charge completion
+(`v_core_eur`/`v_core_co2_eur`, `v_extra_eur_kwh`/`v_extra_co2_eur_kwh`). Both
+reward terms are phase-gated to Phase 2 only (zeroed in Phase 1's own objective
+and its Phase-2 cost cap, mirroring `w_tier_penalty_eur`) — this is deliberate:
+Phase 1 finds the cost-optimal plan, Phase 2 spends a bounded epsilon budget on
+friction/comfort within `phase1_cap_expr <= c_star + epsilon`, so a reward can
+never make the solver pay more than the accepted slack for it. Battery has no
+comfort-curve wiring (out of scope — no natural "fill" analogue).
 
 #### 2.3.2 Peak-Demand Penalty Threshold (WP6.3, BL-09)
 
