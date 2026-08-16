@@ -41,3 +41,28 @@ Feature: User comfort-curve override (WP4.2, BL-19)
     Then the comfort-curve-driven plan has "ev" charging
     When I DELETE the comfort-curve-driven user request
     And I delete the comfort curve override for asset "ev"
+
+  @use_case
+  Scenario: Comfort curve's CO2 bid changes whether the EV session commits to charging (BL-17)
+    # Same mechanism as the price scenario above, but exercising the CO2 axis in
+    # isolation: price bid stays 0.0 throughout so only the CO2 bid can move the
+    # decision. The default planner weight (w_ghg) is deliberately tiny — real
+    # gCO2/kWh-scale bids would round to nothing — so, exactly like the price
+    # scenario's deliberately unrealistic EUR/kWh values, this uses a
+    # correspondingly extreme gCO2/kWh bid to prove the axis is wired through
+    # end-to-end, not to model a plausible real-world bid.
+    Given the comfort curve for asset "ev" reports source "default"
+    And I set pv plan forecast to 0.0 kW
+    And I inject ev_soc 0.20 via sim inject
+    When I set a comfort curve for asset "ev" with points "0.0:0.0:0,1.0:0.0:0"
+    And I POST a soft-deadline user request for asset "ev" with target_soc 0.90 and latest_end in 6 hours
+    And I wait for the VEN plan to be recomputed after the comfort-curve session
+    Then the comfort-curve-driven plan has no "ev" charging
+    When I DELETE the comfort-curve-driven user request
+    Given I inject ev_soc 0.20 via sim inject
+    When I set a comfort curve for asset "ev" with points "0.0:0.0:20000000,1.0:0.0:20000000"
+    And I POST a soft-deadline user request for asset "ev" with target_soc 0.90 and latest_end in 6 hours
+    And I wait for the VEN plan to be recomputed after the comfort-curve session
+    Then the comfort-curve-driven plan has "ev" charging
+    When I DELETE the comfort-curve-driven user request
+    And I delete the comfort curve override for asset "ev"
