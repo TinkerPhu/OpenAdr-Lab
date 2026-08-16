@@ -745,6 +745,29 @@ outes/sim.rs causes a T1+T2 double-solve race:
   on the actual solved output (a handful of `cargo test -- --nocapture` runs at different
   coefficient values) found the real threshold faster and more reliably than deriving it
   by hand from the objective's listed terms.
+- **A backlog item scoped as new external-integration work can already be ~built under a
+  different name — check before scoping.** BL-17 ("grid CO2-intensity forecast
+  ingestion") was filed and estimated as `Large` effort, blocked on choosing a
+  third-party API provider. It was actually already delivered: the VTN's generic
+  OpenADR rate-event mechanism (`collect_interval_groups`, called with
+  `&["PRICE","EXPORT_PRICE","GHG"]`) had zero GHG-specific code — the same pipeline
+  that parses `PRICE` already parsed `GHG` into a full `TariffTimeSeries`, and the
+  planner already consumed it per-slot. The only real gap was staleness-policy parity
+  with the import tariff (2026-08-16, BL-17 closeout + CO2 comfort bidding). Before
+  scoping a backlog item as new integration work, grep for the target signal's
+  consumers first — a generic mechanism built for one event type may already carry
+  others through unmodified.
+- **A CO2 comfort-bid reward needs a real counterweight in the baseline case, or the
+  "no reward" test is a degenerate LP tie, not a deterministic assertion** (2026-08-16).
+  Mirroring `battery_arbitrage_driven_by_ghg_intensity_alone`'s pattern for the
+  session-level CO2 bid (`heater_co2_comfort_bid_shapes_phase2_full_tier_usage`): with
+  `w_tier_penalty_eur = 0.0` and `comfort_full_co2_reward_eur_kwh = 0.0`, an unrewarded
+  full-tier slot costs the friction objective exactly the same as staying off (both
+  contribute `0.0`) — HiGHS is free to pick either, making the "reward=0 → full_tier=0"
+  half of the assertion solver-implementation-dependent rather than proven. Setting
+  `w_tier_penalty_eur` to a small nonzero value gives the zero-reward baseline a real,
+  unambiguous reason to prefer staying off, so both halves of the before/after
+  comparison are deterministic.
 
 ## Node1 Operational Gotchas (BL-41 final verification, 2026-08-01)
 

@@ -10397,3 +10397,92 @@ fleet compose file is a separate Compose project.
 
 **Bookkeeping:** Removed GB-20's row from `docs/BACKLOG.md`.
 
+## BL-17 closeout + CO2-aware comfort bidding
+
+**Trigger:** Adding coverage-gap-driven unit tests for `controller/user_request.rs`
+surfaced that `ComfortRateInput` (`POST /user-requests`) hardcoded
+`max_marginal_co2: 0.0` — no user-facing way to express a CO2 preference at all.
+Wider investigation found `max_marginal_co2` was dead everywhere: every
+`ComfortRate` construction site set it to `0.0`, and `ComfortRate::value_at_fill`
+(the only reader) only ever interpolated `max_marginal_price`. Building real
+CO2-aware comfort bidding (mirroring the existing BL-34 price mechanism) was
+believed blocked on BL-17 ("grid CO2-intensity forecast ingestion," nominally a
+`Large`-effort, unimplemented external-API integration per `docs/BACKLOG.md`).
+
+**Design — BL-17 was already ~95% built:** deeper investigation found the VTN
+already delivers GHG values through the exact same generic OpenADR rate-event
+mechanism used for `PRICE`/`EXPORT_PRICE` tariffs
+(`controller/rate_schedule.rs::collect_interval_groups`, called with
+`&["PRICE","EXPORT_PRICE","GHG"]` — no GHG-specific code path exists).
+`TariffTimeSeries::from_snapshots` already accumulated a full multi-point CO2
+series; `scripts/seed_vtn.py` already seeded a genuine 24-hourly-interval GHG
+forecast; `controller/milp_planner/inputs.rs` already consumed it per-slot; the
+VEN UI already visualized it (`TariffsLineChart.tsx`'s "CO₂ g/kWh" axis). The
+one real gap: CO2 had no `co2_coverage_end`/stale-data-policy parity with the
+import tariff, and GHG's multi-interval parsing plus "does it actually change
+solve behavior" were untested — the exact class of bug BL-34's own postmortem
+in `KEY_LEARNINGS.md` warns about ("syntactically correct and semantically
+inert at the same time"). Closing that gap, rather than building new
+ingestion, unblocked the CO2 comfort-bid work directly.
+
+**Implementation — Phase A (BL-17 closeout):** generalized
+`apply_stale_rate_policy` (`controller/milp_planner/stale_rates.rs`) to operate
+over `&TimeSeries` + `Option<DateTime<Utc>>` + a `label: &str` instead of
+`&TariffTimeSeries` directly; added `co2_coverage_end` to `TariffTimeSeries`
+(`entities/tariff_snapshot.rs`), populated the same way as
+`import_coverage_end`; routed `g_imp_kgco2_kwh` through the same policy
+machinery as `c_imp_eur_kwh`; CO2 staleness now raises its own independent
+`PlanWarning` (`co2_stale_rate_warning`). Added a 3-interval GHG parsing test,
+a CO2-coverage-independent-of-import-coverage test, and the critical MILP
+integration test `battery_arbitrage_driven_by_ghg_intensity_alone` (flat
+tariff, varying grid CO2 intensity, proving `g_imp_kgco2_kwh` × `w_ghg` is
+load-bearing via pure battery arbitrage).
+
+**Implementation — Phase B (CO2 comfort bidding), Heater + EV only** (Battery
+has no comfort-curve wiring at all — no natural "fill" analogue, out of
+scope): generalized `ComfortRate::value_at_fill` into a shared
+`interpolate_at_fill(rates, fill, extract)` helper and added
+`co2_value_at_fill` reusing it; `ComfortRateInput` gained `co2: Option<f64>`
+(`max_marginal_co2: r.co2.unwrap_or(0.0)`) — the exact fix for the originally
+found gap. `HeaterMilpContext` gained `comfort_full_co2_reward_eur_kwh`;
+`EvMilpContext` gained `v_extra_co2_eur_kwh`/`v_core_co2_eur`. Both are
+monetized from the resolved curve's gCO2/kWh bid via the profile's `w_ghg`
+weight (€/kgCO2 — the same weight already used for the grid-carbon cost term)
+at `from_state()` construction time, so the objective only ever sees €, and
+phase-gated to Phase 2 exactly like the existing price reward (zeroed in
+Phase 1 and in Phase 2's own cost cap). Extracted the EV comfort-curve
+resolution (price + CO2, sourced together) into a new `assets/ev_comfort.rs`
+module to keep `ev_milp.rs` under the 500-production-line cap after adding the
+CO2 fields. Added the critical MILP test
+`heater_co2_comfort_bid_shapes_phase2_full_tier_usage` (two Phase-2 solves
+differing only in the CO2 reward, with a `w_tier_penalty_eur` counterweight so
+the zero-reward baseline is deterministic, not a degenerate tie) — same
+postmortem lesson as Phase A's battery test, this time for the session-level
+bid rather than the grid signal. Extended the BDD comfort-curve step
+(`_parse_points`) to accept an optional `:co2` segment and added a
+`@use_case` scenario isolating the CO2 axis (price bid held at 0.0 throughout;
+an extreme gCO2/kWh bid compensates for the tiny default `w_ghg` weight, same
+"deliberately unrealistic magnitude to prove the axis is wired end-to-end"
+convention the existing price scenario already uses). UI: `ComfortCurveCard`
+gained an editable CO2 bid field; `CurveChart` was generalized from a single
+hardcoded price series to a configurable list of Y-series (price left axis,
+CO2 right axis — unrelated units/magnitudes) rather than adding a second
+bespoke chart component for the same (fill %, bid) shape.
+
+**One file-size fixup along the way:** Phase A's independent CO2 stale-rate
+warning push (`results.rs`) landed at 505 production lines, 5 over the cap.
+Fixed by collapsing the two structurally-identical warning pushes (import
+tariff, CO2) into one loop over `[stale_rate_warning, co2_stale_rate_warning]`
+— dedup, not a behavior change.
+
+**Verification:** Node2 docker, under `docker_host_lock.sh`: targeted tests
+(226 passed) after the MILP context wiring, then full suite (1068 passed),
+`cargo fmt --check`, `cargo clippy -D warnings`, `scripts/audit_file_sizes.py`,
+architecture-invariant greps — all clean. VEN UI: `npm test` (575 passed),
+`eslint` (0 errors), `npm run build`. E2E/BDD and Phase C (PV embodied-carbon
+reporting) verification tracked separately as this feature's remaining work.
+
+**Bookkeeping:** Removed BL-17's row and full entry from `docs/BACKLOG.md` —
+closed as "already implemented, hardened staleness parity + tests" rather
+than the originally-scoped external-API ingestion.
+
