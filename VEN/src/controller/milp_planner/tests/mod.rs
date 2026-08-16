@@ -163,6 +163,7 @@ fn make_profile() -> Profile {
                 id: "pv".into(),
                 rated_kw: 5.0,
                 inverter_max_kw: 5.0,
+                co2_g_kwh: 0.0,
             }),
             AssetProfile::BaseLoad(BaseLoadConfig {
                 id: "base_load".into(),
