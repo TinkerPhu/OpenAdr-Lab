@@ -110,10 +110,7 @@ impl Profile {
                         }
                     }
                     if c.co2_g_kwh < 0.0 {
-                        errors.push(format!(
-                            "pv.co2_g_kwh must be >= 0.0, got {}",
-                            c.co2_g_kwh
-                        ));
+                        errors.push(format!("pv.co2_g_kwh must be >= 0.0, got {}", c.co2_g_kwh));
                     }
                 }
                 _ => {}
