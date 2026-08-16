@@ -48,6 +48,9 @@ pub struct RequestDeadlineInput {
 pub struct ComfortRateInput {
     pub fill: f64,
     pub bid: f64,
+    /// Max gCO2/kWh the user accepts at this fill level (BL-17 comfort bidding).
+    /// `None` = no CO2 preference expressed, treated as 0.0.
+    pub co2: Option<f64>,
 }
 
 /// Error type for user request validation.
@@ -114,7 +117,7 @@ pub fn create_from_body(
             .map(|r| ComfortRate {
                 fill: r.fill,
                 max_marginal_price: r.bid,
-                max_marginal_co2: 0.0,
+                max_marginal_co2: r.co2.unwrap_or(0.0),
             })
             .collect()
     } else {
