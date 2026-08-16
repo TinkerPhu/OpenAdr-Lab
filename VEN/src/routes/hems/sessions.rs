@@ -331,3 +331,13 @@ pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
 pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.flexibility_history().await)
 }
+
+/// GET /flexibility/forecast — forward-looking per-slot headroom trajectory,
+/// re-derived fresh every dispatcher tick from the active plan's own setpoint
+/// schedule plus each asset's real current state (see
+/// `SiteFlexibilityForecastSlot`'s doc comment) — distinct from both
+/// `GET /flexibility` (instant-only) and `GET /flexibility/history` (the past
+/// ring). Always 200 — an empty array when there's no active plan.
+pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.site_headroom_forecast().await)
+}

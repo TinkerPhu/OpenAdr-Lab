@@ -4,11 +4,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::dispatcher::resolve_pv_generation_limit_kw;
-use crate::controller::HistoryPort;
-use crate::controller::MeasurementPort;
-use crate::controller::SimulatorPort;
-use crate::controller::VtnPort;
-use crate::controller::WeatherForecastPort;
+use crate::controller::{
+    HistoryPort, MeasurementPort, SimulatorPort, VtnPort, WeatherForecastPort,
+};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::PvForecastParams;
 use crate::planner_events::PlannerEventTx;
@@ -42,7 +40,7 @@ pub(crate) async fn tick_once(
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
 
-    let _events = state.events().await; // PHASE 0: snapshot events, inject, plan, capacity, tariffs
+    let _events = state.events().await;
     let ctx = super::context::resolve_tick_context(
         &state,
         now,
@@ -55,11 +53,11 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    // Lock sim for physics only — no .await inside the block.
     let (
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
+        tick_forecast,
         cleared_fields,
         pv_clear,
         base_clear,
@@ -68,18 +66,15 @@ pub(crate) async fn tick_once(
     ) = {
         let mut sim_guard = sim.lock().await;
 
-        // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
         let cleared_fields = super::helpers::apply_sim_injections(&ctx.inject, &mut sim_guard);
         let pv_clear = ctx.inject.pv_irradiance.is_some();
         let base_clear = ctx.inject.base_load_kw.is_some();
 
-        // PHASE 2: dispatcher setpoints, then the deviation arbiter on top.
         let pre_snap = sim_guard
             .snapshot()
             .expect("SimState::snapshot is infallible");
 
-        // `pre_snap` predates this tick's physics; peek_pv_kw/peek_base_load_kw
-        // preview `now`'s values so the arbiter never sees a one-tick-stale input.
+        // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
         let live_pv_kw = sim_guard.peek_pv_kw(
             now,
             dt_s,
@@ -131,7 +126,6 @@ pub(crate) async fn tick_once(
         let new_active_lever = outcome.active_lever.map(|s| s.to_string());
         let (arbiter_net_kw, arbiter_dev_kw) = (outcome.net_kw, outcome.dev_kw);
 
-        // PHASE 3: Simulator tick — apply setpoints → update device states.
         sim_guard.tick(
             dt_s,
             outcome.setpoints,
@@ -155,14 +149,22 @@ pub(crate) async fn tick_once(
             ctx.base_load_heuristic_kw_now,
         );
 
-        // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.
-        let (tick_sensor, tick_sim_snap, tick_envelope) =
-            super::helpers::finalize_tick_outputs(&mut sim_guard, &ctx.capacity_snap, now);
+        let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast) =
+            super::helpers::finalize_tick_outputs(
+                &mut sim_guard,
+                &ctx.capacity_snap,
+                ctx.plan_snap.as_ref(),
+                ctx.ev_session.as_ref(),
+                &ctx.shiftable_loads,
+                &ctx.shiftable_runtimes,
+                now,
+            );
 
         (
             tick_sensor,
             tick_sim_snap,
             tick_envelope,
+            tick_forecast,
             cleared_fields,
             pv_clear,
             base_clear,
@@ -171,7 +173,6 @@ pub(crate) async fn tick_once(
         )
     };
 
-    // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
     let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
     super::arbiter_glue::record_arbiter_outcome(&state, &notifier, arbiter_summary, now).await;
     super::arbiter_glue::apply_residual_escalation(
@@ -182,15 +183,14 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    // PHASE 1 (post-lock): clear one-shot inject fields.
     super::post_lock::clear_inject_fields(&state, cleared_fields, pv_clear, base_clear).await;
 
-    // PHASE 5 (post-lock): async state publishes — sensor, shiftable, ledger, envelope.
     let snap_for_reports = tick_sim_snap.clone();
     let _sim_snapshot = super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
+        tick_forecast,
         ctx.plan_snap.as_ref(),
         &state,
         &trigger_tx,
@@ -201,7 +201,6 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    // PHASE 6: Periodic measurement reports (T049); PHASE 7: periodic persist.
     super::post_lock::run_periodic_reports_and_persist(
         report_counter,
         report_every_ticks,

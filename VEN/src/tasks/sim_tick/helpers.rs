@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::device_session::{EvSession, ShiftableLoad, ShiftableLoadRuntime};
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::sim_inject::SimInjectState;
 use crate::models::SensorSnapshot;
 use crate::simulator::SimState;
@@ -154,13 +155,23 @@ pub(crate) fn build_tick_setpoints(
     outcome
 }
 
-/// PHASE 5 in-lock tail: extract snapshots, push history, update grid asset, compute envelope.
-/// Returns the 3-tuple needed for post-lock async state publishing.
+/// PHASE 5 in-lock tail: extract snapshots, push history, update grid asset, compute envelope
+/// + forward headroom forecast. Returns the tuple needed for post-lock async state publishing.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn finalize_tick_outputs(
     sim: &mut SimState,
     capacity_snap: &OadrCapacityState,
+    plan_snap: Option<&Plan>,
+    ev_session: Option<&EvSession>,
+    shiftable_loads: &[ShiftableLoad],
+    shiftable_runtimes: &[ShiftableLoadRuntime],
     now: DateTime<Utc>,
-) -> (SensorSnapshot, SimSnapshot, SiteFlexibilityEnvelope) {
+) -> (
+    SensorSnapshot,
+    SimSnapshot,
+    SiteFlexibilityEnvelope,
+    Vec<SiteFlexibilityForecastSlot>,
+) {
     let tick_sensor = sim.to_sensor_snapshot();
     let tick_sim_snap = sim.to_sim_snapshot();
 
@@ -189,6 +200,14 @@ pub(crate) fn finalize_tick_outputs(
 
     // Compute site envelope (pure math — reads snapshot taken above).
     let tick_envelope = controller::envelope::compute_envelope(&tick_sim_snap, now);
+    let tick_forecast = super::forecast_wiring::compute_tick_forecast(
+        sim,
+        plan_snap,
+        ev_session,
+        shiftable_loads,
+        shiftable_runtimes,
+        now,
+    );
 
-    (tick_sensor, tick_sim_snap, tick_envelope)
+    (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast)
 }
