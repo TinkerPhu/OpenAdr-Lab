@@ -14,6 +14,7 @@ fn base_inputs(n: usize) -> MilpInputs {
         c_imp_eur_kwh: vec![0.25; n],
         rate_stale: vec![false; n],
         stale_rate_warning: None,
+        co2_stale_rate_warning: None,
         budget_warning: None,
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],

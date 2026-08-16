@@ -26,6 +26,11 @@ pub struct TariffTimeSeries {
     /// are "stale" and filled per the configured `StaleRatePolicy`.
     /// `None` = no import data at all (every slot is stale).
     pub import_coverage_end: Option<DateTime<Utc>>,
+    /// BL-17 closeout: same coverage tracking as `import_coverage_end`, but for
+    /// CO2 intensity (GHG events) — gives CO2 full staleness-policy parity with
+    /// the import tariff instead of silently holding the last known value
+    /// forward forever.
+    pub co2_coverage_end: Option<DateTime<Utc>>,
 }
 
 impl TariffTimeSeries {
@@ -41,6 +46,7 @@ impl TariffTimeSeries {
         let mut export_samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
         let mut co2_samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
         let mut import_coverage_end: Option<DateTime<Utc>> = None;
+        let mut co2_coverage_end: Option<DateTime<Utc>> = None;
 
         for snap in &sorted {
             let ts = snap.interval_start;
@@ -72,6 +78,10 @@ impl TariffTimeSeries {
                 }
             }
             if let Some(v) = snap.co2_g_kwh {
+                co2_coverage_end = Some(match co2_coverage_end {
+                    Some(cur) => cur.max(snap.interval_end),
+                    None => snap.interval_end,
+                });
                 if let Some(last) = co2_samples.last_mut() {
                     if last.0 == ts {
                         last.1 = v;
@@ -98,6 +108,7 @@ impl TariffTimeSeries {
                 interpolation: Interpolation::Step,
             },
             import_coverage_end,
+            co2_coverage_end,
         }
     }
 

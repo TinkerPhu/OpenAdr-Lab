@@ -674,6 +674,61 @@ mod tests {
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
 
+    /// BL-17 closeout: GHG must parse as a genuine multi-interval forecast, not
+    /// just a single current value — mirrors `test_parse_rate_snapshots_price`
+    /// exactly, since `collect_interval_groups` treats GHG identically to
+    /// PRICE/EXPORT_PRICE (no GHG-specific code path exists).
+    #[test]
+    fn test_parse_rate_snapshots_ghg_multi_interval() {
+        let events = json!([
+            {
+                "id": "evt-ghg-forecast",
+                "programID": "prog-1",
+                "eventName": "ghg-forecast-event",
+                "intervals": [
+                    {
+                        "id": 0,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T14:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "GHG", "values": [280.0]}
+                        ]
+                    },
+                    {
+                        "id": 1,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T15:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "GHG", "values": [320.0]}
+                        ]
+                    },
+                    {
+                        "id": 2,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T16:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "GHG", "values": [180.0]}
+                        ]
+                    }
+                ]
+            }
+        ]);
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
+        assert_eq!(snapshots.len(), 3);
+        assert_eq!(snapshots[0].co2_g_kwh, Some(280.0));
+        assert_eq!(snapshots[1].co2_g_kwh, Some(320.0));
+        assert_eq!(snapshots[2].co2_g_kwh, Some(180.0));
+    }
+
     #[test]
     fn test_parse_rate_snapshots_export_price() {
         let events = json!([

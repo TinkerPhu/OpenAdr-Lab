@@ -99,6 +99,10 @@ pub(crate) struct MilpInputs {
     /// WP4.4: stable warning text when any slot is stale (→ PlanWarning →
     /// WP4.3 notification), `None` when the horizon is fully covered.
     pub(crate) stale_rate_warning: Option<String>,
+    /// BL-17 closeout: same as `stale_rate_warning`, but for CO2 intensity
+    /// coverage — independent, since CO2 and import-tariff coverage can end
+    /// at different times.
+    pub(crate) co2_stale_rate_warning: Option<String>,
     /// WP4.1-c MAX_COST: stable warning text when the session budget cannot
     /// buy the target energy even at the cheapest slot rate.
     pub(crate) budget_warning: Option<String>,

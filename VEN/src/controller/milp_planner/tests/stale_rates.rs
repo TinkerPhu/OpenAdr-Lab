@@ -150,6 +150,54 @@ fn test_full_coverage_no_stale_no_warning() {
     );
 }
 
+/// BL-17 closeout: CO2 coverage is tracked independently of import-tariff
+/// coverage — a VTN that stops sending GHG events well before it stops
+/// sending PRICE events (or vice versa) must not conflate the two staleness
+/// windows.
+#[test]
+fn test_co2_coverage_independent_of_import_coverage() {
+    let now = fixed_now();
+    // Import covers the full 6 h horizon; CO2 covers only the first hour.
+    let snap = |off_min: i64, dur_min: i64, imp: f64, co2: Option<f64>| TariffSnapshot {
+        interval_start: now + Duration::minutes(off_min),
+        interval_end: now + Duration::minutes(off_min + dur_min),
+        import_tariff_eur_kwh: Some(imp),
+        export_tariff_eur_kwh: Some(0.08),
+        co2_g_kwh: co2,
+    };
+    let tariffs = TariffTimeSeries::from_snapshots(&[
+        snap(0, 60, 0.20, Some(300.0)),
+        snap(60, 300, 0.20, None), // import continues, GHG events stop
+    ]);
+
+    let profile = make_profile_6h(StaleRatePolicy::LastKnown, 0.5);
+    let sim = make_snap_from_profile(&profile);
+    let inp = bmi(
+        &profile,
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        fixed_now(),
+        None,
+        None,
+    );
+
+    // Import is fully covered — no import staleness anywhere.
+    assert!(
+        inp.rate_stale.iter().all(|&s| !s),
+        "import tariff covers the whole horizon"
+    );
+    // CO2 coverage ends after 1 h (slots 0–1 on 1800s slots), stale after.
+    assert!(
+        inp.co2_stale_rate_warning.is_some(),
+        "CO2 coverage ends before the horizon — warning expected"
+    );
+    assert!(
+        inp.co2_stale_rate_warning.as_deref().unwrap().contains("GHG"),
+        "warning names the GHG data source"
+    );
+}
+
 #[test]
 fn test_rate_estimated_flag_lands_in_plan_slots() {
     let profile = make_profile_6h(StaleRatePolicy::LastKnown, 0.5);
@@ -199,12 +247,19 @@ fn covered_slot_straddling_tariff_boundary_uses_time_weighted_mean() {
     };
     let tariffs = TariffTimeSeries::from_snapshots(&[snap(0, 7, 0.20), snap(7, 53, 0.15)]);
     let bounds = [(now, now + Duration::minutes(10))];
-    let outcome =
-        apply_stale_rate_policy(&StaleRatePolicy::LastKnown, 0.8, &tariffs, &bounds, 0.25);
+    let outcome = apply_stale_rate_policy(
+        &StaleRatePolicy::LastKnown,
+        0.8,
+        &tariffs.import_eur_kwh,
+        tariffs.import_coverage_end,
+        &bounds,
+        0.25,
+        "Tariff data",
+    );
     assert!(!outcome.rate_stale[0], "slot start is covered");
     assert!(
-        (outcome.c_imp_eur_kwh[0] - 0.185).abs() < 1e-9,
+        (outcome.values[0] - 0.185).abs() < 1e-9,
         "expected blended 0.185, got {}",
-        outcome.c_imp_eur_kwh[0]
+        outcome.values[0]
     );
 }

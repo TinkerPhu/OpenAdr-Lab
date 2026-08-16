@@ -432,6 +432,16 @@ pub(crate) fn translate_to_plan(
             suggested_action: None,
         });
     }
+    // BL-17 closeout: same stable-text contract as the import-tariff warning
+    // above, independent since CO2/import coverage can end at different times.
+    if let Some(msg) = &inputs.co2_stale_rate_warning {
+        warnings.push(PlanWarning {
+            severity: WarningSeverity::Warning,
+            kind: WarningKind::StaleRateEstimate,
+            message: msg.clone(),
+            suggested_action: None,
+        });
+    }
     // WP4.1-c (BL-28) MAX_COST budget shortfall — same stable-text contract.
     if let Some(msg) = &inputs.budget_warning {
         warnings.push(PlanWarning {
