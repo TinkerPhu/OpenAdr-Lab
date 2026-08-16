@@ -215,6 +215,25 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
     }
 }
 
+/// One future slot of the forward-looking site headroom trajectory —
+/// distinct from `SiteFlexibilityEnvelope`, which is instant-only.
+///
+/// Re-derived fresh every dispatcher tick (not read statically off
+/// `PlanTimeSlot.planned_state_by_asset`, a stale solve-time-only snapshot):
+/// each asset's REAL current state is re-simulated forward via
+/// `Asset::simulate_forward`, driven by the active plan's own
+/// `planned_kw_by_asset` schedule, so this trajectory self-corrects for any
+/// drift between the plan's assumptions and reality on every tick — see
+/// `controller::envelope_forecast::compute_headroom_forecast`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SiteFlexibilityForecastSlot {
+    pub ts: DateTime<Utc>,
+    /// Consumption-reduction headroom at this future slot (kW). Always ≥ 0.
+    pub up_kw: f64,
+    /// Consumption-increase headroom at this future slot (kW). Always ≥ 0.
+    pub down_kw: f64,
+}
+
 /// Outcome of the MILP solve that produced a `Plan`.
 ///
 /// Two states only — the codebase has no distinct heuristic-solve path today

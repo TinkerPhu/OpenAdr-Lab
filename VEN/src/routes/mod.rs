@@ -122,6 +122,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/ev-session", get(hems::get_ev_session))
         .route("/flexibility", get(hems::get_flexibility))
         .route("/flexibility/history", get(hems::get_flexibility_history))
+        .route("/flexibility/forecast", get(hems::get_flexibility_forecast))
         .route(
             "/ev-settings",
             get(hems::get_ev_settings).put(hems::put_ev_settings),

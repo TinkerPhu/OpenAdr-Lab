@@ -34,6 +34,7 @@ pub mod rate_schedule;
 pub mod arbiter;
 pub mod dispatcher;
 pub mod envelope;
+pub mod envelope_forecast;
 pub mod milp_interactions;
 pub mod milp_planner;
 pub mod timeline;

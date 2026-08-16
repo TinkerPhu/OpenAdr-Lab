@@ -30,6 +30,7 @@ mod grid_signals;
 mod heuristics;
 mod obligations;
 mod report_submissions;
+mod site_headroom_forecast;
 mod task_status;
 
 pub use connection::VtnConnectionStatus;
@@ -106,6 +107,7 @@ pub struct HemsState {
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
     pub active_requests: Vec<UserRequest>,
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
+    pub site_headroom_forecast: Vec<crate::entities::plan::SiteFlexibilityForecastSlot>, // state/site_headroom_forecast.rs
     pub ev_session: Option<EvSession>,
     pub heater_target: Option<HeaterTarget>,
     pub shiftable_loads: Vec<ShiftableLoad>,
@@ -161,8 +163,7 @@ pub struct AppState {
             >,
         >,
     >,
-    /// BL-43: bounded ring of `SiteFlexibilityEnvelope` snapshots, oldest first —
-    /// `HemsState::site_envelope` only ever holds the latest one.
+    /// BL-43: bounded ring of `SiteFlexibilityEnvelope` snapshots, oldest first (`site_envelope` holds only the latest).
     pub flexibility_history:
         Arc<RwLock<crate::entities::ring_buffer::RingBuffer<SiteFlexibilitySample>>>,
 }

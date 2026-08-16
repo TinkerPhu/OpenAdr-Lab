@@ -11,7 +11,7 @@ use crate::controller::HistoryPort;
 use crate::controller::SimSnapshot;
 use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
 use crate::simulator::SimState;
@@ -22,6 +22,7 @@ pub(crate) async fn publish_sim_tick_result(
     sensor: SensorSnapshot,
     mut sim_snap: SimSnapshot,
     envelope: SiteFlexibilityEnvelope,
+    forecast: Vec<SiteFlexibilityForecastSlot>,
     plan_snap: Option<&Plan>,
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
@@ -142,6 +143,11 @@ pub(crate) async fn publish_sim_tick_result(
 
     // Refresh site envelope (computed in-lock from final sim state).
     state.set_site_envelope(envelope).await;
+    // Refresh the forward headroom forecast — recomputed fresh every tick,
+    // anchored to the real state just published above (see
+    // `SiteFlexibilityForecastSlot`'s doc comment for why this must never
+    // be read statically off the plan).
+    state.set_site_headroom_forecast(forecast).await;
 
     sim_snap
 }

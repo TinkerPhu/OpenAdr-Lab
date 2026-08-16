@@ -28,6 +28,14 @@ pub(crate) struct TickContext {
     pub overlay_enabled: bool,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
+    /// Live device-session state for the site-headroom forecast
+    /// (`simulator::forecast::build_forecast_frames`) — read fresh here
+    /// (pre-lock, async) rather than from the plan, since a shiftable
+    /// load's window/duration is a live scheduling fact, not a planning
+    /// result.
+    pub ev_session: Option<crate::entities::device_session::EvSession>,
+    pub shiftable_loads: Vec<crate::entities::device_session::ShiftableLoad>,
+    pub shiftable_runtimes: Vec<crate::entities::device_session::ShiftableLoadRuntime>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -74,6 +82,9 @@ pub(crate) async fn resolve_tick_context(
         overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state).await,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
+        ev_session: state.ev_session().await,
+        shiftable_loads: state.shiftable_loads().await,
+        shiftable_runtimes: state.shiftable_runtimes().await,
     }
 }
 
