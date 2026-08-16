@@ -317,3 +317,81 @@ describe("TimeSeriesChart — bands (BL-43)", () => {
     expect(areas).toHaveLength(0);
   });
 });
+
+describe("TimeSeriesChart — band tooltip formatter", () => {
+  beforeEach(() => {
+    lines.length = 0;
+    areas.length = 0;
+    tooltips.length = 0;
+  });
+
+  it("a band with its own formatter uses it for its [lower, upper] tooltip value", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        bands={[
+          {
+            key: "headroom",
+            axisId: "power",
+            lower: (r) => (r.values?.power ?? 0) - 1,
+            upper: (r) => (r.values?.power ?? 0) + 1,
+            color: "#8BC34A",
+            formatter: (lo, hi) => `${lo.toFixed(1)} to ${hi.toFixed(1)} kW`,
+          },
+        ]}
+      />
+    );
+    const formatter = tooltips[0].formatter as (v: unknown, n: string) => [string, string];
+    expect(formatter([0, 2], "headroom")).toEqual(["0.0 to 2.0 kW", "headroom"]);
+  });
+
+  it("a band without its own formatter falls back to a plain dash-joined pair", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        bands={[
+          {
+            key: "headroom",
+            axisId: "power",
+            lower: (r) => (r.values?.power ?? 0) - 1,
+            upper: (r) => (r.values?.power ?? 0) + 1,
+            color: "#8BC34A",
+          },
+        ]}
+      />
+    );
+    const formatter = tooltips[0].formatter as (v: unknown, n: string) => [string, string];
+    expect(formatter([0, 2], "headroom")).toEqual(["0 – 2", "headroom"]);
+  });
+
+  it("a series tooltip formatter is unaffected by band handling", () => {
+    const seriesWithFormatter: TimeSeriesSeriesSpec[] = [
+      { ...series[0], formatter: (v) => `${v.toFixed(1)} kW` },
+    ];
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={seriesWithFormatter}
+        bands={[
+          {
+            key: "headroom",
+            axisId: "power",
+            lower: (r) => (r.values?.power ?? 0) - 1,
+            upper: (r) => (r.values?.power ?? 0) + 1,
+            color: "#8BC34A",
+          },
+        ]}
+      />
+    );
+    const formatter = tooltips[0].formatter as (v: unknown, n: string) => [string, string];
+    expect(formatter(1, "power")).toEqual(["1.0 kW", "power"]);
+  });
+});

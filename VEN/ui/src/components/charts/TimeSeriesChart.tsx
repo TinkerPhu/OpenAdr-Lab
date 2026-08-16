@@ -67,6 +67,12 @@ export interface TimeSeriesBandSpec {
   upper: (row: TimestampedRow) => number | null | undefined;
   color: string;
   fillOpacity?: number;
+  /** This band's own tooltip value formatter, given the hovered row's [lower, upper]
+   * pair — takes precedence the same way a series' own `formatter` does. Without one,
+   * the tooltip falls back to a plain dash-joined pair (not `String([lo, hi])`, which
+   * recharts/JS render as a bare comma-joined "lo,hi" — unreadable and, worse, easy to
+   * misread as a single long number). */
+  formatter?: (lower: number, upper: number) => string;
 }
 
 interface TimeSeriesChartProps {
@@ -138,10 +144,16 @@ export function TimeSeriesChart({
   const { isHidden, toggle } = useLegendToggle();
   const visibleSeries = series.filter((s) => seriesHasData(data, s.dataKey));
   const seriesByName = new Map(visibleSeries.map((s) => [s.key, s]));
-  const resolveTooltipValue = (value: number, name: string): [string, string] => {
+  const bandsByName = new Map((bands ?? []).map((b) => [b.key, b]));
+  const resolveTooltipValue = (value: unknown, name: string): [string, string] => {
+    const band = bandsByName.get(name);
+    if (band && Array.isArray(value)) {
+      const [lower, upper] = value as [number, number];
+      return [band.formatter ? band.formatter(lower, upper) : `${lower} – ${upper}`, name];
+    }
     const own = seriesByName.get(name)?.formatter;
-    if (own) return [own(value), name];
-    if (tooltipFormatter) return tooltipFormatter(value, name);
+    if (own) return [own(value as number), name];
+    if (tooltipFormatter) return tooltipFormatter(value as number, name);
     return [String(value), name];
   };
   return (
