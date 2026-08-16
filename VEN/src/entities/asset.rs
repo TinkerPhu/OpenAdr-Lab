@@ -71,27 +71,38 @@ pub struct ComfortRate {
 }
 
 impl ComfortRate {
-    /// Interpolate `max_marginal_price` at an arbitrary fill level. `rates` must be sorted
-    /// non-decreasing by `fill` (guaranteed by `services/comfort.rs::validate_curve` for any
-    /// persisted curve) and non-empty. Exact breakpoint queries return the stored price;
-    /// mid-curve queries interpolate linearly between the two bracketing points; queries
-    /// outside the stored range clamp to the nearest boundary breakpoint.
-    pub fn value_at_fill(rates: &[ComfortRate], fill: f64) -> f64 {
+    /// Interpolate an arbitrary `ComfortRate` field (selected by `extract`) at a fill level.
+    /// `rates` must be sorted non-decreasing by `fill` (guaranteed by
+    /// `services/comfort.rs::validate_curve` for any persisted curve) and non-empty. Exact
+    /// breakpoint queries return the stored value; mid-curve queries interpolate linearly
+    /// between the two bracketing points; queries outside the stored range clamp to the
+    /// nearest boundary breakpoint.
+    fn interpolate_at_fill(rates: &[ComfortRate], fill: f64, extract: impl Fn(&ComfortRate) -> f64) -> f64 {
         if fill <= rates[0].fill {
-            return rates[0].max_marginal_price;
+            return extract(&rates[0]);
         }
         let last = rates.len() - 1;
         if fill >= rates[last].fill {
-            return rates[last].max_marginal_price;
+            return extract(&rates[last]);
         }
         let hi = rates.iter().position(|r| r.fill >= fill).unwrap();
         let lo = hi - 1;
         let (r_lo, r_hi) = (&rates[lo], &rates[hi]);
         if r_hi.fill == r_lo.fill {
-            return r_hi.max_marginal_price;
+            return extract(r_hi);
         }
         let t = (fill - r_lo.fill) / (r_hi.fill - r_lo.fill);
-        r_lo.max_marginal_price + t * (r_hi.max_marginal_price - r_lo.max_marginal_price)
+        extract(r_lo) + t * (extract(r_hi) - extract(r_lo))
+    }
+
+    /// Interpolate `max_marginal_price` at an arbitrary fill level. See `interpolate_at_fill`.
+    pub fn value_at_fill(rates: &[ComfortRate], fill: f64) -> f64 {
+        Self::interpolate_at_fill(rates, fill, |r| r.max_marginal_price)
+    }
+
+    /// Interpolate `max_marginal_co2` at an arbitrary fill level. See `interpolate_at_fill`.
+    pub fn co2_value_at_fill(rates: &[ComfortRate], fill: f64) -> f64 {
+        Self::interpolate_at_fill(rates, fill, |r| r.max_marginal_co2)
     }
 }
 
@@ -104,12 +115,12 @@ mod comfort_rate_tests {
             ComfortRate {
                 fill: 0.0,
                 max_marginal_price: 0.30,
-                max_marginal_co2: 0.0,
+                max_marginal_co2: 300.0,
             },
             ComfortRate {
                 fill: 1.0,
                 max_marginal_price: 0.10,
-                max_marginal_co2: 0.0,
+                max_marginal_co2: 50.0,
             },
         ]
     }
@@ -155,5 +166,71 @@ mod comfort_rate_tests {
             },
         ];
         assert!((ComfortRate::value_at_fill(&rates, 0.75) - 0.15).abs() < 1e-9);
+    }
+
+    // ── co2_value_at_fill: same interpolation, independent axis (BL-17 comfort bidding) ──
+
+    #[test]
+    fn co2_value_at_fill_exact_breakpoint_returns_stored_co2() {
+        let rates = curve();
+        assert_eq!(ComfortRate::co2_value_at_fill(&rates, 0.0), 300.0);
+        assert_eq!(ComfortRate::co2_value_at_fill(&rates, 1.0), 50.0);
+    }
+
+    #[test]
+    fn co2_value_at_fill_mid_curve_interpolates_linearly() {
+        let rates = curve();
+        assert!((ComfortRate::co2_value_at_fill(&rates, 0.5) - 175.0).abs() < 1e-9);
+        assert!((ComfortRate::co2_value_at_fill(&rates, 0.25) - 237.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn co2_value_at_fill_out_of_range_clamps_to_nearest_breakpoint() {
+        let rates = curve();
+        assert_eq!(ComfortRate::co2_value_at_fill(&rates, -0.5), 300.0);
+        assert_eq!(ComfortRate::co2_value_at_fill(&rates, 1.5), 50.0);
+    }
+
+    #[test]
+    fn co2_value_at_fill_three_point_curve_interpolates_within_bracket() {
+        let rates = vec![
+            ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.30,
+                max_marginal_co2: 300.0,
+            },
+            ComfortRate {
+                fill: 0.5,
+                max_marginal_price: 0.20,
+                max_marginal_co2: 200.0,
+            },
+            ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.10,
+                max_marginal_co2: 50.0,
+            },
+        ];
+        assert!((ComfortRate::co2_value_at_fill(&rates, 0.75) - 125.0).abs() < 1e-9);
+    }
+
+    /// Price and CO2 axes are independent — a curve where they move in *opposite*
+    /// directions across fill must interpolate each correctly on its own, proving
+    /// `co2_value_at_fill` isn't accidentally reading the price field (or vice versa).
+    #[test]
+    fn price_and_co2_axes_interpolate_independently_on_a_diverging_curve() {
+        let rates = vec![
+            ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.10, // price rises with fill...
+                max_marginal_co2: 300.0,  // ...while CO2 bid falls with fill
+            },
+            ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.50,
+                max_marginal_co2: 20.0,
+            },
+        ];
+        assert!((ComfortRate::value_at_fill(&rates, 0.5) - 0.30).abs() < 1e-9);
+        assert!((ComfortRate::co2_value_at_fill(&rates, 0.5) - 160.0).abs() < 1e-9);
     }
 }
