@@ -1183,3 +1183,34 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `intervalPeriod` on every interval (as this file's own pre-existing tests
   did) won't catch this — the fixture needs to match the single-interval,
   event-level-only shape real single-window events actually send.
+- **`docker compose run --rm test-runner ...` without `--build` silently
+  re-tests a stale image** (GB-22, 2026-08-16): `tests/docker-compose.test.yml`'s
+  `test-runner` service bakes `tests/` into the image via `COPY` at build
+  time — it is not bind-mounted. `run_all_tests.sh --e2e` always passes
+  `--build`, so it always tests current code, but any ad-hoc single-file
+  invocation used to iterate faster (`docker compose -f tests/docker-compose.test.yml
+  run --rm test-runner features/some.feature`) reuses whatever image was
+  last built, silently ignoring every step-file/feature-file change made
+  since. Cost several debugging cycles chasing a fix that had actually
+  worked on the first attempt — each "still failing" re-run was re-testing
+  the pre-fix code. Always pass `--build` on the first ad-hoc run after any
+  edit to `tests/features/` or `tests/steps/`, or push and pull to Node2
+  and let `run_all_tests.sh` rebuild for you.
+- **jsdom-based vitest tests cannot catch real-CSS-transition visibility
+  bugs Playwright can** (GB-22, 2026-08-16): BL-38 nested Planner page
+  content inside an MUI Accordion collapsed by default; its own
+  `PlannerPage.test.tsx` (vitest + jsdom) correctly asserted the collapsed/
+  expanded states by clicking the accordion's text and checking
+  `toBeVisible()` — but jsdom doesn't run real CSS transitions, so a click
+  synchronously flips React state and the DOM in one tick. In a real
+  (Playwright) browser, MUI's `Collapse` component measures content height
+  and animates to it *asynchronously* — the `Mui-expanded` class flips
+  immediately with the click, but content stays visually clipped to 0px for
+  a beat after. The corresponding E2E BDD scenarios were never updated
+  alongside BL-38's own vitest fixtures and broke outright (not flaky — 100%
+  reproducible) as a result, uncaught until GB-22's own E2E run. When an MUI
+  Accordion/Collapse (or any animated show/hide) gates content a Playwright
+  scenario asserts on, wait for the actual rendered geometry (e.g. the
+  `Collapse` wrapper's `getBoundingClientRect().height`), not just the
+  state-driven CSS class — and update the E2E suite in the same change that
+  adds a new collapsed-by-default UI section, not as an afterthought.
