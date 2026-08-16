@@ -30,14 +30,16 @@ use crate::entities::history::{
 };
 use crate::entities::DomainError;
 use schema::{
-    SCHEMA_V1, SCHEMA_V10, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7,
-    SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
+    SCHEMA_V1, SCHEMA_V10, SCHEMA_V11, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
 };
 
 type GridSampleRow = (
     i64,
     f64,
     f64,
+    Option<f64>,
+    Option<f64>,
     Option<f64>,
     Option<f64>,
     Option<f64>,
@@ -132,6 +134,10 @@ impl SqliteHistoryStore {
             conn.execute_batch(SCHEMA_V10)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v10: {e}")))?;
         }
+        if version < 11 {
+            conn.execute_batch(SCHEMA_V11)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v11: {e}")))?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
         Ok(())
@@ -155,8 +161,8 @@ impl HistoryPort for SqliteHistoryStore {
         conn.execute(
             "INSERT INTO grid_samples
                 (ts, import_kw, export_kw, import_tariff_eur_kwh, export_tariff_eur_kwh, co2_g_kwh,
-                 import_limit_kw, export_limit_kw)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 import_limit_kw, export_limit_kw, up_kw, down_kw)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 to_unix(row.ts),
                 row.import_kw,
@@ -166,6 +172,8 @@ impl HistoryPort for SqliteHistoryStore {
                 row.co2_g_kwh,
                 row.import_limit_kw,
                 row.export_limit_kw,
+                row.up_kw,
+                row.down_kw,
             ],
         )
         .map_err(|e| DomainError::StorageError(format!("insert grid sample: {e}")))?;
@@ -242,7 +250,7 @@ impl HistoryPort for SqliteHistoryStore {
         let mut stmt = conn
             .prepare(
                 "SELECT ts, import_kw, export_kw, import_tariff_eur_kwh, export_tariff_eur_kwh, co2_g_kwh,
-                        import_limit_kw, export_limit_kw
+                        import_limit_kw, export_limit_kw, up_kw, down_kw
                  FROM grid_samples WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC",
             )
             .map_err(|e| DomainError::StorageError(format!("prepare query_grid: {e}")))?;
@@ -257,6 +265,8 @@ impl HistoryPort for SqliteHistoryStore {
                     row.get(5)?,
                     row.get(6)?,
                     row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
                 ))
             })
             .map_err(|e| DomainError::StorageError(format!("query_grid: {e}")))?
@@ -274,6 +284,8 @@ impl HistoryPort for SqliteHistoryStore {
                     co2_g_kwh,
                     import_limit_kw,
                     export_limit_kw,
+                    up_kw,
+                    down_kw,
                 )|
                  -> Result<GridSample, DomainError> {
                     Ok(GridSample {
@@ -285,6 +297,8 @@ impl HistoryPort for SqliteHistoryStore {
                         co2_g_kwh,
                         import_limit_kw,
                         export_limit_kw,
+                        up_kw,
+                        down_kw,
                     })
                 },
             )
@@ -604,6 +618,8 @@ mod tests {
             co2_g_kwh: Some(300.0),
             import_limit_kw: Some(5.0),
             export_limit_kw: Some(3.0),
+            up_kw: Some(1.5),
+            down_kw: Some(2.5),
         };
         store.append_grid_sample(&row).unwrap();
         let rows = store.query_grid(ts(0), ts(1000)).unwrap();
@@ -622,6 +638,8 @@ mod tests {
             co2_g_kwh: Some(300.0),
             import_limit_kw: None,
             export_limit_kw: None,
+            up_kw: None,
+            down_kw: None,
         };
         store.append_grid_sample(&row).unwrap();
         let rows = store.query_grid(ts(0), ts(1000)).unwrap();
@@ -708,6 +726,8 @@ mod tests {
                 co2_g_kwh: None,
                 import_limit_kw: None,
                 export_limit_kw: None,
+                up_kw: None,
+                down_kw: None,
             })
             .unwrap();
 
@@ -948,6 +968,8 @@ mod tests {
                     co2_g_kwh: None,
                     import_limit_kw: None,
                     export_limit_kw: None,
+                    up_kw: None,
+                    down_kw: None,
                 })
                 .unwrap();
         }
@@ -1320,5 +1342,41 @@ mod tests {
             .append_plan_history(&[plan_history_sample(ts(100))])
             .unwrap();
         assert_eq!(store.query_plan_history(ts(0), ts(200)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_migrate_v11_adds_headroom_columns_preserving_data() {
+        // Build a v10 database by hand (pre-headroom-columns state) with one
+        // grid_samples row, then let from_connection run the v11 migration.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.execute_batch(schema::SCHEMA_V4).unwrap();
+        conn.execute_batch(schema::SCHEMA_V5).unwrap();
+        conn.execute_batch(schema::SCHEMA_V6).unwrap();
+        conn.execute_batch(schema::SCHEMA_V7).unwrap();
+        conn.execute_batch(schema::SCHEMA_V8).unwrap();
+        conn.execute_batch(schema::SCHEMA_V9).unwrap();
+        conn.execute_batch(schema::SCHEMA_V10).unwrap();
+        conn.pragma_update(None, "user_version", 10).unwrap();
+        conn.execute(
+            "INSERT INTO grid_samples
+                (ts, import_kw, export_kw, import_tariff_eur_kwh, export_tariff_eur_kwh, co2_g_kwh)
+             VALUES (?1, 1.0, 0.0, 0.20, 0.05, 300.0)",
+            params![100_i64],
+        )
+        .unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v10→v11 migration");
+        let rows = store
+            .query_grid(from_unix(0).unwrap(), from_unix(200).unwrap())
+            .unwrap();
+        assert_eq!(rows.len(), 1, "existing row survives the column addition");
+        assert_eq!(
+            rows[0].up_kw, None,
+            "pre-migration row reads back NULL, not a zero sentinel"
+        );
+        assert_eq!(rows[0].down_kw, None);
     }
 }

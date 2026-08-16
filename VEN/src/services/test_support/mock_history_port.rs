@@ -433,6 +433,8 @@ mod tests {
             co2_g_kwh: None,
             import_limit_kw: None,
             export_limit_kw: None,
+            up_kw: None,
+            down_kw: None,
         })
         .unwrap();
 

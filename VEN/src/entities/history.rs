@@ -48,6 +48,12 @@ pub struct GridSample {
     /// Dynamic Operating Envelope export capacity limit (kW), same semantics as `import_limit_kw`.
     #[serde(default)]
     pub export_limit_kw: Option<f64>,
+    /// Mean instant site-flexibility headroom (kW) over the window — see
+    /// `entities::plan::SiteFlexibilityEnvelope`. `None` before the first dispatcher tick.
+    #[serde(default)]
+    pub up_kw: Option<f64>,
+    #[serde(default)]
+    pub down_kw: Option<f64>,
 }
 
 /// An OpenADR event as accepted from the VTN.

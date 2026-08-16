@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 10;
+pub(super) const SCHEMA_VERSION: i64 = 11;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -175,4 +175,14 @@ CREATE TABLE plan_history (
     c_peak_penalty_eur REAL
 );
 CREATE INDEX idx_plan_history_created_at ON plan_history(created_at);
+";
+
+/// site-headroom-forecast Piece 3: mean instant site-flexibility headroom
+/// (`entities::plan::SiteFlexibilityEnvelope`) over the window, mean-shaped
+/// like `import_kw`/`export_kw` above (not tightest-value, unlike the DOE
+/// limit columns from SCHEMA_V9) — see `history_sampler/accumulator.rs`'s
+/// `GridAcc`. `NULL` means no dispatcher tick had run yet during this window.
+pub(super) const SCHEMA_V11: &str = "
+ALTER TABLE grid_samples ADD COLUMN up_kw REAL;
+ALTER TABLE grid_samples ADD COLUMN down_kw REAL;
 ";
