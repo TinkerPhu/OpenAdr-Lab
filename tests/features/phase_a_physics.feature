@@ -9,22 +9,18 @@ Feature: Phase A — Asset physics and capability coverage
 
   # ── Block A: capability() state-dependence ────────────────────────────────
 
-  Scenario: Battery at full SoC reports zero import capability
-    Given the battery SoC is reset to 1.0
-    When I wait for the VEN /capability/battery max_import_kw to equal 0.0
-    Then the polled capability matched
+  # "Battery at full SoC reports zero import capability",
+  # "EV unplugged reports zero capability in both directions", and
+  # "ev_plugged false stops EV charging capability" (Block B) moved to
+  # features/isolated/phase_a_physics_battery.feature (GB-22,
+  # docs/BACKLOG.md) — their shared poll_until step raced real backend
+  # capability polling under host-load contention during the main pass.
 
   Scenario: Battery at empty SoC reports zero export capability
     Given the battery SoC is reset to 0.0
     When I GET /capability/battery from the VEN
     Then the response status is 200
     And the capability max_export_kw is 0.0
-
-  Scenario: EV unplugged reports zero capability in both directions
-    When I POST a sim override setting ev_plugged to false
-    And I wait for the VEN /capability/ev max_import_kw to equal 0.0
-    And I wait for the VEN /capability/ev max_export_kw to equal 0.0
-    Then the polled capability matched
 
   Scenario: PV always reports zero import capability (never imports)
     When I GET /capability/pv from the VEN
@@ -47,11 +43,6 @@ Feature: Phase A — Asset physics and capability coverage
     And I GET /capability/pv from the VEN
     Then the response status is 200
     And the capability max_import_kw is less than 0.0
-
-  Scenario: ev_plugged false stops EV charging capability
-    When I POST a sim override setting ev_plugged to false
-    And I wait for the VEN /capability/ev max_import_kw to equal 0.0
-    Then the polled capability matched
 
   Scenario: grid_export_limit_kw sim override actually curtails PV output
     When I POST a sim override with full PV irradiance

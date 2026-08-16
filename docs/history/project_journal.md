@@ -10226,3 +10226,50 @@ S-3/S-6/S-7) next actually executes against the live fleet.
 
 **Bookkeeping:** Removed GB-33's row from `docs/BACKLOG.md`.
 
+## GB-22: Isolate the remaining flaky E2E scenarios
+
+**Trigger:** GB-22 had one instance already fixed (`controller_navigation`
+scenario moved to `features/isolated/`), but stayed open because the
+originally-reported battery scenario (`phase_a_physics.feature`, a 120s
+backend `poll_until`) was never isolated, and its own text left "audit
+other `@ven-ui`/browser scenarios for the same gap" as a reminder.
+
+**Design:** Audited all 52 `.feature` files for the two root causes GB-22
+actually names — long real-backend `poll_until` calls, and `@ven-ui`
+scenarios combining a browser page with a real-backend poll. Found: (1)
+the named battery scenario plus two siblings in the same file
+(`phase_a_physics.feature`) sharing the exact same 120s poll step and
+Background — fixing only the named one would leave an open item
+half-closed; (2) `ven_ui_planner.feature`'s "Clicking a matrix cell..."
+scenario — the closest match to the already-fixed `controller_navigation`
+pattern, a real 300s backend poll immediately followed by real Playwright
+navigation/click; (3) a broader class of backend-only long-`poll_until`
+scenarios (`controller/05_ev_charging_scenarios.feature` and others) that
+share the load-sensitivity mechanism but not the browser+backend combo
+GB-22's own failures reproduced — deliberately not isolated here (no
+confirmed flake, isolating everything with a long timeout would bloat the
+isolated pass speculatively), split into new item GB-35 so the reminder
+survives GB-22's closure.
+
+**Implementation:** New `features/isolated/phase_a_physics_battery.feature`
+(3 scenarios: battery full-SoC, EV-unplugged-both-directions,
+ev_plugged-false-stops-charging, all `@isolated`) and new
+`features/isolated/planner_matrix_drawer.feature` (1 scenario, `@isolated
+@ven-ui`) — both restate their originating `Background` (behave doesn't
+share Background across feature files) and leave a short comment crediting
+GB-22, mirroring `controller_navigation.feature`'s precedent. Original
+files (`phase_a_physics.feature`, `ven_ui_planner.feature`) got matching
+comments in place of the moved scenarios, same style as
+`04_navigation.feature`'s. No step-file changes: all step defs
+(`phase_a_physics_steps.py`, `planner_steps.py`) are generic/parameterized
+and resolve identically for scenarios living in a different feature file.
+
+**Verification:** `run_all_tests.sh --e2e` on Node2 (docker host lock
+held) — confirmed via behave's own pass summary that the main pass no
+longer runs the 4 moved scenarios and the `@isolated` pass picks them up
+and passes them; total scenario count unchanged across both passes
+combined (nothing dropped or duplicated in the move).
+
+**Bookkeeping:** Removed GB-22's row from `docs/BACKLOG.md`; added GB-35's
+row for the deferred broader long-`poll_until` audit.
+
