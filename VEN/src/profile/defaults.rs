@@ -84,6 +84,9 @@ pub(super) fn default_asset_id_pv() -> String {
 pub(super) fn default_pv_rated() -> f64 {
     5.0
 }
+pub(super) fn default_pv_co2_g_kwh() -> f64 {
+    crate::entities::asset_params::DEFAULT_PV_CO2_G_KWH
+}
 
 // ── weather_pv (weather-forecast-visibility) ──────────────────────────────────
 pub(super) fn default_weather_pv_performance_ratio() -> f64 {

@@ -28,6 +28,7 @@ pub(crate) async fn publish_sim_tick_result(
     rates_snap: &[TariffSnapshot],
     dt_s: f64,
     now: DateTime<Utc>,
+    pv_co2_g_kwh: f64,
 ) -> SimSnapshot {
     // Update sensor snapshot (backward compat)
     state.update_sensor(sensor).await;
@@ -127,7 +128,15 @@ pub(crate) async fn publish_sim_tick_result(
     // accumulated cost for any active UserRequest sharing the ledger's tick.
     let mut ledger = state.asset_ledger().await;
     let mut requests = state.active_requests().await;
-    controller::monitor::record_tick(&mut ledger, &mut requests, &sim_snap, rates_snap, dt_s, now);
+    controller::monitor::record_tick(
+        &mut ledger,
+        &mut requests,
+        &sim_snap,
+        rates_snap,
+        dt_s,
+        now,
+        pv_co2_g_kwh,
+    );
     state.set_asset_ledger(ledger).await;
     state.set_active_requests(requests).await;
 

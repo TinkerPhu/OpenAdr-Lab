@@ -115,7 +115,16 @@ pub struct PvParams {
     /// Inverter's true AC output capability (kW); distinct from `rated_kw` (DC panel peak).
     /// Resolved from profile `inverter_max_kw` at conversion time, defaulting to `rated_kw`.
     pub inverter_max_kw: f64,
+    /// Lifecycle/embodied carbon intensity of self-generated PV energy, gCO2eq/kWh —
+    /// reporting-only (ledger `co2_kg`, BL-16), distinct from the grid-carbon signal
+    /// (`g_imp_kgco2_kwh`) and does not enter the planner objective.
+    pub co2_g_kwh: f64,
 }
+
+/// IPCC AR5 harmonized median for utility-scale crystalline-silicon PV; typical
+/// literature range ~20-50 gCO2eq/kWh depending on module technology and
+/// manufacturing location.
+pub const DEFAULT_PV_CO2_G_KWH: f64 = 40.0;
 
 impl Default for PvParams {
     fn default() -> Self {
@@ -123,6 +132,7 @@ impl Default for PvParams {
             id: crate::ids::ASSET_PV.to_string(),
             rated_kw: 5.0,
             inverter_max_kw: 5.0,
+            co2_g_kwh: DEFAULT_PV_CO2_G_KWH,
         }
     }
 }
