@@ -8,14 +8,18 @@ from features.helpers.wait import poll_until
 
 
 def _parse_points(spec):
-    """"0.5:0.40,1.0:0.10" -> ComfortRate list (fill:bid pairs)."""
+    """"0.5:0.40,1.0:0.10" -> ComfortRate list (fill:price pairs, co2 defaults to
+    0.0). An optional third segment sets the CO2 bid explicitly:
+    "0.5:0.40:300,1.0:0.10:100" (fill:price:co2, gCO2/kWh)."""
     rates = []
     for pair in spec.split(","):
-        fill, bid = pair.split(":")
+        parts = pair.split(":")
+        fill, bid = parts[0], parts[1]
+        co2 = parts[2] if len(parts) > 2 else "0.0"
         rates.append({
             "fill": float(fill),
             "max_marginal_price": float(bid),
-            "max_marginal_co2": 0.0,
+            "max_marginal_co2": float(co2),
         })
     return rates
 
