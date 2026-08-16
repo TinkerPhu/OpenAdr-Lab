@@ -69,6 +69,17 @@ cmd_up() {
     echo "Fleet of $count VENs is up."
 }
 
+purge_fleet_data() {
+    # Docker auto-creates a missing bind-mount host dir as root:root, and the
+    # VEN process inside writes as uid 2000 (VEN/Dockerfile) — the regular
+    # host user running fleet.sh can't rm -rf either. Delete via a throwaway
+    # container that runs as root by default (no host sudo needed).
+    if [[ -d "$VEN_DIR/data" ]]; then
+        docker run --rm -v "$VEN_DIR/data:/data" busybox \
+            sh -c 'rm -rf /data/fleet-ven-*'
+    fi
+}
+
 cmd_down() {
     local purge=false
     while [[ $# -gt 0 ]]; do
@@ -85,7 +96,7 @@ cmd_down() {
 
     if $purge; then
         (cd "$VEN_DIR" && docker compose -f docker-compose.fleet.yml down -v)
-        rm -rf "$VEN_DIR"/data/fleet-ven-*
+        purge_fleet_data
         rm -f "$VEN_DIR"/profiles/fleet-ven-*.yaml
         rm -f "$COMPOSE_FILE" "$MANIFEST"
         echo "Fleet stopped and purged (data, profiles, compose file, manifest removed)."
