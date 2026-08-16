@@ -4,10 +4,17 @@
 # compliance_latency_s with at least one deliberately hard case, the way S-7
 # already does for import.
 #
-# Launch shortly before local solar noon (Europe/Zurich, see s9_diurnal.yaml
-# for why) via `--start-at`, so the window actually overlaps real peak PV
-# output — an export cap tested at night or in low sun is not a test of
-# anything.
+# Launch via `--start-at` so the window overlaps real peak PV output — an
+# export cap tested at night or in low sun is not a test of anything.
+# NOT solar noon: ven-1/2/3's PV arrays are azimuth_deg: 267 (near-due-west,
+# see VEN/profiles/ven-1.yaml), so their generation peaks mid-to-late
+# afternoon, well after true solar noon. At this site (47.45N/7.81E,
+# Europe/Zurich, UTC+2 in summer/CEST), that peak falls roughly 15:00-16:00
+# local. With this scenario's cap window running from minute 5 to minute 35,
+# centering it on ~15:30 local means starting around 15:10 local, i.e.
+# `--start-at <date>T13:10:00Z` in CEST months. Re-derive the UTC offset for
+# CET months (UTC+1, --start-at ...T14:10:00Z) if launching outside
+# late-March-to-late-October.
 name: s10_overexport
 description: Tight 1.0 kW export cap for 30 min during simulated peak PV
 tier: stress
