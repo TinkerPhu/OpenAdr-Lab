@@ -78,6 +78,28 @@ impl AssetSnapshot {
     }
 }
 
+/// One asset's forecasted capability at one future plan slot — built by
+/// re-simulating that asset forward from its REAL current state using the
+/// active plan's own setpoint schedule (`simulator::forecast::build_forecast_frames`),
+/// not read from the plan's own stale `planned_state_by_asset` snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetForecastPoint {
+    /// The plan's own scheduled power for this asset at this slot (kW) — the
+    /// same value used to drive the re-simulation, mirroring how the live
+    /// instant envelope uses the asset's actual current power as its
+    /// operating-point reference.
+    pub planned_kw: f64,
+    pub cap_max_import_kw: f64,
+    pub cap_max_export_kw: f64,
+}
+
+/// One future slot's per-asset forecasted capability, keyed by asset id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetForecastFrame {
+    pub ts: DateTime<Utc>,
+    pub assets: HashMap<String, AssetForecastPoint>,
+}
+
 /// State overrides for the `inject()` port method (used by MockSimulatorPort and tests).
 ///
 /// This is the controller-side inject state type. The UI layer uses the richer

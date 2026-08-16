@@ -1,5 +1,6 @@
 mod base_load_preview;
 pub mod energy;
+pub mod forecast;
 mod grid_meter;
 pub mod persist;
 pub mod plan_context;
