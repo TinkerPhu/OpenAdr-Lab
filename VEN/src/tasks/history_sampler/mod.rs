@@ -1,10 +1,8 @@
 //! WP1.2/1.3/1.6 — history sampler task glue: 1-minute downsample write path
 //! (accumulator in `accumulator.rs`), daily retention pruning, and monthly
-//! `AssetLedger` billing-period rollover. All boundary checks are pure and
-//! clock-injected (`now` passed in per call) so they're testable without sleeps;
-//! the async loop snapshots the simulator each 1s tick (same `sim.lock().await`
-//! pattern as `tasks::obligation`) and writes through `spawn_blocking` — history
-//! writes are best-effort, log-and-continue, never block the control loop.
+//! `AssetLedger` billing-period rollover. Boundary checks are pure/clock-injected
+//! (testable without sleeps); the async loop snapshots the simulator each 1s tick
+//! and writes through `spawn_blocking` — best-effort, log-and-continue.
 mod accumulator;
 
 use std::collections::HashMap;
@@ -29,10 +27,8 @@ use crate::state::AppState;
 const DOWNSAMPLE_WINDOW_S: i64 = 60;
 
 /// Append a flushed window through the (blocking) `HistoryPort`, logging and
-/// continuing on failure — history writes must never block or crash the
-/// control loop. 030: a `StorageError` additionally raises one deduplicated
-/// ALERT (`dedup_key` "storage-error") so the resident sees a persistent
-/// storage problem exactly once, not per flush.
+/// continuing on failure. 030: a `StorageError` additionally raises one deduplicated
+/// ALERT (`dedup_key` "storage-error") so the resident sees it once, not per flush.
 async fn write_window(
     history: Arc<dyn HistoryPort>,
     notifier: &crate::services::notify::Notifier,
@@ -184,10 +180,8 @@ pub(crate) fn spawn_history_sampler(
                     .snapshot()
                     .expect("SimState::snapshot is infallible")
             };
-            // SITE_RESIDUAL (BL-08, Phase 5 WP5.1): this loop takes its own
-            // raw simulator snapshot independent of `tick_once`/`publish.rs`
-            // (a separate 1s cadence), so site-residual must be inserted
-            // here too for its history to accumulate via `tick_samples`.
+            // SITE_RESIDUAL (BL-08): this loop's own 1s snapshot (independent of
+            // `tick_once`) needs site-residual inserted here too for `tick_samples`.
             let residual_kw = crate::controller::residual::compute_site_residual_kw(&snap);
             snap.assets.insert(
                 crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
@@ -195,7 +189,14 @@ pub(crate) fn spawn_history_sampler(
             );
             let tariffs_snap = state.planned_tariffs().await;
             let caps_snap = state.planned_capacity_limits().await;
-            if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap, &caps_snap) {
+            let envelope_snap = state.site_envelope().await;
+            if let Some((ticks, grid)) = sampler.record(
+                now,
+                &snap,
+                &tariffs_snap,
+                &caps_snap,
+                envelope_snap.as_ref(),
+            ) {
                 write_window(history.clone(), &notifier, &state, now, ticks, grid).await;
             }
             if day_boundary_crossed(&mut last_pruned_day, now) {
@@ -341,6 +342,8 @@ mod tests {
                 co2_g_kwh: None,
                 import_limit_kw: None,
                 export_limit_kw: None,
+                up_kw: None,
+                down_kw: None,
             },
         )
     }
