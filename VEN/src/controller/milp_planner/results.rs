@@ -423,18 +423,13 @@ pub(crate) fn translate_to_plan(
 
     // ── Warnings ────────────────────────────────────────────────────────
     let mut warnings = Vec::new();
-    // WP4.4 (BL-07): stable text — WP4.3's notification dedup keys on it.
-    if let Some(msg) = &inputs.stale_rate_warning {
-        warnings.push(PlanWarning {
-            severity: WarningSeverity::Warning,
-            kind: WarningKind::StaleRateEstimate,
-            message: msg.clone(),
-            suggested_action: None,
-        });
-    }
-    // BL-17 closeout: same stable-text contract as the import-tariff warning
-    // above, independent since CO2/import coverage can end at different times.
-    if let Some(msg) = &inputs.co2_stale_rate_warning {
+    // WP4.4 (BL-07) import tariff + BL-17 CO2: independent stale-rate warnings
+    // (coverage can end at different times), same stable-text contract —
+    // WP4.3's notification dedup keys on the message text.
+    for msg in [&inputs.stale_rate_warning, &inputs.co2_stale_rate_warning]
+        .into_iter()
+        .flatten()
+    {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
             kind: WarningKind::StaleRateEstimate,
