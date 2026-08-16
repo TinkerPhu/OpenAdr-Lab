@@ -367,11 +367,11 @@ mod tests {
     }
 
     #[test]
-    fn comfort_rates_explicit_override_replaces_asset_default_and_zeroes_co2_bid() {
-        // Explicit comfort_rates in the request body only carry fill+bid (price) -- there is
-        // no user-facing CO2 field on ComfortRateInput, so max_marginal_co2 is always 0.0 for
-        // an explicit override, unlike the asset's own default which may carry a real value.
-        // This test pins that (possibly surprising) behavior down explicitly.
+    fn comfort_rates_explicit_override_replaces_asset_default_co2_defaults_to_zero_when_omitted() {
+        // Explicit comfort_rates in the request body override the asset's own default curve
+        // entirely (a different curve, different fill/price). When the override's `co2` field
+        // is omitted, it defaults to 0.0 -- distinct from the asset default's own CO2 value,
+        // proving the override genuinely replaces rather than merges with the asset default.
         let mut s = slice("ev");
         s.comfort_rates = vec![ComfortRate {
             fill: 0.5,
@@ -382,12 +382,29 @@ mod tests {
         body.comfort_rates = Some(vec![ComfortRateInput {
             fill: 1.0,
             bid: 0.5,
+            co2: None,
         }]);
         let req = create_from_body(body, &[s], now()).unwrap();
         assert_eq!(req.comfort_rates.len(), 1);
         assert!((req.comfort_rates[0].fill - 1.0).abs() < 1e-9);
         assert!((req.comfort_rates[0].max_marginal_price - 0.5).abs() < 1e-9);
         assert!((req.comfort_rates[0].max_marginal_co2 - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn comfort_rates_explicit_override_co2_bid_is_passed_through_when_given() {
+        // BL-17 comfort bidding: an explicit CO2 bid in the request body must actually reach
+        // the resolved ComfortRate, not be silently dropped -- this is the exact gap the whole
+        // CO2-comfort-bidding feature exists to close.
+        let mut body = base_body();
+        body.comfort_rates = Some(vec![ComfortRateInput {
+            fill: 1.0,
+            bid: 0.5,
+            co2: Some(150.0),
+        }]);
+        let req = create_from_body(body, &[slice("ev")], now()).unwrap();
+        assert_eq!(req.comfort_rates.len(), 1);
+        assert!((req.comfort_rates[0].max_marginal_co2 - 150.0).abs() < 1e-9);
     }
 
     #[test]
