@@ -26,7 +26,7 @@ vi.mock("../components/charts/TimeSeriesChart", () => ({
 
 import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
 import type { AssetTimelinePoint } from "../components/controller/types";
-import type { SiteFlexibilitySample } from "../api/types";
+import type { SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../api/types";
 
 describe("SiteHeadroomChart — past band renders continuously", () => {
   beforeEach(() => {
@@ -87,5 +87,60 @@ describe("SiteHeadroomChart — past band renders continuously", () => {
     // real band value — before the fix, almost none did.
     const rowsWithoutBandValue = data.filter((row) => band.lower(row) == null);
     expect(rowsWithoutBandValue.length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("SiteHeadroomChart — forecast prop feeds the future band with real per-slot values", () => {
+  beforeEach(() => {
+    propsCalls.length = 0;
+  });
+
+  it("future rows carry the forecast's own varying values, not a flat LOCF copy of the last history sample", () => {
+    const nowMs = 1_000_000_000;
+    const gridTimeline: AssetTimelinePoint[] = [
+      { ts: nowMs - 300_000, values: { power_kw: 2.0 } },
+      { ts: nowMs, values: { power_kw: 2.0 } },
+      { ts: nowMs + 300_000, values: { power_kw: 2.0 } },
+      { ts: nowMs + 600_000, values: { power_kw: 2.0 } },
+    ];
+    const history: SiteFlexibilitySample[] = [
+      { ts: new Date(nowMs - 300_000).toISOString(), up_kw: 1.0, down_kw: 1.0 },
+      { ts: new Date(nowMs).toISOString(), up_kw: 1.0, down_kw: 1.0 },
+    ];
+    // Forecast values genuinely differ per slot — if the fix regressed to flat LOCF-extending
+    // the last history sample (up_kw/down_kw both 1.0), these distinct values would never appear.
+    const forecast: SiteFlexibilityForecastSlot[] = [
+      { ts: new Date(nowMs + 300_000).toISOString(), up_kw: 3.0, down_kw: 4.0 },
+      { ts: new Date(nowMs + 600_000).toISOString(), up_kw: 5.0, down_kw: 6.0 },
+    ];
+
+    render(
+      <SiteHeadroomChart
+        gridTimeline={gridTimeline}
+        history={history}
+        forecast={forecast}
+        nowMs={nowMs}
+        hoursBack={0.1}
+        hoursForward={0.2}
+      />
+    );
+
+    const { data, bands } = propsCalls[0] as {
+      data: TimestampedRow[];
+      bands: Array<{
+        lower: (row: TimestampedRow) => number | null;
+        upper: (row: TimestampedRow) => number | null;
+      }>;
+    };
+    const band = bands[0];
+
+    const futureRow1 = data.find((row) => row.ts === nowMs + 300_000);
+    const futureRow2 = data.find((row) => row.ts === nowMs + 600_000);
+    expect(futureRow1).toBeDefined();
+    expect(futureRow2).toBeDefined();
+    // gridPowerKw is flat at 2.0 here, so lower = gridPowerKw - up_kw distinguishes the slots.
+    expect(band.lower(futureRow1!)).toBeCloseTo(2.0 - 3.0);
+    expect(band.lower(futureRow2!)).toBeCloseTo(2.0 - 5.0);
+    expect(band.lower(futureRow1!)).not.toBeCloseTo(band.lower(futureRow2!)!);
   });
 });

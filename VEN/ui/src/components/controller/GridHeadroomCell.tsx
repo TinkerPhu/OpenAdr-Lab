@@ -8,12 +8,13 @@ import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
 } from "../charts/chartLayout";
 import type { AssetTimelinePoint } from "./types";
-import type { SiteFlexibilityEnvelope, SiteFlexibilitySample } from "../../api/types";
+import type { SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../../api/types";
 import { SiteHeadroomChart } from "./charts/SiteHeadroomChart";
 
 interface GridHeadroomCellProps {
   envelope: SiteFlexibilityEnvelope | null | undefined;
   history: SiteFlexibilitySample[];
+  forecast: SiteFlexibilityForecastSlot[];
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
   extended: boolean;
@@ -39,6 +40,7 @@ function fmtDuration(s: number | null | undefined): string {
 export function GridHeadroomCell({
   envelope,
   history,
+  forecast,
   gridTimeline,
   nowMs,
   extended,
@@ -72,6 +74,7 @@ export function GridHeadroomCell({
         <SiteHeadroomChart
           gridTimeline={gridTimeline}
           history={history}
+          forecast={forecast}
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
