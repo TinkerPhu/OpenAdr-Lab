@@ -11,29 +11,59 @@ import { Box } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
 import { EmptyState } from "./EmptyState";
-import { formatTariffEurKwh } from "./unitFormat";
+import { formatTariffEurKwh, formatCo2IntensityGKwh } from "./unitFormat";
+
+type CurvePoint = { fillPct: number; bidEurKwh: number; co2GKwh: number };
+
+interface CurveSeriesConfig {
+  dataKey: "bidEurKwh" | "co2GKwh";
+  label: string;
+  color: string;
+  yAxisId: "price" | "co2";
+  formatValue: (v: number) => string;
+}
+
+/** BL-17: price and CO2 bids are unrelated units/magnitudes, so each gets its own
+ * Y-axis (price left, CO2 right) rather than sharing one scale. */
+const DEFAULT_SERIES: CurveSeriesConfig[] = [
+  {
+    dataKey: "bidEurKwh",
+    label: "Max bid",
+    color: "#2196F3",
+    yAxisId: "price",
+    formatValue: formatTariffEurKwh,
+  },
+  {
+    dataKey: "co2GKwh",
+    label: "Max CO2 bid",
+    color: "#4CAF50",
+    yAxisId: "co2",
+    formatValue: formatCo2IntensityGKwh,
+  },
+];
 
 interface CurveChartProps {
   rows: ComfortRate[];
-  color?: string;
+  /** Declares which curve axes to render (data-driven per `declare-dont-branch`) —
+   * defaults to both price and CO2. */
+  series?: CurveSeriesConfig[];
 }
-
-type CurvePoint = { fillPct: number; bidEurKwh: number };
 
 /**
  * Non-temporal-X-axis composition (design.md's 3rd taxonomy member, alongside
  * TimeSeriesChart and StackedTimeSeriesChart) — shares only sizing/empty-state/
- * unit-formatting primitives with the other two, since a fill%-vs-price curve has no
- * time domain, NOW line, or zone shading to share. Currently has one real consumer
- * (the comfort-curve editor preview); kept scoped to that exact (fill%, €/kWh) shape
- * rather than generalized further, since there's no second shape yet to generalize for.
+ * unit-formatting primitives with the other two, since a fill%-vs-bid curve has no
+ * time domain, NOW line, or zone shading to share. One real consumer (the
+ * comfort-curve editor preview); generalized to a configurable list of Y-series
+ * (BL-17 added the CO2 bid alongside the original price bid) rather than adding a
+ * second bespoke chart component for the same (fill %, bid) shape.
  *
- * Live preview of the (fill %, bid €/kWh) willingness-to-pay curve being edited in
- * `ComfortCurveCard` — plotted in fill order so the shape of the curve (typically: pay
- * more to reach a low fill fast, less once "enough" is already banked) is visible at a
- * glance, not just as a row of numbers.
+ * Live preview of the comfort curve being edited in `ComfortCurveCard` — plotted in
+ * fill order so the shape of the curve (typically: pay more to reach a low fill
+ * fast, less once "enough" is already banked) is visible at a glance, not just as a
+ * row of numbers.
  */
-export function CurveChart({ rows, color = "#2196F3" }: CurveChartProps) {
+export function CurveChart({ rows, series = DEFAULT_SERIES }: CurveChartProps) {
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -45,7 +75,11 @@ export function CurveChart({ rows, color = "#2196F3" }: CurveChartProps) {
   }
 
   const data: CurvePoint[] = rows
-    .map((r) => ({ fillPct: Math.round(r.fill * 100), bidEurKwh: r.max_marginal_price }))
+    .map((r) => ({
+      fillPct: Math.round(r.fill * 100),
+      bidEurKwh: r.max_marginal_price,
+      co2GKwh: r.max_marginal_co2,
+    }))
     .sort((a, b) => a.fillPct - b.fillPct);
 
   return (
@@ -61,25 +95,38 @@ export function CurveChart({ rows, color = "#2196F3" }: CurveChartProps) {
             tick={{ fontSize: 11 }}
           />
           <YAxis
-            dataKey="bidEurKwh"
+            yAxisId="price"
+            domain={[0, "auto"]}
+            tick={{ fontSize: 11 }}
+            width={48}
+          />
+          <YAxis
+            yAxisId="co2"
+            orientation="right"
             domain={[0, "auto"]}
             tick={{ fontSize: 11 }}
             width={48}
           />
           <Tooltip
-            formatter={(value: number, name: string) =>
-              name === "bidEurKwh" ? [formatTariffEurKwh(value), "Max bid"] : [value, name]
-            }
+            formatter={(value: number, name: string) => {
+              const s = series.find((s) => s.dataKey === name);
+              return s ? [s.formatValue(value), s.label] : [value, name];
+            }}
             labelFormatter={(fillPct: number) => `Fill: ${fillPct}%`}
           />
-          <Line
-            type="linear"
-            dataKey="bidEurKwh"
-            stroke={color}
-            strokeWidth={2}
-            dot={{ r: 4 }}
-            isAnimationActive={false}
-          />
+          {series.map((s) => (
+            <Line
+              key={s.dataKey}
+              yAxisId={s.yAxisId}
+              type="linear"
+              dataKey={s.dataKey}
+              name={s.dataKey}
+              stroke={s.color}
+              strokeWidth={2}
+              dot={{ r: 4 }}
+              isAnimationActive={false}
+            />
+          ))}
         </LineChart>
       </ResponsiveContainer>
     </Box>
