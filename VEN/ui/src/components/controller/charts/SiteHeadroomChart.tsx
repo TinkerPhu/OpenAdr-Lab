@@ -7,7 +7,7 @@ import {
   clipRowsToWindow,
   ensureNonEmptyRows,
 } from "../../charts/mergeSeries";
-import { minSpanDomain, MIN_POWER_SPAN_KW, zeroAnchoredTicks } from "../../charts/axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, zeroAnchoredTicks, formatPowerTick } from "../../charts/axisDomain";
 import { formatSignedPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
@@ -97,7 +97,7 @@ export function SiteHeadroomChart({
       tMax={tMax}
       xAxisTickFormatter={formatTs}
       axes={[
-        { id: "power", unit: " kW", width: 48, domain, ticks: zeroAnchoredTicks(domain) },
+        { id: "power", width: 48, domain, tickFormatter: formatPowerTick, ticks: zeroAnchoredTicks(domain) },
       ]}
       series={series}
       bands={[
