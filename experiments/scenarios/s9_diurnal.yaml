@@ -22,10 +22,12 @@ actions:
     # 20-24 evening decline.
     values_eur_kwh: [0.15, 0.20, 0.28, 0.08, 0.40, 0.22]
     interval_minutes: 240
-  - at_minute: 660          # 11:00 — ramp in ahead of the midday PV peak
-    type: export_capacity_limit
-    export_kw: 6.0          # below ven-1's 12.5 kW inverter max — real curtailment, not a no-op
-    duration_minutes: 300   # through 16:00
+  - at_minute: 660          # 11:00 — through 16:00; ven-1/2/3's PV is azimuth_deg: 267
+    type: export_capacity_limit  # (near-due-west), so its real peak lands mid-to-late
+    export_kw: 6.0          # afternoon, not solar noon -- this 5h window is deliberately
+    duration_minutes: 300   # wide enough to still cover that peak comfortably (unlike
+                             # s10_overexport's narrow 30 min window, which needs a
+                             # precisely-timed --start-at instead, see that file)
   - at_minute: 1080         # 18:00 — evening demand peak
     type: capacity_limit
     import_kw: 4.0           # above base-load-only VENs, below EV-charging-at-peak VENs
