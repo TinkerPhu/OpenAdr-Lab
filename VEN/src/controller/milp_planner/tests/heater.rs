@@ -702,16 +702,16 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
         None,
         None,
     );
-    // WP4.4 adds a benign informational warning when tariff coverage ends
-    // before the horizon — this test's invariant is *feasibility*, so only
-    // solver/violation warnings may fail it.
+    // WP4.4 (+ BL-17 closeout) adds a benign informational warning when
+    // tariff or CO2 (GHG) coverage ends before the horizon — this test's
+    // invariant is *feasibility*, so only solver/violation warnings may fail
+    // it. Both messages share this suffix by construction (stale_rates.rs's
+    // `apply_stale_rate_policy` is parameterized by `label` but not the rest
+    // of the sentence).
     let blocking: Vec<_> = plan
         .warnings
         .iter()
-        .filter(|w| {
-            !w.message
-                .contains("Tariff data ends before the planning horizon")
-        })
+        .filter(|w| !w.message.contains("ends before the planning horizon"))
         .collect();
     assert!(
         blocking.is_empty(),
