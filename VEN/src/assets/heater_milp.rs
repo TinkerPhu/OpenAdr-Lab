@@ -1187,7 +1187,16 @@ mod milp_context_trait_tests {
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
         let ctx = HeaterMilpContext::from_state(
-            &state, &cfg, 12, &cum_s, now, None, 0.0, 0.0, vec![], 0.5,
+            &state,
+            &cfg,
+            12,
+            &cum_s,
+            now,
+            None,
+            0.0,
+            0.0,
+            vec![],
+            0.5,
         );
         assert_eq!(ctx.comfort_full_reward_eur_kwh, 0.0);
         assert_eq!(ctx.comfort_full_co2_reward_eur_kwh, 0.0);

@@ -84,9 +84,9 @@ pub(crate) fn apply_stale_rate_policy(
         StaleRatePolicy::LastKnown => {
             format!("{label} ends before the planning horizon; stale slots filled by LAST_KNOWN")
         }
-        StaleRatePolicy::SafeAverage => format!(
-            "{label} ends before the planning horizon; stale slots filled by SAFE_AVERAGE"
-        ),
+        StaleRatePolicy::SafeAverage => {
+            format!("{label} ends before the planning horizon; stale slots filled by SAFE_AVERAGE")
+        }
         StaleRatePolicy::DeferToFlexible => format!(
             "{label} ends before the planning horizon; stale slots deferred by DEFER_TO_FLEXIBLE"
         ),
