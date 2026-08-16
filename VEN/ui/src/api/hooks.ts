@@ -6,7 +6,13 @@ import type {
   UpdateEvSettingsBody, UpdateArbiterSettingsBody,
   CreateBaselineOverrideBody,
   PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
+  EventLogEntry,
 } from "./types";
+
+// Mirrors the backend's own EVENT_LOG_RING_CAP (VEN/src/state/event_log.rs) —
+// keeps the client-side list from growing unbounded over a long-lived SSE
+// connection.
+const EVENT_LOG_CLIENT_CAP = 200;
 
 export function useHealth() {
   const { api } = useVenContext();
@@ -265,17 +271,41 @@ export function useVtnStatus() {
   });
 }
 
-// WP-T4: VEN-operational Event Log — polled like the other Diagnostics
-// pages (Metrics, Tasks); the backend also offers an SSE stream
-// (/events/log/events) but wiring that into the UI is left for a follow-up,
-// consistent with this WP's in-memory-only, keep-it-contained scope.
+// WP-T4/GB-13: VEN-operational Event Log — seeded via an initial GET, kept
+// live via the backend's /events/log/events SSE stream (live-forward-only,
+// no replay) rather than polling.
 export function useEventLog() {
   const { api } = useVenContext();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: ["event-log", api.baseUrl],
     queryFn: () => api.eventLog(),
-    refetchInterval: 10_000,
   });
+
+  useEffect(() => {
+    const es = new EventSource(`${api.baseUrl}/events/log/events`);
+    es.onmessage = (e) => {
+      try {
+        const entry = JSON.parse(e.data) as EventLogEntry;
+        queryClient.setQueryData<EventLogEntry[]>(
+          ["event-log", api.baseUrl],
+          (old) => {
+            const list = old ?? [];
+            if (list.some((x) => x.id === entry.id)) return list;
+            const next = [...list, entry];
+            return next.length > EVENT_LOG_CLIENT_CAP
+              ? next.slice(next.length - EVENT_LOG_CLIENT_CAP)
+              : next;
+          },
+        );
+      } catch {
+        /* ignore malformed events */
+      }
+    };
+    return () => es.close();
+  }, [api.baseUrl, queryClient]);
+
+  return query;
 }
 
 export function usePlan(options?: { refetchInterval?: number | false }) {
