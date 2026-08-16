@@ -102,6 +102,16 @@ export function ComfortCurveCard() {
                   }
                   inputProps={{ min: 0, step: 0.05, "data-testid": `comfort-bid-${i}` }}
                 />
+                <TextField
+                  label="CO2 bid (gCO2/kWh)"
+                  type="number"
+                  size="small"
+                  value={r.max_marginal_co2}
+                  onChange={(e) =>
+                    updateRow(i, { max_marginal_co2: Number(e.target.value) })
+                  }
+                  inputProps={{ min: 0, step: 10, "data-testid": `comfort-co2-${i}` }}
+                />
                 <IconButton
                   size="small"
                   aria-label="Remove point"

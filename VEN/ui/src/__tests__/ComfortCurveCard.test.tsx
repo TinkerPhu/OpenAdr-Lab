@@ -37,6 +37,23 @@ describe("ComfortCurveCard", () => {
     expect(rows).toHaveLength(2);
     expect(screen.getByTestId("comfort-fill-0")).toHaveValue(80);
     expect(screen.getByTestId("comfort-bid-0")).toHaveValue(0.3);
+    expect(screen.getByTestId("comfort-co2-0")).toHaveValue(0);
+  });
+
+  it("edits the CO2 bid field and saves it as part of the override", async () => {
+    const user = userEvent.setup();
+    render(<ComfortCurveCard />);
+    const co2 = screen.getByTestId("comfort-co2-0");
+    await user.clear(co2);
+    await user.type(co2, "250");
+    await user.click(screen.getByTestId("comfort-save-btn"));
+    expect(mockSetCurve).toHaveBeenCalledWith({
+      assetId: "ev",
+      rates: [
+        { fill: 0.8, max_marginal_price: 0.3, max_marginal_co2: 250 },
+        { fill: 1.0, max_marginal_price: 0.1, max_marginal_co2: 0 },
+      ],
+    });
   });
 
   it("renders a curve chart preview alongside the editable rows", () => {
