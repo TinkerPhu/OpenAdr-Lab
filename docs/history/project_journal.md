@@ -10264,11 +10264,55 @@ comments in place of the moved scenarios, same style as
 (`phase_a_physics_steps.py`, `planner_steps.py`) are generic/parameterized
 and resolve identically for scenarios living in a different feature file.
 
+**Verification found a second, unrelated, real regression**: running the
+moved `planner_matrix_drawer.feature` scenario on Node2 failed outright
+(not a flake — 100% reproducible) because BL-38 (merged earlier this
+session) nested the plan header, trigger timeline, and decision matrix
+inside a Diagnostics accordion collapsed by default, and
+`ven_ui_planner.feature`'s E2E BDD steps were never updated to expand it —
+only BL-38's own jsdom-based vitest suite was, which can't catch this
+class of bug since jsdom doesn't run real CSS transitions. Every scenario
+in the file asserting on that content (9 of 12) was silently broken since
+BL-38 merged; this was the first `run_all_tests.sh --e2e` run since then.
+Fixed: added a reusable `I expand the Planner Diagnostics section` step
+and wired it into every affected scenario (`ven_ui_planner.feature` and
+the moved `planner_matrix_drawer.feature`). Getting the click itself right
+took several iterations — a bare `text=Diagnostics` selector matched the
+VEN UI nav sidebar's own unrelated "Diagnostics" menu group instead of the
+accordion; a scoped `>> text=` selector still didn't reliably land the
+click; a direct coordinate-based click on the accordion element itself
+(reliable when collapsed, since the rendered box is exactly the summary
+bar) finally worked, but also needed to wait for the Collapse wrapper's
+*actual* height rather than just the `Mui-expanded` class, since React
+flips the class synchronously on click while MUI's Collapse measures and
+animates to the real height asynchronously — content stayed clipped to
+0px (reading as not-visible to Playwright) for a beat after the class
+already said expanded. Also fixed the same lint-driven regression from
+GB-16 in `VTN/ui/src/__tests__/Events.test.tsx` a second, correct way:
+GB-16's fix had dropped `useEventsMock`'s `active` parameter to silence an
+unused-var warning, but the parameter was load-bearing (assertions at
+lines 241-260 check what it was called with) — vitest's loose runtime
+typing didn't catch the mismatch with the call site still forwarding an
+argument, but `tsc` (`npm run build`, part of the Docker E2E build) does.
+Restored the parameter and silenced the warning with a `void active;`
+no-op instead.
+
+A large chunk of the debugging time on the accordion fix was wasted
+chasing a phantom: repeated `docker compose run --rm test-runner ...`
+verification runs, used to iterate faster than the full `run_all_tests.sh
+--e2e` build/teardown cycle, never passed `--build` — the test-runner
+image bakes `tests/` in via `COPY` at build time rather than a bind mount,
+so every one of those runs was silently re-testing the *first* build's
+code, not the fix just pushed. Several iterations of "the fix doesn't
+work" were actually testing no fix at all. Re-running with `--build`
+confirmed the very first accordion-click fix attempt had actually worked.
+
 **Verification:** `run_all_tests.sh --e2e` on Node2 (docker host lock
-held) — confirmed via behave's own pass summary that the main pass no
-longer runs the 4 moved scenarios and the `@isolated` pass picks them up
-and passes them; total scenario count unchanged across both passes
-combined (nothing dropped or duplicated in the move).
+held, proper `--build`) — confirmed via behave's own pass summary that the
+main pass no longer runs the 4 moved scenarios and the `@isolated` pass
+picks them up and passes them; total scenario count unchanged across both
+passes combined (nothing dropped or duplicated in the move); all 22
+`ven_ui_planner.feature` scenarios pass, including the previously-broken 9.
 
 **Bookkeeping:** Removed GB-22's row from `docs/BACKLOG.md`; added GB-35's
 row for the deferred broader long-`poll_until` audit.
