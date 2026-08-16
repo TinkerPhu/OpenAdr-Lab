@@ -14,6 +14,16 @@ def step_navigate_planner(context):
     context.ven_ui.go_planner()
 
 
+@when("I expand the Planner Diagnostics section")
+def step_expand_diagnostics(context):
+    """BL-38 nested the plan header, trigger timeline, and decision matrix
+    inside a Diagnostics accordion that is collapsed by default; expand it
+    before asserting on any of that content."""
+    page = context.browser_page
+    page.wait_for_selector(tid("planner-diagnostics-accordion"), timeout=45000)
+    page.click('text="Diagnostics"')
+
+
 @then('I see a nav button with testid "{testid}"')
 def step_see_nav_button(context, testid):
     el = context.browser_page.wait_for_selector(tid(testid), timeout=45000)
