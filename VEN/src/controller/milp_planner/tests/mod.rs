@@ -535,6 +535,7 @@ fn build_asset_contexts(
                     lambda_sw,
                     c_terminal,
                     vec![],
+                    profile.planner.w_ghg,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -573,6 +574,7 @@ fn build_asset_contexts(
                     lambda_sw,
                     0.0,
                     vec![],
+                    profile.planner.w_ghg,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -606,6 +608,7 @@ fn build_asset_contexts(
                     lambda_sw,
                     c_terminal,
                     vec![],
+                    profile.planner.w_ghg,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -660,6 +663,8 @@ fn contexts_from_inputs(
                 free_early_bias: false,
                 budget_eur: None,
                 c_imp_eur_kwh: None,
+                v_extra_co2_eur_kwh: 0.0,
+                v_core_co2_eur: 0.0,
             },
         }));
     }
@@ -685,6 +690,7 @@ fn contexts_from_inputs(
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
+                comfort_full_co2_reward_eur_kwh: 0.0,
             },
         }));
     }

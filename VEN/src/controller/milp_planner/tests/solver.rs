@@ -718,6 +718,7 @@ fn heater_terminal_reward_raises_end_state() {
                     c_terminal_eur_kwh: c_terminal,
                     anchored_kw: vec![],
                     comfort_full_reward_eur_kwh: 0.0,
+                    comfort_full_co2_reward_eur_kwh: 0.0,
                 },
             })]
         };

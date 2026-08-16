@@ -126,6 +126,8 @@ impl MockEvCtx {
                 free_early_bias: false,
                 budget_eur: None,
                 c_imp_eur_kwh: None,
+                v_extra_co2_eur_kwh: 0.0,
+                v_core_co2_eur: 0.0,
             },
         }
     }
@@ -150,6 +152,8 @@ impl MockEvCtx {
                 free_early_bias: false,
                 budget_eur: None,
                 c_imp_eur_kwh: None,
+                v_extra_co2_eur_kwh: 0.0,
+                v_core_co2_eur: 0.0,
             },
         }
     }
@@ -251,6 +255,7 @@ impl MockHeaterCtx {
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
+                comfort_full_co2_reward_eur_kwh: 0.0,
             },
         }
     }
@@ -314,7 +319,17 @@ impl AssetMilpContext for MockHeaterCtx {
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
-            HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, 0.0, n, dt_h)
+            HeaterMilpContext::objective(
+                &self.ctx,
+                v,
+                0.0,
+                M_LOW_EUR_PER_KWH,
+                0.0,
+                0.0,
+                0.0,
+                n,
+                dt_h,
+            )
         } else {
             HeaterMilpContext::objective(
                 &self.ctx,
@@ -323,6 +338,7 @@ impl AssetMilpContext for MockHeaterCtx {
                 0.0,
                 self.ctx.lambda_sw_eur,
                 self.ctx.comfort_full_reward_eur_kwh,
+                self.ctx.comfort_full_co2_reward_eur_kwh,
                 n,
                 dt_h,
             )
