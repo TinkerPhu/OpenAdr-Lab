@@ -120,6 +120,12 @@ pub struct EvMilpContext {
     /// Per-slot import rate [€/kWh] for the budget constraint. Filled by
     /// `inject_grid_slots` when `budget_eur` is set.
     pub c_imp_eur_kwh: Option<Vec<f64>>,
+    /// BL-17 comfort bidding: CO2 analogue of `v_extra_eur_kwh`, already monetized via
+    /// w_ghg [€/kWh]. 0.0 outside the `ByDeadline`/`Asap` modes.
+    pub v_extra_co2_eur_kwh: f64,
+    /// BL-17 comfort bidding: CO2 analogue of `v_core_eur`, already monetized via w_ghg
+    /// [€] (= e_core_kwh × the curve's fill=0.0 CO2 bid monetized). 0.0 otherwise.
+    pub v_core_co2_eur: f64,
 }
 
 /// Typed LP variable handles for one EV charger in the MILP model.
@@ -198,6 +204,10 @@ pub struct HeaterMilpContext {
     /// BL-34: session comfort curve's price at fill=1.0 [EUR/kWh] — a reward on full-tier
     /// operation, competing against the tier penalty. 0.0 when there's no session/curve.
     pub comfort_full_reward_eur_kwh: f64,
+    /// BL-17 comfort bidding: session comfort curve's CO2 bid at fill=1.0, monetized via
+    /// w_ghg [EUR/kWh] — same reward mechanism as `comfort_full_reward_eur_kwh`, on the CO2
+    /// axis instead of price. 0.0 when there's no session/curve.
+    pub comfort_full_co2_reward_eur_kwh: f64,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.

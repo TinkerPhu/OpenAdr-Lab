@@ -169,9 +169,12 @@ impl EvMilpContext {
         }
         if self.mode != EvMilpMode::MustNotRun && !self.reward_per_slot {
             obj += -(w_services * self.v_extra_eur_kwh) * v.e_ev_extra;
+            // BL-17 comfort bidding: CO2 analogue, already monetized via w_ghg.
+            obj += -(w_services * self.v_extra_co2_eur_kwh) * v.e_ev_extra;
         }
         if self.mode == EvMilpMode::MayRun {
             obj += -(w_services * self.v_core_eur) * v.z_ev_core;
+            obj += -(w_services * self.v_core_co2_eur) * v.z_ev_core;
         }
         // WP4.1 (BL-28) OPPORTUNISTIC / *_FREE / MAX_COST: reward the energy
         // actually charged, per slot, rather than the lump e_ev_extra reward
@@ -233,6 +236,7 @@ impl EvMilpContext {
         v_ev_core_eur_kwh: f64,
         asap_lateness_eur_kwh_h: f64,
         v_ev_free_charge_eur_kwh: f64,
+        w_ghg_eur_kg: f64,
     ) -> Self {
         use crate::entities::design_vocabulary::UserRequestMode;
         let plugged = if let super::AssetState::Ev(s) = state {
@@ -258,6 +262,8 @@ impl EvMilpContext {
             free_early_bias: false,
             budget_eur: None,
             c_imp_eur_kwh: None,
+            v_extra_co2_eur_kwh: 0.0,
+            v_core_co2_eur: 0.0,
         };
         if !plugged {
             return base;
@@ -339,23 +345,12 @@ impl EvMilpContext {
             // redirects v_extra_eur_kwh to an unrelated signal (free-energy
             // incentive, budget reward), so the curve doesn't apply there.
             UserRequestMode::ByDeadline | UserRequestMode::Asap => {
-                // Empty curve (no session-intent comfort override was ever resolved for this
-                // session, e.g. the legacy `/ev-session` route or a VTN-commanded session) keeps
-                // the passed-in global defaults — matches pre-BL-34 behavior exactly.
-                let (v_core_eur_kwh, v_extra_eur_kwh) = if session.comfort_rates.is_empty() {
-                    (v_ev_core_eur_kwh, v_ev_extra_eur_kwh)
-                } else {
-                    (
-                        crate::entities::asset::ComfortRate::value_at_fill(
-                            &session.comfort_rates,
-                            0.0,
-                        ),
-                        crate::entities::asset::ComfortRate::value_at_fill(
-                            &session.comfort_rates,
-                            1.0,
-                        ),
-                    )
-                };
+                let reward = super::ev_comfort::resolve_ev_comfort_reward(
+                    session,
+                    v_ev_core_eur_kwh,
+                    v_ev_extra_eur_kwh,
+                    w_ghg_eur_kg,
+                );
                 Self {
                     mode: if session.soft_deadline {
                         EvMilpMode::MayRun
@@ -366,9 +361,15 @@ impl EvMilpContext {
                     t_dead_step: Some(t_dead),
                     e_core_kwh: core_kwh,
                     e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
-                    v_extra_eur_kwh,
+                    v_extra_eur_kwh: reward.v_extra_eur_kwh,
                     v_core_eur: if session.soft_deadline {
-                        core_kwh * v_core_eur_kwh
+                        core_kwh * reward.v_core_eur_kwh
+                    } else {
+                        0.0
+                    },
+                    v_extra_co2_eur_kwh: reward.v_extra_co2_eur_kwh,
+                    v_core_co2_eur: if session.soft_deadline {
+                        core_kwh * reward.v_core_co2_eur_kwh
                     } else {
                         0.0
                     },
@@ -538,6 +539,8 @@ mod milp_context_trait_tests {
             free_early_bias: false,
             budget_eur: None,
             c_imp_eur_kwh: None,
+            v_extra_co2_eur_kwh: 0.0,
+            v_core_co2_eur: 0.0,
         }
     }
 
@@ -605,6 +608,7 @@ mod milp_context_trait_tests {
             1.0,
             0.0,
             0.0,
+            0.0,
         );
         assert!((ctx.e_core_kwh - 6.0).abs() < 1e-9, "{}", ctx.e_core_kwh);
         assert!(
@@ -670,6 +674,7 @@ mod milp_context_trait_tests {
             0.77, // v_ev_core_eur_kwh
             0.0,
             0.0,
+            0.0,
         );
         assert!(
             (ctx.v_core_eur - 6.0 * 0.77).abs() < 1e-9,
@@ -721,6 +726,8 @@ mod milp_context_trait_tests {
             free_early_bias: false,
             budget_eur: None,
             c_imp_eur_kwh: None,
+            v_extra_co2_eur_kwh: 0.0,
+            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
@@ -747,6 +754,8 @@ mod milp_context_trait_tests {
             free_early_bias: false,
             budget_eur: None,
             c_imp_eur_kwh: None,
+            v_extra_co2_eur_kwh: 0.0,
+            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
@@ -775,6 +784,8 @@ mod milp_context_trait_tests {
             free_early_bias: false,
             budget_eur: None,
             c_imp_eur_kwh: None,
+            v_extra_co2_eur_kwh: 0.0,
+            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(n, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),

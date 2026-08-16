@@ -108,6 +108,7 @@ pub fn build_asset_contexts(
                 } else {
                     vec![]
                 },
+                planner.w_ghg,
             )
         })
         .collect()
