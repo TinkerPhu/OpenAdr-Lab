@@ -8,7 +8,7 @@ import {
   ensureNonEmptyRows,
 } from "../../charts/mergeSeries";
 import { minSpanDomain, MIN_POWER_SPAN_KW, zeroAnchoredTicks, formatPowerTick } from "../../charts/axisDomain";
-import { formatSignedPowerValue } from "../../charts/unitFormat";
+import { formatSignedPowerValue, formatPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
@@ -113,6 +113,7 @@ export function SiteHeadroomChart({
               ? row.values["gridPowerKw"] + row.values["downKw"]
               : null,
           color: "#8BC34A",
+          formatter: (lower, upper) => `${formatPowerValue(lower)} – ${formatPowerValue(upper)}`,
         },
       ]}
       nowMs={nowMs}
