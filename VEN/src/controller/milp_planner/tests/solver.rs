@@ -288,6 +288,82 @@ fn battery_arbitrage_driven_by_ghg_intensity_alone() {
     );
 }
 
+/// BL-17 comfort bidding, the critical test per the BL-34 postmortem lesson in
+/// KEY_LEARNINGS.md ("syntactically correct and semantically inert at the same
+/// time — verify the variable it rewards is actually load-bearing"): two
+/// otherwise-identical Phase 2 solves differ only in the heater's
+/// `comfort_full_co2_reward_eur_kwh` (the session's monetized CO2 bid); the
+/// reward must measurably shift full-tier usage, not just compile and sit unused.
+///
+/// `w_tier_penalty_eur = 0.05` gives the baseline (reward = 0.0) a real, if
+/// small, reason to avoid full tier — without it, an unrewarded full-tier slot
+/// is exactly as cheap in the friction objective as staying off, and the
+/// solver's tie-break choice would be undefined rather than deterministic.
+#[test]
+fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
+    use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
+    use crate::services::test_support::milp_mocks::MockHeaterCtx;
+
+    let n = 4;
+    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh import, dt_h=1.0, no load
+
+    let make_ctxs = |co2_reward_eur_kwh: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        vec![Box::new(MockHeaterCtx {
+            ctx: HeaterMilpContext {
+                mode: HeaterMilpMode::MayRun,
+                t_dead_step: None,
+                p_mid_kw: 1.0,
+                p_full_kw: 2.0,
+                e_init_kwh: 0.0,
+                e_max_kwh: 20.0,
+                q_dem_kw: 0.0,
+                e_target_kwh: 0.0, // no forced target — running is purely reward-driven
+                lambda_sw_eur: 0.0,
+                initial_z_mid: 0.0,
+                initial_z_full: 0.0,
+                c_terminal_eur_kwh: 0.0,
+                anchored_kw: vec![],
+                comfort_full_reward_eur_kwh: 0.0,
+                comfort_full_co2_reward_eur_kwh: co2_reward_eur_kwh,
+            },
+        })]
+    };
+
+    let p1w = make_phase1_weights();
+    let p2w = Phase2Weights {
+        w_tier_penalty_eur: 0.05,
+        ..make_phase2_weights()
+    };
+    // Full tier costs 2.0 kW * 1.0 h * 0.25 EUR/kWh = 0.50 EUR/slot extra import;
+    // epsilon must cover running it in every slot (4 * 0.50 = 2.0 EUR) with margin.
+    let epsilon = 2.5;
+
+    let out_no_reward = solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.0), 60.0)
+        .expect("solver failed (no CO2 reward)")
+        .0;
+    // Reward (0.50) exceeds both the tier penalty (0.05) and the real energy
+    // cost (0.50) is covered separately by epsilon — net friction benefit per
+    // full-tier slot is unambiguous.
+    let out_with_reward =
+        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.50), 60.0)
+            .expect("solver failed (CO2 reward=0.50)")
+            .0;
+
+    let full_slots_no: f64 = out_no_reward.z_heat_full.iter().sum();
+    let full_slots_with: f64 = out_with_reward.z_heat_full.iter().sum();
+    assert!(
+        full_slots_no < 0.5,
+        "without a CO2 reward, the tier penalty should keep the heater off full tier: \
+         got {full_slots_no}"
+    );
+    assert!(
+        full_slots_with > full_slots_no + 2.0,
+        "a CO2 comfort bid, monetized via w_ghg, must be load-bearing in the MILP \
+         objective — expected materially more full-tier usage: no_reward={full_slots_no}, \
+         with_reward={full_slots_with}"
+    );
+}
+
 #[test]
 fn ev_startup_penalty_produces_contiguous_block() {
     // Flat tariff across 6 slots → degenerate without penalty.
