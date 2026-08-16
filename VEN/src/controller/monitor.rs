@@ -259,7 +259,15 @@ mod tests {
             make_request("ev", UserRequestStatus::Active),
             make_request("heater", UserRequestStatus::Active),
         ];
-        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now(), 0.0);
+        record_tick(
+            &mut ledger,
+            &mut requests,
+            &sim,
+            &[],
+            3600.0,
+            Utc::now(),
+            0.0,
+        );
 
         assert!(
             requests[0].accumulated_cost_eur > 0.0,
@@ -276,7 +284,15 @@ mod tests {
         let sim = make_sim("ev", 3.0);
         let mut ledger = HashMap::new();
         let mut requests = vec![make_request("ev", UserRequestStatus::Completed)];
-        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now(), 0.0);
+        record_tick(
+            &mut ledger,
+            &mut requests,
+            &sim,
+            &[],
+            3600.0,
+            Utc::now(),
+            0.0,
+        );
 
         assert_eq!(
             requests[0].accumulated_cost_eur, 0.0,
@@ -290,7 +306,15 @@ mod tests {
         let sim = make_sim("battery", -3.0);
         let mut ledger = HashMap::new();
         let mut requests = vec![make_request("battery", UserRequestStatus::Active)];
-        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now(), 0.0);
+        record_tick(
+            &mut ledger,
+            &mut requests,
+            &sim,
+            &[],
+            3600.0,
+            Utc::now(),
+            0.0,
+        );
 
         assert_eq!(requests[0].accumulated_cost_eur, 0.0);
     }

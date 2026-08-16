@@ -174,8 +174,13 @@ pub(crate) async fn tick_once(
     // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
     let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
     super::arbiter_glue::record_arbiter_outcome(&state, &notifier, arbiter_summary, now).await;
-    super::arbiter_glue::apply_residual_escalation(&state, &trigger_tx, &absorbed_kwh_by_asset, now)
-        .await;
+    super::arbiter_glue::apply_residual_escalation(
+        &state,
+        &trigger_tx,
+        &absorbed_kwh_by_asset,
+        now,
+    )
+    .await;
 
     // PHASE 1 (post-lock): clear one-shot inject fields.
     super::post_lock::clear_inject_fields(&state, cleared_fields, pv_clear, base_clear).await;
