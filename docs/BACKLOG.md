@@ -28,7 +28,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-17](#bl-17-externaldatasource--grid-co2-intensity-forecast-ingestion) | Grid-CO2-aware planning from a real CO2-intensity forecast (weather/irradiance ingestion for PV is already implemented) | Medium | L | Medium–High — third-party API dependency, staleness/failure handling, provider not yet chosen |
 
 ### VEN user (site operator) — comfort, control & trust
 
@@ -74,16 +73,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Low — perceived plan stability under flat tariffs, no cost or capability change.
 **Complexity:** Small (1–2 hours). Statistical check + slot reclassification.
 **Verify:** Unit test: flat-rate tariff (all €0.15) → all slots classified FIRM. Variable tariff (€0.10–€0.30) → FLEXIBLE slots remain FLEXIBLE.
-
----
-
-### BL-17: ExternalDataSource — grid CO2-intensity forecast ingestion
-**Req:** entities/design_vocabulary.rs §2.11 (`ExternalDataSource`, `ExternalDataSourceType`, `ExternalDataFetchStatus`)
-**Problem:** Weather/irradiation ingestion for PV forecasting is implemented (`docs/architecture/weather_forecast.md`, an MQTT-pushed feed rather than the originally-sketched poll loop). Grid CO2-intensity forecasting is not: no code path polls or receives a CO2-intensity feed, so the planner has no way to prefer low-carbon slots beyond whatever GHG values arrive on an event.
-**Fix:** Implement an `ExternalDataSource`/`ExternalDataPort` poll loop for a CO2-intensity provider, caching the last successful response and tracking `ExternalDataFetchStatus`; feed results into planning as a new forecast/cost input alongside tariffs.
-**Gain:** Medium — genuine carbon-aware planning capability, but realized value is speculative until a provider is actually chosen and integrated.
-**Complexity:** Large — third-party API dependency (no evaluated free-tier provider yet, per `docs/plans/roadmap/phase-5-forecast-and-baseline.md`), staleness/failure handling.
-**Verify:** TBD — depends on the chosen external API; at minimum, a fake-server integration test asserting `fetch_status` transitions correctly on success/failure/timeout.
 
 ---
 
