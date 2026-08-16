@@ -23,13 +23,24 @@ def step_expand_diagnostics(context):
     the accordion element itself (coordinate-based, not a text/testid
     sub-selector — a bare 'text=Diagnostics' also matches the VEN UI nav
     sidebar's unrelated "Diagnostics" menu group) lands on the summary and
-    toggles it. Verify via MUI's Mui-expanded class so this fails fast
-    instead of surfacing later as an unrelated hidden-element timeout."""
+    toggles it. React's Mui-expanded class flips synchronously with the
+    click, but MUI's Collapse wrapper measures content height and animates
+    to it asynchronously — wait for the wrapper's actual height, not just
+    the class, or content stays clipped to 0px and every element inside
+    reads as not-visible to Playwright even though the class already says
+    expanded."""
     page = context.browser_page
     accordion = page.wait_for_selector(tid("planner-diagnostics-accordion"), timeout=45000)
     accordion.click()
     page.wait_for_selector(
         f'{tid("planner-diagnostics-accordion")}.Mui-expanded', timeout=10000
+    )
+    page.wait_for_function(
+        """() => {
+            const root = document.querySelector('[data-testid="planner-diagnostics-accordion"] .MuiCollapse-root');
+            return root && root.getBoundingClientRect().height > 10;
+        }""",
+        timeout=10000,
     )
 
 
