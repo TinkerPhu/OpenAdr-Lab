@@ -36,11 +36,16 @@ pub fn compute_headroom_forecast(
 
             for (asset_id, point) in &frame.assets {
                 if asset_id == ASSET_PV {
-                    // Curtailment margin: how far below the fresh forecast
-                    // ceiling the plan's own PV usage currently sits — the
-                    // same shape as every other asset's "up" formula, but
-                    // PV can only ever contribute to down (it can't import).
-                    down_kw += (point.planned_kw - point.cap_max_export_kw).max(0.0);
+                    // Up: unused generation headroom toward the fresh forecast
+                    // ceiling — how much MORE the site could export (further
+                    // reduce consumption) if PV weren't held below its ceiling.
+                    // Same shape as every other asset's "up" formula.
+                    up_kw += (point.planned_kw - point.cap_max_export_kw).max(0.0);
+                    // Down: how much of PV's own currently-planned output could
+                    // be curtailed away, increasing site consumption by the
+                    // same amount. Bounded by PV's own output, not by
+                    // cap_max_import_kw (always 0 — PV can never import).
+                    down_kw += (-point.planned_kw).max(0.0);
                     continue;
                 }
                 up_kw += (point.planned_kw - point.cap_max_export_kw).max(0.0);
@@ -286,32 +291,15 @@ mod tests {
         assert!((out[1].down_kw - 0.0).abs() < 1e-9);
     }
 
-    // ── PV curtailment margin ───────────────────────────────────────────────
+    // ── PV: up = unused generation margin, down = curtailment of current output ──
 
     #[test]
-    fn pv_never_contributes_to_up() {
+    fn pv_up_kw_is_the_unused_generation_margin_toward_the_ceiling() {
         let now = Utc::now();
         let plan = make_plan(300, 1, now);
-        let frames = vec![AssetForecastFrame {
-            ts: now,
-            assets: HashMap::from([(
-                "pv".to_string(),
-                AssetForecastPoint {
-                    planned_kw: -1.0,
-                    cap_max_import_kw: 0.0,
-                    cap_max_export_kw: -3.0,
-                },
-            )]),
-        }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
-        assert_eq!(out[0].up_kw, 0.0);
-    }
-
-    #[test]
-    fn pv_down_kw_is_the_curtailment_margin_not_the_raw_ceiling() {
-        let now = Utc::now();
-        let plan = make_plan(300, 1, now);
-        // planned (used) = -1.0 kW, fresh ceiling = -3.0 kW → 2.0 kW curtailed.
+        // planned (used) = -1.0 kW, fresh ceiling = -3.0 kW → 2.0 kW of unused
+        // generation capacity — more export (further consumption reduction)
+        // is available if PV weren't held back below its ceiling.
         let frames = vec![AssetForecastFrame {
             ts: now,
             assets: HashMap::from([(
@@ -325,14 +313,39 @@ mod tests {
         }];
         let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
         assert!(
-            (out[0].down_kw - 2.0).abs() < 1e-9,
-            "expected 2.0 kW curtailment margin, got {}",
+            (out[0].up_kw - 2.0).abs() < 1e-9,
+            "expected 2.0 kW unused-generation margin as up_kw, got {}",
+            out[0].up_kw
+        );
+    }
+
+    #[test]
+    fn pv_down_kw_is_the_currently_planned_output_available_to_curtail() {
+        let now = Utc::now();
+        let plan = make_plan(300, 1, now);
+        // planned (used) = -1.0 kW — that whole 1.0 kW could be curtailed away,
+        // increasing site consumption by 1.0 kW. Independent of the ceiling.
+        let frames = vec![AssetForecastFrame {
+            ts: now,
+            assets: HashMap::from([(
+                "pv".to_string(),
+                AssetForecastPoint {
+                    planned_kw: -1.0,
+                    cap_max_import_kw: 0.0,
+                    cap_max_export_kw: -3.0,
+                },
+            )]),
+        }];
+        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        assert!(
+            (out[0].down_kw - 1.0).abs() < 1e-9,
+            "expected 1.0 kW of curtailable current output as down_kw, got {}",
             out[0].down_kw
         );
     }
 
     #[test]
-    fn pv_fully_using_its_ceiling_contributes_zero_down() {
+    fn pv_fully_using_its_ceiling_contributes_zero_up() {
         let now = Utc::now();
         let plan = make_plan(300, 1, now);
         let frames = vec![AssetForecastFrame {
@@ -347,6 +360,34 @@ mod tests {
             )]),
         }];
         let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        assert_eq!(
+            out[0].up_kw, 0.0,
+            "no unused margin left toward the ceiling"
+        );
+        assert!(
+            (out[0].down_kw - 3.0).abs() < 1e-9,
+            "all 3.0 kW of current output is still curtailable, got {}",
+            out[0].down_kw
+        );
+    }
+
+    #[test]
+    fn pv_idle_at_zero_ceiling_contributes_nothing_either_way() {
+        let now = Utc::now();
+        let plan = make_plan(300, 1, now);
+        let frames = vec![AssetForecastFrame {
+            ts: now,
+            assets: HashMap::from([(
+                "pv".to_string(),
+                AssetForecastPoint {
+                    planned_kw: 0.0,
+                    cap_max_import_kw: 0.0,
+                    cap_max_export_kw: 0.0,
+                },
+            )]),
+        }];
+        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        assert_eq!(out[0].up_kw, 0.0);
         assert_eq!(out[0].down_kw, 0.0);
     }
 

@@ -146,7 +146,11 @@ fn insert_pv_points(
         frames[i].assets.insert(
             ASSET_PV.to_string(),
             AssetForecastPoint {
-                planned_kw: slot.pv_used_kw,
+                // pv_used_kw is a positive generation magnitude (see
+                // controller/timeline.rs, controller/dispatcher.rs, which both
+                // negate it for the same reason) — negate here too so it
+                // matches cap_max_export_kw's export-negative convention.
+                planned_kw: -slot.pv_used_kw,
                 cap_max_import_kw: cap.max_import_kw,
                 cap_max_export_kw: cap.max_export_kw,
             },
@@ -268,6 +272,34 @@ mod tests {
              (full after slot 0's step) — proves capability is re-derived \
              per slot from the re-simulated state, not flat-copied; got {:?}",
             import_caps
+        );
+    }
+
+    #[test]
+    fn pv_planned_kw_is_negative_when_generating_matching_export_negative_convention() {
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Pv(PvParams {
+                id: ASSET_PV.to_string(),
+                rated_kw: 5.0,
+                inverter_max_kw: 5.0,
+                co2_g_kwh: 0.0,
+            })],
+            now,
+        );
+        let mut plan = make_plan(900, 1, now);
+        // pv_used_kw is stored as a positive generation magnitude everywhere
+        // else in this codebase (controller/timeline.rs, controller/dispatcher.rs
+        // both negate it) — the frame's planned_kw must follow the same
+        // export-negative convention as cap_max_export_kw, or every downstream
+        // headroom formula that mixes the two silently breaks.
+        plan.slots[0].pv_used_kw = 2.0;
+
+        let frames = build_forecast_frames(&sim, &plan, None, now);
+        let planned_kw = frames[0].assets[ASSET_PV].planned_kw;
+        assert!(
+            (planned_kw - (-2.0)).abs() < 1e-9,
+            "expected planned_kw = -2.0 (pv_used_kw negated), got {planned_kw}"
         );
     }
 
