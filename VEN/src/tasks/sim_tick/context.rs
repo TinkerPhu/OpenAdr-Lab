@@ -79,7 +79,7 @@ pub(crate) async fn resolve_tick_context(
         dispatch_windows: state.dispatch_windows().await,
         alert_windows: state.alert_windows().await,
         rates_snap: state.planned_tariffs().await,
-        overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state).await,
+        overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state, now).await,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
         ev_session: state.ev_session().await,

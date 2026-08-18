@@ -69,9 +69,23 @@ pub(crate) async fn record_arbiter_outcome(
     state.set_arbiter_active_lever(active_lever).await;
 }
 
-/// PHASE 0: user toggle AND no active EvSession. Also updates the derived
-/// `paused_by_active_session` flag on `EvSettings` when it goes stale.
-pub(crate) async fn resolve_overlay_enabled(state: &crate::state::AppState) -> bool {
+/// PHASE 0: user toggle AND no active (non-expired) EvSession. Also updates
+/// the derived `paused_by_active_session` flag on `EvSettings` when it goes
+/// stale, and clears an EvSession once its `departure_time` has passed —
+/// nothing else ever expires a session (only explicit cancel or the VTN
+/// signal disappearing), so a finished/missed session would otherwise pause
+/// opportunistic charging and hide the EV from the headroom forecast forever.
+pub(crate) async fn resolve_overlay_enabled(
+    state: &crate::state::AppState,
+    now: DateTime<Utc>,
+) -> bool {
+    let ev_sess_tick = state.ev_session().await;
+    if ev_sess_tick
+        .as_ref()
+        .is_some_and(|s| s.departure_time <= now)
+    {
+        state.set_ev_session(None).await;
+    }
     let ev_sess_tick = state.ev_session().await;
     let ev_settings_tick = state.ev_settings().await;
     let session_active = ev_sess_tick.is_some();
@@ -207,5 +221,63 @@ mod tests {
             ring[1].dedup_key.as_deref(),
             Some("arbiter-correction-cleared")
         );
+    }
+
+    fn make_ev_session(
+        departure_time: DateTime<Utc>,
+    ) -> crate::entities::device_session::EvSession {
+        crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.8,
+            departure_time,
+            soft_deadline: false,
+            mode: Default::default(),
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: ts(0),
+            updated_at: ts(0),
+        }
+    }
+
+    /// A session with `departure_time` still ahead of `now` must keep pausing
+    /// opportunistic charging and must not be cleared from state.
+    #[tokio::test]
+    async fn resolve_overlay_enabled_keeps_a_not_yet_expired_session() {
+        let state = AppState::new();
+        state.set_ev_session(Some(make_ev_session(ts(100)))).await;
+
+        let enabled = resolve_overlay_enabled(&state, ts(0)).await;
+
+        assert!(!enabled, "a live session must still suppress the overlay");
+        assert!(state.ev_session().await.is_some());
+        assert!(state.ev_settings().await.paused_by_active_session);
+    }
+
+    /// A session whose `departure_time` has already passed is never expired
+    /// by anything else (only explicit cancel or a vanished VTN signal) — it
+    /// must be cleared here so it stops permanently pausing opportunistic
+    /// charging and stops hiding the EV from the headroom forecast.
+    #[tokio::test]
+    async fn resolve_overlay_enabled_clears_an_expired_session() {
+        let state = AppState::new();
+        state.set_ev_session(Some(make_ev_session(ts(-1)))).await;
+        state
+            .set_ev_settings(crate::state::EvSettings {
+                opportunistic_charging_enabled: true,
+                paused_by_active_session: true,
+            })
+            .await;
+
+        let enabled = resolve_overlay_enabled(&state, ts(0)).await;
+
+        assert!(
+            enabled,
+            "an expired session must no longer suppress the overlay"
+        );
+        assert!(
+            state.ev_session().await.is_none(),
+            "expired session must be cleared from state"
+        );
+        assert!(!state.ev_settings().await.paused_by_active_session);
     }
 }

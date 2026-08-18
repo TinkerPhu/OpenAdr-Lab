@@ -162,7 +162,7 @@ export function EvCard(props: EvCardProps) {
           }
         />
         {paused && (
-          <Chip label="Paused — active plan" size="small" data-testid="ev-opportunistic-paused-chip" />
+          <Chip label="Paused — active charging session" size="small" data-testid="ev-opportunistic-paused-chip" />
         )}
       </CardActions>
 
