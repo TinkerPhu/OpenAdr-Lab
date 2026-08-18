@@ -90,6 +90,44 @@ describe("SiteHeadroomChart — past band renders continuously", () => {
   });
 });
 
+describe("SiteHeadroomChart — xAxisTickIntervalMinutes wiring (shared roundedTimeTicks pattern)", () => {
+  beforeEach(() => {
+    propsCalls.length = 0;
+  });
+
+  it("forwards rounded, wall-clock-snapped ticks to TimeSeriesChart when the prop is set", () => {
+    const nowMs = 1_000_000_000;
+    render(
+      <SiteHeadroomChart
+        gridTimeline={[]}
+        history={[]}
+        nowMs={nowMs}
+        hoursBack={1}
+        hoursForward={0}
+        xAxisTickIntervalMinutes={10}
+      />
+    );
+
+    const { xAxisTicks } = propsCalls[0] as { xAxisTicks?: number[] };
+    expect(xAxisTicks).toBeDefined();
+    expect(xAxisTicks!.length).toBeGreaterThan(0);
+    const intervalMs = 10 * 60_000;
+    for (const tick of xAxisTicks!) {
+      expect(tick % intervalMs).toBe(0);
+    }
+  });
+
+  it("leaves ticks undefined (recharts default) when the prop is omitted", () => {
+    const nowMs = 1_000_000_000;
+    render(
+      <SiteHeadroomChart gridTimeline={[]} history={[]} nowMs={nowMs} hoursBack={1} hoursForward={0} />
+    );
+
+    const { xAxisTicks } = propsCalls[0] as { xAxisTicks?: number[] };
+    expect(xAxisTicks).toBeUndefined();
+  });
+});
+
 describe("SiteHeadroomChart — forecast prop feeds the future band with real per-slot values", () => {
   beforeEach(() => {
     propsCalls.length = 0;

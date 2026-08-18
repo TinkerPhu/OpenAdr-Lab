@@ -6,6 +6,7 @@ import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
+  DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "../charts/chartLayout";
 import type { AssetTimelinePoint } from "./types";
 import type { SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../../api/types";
@@ -79,6 +80,7 @@ export function GridHeadroomCell({
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
           height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
+          xAxisTickIntervalMinutes={extended ? EXTENDED_TICK_INTERVAL_MINUTES : DEFAULT_TICK_INTERVAL_MINUTES}
         />
       </Box>
 
