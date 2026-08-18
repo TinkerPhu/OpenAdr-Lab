@@ -10553,3 +10553,106 @@ live against real per-slot data post-deploy.
 **Bookkeeping:** No `BACKLOG.md` item to remove — this originated from live
 user feedback on the Controller page, not a tracked backlog entry.
 
+## Fleet re-run S-9 (24h diurnal): GB-33 verification on live data (2026-08-17/19)
+
+Following GB-33's fix (interval-schedule event-level `intervalPeriod`
+fallback, merged 2026-08-17), the fleet-experiment stakeholder-KPI-reframe
+tooling had never been exercised against a real live run — the whole point
+of GB-25/GB-33's work was to make `grid_regulation` finally populate with
+real import/export capacity-compliance data, and that needed an actual
+scenario execution to confirm, not just unit tests.
+
+**Redeploy**: both hosts rebuilt from current `main` (Node1 was 15 commits
+behind; Node2's git checkout already matched `main` but its containers were
+still running images built 2 days earlier — a reminder that a matching
+`git rev-parse HEAD` is not proof of matching running code, only a rebuild
++ binary-timestamp check is). Both verified healthy, `GET /history/plans`
+returning 200, before touching the scenario.
+
+**Sequencing**: `s9_diurnal` (24h) and `s10_overexport` cannot run
+concurrently with anything else on this fleet — `run_experiment.py`'s
+events are program-wide and this project's VTN hands every polling VEN
+every active event regardless of which program it belongs to (the same
+mechanism behind fleet-run-2's "leftover test-rd-check program's reports
+leaked into our time window" finding). Two overlapping scenarios on the
+same 13 VENs would contaminate each other's price/capacity signals. Given
+the timing (redeploy finished with only ~90 min left before that night's
+local midnight — not enough for S-1..S-8 first), `s9_diurnal` was launched
+alone that night; S-1..S-8/S-10 are deferred to a follow-up run.
+
+**A real bug in this session's own launch, caught immediately**: the first
+launch attempt crashed on its very first HTTP call — `--vtn-url` was never
+passed, so it defaulted to `localhost:8200` (the orchestration workstation)
+instead of Node1's actual VTN. Caught within minutes via the log
+(`ConnectionRefusedError`), fixed, and relaunched ~6 minutes past the
+intended midnight start — negligible drift for a scenario whose price steps
+are 4 hours apart.
+
+**Lock-holding strategy**: rather than hold a single ~26h lock spanning the
+idle gap before the scenario's actual start, the process was launched
+detached (`--start-at` sleeping internally) *without* holding the lock, and
+the lock was acquired only ~6 minutes before the scenario's actions began
+posting — avoiding blocking other sessions' use of Node1/Node2 during a
+period when nothing was actually happening yet. Monitored hourly for the
+full 24h (process liveness, VTN program/plan cross-checks rather than
+trusting a possibly-buffered log, container-timestamp/git-HEAD integrity
+checks to catch a concurrent redeploy before it could corrupt the run) —
+mid-run, the user asked to release the locks, which was done, and a
+subsequent `git rev-parse HEAD` check confirmed another session's `git
+pull` landed on Node2 during that gap but did **not** trigger a rebuild/
+restart (container `CreatedAt` timestamps unchanged) — the run's data was
+never actually at risk, though the exposure was real and the locks were
+re-acquired for the remaining ~3.5h once asked to.
+
+**Result — GB-33 confirmed fixed on live data**: `grid_regulation.import`/
+`.export` now populate with real, non-`null` compliance and latency data
+for all 13 VENs, matching the scenario's exact action windows (240/241
+samples ≈ the 240-min import-cap window, 300 ≈ the 300-min export-cap
+window). `compliance_latency_s` also shows real, distinguishable values
+(e.g. ven-1: `0.0s` for the import cap — already compliant when it started
+— vs. a genuine `246.0s` detection latency for the export cap). All 13 VENs
+stayed 100% compliant with 0 overshoot on both caps — expected for this
+`tier: realistic` scenario (caps were sized to be achievable, unlike
+S-7/S-10's deliberately-forced stress-tier limits), not a sign anything is
+broken.
+
+**A genuine, unflattering finding, reported as-is**: `energy_business.
+tariff_response.pearson_r` came out slightly *positive* (`0.126`, weak) with
+`cheap_vs_expensive_pct: -28.2%` — the fleet actually imported *more*
+during the diurnal curve's expensive windows than its cheap ones, the
+opposite of good demand-response behavior (though the correlation itself is
+weak, closer to "no clear response" than "actively wrong"). Not
+investigated further here — this is exactly the kind of result the
+stakeholder-KPI reframe was built to surface, and it surfaced something
+real on its very first live use.
+
+**GB-36, a new bug found while sanity-checking `report_timeliness`**:
+`report_timeliness` came back with all-negative lag values (median
+`-43119.8s`), distinct in shape from the already-known GB-32 (which skews
+lag by at most one report interval, not tens of thousands of seconds).
+Traced to `VTN/bff/src/recorder.rs`'s `report_submission_lag_s`: it
+computes lag as `created − max(interval_end)` across every interval
+currently present in a report resource, correct for a report created fresh
+per submission, but openleadr-rs appears to grow a single long-lived report
+resource by appending intervals over its lifetime without updating
+`createdDateTime` — so lag drifts increasingly negative the longer the
+report resource lives, a signature only visible once a scenario runs long
+enough to accumulate many intervals in one report (confirmed: values
+progressed in ~300s steps matching the report's own frequency).
+`kpi.py`'s own `event_ids` filtering was independently confirmed correct
+during this investigation (count 7410 = 285 samples × 13 VENs × 2 report
+types, exactly matching this run's own event — other programs' reports,
+some off by *millions* of seconds, were correctly excluded). Filed as
+GB-36, not fixed — needs a design decision on what the metric should
+actually measure for a growing report resource before touching
+`recorder.rs`, not a one-line parse fix like GB-32 was.
+
+**Cleanup**: no orphaned VTN program/events after the run's own `finally`
+block ran; a leftover empty result directory from the crashed first launch
+attempt (`20260817-2016-s9_diurnal/`) removed; both locks released.
+
+**Not done / left open**: `s1_flat` through `s8_budget` and `s10_overexport`
+— deferred to a follow-up run, this session only covered `s9_diurnal`.
+GB-36 (new). GB-31/GB-24 remain open as before. The tariff-response finding
+above is reported, not investigated further.
+
