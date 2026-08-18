@@ -197,6 +197,7 @@ export function HistoryPage() {
         nowMs={toMs}
         hoursBack={24}
         hoursForward={0}
+        xAxisTickIntervalMinutes={30}
       />
 
       {[...ticksByAsset.entries()].map(([assetId, points]) => {

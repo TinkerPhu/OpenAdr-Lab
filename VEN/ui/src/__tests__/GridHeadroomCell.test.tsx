@@ -13,14 +13,17 @@ vi.mock("../components/controller/charts/SiteHeadroomChart", () => ({
   SiteHeadroomChart: ({
     history,
     forecast,
+    xAxisTickIntervalMinutes,
   }: {
     history: SiteFlexibilitySample[];
     forecast: SiteFlexibilityForecastSlot[];
+    xAxisTickIntervalMinutes?: number;
   }) => (
     <div
       data-testid="site-headroom-chart"
       data-history-len={String(history.length)}
       data-forecast-len={String(forecast.length)}
+      data-tick-interval-minutes={String(xAxisTickIntervalMinutes)}
     />
   ),
 }));
@@ -110,6 +113,38 @@ describe("GridHeadroomCell", () => {
       />
     );
     expect(screen.getByTestId("site-headroom-chart")).toHaveAttribute("data-forecast-len", "1");
+  });
+
+  it("passes the default tick interval to SiteHeadroomChart when not extended", () => {
+    render(
+      <GridHeadroomCell
+        envelope={envelope}
+        history={history}
+        forecast={[]}
+        gridTimeline={[]}
+        nowMs={Date.now()}
+        extended={false}
+        pinned={false}
+        onTogglePin={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("site-headroom-chart")).toHaveAttribute("data-tick-interval-minutes", "10");
+  });
+
+  it("passes the extended tick interval to SiteHeadroomChart when extended", () => {
+    render(
+      <GridHeadroomCell
+        envelope={envelope}
+        history={history}
+        forecast={[]}
+        gridTimeline={[]}
+        nowMs={Date.now()}
+        extended={true}
+        pinned={false}
+        onTogglePin={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("site-headroom-chart")).toHaveAttribute("data-tick-interval-minutes", "30");
   });
 
   it("calls onTogglePin when the pin button is clicked", async () => {

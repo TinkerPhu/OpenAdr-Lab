@@ -7,7 +7,13 @@ import {
   clipRowsToWindow,
   ensureNonEmptyRows,
 } from "../../charts/mergeSeries";
-import { minSpanDomain, MIN_POWER_SPAN_KW, zeroAnchoredTicks, formatPowerTick } from "../../charts/axisDomain";
+import {
+  minSpanDomain,
+  MIN_POWER_SPAN_KW,
+  roundedTimeTicks,
+  zeroAnchoredTicks,
+  formatPowerTick,
+} from "../../charts/axisDomain";
 import { formatSignedPowerValue, formatPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
@@ -26,6 +32,9 @@ interface SiteHeadroomChartProps {
   hoursBack?: number;
   hoursForward?: number;
   height?: number;
+  /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:30, ...) instead of
+   * recharts' default "nice" ticks — same mechanism as GridRatesChart/TariffEnvelopeChart. */
+  xAxisTickIntervalMinutes?: number;
 }
 
 /**
@@ -42,9 +51,13 @@ export function SiteHeadroomChart({
   hoursBack = 1.0,
   hoursForward = 1.0,
   height,
+  xAxisTickIntervalMinutes,
 }: SiteHeadroomChartProps) {
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+  const xAxisTicks = xAxisTickIntervalMinutes
+    ? roundedTimeTicks(tMin, tMax, xAxisTickIntervalMinutes)
+    : undefined;
 
   const gridRows: TimestampedRow[] = gridTimeline.map((p) => ({
     ts: p.ts,
@@ -123,8 +136,9 @@ export function SiteHeadroomChart({
       tMin={tMin}
       tMax={tMax}
       xAxisTickFormatter={formatTs}
+      xAxisTicks={xAxisTicks}
       axes={[
-        { id: "power", width: 48, domain, tickFormatter: formatPowerTick, ticks: zeroAnchoredTicks(domain) },
+        { id: "power", width: 46, domain, tickFormatter: formatPowerTick, ticks: zeroAnchoredTicks(domain) },
       ]}
       series={series}
       bands={[
