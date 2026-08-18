@@ -56,8 +56,12 @@ pub fn build_forecast_frames(
                     // physics projection would keep showing "still plugged" for
                     // the whole horizon even past the real session's deadline.
                     // Zero this asset out past the live session end instead of
-                    // trusting a physics-only artifact.
-                    ev_session.is_some_and(|s| slot.start < s.departure_time)
+                    // trusting a physics-only artifact. No session at all means
+                    // no known deadline to respect, so the EV keeps contributing
+                    // (map_or's `true` default) rather than being excluded
+                    // outright — this asset's forecast must not depend on a
+                    // user-created session existing at all.
+                    ev_session.is_none_or(|s| slot.start < s.departure_time)
                 });
             }
             AssetConfig::Battery(_) | AssetConfig::Heater(_) => {
@@ -384,6 +388,37 @@ mod tests {
         assert!(
             !frames[3].assets.contains_key(ASSET_EV),
             "EV must not contribute past its live session's departure_time"
+        );
+    }
+
+    #[test]
+    fn ev_contributes_at_every_slot_when_no_session_is_active() {
+        // No user-created charging session at all is the common case (an EV
+        // just sitting plugged in) — it must not be read as "deadline already
+        // passed, exclude everywhere". Absence of a session means absence of
+        // a known deadline, not an implicit one in the past.
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Ev(EvParams {
+                id: ASSET_EV.to_string(),
+                max_charge_kw: 7.0,
+                max_discharge_kw: 0.0,
+                initial_soc: 0.5,
+                battery_kwh: 60.0,
+                soc_target: 0.8,
+                default_charge_kw: 0.0,
+                min_charge_kw: 1.4,
+                response_delay_s: 0.0,
+            })],
+            now,
+        );
+        let plan = make_plan(900, 4, now);
+
+        let frames = build_forecast_frames(&sim, &plan, None, now);
+
+        assert!(
+            frames.iter().all(|f| f.assets.contains_key(ASSET_EV)),
+            "EV must contribute at every slot when there is no session to bound it"
         );
     }
 }
