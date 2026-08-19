@@ -445,7 +445,7 @@ def setup_persona_sessions(manifest_path, host):
     return ven_names, teardown
 
 
-def setup_ev_roster_sessions(roster_path, fleet_map, host, mode, target_soc, deadline_hour_utc, budget_eur):
+def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_hour_utc, budget_eur):
     """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
     one identical, explicit EV session, addressed via `fleet_map`'s existing
     per-VEN host/port -- NOT `setup_persona_sessions`'s manifest, which (a)
@@ -457,8 +457,11 @@ def setup_ev_roster_sessions(roster_path, fleet_map, host, mode, target_soc, dea
     docs/guidelines/FLEET_EXPERIMENT_DESIGN.md). Returns (ven_names, teardown).
 
     `fleet_map` is `experiments/fleet_map.json`'s already-loaded `"vens"` dict
-    (ven_name -> {"lan_ip", "port", ...}); `host` is only used as a fallback
-    for roster entries missing from `fleet_map` (mirrors --fleet-host)."""
+    (ven_name -> {"lan_ip", "port", ...}) and is required -- unlike host, a
+    roster entry has no port of its own, so there is no meaningful fallback
+    for a VEN missing from `fleet_map`; it is skipped with a WARN instead.
+    Callers should validate `--fleet-map` was given alongside
+    `--ev-session-mode` (see main()) rather than relying on that WARN."""
     roster = json.loads(Path(roster_path).read_text(encoding="utf-8"))["vens"]
     now = datetime.now(timezone.utc)
     dep = _persona_departure(deadline_hour_utc, now) if mode == "BY_DEADLINE" else now + timedelta(hours=8)
@@ -466,10 +469,10 @@ def setup_ev_roster_sessions(roster_path, fleet_map, host, mode, target_soc, dea
     ven_names = []
     for ven_name in roster:
         entry = (fleet_map or {}).get(ven_name)
-        base = f"http://{entry['lan_ip']}:{entry['port']}" if entry else f"http://{host}:{ven_name}"
         if not entry:
             print(f"WARN: {ven_name} not in --fleet-map, skipping EV session")
             continue
+        base = f"http://{entry['lan_ip']}:{entry['port']}"
         body = {
             "asset_id": "ev",
             "target_soc": target_soc,
@@ -732,6 +735,13 @@ def main():
     )
     args = p.parse_args()
 
+    if args.ev_session_mode and not args.fleet_map:
+        p.error(
+            "--ev-session-mode requires --fleet-map (setup_ev_roster_sessions needs each "
+            "roster VEN's host/port from it -- without it every VEN is silently skipped, "
+            "reproducing GB-37's original bug: every EV inert for the whole run)"
+        )
+
     start_at = None
     if args.start_at:
         start_at = datetime.strptime(args.start_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -764,7 +774,7 @@ def main():
     ev_roster_teardown = None
     if args.ev_session_mode:
         ev_names, ev_roster_teardown = setup_ev_roster_sessions(
-            args.ev_roster, fleet_map, args.fleet_host, args.ev_session_mode,
+            args.ev_roster, fleet_map, args.ev_session_mode,
             args.ev_target_soc, args.ev_deadline_hour_utc, args.ev_budget_eur,
         )
         ven_names = sorted(set(ven_names) | set(ev_names))
@@ -849,7 +859,7 @@ def _self_check_ev_roster_sessions():
                 # ven-99 deliberately absent -- must be skipped, not crash.
             }
             ven_names, teardown = setup_ev_roster_sessions(
-                roster_path, fleet_map, "localhost", "BY_DEADLINE", 0.8, 7, None,
+                roster_path, fleet_map, "BY_DEADLINE", 0.8, 7, None,
             )
             assert ven_names == ["ven-1", "ven-11"], ven_names
             assert len(posted) == 2, posted
