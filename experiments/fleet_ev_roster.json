@@ -1,0 +1,4 @@
+{
+  "_comment": "GB-37: the EV-bearing VENs in the hand-authored 13-VEN fleet (VEN/profiles/ven-1..13.yaml), derived via `grep -l \"type: ev\" VEN/profiles/ven-*.yaml`. Consumed by experiments/run_experiment.py's setup_ev_roster_sessions() when launched with --ev-session-mode, to give exactly this set of VENs one uniform, explicit EV session for the run -- see docs/guidelines/FLEET_EXPERIMENT_DESIGN.md. Kept separate from fleet_map.json (host/port infra, unrelated to which VENs happen to own an EV asset).",
+  "vens": ["ven-1", "ven-3", "ven-5", "ven-7", "ven-11", "ven-12"]
+}

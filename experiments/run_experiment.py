@@ -445,6 +445,56 @@ def setup_persona_sessions(manifest_path, host):
     return ven_names, teardown
 
 
+def setup_ev_roster_sessions(roster_path, fleet_map, host, mode, target_soc, deadline_hour_utc, budget_eur):
+    """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
+    one identical, explicit EV session, addressed via `fleet_map`'s existing
+    per-VEN host/port -- NOT `setup_persona_sessions`'s manifest, which (a)
+    doesn't exist for the hand-authored ven-1..13 fleet and (b) assumes a
+    single `host` for every VEN, which this two-host fleet (Node1 + Node2)
+    doesn't satisfy. `mode` is applied uniformly across the whole roster, by
+    design -- a causal/attribution scenario (e.g. tariff_response) needs one
+    controlled population, not a mixed persona spread (see
+    docs/guidelines/FLEET_EXPERIMENT_DESIGN.md). Returns (ven_names, teardown).
+
+    `fleet_map` is `experiments/fleet_map.json`'s already-loaded `"vens"` dict
+    (ven_name -> {"lan_ip", "port", ...}); `host` is only used as a fallback
+    for roster entries missing from `fleet_map` (mirrors --fleet-host)."""
+    roster = json.loads(Path(roster_path).read_text(encoding="utf-8"))["vens"]
+    now = datetime.now(timezone.utc)
+    dep = _persona_departure(deadline_hour_utc, now) if mode == "BY_DEADLINE" else now + timedelta(hours=8)
+    created = []  # (base_url, request_id)
+    ven_names = []
+    for ven_name in roster:
+        entry = (fleet_map or {}).get(ven_name)
+        base = f"http://{entry['lan_ip']}:{entry['port']}" if entry else f"http://{host}:{ven_name}"
+        if not entry:
+            print(f"WARN: {ven_name} not in --fleet-map, skipping EV session")
+            continue
+        body = {
+            "asset_id": "ev",
+            "target_soc": target_soc,
+            "deadlines": [{"latest_end": iso(dep)}],
+            "mode": mode,
+        }
+        if budget_eur is not None:
+            body["budget_eur"] = budget_eur
+        try:
+            request_id = post_user_request(base, body)
+            print(f"  ev-roster {ven_name}: mode={mode} target_soc={target_soc} deadline={iso(dep)}")
+        except requests.RequestException as e:
+            print(f"WARN: ev-roster session for {ven_name}: {e}")
+            request_id = None
+        created.append((base, request_id))
+        ven_names.append(ven_name)
+
+    def teardown():
+        for base, request_id in created:
+            if request_id:
+                delete_user_request(base, request_id)
+
+    return ven_names, teardown
+
+
 def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label, program_name, actions,
                report_descriptors=None, tier="realistic"):
     """Run one real-time window against the VTN: create a throwaway program,
@@ -623,6 +673,29 @@ def main():
     p.add_argument("--fleet-manifest", default=str(REPO_ROOT / "VEN" / "fleet" / "manifest.json"))
     p.add_argument("--fleet-host", default="localhost")
     p.add_argument(
+        "--ev-session-mode",
+        choices=["ASAP", "BY_DEADLINE", "OPPORTUNISTIC", "ASAP_FREE", "MAX_COST"],
+        help="GB-37: give every EV in --ev-roster one identical session in this mode "
+             "before the scenario, torn down after -- for the hand-authored ven-1..13 "
+             "fleet, which --personas cannot address (see setup_ev_roster_sessions). "
+             "Omit for scenarios that don't care about EV behavior; every EV then stays "
+             "unplugged-equivalent (EvMilpMode::MustNotRun), as before this flag existed. "
+             "Only BY_DEADLINE/ASAP/MAX_COST route the real per-slot tariff into the EV's "
+             "MILP reward -- OPPORTUNISTIC/ASAP_FREE are gated on PV surplus, not price, "
+             "and will not produce a meaningful tariff_response signal.",
+    )
+    p.add_argument("--ev-roster", default=str(REPO_ROOT / "experiments" / "fleet_ev_roster.json"))
+    p.add_argument("--ev-target-soc", type=float, default=0.8)
+    p.add_argument(
+        "--ev-deadline-hour-utc", type=int, default=7,
+        help="Only used when --ev-session-mode BY_DEADLINE: next occurrence of this UTC "
+             "hour (at least 2h out) is used as every roster VEN's session deadline.",
+    )
+    p.add_argument(
+        "--ev-budget-eur", type=float, default=None,
+        help="Only used when --ev-session-mode MAX_COST: session budget_eur.",
+    )
+    p.add_argument(
         "--fleet-map",
         help="experiments/fleet_map.json — host/port for each VEN. When given, --vens "
              "defaults to every VEN in the map (all 13) instead of ven-1,ven-2,ven-3, "
@@ -688,6 +761,14 @@ def main():
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
         ven_names = sorted(set(ven_names) | set(fleet_names))
 
+    ev_roster_teardown = None
+    if args.ev_session_mode:
+        ev_names, ev_roster_teardown = setup_ev_roster_sessions(
+            args.ev_roster, fleet_map, args.fleet_host, args.ev_session_mode,
+            args.ev_target_soc, args.ev_deadline_hour_utc, args.ev_budget_eur,
+        )
+        ven_names = sorted(set(ven_names) | set(ev_names))
+
     try:
         baseline_dir = None
         if args.paired_baseline:
@@ -720,11 +801,75 @@ def main():
     finally:
         if persona_teardown:
             persona_teardown()
+        if ev_roster_teardown:
+            ev_roster_teardown()
 
     print(f"=== snapshot written to {run_dir} ===")
     baseline_hint = str(baseline_dir) if baseline_dir else "<s1 run dir>"
     print(f"Next: python3 experiments/kpi.py --run {run_dir} [--baseline {baseline_hint}]")
 
 
+def _self_check_ev_roster_sessions():
+    """GB-37: shape-only check for setup_ev_roster_sessions -- no live HTTP,
+    matching this project's existing convention for these ops scripts (no
+    pytest infra exists for experiments/scripts/; scripts/personas.py uses
+    the same run-directly self-check pattern). Monkeypatches requests.post/
+    delete for the duration of the check, then restores them."""
+    import tempfile
+
+    posted = []
+    deleted = []
+
+    def fake_post(url, json=None, timeout=None):
+        posted.append((url, json))
+
+        class R:
+            status_code = 201
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"id": f"req-{len(posted)}"}
+
+        return R()
+
+    def fake_delete(url, timeout=None):
+        deleted.append(url)
+
+    real_post, real_delete = requests.post, requests.delete
+    requests.post, requests.delete = fake_post, fake_delete
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            roster_path = Path(td) / "roster.json"
+            roster_path.write_text(json.dumps({"vens": ["ven-1", "ven-11", "ven-99"]}))
+            fleet_map = {
+                "ven-1": {"lan_ip": "192.168.1.103", "port": 8211},
+                "ven-11": {"lan_ip": "192.168.1.104", "port": 8221},
+                # ven-99 deliberately absent -- must be skipped, not crash.
+            }
+            ven_names, teardown = setup_ev_roster_sessions(
+                roster_path, fleet_map, "localhost", "BY_DEADLINE", 0.8, 7, None,
+            )
+            assert ven_names == ["ven-1", "ven-11"], ven_names
+            assert len(posted) == 2, posted
+            url0, body0 = posted[0]
+            assert url0 == "http://192.168.1.103:8211/user-requests", url0
+            assert body0["asset_id"] == "ev" and body0["mode"] == "BY_DEADLINE", body0
+            assert body0["target_soc"] == 0.8, body0
+            assert "budget_eur" not in body0, body0
+            teardown()
+            assert deleted == [
+                "http://192.168.1.103:8211/user-requests/req-1",
+                "http://192.168.1.104:8221/user-requests/req-2",
+            ], deleted
+    finally:
+        requests.post, requests.delete = real_post, real_delete
+    print("_self_check_ev_roster_sessions OK")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
+        _self_check_ev_roster_sessions()
+    else:
+        main()
