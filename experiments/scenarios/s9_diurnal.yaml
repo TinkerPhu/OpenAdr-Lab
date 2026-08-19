@@ -10,6 +10,19 @@
 # location, so launching at any other time misaligns the scripted price/
 # capacity steps against the real generation curve they're meant to line
 # up with.
+#
+# Scenario intent (docs/guidelines/FLEET_EXPERIMENT_DESIGN.md): this is a
+# causal/attribution scenario for `energy_business.tariff_response`, not an
+# aggregate/system one -- it needs a controlled EV population, not the
+# fleet's natural persona/asset-mix diversity. Also pass
+# `--ev-session-mode BY_DEADLINE --ev-roster experiments/fleet_ev_roster.json`
+# (GB-37, docs/BACKLOG.md): without it, every EV-bearing VEN's EV has no
+# active session and sits inert (EvMilpMode::MustNotRun) for the whole run,
+# which is exactly what produced the misleading tariff_response numbers in
+# the first live S-9 run (docs/history/fleet_run_journal.md). Never launch
+# with `--personas` for this scenario even once it's usable against this
+# fleet -- its default persona mix leans OPPORTUNISTIC/ASAP_FREE, which are
+# gated on PV surplus, not price, and would still confound the result.
 name: s9_diurnal
 description: 24h duck-curve price shape + evening import cap + midday export cap
 tier: realistic
