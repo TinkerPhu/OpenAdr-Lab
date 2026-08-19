@@ -160,7 +160,12 @@ export function SiteHeadroomChart({
       nowMs={nowMs}
       referenceAxisId="power"
       height={height ?? CELL_CHART_HEIGHT}
-      margin={{ top: 4, right: 40, left: 0, bottom: 0 }}
+      // No right-side axis here (single "power" axis, left only), but this chart is
+      // stacked in the same column as TariffEnvelopeChart/GridRatesChart/AssetTimelineChart,
+      // which all reserve ~88-92px on the right for a second axis. Matching that reserve via
+      // margin.right (instead of the generic default of 40) keeps every stacked chart's plot
+      // area — and therefore its X-axis ticks/gridlines — the same width and aligned.
+      margin={{ top: 4, right: 88, left: 0, bottom: 0 }}
     />
   );
 }
