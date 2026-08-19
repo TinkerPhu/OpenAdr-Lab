@@ -9837,3 +9837,30 @@ this on an 8 GB host.
 
 **Bookkeeping:** No `BACKLOG.md` item — this originated from live user feedback on the
 History tab, not a tracked backlog entry.
+
+---
+
+## GB-14: Node1 already has its own SSH identity — backlog note was stale (2026-08-19)
+
+**Trigger:** GB-14 (filed 2026-07-31) claimed `~/.ssh/config`'s `Node1` entry had no
+`IdentityFile` and fell back to whatever default identity (`id_rsa`) the server accepted,
+unlike `Node2`. Picked next off the re-ranked top-5 pressing list.
+
+**Investigation:** Read `~/.ssh/config` directly — both `Node1` and `Node2` entries already
+pin their own `IdentityFile` (`id_ed25519_pi4`, `id_ed25519_po4`), and both key files exist
+on disk (`id_ed25519_pi4` created 2026-08-01, i.e. after the 2026-07-31 note was written).
+Verified live with `ssh -v Node1`: the client offers `id_ed25519_pi4` explicitly and
+authenticates with it — no fallback to a default identity occurs.
+
+**Fix:** None needed — a prior, untracked change (dated 2026-08-01) already gave Node1 its
+own dedicated key. The backlog entry just hadn't been removed after the fact.
+
+**Key learning:** Same lesson as GB-31's "don't trust an existing debt note's stated blocker
+without re-checking" — this time the note was stale in the *other* direction: the underlying
+condition it described had already been fixed by unrelated work, not narrowed or wrong from
+the start. Worth a quick verification pass before implementing any backlog item whose
+premise is a specific file/config state, since that state can silently drift.
+
+**Bookkeeping:** Removed `GB-14` from `docs/BACKLOG.md` (verified already resolved, no code
+or config change made in this pass).
+
