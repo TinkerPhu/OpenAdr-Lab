@@ -58,6 +58,8 @@ fn split_kinds(s: &str) -> Result<Vec<WarningKind>, DomainError> {
 fn solve_status_str(status: SolveStatus) -> &'static str {
     match status {
         SolveStatus::Optimal => "OPTIMAL",
+        SolveStatus::TimeLimit => "TIME_LIMIT",
+        SolveStatus::GapLimit => "GAP_LIMIT",
         SolveStatus::Infeasible => "INFEASIBLE",
     }
 }
@@ -65,6 +67,8 @@ fn solve_status_str(status: SolveStatus) -> &'static str {
 fn parse_solve_status(s: &str) -> Result<SolveStatus, DomainError> {
     match s {
         "OPTIMAL" => Ok(SolveStatus::Optimal),
+        "TIME_LIMIT" => Ok(SolveStatus::TimeLimit),
+        "GAP_LIMIT" => Ok(SolveStatus::GapLimit),
         "INFEASIBLE" => Ok(SolveStatus::Infeasible),
         other => Err(DomainError::StorageError(format!(
             "invalid stored solve_status: {other}"

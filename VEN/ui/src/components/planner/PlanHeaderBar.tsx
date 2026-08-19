@@ -60,6 +60,10 @@ export function PlanHeaderBar({ plan }: Props) {
 
   const hasWarnings = plan.warnings.length > 0;
   const isInfeasible = plan.solve_status === "INFEASIBLE";
+  // GB-31 — a feasible plan the solver couldn't certify optimal (cut off by
+  // the timeout or by hitting the configured MIP-gap tolerance): distinct
+  // from both a clean Optimal solve and the no-plan-at-all Infeasible case.
+  const isSuboptimal = plan.solve_status === "TIME_LIMIT" || plan.solve_status === "GAP_LIMIT";
 
   return (
     <Box data-testid="plan-header">
@@ -74,6 +78,23 @@ export function PlanHeaderBar({ plan }: Props) {
               icon={<ErrorOutlineIcon fontSize="small" />}
               label="Infeasible"
               color="error"
+              size="small"
+            />
+          </Tooltip>
+        )}
+        {isSuboptimal && (
+          <Tooltip
+            title={
+              plan.solve_status === "TIME_LIMIT"
+                ? "The solver found a feasible plan but was cut off by its time limit before certifying optimality."
+                : "The solver found a feasible plan within the configured MIP-gap tolerance but stopped before certifying full optimality."
+            }
+          >
+            <Chip
+              data-testid="plan-suboptimal-chip"
+              icon={<WarningAmberIcon fontSize="small" />}
+              label="Not certified optimal"
+              color="warning"
               size="small"
             />
           </Tooltip>

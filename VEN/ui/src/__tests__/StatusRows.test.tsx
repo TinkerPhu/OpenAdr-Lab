@@ -75,6 +75,18 @@ describe("PlanStatusRow", () => {
     render(<PlanStatusRow plan={makePlan({ solve_status: "INFEASIBLE" })} />);
     expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/infeasible/i);
   });
+
+  it("shows a not-certified-optimal state when the solver hit its time limit", () => {
+    render(<PlanStatusRow plan={makePlan({ solve_status: "TIME_LIMIT" })} />);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/not certified optimal/i);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/time limit/i);
+  });
+
+  it("shows a not-certified-optimal state when the solver hit its gap tolerance", () => {
+    render(<PlanStatusRow plan={makePlan({ solve_status: "GAP_LIMIT" })} />);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/not certified optimal/i);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/gap tolerance/i);
+  });
 });
 
 describe("TaskSummaryRow", () => {

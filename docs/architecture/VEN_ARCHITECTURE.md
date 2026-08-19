@@ -735,9 +735,20 @@ the live event, `GET /plan`, and the plan-history row all agree. `mip_gap_target
 `Plan` construction time in `controller::milp_planner::results` from the shared
 `controller::milp_planner::types::MIP_GAP_TARGET` constant (`0.02`) — the same value passed to
 `good_lp`'s `with_mip_gap` at all three solve call sites (`solver_phase1`, `solver_phase2`,
-`solver_duals`). This is a proxy only: the *configured* tolerance, not the *achieved* gap on any
-given solve — `good_lp`/`highs` expose no achieved-gap query today (tracked as debt in
-`docs/reference/TECHNICAL_DEBTS.md`).
+`solver_duals`). This remains a proxy only: the *configured* tolerance, not the *achieved* gap as
+a number on any given solve — `good_lp`'s public API exposes no achieved-gap query (tracked as
+debt in `docs/reference/TECHNICAL_DEBTS.md`).
+
+**`Plan.solve_status`** (GB-31) — reads the solver's real termination reason instead of always
+reporting `Optimal`. `SolveOutput` (`controller::milp_planner::types`) carries the winning solve's
+`good_lp::solvers::SolutionStatus`, captured in `read_solve_output` and mapped via
+`types::map_solve_status` onto `SolveStatus::{Optimal, TimeLimit, GapLimit}` at `Plan`
+construction; `Infeasible` is still set directly by `fallback_plan`, since a solve that returns
+`Err` (genuinely infeasible, unbounded, or any other solver failure) never produces a
+`SolutionStatus` to map from. `TimeLimit`/`GapLimit` both mean a *feasible* plan was found but
+optimality wasn't certified — the VEN UI's `PlanHeaderBar`/`PlanStatusRow` surface this as a
+distinct "not certified optimal" signal, separate from both a clean `Optimal` solve and the
+no-plan-at-all `Infeasible` case.
 
 **`PlanWarning.kind`** — a typed `WarningKind` enum (`SOLVER_INFEASIBLE`, `STALE_RATE_ESTIMATE`,
 `BUDGET_SHORTFALL`, `CAPACITY_VIOLATION`, `PEAK_PENALTY_EXCEEDED`, `OTHER`) alongside the existing

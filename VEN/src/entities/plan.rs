@@ -236,15 +236,27 @@ pub struct SiteFlexibilityForecastSlot {
 
 /// Outcome of the MILP solve that produced a `Plan`.
 ///
-/// Two states only — the codebase has no distinct heuristic-solve path today
-/// (verified: all "heuristic" references are `AssetHeuristics`/BL-14 learned load
-/// profiles, unrelated to solver fallback). `fallback_plan` is synonymous with
-/// infeasibility, not a substitute heuristic solve. A `FallbackHeuristic` variant
-/// is deferred until a real heuristic-solve path exists (candidate: BL-13).
+/// `Infeasible` covers every solve failure the two-phase solver can hit
+/// (genuinely infeasible, unbounded, or any other solver error) — the
+/// codebase has no distinct heuristic-solve path today (verified: all
+/// "heuristic" references are `AssetHeuristics`/BL-14 learned load profiles,
+/// unrelated to solver fallback), so `fallback_plan` is synonymous with
+/// infeasibility, not a substitute heuristic solve.
+///
+/// `TimeLimit`/`GapLimit` (GB-31) cover the two ways a *feasible* solve can
+/// still be non-optimal: HiGHS stopped at `solver_timeout_s` before
+/// certifying optimality, or it stopped once the solution was within
+/// `MIP_GAP_TARGET` of the best known bound (the more common case in
+/// practice) — both read straight from `good_lp`'s `SolutionStatus`, not
+/// hardcoded. See `MIP_GAP_TARGET`'s doc comment for what's still not
+/// exposed (the achieved gap as a number, as opposed to this coarser
+/// within-target/not classification).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SolveStatus {
     Optimal,
+    TimeLimit,
+    GapLimit,
     Infeasible,
 }
 
@@ -416,12 +428,28 @@ mod solve_status_tests {
             "\"OPTIMAL\""
         );
         assert_eq!(
+            serde_json::to_string(&SolveStatus::TimeLimit).unwrap(),
+            "\"TIME_LIMIT\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SolveStatus::GapLimit).unwrap(),
+            "\"GAP_LIMIT\""
+        );
+        assert_eq!(
             serde_json::to_string(&SolveStatus::Infeasible).unwrap(),
             "\"INFEASIBLE\""
         );
         assert_eq!(
             serde_json::from_str::<SolveStatus>("\"OPTIMAL\"").unwrap(),
             SolveStatus::Optimal
+        );
+        assert_eq!(
+            serde_json::from_str::<SolveStatus>("\"TIME_LIMIT\"").unwrap(),
+            SolveStatus::TimeLimit
+        );
+        assert_eq!(
+            serde_json::from_str::<SolveStatus>("\"GAP_LIMIT\"").unwrap(),
+            SolveStatus::GapLimit
         );
         assert_eq!(
             serde_json::from_str::<SolveStatus>("\"INFEASIBLE\"").unwrap(),
