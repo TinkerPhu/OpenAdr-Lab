@@ -1068,15 +1068,45 @@ stayed 100% compliant with 0 overshoot on both caps — expected for this
 S-7/S-10's deliberately-forced stress-tier limits), not a sign anything is
 broken.
 
-**A genuine, unflattering finding, reported as-is**: `energy_business.
-tariff_response.pearson_r` came out slightly *positive* (`0.126`, weak) with
-`cheap_vs_expensive_pct: -28.2%` — the fleet actually imported *more*
-during the diurnal curve's expensive windows than its cheap ones, the
-opposite of good demand-response behavior (though the correlation itself is
-weak, closer to "no clear response" than "actively wrong"). Not
-investigated further here — this is exactly the kind of result the
-stakeholder-KPI reframe was built to surface, and it surfaced something
-real on its very first live use.
+**A genuine, unflattering finding, reported as-is — then investigated and
+explained (2026-08-19)**: `energy_business.tariff_response.pearson_r` came
+out slightly *positive* for ven-1 (`0.126`, weak) with
+`cheap_vs_expensive_pct: -28.2%`, at first glance the opposite of good
+demand-response behavior. Follow-up investigation across all 13 VENs'
+per-VEN `tariff_response` (not just ven-1, the one quoted here) found the
+sign split roughly evenly (5 anti-correlated, 5 correctly correlated, 3
+flat) rather than being a fleet-wide failure, and traced the two real
+drivers:
+
+- ven-1 specifically runs on real MQTT weather/load ground truth
+  (`measurements.pv_enabled: true` in its profile), not the modeled PV
+  curve every other VEN uses — its result reflects actual Zunzgen weather
+  on 2026-08-16/17, not the idealized diurnal shape the scenario assumes,
+  and shouldn't be read as representative of the fleet.
+- Every EV-touching VEN's correlation was noise, for a root cause found by
+  reading `VEN/src/assets/ev_milp.rs::EvMilpContext::from_state`: without
+  an active `EvSession` (created only via `POST /user-requests`, which
+  `run_experiment.py` only does when launched with `--personas`), the EV's
+  MILP mode is `MustNotRun` — the solver is hard-constrained to zero
+  charging power for every slot, the whole run. This S-9 launch did not
+  pass `--personas`, so **no EV in the fleet was ever deliberately charged
+  by the optimizer**; each just sat plugged in at its `initial_soc` for 24h.
+  Every EV-touching correlation number (ven-1, 3, 5, 7, 11, 12) is an
+  artifact of that (most likely the `initial_state()` bootstrap setpoint
+  before the first plan lands), not a real optimizer decision — confirming
+  it really did look random, because no optimization was happening.
+
+Batteries and heaters are *not* session-gated, so their correlations (all
+negative/correct: ven-4, -6, -10, -12, -13; ven-1 aside) are real and
+trustworthy. Re-testing EV price-response isn't as simple as adding
+`--personas`, either: `scripts/personas.py`'s default persona mix is mostly
+`OPPORTUNISTIC`/`ASAP_FREE`, which route the EV's reward off real-time PV
+surplus (`v_ev_free_charge_eur_kwh`), never the actual grid tariff — for a
+non-PV EV VEN those modes charge exactly nothing in a scenario with no
+zero/negative price slot, same dead-EV outcome as no session at all. Only
+`BY_DEADLINE`/`ASAP` sessions route the real per-slot tariff into the EV's
+MILP reward. No controller code change is warranted here — this is a test-
+harness gap (see GB-37, `docs/BACKLOG.md`), not a bug in `ev_milp.rs`.
 
 **GB-36, a new bug found while sanity-checking `report_timeliness`**:
 `report_timeliness` came back with all-negative lag values (median
@@ -1105,5 +1135,6 @@ attempt (`20260817-2016-s9_diurnal/`) removed; both locks released.
 
 **Not done / left open**: `s1_flat` through `s8_budget` and `s10_overexport`
 — deferred to a follow-up run, this session only covered `s9_diurnal`.
-GB-36 (new). GB-31/GB-24 remain open as before. The tariff-response finding
-above is reported, not investigated further.
+GB-36 (new). GB-31/GB-24 remain open as before. Re-testing genuine EV
+price-response needs a follow-up `s9_diurnal` run launched with
+`--personas` — see GB-37 in `docs/BACKLOG.md`.
