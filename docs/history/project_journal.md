@@ -9864,3 +9864,50 @@ premise is a specific file/config state, since that state can silently drift.
 **Bookkeeping:** Removed `GB-14` from `docs/BACKLOG.md` (verified already resolved, no code
 or config change made in this pass).
 
+---
+
+## VEN UI: static nameplate specs on the asset tiles (2026-08-19)
+
+**Trigger:** User asked whether the per-asset tiles (controller/dashboard page) had room
+to display static profile properties — PV peak power, EV/battery Pmax and capacity, heater
+max power and tank capacity — alongside the existing live state. A read-only investigation
+found the tiles show only dynamic state (power, cost/CO₂ rate, SoC%, tank temp, forecast
+energy); the backend's `GET /sim` snapshot already carries the needed static values per-asset
+via each asset's `state_values()` (`capacity_kwh`/`max_charge_kw`/`max_discharge_kw` for
+battery, `battery_kwh`/`max_charge_kw` for EV, `rated_kw` for PV), just unused by the
+frontend — a straightforward `ui-transparency` gap (see `.claude/CLAUDE.md`).
+
+**Fix — backend:** `VEN/src/assets/heater.rs::state_values()` was missing one static field:
+the heater's usable tank *capacity* in kWh isn't a single config value, it's derived
+(`(temp_max_c − temp_min_c) × thermal_mass_kwh_per_c`), and `thermal_mass_kwh_per_c` itself
+wasn't exposed (only `temp_min_c`/`temp_max_c`/`max_kw` were). Added
+`m.insert("thermal_mass_kwh_per_c".into(), self.thermal_mass_kwh_per_c)` — battery/ev/pv
+needed no backend change, everything else was already exposed.
+
+**Fix — frontend:** Extended `AssetSummary` (`VEN/ui/src/components/controller/types.ts`)
+with three new optional fields — `maxImportKw`, `maxExportKw`, `capacityKwh` — populated per
+asset type in `dataBuilders.ts::deriveAssetSummaries()` via the same bracket-access +
+`typeof === "number"` guard pattern already used for the heater's `temp_c` read. Mapping:
+battery gets both max charge/discharge + capacity (asymmetric charge/discharge is a real
+case); EV gets max charge + battery capacity (no export — no V2G modeled); PV gets
+`rated_kw` as max export only; heater gets `max_kw` as max import plus the derived tank
+capacity. `base_load` and generic shiftable-load assets get no specs (no nameplate max in
+their profile — a load trace, not a rated capacity). Added `AssetLeftSection.tsx` a new
+conditional "Specs" line (same "omit when null" convention as the existing `socPct`/`tempC`
+lines), using a new `formatEnergyKwh` helper added to the shared `unitFormat.ts` module
+alongside the existing `formatPowerValue` for the kW figures.
+
+**Verification:** Backend — test-first: added
+`heater::tests::state_values_exposes_thermal_mass_kwh_per_c`, confirmed it failed before the
+fix, passed after; full `wsl cargo test -p ven-app` 1111 passed (up from 1110), `cargo fmt
+--check`/`clippy -D warnings` clean, file-size audit and architecture-invariant greps clean.
+Frontend: `dataBuilders.test.ts` gained a 5-case `deriveAssetSummaries — static specs` block
+(one per asset type including the base_load negative case); `AssetCell.test.tsx` gained 2
+cases (specs line renders when present, omitted when absent); `npm test` 35/35 in the
+touched files, `eslint` 0 errors, `npm run build` clean.
+
+**Bookkeeping:** No `BACKLOG.md` item — originated from live user feedback on the dashboard,
+not a tracked backlog entry. BL-18 (`AssetFlexibility`, per-asset real-time flex snapshot)
+was discussed in the same conversation and confirmed distinct from this — this is static
+nameplate specs, BL-18 is a dynamic "how much can this asset flex right now" computation;
+BL-18 stays parked, unchanged.
