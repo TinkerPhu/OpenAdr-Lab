@@ -9629,3 +9629,52 @@ lock, then confirmed live post-deploy: `GET /ev-session` now `204`,
 
 **Bookkeeping:** No `BACKLOG.md` item to remove — both fixes originated from
 live user feedback, not tracked backlog entries.
+
+## GB-36: report_submission_lag_s no longer drifts on long-lived report resources
+
+**Root cause:** `report_submission_lag_s` (`VTN/bff/src/recorder.rs`) computed
+lag as `createdDateTime − max(interval_end)` over the *whole* intervals array
+present on each poll. openleadr-rs grows a report resource by re-PUTting an
+ever-larger `intervals` array and bumps `modificationDateTime` on every PUT
+(confirmed against `openleadr-vtn/src/data_source/postgres/report.rs`), but
+`createdDateTime` is set once at INSERT and never touched again. As a report
+resource accumulated intervals over a long-running scenario, `max(interval_end)`
+kept advancing while `created` stayed fixed, so lag drifted increasingly
+negative — down to -86320s in the 24h `s9_diurnal` fleet run (GB-36).
+
+**Fix:** Switched the as-of timestamp from `createdDateTime` to
+`modificationDateTime` (the field that actually advances on append), and made
+lag "since-last-poll" rather than "since resource creation": `record_reports`
+now looks up the prior snapshot's `max_interval_end` for the same `report_id`
+from the existing `lab_recorder.reports_received` history (one extra `SELECT
+... ORDER BY modification_date_time::timestamptz DESC LIMIT 1` per report) and
+`report_submission_lag_s` only considers intervals newer than that prior
+marker. A new `max_interval_end TIMESTAMPTZ` column persists each snapshot's
+own marker for the next poll to diff against — no new table, reuses the
+existing per-`(report_id, modification_date_time)` row history. First-ever
+poll for a report_id (no prior row) falls back to the old whole-array
+behavior; a poll with nothing newly appended returns `None` rather than a
+stale or zero lag.
+
+**Key learning:** the bug was invisible in every scenario tested before the
+24h run because those were all ≤60 min and never accumulated enough intervals
+for the drift to be visible — a reminder that KPI-column correctness assumed
+under short-scenario testing doesn't automatically hold at longer horizons;
+worth deliberately re-checking derived-metric columns (not just functional
+behavior) whenever a scenario's duration class changes.
+
+**Verification:** `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -D warnings`, `cargo test recorder` (16 passed, including new
+first-poll regression guard, second-poll-only-counts-new-intervals repro of
+the exact bug shape, and no-new-intervals → `None` case) — all run via local
+WSL, `wsl_lock.sh`-guarded (native Windows link failed for this crate, MSVC
+linker issue, unrelated to this change).
+
+**Bookkeeping:** Removed `GB-36` from `docs/BACKLOG.md` (resolved). Also
+removed `BL-11` (time-weighted tariff averaging — found already implemented
+in `VEN/src/common/mod.rs::TimeSeries::time_weighted_mean`, labeled `BL-11` in
+its own doc comment, with no BACKLOG.md entry ever having been cleaned up
+after it shipped) and `BL-13` (early firm-up heuristic — referenced
+`planner.rs:271`, a file deleted when the greedy scheduler was replaced by
+the MILP planner; no FLEXIBLE/FIRM phase structure remains to attach the
+heuristic to, so the item was dropped as stale rather than re-scoped).

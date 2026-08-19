@@ -90,6 +90,15 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    // GB-36: tracks the max interval end this report_id's snapshot covered,
+    // so the next poll can tell which intervals are newly appended rather
+    // than recomputing lag over the whole (ever-growing) intervals array.
+    sqlx::query(
+        "ALTER TABLE lab_recorder.reports_received
+         ADD COLUMN IF NOT EXISTS max_interval_end TIMESTAMPTZ",
+    )
+    .execute(pool)
+    .await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS lab_recorder.events_published (
             event_id TEXT NOT NULL,
@@ -176,23 +185,15 @@ fn parse_pt_duration_s(s: &str) -> i64 {
     date_s + time_s
 }
 
-/// WP3.7 — SG-3 timeliness: seconds between the end of the newest reported
-/// interval window and the report's own `createdDateTime` (VTN ingestion
-/// time). Positive = the report arrived after the window it measures (normal
-/// for measurements — small is timely); negative = the report describes a
-/// future window (normal for USAGE_FORECAST). `None` when the report has no
-/// parseable `createdDateTime` or no interval with a parseable start.
-fn report_submission_lag_s(report: &Value) -> Option<f64> {
-    let created = report
-        .get("createdDateTime")?
-        .as_str()?
-        .parse::<chrono::DateTime<chrono::Utc>>()
-        .ok()?;
-
-    let window_end = report
-        .get("resources")?
-        .as_array()?
-        .iter()
+/// Every interval end (`start + duration`) present in a report's `resources`,
+/// across all resources/intervals. Unparseable intervals are skipped, not
+/// fatal — a malformed one interval must not blank out lag for the rest.
+fn interval_ends(report: &Value) -> Vec<DateTime<Utc>> {
+    report
+        .get("resources")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
         .flat_map(|r| {
             r.get("intervals")
                 .and_then(|i| i.as_array())
@@ -204,7 +205,7 @@ fn report_submission_lag_s(report: &Value) -> Option<f64> {
             let start = period
                 .get("start")?
                 .as_str()?
-                .parse::<chrono::DateTime<chrono::Utc>>()
+                .parse::<DateTime<Utc>>()
                 .ok()?;
             let dur_s = period
                 .get("duration")
@@ -213,9 +214,51 @@ fn report_submission_lag_s(report: &Value) -> Option<f64> {
                 .unwrap_or(0);
             Some(start + chrono::Duration::seconds(dur_s))
         })
-        .max()?;
+        .collect()
+}
 
-    Some((created - window_end).num_milliseconds() as f64 / 1000.0)
+/// WP3.7 (Phase 3), fixed for GB-36 — SG-3 timeliness: seconds between the
+/// report's `modificationDateTime` and the newest *newly appended* interval's
+/// end. `modificationDateTime` is used as the as-of timestamp (not
+/// `createdDateTime`) because openleadr-rs grows a long-lived report resource
+/// by re-PUTting an ever-larger `intervals` array, bumping
+/// `modificationDateTime` on every append while `createdDateTime` stays fixed
+/// at the resource's original creation — using `createdDateTime` made lag
+/// drift unboundedly negative as a report resource accumulated intervals over
+/// its lifetime (observed down to -86320s in the 24h `s9_diurnal` run).
+///
+/// `prior_max_end` is the `max_interval_end` recorded for this report_id's
+/// last-polled snapshot. When present, only intervals ending after it count
+/// as "new" for this poll, so lag reflects just what was appended since last
+/// time rather than the whole resource's history. Returns
+/// `(lag_s, new_max_end)`: `new_max_end` is what to persist as this
+/// snapshot's own marker for the next poll — the whole array's max on a
+/// report_id's first-ever poll, or carried forward unchanged if nothing new
+/// was appended. `lag_s` is `None` when there are no intervals at all, or
+/// nothing new since the prior snapshot.
+fn report_submission_lag_s(
+    report: &Value,
+    modified: DateTime<Utc>,
+    prior_max_end: Option<DateTime<Utc>>,
+) -> (Option<f64>, Option<DateTime<Utc>>) {
+    let ends = interval_ends(report);
+    if ends.is_empty() {
+        return (None, prior_max_end);
+    }
+    let whole_max = ends.iter().copied().max();
+
+    let new_since_prior = match prior_max_end {
+        Some(prior) => ends.into_iter().filter(|e| *e > prior).max(),
+        None => whole_max,
+    };
+
+    match new_since_prior {
+        Some(end) => (
+            Some((modified - end).num_milliseconds() as f64 / 1000.0),
+            Some(end),
+        ),
+        None => (None, prior_max_end.or(whole_max)),
+    }
 }
 
 /// Fetch every page of a list endpoint via `skip`/`limit`, stopping when a
@@ -247,11 +290,30 @@ async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
         };
         let ven_name = r.get("clientName").and_then(|v| v.as_str());
         let report_type = r.get("reportName").and_then(|v| v.as_str());
-        let report_lag_s = report_submission_lag_s(r);
+
+        // GB-36: fetch the prior snapshot's max_interval_end for this
+        // report_id so lag is computed only over intervals appended since
+        // then, not the whole (ever-growing) intervals array.
+        let prior_max_end: Option<DateTime<Utc>> = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+            "SELECT max_interval_end FROM lab_recorder.reports_received
+             WHERE report_id = $1
+             ORDER BY modification_date_time::timestamptz DESC
+             LIMIT 1",
+        )
+        .bind(&id)
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+
+        let (report_lag_s, max_interval_end) = match modified.parse::<DateTime<Utc>>() {
+            Ok(modified_ts) => report_submission_lag_s(r, modified_ts, prior_max_end),
+            Err(_) => (None, prior_max_end),
+        };
+
         let res = sqlx::query(
             "INSERT INTO lab_recorder.reports_received
-                (report_id, modification_date_time, ven_name, report_type, payload_json, report_lag_s)
-             VALUES ($1, $2, $3, $4, $5, $6)
+                (report_id, modification_date_time, ven_name, report_type, payload_json, report_lag_s, max_interval_end)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (report_id, modification_date_time) DO NOTHING",
         )
         .bind(&id)
@@ -260,6 +322,7 @@ async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
         .bind(report_type)
         .bind(r)
         .bind(report_lag_s)
+        .bind(max_interval_end)
         .execute(pool)
         .await?;
         n += res.rows_affected();
@@ -422,7 +485,7 @@ mod tests {
         assert_eq!(dedup_key(&v), None);
     }
 
-    // ── report_submission_lag_s (WP3.7) ─────────────────────────────
+    // ── report_submission_lag_s (WP3.7, fixed for GB-36) ────────────
 
     #[test]
     fn test_parse_pt_duration_s_variants() {
@@ -437,51 +500,123 @@ mod tests {
         assert_eq!(parse_pt_duration_s("P0Y0M1DT0H0M0S"), 86400);
     }
 
+    fn dt(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn test_report_lag_positive_for_past_measurement_window() {
-        // Window [10:00, 10:15) reported at 10:15:30 → 30s lag.
+        // Window [10:00, 10:15) modified at 10:15:30, no prior snapshot → 30s lag.
         let v = json!({
-            "createdDateTime": "2026-01-01T10:15:30Z",
             "resources": [{"intervals": [{
                 "intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "P0Y0M0DT0H15M0S"}
             }]}]
         });
-        assert_eq!(report_submission_lag_s(&v), Some(30.0));
+        let (lag, new_max) = report_submission_lag_s(&v, dt("2026-01-01T10:15:30Z"), None);
+        assert_eq!(lag, Some(30.0));
+        assert_eq!(new_max, Some(dt("2026-01-01T10:15:00Z")));
     }
 
     #[test]
     fn test_report_lag_negative_for_forecast_window() {
-        // Forecast slot ending 11:00 reported at 10:00 → -3600s.
+        // Forecast slot ending 11:00 modified at 10:00, no prior snapshot → -3600s.
         let v = json!({
-            "createdDateTime": "2026-01-01T10:00:00Z",
             "resources": [{"intervals": [{
                 "intervalPeriod": {"start": "2026-01-01T10:55:00Z", "duration": "P0Y0M0DT0H5M0S"}
             }]}]
         });
-        assert_eq!(report_submission_lag_s(&v), Some(-3600.0));
+        let (lag, _) = report_submission_lag_s(&v, dt("2026-01-01T10:00:00Z"), None);
+        assert_eq!(lag, Some(-3600.0));
     }
 
     #[test]
     fn test_report_lag_uses_newest_interval() {
         let v = json!({
-            "createdDateTime": "2026-01-01T10:30:00Z",
             "resources": [{"intervals": [
                 {"intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "P0Y0M0DT0H15M0S"}},
                 {"intervalPeriod": {"start": "2026-01-01T10:15:00Z", "duration": "P0Y0M0DT0H15M0S"}}
             ]}]
         });
-        assert_eq!(report_submission_lag_s(&v), Some(0.0));
+        let (lag, _) = report_submission_lag_s(&v, dt("2026-01-01T10:30:00Z"), None);
+        assert_eq!(lag, Some(0.0));
     }
 
     #[test]
-    fn test_report_lag_none_without_created_or_intervals() {
-        let no_created = json!({"resources": [{"intervals": [{
-            "intervalPeriod": {"start": "2026-01-01T10:00:00Z"}
-        }]}]});
-        assert_eq!(report_submission_lag_s(&no_created), None);
+    fn test_report_lag_none_without_intervals() {
+        let no_intervals = json!({"resources": []});
+        let (lag, new_max) =
+            report_submission_lag_s(&no_intervals, dt("2026-01-01T10:00:00Z"), None);
+        assert_eq!(lag, None);
+        assert_eq!(new_max, None);
+    }
 
-        let no_intervals = json!({"createdDateTime": "2026-01-01T10:00:00Z", "resources": []});
-        assert_eq!(report_submission_lag_s(&no_intervals), None);
+    #[test]
+    fn test_report_lag_first_poll_matches_whole_array_behavior() {
+        // Regression guard: with no prior snapshot, behavior matches the
+        // pre-fix whole-array computation (just against modificationDateTime
+        // now instead of createdDateTime).
+        let v = json!({
+            "resources": [{"intervals": [
+                {"intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT5M"}},
+                {"intervalPeriod": {"start": "2026-01-01T00:05:00Z", "duration": "PT5M"}},
+                {"intervalPeriod": {"start": "2026-01-01T00:10:00Z", "duration": "PT5M"}}
+            ]}]
+        });
+        let (lag, new_max) = report_submission_lag_s(&v, dt("2026-01-01T00:15:10Z"), None);
+        assert_eq!(lag, Some(10.0));
+        assert_eq!(new_max, Some(dt("2026-01-01T00:15:00Z")));
+    }
+
+    #[test]
+    fn test_report_lag_second_poll_only_counts_newly_appended_intervals() {
+        // The core GB-36 regression: a report resource that grows across
+        // polls must not have its lag computed over the whole accumulated
+        // history — only over what's new since the prior snapshot.
+        let first = json!({
+            "resources": [{"intervals": [
+                {"intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT5M"}},
+                {"intervalPeriod": {"start": "2026-01-01T00:05:00Z", "duration": "PT5M"}}
+            ]}]
+        });
+        let (_, prior_max) = report_submission_lag_s(&first, dt("2026-01-01T00:10:05Z"), None);
+        assert_eq!(prior_max, Some(dt("2026-01-01T00:10:00Z")));
+
+        // Resource grows: 20 more 5-min intervals appended (as in a
+        // long-lived report resource), polled 5s after the newest one ends.
+        let mut intervals = vec![
+            json!({"intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT5M"}}),
+            json!({"intervalPeriod": {"start": "2026-01-01T00:05:00Z", "duration": "PT5M"}}),
+        ];
+        for i in 0..20 {
+            let start = dt("2026-01-01T00:10:00Z") + chrono::Duration::minutes(5 * i);
+            intervals.push(json!({
+                "intervalPeriod": {"start": start.to_rfc3339(), "duration": "PT5M"}
+            }));
+        }
+        let second = json!({"resources": [{"intervals": intervals}]});
+        let polled_at = dt("2026-01-01T00:10:00Z")
+            + chrono::Duration::minutes(5 * 20)
+            + chrono::Duration::seconds(5);
+        let (lag, new_max) = report_submission_lag_s(&second, polled_at, prior_max);
+
+        // Without the fix this would be ~6005s (measured against the whole
+        // array's oldest history); with the fix it stays small (~5s), because
+        // only the newest appended interval counts.
+        assert_eq!(lag, Some(5.0));
+        assert_eq!(new_max, Some(polled_at - chrono::Duration::seconds(5)));
+    }
+
+    #[test]
+    fn test_report_lag_none_when_no_new_intervals_since_prior_poll() {
+        let v = json!({
+            "resources": [{"intervals": [
+                {"intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT5M"}}
+            ]}]
+        });
+        let prior = Some(dt("2026-01-01T00:05:00Z"));
+        let (lag, new_max) = report_submission_lag_s(&v, dt("2026-01-01T00:06:00Z"), prior);
+        assert_eq!(lag, None);
+        assert_eq!(new_max, prior);
     }
 
     // ── recorder health/reconnect (2026-08-10 incident fix) ─────────────
