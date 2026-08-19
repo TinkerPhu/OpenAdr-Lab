@@ -11,9 +11,11 @@
 //! the schema/adapter as its own reviewable commit first.
 #![allow(dead_code)]
 
+mod events;
 mod forecast_accuracy;
 mod notifications;
 mod plan_history;
+mod reports;
 mod schema;
 mod settings;
 mod ticks;
@@ -25,7 +27,7 @@ use rusqlite::{params, Connection};
 
 use crate::controller::HistoryPort;
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, HistoryPage, LedgerPeriod,
     PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
@@ -309,68 +311,22 @@ impl HistoryPort for SqliteHistoryStore {
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<EventReceived>, DomainError> {
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<EventReceived>, DomainError> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT received_at, event_id, event_type, payload_json FROM events_received
-                 WHERE received_at >= ?1 AND received_at < ?2 ORDER BY received_at ASC",
-            )
-            .map_err(|e| DomainError::StorageError(format!("prepare query_events: {e}")))?;
-        let raw: Vec<(i64, String, String, String)> = stmt
-            .query_map(params![to_unix(from), to_unix(to)], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| DomainError::StorageError(format!("query_events: {e}")))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| DomainError::StorageError(format!("read query_events rows: {e}")))?;
-
-        raw.into_iter()
-            .map(
-                |(received_at, event_id, event_type, payload_json)| -> Result<EventReceived, DomainError> {
-                    Ok(EventReceived {
-                        received_at: from_unix(received_at)?,
-                        event_id,
-                        event_type,
-                        payload_json,
-                    })
-                },
-            )
-            .collect()
+        events::query(&conn, from, to, limit, offset)
     }
 
     fn query_reports(
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<ReportSent>, DomainError> {
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<ReportSent>, DomainError> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT sent_at, report_type, event_id, payload_json FROM reports_sent
-                 WHERE sent_at >= ?1 AND sent_at < ?2 ORDER BY sent_at ASC",
-            )
-            .map_err(|e| DomainError::StorageError(format!("prepare query_reports: {e}")))?;
-        let raw: Vec<(i64, String, String, String)> = stmt
-            .query_map(params![to_unix(from), to_unix(to)], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| DomainError::StorageError(format!("query_reports: {e}")))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| DomainError::StorageError(format!("read query_reports rows: {e}")))?;
-
-        raw.into_iter()
-            .map(
-                |(sent_at, report_type, event_id, payload_json)| -> Result<ReportSent, DomainError> {
-                    Ok(ReportSent {
-                        sent_at: from_unix(sent_at)?,
-                        report_type,
-                        event_id,
-                        payload_json,
-                    })
-                },
-            )
-            .collect()
+        reports::query(&conn, from, to, limit, offset)
     }
 
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError> {
@@ -657,8 +613,9 @@ mod tests {
             payload_json: "{}".into(),
         };
         store.append_event_received(&row).unwrap();
-        let rows = store.query_events(ts(0), ts(1000)).unwrap();
-        assert_eq!(rows, vec![row]);
+        let page = store.query_events(ts(0), ts(1000), 100, 0).unwrap();
+        assert_eq!(page.rows, vec![row]);
+        assert_eq!(page.total, 1);
     }
 
     #[test]
@@ -671,8 +628,9 @@ mod tests {
             payload_json: "{}".into(),
         };
         store.append_report_sent(&row).unwrap();
-        let rows = store.query_reports(ts(0), ts(1000)).unwrap();
-        assert_eq!(rows, vec![row]);
+        let page = store.query_reports(ts(0), ts(1000), 100, 0).unwrap();
+        assert_eq!(page.rows, vec![row]);
+        assert_eq!(page.total, 1);
     }
 
     #[test]

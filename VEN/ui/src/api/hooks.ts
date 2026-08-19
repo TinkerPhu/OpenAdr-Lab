@@ -390,20 +390,20 @@ export function useHistoryGrid(from: string, to: string) {
   });
 }
 
-export function useHistoryEvents(from: string, to: string) {
+export function useHistoryEvents(from: string, to: string, limit: number, offset: number) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["history/events", api.baseUrl, from, to],
-    queryFn: () => api.historyEvents({ from, to }),
+    queryKey: ["history/events", api.baseUrl, from, to, limit, offset],
+    queryFn: () => api.historyEvents({ from, to, limit, offset }),
     refetchInterval: false,
   });
 }
 
-export function useHistoryReports(from: string, to: string) {
+export function useHistoryReports(from: string, to: string, limit: number, offset: number) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["history/reports", api.baseUrl, from, to],
-    queryFn: () => api.historyReports({ from, to }),
+    queryKey: ["history/reports", api.baseUrl, from, to, limit, offset],
+    queryFn: () => api.historyReports({ from, to, limit, offset }),
     refetchInterval: false,
   });
 }

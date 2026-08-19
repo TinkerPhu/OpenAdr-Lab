@@ -18,6 +18,46 @@ import type { ForecastAccuracySample, SiteFlexibilitySample } from "../api/types
  * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
 const FORECAST_TRACKED_ASSETS = ["pv", "base_load", "site-residual"] as const;
 
+/** Rows per page for the "Events received"/"Reports sent" tables — both can hold far more
+ * rows than a [from, to) window alone bounds (e.g. many active events on a short
+ * `report_interval_s`), so both are paginated the same way. */
+const HISTORY_TABLE_PAGE_SIZE = 50;
+
+/** Shared "X-Y of total" + prev/next footer for a paginated history table — one definition
+ * so "Events received" and "Reports sent" (the same row-shape-of-problem) can't drift. */
+function HistoryTablePager({
+  testIdPrefix, total, limit, offset, onOffsetChange,
+}: {
+  testIdPrefix: string; total: number; limit: number; offset: number;
+  onOffsetChange: (next: number) => void;
+}) {
+  // A single page needs no controls or count — only show once there's a second page.
+  if (total <= limit) return null;
+  const from = offset + 1;
+  const to = Math.min(offset + limit, total);
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, mb: 2 }}>
+      <Button
+        size="small" variant="outlined" disabled={offset === 0}
+        onClick={() => onOffsetChange(Math.max(0, offset - limit))}
+        data-testid={`${testIdPrefix}-prev`}
+      >
+        Prev
+      </Button>
+      <Button
+        size="small" variant="outlined" disabled={to >= total}
+        onClick={() => onOffsetChange(offset + limit)}
+        data-testid={`${testIdPrefix}-next`}
+      >
+        Next
+      </Button>
+      <Typography variant="body2" color="text.secondary" data-testid={`${testIdPrefix}-summary`}>
+        {from}-{to} of {total}
+      </Typography>
+    </Stack>
+  );
+}
+
 /** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
 export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string } {
   const from = new Date(`${dateStr}T00:00:00.000Z`);
@@ -42,10 +82,23 @@ export function HistoryPage() {
   // newest displayed day so the field is never blank, without treating that as a selection.
   const displayDate = date ?? toIso.slice(0, 10);
 
+  // Paged independently of each other; reset to page 1 whenever the date/range changes,
+  // since an offset from a previous window is meaningless against a new one. Adjusted during
+  // render (React's documented pattern for resetting state on a prop change) rather than in a
+  // useEffect, which would cause an extra commit/cascading render for the same outcome.
+  const [eventsOffset, setEventsOffset] = useState(0);
+  const [reportsOffset, setReportsOffset] = useState(0);
+  const [pagedRangeIso, setPagedRangeIso] = useState({ fromIso, toIso });
+  if (pagedRangeIso.fromIso !== fromIso || pagedRangeIso.toIso !== toIso) {
+    setPagedRangeIso({ fromIso, toIso });
+    setEventsOffset(0);
+    setReportsOffset(0);
+  }
+
   const ticksQuery = useHistoryTicks(fromIso, toIso);
   const gridQuery = useHistoryGrid(fromIso, toIso);
-  const eventsQuery = useHistoryEvents(fromIso, toIso);
-  const reportsQuery = useHistoryReports(fromIso, toIso);
+  const eventsQuery = useHistoryEvents(fromIso, toIso, HISTORY_TABLE_PAGE_SIZE, eventsOffset);
+  const reportsQuery = useHistoryReports(fromIso, toIso, HISTORY_TABLE_PAGE_SIZE, reportsOffset);
   // Rules of hooks — fixed set, so called unconditionally rather than in the render loop below.
   const pvForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "pv");
   const baseLoadForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
@@ -53,8 +106,10 @@ export function HistoryPage() {
 
   const { data: ticks = [] } = ticksQuery;
   const { data: grid = [] } = gridQuery;
-  const { data: events = [] } = eventsQuery;
-  const { data: reports = [] } = reportsQuery;
+  const { data: eventsPage = { rows: [], total: 0 } } = eventsQuery;
+  const { data: reportsPage = { rows: [], total: 0 } } = reportsQuery;
+  const events = eventsPage.rows;
+  const reports = reportsPage.rows;
   const { data: pvForecast = [] } = pvForecastQuery;
   const { data: baseLoadForecast = [] } = baseLoadForecastQuery;
   const { data: siteResidualForecast = [] } = siteResidualForecastQuery;
@@ -69,6 +124,11 @@ export function HistoryPage() {
   // key change: reopening the date picker (stale last-24h view, same day re-confirmed) and
   // re-clicking "Last 24h" while already in that mode (the rolling window has drifted).
   const refetchAll = () => {
+    // A stale page offset from the previous view could be past the end of a freshly
+    // refetched window (fromIso/toIso didn't change identity here, so the effect above
+    // won't fire) — reset both tables back to page 1 alongside the refetch.
+    setEventsOffset(0);
+    setReportsOffset(0);
     ticksQuery.refetch();
     gridQuery.refetch();
     eventsQuery.refetch();
@@ -244,6 +304,13 @@ export function HistoryPage() {
           </TableBody>
         </Table>
       </TableContainer>
+      <HistoryTablePager
+        testIdPrefix="history-events-pager"
+        total={eventsPage.total}
+        limit={HISTORY_TABLE_PAGE_SIZE}
+        offset={eventsOffset}
+        onOffsetChange={setEventsOffset}
+      />
 
       <Typography variant="h6" sx={{ mt: 3 }}>Reports sent</Typography>
       <TableContainer component={Paper}>
@@ -266,6 +333,13 @@ export function HistoryPage() {
           </TableBody>
         </Table>
       </TableContainer>
+      <HistoryTablePager
+        testIdPrefix="history-reports-pager"
+        total={reportsPage.total}
+        limit={HISTORY_TABLE_PAGE_SIZE}
+        offset={reportsOffset}
+        onOffsetChange={setReportsOffset}
+      />
 
     </Box>
   );

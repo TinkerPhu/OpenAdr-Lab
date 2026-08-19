@@ -1237,3 +1237,23 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `Collapse` wrapper's `getBoundingClientRect().height`), not just the
   state-driven CSS class — and update the E2E suite in the same change that
   adds a new collapsed-by-default UI section, not as an afterthought.
+- **WSL cargo builds can exhaust host RAM even at `-j 2`, on this 8 GB laptop, once
+  multiple background compiles/watchers accumulate in one session** (2026-08-19): during a
+  History-tab pagination fix, free RAM dropped to 0.3 GB mid-`cargo test` compile despite
+  following the documented `-j 2` rule — likely several detached compiles (clippy, cargo
+  test retries) and a concurrent `npm ci`/vitest run stacking up in the same session. Killed
+  the in-flight build (`pkill -f 'cargo test'`), waited for RAM to recover, and retried at
+  `-j 1`, which completed without incident. When free RAM is checked mid-build (not just
+  before starting) and found below ~1 GB, kill and retry at `-j 1` rather than letting it run
+  and hoping — `-j 2` is a starting point, not a guarantee, once other memory-hungry
+  processes (npm, vitest, another cargo invocation) are running concurrently in the same
+  session.
+- **Detached WSL background compiles (`&` + `disown`) launched via a non-login `bash -c`
+  fail silently with `cargo: not found`** (2026-08-19): the Bash tool's `run_in_background`
+  has a ~10-minute internal timeout that repeatedly killed a long `cargo clippy`/`cargo test`
+  compile before it finished. Working around it by launching the command detached inside WSL
+  (`setsid ... &`) only works if the shell that runs it sources `~/.cargo/env` — `wsl bash -c
+  '...'` (non-login) does not, so `cargo` resolves to nothing and the detached job exits
+  immediately with an unhelpful one-line log. Use `wsl bash -lc '...'` (login shell) for any
+  detached/background WSL command that needs `cargo`, `rustc`, or other `~/.cargo/bin` tools
+  on PATH.

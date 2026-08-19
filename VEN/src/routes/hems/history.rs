@@ -91,10 +91,68 @@ macro_rules! history_range_route {
 
 // GET /history/grid?from=&to= — 1-minute grid samples in `[from, to)`.
 history_range_route!(get_history_grid, query_grid);
-// GET /history/events?from=&to= — OpenADR events received in `[from, to)`.
-history_range_route!(get_history_events, query_events);
-// GET /history/reports?from=&to= — OpenADR reports sent in `[from, to)`.
-history_range_route!(get_history_reports, query_reports);
+
+/// Default/max page size for the paginated event/report routes below — bounds
+/// response size independent of `MAX_RANGE_DAYS`, since a short time range can
+/// still hold an unbounded number of rows (e.g. many active events each on a
+/// short `report_interval_s`).
+const DEFAULT_PAGE_LIMIT: u32 = 200;
+const MAX_PAGE_LIMIT: u32 = 1000;
+
+#[derive(Deserialize)]
+pub struct HistoryPageParams {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+fn resolve_page(params: &HistoryPageParams) -> (u32, u32) {
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_PAGE_LIMIT)
+        .clamp(1, MAX_PAGE_LIMIT);
+    (limit, params.offset.unwrap_or(0))
+}
+
+macro_rules! history_page_route {
+    ($fn_name:ident, $query:ident) => {
+        pub async fn $fn_name(
+            State(ctx): State<AppCtx>,
+            Query(params): Query<HistoryPageParams>,
+        ) -> impl IntoResponse {
+            let Some(history) = ctx.history.clone() else {
+                return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
+            };
+            let range_params = HistoryRangeParams {
+                from: params.from.clone(),
+                to: params.to.clone(),
+                asset_id: None,
+            };
+            let (from, to) = match resolve_range(&range_params) {
+                Ok(r) => r,
+                Err((status, msg)) => return error(status, msg),
+            };
+            let (limit, offset) = resolve_page(&params);
+            match tokio::task::spawn_blocking(move || history.$query(from, to, limit, offset)).await
+            {
+                Ok(Ok(page)) => Json(page).into_response(),
+                Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("task panicked: {e}"),
+                ),
+            }
+        }
+    };
+}
+
+// GET /history/events?from=&to=&limit=&offset= — OpenADR events received in
+// `[from, to)`, paginated (default/max page size above).
+history_page_route!(get_history_events, query_events);
+// GET /history/reports?from=&to=&limit=&offset= — OpenADR reports sent in
+// `[from, to)`, paginated the same way as `get_history_events`.
+history_page_route!(get_history_reports, query_reports);
 
 /// GET /history/ticks?from=&to=&asset_id= — 1-minute per-asset samples in
 /// `[from, to)`, optionally filtered to one asset.
@@ -246,6 +304,54 @@ mod tests {
             asset_id: None,
         };
         assert!(resolve_range(&params).is_err());
+    }
+
+    #[test]
+    fn test_resolve_page_defaults_to_default_page_limit_and_zero_offset() {
+        let params = HistoryPageParams {
+            from: None,
+            to: None,
+            limit: None,
+            offset: None,
+        };
+        assert_eq!(resolve_page(&params), (DEFAULT_PAGE_LIMIT, 0));
+    }
+
+    #[test]
+    fn test_resolve_page_clamps_limit_to_max_page_limit() {
+        let params = HistoryPageParams {
+            from: None,
+            to: None,
+            limit: Some(MAX_PAGE_LIMIT + 500),
+            offset: None,
+        };
+        assert_eq!(resolve_page(&params), (MAX_PAGE_LIMIT, 0));
+    }
+
+    #[test]
+    fn test_resolve_page_clamps_zero_limit_up_to_one() {
+        let params = HistoryPageParams {
+            from: None,
+            to: None,
+            limit: Some(0),
+            offset: None,
+        };
+        assert_eq!(
+            resolve_page(&params).0,
+            1,
+            "a zero limit must not silently return everything"
+        );
+    }
+
+    #[test]
+    fn test_resolve_page_passes_through_an_explicit_offset() {
+        let params = HistoryPageParams {
+            from: None,
+            to: None,
+            limit: Some(50),
+            offset: Some(400),
+        };
+        assert_eq!(resolve_page(&params), (50, 400));
     }
 
     #[test]
