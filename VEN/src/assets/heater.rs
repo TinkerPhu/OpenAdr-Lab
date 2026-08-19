@@ -274,6 +274,7 @@ impl Heater {
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);
         m.insert("temp_safety_max_c".into(), self.temp_safety_max_c);
+        m.insert("thermal_mass_kwh_per_c".into(), self.thermal_mass_kwh_per_c);
         m.insert(
             "emergency_curtail".into(),
             (self.emergency_mode == HeaterEmergencyMode::Curtail) as u8 as f64,
@@ -550,6 +551,13 @@ mod tests {
             temperature_c,
             actual_power_kw,
         }
+    }
+
+    #[test]
+    fn state_values_exposes_thermal_mass_kwh_per_c() {
+        let h = default_heater();
+        let vals = h.state_values(&state_at(21.0, 0.0));
+        assert_eq!(vals.get("thermal_mass_kwh_per_c"), Some(&2.0));
     }
 
     // ── capability (BL-27) ───────────────────────────────────────────────────

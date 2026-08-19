@@ -268,3 +268,69 @@ describe("computeForecastEnergy via deriveAssetSummaries", () => {
     expect(forecastFor(points)).toBeCloseTo(8, 6);
   });
 });
+
+// ─── deriveAssetSummaries — static nameplate specs ────────────────────────────
+
+describe("deriveAssetSummaries — static specs", () => {
+  const specsSim: SimSnapshot = {
+    ts: new Date(NOW).toISOString(),
+    grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+    assets: {
+      ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
+      battery: {
+        power_kw: 0,
+        soc: 0.5,
+        max_charge_kw: 5,
+        max_discharge_kw: 4,
+        capacity_kwh: 10,
+      },
+      pv: { power_kw: 0, rated_kw: 6 },
+      heater: {
+        power_kw: 0,
+        temp_c: 21,
+        temp_min_c: 20,
+        temp_max_c: 23,
+        thermal_mass_kwh_per_c: 2,
+        max_kw: 2.5,
+      },
+      base_load: { power_kw: 1.0 },
+    },
+  };
+  const summaries = deriveAssetSummaries(specsSim, [], [], {}, NOW);
+  const find = (id: string) => summaries.find((s) => s.assetId === id)!;
+
+  it("ev: max charge + battery capacity, no export", () => {
+    const ev = find("ev");
+    expect(ev.maxImportKw).toBe(7.4);
+    expect(ev.maxExportKw).toBeNull();
+    expect(ev.capacityKwh).toBe(60);
+  });
+
+  it("battery: asymmetric charge/discharge + capacity", () => {
+    const battery = find("battery");
+    expect(battery.maxImportKw).toBe(5);
+    expect(battery.maxExportKw).toBe(4);
+    expect(battery.capacityKwh).toBe(10);
+  });
+
+  it("pv: rated power as max export only, no capacity", () => {
+    const pv = find("pv");
+    expect(pv.maxImportKw).toBeNull();
+    expect(pv.maxExportKw).toBe(6);
+    expect(pv.capacityKwh).toBeNull();
+  });
+
+  it("heater: max power + derived tank capacity from temp band × thermal mass", () => {
+    const heater = find("heater");
+    expect(heater.maxImportKw).toBe(2.5);
+    expect(heater.maxExportKw).toBeNull();
+    expect(heater.capacityKwh).toBeCloseTo((23 - 20) * 2, 6);
+  });
+
+  it("base_load: no applicable specs", () => {
+    const baseLoad = find("base_load");
+    expect(baseLoad.maxImportKw).toBeNull();
+    expect(baseLoad.maxExportKw).toBeNull();
+    expect(baseLoad.capacityKwh).toBeNull();
+  });
+});

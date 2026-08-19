@@ -103,7 +103,10 @@ export function deriveAssetSummaries(
     label: string,
     powerKw: number,
     socPct: number | null,
-    tempC: number | null = null
+    tempC: number | null = null,
+    maxImportKw: number | null = null,
+    maxExportKw: number | null = null,
+    capacityKwh: number | null = null
   ): AssetSummary {
     // For consuming assets (powerKw >= 0) scale by gridFraction so only the
     // grid-sourced portion incurs cost. Generating assets (powerKw < 0) are
@@ -127,32 +130,79 @@ export function deriveAssetSummaries(
       tempC,
       forecastEnergyKwh,
       activeRequest,
+      maxImportKw,
+      maxExportKw,
+      capacityKwh,
     };
   }
+
+  const numeric = (v: unknown): number | null => (typeof v === "number" ? v : null);
 
   const evAsset = sim.assets["ev"];
   if (evAsset) {
     summaries.push(
-      makeSummary("ev", "EV", evAsset.power_kw, (evAsset.soc ?? 0) * 100)
+      makeSummary(
+        "ev",
+        "EV",
+        evAsset.power_kw,
+        (evAsset.soc ?? 0) * 100,
+        null,
+        numeric(evAsset["max_charge_kw"]),
+        null,
+        numeric(evAsset["battery_kwh"])
+      )
     );
   }
   const heaterAsset = sim.assets["heater"];
   if (heaterAsset) {
-    const tempC = typeof heaterAsset["temp_c"] === "number" ? heaterAsset["temp_c"] : null;
+    const tempC = numeric(heaterAsset["temp_c"]);
+    const tempMinC = numeric(heaterAsset["temp_min_c"]);
+    const tempMaxC = numeric(heaterAsset["temp_max_c"]);
+    const thermalMassKwhPerC = numeric(heaterAsset["thermal_mass_kwh_per_c"]);
+    const capacityKwh =
+      tempMinC !== null && tempMaxC !== null && thermalMassKwhPerC !== null
+        ? (tempMaxC - tempMinC) * thermalMassKwhPerC
+        : null;
     summaries.push(
-      makeSummary("heater", "Heater", heaterAsset.power_kw, null, tempC)
+      makeSummary(
+        "heater",
+        "Heater",
+        heaterAsset.power_kw,
+        null,
+        tempC,
+        numeric(heaterAsset["max_kw"]),
+        null,
+        capacityKwh
+      )
     );
   }
   const pvAsset = sim.assets["pv"];
   if (pvAsset) {
     summaries.push(
-      makeSummary("pv", "PV", -Math.abs(pvAsset.power_kw), null)
+      makeSummary(
+        "pv",
+        "PV",
+        -Math.abs(pvAsset.power_kw),
+        null,
+        null,
+        null,
+        numeric(pvAsset["rated_kw"])
+      )
     );
   }
   const batteryAsset = sim.assets["battery"];
   if (batteryAsset) {
     summaries.push(
-      makeSummary("battery", "Battery", batteryAsset.power_kw, (batteryAsset.soc ?? 0) * 100)
+      makeSummary(
+        "battery",
+        "Battery",
+        batteryAsset.power_kw,
+        (batteryAsset.soc ?? 0) * 100,
+        null,
+        numeric(batteryAsset["max_charge_kw"]),
+        numeric(batteryAsset["max_discharge_kw"]),
+        numeric(batteryAsset["capacity_kwh"])
+      )
     );
   }
   // BaseLoad is always present

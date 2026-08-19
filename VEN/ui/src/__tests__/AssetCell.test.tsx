@@ -41,7 +41,10 @@ const baseSim: SimSnapshot = {
   assets: {},
 };
 
-function makeAssetSummary(assetId: "ev"): AssetSummary {
+function makeAssetSummary(
+  assetId: "ev",
+  specs: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh">> = {}
+): AssetSummary {
   return {
     assetId,
     label: "EV",
@@ -53,6 +56,10 @@ function makeAssetSummary(assetId: "ev"): AssetSummary {
     tempC: null,
     forecastEnergyKwh: null,
     activeRequest: null,
+    maxImportKw: null,
+    maxExportKw: null,
+    capacityKwh: null,
+    ...specs,
   };
 }
 
@@ -60,12 +67,15 @@ function makeQC() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderCell(timePoints: AssetTimelinePoint[]) {
+function renderCell(
+  timePoints: AssetTimelinePoint[],
+  specs?: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh">>
+) {
   return render(
     <QueryClientProvider client={makeQC()}>
       <AssetCell
         assetId="ev"
-        summary={makeAssetSummary("ev")}
+        summary={makeAssetSummary("ev", specs)}
         simSnapshot={baseSim}
         simOverrides={undefined}
         collapsed={{ right: true }}
@@ -108,5 +118,16 @@ describe("AssetCell — rendering", () => {
     renderCell([point]);
     const attr = screen.getByTestId("asset-timeline-chart").getAttribute("data-cost-rate-0");
     expect(attr).toBe("null");
+  });
+
+  it("renders the specs line when the summary carries nameplate values", () => {
+    renderCell([], { maxImportKw: 7.4, capacityKwh: 60 });
+    expect(screen.getByTestId("asset-specs-ev").textContent).toContain("60.0 kWh");
+    expect(screen.getByTestId("asset-specs-ev").textContent).toContain("max in");
+  });
+
+  it("omits the specs line when the summary has no nameplate values", () => {
+    renderCell([]);
+    expect(screen.queryByTestId("asset-specs-ev")).toBeNull();
   });
 });
