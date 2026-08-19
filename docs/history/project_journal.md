@@ -9780,3 +9780,60 @@ remaining gap (achieved gap as a number) rather than removing it outright,
 since that part is still genuinely open. Updated
 `docs/architecture/VEN_ARCHITECTURE.md` §4.9b with a new `Plan.solve_status`
 paragraph describing the real mechanism.
+
+---
+
+## History Tab Pagination — "Reports sent"/"Events received" (2026-08-19)
+
+**Trigger:** The History tab's "Reports sent" section grows unbounded — user asked to
+investigate why, and what the report-send criteria actually are. Investigation (via a
+read-only research pass) found: `GET /history/reports` and `GET /history/events`
+(`VEN/src/routes/hems/history.rs`) had no `LIMIT`/pagination — only a time-window filter
+(`[from, to)`, capped at 7 days) — while `History.tsx`'s tables rendered every returned row
+with a plain `.map()`, no virtualization. The underlying `reports_sent`/`events_received`
+SQLite tables are already age-pruned (`history_sampler`'s daily `prune_before`, default 90
+days), so the growth was UI/query-side, not an unbounded backend table. Report-send
+criteria themselves (`report_interval_s: 60` in every production profile, matching OpenADR's
+own telemetry cadence, plus per-report-descriptor obligation frequency) were found to be
+legitimate spec-driven cadences, not a bug — no change made there.
+
+**Fix:** Added `HistoryPage<T> { rows: Vec<T>, total: u64 }` (`entities/history.rs`) and
+extended `HistoryPort::query_events`/`query_reports` with `limit`/`offset` params, returning
+a page plus the true total count (so the UI can show "X-Y of total" and disable prev/next
+without a second round trip). Split the two queries out of `history_store/mod.rs` into new
+sibling modules `history_store/events.rs`/`reports.rs` (`SELECT count(*) ... ; SELECT ...
+LIMIT ?3 OFFSET ?4`) — kept `mod.rs` from growing past its 500-line cap and mirrors the
+existing per-concern module split (`ticks.rs`, `notifications.rs`, etc.). `MockHistoryPort`
+gained a shared `paginate()` helper so both query methods use the identical
+limit/offset/total contract as the real adapter. Routes: replaced the two
+`history_range_route!` macro instances for events/reports with a new `history_page_route!`
+macro (`GET .../events?from=&to=&limit=&offset=`), `limit` clamped to `[1,
+MAX_PAGE_LIMIT=1000]` server-side (default 200) so a missing/zero/huge `limit` can't
+silently return everything or blow past a sane response size.
+
+**UI:** `History.tsx` gained a shared `HistoryTablePager` component (Prev/Next + "X-Y of
+total", hidden when everything fits on one page) used identically under both tables — 50
+rows/page. Paging state resets to page 1 whenever the date/range changes, via React's
+documented "adjust state during render" pattern (comparing the incoming `fromIso`/`toIso`
+against a tracked previous value and calling `setState` directly in the render body) rather
+than a `useEffect`, after `eslint`'s `react-hooks/set-state-in-effect` rule caught the
+effect-based version as a cascading-render risk.
+
+**Verification:** Rust: 5 new unit tests (`history_store/events.rs`, `reports.rs` — total
+count independent of page size, offset advancing correctly, offset past the end still
+returns the real total) plus `resolve_page` clamp tests in `routes/hems/history.rs`; full
+suite 1109 passed, `cargo fmt --check`/`clippy -D warnings` clean, file-size audit and
+architecture-invariant greps clean. VEN UI: `History.test.tsx` extended with pager-specific
+tests (no pager on a single page, prev/next disabled state, offset threading through the
+hook call, reset-on-range-change); full UI suite 587 passed, `eslint` 0 errors, `npm run
+build` clean. One TS build-only issue found post-test-pass: `Array.prototype.at(-1)` in the
+new tests needed `lib: es2022`, not configured here — used `arr[arr.length - 1]` instead
+rather than touching the shared tsconfig `lib` target.
+
+**Key learning:** Local WSL RAM pressure got severe enough mid-session (free RAM dropped to
+0.3 GB during a `cargo test` compile) to warrant killing the build and retrying at `cargo
+test -j 1` — see `KEY_LEARNINGS.md` for the durable note on recognizing and recovering from
+this on an 8 GB host.
+
+**Bookkeeping:** No `BACKLOG.md` item — this originated from live user feedback on the
+History tab, not a tracked backlog entry.

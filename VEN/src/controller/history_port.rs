@@ -17,7 +17,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, HistoryPage, LedgerPeriod,
     PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::notification::UserNotification;
@@ -47,16 +47,24 @@ pub trait HistoryPort: Send + Sync {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<GridSample>, DomainError>;
+    /// `[from, to)`, paginated: `limit` rows starting at `offset` (`ORDER BY
+    /// received_at ASC`), plus the total count matching the range regardless
+    /// of paging.
     fn query_events(
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<EventReceived>, DomainError>;
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<EventReceived>, DomainError>;
+    /// `[from, to)`, paginated the same way as `query_events`.
     fn query_reports(
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<ReportSent>, DomainError>;
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<ReportSent>, DomainError>;
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
     /// WP4.3 (BL-20): the NEWEST `limit` notifications last seen after `since`
     /// (all when `None`), returned oldest first. 030: optionally filtered to
