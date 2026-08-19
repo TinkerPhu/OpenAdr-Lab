@@ -9678,3 +9678,29 @@ after it shipped) and `BL-13` (early firm-up heuristic — referenced
 `planner.rs:271`, a file deleted when the greedy scheduler was replaced by
 the MILP planner; no FLEXIBLE/FIRM phase structure remains to attach the
 heuristic to, so the item was dropped as stale rather than re-scoped).
+
+## GB-34: react-router v6 → v7 migration
+
+**Problem:** `react-router-dom` was pinned `^6.26.0` in both `VEN/ui` and
+`VTN/ui`. No patched 6.x release exists for its current advisories (open
+redirect via backslash in `<Link>`/`useNavigate`, arbitrary constructor
+injection via `deserializeErrors()`) — `6.30.4`, the latest 6.x, is still
+inside the vulnerable range. Only the v7 major line fixes it.
+
+**Fix:** Bumped `react-router-dom` to `^7.18.0` in both UIs' `package.json`
+and ran `npm install` to update lockfiles. Both apps only ever used the
+legacy declarative `<BrowserRouter><Routes><Route>` tree plus `<Link>` — no
+`useNavigate`, `useParams`, `useLocation`, `Outlet`, data-router APIs,
+loaders, or route guards anywhere — so this was the easy end of a v6→v7
+migration: zero source changes were needed in either `App.tsx` or any other
+file; the bump alone was sufficient.
+
+**Verification:** `npm run build`, `eslint` (0 errors, only pre-existing
+warnings unrelated to routing), and `npm test` all green in both `VEN/ui`
+(586 passed) and `VTN/ui` (71 passed — an initial run hit vitest worker
+timeouts from running both suites concurrently under low host memory; a
+solo re-run passed cleanly, confirming it was resource contention, not a
+real regression). `npm audit` now reports 0 vulnerabilities in both UIs.
+
+**Bookkeeping:** Removed `GB-34` from `docs/BACKLOG.md` (resolved) and
+updated its Dependency Vulnerabilities table to reflect the clean audit.
