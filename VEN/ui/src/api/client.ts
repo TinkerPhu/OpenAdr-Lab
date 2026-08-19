@@ -7,7 +7,7 @@ import type {
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
-  HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
+  HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
   ForecastAccuracySample, PlanHistorySample,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
@@ -397,21 +397,38 @@ export class VenApi {
     return raw.map((row) => ({ ...row, created_at: new Date(row.created_at).getTime() }));
   }
 
-  async historyEvents(params: { from: string; to: string }): Promise<HistoryEventReceived[]> {
-    const qs = new URLSearchParams({ from: params.from, to: params.to });
+  async historyEvents(
+    params: { from: string; to: string; limit: number; offset: number }
+  ): Promise<HistoryPage<HistoryEventReceived>> {
+    const qs = new URLSearchParams({
+      from: params.from, to: params.to,
+      limit: String(params.limit), offset: String(params.offset),
+    });
     const r = await this.getReq(`/history/events?${qs}`);
     if (!r.ok) throw new Error(`history/events ${r.status}`);
-    const raw: (Omit<HistoryEventReceived, "received_at"> & { received_at: string })[] =
+    const raw: HistoryPage<Omit<HistoryEventReceived, "received_at"> & { received_at: string }> =
       await r.json();
-    return raw.map((row) => ({ ...row, received_at: new Date(row.received_at).getTime() }));
+    return {
+      total: raw.total,
+      rows: raw.rows.map((row) => ({ ...row, received_at: new Date(row.received_at).getTime() })),
+    };
   }
 
-  async historyReports(params: { from: string; to: string }): Promise<HistoryReportSent[]> {
-    const qs = new URLSearchParams({ from: params.from, to: params.to });
+  async historyReports(
+    params: { from: string; to: string; limit: number; offset: number }
+  ): Promise<HistoryPage<HistoryReportSent>> {
+    const qs = new URLSearchParams({
+      from: params.from, to: params.to,
+      limit: String(params.limit), offset: String(params.offset),
+    });
     const r = await this.getReq(`/history/reports?${qs}`);
     if (!r.ok) throw new Error(`history/reports ${r.status}`);
-    const raw: (Omit<HistoryReportSent, "sent_at"> & { sent_at: string })[] = await r.json();
-    return raw.map((row) => ({ ...row, sent_at: new Date(row.sent_at).getTime() }));
+    const raw: HistoryPage<Omit<HistoryReportSent, "sent_at"> & { sent_at: string }> =
+      await r.json();
+    return {
+      total: raw.total,
+      rows: raw.rows.map((row) => ({ ...row, sent_at: new Date(row.sent_at).getTime() })),
+    };
   }
 
 

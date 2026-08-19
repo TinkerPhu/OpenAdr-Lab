@@ -179,15 +179,17 @@ mod tests {
         )
         .await;
 
-        let rows = history
+        let page = history
             .query_reports(
                 ts - chrono::Duration::seconds(1),
                 ts + chrono::Duration::seconds(1),
+                100,
+                0,
             )
             .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].report_type, "TELEMETRY_USAGE");
-        assert_eq!(rows[0].event_id, "evt-1");
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].report_type, "TELEMETRY_USAGE");
+        assert_eq!(page.rows[0].event_id, "evt-1");
     }
 
     #[tokio::test]

@@ -11,11 +11,24 @@ use chrono::{DateTime, Utc};
 
 use crate::controller::HistoryPort;
 use crate::entities::history::{
-    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod,
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, HistoryPage, LedgerPeriod,
     PlanHistorySample, ReportSent, TickSample,
 };
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
+
+/// Same "`limit` rows starting at `offset`, plus the true `total`" contract
+/// as the real SQLite adapter's `LIMIT`/`OFFSET`/`count(*)` — shared by
+/// `query_events`/`query_reports` since both page an already-time-filtered `Vec`.
+fn paginate<T: Clone>(matching: Vec<T>, limit: u32, offset: u32) -> HistoryPage<T> {
+    let total = matching.len() as u64;
+    let rows = matching
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect();
+    HistoryPage { rows, total }
+}
 
 #[derive(Default)]
 pub struct MockHistoryPort {
@@ -201,30 +214,36 @@ impl HistoryPort for MockHistoryPort {
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<EventReceived>, DomainError> {
-        Ok(self
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<EventReceived>, DomainError> {
+        let matching: Vec<EventReceived> = self
             .events
             .lock()
             .unwrap()
             .iter()
             .filter(|r| r.received_at >= from && r.received_at < to)
             .cloned()
-            .collect())
+            .collect();
+        Ok(paginate(matching, limit, offset))
     }
 
     fn query_reports(
         &self,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Vec<ReportSent>, DomainError> {
-        Ok(self
+        limit: u32,
+        offset: u32,
+    ) -> Result<HistoryPage<ReportSent>, DomainError> {
+        let matching: Vec<ReportSent> = self
             .reports
             .lock()
             .unwrap()
             .iter()
             .filter(|r| r.sent_at >= from && r.sent_at < to)
             .cloned()
-            .collect())
+            .collect();
+        Ok(paginate(matching, limit, offset))
     }
 
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError> {

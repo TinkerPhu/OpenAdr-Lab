@@ -74,6 +74,16 @@ pub struct ReportSent {
     pub payload_json: String,
 }
 
+/// One page of a paginated history query: `limit` rows starting at `offset`,
+/// plus `total` — the full count matching the query's `[from, to)` filter
+/// regardless of paging. Lets a UI table show "X-Y of total" and enable/disable
+/// prev/next without a second round trip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryPage<T> {
+    pub rows: Vec<T>,
+    pub total: u64,
+}
+
 /// A closed accounting period for one asset (BL-16 AssetLedger rollup).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LedgerPeriod {

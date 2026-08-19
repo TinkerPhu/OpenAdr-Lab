@@ -666,6 +666,14 @@ export type HistoryReportSent = {
   payload_json: string;
 };
 
+/** One page of a paginated history query: `rows` capped at the requested
+ * `limit`, plus `total` — the full count matching the `[from, to)` filter
+ * regardless of paging. Mirrors `HistoryPage<T>` in VEN/src/entities/history.rs. */
+export type HistoryPage<T> = {
+  rows: T[];
+  total: number;
+};
+
 export type ReportObligation = {
   id: string;
   event_id: string;

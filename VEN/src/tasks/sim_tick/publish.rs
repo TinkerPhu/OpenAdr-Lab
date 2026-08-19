@@ -272,14 +272,16 @@ mod tests {
         .await;
 
         assert_eq!(vtn.submitted().len(), 1, "one measurement report submitted");
-        let rows = history
+        let page = history
             .query_reports(
                 now - chrono::Duration::seconds(1),
                 now + chrono::Duration::seconds(1),
+                100,
+                0,
             )
             .unwrap();
-        assert_eq!(rows.len(), 1, "one ReportSent row appended");
-        assert_eq!(rows[0].event_id, "evt-1");
+        assert_eq!(page.rows.len(), 1, "one ReportSent row appended");
+        assert_eq!(page.rows[0].event_id, "evt-1");
     }
 
     #[tokio::test]

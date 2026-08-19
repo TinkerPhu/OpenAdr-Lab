@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HistoryPage, dayRangeIso } from "../pages/History";
 
 const mockTicks = [
@@ -51,12 +51,25 @@ const mockRefetch = vi.hoisted(() => ({
   forecastAccuracy: vi.fn(),
 }));
 
+// Mutable so individual tests can simulate a multi-page result set (a larger `total` than
+// `rows.length`) without needing a real react-query round trip.
+const mockEventsPage = vi.hoisted(() => ({ current: { rows: [] as unknown[], total: 0 } }));
+const mockReportsPage = vi.hoisted(() => ({ current: { rows: [] as unknown[], total: 0 } }));
+const mockUseHistoryEvents = vi.hoisted(() => vi.fn());
+const mockUseHistoryReports = vi.hoisted(() => vi.fn());
+
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useHistoryTicks: () => ({ data: mockTicks, refetch: mockRefetch.ticks }),
   useHistoryGrid: () => ({ data: mockGrid, refetch: mockRefetch.grid }),
-  useHistoryEvents: () => ({ data: mockEvents, refetch: mockRefetch.events }),
-  useHistoryReports: () => ({ data: mockReports, refetch: mockRefetch.reports }),
+  useHistoryEvents: (...args: unknown[]) => {
+    mockUseHistoryEvents(...args);
+    return { data: mockEventsPage.current, refetch: mockRefetch.events };
+  },
+  useHistoryReports: (...args: unknown[]) => {
+    mockUseHistoryReports(...args);
+    return { data: mockReportsPage.current, refetch: mockRefetch.reports };
+  },
   useHistoryForecastAccuracy: () => ({ data: [], refetch: mockRefetch.forecastAccuracy }),
 }));
 
@@ -74,6 +87,13 @@ function renderHistory() {
     </QueryClientProvider>,
   );
 }
+
+beforeEach(() => {
+  mockEventsPage.current = { rows: mockEvents, total: mockEvents.length };
+  mockReportsPage.current = { rows: mockReports, total: mockReports.length };
+  mockUseHistoryEvents.mockClear();
+  mockUseHistoryReports.mockClear();
+});
 
 describe("dayRangeIso", () => {
   it("returns a 24h [from, to) window for a UTC calendar day", () => {
@@ -180,6 +200,60 @@ describe("HistoryPage", () => {
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
     expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not render a pager when a table's total fits on one page", () => {
+    renderHistory();
+    // mockEvents/mockReports each have 1 row and total: 1 by default (beforeEach) — a single
+    // page needs no pager at all.
+    expect(screen.queryByTestId("history-reports-pager-summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("history-events-pager-summary")).not.toBeInTheDocument();
+  });
+
+  it("renders the reports pager with prev/next state matching the current page", () => {
+    mockReportsPage.current = { rows: mockReports, total: 120 };
+    renderHistory();
+
+    expect(screen.getByTestId("history-reports-pager-summary")).toHaveTextContent("1-50 of 120");
+    // Page 1: nothing to go back to, but more rows exist ahead.
+    expect(screen.getByTestId("history-reports-pager-prev")).toBeDisabled();
+    expect(screen.getByTestId("history-reports-pager-next")).not.toBeDisabled();
+  });
+
+  it("clicking Next on the reports table re-queries with the next page's offset", () => {
+    mockReportsPage.current = { rows: mockReports, total: 120 };
+    renderHistory();
+    mockUseHistoryReports.mockClear();
+
+    fireEvent.click(screen.getByTestId("history-reports-pager-next"));
+
+    // useHistoryReports(from, to, limit, offset) — offset is the 4th argument.
+    const lastCall = mockUseHistoryReports.mock.calls[mockUseHistoryReports.mock.calls.length - 1];
+    expect(lastCall?.[3]).toBe(50);
+  });
+
+  it("clicking Prev on the events table re-queries with the previous page's offset", () => {
+    mockEventsPage.current = { rows: mockEvents, total: 120 };
+    renderHistory();
+    fireEvent.click(screen.getByTestId("history-events-pager-next"));
+    mockUseHistoryEvents.mockClear();
+
+    fireEvent.click(screen.getByTestId("history-events-pager-prev"));
+
+    const lastCall = mockUseHistoryEvents.mock.calls[mockUseHistoryEvents.mock.calls.length - 1];
+    expect(lastCall?.[3]).toBe(0);
+  });
+
+  it("resets both tables' paging back to offset 0 when the date/range changes", () => {
+    mockReportsPage.current = { rows: mockReports, total: 120 };
+    renderHistory();
+    fireEvent.click(screen.getByTestId("history-reports-pager-next"));
+    mockUseHistoryReports.mockClear();
+
+    fireEvent.click(screen.getByTestId("history-last-24h-btn"));
+
+    const lastCall = mockUseHistoryReports.mock.calls[mockUseHistoryReports.mock.calls.length - 1];
+    expect(lastCall?.[3]).toBe(0);
   });
 
   it("refetches history data when 'Last 24h' is clicked while already in that mode", () => {
