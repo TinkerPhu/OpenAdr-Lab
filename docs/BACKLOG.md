@@ -45,7 +45,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-26](#bl-26-assetstate-entities--resolve-the-name-collision-with-the-live-assetsassetstate) | Dead type shadowing a live one's name | None |
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
-| [GB-34](#general-backlog) | react-router v6→v7 migration (security-driven, no new user-facing capability) | Low |
 
 ---
 
@@ -129,30 +128,27 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | GB-14 | Create a dedicated SSH key pair for the `Node1` host instead of falling back to the default `id_rsa` — checked 2026-07-31: `~/.ssh/config`'s `Node1` entry has no `IdentityFile`, so it authenticates with whatever default identity (`id_rsa`) the server happens to accept, unlike `Node2` which already has its own pinned identity file | Low — security/hygiene hardening, no functional gap | Low |
 | GB-15 | The VTN's `/vens` list has no `ven-1` entry — only `ven-1-name`, an old provisioning typo predating the Node2 fleet work (found 2026-08-02 while running `seed_vtn.py`). The stale name also breaks the "Summer Peak DR" demo program's target update (targets `["ven-2", "ven-1-name"]`, 400 on re-seed). Rename the VEN entity to `ven-1` and fix the program's targets | Low — cosmetic/demo-data correctness, `ven-1` itself works fine under its real `CLIENT_ID` | Low |
 | GB-31 | GB-25's persisted `Plan.mip_gap_target` (and the `plan_history` row's copy of it) is a proxy only — the solver's *configured* MIP-gap tolerance (`controller::milp_planner::types::MIP_GAP_TARGET`, `0.02`), not the *achieved* gap on any given solve. `good_lp`/`highs` expose no achieved-gap query today, so a plan that solved to a much tighter gap than the 2% target looks identical, in this field, to one that just barely made the cutoff. Explicit scope decision made during GB-25's implementation, not an oversight | Low — diagnostic-quality gap, not a functional defect; the configured target still tells an operator "this is at least as good as X%" | Low-Medium — needs either a `good_lp`/`highs` upstream API for the achieved gap, or computing it manually from the solver's best-bound and incumbent objective values if HiGHS exposes those separately |
-| GB-34 | `react-router`/`react-router-dom` (both `VEN/ui` and `VTN/ui`, pinned `^6.26.0`) has no patched 6.x release for its current advisories (open redirect via backslash in `<Link>`/`useNavigate`, arbitrary constructor injection via `deserializeErrors()`) — the latest 6.x, `6.30.4`, is itself still inside the vulnerable range; the only fix is the v7 major line (`7.18.x`). Split out of GB-16 2026-08-16 once `npm audit fix --dry-run` confirmed react-router doesn't move past `6.30.4` without `--force`, and that a real API migration (React Router v7's data-router APIs, some hook/export changes) is needed, not a patch/minor bump like the rest of GB-16's findings | Low-Medium — closes the last open moderate finding from GB-16; react-router is runtime-shipped in both UIs | Medium — real breaking-change migration: bump `react-router-dom` to `^7.18.0` in both `package.json`s, migrate any v6-specific API usage, re-verify both UI suites plus the E2E BDD suite (route navigation is exactly what `@ven-ui`/`controller` scenarios exercise) |
 | GB-35 | GB-22's own "audit other `@ven-ui`/browser scenarios for the same gap" reminder, narrowed: a full `features/` tree audit (2026-08-16, closing GB-22) found the browser+real-backend-poll race pattern concretely limited to the scenarios GB-22 itself fixed, but also surfaced a broader, lower-priority class not addressed there — backend-only scenarios with long (90–300s) `poll_until` calls that share the same host-load sensitivity mechanism without the browser-page combo that caused GB-22's actual reported failures: `features/controller/05_ev_charging_scenarios.feature` (all 4 scenarios, `dispatcher_steps.py` timeouts up to 90s) plus other long-timeout call sites (`alerts_steps.py`, `ev_charging_steps.py`, `uc_steps.py`, `planner_steps.py` at 300s; `request_modes_steps.py`, `comfort_steps.py` at 180s). None have failed under contention yet (unlike the GB-22 instances), so isolating all of them pre-emptively would bloat the isolated pass without evidence; this item exists so the reminder isn't lost, not to isolate all of them by default | Low — speculative, no confirmed failures yet, same mechanism as GB-22 | Low — review each site if/when it's observed flaking, same "tag `@isolated` or raise the timeout" fix shape as GB-22 |
+| GB-37 | `experiments/run_experiment.py`'s fleet scenarios silently run every VEN's EV inert unless launched with `--personas`: without an active `EvSession`, `VEN/src/assets/ev_milp.rs::EvMilpContext::from_state` returns `EvMilpMode::MustNotRun` (zero charging power, every slot), so the EV just sits at `initial_soc` for the whole run. The S-9 24h diurnal re-run (2026-08-17/19, `docs/history/fleet_run_journal.md`) was launched without `--personas` and its `energy_business.tariff_response` correlation looked scattered/random fleet-wide specifically because every EV-touching VEN's number was measuring an inert EV, not price response — cost real investigation time before the root cause (missing flag, not a controller bug) was found. **`--personas` alone is not sufficient either**: `scripts/personas.py`'s `"eco"` preset uses `ev_mode: "OPPORTUNISTIC"`, which `from_state`'s `Opportunistic` arm routes through `free_only: true` — `inject_grid_slots` gates charging on PV-surplus-or-nonpositive-price slots only, rewarded via `v_ev_free_charge_eur_kwh`, never the real grid tariff. For an EV-only VEN with no PV (e.g. ven-11), that free-energy cap is `0` in every slot of a scenario with no PV and no zero/negative price (like `s9_diurnal`) — identical zero-charging outcome to no session at all, just via a different code path. For a PV-equipped EV VEN, opportunistic charging tracks solar surplus, not price — any apparent price correlation would be solar-timing coincidence, not real tariff response. Only `BY_DEADLINE`/`ASAP` persona sessions route the actual per-slot tariff into the EV's MILP reward | Medium — a scenario intended to test realistic price-response with no working EVs (or EVs responding to solar, not price) quietly produces a misleading KPI on first use, not a crash or error | Low — either default `run_experiment.py` to `--personas` for realistic-tier scenarios and document that a genuine `tariff_response` read needs `BY_DEADLINE`/`ASAP` personas specifically (not the full persona mix, which is by design mostly `OPPORTUNISTIC`/`ASAP_FREE`), or add a startup warning/summary line when a scenario includes EV-equipped VENs but `--personas` wasn't passed, or wasn't passed with a tariff-sensitive mode |
 
 ---
 
-## Dependency Vulnerabilities — 2026-08-16 (npm rows); 2026-07-16 (cargo rows)
+## Dependency Vulnerabilities — 2026-08-19 (npm rows); 2026-07-16 (cargo rows)
 
 > Re-run `cargo audit` and `npm audit` before each release and update this section.
 
 Cargo rows unchanged since the 2026-07-16 `cargo update` (VEN, VTN/bff) pass on
-`fix/review-c3-code` — not re-verified in this update. npm rows re-run 2026-08-16
-(GB-16): the 2026-07-16 "0 vulnerabilities" claim for both UIs had gone stale —
-`npm audit` had accumulated 7 findings (3 moderate, 4 high) by 2026-08-03 (GB-16
-filed) and grew to include `js-yaml`/`undici` by 2026-08-16. `npm audit fix`
-(no `--force`) in both `VEN/ui` and `VTN/ui` resolved everything except
-`react-router`/`react-router-dom`, split out as GB-34 (no patched 6.x exists;
-fix requires the v7 major line, a real migration, not a hygiene bump):
+`fix/review-c3-code` — not re-verified in this update. npm rows re-run 2026-08-19
+after the GB-34 `react-router`/`react-router-dom` v6→v7 migration (`^7.18.0` in
+both `VEN/ui` and `VTN/ui`) closed out the last open finding from the 2026-08-16
+GB-16 pass:
 
 | Component | cargo/npm audit result |
 |-----------|------------------------|
 | VEN (Rust) | **0 vulnerabilities, 0 warnings** (267 crates) — not re-verified 2026-08-16 |
 | VTN/bff (Rust) | 1 advisory — see below (315 crates) — not re-verified 2026-08-16 |
-| VEN/ui (npm) | 2 moderate (`react-router`/`react-router-dom`, tracked as GB-34) — all other findings fixed 2026-08-16 |
-| VTN/ui (npm) | 2 moderate (`react-router`/`react-router-dom`, tracked as GB-34) — all other findings fixed 2026-08-16 |
+| VEN/ui (npm) | **0 vulnerabilities** |
+| VTN/ui (npm) | **0 vulnerabilities** |
 
 ### VTN/bff — RUSTSEC-2023-0071 (`rsa` 0.9.x, Marvin timing side-channel, medium 5.9)
 
