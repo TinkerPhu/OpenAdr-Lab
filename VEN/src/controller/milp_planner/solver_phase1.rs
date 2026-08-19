@@ -340,6 +340,7 @@ pub(crate) fn read_solve_output<S: Solution>(
     }
 
     SolveOutput {
+        status: solution.status(),
         objective_eur: solution.eval(objective),
         p_imp_kw: (0..n).map(|t| solution.value(p_imp_ref[t])).collect(),
         p_exp_kw: (0..n).map(|t| solution.value(p_exp_ref[t])).collect(),

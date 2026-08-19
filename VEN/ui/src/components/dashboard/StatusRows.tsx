@@ -120,6 +120,19 @@ export function PlanStatusRow({ plan }: { plan: Plan | null | undefined }) {
       />
     );
   }
+  if (plan.solve_status === "TIME_LIMIT" || plan.solve_status === "GAP_LIMIT") {
+    // GB-31 — a real plan exists (unlike INFEASIBLE) but the solver was cut
+    // off before certifying optimality; worth a distinct signal from a
+    // clean Optimal solve, but not the same severity as no plan at all.
+    const reason = plan.solve_status === "TIME_LIMIT" ? "time limit" : "gap tolerance";
+    return (
+      <StatusRow
+        testId="dash-plan"
+        severity="warn"
+        summary={`Plan status: Feasible, not certified optimal (${reason}, solved ${formatAge(plan.created_at)})`}
+      />
+    );
+  }
   return (
     <StatusRow
       testId="dash-plan"

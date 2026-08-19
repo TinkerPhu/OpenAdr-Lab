@@ -263,7 +263,10 @@ export type PlannerObjective =
   | "min_import"
   | "max_revenue";
 
-export type SolveStatus = "OPTIMAL" | "INFEASIBLE";
+/** GB-31 — TIME_LIMIT/GAP_LIMIT mean a feasible plan was found but the solver
+ * was cut off before certifying optimality (timeout or within-gap-tolerance
+ * cutoff); distinct from INFEASIBLE, where no plan was found at all. */
+export type SolveStatus = "OPTIMAL" | "TIME_LIMIT" | "GAP_LIMIT" | "INFEASIBLE";
 
 /** GB-25 — stable, machine-readable classification of a `PlanWarning`. */
 export type WarningKind =

@@ -514,7 +514,7 @@ pub(crate) fn translate_to_plan(
         objective_eur: phase1_cost_eur,
         friction_eur,
         cost_breakdown,
-        solve_status: SolveStatus::Optimal,
+        solve_status: map_solve_status(sol.status),
         penalty_rules_active,
         solver_ms: None,
         mip_gap_target: Some(MIP_GAP_TARGET),

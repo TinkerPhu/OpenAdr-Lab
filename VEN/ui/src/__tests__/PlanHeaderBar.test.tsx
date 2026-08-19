@@ -190,6 +190,24 @@ describe("PlanHeaderBar", () => {
     expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
   });
 
+  // GB-31: a feasible-but-not-certified-optimal solve gets its own chip,
+  // distinct from both Optimal (no chip) and Infeasible (error chip).
+  it("renders suboptimal chip when solve_status is TIME_LIMIT", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "TIME_LIMIT" })} />);
+    expect(screen.getByTestId("plan-suboptimal-chip")).toBeInTheDocument();
+    expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
+  });
+
+  it("renders suboptimal chip when solve_status is GAP_LIMIT", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "GAP_LIMIT" })} />);
+    expect(screen.getByTestId("plan-suboptimal-chip")).toBeInTheDocument();
+  });
+
+  it("does not render suboptimal chip when solve_status is OPTIMAL", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "OPTIMAL" })} />);
+    expect(screen.queryByTestId("plan-suboptimal-chip")).toBeNull();
+  });
+
   // GB-25: solver_ms/mip_gap_target are now persisted on the Plan itself.
   it("renders solver_ms when present on the plan", () => {
     render(<PlanHeaderBar plan={makePlan({ solver_ms: 123 })} />);

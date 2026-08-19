@@ -12,9 +12,31 @@ pub use super::asset_port::MilpLoadMode;
 /// GB-25: the MILP solver's configured optimality-gap tolerance, shared by all
 /// three solve call sites (`solver_phase1`, `solver_phase2`, `solver_duals`) and
 /// persisted on `Plan.mip_gap_target` as a proxy for solve quality — the
-/// *configured* target, not the achieved gap on any given solve (good_lp/highs
-/// expose no achieved-gap query; see `docs/reference/TECHNICAL_DEBTS.md`).
+/// *configured* target, not the achieved gap on any given solve. GB-31 added
+/// `SolveStatus::GapLimit`/`TimeLimit` (real termination reason, read from
+/// `good_lp`'s `SolutionStatus`), but the achieved gap as a *number* is still
+/// not persisted: `good_lp`'s public `Solution` trait exposes only that
+/// coarser status, not the underlying `highs::SolvedModel::mip_gap()` float —
+/// reaching that would mean bypassing `good_lp`'s solve path (which discards
+/// the `SolvedModel` after extracting the solution) and reimplementing its
+/// `Variable`→column-index mapping by hand. See `docs/reference/TECHNICAL_DEBTS.md`.
 pub(crate) const MIP_GAP_TARGET: f64 = 0.02;
+
+/// Map `good_lp`'s coarse solve-quality classification to our persisted
+/// `SolveStatus` (GB-31). `good_lp::solvers::SolutionStatus` has no
+/// `Infeasible`/`Unbounded` variants of its own — those solves return
+/// `Err(ResolutionError)` before a `Solution` (and so a `SolutionStatus`)
+/// ever exists, and are handled at the `fallback_plan` call site instead.
+pub(crate) fn map_solve_status(
+    status: good_lp::solvers::SolutionStatus,
+) -> crate::entities::plan::SolveStatus {
+    use crate::entities::plan::SolveStatus;
+    match status {
+        good_lp::solvers::SolutionStatus::Optimal => SolveStatus::Optimal,
+        good_lp::solvers::SolutionStatus::TimeLimit => SolveStatus::TimeLimit,
+        good_lp::solvers::SolutionStatus::GapLimit => SolveStatus::GapLimit,
+    }
+}
 
 /// WP6.3 (BL-09) — the penalty rules active for this plan, for UI consumption. Kept here
 /// (rather than `results.rs`, its only caller) to stay under that file's 500-production-line
@@ -327,6 +349,10 @@ pub(crate) fn deadline_to_step(
 /// All `Vec<f64>` fields have `len == n` except `e_bat_kwh` which has `len == n + 1`.
 #[derive(Debug, Clone)]
 pub(crate) struct SolveOutput {
+    /// GB-31 — the real HiGHS termination reason for this solve, read from
+    /// `good_lp`'s `Solution::status()`. Map with `map_solve_status` before
+    /// persisting onto `Plan.solve_status`.
+    pub(crate) status: good_lp::solvers::SolutionStatus,
     pub(crate) objective_eur: f64,
     /// Grid import power per step [kW]
     pub(crate) p_imp_kw: Vec<f64>,
@@ -367,4 +393,33 @@ pub(crate) struct SolveOutput {
     /// rule's window count. `> 0.0` means that window's peak still exceeded
     /// `threshold_kw` after solving (penalty accepted).
     pub(crate) s_penalty_kw: Vec<Vec<f64>>,
+}
+
+#[cfg(test)]
+mod map_solve_status_tests {
+    use super::map_solve_status;
+    use crate::entities::plan::SolveStatus;
+
+    // Direct unit coverage of the mapping rather than an integration test
+    // that tries to force each real HiGHS termination reason: reproducing
+    // TimeLimit/GapLimit via solver knobs (e.g. a near-zero timeout) is
+    // solver-timing-dependent and was observed to be flaky (a 0s timeout on
+    // this planner's small MIP came back Infeasible/NoSolutionFound, not
+    // TimeLimit, in one run) — this test instead pins down the one thing
+    // GB-31 actually changed: the mapping itself.
+    #[test]
+    fn maps_every_good_lp_solution_status_to_the_matching_solve_status() {
+        assert_eq!(
+            map_solve_status(good_lp::solvers::SolutionStatus::Optimal),
+            SolveStatus::Optimal
+        );
+        assert_eq!(
+            map_solve_status(good_lp::solvers::SolutionStatus::TimeLimit),
+            SolveStatus::TimeLimit
+        );
+        assert_eq!(
+            map_solve_status(good_lp::solvers::SolutionStatus::GapLimit),
+            SolveStatus::GapLimit
+        );
+    }
 }

@@ -9704,3 +9704,79 @@ real regression). `npm audit` now reports 0 vulnerabilities in both UIs.
 
 **Bookkeeping:** Removed `GB-34` from `docs/BACKLOG.md` (resolved) and
 updated its Dependency Vulnerabilities table to reflect the clean audit.
+
+## GB-31: Plan.solve_status now reads the real solver termination reason
+
+**Problem:** `Plan.solve_status` was hardcoded — always `Optimal` on the
+success path (`results.rs`'s `translate_to_plan`) and always `Infeasible` on
+the fallback path, regardless of what HiGHS actually reported. A plan the
+solver cut off at its time limit, or stopped once it hit the configured
+2% MIP-gap tolerance, looked identical to a cleanly-certified-optimal one.
+
+**Investigation (spike, per the plan's own scoping):** read `good_lp` 1.15.2's
+and `highs` 2.4.0's source directly (via the local WSL cargo registry cache,
+not docs.rs guesswork) to find out what's actually retrievable. The raw
+`highs` crate's `SolvedModel` exposes both `.status() -> HighsModelStatus`
+(the full termination enum: Optimal/Infeasible/Unbounded/ReachedTimeLimit/…)
+and `.mip_gap() -> f64` (the real achieved gap) — but `good_lp`'s public
+`Solution` trait only exposes a coarser `SolutionStatus` (`Optimal
+`/`TimeLimit`/`GapLimit`), because `good_lp`'s own `HighsProblem::solve()`
+computes the achieved gap internally just to classify Optimal-vs-GapLimit,
+then discards the underlying `SolvedModel` (and the private `Variable`→column
+mapping needed to read `.get_solution()` results back into caller-facing
+values) before returning. Reaching the numeric gap would mean bypassing
+`good_lp`'s solve path and reimplementing that mapping by hand — real work,
+not justified by this fix alone. Scope narrowed accordingly: real *status*,
+not the achieved gap as a *number* (matches the plan's built-in fallback).
+
+**Fix:** `SolveOutput` (`controller::milp_planner::types`) gained a `status:
+good_lp::solvers::SolutionStatus` field, captured in `read_solve_output`
+(`solver_phase1.rs`, already generic over `S: Solution`, so `.status()` was
+already reachable) — flows through unmodified to whichever phase actually
+wins in `solve_milp_two_phase`. A new `types::map_solve_status` maps it onto
+two new `SolveStatus` variants, `TimeLimit`/`GapLimit`, alongside the
+existing `Optimal`/`Infeasible`; `results.rs::translate_to_plan` now calls
+it instead of hardcoding `Optimal`. `Infeasible` is untouched — a solve that
+returns `Err` (genuinely infeasible, unbounded, or any other solver failure)
+never produces a `SolutionStatus` to map, so `fallback_plan` still sets it
+directly.
+
+Extended the exhaustive `SolveStatus` matches this touched:
+`history_store/plan_history.rs`'s `solve_status_str`/`parse_solve_status`
+(new `"TIME_LIMIT"`/`"GAP_LIMIT"` DB strings), and per `ui-transparency`,
+the VEN UI: `api/types.ts`'s `SolveStatus` union, a new "not certified
+optimal" branch in `StatusRows.tsx`'s `PlanStatusRow` (distinct from both
+the healthy Optimal line and the degraded Infeasible one), and a matching
+`PlanHeaderBar` chip (`data-testid="plan-suboptimal-chip"`, warning-colored,
+distinct from the existing error-colored infeasible chip) — a new possible
+backend value with no UI surface would otherwise have been a half-shipped
+feature per this project's own rule.
+
+**Key learning:** don't trust an existing debt-note's stated blocker without
+re-checking the actual crate source — `docs/reference/TECHNICAL_DEBTS.md`'s
+R-65 said "good_lp/highs expose no achieved-gap query," which turned out
+true only for the *number*; the *status* was sitting right there on the
+`Solution` trait the whole time, just never read. Worth a source check
+before writing off a "the library doesn't support this" blocker as settled.
+
+**Verification:** test-first — a direct unit test on `map_solve_status`
+(`types.rs`, all three `SolutionStatus` variants) rather than an integration
+test forcing each real HiGHS status through `run_planner`: an initial attempt
+to force `TimeLimit` via `solver_timeout_s: 0` (the same technique `good_lp`'s
+own test suite uses) came back `Infeasible`/`NoSolutionFound` instead on this
+planner's actual MIP shape — solver-timing-dependent and not worth chasing
+into a flaky integration test when the mapping logic itself is what changed
+and is trivial to test directly. Backend: `cargo fmt --check`, `cargo clippy
+--all-targets --all-features -D warnings`, `scripts/audit_file_sizes.py`,
+full `wsl cargo test -p ven-app` (1101 passed, up from 1100 — one new unit
+test; the existing Optimal/Infeasible integration tests still pass unchanged).
+Frontend: `eslint` (0 errors), `tsc && vite build`, `npm test` (591 passed, up
+from 586 — 2 new `StatusRows` + 3 new `PlanHeaderBar` cases).
+
+**Bookkeeping:** Removed `GB-31` from `docs/BACKLOG.md` (the actionable scope
+is resolved). Removed `R-67` from `docs/reference/TECHNICAL_DEBTS.md`
+(GB-34, fully resolved above). Narrowed `R-65` to describe only the
+remaining gap (achieved gap as a number) rather than removing it outright,
+since that part is still genuinely open. Updated
+`docs/architecture/VEN_ARCHITECTURE.md` §4.9b with a new `Plan.solve_status`
+paragraph describing the real mechanism.
