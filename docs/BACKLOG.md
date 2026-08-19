@@ -17,13 +17,6 @@ the gap sits in the code. Effort mirrors each item's own Complexity field
 leaving it undone. Gain is the value delivered if built — independent of
 effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None).
 
-### VEN user (site operator) — money saved
-
-| ID | What the user gets | Gain | Effort | Risk |
-|---|---|---|---|---|
-| [BL-11](#bl-11-time-weighted-tariff-averaging-for-planner-slot-costing) | Slightly cheaper/more accurate plans for slots that straddle a tariff-rate boundary | Low | S | Low — isolated calc on existing `TimeSeries` |
-| [BL-13](#bl-13-early-firm-up-heuristic) | Fewer noisy replans under flat-rate tariffs (plan feels more stable) | Low | S | Low — statistical check + reclassification |
-
 ### VEN user (site operator) — forecast accuracy
 
 | ID | What the user gets | Gain | Effort | Risk |
@@ -53,26 +46,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
 | [GB-34](#general-backlog) | react-router v6→v7 migration (security-driven, no new user-facing capability) | Low |
-
----
-
-### BL-11: Time-weighted tariff averaging for planner slot costing
-**Req:** VEN_ARCHITECTURE §5.3
-**Problem:** Planner evaluates tariff at `slot.start` only. A 5-min slot straddling a tariff boundary (e.g., €0.20 → €0.15 at 10:57) uses only the first tariff, ignoring the 3 min at the cheaper rate.
-**Fix:** Replace `tariff_at(slot.start)` with `Σ(tariff_i × overlap(slot, interval_i)) / slot.duration` using the existing `TimeSeries` abstraction. For capacity: `min(capacity_i for all overlapping intervals)`.
-**Gain:** Low — the mispriced window is at most one slot per tariff boundary; small, rare savings.
-**Complexity:** Small–Medium (2–3 hours). Use existing TimeSeries infrastructure.
-**Verify:** Unit test: 10-min slot spanning tariff boundary at minute 7 → weighted average matches `(7*0.20 + 3*0.15)/10 = 0.185`.
-
----
-
-### BL-13: Early firm-up heuristic
-**Req:** VEN_ARCHITECTURE §2.3
-**Problem:** Spec says if rate variance across FLEXIBLE window is < 10% (flat rate), FLEXIBLE slots may firm up early. Code comment at `planner.rs:271` acknowledges this but it's not implemented.
-**Fix:** After Phase 7, compute variance of tariff across all FLEXIBLE slots. If coefficient of variation < 0.10, reclassify FLEXIBLE → FIRM and re-run allocation (Phases 2–5) for those slots.
-**Gain:** Low — perceived plan stability under flat tariffs, no cost or capability change.
-**Complexity:** Small (1–2 hours). Statistical check + slot reclassification.
-**Verify:** Unit test: flat-rate tariff (all €0.15) → all slots classified FIRM. Variable tariff (€0.10–€0.30) → FLEXIBLE slots remain FLEXIBLE.
 
 ---
 
@@ -158,7 +131,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | GB-31 | GB-25's persisted `Plan.mip_gap_target` (and the `plan_history` row's copy of it) is a proxy only — the solver's *configured* MIP-gap tolerance (`controller::milp_planner::types::MIP_GAP_TARGET`, `0.02`), not the *achieved* gap on any given solve. `good_lp`/`highs` expose no achieved-gap query today, so a plan that solved to a much tighter gap than the 2% target looks identical, in this field, to one that just barely made the cutoff. Explicit scope decision made during GB-25's implementation, not an oversight | Low — diagnostic-quality gap, not a functional defect; the configured target still tells an operator "this is at least as good as X%" | Low-Medium — needs either a `good_lp`/`highs` upstream API for the achieved gap, or computing it manually from the solver's best-bound and incumbent objective values if HiGHS exposes those separately |
 | GB-34 | `react-router`/`react-router-dom` (both `VEN/ui` and `VTN/ui`, pinned `^6.26.0`) has no patched 6.x release for its current advisories (open redirect via backslash in `<Link>`/`useNavigate`, arbitrary constructor injection via `deserializeErrors()`) — the latest 6.x, `6.30.4`, is itself still inside the vulnerable range; the only fix is the v7 major line (`7.18.x`). Split out of GB-16 2026-08-16 once `npm audit fix --dry-run` confirmed react-router doesn't move past `6.30.4` without `--force`, and that a real API migration (React Router v7's data-router APIs, some hook/export changes) is needed, not a patch/minor bump like the rest of GB-16's findings | Low-Medium — closes the last open moderate finding from GB-16; react-router is runtime-shipped in both UIs | Medium — real breaking-change migration: bump `react-router-dom` to `^7.18.0` in both `package.json`s, migrate any v6-specific API usage, re-verify both UI suites plus the E2E BDD suite (route navigation is exactly what `@ven-ui`/`controller` scenarios exercise) |
 | GB-35 | GB-22's own "audit other `@ven-ui`/browser scenarios for the same gap" reminder, narrowed: a full `features/` tree audit (2026-08-16, closing GB-22) found the browser+real-backend-poll race pattern concretely limited to the scenarios GB-22 itself fixed, but also surfaced a broader, lower-priority class not addressed there — backend-only scenarios with long (90–300s) `poll_until` calls that share the same host-load sensitivity mechanism without the browser-page combo that caused GB-22's actual reported failures: `features/controller/05_ev_charging_scenarios.feature` (all 4 scenarios, `dispatcher_steps.py` timeouts up to 90s) plus other long-timeout call sites (`alerts_steps.py`, `ev_charging_steps.py`, `uc_steps.py`, `planner_steps.py` at 300s; `request_modes_steps.py`, `comfort_steps.py` at 180s). None have failed under contention yet (unlike the GB-22 instances), so isolating all of them pre-emptively would bloat the isolated pass without evidence; this item exists so the reminder isn't lost, not to isolate all of them by default | Low — speculative, no confirmed failures yet, same mechanism as GB-22 | Low — review each site if/when it's observed flaking, same "tag `@isolated` or raise the timeout" fix shape as GB-22 |
-| GB-36 | `VTN/bff/src/recorder.rs`'s `report_submission_lag_s` computes lag as `report.createdDateTime − max(interval.start + interval.duration)` across every interval currently present in a report resource. This is correct for a report resource that's created fresh per submission (every scenario tested before this one was ≤60 min and never accumulated more than a handful of intervals per report), but openleadr-rs appears to grow a single long-lived report resource by appending new intervals over its lifetime without updating `createdDateTime` — so as more intervals accumulate, `max(interval_end)` keeps advancing while `created` stays fixed at the report's original creation time, making the computed lag drift increasingly (and unboundedly) negative the longer the report resource lives. Found 2026-08-18/19 reviewing the first-ever 24h scenario run (`s9_diurnal`, stakeholder-KPI-reframe fleet re-run): `kpi.py`'s own `event_ids` filtering correctly excluded unrelated leaked programs' reports (confirmed: computed `report_timeliness.count` of 7410 matches exactly 285 samples × 13 VENs × 2 report types for this run's own event), but the *remaining*, correctly-scoped values still ranged from a plausible `-218s` down to an implausible `-86320s` for reports belonging to the very same report resource, growing roughly linearly in ~300s (one report interval) steps per successive report fetch — the signature of `created` staying frozen while `window_end` keeps growing, not a filtering bug | Medium — every long-lived (multi-hour+) scenario's `report_lag_s`/`report_timeliness` column is dominated by this drift, not real timeliness; short scenarios (this project's only tested case until now) never accumulate enough intervals for the drift to be visible, which is how this went unnoticed | Medium — needs deciding what `report_submission_lag_s` should actually measure for a growing report resource (e.g. lag against the *newest* interval added since the last fetch, not `max()` across the resource's whole lifetime, or using `modificationDateTime` instead of `createdDateTime` if openleadr-rs bumps that per-append) — a design question, not a one-line parse fix like GB-32, so needs its own investigation into openleadr-rs's actual report-growth semantics before touching `recorder.rs` |
 
 ---
 
