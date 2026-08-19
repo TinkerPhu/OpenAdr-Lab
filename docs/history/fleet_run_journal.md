@@ -1,0 +1,1109 @@
+# Fleet Run Journal
+
+This document is the dedicated historical record for the multi-VEN fleet
+experiment work: every live scenario run against the persistent VEN fleet
+(`ven-1..3` on Node1, `ven-4..13` on Node2), the tooling built to drive and
+analyze those runs (`experiments/run_experiment.py`, `experiments/kpi.py`,
+the `experiments/scenarios/*.yaml` catalog), and every behavior bug found
+and fixed as a direct result of running them.
+
+Its purpose is **base truth and proof of how the VEN fleet reacts to VTN
+commands** — price signals, capacity limits, alerts, dispatch setpoints,
+budget-constrained user requests — **in connection with each VEN's own
+realistic internal optimization** (its MILP planner, asset mix, persona,
+comfort settings). Where `docs/history/project_journal.md` and the rest of
+this repository's documentation describe only current state and future
+plans, this file is an intentional exception: it preserves the
+chronological narrative of what was run, what the fleet actually did, what
+looked wrong, and how each real bug was root-caused and fixed — exactly
+because that evidentiary trail is the point, not incidental to it. Same
+exemption as `docs/history/**` generally (see
+`docs/reference/DOCUMENTATION_STYLE.md`).
+
+Entries below were originally written into `docs/history/project_journal.md`
+and moved here verbatim (2026-08-19) once fleet-run testing had accumulated
+enough of its own history to warrant a dedicated record; nothing was
+rewritten in the move beyond this introduction.
+
+---
+
+## SG-1/Phase-4-exit persona re-run of S-1..S-6 (2026-08-10)
+
+Immediate follow-on to the run above: same S-1..S-6 matrix, this time with a 3-VEN
+eco/comfort/commuter persona fleet (`fleet.sh up 3 --personas`) layered on top of the base
+`ven-1..3`, to check whether persona diversity (WP4.5) produces measurably different fleet
+response — the Phase 4 exit criterion. Took three attempts; both real bugs found along the
+way are now fixed in the codebase, not worked around.
+
+**Attempt 1** (22:54Z) — two independent bugs, both silent (no crash, just wrong data):
+1. `run_experiment.py --personas`' `setup_persona_sessions()` called `POST /ev-session` to
+   give each fleet VEN its persona's EV request. That route was retired down to `GET`-only
+   when BL-41 replaced the per-device Device-Sessions API with the unified `POST
+   /user-requests` — a stale caller nobody updated when the migration happened. Every
+   persona session creation failed with 405, silently producing zero persona
+   differentiation.
+2. `fleet.sh up` lets Docker Compose auto-create the bind-mounted `VEN/data/fleet-ven-*`
+   directories, which come out `root:root` — but the `ven-app` container runs as uid 2000
+   (matching `ven-1..3`'s directories, which get set up differently). Every persist write
+   failed with `Permission denied`; `history.sqlite` was never created for any fleet VEN.
+
+Killed mid-S3 (`kill -INT` did not reliably interrupt the Python process on this box, both
+here and later — had to `SIGKILL` and manually delete the dangling VTN program +
+event via the API each time cleanup was needed).
+
+**Fixes**: (1) `chown -R 2000:2000` the three `fleet-ven-*` data directories. (2) Committed
++ pushed + pulled a fix to `experiments/run_experiment.py` (commit `dc81d20`) retargeting
+`setup_persona_sessions()` at `POST /user-requests` (`asset_id: "ev"`, `deadlines: [...]`
+instead of the old `departure_time` field) with `DELETE /user-requests/:id` for teardown.
+Verified both fixes independently via direct `curl` against a live fleet VEN before
+resuming.
+
+**Attempt 2** (00:03Z) — `fleet.sh up` is idempotent and found the attempt-1 containers
+still running, so it left them alone rather than recreating them. That mattered because
+`main.rs` only calls `SqliteHistoryStore::open()` once at process boot; those containers had
+already tried and permanently failed at their original 22:58:54Z boot (directories were
+still root-owned then) and never retry. The chown fix only helps a *fresh* boot. S-1
+completed with correct persona sessions but **still** zero history data. Discovered
+mid-S2 and `docker restart`ed the three containers to force a fresh boot with the
+already-correct permissions — but active user-requests aren't part of the persisted
+`state.json`/`sim_state.json`, so the restart silently wiped S-2's in-flight persona
+session too (confirmed: `GET /user-requests` returned `[]` right after). Killed the run,
+cleaned up the dangling S-2 VTN program.
+
+**Learning for next time**: a `docker restart` of a warm container is not a safe way to
+"pick up a directory permission fix" if that container holds any request/session state that
+isn't in its persisted snapshot — always prefer a full stop+recreate (or just don't touch
+already-broken containers; kill the driver and relaunch fresh so `fleet.sh up` builds and
+boots them correctly from scratch).
+
+**Attempt 3** (00:40:19Z) — fully fresh containers, both fixes in place before any scenario
+ran. Confirmed clean at every step: S-1 had no "no history store" warning, `history.sqlite`
+plus its `-wal` sidecar grew steadily throughout (2.8 MB+ by S-4), and all six scenarios
+completed with directory-capture, KPI extraction, and report rendering all working (the
+run-dir capture bug from the earlier S-1..S-6 run had already been fixed in this driver
+script and held up across all 6 runs here too). `fleet.sh down --purge`'s own data-file
+`rm` failed with `Permission denied` (same uid-2000-vs-`pi`-user mismatch, this time on
+*deletion* rather than creation) — containers were still removed cleanly, just the data
+dirs needed a manual `sudo rm -rf` after. Not fixed in `fleet.sh` itself; noted here as a
+minor follow-up (the `--purge` path assumes it can delete files it didn't chown).
+
+**Findings from the report** (`experiments/results/s1-s6-persona-report.md`) — this is the
+result that matters, real persona-driven behavioural diversity, exactly the Phase-4 exit
+criterion:
+- **eco** (`fleet-ven-001`, OPPORTUNISTIC/free-energy-only): near-zero import in every
+  single scenario (0.003–0.15 kWh per 30-min window, cost ≈ €0) — textbook "only charge on
+  surplus" behaviour.
+- **comfort** (`fleet-ven-000`, ASAP/cost-blind): consistently the highest importer across
+  all six scenarios (2.9–3.8 kWh, €0.18–0.28) — convenience wins over price exactly as
+  designed, and barely responds to any control signal (S-2..S-6 costs stay close to the S-1
+  baseline).
+- **commuter** (`fleet-ven-002`, BY_DEADLINE + €2 budget ceiling): intermediate and the most
+  *reactive* of the three — import swings from 0.007 kWh (S-3, capacity-limited) up to 2.09
+  kWh (S-6, combined) depending on the scenario, showing the deadline pressure trading off
+  against the budget cap as conditions change.
+
+This is a clean confirmation of SG-1 (fleet diversity produces measurably different
+responses) — the three personas are visibly distinguishable on every KPI in every scenario.
+
+**Both open items from the first (non-persona) run reproduced independently here**, which
+upgrades them from "maybe a fluke" to "confirmed real, worth fixing before the data path is
+trusted further":
+- `report_timeliness` is `null` again in all 6 scenarios' `kpis.json` (verified: each
+  scenario's `recorder-reports_received.csv` has zero rows with `received_at` inside that
+  scenario's actual wall-clock window, same as the first run).
+- The S-5 dispatch divergence pattern recurs: `ven-3`/`fleet-ven-002` (its persona-fleet
+  counterpart role) shows a markedly larger response than `ven-2` under the exact same
+  `DISPATCH_SETPOINT` event in both independent runs (this run: `ven-3` 0.89 kWh / 6.6 kW
+  peak vs. `ven-2` 0.24 kWh / 0.5 kW peak — same shape as the first run). Reproducing across
+  two independent live runs rules out one-off noise; still not root-caused.
+
+**Follow-up**: file both open items (`report_timeliness` always null; the `ven-3` S-5
+dispatch divergence) as BACKLOG entries — they're now confirmed-reproducible, not
+speculative. Also worth a small `fleet.sh down --purge` fix so its own cleanup doesn't need
+a manual `sudo rm -rf` afterward.
+
+## GB-18 root-caused and fixed: VTN recorder had been dead for 9 days (2026-08-10)
+
+Follow-up investigation into `report_timeliness` always being `null` (both experiment runs
+above). Root cause was not a clock/window-matching issue at all: the recorder background
+task had been **completely dead since 2026-08-01T11:04:21Z**, silently, for 9 days.
+
+**What happened**: `vtn-bff`'s `main.rs` connected to Postgres once at process startup
+(`sqlx::PgPool::connect(&database_url).await?`) with no retry. On 2026-08-01 there was a
+brief internal Docker DNS hiccup (`vtn`/DB hostnames briefly unresolvable, visible in the
+BFF's own logs as a burst of "dns error: failed to lookup address information" on unrelated
+VTN-API polls around 10:50–11:04Z) that happened to land on a `vtn-bff` container restart's
+startup connection attempt. That one failed connect logged a single `ERROR` line
+("recorder disabled: failed to connect to DATABASE_URL") and the recorder subsystem was
+never started for that process's entire lifetime — while the rest of the BFF kept serving
+API requests completely normally (`docker ps` showed `vtn-bff-1` healthy for all 9 days).
+Confirmed via `SELECT max(received_at), count(*) FROM lab_recorder.reports_received`:
+frozen at `2026-08-01 11:03:08`, 119,704 rows, unchanged until this fix.
+
+**Fix** (`fix/vtn-recorder-reconnect`, commit `c4ca5b8`, fast-forward merged to `main`):
+- `recorder.rs`: connect + `init_schema` now retry forever with exponential backoff
+  (5s → 300s cap), fully inside the recorder's own spawned task — a DB/DNS problem can
+  never block or fail BFF startup itself (previously `init_schema(&pool).await?` used `?`
+  directly in `main()`, so even a schema-init failure — not just a connect failure — could
+  have taken down the whole BFF, not just the recorder).
+- Added `RecorderStatus` (connected, last poll/success time, consecutive failures, last
+  error) tracked via `Arc<RwLock<_>>`, updated every connect attempt and every poll tick.
+- Per `ui-transparency`: this state had **zero** visibility before this fix — nothing but a
+  single log line, 9 days ago, that nobody was watching. Surfaced via `GET /api/health`'s
+  new `recorder` block and a "Recorder: connected/disconnected (N failed attempts)" line on
+  the VTN UI Dashboard's health card.
+- Test-first: added pure unit tests for the backoff calculation and the three status-mutation
+  helpers (`mark_connect_failure`/`mark_connect_success`/`mark_poll_tick`) before
+  implementing them — confirmed red (compile failure, functions didn't exist), then green.
+  Dashboard gained 3 new tests (connected / disconnected+failure-count / hidden-when-disabled)
+  following the same red→green flow. Full `VTN/bff` (26/26) and `VTN/ui` (67/67) suites green,
+  `cargo fmt`/`clippy -D warnings`/ESLint (0 errors) all clean, `cargo audit` shows only
+  pre-existing unrelated findings (no new dependencies added).
+
+**Mitigation + verification**: restarted `vtn-bff` immediately (before the code fix existed)
+to get data flowing again right away — confirmed archiving resumed instantly. After
+deploying the actual fix, redeployed `bff`+`ui` on Node1 (`docker compose up -d bff ui`
+unexpectedly also recreated `vtn-db`/`vtn-vtn` — all 4 containers came back healthy within
+~30s, recorder row count kept climbing through the recreate with no data loss, so treated as
+a non-issue rather than chased further). Verified live: `GET /api/health` now returns a
+populated `recorder` block (`connected: true`, fresh `lastPollAt`/`lastSuccessAt`), and the
+deployed UI bundle contains the new "Recorder:" status text.
+
+**Still open**: GB-18's *symptom* (report_timeliness null) is now explained and the root
+cause fixed, but the 9-day historical gap in `lab_recorder.reports_received` is permanent —
+any future analysis spanning 2026-08-01 through 2026-08-10 will have a reporting blind spot
+for that window. Not backfillable (the source data was never captured). GB-18 can be closed
+in BACKLOG.md; the underlying reliability gap (no retry, no health surface) is what's fixed
+here, not just the immediate incident.
+
+## Full 13-VEN fleet deploy + S-1..S-6 experiment run (2026-08-12)
+
+**Trigger**: after the R-18 fix, the user asked to (1) bring Node2's VEN fleet up to
+current `main` if it wasn't already, (2) extend the experiment tooling (`experiments/
+run_experiment.py`, `kpi.py`) to cover the full 13-VEN fleet (Node1's `ven-1..3` +
+Node2's `ven-4..13`) instead of just Node1's 3, (3) design what to record so a
+scenario run's results can be judged expected-or-not, then (4) run S-1..S-6
+sequentially against the full fleet, unattended (~8h window). Work happened in a
+worktree (`worktrees/fleet-13-ven-experiment`, branch `fleet/13-ven-experiment-run`)
+rather than the main checkout — the main checkout had unrelated uncommitted WIP for
+the `reactive-correction-notifications` openspec change sitting in it that needed to
+stay untouched.
+
+### Deploy (Phase A)
+
+Local `main` was 2 commits ahead of `origin/main` (unpushed — included the R-18 fix)
+— pushed first so both hosts could pull it. Node1 was 8 commits behind, Node2 was 11
+— both fast-forwarded cleanly (`git pull --ff-only`, both hosts had clean working
+trees). Rebuilt and redeployed under the standard lease locks: Node1's `VTN/` and
+`VEN/` compose projects (ven-1..3 + VTN/BFF/UIs), Node2's `VEN/scale_out/node2/`
+compose project (ven-4..13). `bash scripts/capture_ven1_logs.sh` run before the
+Node1 `ven-1` rebuild per the standing rule. All 13 VENs came up healthy and
+`/vtn/status`-connected on the first try — no repeat of the earlier 401-degraded
+transient. Both hosts now on `738003104ecb8127aa15d7c39efd41a339399e32`.
+
+### Tooling extension (Phase B)
+
+`run_experiment.py`/`kpi.py` only ever addressed VENs on the host they ran on
+(Node1's `ven-1..3`, reading `history.sqlite` off the local bind mount and
+`docker exec`-ing `vtn-db-1` directly) — Node2's `ven-4..13` were invisible to the
+scripts. New `experiments/fleet_map.json` gives each of the 13 VENs a host/port/
+lan_ip/remote_data_root entry. `snapshot()` now takes an optional fleet map and
+routes each VEN through either the existing local file copy or a new `scp`-based
+remote pull; the recorder-CSV dump gained a `--pg-host` flag that wraps the
+`docker exec ... psql` call in `ssh` when not run locally.
+
+**Orchestration host**: the script's own docstring says it "runs ON the docker host
+(Node1)," matching `fleet.sh`'s convention. That assumption broke here — Node1 has
+no configured ssh trust to Node2 (`ssh Node1 "ssh Node2 ..."` failed to resolve the
+alias, and retrying with agent-forwarding hit `Permission denied (publickey)`), and
+setting up new cross-host ssh trust on shared production hosts wasn't something to
+do unprompted mid-task. The workstation running this session already had verified
+direct LAN HTTP and ssh/scp access to *both* Node1 and Node2, so the run was
+orchestrated from there instead — `fleet_map.json` marks every VEN (including
+Node1's own `ven-1..3`) as reached via its `Node1`/`Node2` ssh alias, and
+`--pg-host Node1` routes the recorder dump the same way. This works but means the
+"runs on Node1" docstring is now stale — filed as a backlog item (see below) rather
+than fixed by force, since the right fix (restore Node1-to-Node2 ssh trust vs.
+formalize off-host orchestration as the supported mode) is a judgment call for the
+user.
+
+**Diagnostics recording**: the point of this exercise beyond raw energy/cost KPIs
+was to be able to tell *why* a scenario's result looked the way it did. Explored
+what the VEN already exposes (`GET /plan`, `PlanReady` SSE) before adding anything —
+`solve_status`, free-text `warnings` (severity-tagged), `cost_breakdown` (incl. a
+`c_violations_eur` total), `objective_eur`/`friction_eur` are all already on the
+persisted `Plan` and served by `GET /plan`; `solver_ms` exists only on the
+`plan_ready` SSE event, not the persisted `Plan`. Per the user's explicit choice
+(asked directly rather than assumed), this pass reuses what already exists via a
+background poller rather than adding new VEN-side Rust instrumentation: a
+60s-interval poll of every VEN's `GET /plan` for the run's duration, appended as
+JSONL (`{ven}-plan-diagnostics.jsonl`), threaded so it runs alongside the existing
+scenario action loop. `kpi.py` gained `plan_diagnostics_summary()` — solve_status
+distribution, warning-severity counts, `c_violations_eur` mean/max per VEN, folded
+into the existing per-VEN KPI block. `solver_ms` capture (would need a persistent
+per-VEN SSE listener) and structured/typed violation fields were explicitly
+deferred — backlogged below.
+
+A 3-minute `smoke.yaml` dry run against all 13 VENs (multi-host snapshot + poller)
+surfaced one real, unrelated bug before the real runs started: `kpi.py`'s recorder-
+CSV reader hit Python's default 128 KiB `csv` field-size limit, because the
+recorder dump is the *whole* `lab_recorder.reports_received` table (not filtered to
+the run window) and this deployment's accumulated history contains a payload blob
+past that limit. Fixed with `csv.field_size_limit(10 * 1024 * 1024)` (not
+`sys.maxsize` — that overflows the C `long` `field_size_limit` uses internally on
+Windows). The unfiltered-dump root cause itself is backlogged, not fixed here (out
+of scope — a bigger change to the recorder query, not a one-line fix).
+
+Committed as `803c8c0` on `fleet/13-ven-experiment-run`.
+
+### The S-1 run got killed twice before it stuck
+
+The harness's own background-task tracking for the local (non-ssh) `run_experiment.py`
+process didn't survive across turns — both of the first two S-1 launches came back
+`status: killed` at ~90s in, well before the 30-minute scenario window closed, with
+no crash in the process's own output (empty log both times). Each left an orphaned
+VTN program + event behind (the script's cleanup `finally` block never got the
+chance to run) — cleaned up via direct `DELETE /events/{id}` and `DELETE /programs/
+{id}` calls both times before retrying. Worked around the same way the project
+already documents for remote long builds on separate git clones: launch fully
+detached (`nohup ... > log 2>&1 < /dev/null & disown`), then poll the PID
+(`Get-Process python`) and log file across turns instead of relying on the
+harness's own background-task completion notification. This held for all 5
+remaining scenario runs with zero further kills.
+
+### Results — S-1..S-6 against the full 13-VEN fleet
+
+Each run: 30 min real-time window, full fleet snapshot + `kpi.py` (`--baseline` =
+S-1) run immediately after. All 6 runs: **13/13 VENs present in every `kpis.json`,
+0 poll errors on the diagnostics poller, `solve_status: OPTIMAL` on every one of
+390 polled samples across the whole run (13 VENs x 30 polls) in every scenario —
+the solver never went infeasible or timed out anywhere in this run.**
+
+| Scenario | Fleet import (kWh) | Fleet cost (EUR) | Peak (kW, any VEN) | Sum shift vs S-1 (kWh) | Warnings | Max violation cost (EUR) |
+|---|---|---|---|---|---|---|
+| S-1 flat (baseline) | 5.526 | 0.749 | 3.900 | -- | 0 | 0 |
+| S-2 price_spike | 5.851 | 0.581 | 3.900 | -0.325 | 0 | 0 |
+| S-3 capacity_limit (3 kW/10min) | 1.548 | 0.187 | 2.150 | +3.978 | 2 (ven-3) | 57.76 |
+| S-4 alert (grid emergency) | 1.610 | 0.100 | 1.800 | +3.916 | 20 (ven-9/10/11/12) | 1000.00 |
+| S-5 dispatch (SIMPLE + setpoint) | 1.955 | -0.013 | 3.900 | +3.571 | 0 | 0 |
+| S-6 combined (spike+reservation+alert) | 2.812 | -0.254 | 4.257 | +2.713 | 29 (ven-2/3/9/10/11/12) | 1196.74 |
+
+Capacity limits and the emergency alert clearly shift load and cut fleet cost — a
+price signal alone (S-2) barely moved the fleet total, matching the earlier S-1..S-6
+run's finding (see the 2026-08-09/10 entry) that capacity/alert control beats price
+signals for peak shaving in this fleet.
+
+**The S-3/S-4/S-6 warnings are the diagnostics tooling doing its job, not a bug.**
+Every warning reads `"Grid capacity violation in N slot(s) - solver used slack"`,
+and every VEN that raised one is asset-mix-inflexible for the constraint in play:
+`ven-9` is `base_load`-only (no PV/battery/heater to shed at all — see `VEN/profiles/
+ven-9.yaml`), and `ven-10/11/12` are similarly light. When a capacity limit or
+emergency alert demands more shedding than a VEN's actual assets can deliver, the
+MILP correctly falls back to a slack variable (`solve_status` stays `OPTIMAL`, not
+`Infeasible`) and prices the shortfall into `c_violations_eur` rather than
+producing an infeasible plan — the fleet's asset-mix diversity (5/13 VENs have PV,
+3/13 have battery, per this file's Node2-growth entry) means "the fleet as a whole
+met the constraint" (visible in the aggregate KPIs above) can still coexist with
+"this specific inflexible VEN individually didn't." This is exactly the kind of
+per-VEN signal the `GET /plan` poller was built to surface that pure grid-power
+KPIs would have hidden.
+
+**Methodology finding — the S-4 negative-shift confound**: `ven-1`'s
+`energy_shifted_kwh` came back **-0.3615 kWh** in S-4 (imported *more* than its S-1
+baseline despite the emergency alert). Investigated rather than dismissed: `ven-1`'s
+`solve_status` was `OPTIMAL` for all 30 polls with zero warnings/violations in S-4,
+so this isn't a shed failure. The scenarios run in real wall-clock time (the sim
+clock has no injectable-time acceleration for this harness — see `run_experiment.py`'s
+own docstring), and S-1 ran at 21:57 UTC on 2026-08-11 while S-4 ran at 06:21 UTC
+the next day — a large natural time-of-day difference in PV/base-load that
+`energy_shifted_kwh`'s same-VEN-different-run diff can't distinguish from an actual
+event response. `ven-1` is one of the few VENs with PV (per its profile), which is
+exactly the asset most sensitive to a 21:57-vs-06:21 UTC time-of-day difference —
+consistent with this being the confound, not a regression. Backlogged: a same-
+wall-clock paired-control or same-time-of-day-rerun design would remove this
+confound for future runs.
+
+**Bookkeeping**: new backlog items filed in `docs/BACKLOG.md` (deferred structured
+plan-quality instrumentation, unfiltered recorder-CSV dump size, report_timeliness/
+event_impact_kwh nulls because scenarios don't request BASELINE/USAGE reports, the
+same-wall-clock-baseline idea, and the stale "runs on Node1" docstring). Tooling
+changes + this entry committed and pushed on `fleet/13-ven-experiment-run` — **not**
+merged to `main`; the branch is left for the user to review before merging. The
+worktree is left in place (not removed) for the same reason.
+
+## GB-28 fix: paired-baseline window for `energy_shifted_kwh` (2026-08-13)
+
+**Trigger**: the user asked which of the newly-filed backlog items was most
+pressing; answered GB-28 (renumbered from GB-27 — other agents had claimed
+GB-21..24 on `main` in the meantime, resolved by rebasing this branch onto
+current `main` and renumbering this session's own items to GB-25..29; see the
+rebase note above). User then asked to implement it, planned first, reviewed
+before merging.
+
+**Fix**: `run_experiment.py` gained a `run_window()` helper (extracted from the
+old single-window `main()` body, no behavior change to the window logic itself)
+and a `--paired-baseline` flag (default on). When enabled, every scenario run
+now spends one extra `duration_minutes` window with zero events posted,
+immediately *before* the scenario's own window, snapshotted to a sibling
+`{run_dir}-baseline/` directory. `kpi.py` auto-discovers that sibling directory
+for `energy_shifted_kwh` when `--baseline` isn't given explicitly, falling back
+to the old behavior (no baseline) if it's absent. This shrinks the baseline-to-
+scenario gap from hours (the 8.5h S-1-vs-S-4 gap that surfaced the bug) to the
+width of one window (~30 min for S-1..S-6) — a large reduction, not a full
+elimination; the docstring/backlog explicitly say so, since a true fix needs
+injectable sim time through the whole tick/poll path, out of scope here.
+
+**Design choice — same-VEN adjacent baseline, not a cross-VEN control**:
+confirmed via source read that the VTN does support per-VEN event targeting
+(`targets: [{"type":"VEN_NAME","values":[...]}]`, enforced server-side in the
+embedded `openleadr-rs` fork), so an in-run "control VEN" excluded from the
+event was a real option. Rejected — the 13 VENs have deliberately
+heterogeneous asset profiles (5/13 have PV, 3 of those have battery, `ven-9` is
+base-load-only, no two share a profile), so "VEN A untouched" can't stand in
+for "VEN B without the event." A same-VEN comparison is the only
+methodologically sound one available without a bigger architectural change.
+
+**Verification**: live smoke-test run (`smoke.yaml`, 3 min × 2 windows) against
+the full 13-VEN fleet. `{run_dir}-baseline/` came back with 13/13 VEN
+snapshots and its own plan-diagnostics files, exactly like a normal run.
+`kpi.py --run {run_dir}` (no explicit `--baseline`) auto-picked up the sibling
+baseline and populated `energy_shifted_kwh` for every VEN present.
+
+**Found during verification, not part of this fix**: `kpi.py`'s output was
+missing `ven-1` — 12/13 VENs, not 13. Investigated rather than assumed benign:
+`ven-1`'s `grid_samples` table hadn't been written to in ~8.8h, and its
+`/health` endpoint showed `storage: degraded`. Root cause: the running
+`ven-ven-1-1` container (`StartedAt: 2026-08-12T20:51:18Z` — recreated by some
+other session, not this one) has its `/data` bind mount pointing at
+`/srv/docker/openadr_lab_main-deploy/VEN/data/ven-1`, a path that doesn't exist
+anywhere on Node1's filesystem (confirmed via `stat`) — Docker silently mounted
+it as an empty directory. Container logs confirm: `sim persist failed: No such
+file or directory` / `persist write failed: No such file or directory`
+repeating every ~15s since that timestamp, while VTN polling/events/reports
+(which don't touch `/data`) kept working fine, masking the problem from a
+casual `/health` glance. `ven-1`'s real data (through the last known-good
+write) is still intact at the canonical `/srv/docker/openadr_lab/VEN/data/
+ven-1/` — not touched, not remediated; flagged to the user rather than
+restarted unilaterally, since it's live shared infrastructure another session
+may still depend on. `kpi.py` handled the missing VEN gracefully (silent
+exclusion, not a crash) — no code change needed for that part; it's exactly
+the degrade-gracefully behavior you'd want.
+
+**Bookkeeping**: GB-28 row removed from `docs/BACKLOG.md` (the in-scope,
+actionable fix is done; the residual "needs injectable sim time" gap is
+already out-of-scope-by-design, not a new open item). The `ven-1` data-mount
+incident is not filed as a new backlog item here — left for the user to decide
+how to remediate first, since acting on it (or even fully diagnosing it
+further) wasn't this session's call to make unilaterally.
+
+## GB-27 fix: reportDescriptors so scenario runs actually get reports (2026-08-13)
+
+**Trigger**: second half of the same "which is most pressing" follow-up — after
+GB-28, the user asked to implement GB-27 the same way (plan, implement, review,
+merge).
+
+**Root cause** (confirmed via source read, `VEN/src/controller/vtn_port.rs` +
+`openadr_interface.rs`): a VEN only submits BASELINE/USAGE reports for an event
+that carries a `reportDescriptors` array on the *event* body — program-level
+reportDescriptors are spec-legal but not read by this VEN's model at all
+(`OadrProgram` has no such field). `experiments/run_experiment.py`'s
+`build_event()` never set this key, so no scenario run had ever produced a
+reportable obligation; `report_lag_stats()`/`event_impact_kwh()` always
+returned `None`/`null` — not because they're broken, but because nothing was
+ever archived for them to read.
+
+**Fix**: new `REPORT_DESCRIPTORS` constant (BASELINE `historical: false` +
+USAGE, both `frequency: 300` seconds — confirmed via `extract_report_
+obligations()` that frequency is seconds, not an ISO 8601 duration, a
+documented past gotcha; also confirmed `due_at = now + frequency`, so the
+*first* report only fires after a full frequency interval — 300s comfortably
+inside every 30-min scenario window, but too long for the 3-min `smoke.yaml`,
+which is why verification used a real scenario instead). `build_event()`
+gained an optional `report_descriptors` param; `run_window()` attaches it to
+the first event of `actions` when present (new `--request-reports` flag,
+default on). For the GB-28 paired-baseline window (`actions=[]`, no events at
+all otherwise), a synthetic **SIMPLE level=0** event spanning the whole window
+carries the descriptors instead — confirmed via `docs/openadr_3_0_specs/
+2_OpenADR 3.0 Definition v3.0.1.md` that level 0 means "normal operations" per
+spec, and via `VEN/src/controller/milp_planner/inputs.rs`'s `simple_cap`
+match arm that any level other than 1/2/3 falls through to the unrestricted
+contractual cap — a genuine no-op for planning, unlike posting a real
+price/capacity/alert event which would itself become a confound.
+
+**Verification**: live 30-min `s1_flat` run (`--no-paired-baseline`, since
+GB-28's own window-pairing mechanics were already verified separately) against
+the full 13-VEN fleet. `kpi.py`'s output: `report_timeliness` populated with
+130 samples (`median_s: -532.7`, `max_s: 72.4`, `min_s: -1145.5` — the
+negative lags are expected, not a bug: `report_lag_s` is computed against
+each interval's own timing, and a `historical: false` BASELINE report is a
+*forecast* for a future interval, so it's legitimately received before that
+interval's nominal time). `event_impact_kwh` populated (non-null) for all
+12 VENs present. Investigated the raw recorder rows rather than trusting the
+non-null check alone: a first ad-hoc query without time-window filtering
+picked up unrelated historical report rows from days earlier (a reminder that
+`report_lag_stats`/`_report_energy_kwh` deliberately filter by `received_at`
+for exactly this reason) — redone properly windowed, confirmed 60 real
+BASELINE and 60 real USAGE payload intervals for `ven-4` inside the actual run
+window. Every VEN's `event_impact_kwh` came back exactly `0.0` — expected, not
+a red flag: S-1 is the no-control-signal baseline scenario itself, so a
+well-calibrated forecast should closely track actual usage when nothing
+unusual is happening; this is the "no signal → no impact" sanity result, the
+same caveat WP5.4's own proposal flagged going in ("simulated households may
+be too regular, making the heuristic-baseline counterfactual look artificially
+good"). A scenario with a real event (S-4, S-6) would be the next place to
+look for a genuinely non-zero value, not attempted here (out of scope for this
+fix's own verification).
+
+**Bookkeeping**: GB-27 row removed from `docs/BACKLOG.md`.
+
+## GB-26 + GB-29 fixes: windowed recorder dump, stale orchestration docstring (2026-08-13)
+
+Two small follow-ups from the same fleet-experiment tooling session, both
+trivial per the user's own assessment before implementing.
+
+**GB-26**: `run_experiment.py`'s `snapshot()` dumped the entire
+`lab_recorder.reports_received`/`events_published`/`ven_snapshots` tables via
+unfiltered `COPY ... TO STDOUT`, so every run paid a dump cost that scaled
+with total deployment history, not run length (hit ~122 MB for
+`reports_received` alone in an earlier 3-min smoke test). Fixed by adding a
+`_TABLE_TIME_COL` map (`reports_received.received_at`,
+`events_published.seen_at`) and an optional `t_from`/`t_to` pair on
+`snapshot()`; when both are given, the `COPY` query gains a
+`WHERE <time_col> >= t_from AND <time_col> < t_to` clause. `ven_snapshots` is
+exempt — it's a PK-per-VEN "latest state" table (one row per VEN, overwritten
+in place), not an append log, so a time filter there would just risk
+excluding a VEN's only row if its last write happened to fall outside the
+window. `run_window()`'s call site now passes `t_from=t0` (the window's own
+start) and `t_to=datetime.now(timezone.utc)` (the actual moment snapshotting
+begins, not the nominal `end` — deliberately a little wider than the nominal
+window so nothing arriving during the cleanup/event-deletion step gets
+clipped).
+
+**GB-29**: the module docstring claimed the script "Runs ON the docker host
+(Node1), same convention as `fleet.sh`" — stale since the 2026-08-12 full
+13-VEN run, which had to be orchestrated off-host (a workstation reaching
+both Node1 and Node2 over LAN/ssh) because Node1 has no ssh trust to Node2.
+Rewrote the docstring to describe both modes: on-host for a single-host run,
+off-host via `--fleet-map`/`--pg-host` for a multi-host fleet — matching what
+the script has actually done since GB-29 was filed. No behavior change,
+docs-only.
+
+**Verification**: both are syntax/doc-level changes with no new runtime
+branch beyond the existing `--paired-baseline`/`--request-reports` machinery
+already exercised in the GB-28/GB-27 verification runs above; confirmed via
+`python3 -c "import ast; ast.parse(...)"` that the file still parses cleanly.
+No live re-run performed — the `WHERE` clause only narrows what a pre-existing
+non-empty query already returns, and the GB-27 verification run above already
+exercised the exact `t_from`/`snapshot()` call path this reuses.
+
+**Bookkeeping**: GB-26 and GB-29 rows removed from `docs/BACKLOG.md`.
+
+## GB-25 fix: persisted plan-quality history (2026-08-13)
+
+**Trigger**: implementing an approved, fully-specified plan for GB-25 — a
+VEN's plan quality (solve time, warnings, MILP gap tolerance) was visible only
+live: `solver_ms` existed solely on the transient `plan_ready` SSE event,
+never on the persisted `Plan`/`GET /plan`; `PlanWarning` was free-text
+(`message: String`) with no typed `kind`; no MILP optimality-gap field existed
+anywhere; and the one table that would have stored plan history
+(`plan_snapshots`) had been dropped as dead code (R-63) — its only writer was
+never called from production, so it was always empty.
+
+**Four confirmed design decisions** (fixed before implementation, not
+re-litigated during it):
+
+1. **Dedup switches to `kind`.** `services/notify.rs`'s `new_plan_warnings`
+   previously deduped newly-surfaced warnings on `PlanWarning.message`; a
+   warning's message text can carry per-cycle interpolated numbers (thresholds,
+   window times), so two cycles' worth of "the same" warning looked new every
+   time its numbers moved. Switched the dedup key to the new typed `kind`.
+2. **`WarningKind` covers only what's actually raised today**: a 6-variant enum
+   (`SolverInfeasible`, `StaleRateEstimate`, `BudgetShortfall`,
+   `CapacityViolation`, `PeakPenaltyExceeded`, plus `Other` as an unused-today
+   catch-all) mapped 1:1 onto the 5 real `PlanWarning{...}` construction sites
+   in `controller::milp_planner::results` — no speculative variants for
+   warnings the codebase doesn't actually raise.
+3. **UI location: a new Diagnostics nav page** (`/plan-history`), not a tab
+   inside the live Planner page — plan history is a distinct diagnostic
+   surface from "what's the plan doing right now."
+4. **MILP gap: proxy only, explicitly out of scope to do better.** Persist
+   `mip_gap_target` (the solver's configured tolerance, `0.02`) + `solve_status`.
+   The `0.02` literal, previously duplicated across `solver_phase1.rs`,
+   `solver_phase2.rs`, and `solver_duals.rs`, was extracted to one shared
+   `controller::milp_planner::types::MIP_GAP_TARGET` constant reused by all
+   three `with_mip_gap` call sites. Querying a real *achieved* MILP gap from
+   `good_lp`/`highs` is explicitly out of scope — persisting the configured
+   target is only a proxy; filed as follow-up debt (R-65) and backlog item
+   GB-31.
+
+**Implementation**: `entities/plan.rs` gained `WarningKind`, `PlanWarning.kind`,
+and `Plan.solver_ms`/`Plan.mip_gap_target` (both `#[serde(default)]` so old
+persisted/serialized plans still deserialize). `entities/history.rs` gained
+`PlanHistorySample` (mirroring the `ForecastAccuracySample` struct already in
+that file, per the `forecast_accuracy_samples` pattern documented in
+`docs/architecture/VEN_ARCHITECTURE.md` §4.9a — the design that pattern's own
+doc comment says was chosen *over* reviving `plan_snapshots`).
+`history_store/schema.rs` gained `SCHEMA_V10` (`plan_history` table,
+`warning_kinds` stored as a comma-joined TEXT column rather than a join table
+— the only consumer is a per-cycle UI summary, not per-warning queries) and a
+new `history_store/plan_history.rs` module for its `append`/`query`, wired into
+`HistoryPort` and `SqliteHistoryStore` the same way `forecast_accuracy.rs` is.
+`services::planning::adopt_if_warranted` stamps `plan.solver_ms` before either
+the `PlanReady` SSE emit or `state.set_active_plan`, so the live event, the
+persisted `Plan`, and the plan-history row all agree; `mip_gap_target` is
+stamped at `Plan` construction time in `results.rs` instead (it's known before
+the solve, not after). `services::forecast::finish_plan_cycle` builds and
+persists one `PlanHistorySample` per plan cycle (adopted or not — this is a
+solve-quality trend, not a dispatch-history view) right alongside its existing
+forecast-accuracy write, same best-effort/log-and-continue contract.
+`GET /history/plans?from=&to=` mirrors the existing `/history/forecast-accuracy`
+route's shape exactly. On the UI side: `PlanHistory.tsx` (solve-time trend
+chart + per-cycle table with a warning-kind chip per warning) under a new
+"Plan History" Diagnostics nav entry, and `PlanHeaderBar.tsx` (the live
+Planner page) now renders the persisted `solver_ms`/`mip_gap_target` and a
+kind chip per warning alongside the existing severity chip and message.
+
+**Deviation from the plan's file-size estimate**: `results.rs` crossed the
+500-production-line cap by 7 lines once the `kind` stamping and
+`mip_gap_target` assembly landed. Fixed by moving the small, self-contained
+`active_penalty_rules` helper (pure `PenaltyRuleParams` → `ActivePenaltyRule`
+mapping, WP6.3/BL-09, unrelated to this change's own logic) out to
+`controller::milp_planner::types`, which every `milp_planner` submodule
+already pulls in via `use super::types::*` — no call-site changes needed
+beyond the move itself.
+
+**Verification**: `wsl cargo test -p ven-app` — 1003 + 1 passed, 0 failed
+(under `wsl_lock.sh` discipline, `-j 2`; the lease expired mid-build once
+during the UI-test detour and was re-acquired before continuing, per the
+project's shared-WSL convention). `cargo fmt --check` and
+`cargo clippy --all-targets --all-features -- -D warnings` both clean.
+`scripts/audit_file_sizes.py` passed after the `results.rs` split above.
+`cd VEN/ui && npm test` — 547/547 passed; `npm run lint` — 0 errors (the same
+pre-existing `react-refresh/only-export-components` warning class every other
+page-plus-helper-exports file in this codebase already carries, e.g.
+`History.tsx`). A new BDD scenario
+("Operator reviews historical plan quality after a plan cycle runs",
+`tests/features/ven_history.feature`) plus two smaller `/history/plans`
+route scenarios were added; E2E verification via Node1 (`run_all_tests.sh
+--e2e`) was not attempted this session — left for the next Node1-lock
+window, noted rather than skipped silently.
+
+**Bookkeeping**: GB-25 row removed from `docs/BACKLOG.md`; new low-priority
+row GB-31 added for the real-achieved-MILP-gap follow-up (decision 4 above).
+`docs/reference/TECHNICAL_DEBTS.md` gained R-65, cross-referencing GB-31,
+documenting the gap-proxy-only decision as tracked debt (mirroring how R-63
+documented the `plan_snapshots` removal). `docs/architecture/VEN_ARCHITECTURE.md`
+gained §4.9b describing the `plan_history` table, its route, and the UI
+surfaces, following §4.9a's format.
+
+## Fleet run 2 tooling (Part A) — 2026-08-14
+
+Follow-up to the 2026-08-12 full 13-VEN fleet run: that run's plan-quality
+stats were data-poor (solve_status OPTIMAL on all 390 samples, few
+warnings), and GB-25 (`solver_ms`/`mip_gap_target`/typed `warning_kinds`,
+`GET /history/plans`) has since landed on `main` but the live fleet
+deployment still runs pre-GB-25 code. This piece of work (done in worktree
+`worktrees/fleet-run-2-tooling`, branch `feat/fleet-run-2-tooling`) builds
+the tooling/scenario/profile changes a fresh redeploy + 8-scenario run
+(S-1..S-8) will use — no live deploy, no fleet run, done here.
+
+**Profile**: `VEN/profiles/ven-9.yaml` (base-load-only, no controllable
+asset) gained a `penalty_rules` block — 0.3 kW threshold, 30-min window,
+1 EUR/kW — deliberately below its own 0.5 kW baseline so a PeakPenaltyExceeded
+warning is guaranteed once redeployed. Exact shape matched against
+`VEN/profiles/penalty_test.yaml`'s existing fixture.
+
+**Scenarios**: `experiments/scenarios/s7_stress.yaml` (tight 1.5 kW capacity
+limit overlapping a grid-emergency alert) added, matching `s3_capacity_limit`/
+`s4_alert`'s existing field shapes exactly.
+
+`experiments/scenarios/s8_budget.yaml` was added as its **own** scenario
+rather than a 4th action folded into S-7 — keeps BudgetShortfall's own stats
+separable per-scenario from CapacityViolation/PeakPenaltyExceeded's in the
+`warning_kind_counts` KPI (kpi.py's `plan_history_summary`), since S-7's own
+actions already produce those two kinds.
+
+**New `budget_shortfall` action type** (`experiments/run_experiment.py`):
+unlike every other action type, this bypasses the VTN — a direct
+`POST /user-requests` on the target VEN's own HTTP API (no auth header
+needed; confirmed by reading the route registration in
+`VEN/src/routes/mod.rs` — `/user-requests` isn't behind bearer-token auth)
+with a deliberately too-tight budget, to force a real `BudgetShortfall` plan
+warning. New helpers `post_user_request`/`delete_user_request` mirror
+`post_event`'s shape; `run_window()`'s action loop and `finally` cleanup got
+a parallel `created_requests` list alongside `created_events`.
+
+Key correctness finding from reading `VEN/src/controller/milp_planner/inputs.rs`'s
+`budget_warning` and `VEN/src/assets/ev_milp.rs`: `budget_eur` only reaches
+the MILP budget constraint (and therefore the warning) when the EV session's
+`mode` is `MAX_COST` — every other mode ignores `session.budget_eur` entirely.
+Also, contrary to the initial plan draft, the MILP's core-energy shortfall
+comes from `session.target_soc` (via `core_kwh = (target_soc − current_soc) *
+battery_kwh` in `ev_milp.rs`), **not** from `target_energy_kwh` — passing
+`target_energy_kwh` alone in the POST body leaves `target_soc` at its default
+(0.9) and has no effect on the MILP's core-energy computation for the EV
+asset. So the actual POST body sets `mode: "MAX_COST"` and `target_soc`
+(0.80, matching ven-11's own `soc_target`) rather than `target_energy_kwh`;
+the scenario YAML's `target_soc` field reflects this. Confirmed the
+mechanism itself already has coverage — `tests/features/ven_request_modes.feature`
+scenario "MAX_COST budget shortfall raises a user notification" exercises the
+exact same `mode=MAX_COST` + low `budget_eur` combination end-to-end.
+
+**Plan-history + forecast-accuracy fetch**: `fetch_plan_history`/
+`fetch_forecast_accuracy` pull `GET /history/plans`/`GET /history/forecast-accuracy`
+per VEN (gated on `--fleet-map`, same as the existing `poll_plan_diagnostics`)
+right after `run_window()`'s existing `snapshot()` call, same `t_from`/`t_to`
+window. `poll_plan_diagnostics`'s docstring corrected — its "solver_ms would
+need an SSE listener" note was stale since GB-25; it's now documented as the
+live-progress fallback, not the analysis source of record.
+
+**kpi.py**: new `plan_history_summary()` (reads `{ven}-plan-history.json`,
+verified field-for-field against `entities::history::PlanHistorySample` —
+`warning_kinds` serializes as SCREAMING_SNAKE_CASE strings e.g.
+`"BUDGET_SHORTFALL"`, easy to consume as plain strings) computes
+solver_ms/mip_gap_target-sanity/solve_status_counts/warning_kind_counts/cost
+stats, all null-tolerant. New `forecast_accuracy_summary()` (reads
+`{ven}-forecast-accuracy.json`, verified against `ForecastAccuracySample`)
+groups by `(asset_id, lead_kind)` and computes MAE + bias (signed, to catch
+systematic over/under-forecast direction), excluding unreconciled
+(`actual_kw is None`) rows silently. `main()` tries `plan_history_summary()`
+first, falls back to the existing `plan_diagnostics_summary()` (unchanged,
+now documented as the fallback) when it returns `None` — the
+`k["plan_diagnostics"]` key name is unchanged either way. Self-check
+(`python experiments/kpi.py --self-check`) extended with synthetic fixtures
+for both new functions, including a deliberately non-constant
+`mip_gap_target` (flags a WARN, doesn't error) and a warning_count/
+`len(warning_kinds)` mismatch check.
+
+**Verification**: no local Docker available on this workstation (`docker
+version` fails), so no local single-VEN stack was brought up. Verified
+instead via (a) `python experiments/kpi.py --self-check` — passes, including
+the new fixtures' assertions; (b) `python -m py_compile` on both changed
+scripts; (c) careful cross-reference of every Rust field name/route/mode
+condition this tooling depends on, reading the actual current-`main` source
+rather than trusting the plan draft's field-name notes (which is how the
+`target_soc` vs `target_energy_kwh` finding above was caught); (d) confirming
+existing BDD (`ven_request_modes.feature`) and Rust unit coverage
+(`milp_planner/tests/penalty.rs`, `solver.rs`) already exercise the
+underlying `budget_warning`/`penalty_rules` mechanisms this tooling drives.
+Live-fleet dry-run verification (confirming a real deploy actually fires
+BudgetShortfall/PeakPenaltyExceeded through this new tooling) is deferred to
+Part B (redeploy + run), not done here.
+
+## Fleet run 2 (Part B): redeploy + S-1..S-8 live run (2026-08-14)
+
+Live redeploy + run following the "Fleet run 2 tooling (Part A)" entry
+above. Both hosts were confirmed stale before starting (`GET /plan` on
+ven-1/ven-4 had no `solver_ms`/`mip_gap_target`, `/history/plans` 404'd) and
+on unrelated leftover branches (`fix/gb-25-plan-history` on Node1,
+`fix/sim-persist-plan-context-tests` on Node2, both clean working trees) —
+switched both to `main` and pulled before rebuilding.
+
+**Redeploy**: `docker_host_lock.sh` held on both Node1 and Node2
+(`-l 600`) for the whole window. Rebuilt + redeployed Node1's VTN and VEN
+(ven-1..3) compose projects and Node2's `VEN/scale_out/node2` (ven-4..13).
+Verified before running anything: all 13 VENs healthy and VTN-connected,
+`solver_ms`/`mip_gap_target` present on `GET /plan`, `GET /history/plans`
+returns 200, and `ven-9`'s new `penalty_rules` block is live
+(`penalty_rules_active` shows `s7-peak-guard`, threshold 0.3 kW).
+
+**Two live bugs found and fixed forward, both merged to `main` mid-run**:
+
+1. `poll_plan_diagnostics()` crashed (`AttributeError` on `None.get()`)
+   whenever `GET /plan` returns a bare `null` — which every VEN does until
+   its first plan cycle completes, i.e. every freshly-redeployed VEN. The
+   exception silently killed the whole poller thread (all VENs, not just the
+   one still warming up) a few seconds into the very first scenario. Fixed
+   by treating a `null` plan body as an explicit "no plan yet" record instead
+   of letting it raise. Required killing and relaunching the run once (the
+   very first S-1 attempt); the resulting orphaned VTN program/event were
+   found and deleted manually before relaunching.
+2. `report_lag_stats()`/`event_impact_kwh()` only filtered recorder rows by
+   `received_at` time window, not by which VTN event/program they actually
+   belonged to. Node1's VTN is shared with other pre-existing test programs
+   (e.g. a leftover `test-rd-check` fixture); its own periodic report
+   traffic landed inside this run's time window purely by coincidence and
+   got counted, producing `report_timeliness.min_s` values in the millions
+   of seconds (a stale interval reference on that unrelated program's
+   reports). Found by eyeballing S-1's `kpis.json` output after the run
+   finished — every scenario's `min_s` was wildly wrong in the same way, a
+   clear tell it wasn't scenario-specific. Fixed by threading an `event_ids`
+   set (sourced from `run.json`'s own `"events"` list, already recorded by
+   `run_experiment.py`) through both functions, filtering on each report's
+   `payload_json.eventID`. Re-ran `kpi.py` for all 8 scenarios after the fix
+   (no need to re-run the live fleet — the recorder CSVs were already
+   snapshotted); `min_s` values are now all within the actual run window
+   (-925 to -1213 s) across every scenario. Also fixed the same
+   non-true-median bug (`s[len(s)//2]` vs `statistics.median()`) caught
+   earlier in Part A's review, this time in `report_lag_stats`.
+
+**Run**: all 8 scenarios (S-1..S-8, ~7h45m total — S-1 ran
+`--no-paired-baseline` since it's the baseline itself) completed with
+`exited rc=0`, no further errors. Orchestrated off-host as a single
+sequential detached script (`nohup bash run_all_scenarios.sh`) rather than
+launching each scenario as its own tracked process, specifically to avoid
+the ScheduleWakeup-coordination race documented in the GB-25 Part B entry
+below — one process, one log file, one line of monitoring truth. Progress
+was checked periodically against the log plus a direct VTN `/programs`
+lookup (the log is fully stdout-buffered when piped to a file, so it goes
+quiet for the ~25-55 min a scenario is mid-window and only flushes at exit —
+looked "frozen" repeatedly but never actually was).
+
+**Results — did the new diversity/stats actually materialize?** Yes.
+Aggregate `warning_kind_counts` across all 8 scenarios:
+`PEAK_PENALTY_EXCEEDED: 5664` (ven-9's new `penalty_rules`, firing on every
+plan cycle in every scenario exactly as designed — its 0.3 kW threshold sits
+below ven-9's own 0.5 kW baseline with no controllable asset to shed it),
+`CAPACITY_VIOLATION: 48` (S-3/S-4/S-6/S-7, as before), `BUDGET_SHORTFALL: 5`
+(S-8 only — the new `budget_shortfall` action against ven-11 fired
+correctly; confirmed independently via `ven-11`'s own `/user-requests`,
+`mode: MAX_COST`, `budget_eur: 0.01`, status `CANCELLED` post-cleanup).
+`SOLVER_INFEASIBLE`/`STALE_RATE_ESTIMATE`/`OTHER` stayed at 0 — expected
+(nothing in this run's scenarios pushes the solver to genuine infeasibility
+or a stale-rate condition). Compare to the 2026-08-12 run: `solve_status`
+was `OPTIMAL` on all 390 samples with almost no warning diversity at all —
+this run's data is substantially richer for exactly the plan-quality
+questions GB-25 was built to answer.
+
+`solver_ms`/`mip_gap_target_sanity`/`forecast_accuracy` all populated with
+real data for the first time (e.g. ven-1/S-1: solver_ms median 2554.5 ms,
+`mip_gap_target` constant at 0.02 as GB-31 documented, `pv:near` forecast
+MAE 1.12 kW / bias -1.12 kW — a genuine PV under-forecast signal, not
+previously visible anywhere in this tooling).
+
+**Cleanup**: no orphaned VTN programs remained after the run (each
+scenario's own `finally` block deletes its events/program); both
+`docker_host_lock`s released; both hosts left on `main`. A leftover junk
+result directory from the killed first S-1 attempt
+(`20260814-1150-s1_flat/`, poller-crash JSONL only, no `run.json`) was
+deleted before running `kpi.py` across the real 8.
+
+**Third bug, found reviewing the results themselves**: `event_impact_kwh`
+was exactly `0.0` for every VEN in every one of the 8 scenarios — uniform
+enough across wildly different conditions (price spikes, capacity limits,
+alerts, a deliberate budget shortfall) to be suspicious rather than a real
+"well-calibrated forecast" result. Root cause: archived report intervals
+carry the fully-qualified ISO 8601 duration form (`"P0Y0M0DT0H5M0S"`), not
+the VEN's own compact `"PT5M"` the reporter actually emits — the VTN
+round-trip normalizes it. `_parse_iso8601_duration_hours` only recognized a
+leading `"PT"`, so every interval silently parsed as zero-length, zeroing
+out the whole energy sum regardless of the real power values. Fixed with a
+regex-based parser covering the full form; added a regression test (`P0Y...`
+vs `PT...` both resolving to the same duration) to `--self-check`; re-ran
+`kpi.py` on all 8 result directories (no live re-run needed). `event_impact_kwh`
+now shows real, scenario-varied non-zero values (e.g. S-7 ranges -5.21 to
++6.36 kWh across the fleet). Recorded in `KEY_LEARNINGS.md` since it'll trip
+up anything else that parses a duration from `lab_recorder`-archived data
+rather than straight from the VEN.
+
+**Not done / left open**: GB-24 (Node2 E2E-vs-fleet contention) — the lock
+held for this run's duration mitigated it for this run specifically, still
+open on the backlog. GB-31 (`mip_gap_target` proxy-not-achieved-gap) —
+this run's `mip_gap_target_sanity` check confirms the known limitation,
+doesn't address it.
+
+## Reframe fleet-experiment KPIs around stakeholder goals (2026-08-15)
+
+Reviewing fleet-run-2's warning counts with the user (PEAK_PENALTY_EXCEEDED
+on every scenario, CAPACITY_VIOLATION on four of eight, one
+BUDGET_SHORTFALL) surfaced that the report read as "the fleet is failing"
+when most of that volume was actually by design: `ven-9`'s `penalty_rules`
+threshold sits below its own fixed base load with no controllable asset to
+shed with, `s8_budget.yaml`'s budget is 2-3 orders of magnitude under a real
+EV charge's cost, and `s7_stress.yaml`'s capacity cap was chosen specifically
+to force a violation — all three added in the previous round specifically to
+prove the warning-kind *mechanism* fires end-to-end, a job that's done but
+was never visually separated from "how does the fleet behave under plausible
+conditions" in the report.
+
+Separately, `kpis.json` never actually answered what each of the three
+project stakeholders cares about: the grid operator (capacity-envelope
+compliance, both import *and* export — the user flagged export as the more
+pressing of the two, since an uncurtailed PV spike risks overvoltage/
+appliance damage on top of grid stability, not just import overshoot), the
+energy-business side (does the fleet actually track the tariff curve), and
+the VEN/household side (what did participating cost in money or comfort).
+
+**Implementation** (`experiments/kpi.py`, `experiments/run_experiment.py`,
+scenario YAML — no VEN/VTN Rust changes; every new number is computed from
+data already flowing into `history.sqlite`/`{ven}-plan-history.json`):
+
+- `grid_envelope_compliance(db, t_from, t_to, direction)` and
+  `compliance_latency_s(db, t_from, t_to, actions, direction)`, each called
+  once per `"import"`/`"export"` direction. The latter finally implements
+  the signal-to-response KPI this module's own docstring has described,
+  unbuilt, since WP3.8.
+- `tariff_response_correlation(db, t_from, t_to)` — Pearson correlation plus
+  a cheap-vs-expensive-tercile % figure, plain Python (no new dependency).
+  Returns `None` under 5 distinct price points, which every existing 30-min
+  scenario is — the reason for the new 24h scenario below.
+- `run_experiment.py` gained a new `export_capacity_limit` scenario action
+  (the VEN already implements `EXPORT_CAPACITY_LIMIT` end-to-end; the
+  experiment tooling had simply never exercised it), a per-action
+  `run.json["actions"]` start-time log (feeds `compliance_latency_s`), a
+  `tier: realistic|stress` passthrough from scenario YAML, and a
+  `--start-at <ISO8601>` sleep-until option — needed because the simulator's
+  PV tracks real solar position for the lab's actual coordinates
+  (`docs/architecture/weather_forecast.md`, Europe/Zurich), so a diurnal
+  scenario's scripted steps only land correctly if launched at a
+  deliberately chosen wall-clock time, not whenever the script happens to
+  run.
+- All 8 existing scenarios tagged `tier:` (S-1/2/3/5/6 realistic, S-4/7/8
+  stress). Two new scenarios: `s9_diurnal.yaml` (24h duck-curve price shape
+  + evening import cap + midday export cap, `tier: realistic`, launched at
+  local midnight) and `s10_overexport.yaml` (tight export cap during
+  simulated peak PV, `tier: stress`, mirrors S-7's role for the export leg,
+  launched pre-solar-noon).
+- `kpi.py`'s `main()` restructured each VEN's entry into `raw` (the original
+  flat metering numbers) plus four interpretive buckets: `grid_regulation`,
+  `energy_business`, `ven_impact` (extended with a `cost_eur_delta` vs.
+  baseline, `budget_shortfall_warnings` as the available comfort-shortfall
+  proxy, and `compliance_cost_eur` — GB-25's already-collected
+  `c_violations_eur`/`c_peak_penalty_eur`/`c_wear_eur` regrouped under the
+  VEN's own viewpoint rather than left as raw plan-diagnostic numbers), and
+  `mechanism_health` (the pre-existing plan/forecast diagnostics, explicitly
+  separated so a stress-fixture's warnings stop reading as a fleet defect).
+  `kpis.json`'s new top-level `meta.tier` lets a reader group by tier
+  without re-parsing scenario YAML.
+- `--self-check` extended with import- and export-direction fixtures for
+  the two new grid functions plus a tariff-correlation case, all against a
+  real temp SQLite `grid_samples` table (not a mock) to catch schema
+  mismatches; all green.
+
+**Verification against real data**: rather than wait for a new live run,
+regenerated `kpis.json` for all 8 of fleet-run-2's existing result
+directories with the new code — no crashes, backward-compatible with
+`run.json` files that predate `"actions"`/`"tier"` (default `[]`/
+`"realistic"`). `ven_impact`/`energy_business`/`mechanism_health` all show
+real per-VEN numbers as expected.
+
+**GB-33, found during this verification**: `grid_regulation.import`/
+`.export` came back `null` for every VEN in every one of the 8 regenerated
+runs — including S-3/S-6/S-7, which explicitly posted `IMPORT_CAPACITY_
+LIMIT`/`RESERVATION` events. Traced to the data, not the new KPI code:
+`grid_samples.import_limit_kw`/`export_limit_kw` (added schema v9) have
+**never once been non-null**, on any VEN, across that VEN's entire
+history.sqlite (confirmed on ven-1: 0 non-null rows out of 47k+). The
+plumbing exists end-to-end (dispatcher tracks it, state stores it, the
+history-sampler accumulator reads it) but the interval match never actually
+fires at sample time, for either leg — not chased to a precise root cause
+mid this Python-only change; filed as GB-33 (`docs/BACKLOG.md`) for its own
+Rust debugging session. This is a real limitation on today's headline
+finding: the grid-operator-facing KPI the user called the most pressing
+question is implemented and self-check-verified, but returns nothing
+against live data until GB-33 is fixed.
+
+**Not done / left open**: running `s9_diurnal.yaml`/`s10_overexport.yaml`
+live against the fleet (a real time/lock-hold commitment, scheduled as its
+own follow-up step); GB-33 itself; a true SoC-deadline-miss comfort metric
+(would need new VEN session-outcome instrumentation, `BUDGET_SHORTFALL`
+counts used as the available proxy for now); the 30-day-scale test the user
+flagged as the longer-term goal beyond the 24h scenario.
+
+## GB-32: BFF `report_lag_s` duration parser — same sibling bug as `kpi.py`'s, server-side
+
+**Trigger:** The `kpi.py` duration-parsing fix above (leading-`"PT"`-only
+parser silently zeroing every fully-qualified-form duration) prompted
+checking whether the BFF has the same bug in its own duration parsing —
+`VTN/bff/src/recorder.rs::parse_pt_duration_s` feeds
+`report_submission_lag_s`, archived as the `report_lag_s` column in
+`lab_recorder.reports_received` (the SG-3 timeliness metric). It did: same
+`"PT"`-only prefix check, same silent `0` on the VTN's fully-qualified
+`P[n]Y[n]M[n]DT[n]H[n]M[n]S` form, same root cause (`record_reports` fetches
+reports back from the VTN via `GET /reports`, which normalizes durations to
+the full form, rather than reading the VEN's raw POST body which uses the
+compact `"PT5M"` form). Every `report_lag_s` value ever recorded to date was
+silently wrong (`window_end` collapsed to `interval.start` instead of
+`interval.start + duration`, an error of up to one report interval,
+300–900s typical).
+
+**Design:** Considered reusing `openleadr_wire::Duration`'s own parsing, but
+the BFF has zero dependency on any openleadr-rs crate today (it talks to the
+VTN as raw `serde_json::Value` over HTTP), and the submodule wasn't checked
+out in the working worktree — adding that dependency sight-unseen for this
+fix would be more scope and risk than the fix itself. Instead mirrored
+`kpi.py`'s fix *shape* (recognize the full form, approximate Y/M as 0 since
+report intervals are minute/hour-scale and never populate them) without
+adding a `regex` crate dependency, since the BFF has none today and this
+project's dependency-review rule applies to every new import. Extracted a
+small `sum_digit_units` helper (walk one duration segment's chars,
+accumulate digits, multiply by the unit each digit run's trailing letter
+maps to) and called it once for an optional date segment (before a `'T'`
+split, `D` → 86400s) and once for the time segment (`H`/`M`/`S`, same
+mapping as the original code) — a natural two-phase extension of the
+original hand-rolled loop, no new crate.
+
+**Implementation:** `VTN/bff/src/recorder.rs` — replaced
+`parse_pt_duration_s`'s body and updated its doc comment to describe the
+full form; added `sum_digit_units` as a shared helper. Extended (not just
+supplemented) the existing 4 unit tests per this project's test-first
+discipline: `test_parse_pt_duration_s_variants` gained 3 full-form
+assertions (`"P0Y0M0DT0H5M0S"` → 300, `"P0Y0M0DT1H30M0S"` → 5400,
+`"P0Y0M1DT0H0M0S"` → 86400, exercising the new `D` handling) alongside the
+existing compact-form ones; the 3 `report_submission_lag_s` tests had their
+`"duration"` fixtures changed from compact to full form (the real shape the
+VTN actually returns), with identical expected lag values — the fix changes
+which input shapes parse correctly, not the intended lag semantics.
+
+**Verification:** `wsl cargo test -p vtn-bff` (all 13 `recorder` tests
+green, including the updated fixtures), `cargo fmt --check`, `cargo clippy
+--all-targets --all-features -- -D warnings` (clean), `scripts
+/audit_file_sizes.py` (pass).
+
+**Bookkeeping:** Removed GB-32's row from `docs/BACKLOG.md`. **Known caveat,
+not addressed by this fix:** already-archived `report_lag_s` rows in
+`lab_recorder.reports_received` (recorded before this fix landed) remain
+silently wrong — this change only fixes parsing going forward, it does not
+backfill or correct historical rows. Anyone analyzing historical SG-3
+timeliness data should treat pre-fix `report_lag_s` values as unreliable.
+
+## GB-33: capacity-limit schedule silently dropped every experiment event (2026-08-16)
+
+Root-caused and fixed the gap flagged as GB-33 in the previous entry:
+`grid_samples.import_limit_kw`/`export_limit_kw` had never once been
+populated on any VEN, despite scenarios like S-3/S-6/S-7 posting real
+`IMPORT_CAPACITY_LIMIT` events and the planner correctly enforcing them
+(`CAPACITY_VIOLATION` warnings fired as expected — the real constraint
+pipeline was never affected, only this history column).
+
+**Root cause**, traced via `poll_events/detect.rs` → `parse_capacity_schedule`
+→ `rate_schedule.rs`'s shared `collect_interval_groups`: that function
+required each `interval` to carry its own `intervalPeriod`
+(`interval.intervalPeriod.as_ref()`, `None => continue`), with no fallback to
+the event-level `intervalPeriod`. `experiments/run_experiment.py`'s
+`build_event()` — and, per the OpenADR 3 spec, any single-window capacity/
+alert/dispatch event — sets `intervalPeriod` only at the event level for a
+single bare interval, exactly the shape every non-price scenario action in
+this project sends. Price events worked fine because `price_series` always
+gives each interval its own `intervalPeriod`, which masked the gap for
+months: only the capacity-schedule/tariff-schedule path (`collect_interval_
+groups`) was missing it, while `parse_alert_windows` (a few functions away
+in the same file) already had the correct `interval.intervalPeriod.as_ref()
+.or(event.intervalPeriod.as_ref())` fallback — the fix pattern already
+existed in the codebase, just not applied everywhere it needed to be.
+
+**Fix** (`VEN/src/controller/rate_schedule.rs`): fall back to the event-level
+`intervalPeriod` only for the single-interval case — a multi-interval event
+without per-interval periods has spec-ambiguous sequential timing nothing in
+this project emits or needs, so the fallback deliberately doesn't guess at
+it. Two regression tests added to `openadr_interface.rs` (test-first: written
+and confirmed failing before the fix, per project convention) — one
+asserting the real single-interval/event-level shape now round-trips
+correctly, one asserting the multi-interval case still returns nothing
+rather than guessing. Both pre-existing `parse_capacity_schedule` tests
+(which always gave each interval its own `intervalPeriod`) kept passing
+unchanged — the gap they never covered is exactly what the new tests close.
+
+**Verification:** full `cargo test` (1028 passed, 0 failed), `cargo fmt
+--check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+`scripts/audit_file_sizes.py` all clean. Not yet re-verified against a live
+run (would need a fresh scenario execution to populate real
+`grid_samples.import_limit_kw`/`export_limit_kw` rows) — the KPI reframe's
+`grid_regulation` block should now populate correctly once one runs; that
+check is deferred to whenever `s9_diurnal`/`s10_overexport` (or any of
+S-3/S-6/S-7) next actually executes against the live fleet.
+
+**Bookkeeping:** Removed GB-33's row from `docs/BACKLOG.md`.
+
+## Fleet re-run S-9 (24h diurnal): GB-33 verification on live data (2026-08-17/19)
+
+Following GB-33's fix (interval-schedule event-level `intervalPeriod`
+fallback, merged 2026-08-17), the fleet-experiment stakeholder-KPI-reframe
+tooling had never been exercised against a real live run — the whole point
+of GB-25/GB-33's work was to make `grid_regulation` finally populate with
+real import/export capacity-compliance data, and that needed an actual
+scenario execution to confirm, not just unit tests.
+
+**Redeploy**: both hosts rebuilt from current `main` (Node1 was 15 commits
+behind; Node2's git checkout already matched `main` but its containers were
+still running images built 2 days earlier — a reminder that a matching
+`git rev-parse HEAD` is not proof of matching running code, only a rebuild
++ binary-timestamp check is). Both verified healthy, `GET /history/plans`
+returning 200, before touching the scenario.
+
+**Sequencing**: `s9_diurnal` (24h) and `s10_overexport` cannot run
+concurrently with anything else on this fleet — `run_experiment.py`'s
+events are program-wide and this project's VTN hands every polling VEN
+every active event regardless of which program it belongs to (the same
+mechanism behind fleet-run-2's "leftover test-rd-check program's reports
+leaked into our time window" finding). Two overlapping scenarios on the
+same 13 VENs would contaminate each other's price/capacity signals. Given
+the timing (redeploy finished with only ~90 min left before that night's
+local midnight — not enough for S-1..S-8 first), `s9_diurnal` was launched
+alone that night; S-1..S-8/S-10 are deferred to a follow-up run.
+
+**A real bug in this session's own launch, caught immediately**: the first
+launch attempt crashed on its very first HTTP call — `--vtn-url` was never
+passed, so it defaulted to `localhost:8200` (the orchestration workstation)
+instead of Node1's actual VTN. Caught within minutes via the log
+(`ConnectionRefusedError`), fixed, and relaunched ~6 minutes past the
+intended midnight start — negligible drift for a scenario whose price steps
+are 4 hours apart.
+
+**Lock-holding strategy**: rather than hold a single ~26h lock spanning the
+idle gap before the scenario's actual start, the process was launched
+detached (`--start-at` sleeping internally) *without* holding the lock, and
+the lock was acquired only ~6 minutes before the scenario's actions began
+posting — avoiding blocking other sessions' use of Node1/Node2 during a
+period when nothing was actually happening yet. Monitored hourly for the
+full 24h (process liveness, VTN program/plan cross-checks rather than
+trusting a possibly-buffered log, container-timestamp/git-HEAD integrity
+checks to catch a concurrent redeploy before it could corrupt the run) —
+mid-run, the user asked to release the locks, which was done, and a
+subsequent `git rev-parse HEAD` check confirmed another session's `git
+pull` landed on Node2 during that gap but did **not** trigger a rebuild/
+restart (container `CreatedAt` timestamps unchanged) — the run's data was
+never actually at risk, though the exposure was real and the locks were
+re-acquired for the remaining ~3.5h once asked to.
+
+**Result — GB-33 confirmed fixed on live data**: `grid_regulation.import`/
+`.export` now populate with real, non-`null` compliance and latency data
+for all 13 VENs, matching the scenario's exact action windows (240/241
+samples ≈ the 240-min import-cap window, 300 ≈ the 300-min export-cap
+window). `compliance_latency_s` also shows real, distinguishable values
+(e.g. ven-1: `0.0s` for the import cap — already compliant when it started
+— vs. a genuine `246.0s` detection latency for the export cap). All 13 VENs
+stayed 100% compliant with 0 overshoot on both caps — expected for this
+`tier: realistic` scenario (caps were sized to be achievable, unlike
+S-7/S-10's deliberately-forced stress-tier limits), not a sign anything is
+broken.
+
+**A genuine, unflattering finding, reported as-is**: `energy_business.
+tariff_response.pearson_r` came out slightly *positive* (`0.126`, weak) with
+`cheap_vs_expensive_pct: -28.2%` — the fleet actually imported *more*
+during the diurnal curve's expensive windows than its cheap ones, the
+opposite of good demand-response behavior (though the correlation itself is
+weak, closer to "no clear response" than "actively wrong"). Not
+investigated further here — this is exactly the kind of result the
+stakeholder-KPI reframe was built to surface, and it surfaced something
+real on its very first live use.
+
+**GB-36, a new bug found while sanity-checking `report_timeliness`**:
+`report_timeliness` came back with all-negative lag values (median
+`-43119.8s`), distinct in shape from the already-known GB-32 (which skews
+lag by at most one report interval, not tens of thousands of seconds).
+Traced to `VTN/bff/src/recorder.rs`'s `report_submission_lag_s`: it
+computes lag as `created − max(interval_end)` across every interval
+currently present in a report resource, correct for a report created fresh
+per submission, but openleadr-rs appears to grow a single long-lived report
+resource by appending intervals over its lifetime without updating
+`createdDateTime` — so lag drifts increasingly negative the longer the
+report resource lives, a signature only visible once a scenario runs long
+enough to accumulate many intervals in one report (confirmed: values
+progressed in ~300s steps matching the report's own frequency).
+`kpi.py`'s own `event_ids` filtering was independently confirmed correct
+during this investigation (count 7410 = 285 samples × 13 VENs × 2 report
+types, exactly matching this run's own event — other programs' reports,
+some off by *millions* of seconds, were correctly excluded). Filed as
+GB-36, not fixed — needs a design decision on what the metric should
+actually measure for a growing report resource before touching
+`recorder.rs`, not a one-line parse fix like GB-32 was.
+
+**Cleanup**: no orphaned VTN program/events after the run's own `finally`
+block ran; a leftover empty result directory from the crashed first launch
+attempt (`20260817-2016-s9_diurnal/`) removed; both locks released.
+
+**Not done / left open**: `s1_flat` through `s8_budget` and `s10_overexport`
+— deferred to a follow-up run, this session only covered `s9_diurnal`.
+GB-36 (new). GB-31/GB-24 remain open as before. The tariff-response finding
+above is reported, not investigated further.
