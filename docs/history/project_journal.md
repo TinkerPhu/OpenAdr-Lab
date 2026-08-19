@@ -9574,3 +9574,58 @@ live against real per-slot data post-deploy.
 
 **Bookkeeping:** No `BACKLOG.md` item to remove — this originated from live
 user feedback on the Controller page, not a tracked backlog entry.
+## Site Headroom follow-up: two post-ship bugs found on live data
+
+**Trigger 1 (PV sign inversion):** User asked whether the PV headroom
+contribution's signs looked inverted — export should read negative. Tracing
+`pv_used_kw`'s convention across `controller/timeline.rs` and
+`controller/dispatcher.rs` (both negate it before using it as a power value)
+confirmed `simulator/forecast.rs::insert_pv_points` was the one place that
+didn't: it stored `pv_used_kw` as a positive generation magnitude instead of
+negating it to match `cap_max_export_kw`'s export-negative convention. This
+fed into `envelope_forecast.rs`'s PV branch, which also had the up/down roles
+swapped — PV's *unused* generation margin toward the ceiling
+(`planned_kw − cap_max_export_kw`) is an **up** contribution (more export
+possible), not down; PV's real **down** contribution
+(`(-planned_kw).max(0.0)`, how much of its own current output could be
+curtailed) had never been computed at all. Fixed both, plus a dedicated
+integration-level test proving the sign-negation wiring itself — the prior
+PV tests had hand-built already-correctly-signed fixtures that bypassed the
+real bug entirely.
+
+**Trigger 2 (EV missing from headroom):** User set an EV's SoC via the
+simulator slider expecting the forecast's import headroom to jump, and
+separately noticed the EV card's "Automatic surplus charging" toggle greyed
+out with a "Paused — active plan" chip despite never having set one. Both
+traced to the same root cause, confirmed live on Node1 (`GET /ev-session`
+returned a session with `departure_time` five months in the past, created
+the day before): nothing ever expires an `EvSession` once its departure
+passes — only explicit cancellation or a vanished VTN signal clears one. That
+stale session permanently pinned `paused_by_active_session` true (deriving
+purely from "does any session exist", with no expiry check), and separately
+`build_forecast_frames`'s EV-inclusion closure used
+`ev_session.is_some_and(|s| slot.start < s.departure_time)` — `is_some_and`
+returns `false` for `None` too, so the EV contributed to the forecast only
+when a fresh, still-active session happened to exist, not by default.
+Fixed by expiring and clearing an `EvSession` once `departure_time <= now`
+inside `resolve_overlay_enabled` (runs every tick, ahead of the tick
+context's own session read), and by switching the inclusion check to
+`is_none_or` so "no session" means "no known deadline" rather than "assume
+it already ended." Reworded the EvCard chip to "active charging session" —
+the flag was never actually about a plan.
+
+**Verification:** Both fixes landed with regression tests reproducing the
+exact bug shape (not just the corrected formula) — `pv_planned_kw_is_negative_when_generating_matching_export_negative_convention`,
+the rewritten PV up/down suite in `envelope_forecast.rs`,
+`ev_contributes_at_every_slot_when_no_session_is_active`, and
+`resolve_overlay_enabled_clears_an_expired_session` /
+`_keeps_a_not_yet_expired_session`. Full suite green both times (`cargo fmt
+--check`, `cargo clippy -D warnings`, `scripts/audit_file_sizes.py`,
+`wsl cargo test -p ven-app` — 1097 then 1100 passed). Deployed to all 13 VENs
+(Node1 `ven-1/2/3` + `ui`, Node2 `ven-4..13`); the EV fix's deploy was
+delayed several hours by a live 24h fleet experiment holding the Node1
+lock, then confirmed live post-deploy: `GET /ev-session` now `204`,
+`paused_by_active_session: false`.
+
+**Bookkeeping:** No `BACKLOG.md` item to remove — both fixes originated from
+live user feedback, not tracked backlog entries.
