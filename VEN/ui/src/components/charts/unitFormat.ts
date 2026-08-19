@@ -54,3 +54,8 @@ export function formatSocPct(socFraction: number): string {
 export function formatTemperatureC(valueC: number): string {
   return `${valueC.toFixed(1)} °C`;
 }
+
+/** Energy [kWh] — 1 decimal place. */
+export function formatEnergyKwh(valueKwh: number): string {
+  return `${valueKwh.toFixed(1)} kWh`;
+}

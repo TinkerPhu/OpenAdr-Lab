@@ -100,6 +100,12 @@ export type AssetSummary = {
   forecastEnergyKwh: number | null;
   /** Closest active user request, null if none */
   activeRequest: UserRequestSummary | null;
+  /** Nameplate max import (charge/consumption) power [kW], null if not applicable */
+  maxImportKw: number | null;
+  /** Nameplate max export (discharge/generation) power [kW], null if not applicable */
+  maxExportKw: number | null;
+  /** Nameplate energy capacity [kWh], null if not applicable */
+  capacityKwh: number | null;
 };
 
 // ─── Timeline (mid section of each asset cell) ───────────────────────────────
