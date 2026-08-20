@@ -106,7 +106,7 @@ pub struct Profile {
     #[serde(default)]
     pub planner: PlannerConfig,
     #[serde(default)]
-    pub grid: GridConfig,
+    pub grid: super::grid::GridConfig,
     #[serde(default)]
     pub history: HistoryConfig,
     /// Weather-sourced PV forecast config (weather-forecast-visibility).
@@ -119,6 +119,9 @@ pub struct Profile {
     /// effect). Optional and additive — absent by default.
     #[serde(default)]
     pub measurements: Option<MeasurementsConfig>,
+    /// GB-09: per-VEN VTN poll cadence + startup jitter. Omitted -> 30/30/60s, zero-jitter defaults.
+    #[serde(default)]
+    pub polling: super::polling::PollConfig,
 }
 
 impl Profile {
@@ -342,21 +345,6 @@ pub struct SimulatorConfig {
     /// Zero disables (residual is then structurally 0, the exact sum of modelled assets).
     #[serde(default)]
     pub unmodelled_load_kw: f64,
-}
-
-/// Physical grid connection limits — meter / main breaker hard ceiling.
-/// The MILP uses these as `p_imp_max_phys_kw` / `p_exp_max_phys_kw`.
-/// When no OpenADR capacity event is active these also act as the contractual limit.
-#[derive(Debug, Clone, Deserialize)]
-pub struct GridConfig {
-    /// Physical import limit at the meter or main breaker (kW).
-    /// Default: 25.0 kW — typical residential 3-phase 32 A supply.
-    #[serde(default = "super::defaults::default_max_import_kw")]
-    pub max_import_kw: f64,
-    /// Physical export limit (inverter / grid-tie maximum) (kW).
-    /// Default: 10.0 kW.
-    #[serde(default = "super::defaults::default_max_export_kw")]
-    pub max_export_kw: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

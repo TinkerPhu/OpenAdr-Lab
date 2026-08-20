@@ -9955,3 +9955,61 @@ enforcement gap is closed, but the item stays open for one remaining step: an ac
 S-9 re-run with the new flags, logged in `docs/history/fleet_run_journal.md`, to confirm
 `tariff_response` produces a sane signal on real data (not yet done — only self-check and a
 network-reachability smoke test were run in this pass).
+
+---
+
+## GB-09: per-profile poll interval + percentage-based startup jitter (2026-08-20)
+
+**Trigger:** GB-09's own backlog text said the original motivation ("N VENs don't poll in
+lockstep") was already met by `POLL_STARTUP_JITTER_S`, and "nothing currently needs" a
+per-profile interval override. Asked the user how to proceed rather than assuming; they
+chose to build it anyway, with two concrete requirements beyond the original scope: the
+interval must support real-world VTN cadences up to ~15 minutes, and the jitter mechanism
+should become two percentages of the interval (a deterministic fixed % plus a randomized %,
+redrawn every boot) instead of an externally-assigned absolute number of seconds. Also
+clarified: since real VENs are deployed one profile per instance, the interval belongs in
+the profile, not a fleet-wide env var (which is a second, easy-to-drift config location for
+a per-instance concern) — env vars stay as a test-only override, not the deployment path.
+
+**Fix:** Added `Profile::polling: PollConfig` (`profile/polling.rs`, new module —
+`events_secs`/`programs_secs`/`reports_secs` default 30/30/60s matching today's behavior,
+`startup_jitter_fixed_pct`/`startup_jitter_random_max_pct` default 0.0/0.0). `Config`'s four
+`poll_*` fields became `Option<...>` "override" fields (env var present → wins; absent →
+`None`, profile value used) — `POLL_STARTUP_JITTER_S` (absolute seconds) is removed,
+replaced by `POLL_STARTUP_JITTER_FIXED_PCT`/`POLL_STARTUP_JITTER_RANDOM_MAX_PCT`. New pure
+functions in `tasks/poll_config.rs`: `resolve()` (override-or-profile per field) and
+`compute_startup_jitter_s(events_secs, fixed_pct, random_max_pct, rng)` —
+`events_secs × (fixed_pct + uniform_draw_in[0, random_max_pct]) / 100`, referenced to the
+*events* interval specifically (not each poll type's own), so all three loops share one
+desync window. `main.rs` resolves once at startup and seeds the random draw with
+`StdRng::from_entropy()` (real per-boot randomness — `simulator/mod.rs`'s existing
+non-test-randomness pattern), same as the old fixed-seconds jitter's one-time-per-process
+semantics.
+
+**File-size fallout:** Adding `PollConfig` to `profile/schema.rs` (already at the 500-line
+cap) broke the file-size audit even after trimming doc comments to nothing helped enough.
+Fixed properly rather than squeezing comments: split `GridConfig` out into its own
+`profile/grid.rs` module too, mirroring the existing `weather_pv.rs` precedent — both new
+types (`PollConfig`, and now `GridConfig`) own their struct definition in a dedicated file;
+`profile/defaults.rs` still owns every `default_*()` fn and each type's `Default` impl,
+unchanged split from before.
+
+**Test-first:** `tasks::poll_config` tests written before the resolver/jitter functions
+existed (7 cases: override-wins, profile-wins, today's-defaults-when-nothing-set, jitter
+fixed-only exact value, zero/zero → zero, random draw stays in bound across 50 seeded
+draws, linear scaling with `events_secs`). `profile::validate` gained 4 cases: YAML omitting
+`polling:` parses to today's defaults, a full `polling:` section round-trips from YAML,
+`events_secs == 0` and negative jitter percentages are rejected by `Profile::validate()`.
+
+**Verification:** `wsl cargo test -p ven-app` 1123 passed (unchanged total across the
+`GridConfig` split, confirming the refactor was behavior-neutral), `cargo fmt --check`,
+`cargo clippy --all-targets --all-features -D warnings`, `scripts/audit_file_sizes.py`, and
+the four architecture-invariant greps all clean.
+
+**Bookkeeping:** Removed `GB-09` from `docs/BACKLOG.md` (both the General Backlog row and
+its User-Value View row). Rewrote `VEN_ARCHITECTURE.md` D-07 to describe the new
+per-profile-interval + two-percentage-jitter mechanism (the old text's "configurable jitter
+is not implemented" line was already stale before this change, since `POLL_STARTUP_JITTER_S`
+shipped after D-07 was written). Added a `polling:` example + explanation to
+`VEN/profiles/README.md` rather than editing a real `ven-*.yaml` (no profile needs a
+non-default value today).

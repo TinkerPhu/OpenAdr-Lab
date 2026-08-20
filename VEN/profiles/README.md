@@ -37,3 +37,25 @@ The persona lands in two places:
 Note: the commuter's budget is recorded on the session; the hard MILP cost cap
 binds only in `MAX_COST` mode (WP4.1-c) — for `BY_DEADLINE` it is documentation
 of intent, not a constraint.
+
+## Poll cadence & startup jitter (GB-09)
+
+Optional `polling:` section — per-VEN VTN poll interval and startup jitter.
+Omitted entirely → today's defaults (30/30/60s, zero jitter). A real VTN's
+event interval can be far longer than the lab default (up to ~15 min is
+typical); this is also how a hand-deployed fleet (not `gen_fleet_profiles.py`)
+staggers its instances instead of relying on an externally-assigned absolute
+seconds value:
+
+```yaml
+polling:
+  events_secs: 900 # up to ~15 min against a real VTN
+  programs_secs: 900
+  reports_secs: 900
+  startup_jitter_fixed_pct: 5.0 # deterministic per-instance offset, same every boot
+  startup_jitter_random_max_pct: 10.0 # fresh random draw in [0, 10]% every boot
+```
+
+Startup delay is `events_secs × (startup_jitter_fixed_pct + drawn_random_pct) / 100`,
+applied once before each poll loop's first request — see `docs/architecture/VEN_ARCHITECTURE.md`
+D-07 for the full mechanism.
