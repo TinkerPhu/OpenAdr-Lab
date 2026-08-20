@@ -23,14 +23,17 @@
 # EV-bearing VEN's EV has no active session and sits inert
 # (EvMilpMode::MustNotRun) for the whole run, which is exactly what produced
 # the misleading tariff_response numbers in the first live S-9 run
-# (docs/history/fleet_run_journal.md). Never launch with `--personas` for
-# this scenario even once it's usable against this fleet -- its default
-# persona mix leans OPPORTUNISTIC/ASAP_FREE, which are gated on PV surplus,
-# not price, and would still confound the result.
+# (docs/history/fleet_run_journal.md). `incompatible_ev_session_modes` below
+# is enforced by run_experiment.py (check_ev_mode_compatible) -- OPPORTUNISTIC/
+# ASAP_FREE are gated on PV surplus, not price, and would confound the
+# result; this also blocks `--personas` from ever being usable here once its
+# manifest pipeline covers this fleet, since its default persona mix leans
+# on those same two modes.
 name: s9_diurnal
 description: 24h duck-curve price shape + evening import cap + midday export cap
 tier: realistic
 duration_minutes: 1440
+incompatible_ev_session_modes: [OPPORTUNISTIC, ASAP_FREE]
 actions:
   - at_minute: 0
     type: price_series
