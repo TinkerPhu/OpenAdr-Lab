@@ -9911,3 +9911,47 @@ not a tracked backlog entry. BL-18 (`AssetFlexibility`, per-asset real-time flex
 was discussed in the same conversation and confirmed distinct from this — this is static
 nameplate specs, BL-18 is a dynamic "how much can this asset flex right now" computation;
 BL-18 stays parked, unchanged.
+
+---
+
+## GB-37 part 2: code-enforce the EV-session-mode guard for tariff scenarios (2026-08-20)
+
+**Trigger:** A backlog review flagged GB-37 as "done" (two commits had landed:
+`b927a7c`, `44981e2`), but re-verification against the actual code found only 2 of its
+3 required fix parts complete. Part 2 — "force every EV-bearing VEN onto a tariff-sensitive
+mode, never OPPORTUNISTIC/ASAP_FREE, for a tariff-response scenario" — existed only as a
+documentation warning (`--ev-session-mode`'s help text, `s9_diurnal.yaml`'s header comment):
+`run_experiment.py` still accepted any of the five modes for any scenario with no check.
+An operator launching S-9 with `--ev-session-mode OPPORTUNISTIC` would still get a silently
+meaningless `tariff_response` KPI — the same failure class GB-37 was filed over, just
+through a different specific mistake (wrong mode, not no session at all).
+
+**Fix:** Added `check_ev_mode_compatible(scenario, mode)` (`experiments/run_experiment.py`,
+next to `setup_ev_roster_sessions`) — a pure function returning an error string when `mode`
+is in the scenario's own `incompatible_ev_session_modes` list (or `None` when compatible or
+undeclared). Called from `main()` right after the scenario YAML loads and before any EV
+roster/HTTP setup happens, aborting via `p.error(...)` for consistency with the existing
+`--fleet-map` guard. The restriction is scenario-owned data, not a CLI-side rule:
+`s9_diurnal.yaml` gained `incompatible_ev_session_modes: [OPPORTUNISTIC, ASAP_FREE]`
+alongside its existing `name`/`tier`/`duration_minutes` keys (no schema class exists for
+scenario YAML — it's read as a loose dict, so `.get(..., [])` keeps every other scenario,
+none of which need this, untouched). A future new tariff-response scenario declares its own
+requirement the same way, no code change needed.
+
+**Test-first:** Added `_self_check_scenario_ev_mode_guard()` (this project's existing
+`--self-check` convention for `experiments/` scripts — no pytest infra there), confirmed it
+failed with `NameError` before `check_ev_mode_compatible` existed, then implemented and
+re-ran to green.
+
+**Verification:** `python experiments/run_experiment.py --self-check` — both self-checks
+pass. Manual smoke: `--scenario s9_diurnal.yaml --ev-session-mode OPPORTUNISTIC` aborts via
+`p.error` with the new message before any network call; the same with `BY_DEADLINE`, and a
+scenario without the new key (`s1_flat.yaml`) with `OPPORTUNISTIC`, both proceed past the
+guard unaffected (confirmed by reaching the real network-connect attempt to the fleet hosts).
+No VEN/VTN Rust or UI code touched — out of scope for those test suites.
+
+**Bookkeeping:** Narrowed `GB-37` in `docs/BACKLOG.md` rather than removing it — the
+enforcement gap is closed, but the item stays open for one remaining step: an actual live
+S-9 re-run with the new flags, logged in `docs/history/fleet_run_journal.md`, to confirm
+`tariff_response` produces a sane signal on real data (not yet done — only self-check and a
+network-reachability smoke test were run in this pass).
