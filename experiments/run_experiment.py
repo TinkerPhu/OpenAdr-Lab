@@ -445,6 +445,23 @@ def setup_persona_sessions(manifest_path, host):
     return ven_names, teardown
 
 
+def check_ev_mode_compatible(scenario, mode):
+    """GB-37 part 2: a scenario may declare `incompatible_ev_session_modes`
+    (e.g. s9_diurnal.yaml, whose tariff_response KPI is meaningless under
+    OPPORTUNISTIC/ASAP_FREE -- those are gated on PV surplus, not price).
+    Returns an error message string if `mode` is incompatible, else None.
+    `mode` may be None (--ev-session-mode omitted) -- always compatible."""
+    incompatible_modes = scenario.get("incompatible_ev_session_modes", [])
+    if mode in incompatible_modes:
+        return (
+            f"scenario {scenario.get('name')!r} declares --ev-session-mode {mode} "
+            f"incompatible ({incompatible_modes}) -- it needs a tariff-sensitive "
+            "mode (BY_DEADLINE/ASAP/MAX_COST) or the KPI this scenario measures "
+            "will be meaningless (GB-37)"
+        )
+    return None
+
+
 def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_hour_utc, budget_eur):
     """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
     one identical, explicit EV session, addressed via `fleet_map`'s existing
@@ -757,6 +774,11 @@ def main():
     scenario = yaml.safe_load(Path(args.scenario).read_text(encoding="utf-8"))
     name = scenario["name"]
     duration_min = scenario["duration_minutes"]
+
+    mode_error = check_ev_mode_compatible(scenario, args.ev_session_mode)
+    if mode_error:
+        p.error(mode_error)
+
     t0 = datetime.now(timezone.utc)
     run_dir = Path(args.out) / f"{t0.strftime('%Y%m%d-%H%M')}-{name}"
 
@@ -878,8 +900,29 @@ def _self_check_ev_roster_sessions():
     print("_self_check_ev_roster_sessions OK")
 
 
+def _self_check_scenario_ev_mode_guard():
+    """GB-37 part 2: check_ev_mode_compatible must reject a scenario's
+    declared-incompatible --ev-session-mode, accept everything else, and
+    default to no restriction when the scenario doesn't declare any."""
+    scenario = {"name": "s9_diurnal", "incompatible_ev_session_modes": ["OPPORTUNISTIC", "ASAP_FREE"]}
+
+    err = check_ev_mode_compatible(scenario, "OPPORTUNISTIC")
+    assert err is not None and "s9_diurnal" in err and "OPPORTUNISTIC" in err, err
+
+    assert check_ev_mode_compatible(scenario, "ASAP_FREE") is not None
+
+    assert check_ev_mode_compatible(scenario, "BY_DEADLINE") is None
+    assert check_ev_mode_compatible(scenario, None) is None
+
+    no_restriction_scenario = {"name": "s1_flat"}
+    assert check_ev_mode_compatible(no_restriction_scenario, "OPPORTUNISTIC") is None
+
+    print("_self_check_scenario_ev_mode_guard OK")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
         _self_check_ev_roster_sessions()
+        _self_check_scenario_ev_mode_guard()
     else:
         main()
