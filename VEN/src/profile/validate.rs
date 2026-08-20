@@ -35,6 +35,29 @@ impl Profile {
             ));
         }
 
+        // Poll cadence + startup jitter bounds (GB-09).
+        if self.polling.events_secs == 0 {
+            errors.push("polling.events_secs must be > 0".into());
+        }
+        if self.polling.programs_secs == 0 {
+            errors.push("polling.programs_secs must be > 0".into());
+        }
+        if self.polling.reports_secs == 0 {
+            errors.push("polling.reports_secs must be > 0".into());
+        }
+        if self.polling.startup_jitter_fixed_pct < 0.0 {
+            errors.push(format!(
+                "polling.startup_jitter_fixed_pct must be ≥ 0.0, got {}",
+                self.polling.startup_jitter_fixed_pct
+            ));
+        }
+        if self.polling.startup_jitter_random_max_pct < 0.0 {
+            errors.push(format!(
+                "polling.startup_jitter_random_max_pct must be ≥ 0.0, got {}",
+                self.polling.startup_jitter_random_max_pct
+            ));
+        }
+
         // Per-asset numeric bounds.
         for asset in &self.assets {
             match asset {
@@ -912,5 +935,79 @@ planner:
         let p: Profile = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.planner.effective_step_s(), 3600);
         assert_eq!(p.planner.effective_horizon_h(), 24);
+    }
+
+    #[test]
+    fn polling_omitted_defaults_to_today_s_behavior() {
+        let p = Profile::default();
+        assert_eq!(p.polling.events_secs, 30);
+        assert_eq!(p.polling.programs_secs, 30);
+        assert_eq!(p.polling.reports_secs, 60);
+        assert_eq!(p.polling.startup_jitter_fixed_pct, 0.0);
+        assert_eq!(p.polling.startup_jitter_random_max_pct, 0.0);
+    }
+
+    #[test]
+    fn polling_section_parses_from_yaml() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+polling:
+  events_secs: 900
+  programs_secs: 900
+  reports_secs: 900
+  startup_jitter_fixed_pct: 5.0
+  startup_jitter_random_max_pct: 10.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.polling.events_secs, 900);
+        assert_eq!(p.polling.programs_secs, 900);
+        assert_eq!(p.polling.reports_secs, 900);
+        assert_eq!(p.polling.startup_jitter_fixed_pct, 5.0);
+        assert_eq!(p.polling.startup_jitter_random_max_pct, 10.0);
+    }
+
+    #[test]
+    fn validate_rejects_zero_poll_interval() {
+        let mut p = Profile {
+            assets: vec![AssetProfile::BaseLoad(
+                crate::profile::schema::BaseLoadConfig {
+                    id: "base_load".into(),
+                    baseline_kw: 0.5,
+                    spikes: vec![],
+                },
+            )],
+            ..Profile::default()
+        };
+        p.polling.events_secs = 0;
+        let errors = p.validate().unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("polling.events_secs")));
+    }
+
+    #[test]
+    fn validate_rejects_negative_jitter_percentages() {
+        let mut p = Profile {
+            assets: vec![AssetProfile::BaseLoad(
+                crate::profile::schema::BaseLoadConfig {
+                    id: "base_load".into(),
+                    baseline_kw: 0.5,
+                    spikes: vec![],
+                },
+            )],
+            ..Profile::default()
+        };
+        p.polling.startup_jitter_fixed_pct = -1.0;
+        p.polling.startup_jitter_random_max_pct = -2.0;
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("polling.startup_jitter_fixed_pct")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("polling.startup_jitter_random_max_pct")));
     }
 }
