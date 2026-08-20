@@ -942,10 +942,26 @@ for the endpoint's four behaviour classes; it superseded the earlier `/sim/overr
 **Rationale:** Partial-patch semantics (PATCH) require null-vs-absent disambiguation.
 Full-replace is simpler and explicit. Callers must set all fields they want active.
 
-### D-07: Event Poll Interval — Configurable, Not Fixed
+### D-07: Event Poll Interval — Per-Profile, Not Fixed or Fleet-Wide (GB-09)
 
-**Decision:** Event polling defaults to 30 s (`POLL_EVENTS_SECS` env var, default 30;
-`POLL_PROGRAMS_SECS`/`POLL_REPORTS_SECS` default 30/60) rather than a hardcoded constant.
-**Rationale:** Balances VTN load against response latency; making it env-configurable
-lets a deployment tune this per VTN without a rebuild. Configurable jitter is not
-implemented in the lab.
+**Decision:** Poll cadence (`events_secs`/`programs_secs`/`reports_secs`, default
+30/30/60s) and startup jitter live in `Profile::polling` (`profile/polling.rs`), not a
+fleet-wide env var — real VENs are deployed one profile per instance, so per-instance
+tuning (e.g. a 15-minute interval for a real-world VTN) belongs in the profile, not a
+shared config surface every instance would otherwise read identically. `Config`'s
+`POLL_EVENTS_SECS`/`POLL_PROGRAMS_SECS`/`POLL_REPORTS_SECS`/
+`POLL_STARTUP_JITTER_FIXED_PCT`/`POLL_STARTUP_JITTER_RANDOM_MAX_PCT` env vars remain as
+a test-only override on top of the profile value (`tasks::poll_config::resolve`) —
+useful for BDD/E2E fixtures, not the deployment mechanism.
+
+Startup jitter (once, before the first poll of every poll loop — same semantics as the
+original fixed-seconds version) is now two percentages of `polling.events_secs`,
+resolved once per process at startup by `tasks::poll_config::compute_startup_jitter_s`:
+a deterministic `startup_jitter_fixed_pct` (same every boot) plus a random draw in
+`[0, startup_jitter_random_max_pct]` (fresh every boot, via `StdRng::from_entropy()`) —
+`startup_delay_s = events_secs × (fixed_pct + drawn_random_pct) / 100`. This still
+solves the original "N VENs don't poll in lockstep" motivation, now expressed relative
+to each VEN's own (profile-configurable) interval rather than an externally
+precomputed absolute number of seconds.
+**Rationale:** Balances VTN load against response latency, tunable per VEN without a
+rebuild or touching every instance's shared env config.

@@ -1,4 +1,6 @@
-use super::schema::{GridConfig, HeaterConfig, PlannerConfig, SimulatorConfig};
+use super::grid::GridConfig;
+use super::polling::PollConfig;
+use super::schema::{HeaterConfig, PlannerConfig, SimulatorConfig};
 use crate::entities::PlannerObjective;
 
 pub(super) fn default_asset_id_ev() -> String {
@@ -181,6 +183,28 @@ impl Default for GridConfig {
         Self {
             max_import_kw: default_max_import_kw(),
             max_export_kw: default_max_export_kw(),
+        }
+    }
+}
+
+pub(super) fn default_poll_events_secs() -> u64 {
+    30
+}
+pub(super) fn default_poll_programs_secs() -> u64 {
+    30
+}
+pub(super) fn default_poll_reports_secs() -> u64 {
+    60
+}
+
+impl Default for PollConfig {
+    fn default() -> Self {
+        Self {
+            events_secs: default_poll_events_secs(),
+            programs_secs: default_poll_programs_secs(),
+            reports_secs: default_poll_reports_secs(),
+            startup_jitter_fixed_pct: 0.0,
+            startup_jitter_random_max_pct: 0.0,
         }
     }
 }

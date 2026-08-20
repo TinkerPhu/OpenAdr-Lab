@@ -3,6 +3,7 @@ pub mod heuristics_job;
 pub mod history_sampler;
 pub mod obligation;
 pub mod planning;
+pub mod poll_config;
 pub mod poll_events;
 pub mod poll_programs;
 pub mod poll_reports;

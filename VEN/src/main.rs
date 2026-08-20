@@ -26,6 +26,7 @@ use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::Profile;
+use rand::SeedableRng;
 use simulator::SimState;
 use std::collections::HashMap;
 
@@ -248,9 +249,20 @@ async fn main() -> anyhow::Result<()> {
     // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
     const TASK_COOLDOWN_S: u64 = 5;
 
-    let poll_jitter_s = cfg.poll_startup_jitter_s;
+    // GB-09: poll cadence + startup jitter resolved once from Profile (with
+    // Config's env vars as a test-only override), so the jitter draw is
+    // fixed for this process's lifetime — matching the old fixed-seconds
+    // jitter's semantics, just profile-configurable and percentage-based.
+    let resolved_poll = tasks::poll_config::resolve(&cfg, &profile);
+    let poll_jitter_s = tasks::poll_config::compute_startup_jitter_s(
+        resolved_poll.events_secs,
+        resolved_poll.startup_jitter_fixed_pct,
+        resolved_poll.startup_jitter_random_max_pct,
+        &mut rand::rngs::StdRng::from_entropy(),
+    )
+    .round() as u64;
     {
-        let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
+        let (s, v, secs) = (state.clone(), vtn_port.clone(), resolved_poll.programs_secs);
         tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_program_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
@@ -259,7 +271,7 @@ async fn main() -> anyhow::Result<()> {
         let (s, v, secs, tx, nf, h) = (
             state.clone(),
             vtn_port.clone(),
-            cfg.poll_events_secs,
+            resolved_poll.events_secs,
             trigger_tx.clone(),
             notifier.clone(),
             history_port.clone(),
@@ -277,7 +289,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     {
-        let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
+        let (s, v, secs) = (state.clone(), vtn_port.clone(), resolved_poll.reports_secs);
         tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_report_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
