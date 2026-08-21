@@ -1,8 +1,17 @@
+use crate::error::UpstreamStatusError;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
+
+fn upstream_status_err(path: &str, status: StatusCode, body: String) -> anyhow::Error {
+    UpstreamStatusError {
+        status,
+        message: format!("{path} returned {status}: {body}"),
+    }
+    .into()
+}
 
 #[derive(Clone)]
 pub struct VtnClient {
@@ -132,7 +141,7 @@ impl VtnClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(upstream_status_err(path, status, body));
             }
             return Ok(resp.json().await?);
         }
@@ -140,7 +149,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(upstream_status_err(path, status, body));
         }
 
         Ok(resp.json().await?)
@@ -180,7 +189,7 @@ impl VtnClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(upstream_status_err(path, status, body));
             }
             return Ok(resp.json().await?);
         }
@@ -188,7 +197,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(upstream_status_err(path, status, body));
         }
 
         Ok(resp.json().await?)
@@ -228,7 +237,7 @@ impl VtnClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(upstream_status_err(path, status, body));
             }
             return Ok(resp.json().await?);
         }
@@ -236,7 +245,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(upstream_status_err(path, status, body));
         }
 
         Ok(resp.json().await?)
@@ -265,7 +274,7 @@ impl VtnClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(upstream_status_err(path, status, body));
             }
             return Ok(());
         }
@@ -273,7 +282,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(upstream_status_err(path, status, body));
         }
 
         Ok(())
@@ -352,6 +361,24 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("500"), "error must carry the status: {msg}");
         assert!(msg.contains("boom"), "error must carry the body: {msg}");
+    }
+
+    #[tokio::test]
+    async fn get_json_bails_with_downcastable_status_error_on_409() {
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/programs",
+                get(|| async { (AxStatus::CONFLICT, "name already exists") }),
+            );
+        let client = client_for(spawn_stub(app).await);
+
+        let err = client.get_json("/programs", None).await.unwrap_err();
+        let upstream = err
+            .downcast_ref::<crate::error::UpstreamStatusError>()
+            .expect("error must downcast to UpstreamStatusError");
+        assert_eq!(upstream.status, AxStatus::CONFLICT);
+        assert!(upstream.message.contains("name already exists"));
     }
 
     #[tokio::test]
