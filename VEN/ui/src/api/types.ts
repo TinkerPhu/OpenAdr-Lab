@@ -580,6 +580,33 @@ export type SiteFlexibilityForecastSlot = {
   down_kw: number;
 };
 
+/** One step in a `CapacityCurve` — power holds constant from `elapsed_s` until
+ * the next step (or the curve's end), a step function, not interpolated. */
+export type CapacityCurveStep = {
+  elapsed_s: number;
+  power_kw: number;
+};
+
+/** A closed-form sustained-commitment power/duration/energy forecast for one
+ * direction, `GET /flexibility/capacity` — "if the site committed now to
+ * sustained max import (or export), how does achievable power step down over
+ * elapsed time." Distinct from `SiteFlexibilityForecastSlot` above (which is
+ * an independent per-instant counterfactual, not a duration/energy curve).
+ * Not cached or binding across ticks — re-derived fresh every dispatcher
+ * tick, same as the other flexibility signals. */
+export type CapacityCurve = {
+  direction: "import" | "export";
+  start: string;
+  steps: CapacityCurveStep[];
+};
+
+/** `GET /flexibility/capacity` response body — both directions in one
+ * response (mirrors `SiteHeadroomChart`'s up/down pairing convention). */
+export type CapacityCurvesResponse = {
+  import: CapacityCurve;
+  export: CapacityCurve;
+};
+
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 
 /** Per-device schedulability metadata emitted at plan time (VEN/src/entities/plan.rs FlexibilityEnvelope). */

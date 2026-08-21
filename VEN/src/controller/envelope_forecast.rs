@@ -69,7 +69,7 @@ pub fn compute_headroom_forecast(
 /// (this model has no interrupt/early-stop mechanism), so it contributes no
 /// flexibility of either kind for the rest of its life, regardless of what
 /// any current or future plan says.
-fn already_run(load: &ShiftableLoad, runtimes: &[ShiftableLoadRuntime]) -> bool {
+pub(crate) fn already_run(load: &ShiftableLoad, runtimes: &[ShiftableLoadRuntime]) -> bool {
     runtimes.iter().any(|r| r.load_id == load.id)
 }
 
@@ -106,7 +106,7 @@ fn has_later_valid_start(load: &ShiftableLoad, chosen_start: DateTime<Utc>) -> b
 /// window. Assumes `ts >= now` already (the caller's frames are always
 /// built for the remaining horizon only) — this function only checks the
 /// load's own window, not the current wall-clock time.
-fn valid_start_exists_at(load: &ShiftableLoad, ts: DateTime<Utc>) -> bool {
+pub(crate) fn valid_start_exists_at(load: &ShiftableLoad, ts: DateTime<Utc>) -> bool {
     let duration = chrono::Duration::minutes(load.duration_min as i64);
     ts >= load.earliest_start && ts + duration <= load.latest_end
 }

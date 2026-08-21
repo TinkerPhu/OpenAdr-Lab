@@ -171,8 +171,10 @@ impl EvCharger {
         m.insert("soc".into(), state.soc);
         m.insert("plugged".into(), if state.plugged { 1.0 } else { 0.0 });
         m.insert("max_charge_kw".into(), self.max_charge_kw);
+        m.insert("max_discharge_kw".into(), self.max_discharge_kw);
         m.insert("min_charge_kw".into(), self.min_charge_kw);
         m.insert("soc_target".into(), self.soc_target);
+        m.insert("min_soc".into(), self.min_soc);
         m.insert("battery_kwh".into(), self.battery_kwh);
         m
     }
@@ -568,6 +570,17 @@ mod tests {
     fn future_state_values_at_clamps() {
         assert_eq!(EvCharger::future_state_values_at(-0.1)["soc"], 0.0);
         assert_eq!(EvCharger::future_state_values_at(1.5)["soc"], 1.0);
+    }
+
+    // Capacity-forecast (openspec/changes/flexibility-capacity-forecast) needs
+    // max_discharge_kw and min_soc alongside the already-present soc_target and
+    // battery_kwh to compute EV export headroom without importing EvCharger directly.
+    #[test]
+    fn state_values_exposes_max_discharge_kw_and_min_soc() {
+        let (ev, state) = make_ev(true, 0.5, 7.4);
+        let vals = ev.state_values(&state);
+        assert_eq!(vals.get("max_discharge_kw"), Some(&ev.max_discharge_kw));
+        assert_eq!(vals.get("min_soc"), Some(&ev.min_soc));
     }
 }
 

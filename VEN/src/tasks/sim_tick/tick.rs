@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::controller::dispatcher::resolve_pv_generation_limit_kw;
 use crate::controller::{
     HistoryPort, MeasurementPort, SimulatorPort, VtnPort, WeatherForecastPort,
 };
@@ -58,6 +57,7 @@ pub(crate) async fn tick_once(
         tick_sim_snap,
         tick_envelope,
         tick_forecast,
+        tick_capacity_curves,
         cleared_fields,
         pv_clear,
         base_clear,
@@ -106,14 +106,12 @@ pub(crate) async fn tick_once(
             ctx.incumbent_lever.as_deref(),
         );
 
-        let effective_capacity_for_pv =
-            super::helpers::effective_capacity(&ctx.capacity_snap, &ctx.inject);
-        let resolved_pv_generation_limit = resolve_pv_generation_limit_kw(
+        let resolved_pv_generation_limit = super::helpers::resolve_pv_limit(
             ctx.plan_snap.as_ref(),
-            &effective_capacity_for_pv,
+            &ctx.capacity_snap,
+            &ctx.inject,
             now,
             outcome.pv_generation_limit_tighten_kw,
-            ctx.inject.pv_generation_limit_kw,
         );
 
         let (heater_emergency_curtail, heater_emergency_absorb) =
@@ -149,8 +147,8 @@ pub(crate) async fn tick_once(
             ctx.base_load_heuristic_kw_now,
         );
 
-        let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast) =
-            super::helpers::finalize_tick_outputs(
+        let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =
+            super::finalize::finalize_tick_outputs(
                 &mut sim_guard,
                 &ctx.capacity_snap,
                 ctx.plan_snap.as_ref(),
@@ -165,6 +163,7 @@ pub(crate) async fn tick_once(
             tick_sim_snap,
             tick_envelope,
             tick_forecast,
+            tick_capacity_curves,
             cleared_fields,
             pv_clear,
             base_clear,
@@ -191,6 +190,7 @@ pub(crate) async fn tick_once(
         tick_sim_snap,
         tick_envelope,
         tick_forecast,
+        tick_capacity_curves,
         ctx.plan_snap.as_ref(),
         &state,
         &trigger_tx,

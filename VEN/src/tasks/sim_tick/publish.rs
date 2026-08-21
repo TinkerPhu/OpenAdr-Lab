@@ -11,6 +11,7 @@ use crate::controller::HistoryPort;
 use crate::controller::SimSnapshot;
 use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
@@ -23,6 +24,7 @@ pub(crate) async fn publish_sim_tick_result(
     mut sim_snap: SimSnapshot,
     envelope: SiteFlexibilityEnvelope,
     forecast: Vec<SiteFlexibilityForecastSlot>,
+    capacity_curves: (CapacityCurve, CapacityCurve),
     plan_snap: Option<&Plan>,
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
@@ -148,6 +150,11 @@ pub(crate) async fn publish_sim_tick_result(
     // `SiteFlexibilityForecastSlot`'s doc comment for why this must never
     // be read statically off the plan).
     state.set_site_headroom_forecast(forecast).await;
+    // Sustained-commitment capacity curves — same "recompute fresh every
+    // tick" reasoning as the headroom forecast above, see
+    // `controller::capacity_forecast`'s module doc for why this is a
+    // separate computation, not derived from `forecast`.
+    state.set_capacity_curves(capacity_curves).await;
 
     sim_snap
 }
@@ -248,6 +255,8 @@ mod tests {
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
+                import_limit_kw: f64::MAX,
+                export_limit_kw: -f64::MAX,
             },
             assets: std::collections::HashMap::new(),
         }

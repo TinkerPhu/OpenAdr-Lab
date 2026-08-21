@@ -3,6 +3,7 @@
 mod arbiter_glue;
 mod context;
 mod dispatch_override;
+mod finalize;
 mod forecast_wiring;
 mod helpers;
 mod post_lock;

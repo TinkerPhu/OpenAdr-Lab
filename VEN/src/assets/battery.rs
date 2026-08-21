@@ -118,6 +118,7 @@ impl Battery {
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("max_discharge_kw".into(), self.max_discharge_kw);
         m.insert("min_soc".into(), self.min_soc);
+        m.insert("round_trip_efficiency".into(), self.round_trip_efficiency);
         m
     }
 
@@ -275,6 +276,20 @@ mod tests {
             c_terminal_eur_kwh: None,
         };
         (Battery::from_params(&cfg), Battery::initial_state(&cfg))
+    }
+
+    // Capacity-forecast (openspec/changes/flexibility-capacity-forecast) needs
+    // round_trip_efficiency alongside the already-present capacity_kwh/max_charge_kw/
+    // max_discharge_kw/min_soc to compute charge-direction duration without importing
+    // Battery directly.
+    #[test]
+    fn state_values_exposes_round_trip_efficiency() {
+        let (bat, state) = make_battery_cfg(0.5);
+        let vals = bat.state_values(&state);
+        assert_eq!(
+            vals.get("round_trip_efficiency"),
+            Some(&bat.round_trip_efficiency)
+        );
     }
 
     #[test]

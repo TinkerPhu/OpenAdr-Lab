@@ -176,6 +176,8 @@ mod tests {
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
+                import_limit_kw: f64::MAX,
+                export_limit_kw: -f64::MAX,
             },
             assets: assets.into_iter().collect(),
         }
@@ -308,6 +310,8 @@ mod tests {
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
+                import_limit_kw: f64::MAX,
+                export_limit_kw: -f64::MAX,
             },
             assets,
         };

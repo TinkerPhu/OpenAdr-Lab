@@ -1257,3 +1257,35 @@ outes/sim.rs causes a T1+T2 double-solve race:
   immediately with an unhelpful one-line log. Use `wsl bash -lc '...'` (login shell) for any
   detached/background WSL command that needs `cargo`, `rustc`, or other `~/.cargo/bin` tools
   on PATH.
+
+## Sustained-Commitment Capacity Forecast (flexibility-capacity-forecast, 2026-08-21)
+
+- **A shared helper's contract can be wrong for a new caller even when it's correct for
+  every existing one — check the actual control logic, not just the helper's doc comment.**
+  `AssetConfig::available_storage_kwh` computes EV charge headroom to SoC 1.0. Every existing
+  caller only uses it for something where that's fine (e.g. instantaneous envelope maths that
+  gets clamped downstream). A new duration/energy computation that used it directly would have
+  silently overstated EV import capacity, because `ev.rs::step_inner`'s actual control logic
+  stops charging at `soc_target`, not 1.0 — a fact the helper simply doesn't encode. Caught by
+  reading the asset's real `step_inner`/`capability_inner` logic before trusting an existing
+  "energy headroom" helper, not by trusting its name or doc comment. When reusing a shared
+  helper for a new purpose, verify its contract against the asset's actual physics, not against
+  what its existing callers happen to need.
+- **A component correctly scoped as "contributes no flexibility" can still be wrong to
+  exclude from a net-quantity computation.** Base load and a heater's current draw were both
+  initially scoped out of the capacity-curve merge as "non-flexible" — true for flexibility
+  bookkeeping, but the curve was meant to represent net grid power, not flexible-asset
+  dispatch, and both terms affect that regardless of being uncontrollable. "Doesn't provide
+  flexibility" and "doesn't affect the quantity being computed" are different claims; conflating
+  them silently drops real, non-optional terms from a result that's supposed to be exhaustive.
+  Caught by working through the actual physical accounting (`net_grid_power = baseline + PV +
+  battery + EV + heater`) rather than only asking "which assets are flexible."
+- **File-size-cap fixes via import consolidation ("import golfing") are fragile — `cargo fmt`
+  owns import formatting and will re-expand anything that doesn't fit its line-width rules,
+  silently undoing the size win.** Tried combining several multi-line grouped imports into
+  single lines to claw back a few lines under `scripts/audit_file_sizes.py`'s cap; `cargo fmt`
+  reformatted several of them straight back to multi-line. The durable fix is always a real
+  structural extraction (a genuinely reusable function moved to its own file, or two near-
+  duplicate call sites merged into one shared one) — verify by running `cargo fmt` FIRST, then
+  re-run the size audit on the post-format result, not on manually-formatted source that hasn't
+  been through the formatter yet.

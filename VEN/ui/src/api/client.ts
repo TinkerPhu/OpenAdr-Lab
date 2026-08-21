@@ -3,6 +3,7 @@ import type {
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
+  CapacityCurvesResponse,
   EvSettings, UpdateEvSettingsBody,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
@@ -342,6 +343,13 @@ export class VenApi {
   async flexibilityForecast(): Promise<SiteFlexibilityForecastSlot[]> {
     const r = await this.getReq("/flexibility/forecast");
     if (!r.ok) throw new Error(`flexibility/forecast ${r.status}`);
+    return r.json();
+  }
+
+  async capacityCurves(): Promise<CapacityCurvesResponse | null> {
+    const r = await this.getReq("/flexibility/capacity");
+    if (r.status === 204) return null;
+    if (!r.ok) throw new Error(`flexibility/capacity ${r.status}`);
     return r.json();
   }
 

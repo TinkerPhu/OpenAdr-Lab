@@ -612,6 +612,18 @@ export function useFlexibilityForecast() {
   });
 }
 
+/** Sustained-commitment power/duration/energy capacity curves (both
+ * directions), for the "Capacity Forecast" Diagnostics chart. Distinct from
+ * `useFlexibilityForecast` above — see `CapacityCurve`'s doc comment. */
+export function useCapacityCurves() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["capacity_curves", api.baseUrl],
+    queryFn: () => api.capacityCurves(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useBaselineOverride() {
   const { api } = useVenContext();
   return useQuery({

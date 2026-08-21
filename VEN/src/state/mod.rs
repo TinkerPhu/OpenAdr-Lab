@@ -6,23 +6,22 @@ use crate::entities::capacity::{
     AlertWindow, CapacitySnapshot, DispatchWindow, OadrCapacityState, OadrReportObligation,
     SimpleWindow,
 };
+use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
 };
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
-use crate::entities::sim_inject::SimInjectState;
-use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
+use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
 use crate::models::SensorSnapshot;
-use chrono::DateTime;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 mod arbiter;
+mod capacity_curves;
 mod connection;
 mod event_log;
 mod flexibility_history;
@@ -108,6 +107,7 @@ pub struct HemsState {
     pub active_requests: Vec<UserRequest>,
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
     pub site_headroom_forecast: Vec<crate::entities::plan::SiteFlexibilityForecastSlot>, // state/site_headroom_forecast.rs
+    pub capacity_curves: Option<(CapacityCurve, CapacityCurve)>, // (import, export) — state/capacity_curves.rs
     pub ev_session: Option<EvSession>,
     pub heater_target: Option<HeaterTarget>,
     pub shiftable_loads: Vec<ShiftableLoad>,

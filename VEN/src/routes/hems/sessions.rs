@@ -341,3 +341,21 @@ pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResp
 pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.site_headroom_forecast().await)
 }
+
+/// GET /flexibility/capacity — sustained-commitment power/duration/energy
+/// capacity curves (both directions in one response — see
+/// `openspec/changes/flexibility-capacity-forecast/design.md` open question
+/// 2), re-derived fresh every dispatcher tick from the current asset state
+/// (see `controller::capacity_forecast`'s module doc for why this is a
+/// distinct computation from `GET /flexibility/forecast` above, not an
+/// extension of it). 204 before the first dispatcher tick.
+pub async fn get_capacity_curves(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.capacity_curves().await {
+        Some((import_curve, export_curve)) => Json(serde_json::json!({
+            "import": import_curve,
+            "export": export_curve,
+        }))
+        .into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
