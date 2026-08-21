@@ -25,8 +25,8 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 
 ## 2. Where the open items live
 
-- `docs/BACKLOG.md` — feature gaps: BL-11, BL-13, BL-17, BL-18, BL-21…BL-27,
-  BL-29, BL-34, BL-35; general items GB-04, GB-05, GB-07, GB-09, GB-11.
+- `docs/BACKLOG.md` — feature gaps: BL-11, BL-13, BL-17, BL-18, BL-22, BL-23,
+  BL-27, BL-29, BL-34, BL-35; general items GB-04, GB-05, GB-07, GB-09, GB-11.
 - `docs/BACKLOG_OpenADR_Cert.md` — certification/transport line items (Cluster H).
 - `docs/reference/TECHNICAL_DEBTS.md` — the debt register (R-18…R-40).
 - `docs/plans/refactoring_backlog.md` — detailed diagnostics for open register items (currently empty).
@@ -80,7 +80,7 @@ deployment.
 
 ### 3.5 Continuous — hygiene & decision-shaped debt
 
-BL-21/22/23/26/29 (vocabulary cleanup, wire-or-delete decisions), GB-04/05/07/09/11,
+BL-22/23/29 (vocabulary cleanup, wire-or-delete decisions), GB-04/05/07/09/11,
 and the R-register — fold in opportunistically when touching the same files, per the
 refactoring rule in `.claude/CLAUDE.md`.
 
@@ -100,8 +100,10 @@ same simulated day (scenario YAMLs in `experiments/`):
 | S-5 direct dispatch | DISPATCH_SETPOINT to a subset | precision vs. side effects on comfort |
 | S-6 combined | tariff + limit + one event | interaction / arbitration |
 
-A future **S-7 capacity negotiation** (VEN *requests* capacity via
-`OadrCapacityRequest`, BL-24 tail) gets added when a driving experiment exists.
+A future **S-7 capacity negotiation** (VEN *requests* capacity from the VTN — no
+such workflow exists today; the earlier `OadrCapacityRequest` sketch tracking it
+was removed as dead code, no dependent feature ever appeared) gets added when a
+driving experiment exists.
 
 **KPIs per scenario, per VEN and fleet-aggregate** (from the VEN history stores +
 VTN recorder): total cost (€/day), peak import (kW), load factor, energy shifted

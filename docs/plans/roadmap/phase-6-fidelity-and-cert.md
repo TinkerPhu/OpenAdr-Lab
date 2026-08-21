@@ -7,7 +7,7 @@
 > or a WP elsewhere touches the same files.
 > **Items:** BL-11, BL-13, BL-27, BL-18, Cluster H (TLS, webhooks, MQTT,
 > `/auth/server`, gzip, `randomizeStart`, "now" sentinel, runtime reconfig, mDNS),
-> dependency-vulnerability batch, Cluster I hygiene (BL-21/22/23/26/29,
+> dependency-vulnerability batch, Cluster I hygiene (BL-22/23/29,
 > GB-01/04/05/08).
 > **Prerequisites:** none hard; WP6.3 benefits from Phase 3's constraint work.
 > **Exit demonstration:** (a) a slot-cost unit-test suite proving bills match
@@ -101,8 +101,6 @@ same files):
 
 | Item | Action |
 |------|--------|
-| BL-21 | Confirm `assets/heater.rs` params superset → delete entities-level `ThermalModelParams` |
-| BL-26 | Compare entities `AssetState` vs. live `assets::AssetState` → delete or fold missing monitoring fields |
 | BL-29 | Fold `FlexibilityDirection` into BL-10's report code (done in Phase 3 — verify), close the rest pending multi-currency demand |
 | BL-22 | Decide: wire `apply_battery_correction_overlay` behind `battery.deviation_correction_enabled` (default off) **or** delete after user re-confirmation — ask, don't assume |
 | BL-23 | Route `post_heater_target` through `HvacService` (consistency with EV path) or delete the shell |

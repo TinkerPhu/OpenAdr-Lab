@@ -59,10 +59,10 @@ created.
 
 All of `ALERT_*`, `DISPATCH_SETPOINT`, `CHARGE_STATE_SETPOINT`, and the export-side
 subscription/reservation payloads are now genuinely handled (Phase 3) — the long-standing
-drift against `VEN_ARCHITECTURE.md` §2.1's translation table is closed. Only the
-`OadrEventCache` vocabulary struct remains an unwired sketch (its anticipated
-DISPATCH_SETPOINT consumer landed as typed `DispatchWindow` state instead; removal
-flagged in `docs/BACKLOG.md` BL-24).
+drift against `VEN_ARCHITECTURE.md` §2.1's translation table is closed. The `OadrEventCache`
+vocabulary struct (whose anticipated DISPATCH_SETPOINT consumer landed as typed
+`DispatchWindow` state instead) was removed as dead code, along with the other unwired
+`entities/capacity.rs` sketches (2026-08-21, BL-24).
 > BL-04/BL-06 markers cover the alerts and charge setpoints; the export-side capacity
 > payloads and priority-ordered merge are unmarked gaps. See [[ven-code-vs-docs-audit]].
 
