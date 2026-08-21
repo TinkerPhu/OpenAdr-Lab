@@ -30,12 +30,10 @@ pub async fn save(state: &SimState, data_dir: &str) -> anyhow::Result<()> {
 /// when the persisted asset IDs don't match the current asset list.
 pub async fn load_with_params(
     data_dir: &str,
-    sim_params: &crate::entities::planner_params::SimulatorParams,
     asset_params: &[crate::entities::asset_params::AssetParams],
     now: chrono::DateTime<chrono::Utc>,
 ) -> SimState {
-    let mut fresh = SimState::from_params(asset_params, now);
-    fresh.unmodelled_load_kw = sim_params.unmodelled_load_kw;
+    let fresh = SimState::from_params(asset_params, now);
 
     let Some(mut loaded) = load(data_dir).await else {
         return fresh;
@@ -53,7 +51,6 @@ pub async fn load_with_params(
     }
 
     loaded.asset_configs = fresh.asset_configs;
-    loaded.unmodelled_load_kw = fresh.unmodelled_load_kw;
     loaded
 }
 
@@ -87,7 +84,6 @@ pub async fn load(data_dir: &str) -> Option<SimState> {
 mod tests {
     use super::*;
     use crate::entities::asset_params::{AssetParams, BatteryParams};
-    use crate::entities::planner_params::SimulatorParams;
     use chrono::{TimeZone, Utc};
 
     fn temp_data_dir() -> std::path::PathBuf {
@@ -169,17 +165,12 @@ mod tests {
     async fn load_with_params_returns_fresh_state_when_no_file_exists() {
         let dir = temp_data_dir();
         let data_dir = dir.to_str().unwrap();
-        let sim_params = SimulatorParams {
-            unmodelled_load_kw: 2.5,
-            ..Default::default()
-        };
         let asset_params = [battery_params("battery")];
 
-        let state = load_with_params(data_dir, &sim_params, &asset_params, now()).await;
+        let state = load_with_params(data_dir, &asset_params, now()).await;
 
         assert_eq!(state.assets.len(), 1);
         assert_eq!(state.assets[0].id, "battery");
-        assert!((state.unmodelled_load_kw - 2.5).abs() < 1e-9);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -207,9 +198,8 @@ mod tests {
         };
         new_params.capacity_kwh = 20.0;
         let asset_params = [AssetParams::Battery(new_params)];
-        let sim_params = SimulatorParams::default();
 
-        let restarted = load_with_params(data_dir, &sim_params, &asset_params, now()).await;
+        let restarted = load_with_params(data_dir, &asset_params, now()).await;
 
         let (entry, cfg) = restarted.find_asset("battery").unwrap();
         match &entry.state {
@@ -248,9 +238,8 @@ mod tests {
         // Restart with a *different* asset id — simulates a profile change that
         // adds/removes/renames an asset since the last persist.
         let asset_params = [battery_params("battery-new")];
-        let sim_params = SimulatorParams::default();
 
-        let restarted = load_with_params(data_dir, &sim_params, &asset_params, now()).await;
+        let restarted = load_with_params(data_dir, &asset_params, now()).await;
 
         assert!(
             restarted.find_asset("battery-old").is_none(),

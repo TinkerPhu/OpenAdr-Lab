@@ -32,7 +32,6 @@ pub(crate) fn solve_phase1(
         g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
         p_pv_kw: inputs.p_pv_kw.clone(),
         p_base_kw: inputs.p_base_kw.clone(),
-        p_residual_kw: inputs.p_residual_kw.clone(),
         p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
         p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
         p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
@@ -235,13 +234,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
 
         let power_balance_ref = model.add_constraint(constraint!(
             p_imp[t] + pool.grid.p_pv_used[t] + bat_dis
-                == inputs.p_base_kw[t]
-                    + inputs.p_residual_kw[t]
-                    + ev_kw
-                    + heat_kw
-                    + shift_kw
-                    + bat_ch
-                    + p_exp[t]
+                == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + p_exp[t]
         ));
         power_balance_refs.push(power_balance_ref);
         model = model.with(constraint!(pool.grid.p_pv_used[t] <= inputs.p_pv_kw[t]));

@@ -340,11 +340,6 @@ pub struct SimulatorConfig {
     pub persist_every_s: u64,
     #[serde(default = "super::defaults::default_report_interval")]
     pub report_interval_s: u64,
-    /// Peak of a deterministic diurnal *unmodelled* load added to the derived grid meter but to
-    /// no asset (kW): gives the site-residual heuristic a real non-zero signal to learn from.
-    /// Zero disables (residual is then structurally 0, the exact sum of modelled assets).
-    #[serde(default)]
-    pub unmodelled_load_kw: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -201,11 +201,10 @@ holds only pure/port-based logic, while everything needing the concrete
 `SimState` lives in the infra ring next to the simulator
 ([[ven-hexagonal-architecture]]).
 
-Per-slot baselines for `base_load` and `site-residual` come from learned
-heuristics when available ([[heuristics-pipeline]]) — `inputs.rs` samples
+Per-slot baselines for `base_load` come from learned heuristics when available
+([[heuristics-pipeline]]) — `inputs.rs` samples
 `daytime_profile_kw[weekday_bucket][hour] × seasonal_factor` per slot, falling
-back to the profile's flat `baseline_kw` / the live residual reading on
-cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
+back to the profile's flat `baseline_kw` on cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
 so equal-cost windows always resolve to the same schedule across replans.
 
 The terminal-energy reward (`c_terminal`) model — why heater/battery terminal

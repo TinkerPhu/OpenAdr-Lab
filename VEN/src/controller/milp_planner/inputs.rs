@@ -101,20 +101,13 @@ pub(crate) fn build_milp_inputs(
     // has never had `POST /debug/heuristics/preload` run / accumulated
     // enough history) — see the per-slot loop below for the heuristic path.
     let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
-    let flat_residual_kw = assets
-        .assets
-        .get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID)
-        .map(|s| s.power_kw)
-        .unwrap_or(0.0);
     // WP5.2 (BL-14): when a learned heuristic exists, the planner samples a
     // per-slot value (`daytime_profile_kw[weekday_bucket][hour] ×
     // seasonal_factor`) instead of repeating a flat scalar across the whole
     // horizon — this is what makes the Controller tab's future-horizon line
-    // for base_load/site-residual show real daily structure instead of a
-    // flat line once history has been seeded.
+    // for base_load show real daily structure instead of a flat line once
+    // history has been seeded.
     let base_heuristic = asset_heuristics.get(crate::ids::ASSET_BASE_LOAD);
-    let residual_heuristic =
-        asset_heuristics.get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID);
 
     // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
     // slots use the time-weighted mean over the slot (R-16), slots beyond
@@ -160,7 +153,6 @@ pub(crate) fn build_milp_inputs(
     let mut c_exp = Vec::with_capacity(n);
     let mut p_pv = Vec::with_capacity(n);
     let mut p_base = Vec::with_capacity(n);
-    let mut p_residual = Vec::with_capacity(n);
     let mut p_imp_phys = Vec::with_capacity(n);
     let mut p_exp_phys = Vec::with_capacity(n);
     let mut p_imp_cont = Vec::with_capacity(n);
@@ -214,11 +206,6 @@ pub(crate) fn build_milp_inputs(
             .map(|h| h.sample_kw(slot_t))
             .unwrap_or(flat_base_kw);
         p_base.push(base_kw_t);
-        p_residual.push(
-            residual_heuristic
-                .map(|h| h.sample_kw(slot_t))
-                .unwrap_or(flat_residual_kw),
-        );
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
         // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
@@ -413,7 +400,6 @@ pub(crate) fn build_milp_inputs(
         g_imp_kgco2_kwh: g_co2,
         p_pv_kw: p_pv,
         p_base_kw: p_base,
-        p_residual_kw: p_residual,
         p_imp_max_phys_kw: p_imp_phys,
         p_exp_max_phys_kw: p_exp_phys,
         p_imp_max_cont_kw: p_imp_cont,

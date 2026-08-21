@@ -488,7 +488,10 @@ is enabled) its backstop tighten value — `PvCurtailmentSource` tags which one 
 
 **Ground-truth precedence** (ven-1 only, when configured): a real measured PV reading
 outranks the weather-derived estimate, which in turn outranks the sin model — see
-[`docs/architecture/real_measurement_mqtt.md`](real_measurement_mqtt.md).
+[`docs/architecture/real_measurement_mqtt.md`](real_measurement_mqtt.md). PV is the reference
+case for the general rule that every asset combines an *exogenous driver* (weather) with an
+*endogenous response* (curtailment) — see
+[`docs/architecture/forecasting_model.md`](forecasting_model.md).
 
 #### Battery
 
@@ -713,9 +716,9 @@ in the past window, planned watts in the future window).
 
 ### 4.9a Forecast Accuracy Tracking (schema v8)
 
-Tracks how well the planner's own forecasts held up against what actually happened, for PV,
-base_load, and site-residual — the three assets whose power is forecast rather than
-user-commanded. Persisted in the `forecast_accuracy_samples` table (`asset_id`, `lead_kind`
+Tracks how well the planner's own forecasts held up against what actually happened, for PV and
+base_load — the two assets whose power is forecast rather than user-commanded (see
+[forecasting_model.md](forecasting_model.md)). Persisted in the `forecast_accuracy_samples` table (`asset_id`, `lead_kind`
 [`near`/`far`], `target_ts`, `predicted_kw`, `predicted_at`, `actual_kw`, `actual_at`), indexed
 on `(asset_id, target_ts)`; pruned alongside the other history tables via `prune_before`, keyed
 on `target_ts`.
@@ -724,8 +727,8 @@ on `target_ts`.
 called from `finish_plan_cycle`) builds a *near* sample from `plan.slots[1]` and a *far* sample
 from `plan.slots.last()` (no-op below 2 slots) for each tracked asset: PV from
 `slot.pv_forecast_kw`, negated to match the actual/tick sign convention (negative = export) —
-the solver's own field is a non-negative generation magnitude; base_load and site-residual via
-`AssetHeuristics::sample_kw(slot.start)`, each skipped if no heuristic exists yet for that asset.
+the solver's own field is a non-negative generation magnitude; base_load via
+`AssetHeuristics::sample_kw(slot.start)`, skipped if no heuristic exists yet for that asset.
 Written through `HistoryPort::append_forecast_samples` off the async runtime
 (`spawn_blocking`), best-effort (log-and-continue on failure), same pattern as
 `history_sampler::write_window`.
@@ -739,8 +742,8 @@ window's ticks are appended, `HistoryPort::reconcile_forecast_actuals` fills `ac
 §History Store for the full persisted-history route list) — `resolve_range` plus optional
 `asset_id`/`lead_kind` filters; an invalid `lead_kind` value returns 400.
 
-**UI**: the History page overlays near/far forecast lines on the PV, base_load, and
-site-residual `AssetTimelineChart` cells only (the tracked-asset set), via the shared
+**UI**: the History page overlays near/far forecast lines on the PV and base_load
+`AssetTimelineChart` cells only (the tracked-asset set), via the shared
 data-merge/LOCF mechanism every multi-series chart in `VEN/ui` is built on — see
 [docs/architecture/chart_diagrams.md](chart_diagrams.md)'s "cursor-correctness invariant"
 and "Special features → Forecast-accuracy overlay" sections for the full mechanism and why
