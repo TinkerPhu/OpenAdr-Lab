@@ -88,9 +88,9 @@ export const MIN_CO2_INTENSITY_SPAN_G_KWH = 20;
  * near-flat tariff periods auto-scale to fill the chart. */
 export const MIN_TARIFF_SPAN_EUR_KWH = 0.02;
 
-/** Power axis floor [kW] = 5 W — the residual/computed series (e.g. site residual) are
- * unmeasured leftovers, so they hover near zero far more than any physically metered asset;
- * without a floor, sub-watt arithmetic noise gets auto-scaled to fill the chart height the
+/** Power axis floor [kW] = 5 W — an idle or near-balanced asset hovers at essentially zero
+ * power for long stretches; without a floor, sub-watt arithmetic noise (or a series that is
+ * genuinely flat) gets auto-scaled to fill the chart height the
  * same way the cost-rate axis did (see this file's `minSpanDomain` doc comment). 5 W (rather
  * than 1 W) was chosen because 1 W ticks still rendered as multi-decimal kW values
  * (e.g. "0.00025 kW") that were hard to read even once formatted — see `formatPowerTick`. */

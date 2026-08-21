@@ -112,7 +112,7 @@ fn build_plan_history_sample(plan: &Plan) -> PlanHistorySample {
 }
 
 /// forecast-accuracy-tracking: build the plan's near (`slots[1]`) and far (`slots.last()`)
-/// forecast samples for PV, base_load, and site-residual. No-op for plans with fewer than two
+/// forecast samples for PV and base_load. No-op for plans with fewer than two
 /// slots — `slots[1]` wouldn't exist yet. See design.md Decisions 1-3.
 pub fn record_forecast_accuracy_samples(
     plan: &Plan,
@@ -146,21 +146,16 @@ pub fn record_forecast_accuracy_samples(
             actual_kw: None,
             actual_at: None,
         });
-        for asset_id in [
-            crate::ids::ASSET_BASE_LOAD,
-            crate::controller::residual::SITE_RESIDUAL_ASSET_ID,
-        ] {
-            if let Some(h) = heuristics.get(asset_id) {
-                out.push(ForecastAccuracySample {
-                    asset_id: asset_id.to_string(),
-                    lead_kind,
-                    target_ts: slot.start,
-                    predicted_kw: h.sample_kw(slot.start),
-                    predicted_at: now,
-                    actual_kw: None,
-                    actual_at: None,
-                });
-            }
+        if let Some(h) = heuristics.get(crate::ids::ASSET_BASE_LOAD) {
+            out.push(ForecastAccuracySample {
+                asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
+                lead_kind,
+                target_ts: slot.start,
+                predicted_kw: h.sample_kw(slot.start),
+                predicted_at: now,
+                actual_kw: None,
+                actual_at: None,
+            });
         }
     }
     out
@@ -185,7 +180,7 @@ pub async fn publish_post_cycle_state(
     let mut forecasts = build_asset_forecasts(adopted_plan, wall_now);
     // WP5.2 (BL-14): add heuristic-sourced forecasts for assets that never
     // appear in the plan's own allocations (uncontrollable assets like
-    // base_load/site-residual) — no precedence conflict since Optimization
+    // base_load) — no precedence conflict since Optimization
     // and Heuristic never cover the same asset_id in practice.
     let existing_ids: HashSet<String> = forecasts.iter().map(|f| f.asset_id.clone()).collect();
     if !heuristics.is_empty() {
@@ -743,23 +738,16 @@ mod tests {
     }
 
     #[test]
-    fn record_forecast_accuracy_samples_two_slot_plan_yields_six_samples() {
+    fn record_forecast_accuracy_samples_two_slot_plan_yields_four_samples() {
         let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
         let mut heuristics = HashMap::new();
         heuristics.insert(
             crate::ids::ASSET_BASE_LOAD.to_string(),
             base_load_heuristic(),
         );
-        heuristics.insert(
-            crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
-            AssetHeuristics {
-                asset_id: crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
-                ..base_load_heuristic()
-            },
-        );
 
         let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
-        assert_eq!(samples.len(), 6, "3 assets x 2 lead kinds (near, far)");
+        assert_eq!(samples.len(), 4, "2 assets x 2 lead kinds (near, far)");
     }
 
     #[test]
@@ -788,22 +776,15 @@ mod tests {
     #[test]
     fn record_forecast_accuracy_samples_missing_heuristic_omits_only_that_asset() {
         let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
-        let mut heuristics = HashMap::new();
-        heuristics.insert(
-            crate::ids::ASSET_BASE_LOAD.to_string(),
-            base_load_heuristic(),
-        );
-        // No site-residual heuristic present.
+        // No base_load heuristic present — PV must still be sampled.
+        let heuristics = HashMap::new();
 
         let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
-        // PV (2) + base_load (2) = 4; site-residual omitted entirely.
-        assert_eq!(samples.len(), 4);
+        // PV (2) only; base_load omitted entirely.
+        assert_eq!(samples.len(), 2);
         assert!(samples
             .iter()
-            .all(|s| s.asset_id != crate::controller::residual::SITE_RESIDUAL_ASSET_ID));
+            .all(|s| s.asset_id != crate::ids::ASSET_BASE_LOAD));
         assert!(samples.iter().any(|s| s.asset_id == crate::ids::ASSET_PV));
-        assert!(samples
-            .iter()
-            .any(|s| s.asset_id == crate::ids::ASSET_BASE_LOAD));
     }
 }

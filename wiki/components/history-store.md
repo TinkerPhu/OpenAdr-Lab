@@ -74,8 +74,8 @@ unused surface.
 ## Forecast accuracy tracking (schema v8)
 
 `forecast_accuracy_samples` persists how well the planner's own forecast held up against what
-actually happened, for the three assets whose power is forecast rather than user-commanded —
-PV, base_load, and site-residual. Every plan cycle, `services/forecast.rs::
+actually happened, for the two assets whose power is forecast rather than user-commanded —
+PV and base_load. Every plan cycle, `services/forecast.rs::
 record_forecast_accuracy_samples` (called from `finish_plan_cycle`) writes a *near*
 (`plan.slots[1]`) and a *far* (`plan.slots.last()`) sample per tracked asset through
 `HistoryPort::append_forecast_samples`; `history_sampler`'s existing 1-minute tick flush then

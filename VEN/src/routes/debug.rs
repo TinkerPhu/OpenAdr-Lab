@@ -12,7 +12,6 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
 use crate::assets::{AssetConfig, BaseLoad};
-use crate::controller::residual::SITE_RESIDUAL_ASSET_ID;
 use crate::controller::HistoryPort;
 use crate::services::forecast::build_heuristic_forecasts;
 use crate::services::heuristics::{
@@ -21,7 +20,7 @@ use crate::services::heuristics::{
 use crate::state::AppState;
 use crate::AppCtx;
 
-const PRELOAD_ASSET_IDS: [&str; 2] = ["base_load", SITE_RESIDUAL_ASSET_ID];
+const PRELOAD_ASSET_IDS: [&str; 1] = ["base_load"];
 const PRELOAD_WINDOW_DAYS: i64 = 28;
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -48,14 +47,8 @@ pub(crate) async fn preload_heuristics(
     let mut summaries = Vec::new();
 
     for asset_id in PRELOAD_ASSET_IDS {
-        // site-residual has no independent meter-noise source in the
-        // simulator (R-20) — its synthetic backfill is honestly flat 0,
-        // not a reuse of base_load's appliance-noise formula.
-        let rows = if asset_id == SITE_RESIDUAL_ASSET_ID {
-            generate_synthetic_backfill(asset_id, from, now, |_| 0.0)
-        } else {
-            generate_synthetic_backfill(asset_id, from, now, base_load_power_kw_at(&base_load))
-        };
+        let rows =
+            generate_synthetic_backfill(asset_id, from, now, base_load_power_kw_at(&base_load));
         let n_rows = rows.len();
         let h = history.clone();
         tokio::task::spawn_blocking(move || h.append_tick_samples(&rows))
@@ -213,33 +206,6 @@ mod tests {
         assert_eq!(
             heuristic_forecast.source,
             crate::entities::design_vocabulary::ForecastSource::Heuristic
-        );
-    }
-
-    #[tokio::test]
-    async fn preload_heuristics_site_residual_stays_flat_by_design() {
-        // R-20: the simulator has no independent meter-noise source, so
-        // site-residual's synthetic backfill is flat 0 — its learned
-        // heuristic should correctly reflect that, not error out.
-        let history: Arc<dyn HistoryPort> = Arc::new(MockHistoryPort::new());
-        let state = AppState::new();
-        let now = Utc::now();
-
-        let summaries = preload_heuristics(history, base_load_with_coffee(), &state, now)
-            .await
-            .expect("preload must succeed");
-
-        let residual_summary = summaries
-            .iter()
-            .find(|s| s.asset_id == SITE_RESIDUAL_ASSET_ID)
-            .expect("site-residual must clear the cold-start gate too");
-        assert!(
-            residual_summary
-                .daytime_profile_kw
-                .iter()
-                .all(|bucket| bucket.iter().all(|&kw| kw.abs() < 1e-9)),
-            "site-residual's synthetic backfill is always 0 (R-20) — the learned \
-             profile must correctly reflect that, not show a fake pattern"
         );
     }
 }
