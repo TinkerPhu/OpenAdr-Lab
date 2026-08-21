@@ -10,7 +10,6 @@ import {
 import {
   minSpanDomain,
   MIN_POWER_SPAN_KW,
-  zeroAnchoredTicks,
   formatPowerTick,
 } from "../../charts/axisDomain";
 import { formatPowerValue, formatEnergyKwh } from "../../charts/unitFormat";
@@ -129,7 +128,6 @@ export function CapacityForecastChart({ curves, height }: CapacityForecastChartP
             width: 46,
             domain,
             tickFormatter: formatPowerTick,
-            ticks: zeroAnchoredTicks(domain),
           },
         ]}
         series={series}

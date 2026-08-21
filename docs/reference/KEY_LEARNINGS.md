@@ -1289,3 +1289,12 @@ outes/sim.rs causes a T1+T2 double-solve race:
   duplicate call sites merged into one shared one) — verify by running `cargo fmt` FIRST, then
   re-run the size audit on the post-format result, not on manually-formatted source that hasn't
   been through the formatter yet.
+- **A shared helper that returns `undefined` for the common case is not enforcement**
+  (2026-08-21): `zeroAnchoredTicks` looked like the chart kit's Y-axis rounding rule, but it
+  bailed out (`return undefined`) unless the domain straddled zero, and every chart had to
+  opt in by hand. The result: single-sign axes were never rounded anywhere in the app, two
+  charts never opted in at all, and the defect surfaced much later as unreadable PV axis
+  labels. When a rule is meant to hold everywhere, make the primitive total, apply it inside
+  the shared component, and delete the prop that let a caller skip it - the absence of an
+  opt-out is the guarantee, not the helper's existence. Same lesson shape as the chart kit's
+  data-presence filtering (`seriesHasData`) and the `generic-over-bespoke` rule.

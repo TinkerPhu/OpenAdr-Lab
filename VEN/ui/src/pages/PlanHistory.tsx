@@ -7,6 +7,7 @@ import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useHistoryPlans } from "../api/hooks";
+import { niceAxis, tickFormatterForStep } from "../components/charts/axisDomain";
 import type { PlanHistorySample, WarningKind } from "../api/types";
 
 /** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
@@ -60,6 +61,13 @@ export function PlanHistoryPage() {
     [plans]
   );
 
+  // Solve time is a strictly-positive millisecond count; anchor the axis at 0 (a solve taking
+  // "no time" is the meaningful baseline) and let niceAxis pick round ticks.
+  const solverMsAxis = useMemo(
+    () => niceAxis([0, Math.max(...solverMsSeries.map((p) => p.solver_ms), 0)]),
+    [solverMsSeries]
+  );
+
   const handleDateControlClick = () => {
     const alreadyOnThisDay = date === displayDate;
     setDate(displayDate);
@@ -108,7 +116,15 @@ export function PlanHistoryPage() {
             <LineChart data={solverMsSeries}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="ts" tickFormatter={formatTs} minTickGap={40} />
-              <YAxis unit=" ms" width={70} />
+              {/* Round ticks via the shared niceAxis rule (axisDomain.ts) — this chart owns
+                  its own <YAxis> rather than going through TimeSeriesChart. */}
+              <YAxis
+                unit=" ms"
+                width={70}
+                domain={solverMsAxis.domain}
+                ticks={solverMsAxis.ticks}
+                tickFormatter={tickFormatterForStep(solverMsAxis.step)}
+              />
               <Tooltip labelFormatter={formatTs} formatter={(v: number) => [`${v} ms`, "Solve time"]} />
               <Line type="monotone" dataKey="solver_ms" stroke="#1976d2" dot={false} isAnimationActive={false} />
             </LineChart>
