@@ -27,7 +27,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-25 | `CreateUserRequestBody` (HTTP DTO for POST /requests) is defined in domain-ring `controller/user_request.rs` and imported by services and routes. Move the DTO to routes/ (or an api-types module); the domain function takes domain params. | `VEN/src/controller/user_request.rs`, `VEN/src/routes/hems/`, `VEN/src/services/user_request.rs` | Small | Mechanical | 🟡 | Low — architecture correctness, no behavior change |
 | R-26 | Six task files (poll_programs, poll_reports, poll_events, obligation, state_persist, progress_ticker) repeat the `tokio::time::interval` + `loop { tick().await; … }` scaffold; poll_programs vs poll_reports are 0.80 similar. Extract a shared periodic-spawn helper — also centralizes supervision. | `VEN/src/tasks/` | Small | Low | 🟡 | Low — maintenance/consistency only |
 | R-29 | ~24 `unwrap()/expect()` calls in VEN production paths (milp_interactions.rs ×4, common/mod.rs ×4, services/planning.rs ×3, user_request.rs ×2, routes/hems/sessions.rs ×2, openadr_interface.rs ×2, heater/ev/battery_milp.rs ×2 each, sim_tick/tick.rs, services/hems.rs, milp_planner/inputs.rs ×1 each). Triage each: convert to Result or add a safety-justifying comment. | `VEN/src/` | Small | Low | 🟡 | Medium — real panic/crash risk if any untriaged call sees an unexpected input |
-| R-31 | VTN BFF flattens every upstream error to `502 BAD_GATEWAY` with a stringified anyhow chain — VTN 4xx validation/conflict errors surface to the UI as 502. Propagate the upstream status class where known (current behaviour is pinned by a unit test in `error.rs`). | `VTN/bff/src/error.rs`, `VTN/bff/src/vtn_client.rs` | Small | Low | 🟡 | Medium — user/ops-facing error diagnosis quality |
 | R-33 | UI test gaps: `VTN/ui/src/pages/Metrics.tsx` is the only untested page in either UI; `JsonDialog.tsx` is byte-identical in both UIs (50 lines — accept the copy with a twin-note header, or fold into a shared package if one materializes). | `VTN/ui/src/pages/Metrics.tsx`, `*/ui/src/components/JsonDialog.tsx` | Small | Low | 🟡 | Low — test-coverage gap |
 | R-34 | Up to ~112 of 417 behave step definitions look unused (crude static match, false positives likely). Run `behave --dry-run` in the Node1 test container for the authoritative list, then delete dead steps. | `tests/features/steps/` | Small | Low | 🟡 | Low — repo hygiene only |
 | R-42 | `reports_steps.py` submits reports with the fixed `reportName` "TELEMETRY_USAGE" (an OpenADR payload-type constant, not a name). `report_name` is globally unique on the VTN (`report_report_name_uindex`), so the fixed name collides across scenarios/clients and exercises the upsert path unintentionally. Switch to per-scenario unique names (needs sign-off: changes test fixtures). | `tests/features/steps/reports_steps.py` | Trivial | Low | 🟡 | Low — test-fixture correctness only |
@@ -126,8 +125,8 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 4 items
-rated Medium: R-21, R-29, R-31, R-58 (R-22, R-52, R-56, R-24, R-08, R-64, R-63, and R-43 were
+like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 3 items
+rated Medium: R-21, R-29, R-58 (R-22, R-52, R-56, R-24, R-08, R-64, R-63, R-43, and R-31 were
 also on this list and are now resolved — see below). Ordered by dependency, not by ID — work
 top-to-bottom.
 
@@ -140,8 +139,7 @@ top-to-bottom.
    mechanical dispatch/file-organization change unrelated to error handling, so it did not
    fold this triage in as originally planned — those 6 asset-file call sites remain part of
    R-29's own scope, not a separate already-done step).
-3. **R-31** — fully independent of everything above (VTN/bff-only).
-4. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
+3. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
    workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
    via FFI, not this codebase). Its task below is an investigation, not a code fix.
 
@@ -172,24 +170,15 @@ update `docs/history/project_journal.md` and remove the item from this register 
       comment explaining why it can't panic in practice.
 - [ ] 2.3 Full verification; remove R-29 from this register.
 
-### 3. R-31 — Propagate VTN BFF upstream error status class
+### 3. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
 
-- [ ] 3.1 Write a failing unit test in `VTN/bff/src/error.rs` asserting a VTN 4xx
-      validation/conflict error surfaces as its own status class, not a flattened 502.
-- [ ] 3.2 Implement status-class propagation in `error.rs`/`vtn_client.rs` where the upstream
-      status is known; keep 502 only for genuine gateway/connectivity failures.
-- [ ] 3.3 Update the existing pinning unit test in `error.rs` to match the new behavior.
-- [ ] 3.4 Full verification; remove R-31 from this register.
-
-### 4. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
-
-- [ ] 4.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+- [ ] 3.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
       `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 4.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+- [ ] 3.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
       try upgrading in isolation and re-running the full suite several times.
-- [ ] 4.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+- [ ] 3.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
       minimized repro; link it from this entry.
-- [ ] 4.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+- [ ] 3.4 If no upstream fix lands, formalize the existing workaround (e.g. a
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 4.5 This item stays in the register until the crash stops reproducing across several
+- [ ] 3.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
