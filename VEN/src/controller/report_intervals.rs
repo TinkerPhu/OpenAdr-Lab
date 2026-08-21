@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::common::{Aggregation, Interpolation, TimeSeries};
 use crate::controller::reporter::{format_iso8601_duration, AssetReportSample};
 use crate::controller::vtn_port::{OadrIntervalPeriod, OadrReportInterval, OadrReportPayload};
+use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
 
@@ -51,6 +52,43 @@ pub(crate) fn build_forecast_intervals(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// One report interval per `CapacityCurve` step, at the curve's own step
+/// boundaries (`elapsed_s` from `curve.start`) — a step function has no
+/// meaning resampled onto the obligation's interval grid, same reasoning as
+/// `build_forecast_intervals` above. The final step's duration uses
+/// OpenADR's "P9999Y" infinity convention (`intervalPeriod.duration`, per
+/// spec) since the curve has no defined end.
+pub(crate) fn build_capacity_forecast_intervals(
+    curve: &CapacityCurve,
+    payload_type: &str,
+) -> Vec<OadrReportInterval> {
+    curve
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(i, step)| {
+            let start = curve.start + Duration::seconds(step.elapsed_s);
+            let duration_iso = match curve.steps.get(i + 1) {
+                Some(next) => {
+                    format_iso8601_duration((next.elapsed_s - step.elapsed_s).max(0) as u64)
+                }
+                None => "P9999Y".to_string(),
+            };
+            OadrReportInterval {
+                id: i,
+                intervalPeriod: Some(OadrIntervalPeriod {
+                    start: Some(start.to_rfc3339()),
+                    duration: Some(duration_iso),
+                }),
+                payloads: vec![OadrReportPayload {
+                    r#type: payload_type.to_string(),
+                    values: vec![serde_json::Value::from(step.power_kw * 1000.0)],
+                }],
+            }
+        })
+        .collect()
 }
 
 /// Sum all assets' `power_kw` into a single net site power `TimeSeries`.
@@ -235,6 +273,48 @@ mod tests {
         assert_eq!(series.samples.len(), 3);
         assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
         assert!((series.samples[2].1 - 3.0).abs() < 1e-9);
+    }
+
+    // ── build_capacity_forecast_intervals ────────────────────────────────
+
+    use crate::entities::capacity_curve::{CapacityCurveStep, CommitmentDirection};
+
+    #[test]
+    fn build_capacity_forecast_intervals_one_per_step_watts_and_durations() {
+        let start = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        let curve = CapacityCurve {
+            direction: CommitmentDirection::Export,
+            start,
+            steps: vec![
+                CapacityCurveStep {
+                    elapsed_s: 0,
+                    power_kw: 5.0,
+                },
+                CapacityCurveStep {
+                    elapsed_s: 3600,
+                    power_kw: 0.0,
+                },
+            ],
+        };
+        let intervals = build_capacity_forecast_intervals(&curve, "STORAGE_MAX_DISCHARGE_POWER");
+        assert_eq!(intervals.len(), 2);
+        assert_eq!(
+            intervals[0].payloads[0].r#type,
+            "STORAGE_MAX_DISCHARGE_POWER"
+        );
+        assert_eq!(
+            intervals[0].payloads[0].values[0],
+            serde_json::json!(5000.0)
+        );
+        assert_eq!(
+            intervals[0].intervalPeriod.as_ref().unwrap().duration,
+            Some("PT1H".to_string())
+        );
+        // Final step is open-ended — infinity convention.
+        assert_eq!(
+            intervals[1].intervalPeriod.as_ref().unwrap().duration,
+            Some("P9999Y".to_string())
+        );
     }
 
     // ── build_baseline_report_intervals (WP5.4 BASELINE reports) ────────

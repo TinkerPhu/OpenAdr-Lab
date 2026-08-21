@@ -86,6 +86,8 @@ impl SimState {
                 voltage_v: self.grid.voltage_v,
                 import_kwh: self.grid.import_kwh,
                 export_kwh: self.grid.export_kwh,
+                import_limit_kw: self.grid_asset.state.import_limit_kw,
+                export_limit_kw: self.grid_asset.state.export_limit_kw,
             },
             assets: assets_map,
         }

@@ -34,6 +34,15 @@ pub struct GridSnapshot {
     pub voltage_v: f64,
     pub import_kwh: f64,
     pub export_kwh: f64,
+    /// Maximum site import power currently allowed by an active VTN capacity
+    /// event (`assets::GridState::import_limit_kw`) — NOT a fixed hardware/
+    /// interconnection rating. Defaults to `f64::MAX` (unbounded) when no VTN
+    /// event is active.
+    pub import_limit_kw: f64,
+    /// Maximum site export power currently allowed by an active VTN capacity
+    /// event (`assets::GridState::export_limit_kw`, always ≤ 0). Defaults to
+    /// `-f64::MAX` (unbounded) when no VTN event is active.
+    pub export_limit_kw: f64,
 }
 
 /// Per-asset snapshot with precomputed capability fields.
