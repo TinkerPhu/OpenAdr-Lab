@@ -10013,3 +10013,39 @@ is not implemented" line was already stale before this change, since `POLL_START
 shipped after D-07 was written). Added a `polling:` example + explanation to
 `VEN/profiles/README.md` rather than editing a real `ven-*.yaml` (no profile needs a
 non-default value today).
+
+## R-31: VTN BFF propagates real upstream error status class (2026-08-21)
+
+**Trigger:** `VTN/bff/src/error.rs::AppError::into_response` flattened every upstream
+error — including real VTN 4xx validation/conflict responses — to `502 BAD_GATEWAY`,
+tracked as R-31 in `TECHNICAL_DEBTS.md` (Medium gain: user/ops-facing error diagnosis
+quality). A real VTN rejection (e.g. a program name conflict) was indistinguishable from
+a genuine gateway/connectivity failure in the BFF's response to the UI.
+
+**Fix:** Added `UpstreamStatusError { status, message }` (`error.rs`) implementing
+`std::error::Error`, carried through `anyhow::Error` via its blanket `From` impl.
+`vtn_client.rs`'s 8 `!resp.status().is_success()` bail sites across
+`get_json`/`post_json`/`put_json`/`delete_json` (main + 401-retry path, ×4 methods) now
+construct this typed error instead of `anyhow::bail!`-ing a formatted string, via a small
+`upstream_status_err(path, status, body)` helper. `AppError::into_response` downcasts
+the wrapped `anyhow::Error` for `UpstreamStatusError`: a 4xx status propagates as-is with
+its original message; a 5xx status, or no downcast at all (network errors, JSON parse
+failures, token-fetch failures), still maps to `502` — those remain genuine
+gateway-level failures. `reqwest::StatusCode` and `axum::http::StatusCode` are the same
+underlying `http::StatusCode` type, so no conversion was needed between the client and
+response layers. No route files changed — every route already propagates vtn_client
+errors via `?`, so the fix at the `error.rs`/`vtn_client.rs` boundary applies uniformly.
+
+**Test-first:** `error.rs` gained two new cases (`UpstreamStatusError` with 409 → 409
+propagated with the original message; with 500 → still 502) alongside the renamed
+existing pinning test (`into_response_maps_untyped_error_to_502_with_json_error_body` —
+its old name/comment claiming "every AppError maps to 502" was no longer accurate).
+`vtn_client.rs` gained `get_json_bails_with_downcastable_status_error_on_409`, asserting
+the returned error downcasts to `UpstreamStatusError` with the right status and message.
+
+**Verification:** `wsl cargo test -p vtn-bff` — 32 passed, 0 failed. `cargo fmt --check`,
+`cargo clippy --all-targets --all-features -- -D warnings`, and
+`scripts/audit_file_sizes.py` all clean.
+
+**Bookkeeping:** Removed the R-31 row and its task-list section from
+`docs/reference/TECHNICAL_DEBTS.md`.
