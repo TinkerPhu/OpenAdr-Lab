@@ -4,14 +4,16 @@
 
 use chrono::{DateTime, Utc};
 
-use super::{power_model, unmodelled_load_at, SimState};
+use super::{power_model, SimState};
 
 impl SimState {
     /// Derive `self.grid`'s import/export/voltage from this tick's summed
-    /// modelled-asset power plus the configured unmodelled diurnal load —
-    /// the gap between the two is exactly what `site-residual` reports.
+    /// modelled-asset power. The simulated meter is exactly that sum — the
+    /// site's unmetered consumption is modelled as the `base_load` asset, not
+    /// as a separate meter perturbation (see
+    /// `docs/architecture/forecasting_model.md`).
     pub(super) fn derive_grid_meter(&mut self, total_kw: f64, now: DateTime<Utc>, dt_s: f64) {
-        let meter_kw = total_kw + unmodelled_load_at(now, self.unmodelled_load_kw);
+        let meter_kw = total_kw;
         let import_kw = meter_kw.max(0.0);
         let export_kw = (-meter_kw).max(0.0);
         let dt_h = dt_s / 3600.0;

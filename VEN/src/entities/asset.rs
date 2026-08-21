@@ -11,7 +11,6 @@ pub enum AssetType {
     HeatPump,        // thermal consumer with storage characteristics
     WashingMachine,  // batch consumer
     CookingStove,    // heuristic/uncontrollable consumer
-    SiteResidual,    // virtual asset: unmodeled site consumption
     GenericConsumer, // fallback
     GenericProducer, // fallback
 }

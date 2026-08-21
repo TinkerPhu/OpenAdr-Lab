@@ -8,14 +8,14 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use tracing::warn;
 
-use crate::controller::residual::SITE_RESIDUAL_ASSET_ID;
 use crate::controller::HistoryPort;
 use crate::services::heuristics::{learn_asset_heuristics, HeuristicsConfig};
 use crate::state::AppState;
 
-/// Currently heuristic-eligible asset_ids (roadmap: "site-residual, base
-/// load, PV-without-weather"; PV forecasting is WP5.3's job).
-const HEURISTIC_ASSET_IDS: [&str; 2] = ["base_load", SITE_RESIDUAL_ASSET_ID];
+/// Currently heuristic-eligible asset_ids. Base load is the site's whole
+/// unmetered-consumption story (see `docs/architecture/forecasting_model.md`);
+/// PV forecasting is WP5.3's job, not this pipeline's.
+const HEURISTIC_ASSET_IDS: [&str; 1] = ["base_load"];
 
 /// Returns `true` (and records `now`'s UTC calendar day) exactly the first
 /// time this is called for a given day — mirrors `history_sampler`'s
@@ -159,7 +159,7 @@ mod tests {
                 > base_load_heuristics.daytime_profile_kw[0][3],
             "coffee hour should exceed quiet hour in the stored heuristic"
         );
-        // site-residual has no seeded history in this test — cold-start, correctly absent.
-        assert!(!all.contains_key(SITE_RESIDUAL_ASSET_ID));
+        // Only heuristic-eligible assets with seeded history get an entry.
+        assert_eq!(all.len(), 1);
     }
 }

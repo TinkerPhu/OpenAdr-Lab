@@ -936,7 +936,7 @@ All endpoints are served by each VEN on its configured port (default: `8211` for
 | `GET` | `/history/grid` | Persisted grid meter history |
 | `GET` | `/history/events` | Persisted VTN event history |
 | `GET` | `/history/reports` | Persisted report history |
-| `GET` | `/history/forecast-accuracy` | Near/far forecast samples for PV, base_load, site-residual, reconciled with the actual value once elapsed (schema v8) |
+| `GET` | `/history/forecast-accuracy` | Near/far forecast samples for PV and base_load, reconciled with the actual value once elapsed (schema v8) |
 
 ### Timeline
 

@@ -4,7 +4,7 @@ type: component
 created: 2026-07-16
 updated: 2026-08-11
 synced_commit: 5547bc7
-sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, VEN/src/controller/report_intervals.rs, VEN/src/controller/reporter.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
+sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, VEN/src/controller/report_intervals.rs, VEN/src/controller/reporter.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
 tags: [heuristics, forecasting, baseline, phase-5, wp5-4, baseline-reports]
 ---
 
@@ -14,24 +14,25 @@ Phase 5 (WP5.1 + WP5.2, BL-08/BL-14): the VEN learns per-asset behavioral
 heuristics from its own persisted history ([[history-store]]) and feeds them to
 the [[milp-planner]] as per-slot baseline forecasts, replacing flat scalars.
 
-## The signal: SITE_RESIDUAL (`controller/residual.rs`)
+## The signal: base load (`assets/base_load.rs`)
 
-`residual_kw = grid meter (kW) − Σ modelled asset power (kW)` — unmodelled site
-consumption, exposed as a read-only virtual asset (`site-residual`, zero
-import/export capability so it can never be dispatched). Not clamped: a negative
-residual (modelled assets exceeding the meter) is a signal worth surfacing.
-Computed against the raw snapshot *before* synthetic assets (shiftable-load
-runtimes) are inserted, so a running shiftable load isn't misread as
-"unexplained" load. Inserted at both consumers of the 1 s snapshot — the tick
-publish path and the history sampler's own independent snapshot — so its
-history accumulates in `tick_samples`.
+`base_load` is the site's unmetered background consumption — standby draw,
+lighting, plugged-in appliances, anything not modelled as its own asset. It is
+the *only* asset this pipeline learns for, and it is genuinely unsimulatable:
+its driver is occupant behaviour, which no physics model predicts. Learning the
+statistical regularity from history is therefore the correct permanent tool,
+not a placeholder (see
+[forecasting_model.md](../../docs/architecture/forecasting_model.md)).
 
-The simulator gives the residual a real signal via the profile knob
-`simulator.unmodelled_load_kw`: a deterministic diurnal load (zero at 06:00,
-peak at 18:00, `simulator/mod.rs::unmodelled_load_at`) added to the *derived
-grid meter* but to no asset — exactly the gap `site-residual` reports. Default
-0.0, in which case the meter is the exact sum of the modelled assets and the
-residual reads 0.
+Live precedence in `simulator/mod.rs`: a fresh measured MQTT reading wins, else
+the site's own learned heuristic (BL-40/R-60), else the synthetic
+profile+appliance-noise model as a cold-start last resort.
+
+> A second virtual asset, `site-residual`
+> (`grid meter − Σ modelled asset power`), fed this pipeline until 2026-08-21.
+> It was removed: in a real deployment `base_load` is itself derived externally
+> as `grid_true − Σ(other asset measurements)`, which forces the residual to
+> zero by construction. See `docs/architecture/forecasting_model.md` §5.
 
 ## The phenomenon: configured appliance noise (`assets/base_load.rs`)
 
@@ -65,8 +66,8 @@ to ~4 samples per weekday (limit recorded in TECHNICAL_DEBTS.md).
 
 - `tasks/heuristics_job/` — daily background job (mirrors
   `history_sampler`'s day-boundary shape, fires on first check too so a fresh
-  preload doesn't wait a day). Eligible assets: `base_load` and
-  `site-residual`; PV forecasting is WP5.3's job, not this pipeline's.
+  preload doesn't wait a day). Eligible asset: `base_load`; PV forecasting is
+  WP5.3's job, not this pipeline's.
 - `POST /debug/heuristics/preload` (`routes/debug.rs`) — generates a synthetic
   4-week backfill and learns from it immediately. The backfill generator
   (`generate_synthetic_backfill`) is shared between this route and the module's
@@ -75,11 +76,11 @@ to ~4 samples per weekday (limit recorded in TECHNICAL_DEBTS.md).
 
 ## The consumers
 
-- **Planner** ([[milp-planner]], `inputs.rs`): when a heuristic exists for
-  `base_load`/`site-residual`, each plan slot samples
+- **Planner** ([[milp-planner]], `inputs.rs`): when a `base_load` heuristic
+  exists, each plan slot samples
   `daytime_profile_kw[bucket][hour] × seasonal_factor` instead of repeating a
   flat scalar across the horizon; without one, the pre-heuristic flat behavior
-  (`baseline_kw` from the profile, live residual reading) is the fallback.
+  (`baseline_kw` from the profile) is the fallback.
 - **Forecast timeline** (`services/forecast.rs::build_heuristic_forecasts`):
   the same sampling feeds the Controller tab's future-horizon lines in
   [[ven-ui]], which show real daily structure (coffee/lunch/dinner peaks,
@@ -121,10 +122,10 @@ feed dropout silently re-mixes synthetic samples back in with no provenance tag 
 
 ## Distinct from forecast-accuracy tracking
 
-This pipeline *produces* one of the forecasts ([[milp-planner]]'s base_load/site-residual
+This pipeline *produces* one of the forecasts ([[milp-planner]]'s base_load
 input); it does not measure how good that forecast turned out to be. That's a separate,
-newer capability — persisted near/far predicted-vs-actual samples for PV, base_load, and
-site-residual, reconciled once each prediction's target time elapses — described in
+newer capability — persisted near/far predicted-vs-actual samples for PV and base_load,
+reconciled once each prediction's target time elapses — described in
 [[history-store]]'s "Forecast accuracy tracking" section and
 `docs/architecture/VEN_ARCHITECTURE.md` §4.9a. The two compose: forecast accuracy is exactly
 the tool that would let a future change verify whether this pipeline's learned profile is

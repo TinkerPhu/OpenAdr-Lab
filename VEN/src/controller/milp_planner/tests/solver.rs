@@ -17,7 +17,6 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         g_imp_kgco2_kwh: vec![0.30; n],
         p_pv_kw: vec![0.0; n],
         p_base_kw: vec![base_kw; n],
-        p_residual_kw: vec![0.0; n],
         p_imp_max_phys_kw: vec![25.0; n],
         p_exp_max_phys_kw: vec![10.0; n],
         p_imp_max_cont_kw: vec![25.0; n],
@@ -147,12 +146,11 @@ fn solve_feasible_no_optional_assets() {
 }
 
 #[test]
-fn solve_residual_kw_flows_into_net_import() {
-    // WP5.1 (BL-08): SITE_RESIDUAL is a distinct term from base_kw — verify it
-    // reaches the balance constraint independently by leaving base_kw at 0
-    // and setting only p_residual_kw.
-    let mut inputs = make_solver_inputs(4, 0.0); // no base load
-    inputs.p_residual_kw = vec![0.3; 4];
+fn solve_base_kw_flows_into_net_import() {
+    // The baseline load is the sole non-controllable demand term in the power
+    // balance — with no controllable asset able to serve it, it must show up
+    // one-for-one as grid import.
+    let inputs = make_solver_inputs(4, 0.3);
     let result = solve_phase1(
         &inputs,
         &make_phase1_weights(),
@@ -164,7 +162,7 @@ fn solve_residual_kw_flows_into_net_import() {
     for t in 0..4 {
         assert!(
             (out.p_imp_kw[t] - 0.3).abs() < 1e-3,
-            "p_imp[{t}] = {:.4} should be ~0.3 (residual_kw alone)",
+            "p_imp[{t}] = {:.4} should be ~0.3 (base_kw alone)",
             out.p_imp_kw[t]
         );
     }

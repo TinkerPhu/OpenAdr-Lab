@@ -8,6 +8,12 @@ structures, the PV transposition physics, the sky-condition/variability
 signal, the snow-cover model, and the MQTT wire contract a plugin publisher
 must implement.
 
+The weather feed is the VEN's canonical *exogenous driver* — an input the site
+cannot influence, sourced externally precisely because we have no privileged
+information about it. For how that fits the overall forecasting model (and why
+the *endogenous* half, curtailment, can never be outsourced) see
+[forecasting_model.md](forecasting_model.md).
+
 Implemented in `VEN/src/entities/weather.rs`, `entities/solar.rs`,
 `entities/pv_snow.rs`, `entities/asset_params.rs` (`PvArrayGeometry`,
 `PvForecastParams`), `controller/weather_port.rs`, `VEN/src/weather.rs` (the

@@ -349,6 +349,26 @@ outes/sim.rs causes a T1+T2 double-solve race:
   test for a formula involving two "independent" signals, verify they really
   are independent in the system under test — one may be defined in terms of
   the other, silently making the interesting case untestable end-to-end.
+  **Follow-up (2026-08-21): the same result holds in production, not just in
+  simulation — and SITE_RESIDUAL has now been removed entirely.** The
+  simulator-side argument above ("the meter is computed as the asset sum, so
+  residual is 0 *in simulation*") left the implicit hope that a real site with
+  real metering would produce a meaningful non-zero residual. It cannot. In a
+  real deployment `base_load` is itself derived *externally* as
+  `grid_meter_true − Σ(other real asset measurements)` and fed to the VEN as
+  `base_load`'s own measurement, so substituting gives
+  `residual = grid − ((grid − Σothers) + Σothers) = 0` — a tautology
+  independent of which assets are simulated vs. metered. The lesson generalizes:
+  when a derived quantity is defined as "the leftover after subtracting
+  everything we know", check how the *inputs* were themselves produced — if any
+  input is already defined as that same leftover, the quantity is structurally
+  zero by construction and no amount of better instrumentation will change it.
+  A "gap detector" is only meaningful when an independent truth source exists
+  that the other inputs do not already fully explain. See
+  [../architecture/forecasting_model.md](../architecture/forecasting_model.md)
+  for the resulting model (exogenous driver vs. endogenous response, and why
+  divergence is handled by receding-horizon replanning plus
+  `forecast_accuracy_samples`, not by a correction channel).
 
 - **Threading a new "distinct but structurally identical" term through a
   solver (residual_kw parallel to base_kw) touches every site that already

@@ -44,7 +44,6 @@ pub mod timeline;
 pub mod monitor;
 pub(crate) mod report_intervals;
 pub mod reporter;
-pub mod residual;
 
 // ── User requests ─────────────────────────────────────────────────────────────
 pub mod user_request;

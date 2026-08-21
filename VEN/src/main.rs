@@ -204,8 +204,7 @@ async fn main() -> anyhow::Result<()> {
     // profile changes (k_loss, thermal_mass, etc.) take effect on every restart.
     let sim_state = {
         let now = chrono::Utc::now();
-        let sim =
-            simulator::persist::load_with_params(&data_dir, &sim_params, &asset_params, now).await;
+        let sim = simulator::persist::load_with_params(&data_dir, &asset_params, now).await;
         Arc::new(Mutex::new(sim))
     };
 
