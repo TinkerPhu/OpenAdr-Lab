@@ -2,8 +2,8 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
+updated: 2026-08-21
+synced_commit: 35f7808
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
