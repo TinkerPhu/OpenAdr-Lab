@@ -296,7 +296,20 @@ pub async fn get_timeline_all(
     }
 
     let zones = zones_from_plan(plan.as_ref(), now);
-    Json(serde_json::json!({ "zones": zones, "timelines": timelines }))
+    Json(build_all_timelines_response(zones, timelines, now))
+}
+
+/// Pure assembly of the `/timeline/all` response body — split out from the handler so
+/// the `now` field (the server clock this response's timestamps are built against) is
+/// unit-testable without an `AppCtx`. The client uses this `now` instead of its own
+/// `Date.now()` to position chart data, so a skewed client clock can't stretch a
+/// chart's time axis to swallow the whole dataset.
+fn build_all_timelines_response(
+    zones: Vec<serde_json::Value>,
+    timelines: serde_json::Map<String, serde_json::Value>,
+    now: DateTime<Utc>,
+) -> serde_json::Value {
+    serde_json::json!({ "zones": zones, "timelines": timelines, "now": now })
 }
 
 #[cfg(test)]
@@ -311,6 +324,15 @@ mod tests {
             resolution: None,
             max_points: None,
         }
+    }
+
+    #[test]
+    fn test_build_all_timelines_response_carries_the_injected_now() {
+        let now = chrono::Utc::now();
+        let body = build_all_timelines_response(vec![], serde_json::Map::new(), now);
+        let parsed_now: DateTime<Utc> = serde_json::from_value(body["now"].clone())
+            .expect("`now` must deserialize back into a DateTime<Utc>");
+        assert_eq!(parsed_now, now);
     }
 
     #[test]

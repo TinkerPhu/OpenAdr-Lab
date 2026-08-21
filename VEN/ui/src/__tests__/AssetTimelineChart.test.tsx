@@ -297,3 +297,22 @@ describe("AssetTimelineChart — X-axis tick rounding", () => {
     }
   });
 });
+
+describe("AssetTimelineChart — clips data to [tMin, tMax]", () => {
+  beforeEach(() => {
+    composedChartData.length = 0;
+  });
+
+  // Regression test: a client with a skewed OS clock (or any stale/late point outside
+  // the window) must not have that point reach recharts, where an un-clipped domain
+  // would stretch to include it and squeeze the intended window into a sliver.
+  it("drops a data point outside the hoursBack/hoursForward window", () => {
+    const inWindow = point(-30 * minute, { power_kw: 1.0 });
+    const farOutside = point(5 * 60 * minute, { power_kw: 99.0 }); // 5h ahead, hoursForward defaults to 1h
+    render(
+      <AssetTimelineChart data={[inWindow, farOutside]} color="#000" nowMs={now} />
+    );
+    expect(composedChartData.some((row) => row.ts === farOutside.ts)).toBe(false);
+    expect(composedChartData.some((row) => row.ts === inWindow.ts)).toBe(true);
+  });
+});

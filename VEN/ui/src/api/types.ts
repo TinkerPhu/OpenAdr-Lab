@@ -10,6 +10,8 @@ export type HealthResponse = {
     storage: HealthComponentStatus;
     planner: HealthComponentStatus;
   };
+  /** Server clock (ISO 8601) — lets a client detect/correct for its own clock skew. */
+  server_time: string;
 };
 
 export type VtnStatus = {
