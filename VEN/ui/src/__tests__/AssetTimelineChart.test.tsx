@@ -9,8 +9,9 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
-const { referenceAreas, lines, xAxes, composedChartData } = vi.hoisted(() => ({
+const { referenceAreas, lines, xAxes, yAxes, composedChartData } = vi.hoisted(() => ({
   referenceAreas: [] as Array<Record<string, unknown>>,
+  yAxes: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
   xAxes: [] as Array<Record<string, unknown>>,
   composedChartData: [] as Array<Record<string, unknown>>,
@@ -23,7 +24,10 @@ vi.mock("recharts", () => ({
     return children;
   },
   ResponsiveContainer: ({ children }: { children: unknown }) => children,
-  YAxis: () => null,
+  YAxis: (props: Record<string, unknown>) => {
+    yAxes.push(props);
+    return null;
+  },
   Line: (props: Record<string, unknown>) => {
     lines.push(props);
     return null;
@@ -314,5 +318,56 @@ describe("AssetTimelineChart — clips data to [tMin, tMax]", () => {
     );
     expect(composedChartData.some((row) => row.ts === farOutside.ts)).toBe(false);
     expect(composedChartData.some((row) => row.ts === inWindow.ts)).toBe(true);
+
+/**
+ * Regression for the Controller PV cell: its two right-hand axes (cost €/h, CO2 g/h) used to
+ * render labels like "-0.31275 €/h" because a single-sign domain got no explicit ticks. The
+ * chart passes no tick config at all now — rounding comes from TimeSeriesChart.
+ */
+describe("AssetTimelineChart — rounded Y-axis labels on a PV-shaped cell", () => {
+  beforeEach(() => {
+    yAxes.length = 0;
+  });
+
+  /** Significant digits of a rendered tick label, ignoring sign, decimal point and
+   * leading/trailing zeros — "-0.4" → 1, "1.35" → 3, "600" → 1. */
+  function significantDigits(label: string): number {
+    const digits = label.replace(/[^0-9]/g, "").replace(/^0+/, "").replace(/0+$/, "");
+    return digits.length;
+  }
+
+  it("labels every axis with round multiples of the axis step", () => {
+    // PV: generation is negative power, export revenue is a negative cost rate, avoided
+    // emissions a negative CO2 rate — all three axes are single-sign, the case that used to
+    // fall through to recharts' raw-domain ticks.
+    const data = [
+      point(-2 * minute, { power_kw: -3.17, cost_rate_eur_h: -0.4172, co2_rate_g_h: -617.3 }),
+      point(-1 * minute, { power_kw: -2.83, cost_rate_eur_h: -0.3311, co2_rate_g_h: -498.1 }),
+    ];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+
+    const visible = yAxes.filter((a) => a.ticks !== undefined);
+    expect(visible.length).toBe(3);
+    for (const axis of visible) {
+      const step = (axis.ticks as number[])[1] - (axis.ticks as number[])[0];
+      for (const tick of axis.ticks as number[]) {
+        expect(Math.abs(tick / step - Math.round(tick / step))).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("keeps the cost/CO2 labels at one or two significant digits for this data", () => {
+    const data = [
+      point(-2 * minute, { power_kw: -3.17, cost_rate_eur_h: -0.4172, co2_rate_g_h: -617.3 }),
+      point(-1 * minute, { power_kw: -2.83, cost_rate_eur_h: -0.3311, co2_rate_g_h: -498.1 }),
+    ];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+
+    for (const axis of yAxes.filter((a) => a.ticks !== undefined)) {
+      const format = axis.tickFormatter as (v: number) => string;
+      for (const tick of axis.ticks as number[]) {
+        expect(significantDigits(format(tick))).toBeLessThanOrEqual(2);
+      }
+    }
   });
 });

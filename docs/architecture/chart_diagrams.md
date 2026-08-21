@@ -9,7 +9,7 @@ compositions, all under `VEN/ui/src/components/charts/`. VTN UI has no charts.
 ```
 VEN/ui/src/components/charts/
   chartLayout.ts          sizing constants
-  axisDomain.ts            axis-domain flooring, zero-anchored ticks, X-axis tick generation
+  axisDomain.ts            axis-domain flooring, rounded Y ticks, X-axis tick generation
   unitFormat.ts             per-physical-unit tooltip/tick formatting
   mergeSeries.ts            the cursor-correctness data model
   NowLine.tsx                the "NOW" reference line
@@ -70,11 +70,19 @@ the plateau between two real samples shows a value, not a gap). Never give an in
   (tariff €/kWh, CO2 intensity g/kWh) — `minSpanDomain` would seed the domain at 0 and
   compress a narrow real range (e.g. 0.28–0.32) into a sliver of the axis, exactly the
   "squeezed curve" defect a floor exists to prevent.
-- `zeroAnchoredTicks(domain, targetTickCount)` — when a resolved domain has
-  `min < 0 < max`, returns an explicit tick set guaranteed to include `0.0`, stepped
-  outward from it in both directions using a "nice" (1/2/5×10ⁿ) step size. Returns
-  `undefined` (defer to recharts' own tick generation) when the domain doesn't straddle
-  zero. Pass the result as a `<YAxis ticks={...}>` prop.
+- `niceAxis(domain)` → `{ domain, ticks, step }` — the Y-axis counterpart of
+  `roundedTimeTicks`: ticks land on exact multiples of a 1/2/5×10ⁿ step, and the domain is
+  snapped outward to whole steps so the extreme labels are round too. It picks the
+  *coarsest* step that still yields 3–7 ticks without inflating the domain past 1.5× the
+  real data span — coarsest-wins keeps labels at one or two significant digits in the
+  common case (`-0.6 / -0.4 / -0.2 / 0`), while a narrow band far from zero still gets the
+  finer step it needs (`1.3 / 1.4 / 1.5`). 0 is always a tick whenever the domain contains
+  it, which is what the removed `zeroAnchoredTicks` used to provide for mixed-sign domains
+  only. **Callers never call this**: the compositions apply it to every axis themselves
+  (see below).
+- `tickFormatterForStep(step)` — label formatter matching a `niceAxis` step: exactly the
+  decimals the step implies, so float noise never reaches a label. Used as the default
+  axis `tickFormatter` when an axis declares no unit-specific one of its own.
 - `formatPowerTick(valueKw)` — magnitude-aware power formatting: Watts (integer) below
   1 kW, kW (2 decimals) at/above. Used as the power axis's `tickFormatter` and, via
   `unitFormat.ts`, the power tooltip formatter — so axis and tooltip can never disagree.
@@ -278,11 +286,20 @@ Tariff and cost rate are different physical dimensions (a price vs. a rate) and 
 never share a scale — plotting them together previously let cost rate's larger range
 visually flatten the tariff curves.
 
-**Zero-anchored ticks** — any Y-axis whose domain straddles zero (mixed-sign data, e.g.
-net grid power, or cost/CO2 rates that go negative during export) renders 0.0 as one of
-its ticks, with the remaining ticks stepped outward from it symmetrically
-(`zeroAnchoredTicks`). Wired into every `<YAxis>` across all three compositions whose
-domain can plausibly be mixed-sign.
+**Rounded Y ticks, enforced by the compositions** — a chart declares only its *data*
+domain (`minSpanDomain`/`tightSpanDomain`); `TimeSeriesChart`, `StackedTimeSeriesChart` and
+`CurveChart` each run it through `niceAxis` themselves before handing it to `<YAxis>`, so
+every Y label is a round multiple of the axis step. `TimeSeriesAxisSpec` deliberately has
+**no `ticks` prop** — there is no code path through which a caller can render un-rounded Y
+labels, and no chart contains tick logic of its own. The two charts outside the kit that own
+a bare `<YAxis>` (`raw-diagnostics/SimProfileChart`, `pages/PlanHistory`) call `niceAxis`
+directly, for the same reason `NowLine`/`ZoneShading` are functions returning elements: a
+wrapper component would change the child type recharts inspects.
+
+This replaced an opt-in `zeroAnchoredTicks(domain)` helper that returned `undefined` for any
+domain not straddling zero — so every single-sign axis (PV export revenue in €/h, CO2 in
+g/h, a strictly-positive tariff in €/kWh) silently fell back to recharts ticking the raw
+domain, producing labels like `-0.31275 €/h`, and each caller had to remember to opt in.
 
 **PV curtailment shading** (`AssetTimelineChart`, `pvCurtailment` prop) — classifies
 each point as hardware-capped (neutral shading), planned imposed curtailment (amber), or

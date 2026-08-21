@@ -16,6 +16,7 @@ import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "./tooltipStyle";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
 import { seriesHasData, type TimestampedRow } from "./mergeSeries";
+import { niceAxis, tickFormatterForStep } from "./axisDomain";
 import { useLegendToggle } from "./useLegendToggle";
 import { ChartLegend } from "./ChartLegend";
 
@@ -23,9 +24,12 @@ export interface TimeSeriesAxisSpec {
   id: string;
   orientation?: "left" | "right";
   unit?: string;
+  /** The *data* domain (from `minSpanDomain`/`tightSpanDomain`). This component snaps it
+   * outward to round tick values itself via `niceAxis` — there is deliberately no `ticks`
+   * prop, so no chart can render un-rounded Y labels by forgetting to pass one. */
   domain: [number, number];
-  /** From `zeroAnchoredTicks` — `undefined` defers to recharts' own tick generation. */
-  ticks?: number[];
+  /** Unit-specific label formatting (e.g. `formatPowerTick`). Omit to get the step-derived
+   * default from `tickFormatterForStep`, which matches the tick spacing's own precision. */
   tickFormatter?: (v: number) => string;
   width?: number;
   /** Renders with no visible axis line/ticks — carries a series (e.g. SoC, T_tank) whose
@@ -142,6 +146,9 @@ export function TimeSeriesChart({
   margin = { top: 4, right: 4, left: 0, bottom: 0 },
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();
+  // The single Y-axis tick rule for every chart built on this composition: each axis' data
+  // domain is snapped to round tick values here, so no caller can forget it (`niceAxis`).
+  const resolvedAxes = axes.map((axis) => ({ axis, nice: axis.hidden ? null : niceAxis(axis.domain) }));
   const visibleSeries = series.filter((s) => seriesHasData(data, s.dataKey));
   const seriesByName = new Map(visibleSeries.map((s) => [s.key, s]));
   const bandsByName = new Map((bands ?? []).map((b) => [b.key, b]));
@@ -171,8 +178,8 @@ export function TimeSeriesChart({
             tickFormatter={xAxisTickFormatter}
             tick={{ fontSize: 10 }}
           />
-          {axes.map((axis) =>
-            axis.hidden ? (
+          {resolvedAxes.map(({ axis, nice }) =>
+            nice === null ? (
               <YAxis
                 key={axis.id}
                 yAxisId={axis.id}
@@ -190,9 +197,9 @@ export function TimeSeriesChart({
                 tick={{ fontSize: 10 }}
                 width={axis.width ?? 46}
                 unit={axis.unit}
-                tickFormatter={axis.tickFormatter}
-                domain={axis.domain}
-                ticks={axis.ticks}
+                tickFormatter={axis.tickFormatter ?? tickFormatterForStep(nice.step)}
+                domain={nice.domain}
+                ticks={nice.ticks}
               />
             )
           )}

@@ -14,7 +14,7 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../controller/types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../controller/types";
 import type { ZoneDef } from "../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "./axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis } from "./axisDomain";
 import { formatSignedPowerValue } from "./unitFormat";
 import { renderNowLine } from "./NowLine";
 import { renderZoneShading } from "./ZoneShading";
@@ -163,6 +163,9 @@ export function StackedTimeSeriesChart({
     }),
     MIN_POWER_SPAN_KW
   );
+  // Round Y ticks, same rule as TimeSeriesChart's — see niceAxis in axisDomain.ts. This
+  // composition owns its own <YAxis>, so it applies the rule itself rather than opting in.
+  const powerAxis = niceAxis(powerDomain);
 
   // One record per asset drives its positive Area, negative Area, and legend entry —
   // a single shared derivation instead of three independent ones, so an asset's label/
@@ -202,8 +205,8 @@ export function StackedTimeSeriesChart({
             tick={{ fontSize: 10 }}
             width={46}
             tickFormatter={formatPowerTick}
-            domain={powerDomain}
-            ticks={zeroAnchoredTicks(powerDomain)}
+            domain={powerAxis.domain}
+            ticks={powerAxis.ticks}
           />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend

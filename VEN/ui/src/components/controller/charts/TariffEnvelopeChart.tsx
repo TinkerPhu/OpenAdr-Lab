@@ -7,7 +7,6 @@ import {
   MIN_POWER_SPAN_KW,
   MIN_TARIFF_SPAN_EUR_KWH,
   roundedTimeTicks,
-  zeroAnchoredTicks,
 } from "../../charts/axisDomain";
 import { formatTariffEurKwh, formatPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
@@ -122,8 +121,8 @@ export function TariffEnvelopeChart({
       xAxisTickFormatter={formatTs}
       xAxisTicks={xAxisTicks}
       axes={[
-        { id: "tariff", unit: " €/kWh", width: 48, domain: tariffDomain, ticks: zeroAnchoredTicks(tariffDomain) },
-        { id: "capacity", orientation: "right", unit: " kW", width: 48, domain: capacityDomain, ticks: zeroAnchoredTicks(capacityDomain) },
+        { id: "tariff", unit: " €/kWh", width: 48, domain: tariffDomain },
+        { id: "capacity", orientation: "right", unit: " kW", width: 48, domain: capacityDomain },
       ]}
       series={series}
       nowMs={nowMs}
