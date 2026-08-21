@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
+updated: 2026-08-21
+synced_commit: 35f7808
 sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---

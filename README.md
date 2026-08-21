@@ -232,6 +232,7 @@ OpenAdr-Lab/
 | [VEN Architecture](docs/architecture/VEN_ARCHITECTURE.md) | VEN system design, rings, ports, control path |
 | [VTN Architecture](docs/architecture/VTN_ARCHITECTURE.md) | VTN stack design (openleadr-rs, BFF, UI) |
 | [Asset Simulation](docs/architecture/asset_simulation.md) | Physics simulation of battery, EV, heater, PV, base load |
+| [Forecasting Model](docs/architecture/forecasting_model.md) | Where each forecast comes from: exogenous drivers vs. endogenous response |
 | [System Use Case Manual](docs/use-cases/SYSTEM-USE-CASE-MANUAL.md) | Step-by-step guide for demand response use cases |
 | [HEMS Use Case Manual](docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md) | Observing HEMS planning behaviour |
 | [Use Cases](docs/use-cases/SYSTEM-USE-CASES.md) | Use case definitions and test coverage |
