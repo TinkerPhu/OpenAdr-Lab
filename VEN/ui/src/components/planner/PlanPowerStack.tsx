@@ -14,8 +14,6 @@ interface PlanPowerStackProps {
 }
 
 export function PlanPowerStack({ plan }: PlanPowerStackProps) {
-  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time for the NOW line; component re-renders on poll
-  const nowMs = Date.now();
   const lastEnd = plan?.slots[plan.slots.length - 1]?.end;
   // Memoized on the plan's own horizon (lastEnd), not recomputed from Date.now() on
   // every render: this value feeds useAllTimelines()'s query key below, so letting it
@@ -41,6 +39,10 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
     () => allTimelinesResponse?.timelines ?? {},
     [allTimelinesResponse]
   );
+  // Server clock (see Controller.tsx's nowMs for the full rationale) — falls back to
+  // Date.now() only before the first response arrives.
+  // eslint-disable-next-line react-hooks/purity -- intentional: Date.now() fallback captures wall time pre-first-response
+  const nowMs = allTimelinesResponse?.now ?? Date.now();
 
   if (!plan || plan.slots.length === 0) {
     return (

@@ -12,18 +12,22 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-const { lines, legends, tooltips, areas } = vi.hoisted(() => ({
+const { lines, legends, tooltips, areas, xAxes } = vi.hoisted(() => ({
   lines: [] as Array<Record<string, unknown>>,
   legends: [] as Array<Record<string, unknown>>,
   tooltips: [] as Array<Record<string, unknown>>,
   areas: [] as Array<Record<string, unknown>>,
+  xAxes: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
   ComposedChart: ({ children }: { children: ReactNode }) => children,
   ResponsiveContainer: ({ children }: { children: ReactNode }) => children,
   CartesianGrid: () => null,
-  XAxis: () => null,
+  XAxis: (props: Record<string, unknown>) => {
+    xAxes.push(props);
+    return null;
+  },
   YAxis: () => null,
   Tooltip: (props: Record<string, unknown>) => {
     tooltips.push(props);
@@ -315,6 +319,37 @@ describe("TimeSeriesChart — bands (BL-43)", () => {
       <TimeSeriesChart data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} />
     );
     expect(areas).toHaveLength(0);
+  });
+});
+
+describe("TimeSeriesChart — time axis never stretches past its window", () => {
+  beforeEach(() => {
+    xAxes.length = 0;
+  });
+
+  // A skewed client clock (or any stale/late data point outside [tMin, tMax]) must
+  // never widen the axis and squeeze the intended window into a sliver — regression
+  // test for exactly that failure mode, seen live on a VM with a drifted OS clock.
+  it("always passes allowDataOverflow so out-of-window data can't stretch the domain", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        tMin={1000}
+        tMax={2000}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+      />
+    );
+    expect(xAxes[0].allowDataOverflow).toBe(true);
+    expect(xAxes[0].domain).toEqual([1000, 2000]);
+  });
+
+  it("still sets allowDataOverflow when tMin/tMax are undefined (auto domain)", () => {
+    render(
+      <TimeSeriesChart data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} />
+    );
+    expect(xAxes[0].allowDataOverflow).toBe(true);
   });
 });
 

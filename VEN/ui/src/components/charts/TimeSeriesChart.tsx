@@ -166,6 +166,7 @@ export function TimeSeriesChart({
             scale="time"
             type="number"
             domain={tMin !== undefined && tMax !== undefined ? [tMin, tMax] : ["auto", "auto"]}
+            allowDataOverflow
             ticks={xAxisTicks}
             tickFormatter={xAxisTickFormatter}
             tick={{ fontSize: 10 }}
