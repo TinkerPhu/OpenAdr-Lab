@@ -58,6 +58,12 @@ const mockReportsPage = vi.hoisted(() => ({ current: { rows: [] as unknown[], to
 const mockUseHistoryEvents = vi.hoisted(() => vi.fn());
 const mockUseHistoryReports = vi.hoisted(() => vi.fn());
 
+// Mutable so a dedicated test can simulate a skewed server clock; defaults to the real
+// wall clock so the pre-existing "defaults to today" assertions below keep working.
+const mockHealthData = vi.hoisted(() => ({
+  current: { server_time: new Date().toISOString() } as { server_time: string } | undefined,
+}));
+
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useHistoryTicks: () => ({ data: mockTicks, refetch: mockRefetch.ticks }),
@@ -71,6 +77,7 @@ vi.mock("../api/hooks", () => ({
     return { data: mockReportsPage.current, refetch: mockRefetch.reports };
   },
   useHistoryForecastAccuracy: () => ({ data: [], refetch: mockRefetch.forecastAccuracy }),
+  useHealth: () => ({ data: mockHealthData.current }),
 }));
 
 vi.mock("../App", () => ({
@@ -93,6 +100,7 @@ beforeEach(() => {
   mockReportsPage.current = { rows: mockReports, total: mockReports.length };
   mockUseHistoryEvents.mockClear();
   mockUseHistoryReports.mockClear();
+  mockHealthData.current = { server_time: new Date().toISOString() };
 });
 
 describe("dayRangeIso", () => {
@@ -271,5 +279,40 @@ describe("HistoryPage", () => {
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
     expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("HistoryPage — rolling window anchored on the server clock, not the browser's", () => {
+  // Regression test: a client with a skewed OS clock must still default to a window
+  // that actually contains data, since the backend filters strictly to [from, to).
+  it("defaults the rolling window to the server's clock even when far from the real wall clock", () => {
+    mockHealthData.current = { server_time: "2027-06-15T12:00:00.000Z" };
+    renderHistory();
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    expect(input.value).toBe("2027-06-15");
+  });
+
+  it("does not re-anchor (and reset table paging) on a later /health poll while unchanged otherwise", () => {
+    mockHealthData.current = { server_time: "2027-06-15T12:00:00.000Z" };
+    mockReportsPage.current = { rows: mockReports, total: 120 };
+    const { rerender } = renderHistory();
+    fireEvent.click(screen.getByTestId("history-reports-pager-next"));
+    mockUseHistoryReports.mockClear();
+
+    // Simulate a later poll tick returning a newer server_time, without the user
+    // changing `date` — the frozen-once nowMs must not treat this as a new window.
+    mockHealthData.current = { server_time: "2027-06-15T12:00:10.000Z" };
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BrowserRouter>
+          <HistoryPage />
+        </BrowserRouter>
+      </QueryClientProvider>
+    );
+
+    // offset 50 (page 2), not reset to 0 — proves the later poll's fresh server_time
+    // did not re-trigger the date/range-change pagination reset.
+    const lastCall = mockUseHistoryReports.mock.calls[mockUseHistoryReports.mock.calls.length - 1];
+    expect(lastCall?.[3]).toBe(50);
   });
 });

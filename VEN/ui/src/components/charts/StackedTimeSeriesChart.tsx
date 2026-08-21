@@ -192,6 +192,7 @@ export function StackedTimeSeriesChart({
             scale="time"
             type="number"
             domain={[tMin, tMax]}
+            allowDataOverflow
             ticks={xAxisTicks}
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}

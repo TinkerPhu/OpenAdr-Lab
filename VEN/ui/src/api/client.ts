@@ -303,7 +303,7 @@ export class VenApi {
 
   async allTimelines(
     params?: { hoursBack?: number; hoursForward?: number; maxPoints?: number; resolution?: number }
-  ): Promise<{ zones: ZoneDef[]; timelines: Record<string, AssetTimelinePoint[]> }> {
+  ): Promise<{ zones: ZoneDef[]; timelines: Record<string, AssetTimelinePoint[]>; now: number }> {
     const qs = new URLSearchParams();
     if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
     if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
@@ -315,6 +315,7 @@ export class VenApi {
     const envelope: {
       zones: ZoneDef[];
       timelines: Record<string, { ts: string; values: Record<string, number> | null }[]>;
+      now: string;
     } = await r.json();
     const timelines = Object.fromEntries(
       Object.entries(envelope.timelines).map(([id, pts]) => [
@@ -322,7 +323,7 @@ export class VenApi {
         pts.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values })),
       ])
     );
-    return { zones: envelope.zones, timelines };
+    return { zones: envelope.zones, timelines, now: new Date(envelope.now).getTime() };
   }
 
   async flexibility(): Promise<SiteFlexibilityEnvelope | null> {

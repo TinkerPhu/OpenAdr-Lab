@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Box, Button, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField,
   Typography,
 } from "@mui/material";
 import {
   useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
+  useHealth,
 } from "../api/hooks";
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvelopeChart";
@@ -65,10 +66,12 @@ export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string }
   return { fromIso: from.toISOString(), toIso: to.toISOString() };
 }
 
-/** [from, to) ISO bounds for the rolling 24h window ending now — the default view, so the
- * tab is useful the moment it's opened instead of showing an empty/mostly-empty calendar day. */
-function last24hRangeIso(): { fromIso: string; toIso: string } {
-  const to = new Date();
+/** [from, to) ISO bounds for the rolling 24h window ending at `nowMs` — the default view,
+ * so the tab is useful the moment it's opened instead of showing an empty/mostly-empty
+ * calendar day. `nowMs` is caller-supplied (the server clock, not the browser's) so a
+ * client with a skewed OS clock still queries a window that actually contains data. */
+function last24hRangeIso(nowMs: number): { fromIso: string; toIso: string } {
+  const to = new Date(nowMs);
   return { fromIso: new Date(to.getTime() - 24 * 3600 * 1000).toISOString(), toIso: to.toISOString() };
 }
 
@@ -76,7 +79,25 @@ export function HistoryPage() {
   // null = default rolling last-24h window; a "YYYY-MM-DD" string once the user picks a
   // specific UTC calendar day to inspect instead.
   const [date, setDate] = useState<string | null>(null);
-  const { fromIso, toIso } = useMemo(() => (date ? dayRangeIso(date) : last24hRangeIso()), [date]);
+  // Server clock (see Controller.tsx's nowMs for the full rationale), captured once and
+  // then frozen — like `date`, the rolling window is meant to be computed once (not
+  // re-anchored on every /health poll), so it doesn't reset the Events/Reports table
+  // pagination underneath a user mid-page. `serverNowMsRef` is set at most once, the
+  // first time /health resolves; until then it falls back to a Date.now() snapshot
+  // taken once at mount (not recomputed every render, which could otherwise change
+  // fromIso/toIso every render and loop the state-reset block below).
+  const health = useHealth();
+  // eslint-disable-next-line react-hooks/purity -- intentional: one-time Date.now() snapshot at mount, not recomputed per render
+  const [mountNowMs] = useState(() => Date.now());
+  const serverNowMsRef = useRef<number | null>(null);
+  if (serverNowMsRef.current === null && health.data) {
+    serverNowMsRef.current = new Date(health.data.server_time).getTime();
+  }
+  const serverNowMs = serverNowMsRef.current ?? mountNowMs;
+  const { fromIso, toIso } = useMemo(
+    () => (date ? dayRangeIso(date) : last24hRangeIso(serverNowMs)),
+    [date, serverNowMs]
+  );
   const toMs = useMemo(() => new Date(toIso).getTime(), [toIso]);
   // Rolling 24h mode has no single "the" date (it spans two UTC calendar days) — show the
   // newest displayed day so the field is never blank, without treating that as a selection.

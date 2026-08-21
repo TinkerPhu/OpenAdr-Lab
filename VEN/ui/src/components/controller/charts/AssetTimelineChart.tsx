@@ -17,7 +17,7 @@ import {
   formatSocPct,
   formatTemperatureC,
 } from "../../charts/unitFormat";
-import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "../../charts/mergeSeries";
+import { mergeTimestampedSeries, locfFillKeys, clipRowsToWindow, type TimestampedRow } from "../../charts/mergeSeries";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "../../charts/TimeSeriesChart";
 
@@ -165,10 +165,16 @@ export function AssetTimelineChart({
     ? roundedTimeTicks(tMin, tMax, xAxisTickIntervalMinutes)
     : undefined;
 
+  // Clip to the intended window before anything else — a stale/late point outside
+  // [tMin, tMax] must never be allowed to widen this chart's time axis (see
+  // tariffChartShared.ts's clipToWindow, which the sibling grid/tariff/headroom charts
+  // already apply; this was the one chart still passing `data` through unclipped).
+  const clipped: TimestampedRow[] = clipRowsToWindow(data, tMin, tMax);
+
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
   // NOW reference line even when there are no data points yet.
-  const rawData: AssetTimelinePoint[] =
-    data.length > 0 ? data : [{ ts: tMin, values: {} }, { ts: tMax, values: {} }];
+  const rawData: TimestampedRow[] =
+    clipped.length > 0 ? clipped : [{ ts: tMin, values: {} }, { ts: tMax, values: {} }];
 
   // forecast-accuracy-tracking: folded into the SAME per-ts array as the actual line
   // (rather than passed to their own `<Line data={...}>` override) so every series shares

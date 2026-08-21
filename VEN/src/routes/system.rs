@@ -27,6 +27,9 @@ pub struct HealthComponents {
 pub struct HealthResponse {
     status: &'static str,
     components: HealthComponents,
+    /// Server clock, so a client can detect/correct for its own clock skew (e.g. a VM
+    /// with a stale OS clock) instead of trusting `Date.now()` to position chart data.
+    server_time: DateTime<Utc>,
 }
 
 fn component(ok: bool, detail: Option<String>) -> HealthComponent {
@@ -45,6 +48,7 @@ fn build_health_response(
     vtn: &VtnConnectionStatus,
     storage_ok: bool,
     planner_ok: bool,
+    now: DateTime<Utc>,
 ) -> HealthResponse {
     let vtn_detail = vtn
         .last_error
@@ -64,7 +68,11 @@ fn build_health_response(
     } else {
         "degraded"
     };
-    HealthResponse { status, components }
+    HealthResponse {
+        status,
+        components,
+        server_time: now,
+    }
 }
 
 /// A missing plan (VEN just started, nothing adopted yet) is not degraded — only
@@ -87,6 +95,7 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
         &vtn,
         storage_ok,
         plan_is_ok(plan.as_ref()),
+        Utc::now(),
     ))
 }
 
@@ -208,7 +217,7 @@ mod tests {
 
     #[test]
     fn health_reports_degraded_vtn_component_after_failure() {
-        let resp = build_health_response(&degraded_vtn(), true, true);
+        let resp = build_health_response(&degraded_vtn(), true, true, Utc::now());
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.vtn_connection.status, "degraded");
         assert!(resp.components.vtn_connection.detail.is_some());
@@ -218,7 +227,7 @@ mod tests {
 
     #[test]
     fn health_all_ok_when_every_component_healthy() {
-        let resp = build_health_response(&healthy_vtn(), true, true);
+        let resp = build_health_response(&healthy_vtn(), true, true, Utc::now());
         assert_eq!(resp.status, "ok");
         assert_eq!(resp.components.ven_process.status, "ok");
         assert_eq!(resp.components.vtn_connection.status, "ok");
@@ -227,7 +236,7 @@ mod tests {
 
     #[test]
     fn health_storage_degraded_when_storage_not_ok() {
-        let resp = build_health_response(&healthy_vtn(), false, true);
+        let resp = build_health_response(&healthy_vtn(), false, true, Utc::now());
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.storage.status, "degraded");
     }
@@ -236,6 +245,13 @@ mod tests {
     fn health_planner_component_degraded_when_active_plan_infeasible() {
         assert!(!plan_is_ok(Some(&make_plan("INFEASIBLE"))));
         assert!(plan_is_ok(Some(&make_plan("OPTIMAL"))));
+    }
+
+    #[test]
+    fn health_server_time_echoes_the_injected_clock() {
+        let now = Utc::now();
+        let resp = build_health_response(&healthy_vtn(), true, true, now);
+        assert_eq!(resp.server_time, now);
     }
 
     #[test]

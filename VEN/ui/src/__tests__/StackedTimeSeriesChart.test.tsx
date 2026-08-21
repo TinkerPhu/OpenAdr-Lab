@@ -3,11 +3,30 @@
  * Verifies that the custom tooltip merges _pos/_neg series into one row per asset.
  */
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { ReactNode } from "react";
 import { StackedAreaTooltip } from "../components/charts/StackedTimeSeriesChart";
 import { ASSET_COLORS } from "../components/controller/types";
 
 const colorMap = ASSET_COLORS;
+
+const { xAxes } = vi.hoisted(() => ({ xAxes: [] as Array<Record<string, unknown>> }));
+
+vi.mock("recharts", () => ({
+  ComposedChart: ({ children }: { children: ReactNode }) => children,
+  ResponsiveContainer: ({ children }: { children: ReactNode }) => children,
+  CartesianGrid: () => null,
+  XAxis: (props: Record<string, unknown>) => {
+    xAxes.push(props);
+    return null;
+  },
+  YAxis: () => null,
+  Tooltip: () => null,
+  ReferenceLine: () => null,
+  Area: () => null,
+  Line: () => null,
+  Legend: () => null,
+}));
 
 function makePayload(entries: { name: string; value: number }[]) {
   return entries.map((e) => ({ name: e.name, value: e.value }));
@@ -135,5 +154,35 @@ describe("StackedAreaTooltip", () => {
     // Grid should NOT appear in asset rows
     expect(screen.queryAllByText(/^EV \(planned\):/).length).toBe(1);
     expect(screen.queryAllByText(/Grid/).length).toBe(1);
+  });
+});
+
+describe("StackedTimeSeriesChart — time axis never stretches past its window", () => {
+  function stackedPoint(ts: number) {
+    return {
+      ts,
+      ev_pos: 0, ev_neg: 0,
+      heater_pos: 0, heater_neg: 0,
+      pv_pos: 0, pv_neg: 0,
+      battery_pos: 0, battery_neg: 0,
+      base_load_pos: 0, base_load_neg: 0,
+      gridPowerKw: null,
+    };
+  }
+
+  it("always passes allowDataOverflow so out-of-window data can't stretch the domain", async () => {
+    xAxes.length = 0;
+    const { StackedTimeSeriesChart } = await import("../components/charts/StackedTimeSeriesChart");
+    render(
+      <StackedTimeSeriesChart
+        data={[stackedPoint(1000), stackedPoint(2000)]}
+        assetIds={["ev"]}
+        colorMap={colorMap}
+        nowMs={1500}
+        hoursBack={0.5}
+        hoursForward={0.5}
+      />
+    );
+    expect(xAxes[0].allowDataOverflow).toBe(true);
   });
 });

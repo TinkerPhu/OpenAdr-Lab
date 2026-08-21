@@ -54,10 +54,13 @@ export function ControllerPage() {
     [allTimelinesResponse]
   );
 
-  // Shared nowMs: advances only when fresh timeline data arrives, keeping the
-  // NOW reference line consistent across all charts in the same render.
-  // eslint-disable-next-line react-hooks/purity -- intentional: captures wall time at moment timeline data updates
-  const nowMs = useMemo(() => Date.now(), [allTimelines]);
+  // Shared nowMs: the server's own clock (`/timeline/all`'s `now` field), not the
+  // browser's — every chart's time axis is built from this value, so a client whose OS
+  // clock has drifted (observed on a VM once) can no longer stretch/squeeze the axis to
+  // cover the gap between a wrong "now" and the real, server-timestamped data. Falls
+  // back to Date.now() only for the brief instant before the first response arrives.
+  // eslint-disable-next-line react-hooks/purity -- intentional: Date.now() fallback captures wall time pre-first-response
+  const nowMs = useMemo(() => allTimelinesResponse?.now ?? Date.now(), [allTimelinesResponse]);
 
   // Single poll timer — all sources refresh in one tick.
   useEffect(() => {
