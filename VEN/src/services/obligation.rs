@@ -43,6 +43,10 @@ impl ObligationService {
             let plan = state.active_plan().await;
             // WP5.4: BASELINE obligations report the event-blind heuristic forecast.
             let heuristics = state.asset_heuristics().await;
+            // openspec/changes/flexibility-capacity-forecast/: STORAGE_MAX_CHARGE_POWER /
+            // STORAGE_MAX_DISCHARGE_POWER obligations report the sustained-commitment
+            // capacity curve, re-derived fresh every tick (see `state::capacity_curves`).
+            let curves = state.capacity_curves().await;
             let report_opt = crate::controller::reporter::build_measurement_report_for_obligation(
                 &ob,
                 &asset_samples,
@@ -50,6 +54,7 @@ impl ObligationService {
                 env.as_ref(),
                 plan.as_ref(),
                 &heuristics,
+                curves.as_ref(),
                 now,
             );
             let next_due = now + chrono::Duration::seconds(ob.interval_duration_s as i64);

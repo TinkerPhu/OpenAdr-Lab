@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::device_session::{EvSession, ShiftableLoad, ShiftableLoadRuntime};
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::plan::Plan;
 use crate::entities::sim_inject::SimInjectState;
-use crate::models::SensorSnapshot;
 use crate::simulator::SimState;
 
 use super::dispatch_override::apply_dispatch_override;
@@ -68,6 +66,26 @@ pub(crate) fn effective_capacity(
         }
     }
     effective_capacity
+}
+
+/// PHASE 1b: resolve the PV generation limit from capacity/plan/arbiter/manual
+/// sources, composing `effective_capacity` above with
+/// `controller::dispatcher::resolve_pv_generation_limit_kw`.
+pub(crate) fn resolve_pv_limit(
+    plan_snap: Option<&Plan>,
+    capacity_snap: &OadrCapacityState,
+    inject: &SimInjectState,
+    now: DateTime<Utc>,
+    arbiter_tighten_kw: Option<f64>,
+) -> controller::dispatcher::ResolvedPvGenerationLimit {
+    let capacity = effective_capacity(capacity_snap, inject);
+    controller::dispatcher::resolve_pv_generation_limit_kw(
+        plan_snap,
+        &capacity,
+        now,
+        arbiter_tighten_kw,
+        inject.pv_generation_limit_kw,
+    )
 }
 
 /// PHASE 2: Compose effective capacity, build the plan's base setpoint
@@ -153,61 +171,4 @@ pub(crate) fn build_tick_setpoints(
         live_pv_kw,
     );
     outcome
-}
-
-/// PHASE 5 in-lock tail: extract snapshots, push history, update grid asset, compute envelope
-/// + forward headroom forecast. Returns the tuple needed for post-lock async state publishing.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn finalize_tick_outputs(
-    sim: &mut SimState,
-    capacity_snap: &OadrCapacityState,
-    plan_snap: Option<&Plan>,
-    ev_session: Option<&EvSession>,
-    shiftable_loads: &[ShiftableLoad],
-    shiftable_runtimes: &[ShiftableLoadRuntime],
-    now: DateTime<Utc>,
-) -> (
-    SensorSnapshot,
-    SimSnapshot,
-    SiteFlexibilityEnvelope,
-    Vec<SiteFlexibilityForecastSlot>,
-) {
-    let tick_sensor = sim.to_sensor_snapshot();
-    let tick_sim_snap = sim.to_sim_snapshot();
-
-    // Push HistoryPoint per asset into per-asset ring buffer (CP2).
-    {
-        use crate::assets::HistoryPoint;
-        for entry in &mut sim.assets {
-            entry.history.push(HistoryPoint {
-                ts: now,
-                power_kw: entry.last_power_kw,
-                state: entry.state.clone(),
-            });
-        }
-    }
-
-    // Update Grid virtual asset with net power + VTN capacity limits.
-    // Done here (not inside tick()) so capacity_snap is available.
-    {
-        let net_power_kw = sim.grid.net_power_w / 1000.0;
-        let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
-        // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
-        let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
-        sim.grid_asset
-            .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
-    }
-
-    // Compute site envelope (pure math — reads snapshot taken above).
-    let tick_envelope = controller::envelope::compute_envelope(&tick_sim_snap, now);
-    let tick_forecast = super::forecast_wiring::compute_tick_forecast(
-        sim,
-        plan_snap,
-        ev_session,
-        shiftable_loads,
-        shiftable_runtimes,
-        now,
-    );
-
-    (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast)
 }

@@ -9,14 +9,15 @@ use tracing::debug;
 
 use crate::common::{parse_iso8601_duration_secs, Aggregation};
 use crate::controller::report_intervals::{
-    build_baseline_report_intervals, build_forecast_intervals, build_net_site_power_ts,
-    build_soc_intervals,
+    build_baseline_report_intervals, build_capacity_forecast_intervals, build_forecast_intervals,
+    build_net_site_power_ts, build_soc_intervals,
 };
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
     OadrReportResource,
 };
 use crate::entities::capacity::OadrReportObligation;
+use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 
@@ -247,8 +248,14 @@ pub fn build_measurement_reports_for_active_events(
 ///   - STORAGE_CHARGE_STATE / STORAGE_CHARGE_LEVEL → EV SoC point-in-time at interval end
 ///   - USAGE_FORECAST (WP3.6, §8.8) → planned net site power per future plan
 ///     slot, straight from the active plan (None if no plan adopted yet)
+///   - STORAGE_MAX_CHARGE_POWER / STORAGE_MAX_DISCHARGE_POWER
+///     (`openspec/changes/flexibility-capacity-forecast/`) → the sustained-commitment capacity
+///     curve (`controller::capacity_forecast`), one interval per curve step — deliberately NOT
+///     routed through the generic `!obligation.historical => build_forecast_intervals(active_plan,
+///     ..)` fallback below, since that reads plan slots, not this closed-form curve.
 ///
 /// Returns None if the obligation has no event_id or program_id.
+#[allow(clippy::too_many_arguments)]
 pub fn build_measurement_report_for_obligation(
     obligation: &OadrReportObligation,
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
@@ -256,6 +263,7 @@ pub fn build_measurement_report_for_obligation(
     site_envelope: Option<&SiteFlexibilityEnvelope>,
     active_plan: Option<&Plan>,
     heuristics: &std::collections::HashMap<String, AssetHeuristics>,
+    capacity_curves: Option<&(CapacityCurve, CapacityCurve)>,
     now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
     let op_state = operating_state(asset_samples, now);
@@ -330,6 +338,16 @@ pub fn build_measurement_report_for_obligation(
             interval_width,
             &duration_iso,
         ),
+        "STORAGE_MAX_CHARGE_POWER" => capacity_curves
+            .map(|(import_curve, _)| {
+                build_capacity_forecast_intervals(import_curve, "STORAGE_MAX_CHARGE_POWER")
+            })
+            .unwrap_or_default(),
+        "STORAGE_MAX_DISCHARGE_POWER" => capacity_curves
+            .map(|(_, export_curve)| {
+                build_capacity_forecast_intervals(export_curve, "STORAGE_MAX_DISCHARGE_POWER")
+            })
+            .unwrap_or_default(),
         // R-15: `reportDescriptor.historical: false` asks for a forecast of the
         // requested payload — serve plan slots instead of measured history.
         _ if !obligation.historical => build_forecast_intervals(active_plan, payload_type),
@@ -512,6 +530,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             ts(1800),
         )
         .unwrap();
@@ -558,6 +577,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now()
         )
         .is_none());
@@ -574,6 +594,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now()
         )
         .is_none());
@@ -594,6 +615,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             ts(1800),
         )
         .unwrap();
@@ -621,6 +643,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             ts(1800),
         )
         .unwrap();
@@ -658,6 +681,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             ts(1800),
         )
         .unwrap();
@@ -720,6 +744,7 @@ mod tests {
             Some(&env),
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         )
         .expect("should return Some");
@@ -747,6 +772,7 @@ mod tests {
             Some(&env),
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         )
         .expect("should return Some");
@@ -767,6 +793,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         )
         .expect("should return Some even with no envelope");
@@ -1016,6 +1043,7 @@ mod tests {
             None,
             Some(&plan),
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         )
         .expect("plan present -> report built");
@@ -1055,6 +1083,7 @@ mod tests {
             None,
             Some(&plan),
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         )
         .expect("plan present -> forecast report built");
@@ -1076,6 +1105,7 @@ mod tests {
             None,
             None,
             &std::collections::HashMap::new(),
+            None,
             Utc::now(),
         );
         assert!(report.is_none(), "no adopted plan -> no forecast report");
@@ -1113,6 +1143,7 @@ mod tests {
             None,
             None,
             &heuristics,
+            None,
             ts(1800),
         )
         .expect("samples present -> baseline report built");

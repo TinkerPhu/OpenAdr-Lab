@@ -10049,3 +10049,83 @@ the returned error downcasts to `UpstreamStatusError` with the right status and 
 
 **Bookkeeping:** Removed the R-31 row and its task-list section from
 `docs/reference/TECHNICAL_DEBTS.md`.
+
+---
+
+## Sustained-commitment capacity forecast — backend, OpenADR, UI (2026-08-21)
+
+**Trigger:** A design conversation established that the existing `SiteFlexibilityEnvelope`
+(`up_kw`/`down_kw`) is momentary-only, and the existing per-slot forecast
+(`envelope_forecast::compute_headroom_forecast`) is explicitly an independent
+point-in-time counterfactual, not a conserved multi-slot budget — integrating it over time
+double-counts (the same battery kWh headroom appears at every future slot it remains
+available). Neither answers what a VTN actually needs for a duration-shaped DR request:
+"how long can you sustain X kW, and how much energy is behind it." An `openspec` change
+(`flexibility-capacity-forecast`) was written to scope a new, genuinely closed-form
+(no MILP re-solve, no forward trajectory simulation) power/duration/energy curve per
+commitment direction (sustained-import, sustained-export), then implemented in this
+session.
+
+**Design corrections found during implementation** (the openspec artifacts were updated to
+match, not left stale): (1) EV charge headroom must be bounded by `soc_target`, not 1.0 —
+the existing `AssetConfig::available_storage_kwh` helper computes it to 1.0, which would
+silently overstate EV import capacity; the new module computes EV headroom independently
+rather than reusing that helper. (2) Heater was originally scoped as import-direction-only;
+corrected mid-design to recognize its *current* draw as a reducible baseline (like base
+load, but flexible down to 0) that also contributes a constant term to the
+export-commitment curve. (3) Base load was originally scoped as excluded entirely;
+corrected to recognize it as a real net-grid-power term (additive on import, subtractive on
+export) even though it contributes no *flexibility* — omitting it would make the curve
+represent flexible-asset dispatch instead of genuine net grid power. (4) PV's
+export-direction contribution is the forecast ceiling itself, not "ceiling minus current
+output" (which would under-count already-flowing export). (5) Shiftable loads contribute
+only to the import-commitment curve (starting a load can only increase draw) as a
+time-bounded step (start + `duration_min`, not held indefinitely) — the plan-dependent
+export-side lever (deferring an imminently-scheduled load) was deliberately left out as a
+documented gap rather than reintroducing a `Plan` dependency for one asset class only.
+
+**Implementation:** New `entities::capacity_curve` (`CapacityCurve`/`CapacityCurveStep`/
+`CommitmentDirection`) and `controller::capacity_forecast::compute_capacity_curve` — one
+merged site-level curve per direction, built from a sweep-line merge of per-asset
+`(elapsed_s, delta_kw)` events (reservoir-bound for battery/EV/heater-import, forecast-bound
+for PV via the same `AssetForecastFrame`s `envelope_forecast.rs` already builds, time-bounded
+for shiftable loads, constant for base-load/heater-export), clipped to the `Grid` asset's
+`import_limit_kw`/`export_limit_kw` (the VTN-announced Dynamic Operating Envelope limit —
+discovered mid-implementation that `GridSnapshot` didn't expose these at all; added both
+fields and updated all 12 existing construction sites across the codebase). Also found and
+fixed two other `AssetSnapshot`/`state_values()` gaps needed for the new formulas: EV was
+missing `max_discharge_kw`/`min_soc`, battery was missing `round_trip_efficiency`.
+
+OpenADR reporting reuses `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER` — already
+documented in `docs/REQUIREMENTS.md` as payload types "used in this lab," found by search
+rather than inventing a new type — wired as new match arms in
+`reporter::build_measurement_report_for_obligation`, inserted before the generic
+`!obligation.historical` forecast fallback (which reads plan slots, wrong source for this
+curve). New `report_intervals::build_capacity_forecast_intervals` builds one interval per
+curve step at the curve's own step boundaries, using OpenADR's `P9999Y` infinity-duration
+convention for the open-ended final step. New `GET /flexibility/capacity` route
+(`routes/hems/sessions.rs::get_capacity_curves`) returns both directions in one response,
+mirroring `SiteHeadroomChart`'s existing up/down pairing convention. New VEN UI
+`CapacityForecastChart` + `CapacityForecastPage` under Diagnostics (own file, not folded
+into `SiteHeadroomChart.tsx`, which keeps its instantaneous-only role) — reuses the existing
+`TimeSeriesChart`/`mergeSeries`/`axisDomain`/`unitFormat` primitives rather than building new
+chart machinery.
+
+**File-size fallout:** wiring the capacity-curve computation into the tick loop pushed three
+files over the audit cap (`helpers.rs` 216/200, `tick.rs` 203/200, `state/mod.rs` 503/500).
+Fixed with real structural extractions rather than import-golfing (which just gets undone by
+`cargo fmt`'s own reformatting — tried and reverted): `finalize_tick_outputs` moved from
+`helpers.rs` into a new `tasks/sim_tick/finalize.rs`, mirroring `forecast_wiring.rs`'s own
+earlier split for the same reason; `tick.rs`'s PV-limit resolution extracted into a new
+`helpers::resolve_pv_limit`; `forecast_wiring.rs`'s two forecast functions merged into one
+`compute_tick_forecasts` sharing a single `build_forecast_frames` call — a genuine efficiency
+win (was calling it twice per tick), not just a line-count reduction.
+
+**Verification:** `wsl cargo test` 1152 passed (workspace, up from 1123 at the start of this
+session), `cargo fmt --check`, `cargo clippy --all-targets --all-features -D warnings`, and
+`scripts/audit_file_sizes.py` all clean. VEN UI: 53 files / 606 tests pass (3 new), `npm run
+lint` 0 errors, `npm run build` succeeds. **Not yet done**: E2E/resilience suites
+(`run_all_tests.sh --e2e`/`--resilience`) and manual browser verification — both Node1 and
+Node2 were occupied by other sessions' test runs for this entire session, so neither could be
+reached; the openspec change's `tasks.md` records this as the explicit remaining blocker
+before merge.
