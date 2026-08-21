@@ -10129,3 +10129,41 @@ lint` 0 errors, `npm run build` succeeds. **Not yet done**: E2E/resilience suite
 Node2 were occupied by other sessions' test runs for this entire session, so neither could be
 reached; the openspec change's `tasks.md` records this as the explicit remaining blocker
 before merge.
+
+## Rounded Y-axis labels for every chart (2026-08-21)
+
+**What:** Replaced the opt-in `zeroAnchoredTicks` helper with a total `niceAxis(domain)`
+primitive in `VEN/ui/src/components/charts/axisDomain.ts`, and moved Y-tick rounding *into*
+the chart compositions so no caller can skip it. `TimeSeriesAxisSpec` lost its `ticks` prop
+entirely; `StackedTimeSeriesChart`, `CurveChart`, `raw-diagnostics/SimProfileChart` and
+`pages/PlanHistory` (the four charts owning a bare `<YAxis>`) call `niceAxis` themselves.
+
+**Why:** The Controller tab's PV cell rendered its two right-hand axes as
+`-0.4172 / -0.3129 / -0.2086 ... EUR/h` - labels long enough to overflow the 44 px gutter.
+Root cause was not the PV cell: `zeroAnchoredTicks` returned `undefined` for any domain that
+didn't straddle zero, so *every* single-sign axis in the app (PV export revenue, avoided
+CO2, and the always-positive tariff axis, which had therefore never once been rounded) fell
+back to recharts ticking the raw data domain. On top of that, rounding was opted into per
+chart - six call sites repeating `{ domain: X, ticks: zeroAnchoredTicks(X) }`, and two charts
+that never opted in at all. The X axis had the opposite shape (`roundedTimeTicks` snapping to
+the wall clock), which is why it already looked right.
+
+**Design:** `niceAxis` picks the coarsest 1/2/5x10^n step that still yields 3-7 ticks without
+inflating the domain past 1.5x the real data span, snaps the domain outward to whole steps,
+and returns `{ domain, ticks, step }`; `tickFormatterForStep(step)` supplies matching label
+precision when an axis has no unit-specific formatter (power axes keep `formatPowerTick`).
+Coarsest-wins gives one or two significant digits in the common case; the 3-tick lower bound
+and the growth cap are what keep a narrow band far from zero on a finer step (1.3 / 1.4 / 1.5)
+instead of flattening it - finer steps are deliberately not ruled out.
+
+**Test-first:** `axisDomain.test.ts` gained a `niceAxis` block whose central case is a
+property test over a grid of positive-only, negative-only, straddling, tiny and huge domains,
+asserting every tick is an exact multiple of a one-significant-digit step and that tick counts
+stay in 3-7 - a systematic guarantee rather than one assertion per diagram. Composition-level
+tests in `TimeSeriesChart.test.tsx` and `StackedTimeSeriesChartLegend.test.tsx` feed the real
+ugly domain (`[-0.4172, 0]`) in and assert the rounded ticks come out, proving enforcement
+lives in the composition; `AssetTimelineChart.test.tsx` carries the PV-cell regression. The
+zero-span domain case failed first (a single tick) and was fixed by widening symmetrically.
+
+**Verification:** `npx vitest run` 616 passed / 52 files (no existing expectation changed),
+`npx tsc --noEmit` clean, `npx eslint src` 0 errors, `npm run build` clean.

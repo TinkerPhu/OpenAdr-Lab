@@ -137,8 +137,9 @@ export function roundedTimeTicks(fromMs: number, toMs: number, intervalMinutes =
 }
 
 /** Rounds a raw tick step up to a "nice" 1/2/5×10^n value (the same family d3/recharts use
- * internally for their own auto ticks), so zero-anchored ticks read like round numbers
- * (0.5, 1, 2, 5, ...) instead of an arbitrary fraction of the domain span. */
+ * internally for their own auto ticks), so ticks read like round numbers (0.5, 1, 2, 5, ...)
+ * instead of an arbitrary fraction of the domain span. `niceAxis` normally searches the whole
+ * candidate ladder itself; this one-shot form is its fallback for degenerate domains. */
 function niceStep(rawStep: number): number {
   if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
   const exponent = Math.floor(Math.log10(rawStep));
@@ -151,33 +152,91 @@ function niceStep(rawStep: number): number {
   return niceFraction * Math.pow(10, exponent);
 }
 
+/** Fewest/most Y-axis gridlines a chart cell should carry. The lower bound is 3 on purpose:
+ * a narrow band far from zero (e.g. 1.32–1.48) is better served by three round labels
+ * (1.3 / 1.4 / 1.5) than by five with an extra digit each. */
+const MIN_Y_TICKS = 3;
+const MAX_Y_TICKS = 7;
+
+/** How far the niced domain may exceed the real data span. Rounding the endpoints outward is
+ * what makes the extreme labels round, but an unbounded coarsening would squeeze the actual
+ * signal into a sliver of the axis — the same defect `tightSpanDomain` exists to avoid. */
+const MAX_SPAN_GROWTH = 1.5;
+
+export interface NiceAxis {
+  /** Domain snapped outward to whole steps — the first and last tick. */
+  domain: [number, number];
+  ticks: number[];
+  /** The chosen 1/2/5×10^n step; feed to `tickFormatterForStep` for matching label decimals. */
+  step: number;
+}
+
+function ticksForStep(min: number, max: number, step: number): number[] {
+  const first = Math.floor(min / step + 1e-9);
+  const last = Math.ceil(max / step - 1e-9);
+  const ticks: number[] = [];
+  for (let k = first; k <= last; k++) ticks.push(roundToStep(k * step));
+  return ticks;
+}
+
 /**
- * Explicit Y-axis tick set for a domain that straddles zero, guaranteeing 0.0 is always one
- * of the rendered ticks and that every other tick is a whole step away from it in both
- * directions — rather than recharts' default "nice" tick generation, which computes ticks
- * independently of where zero falls in the domain and can skip 0 entirely on a mixed-sign
- * range (e.g. a domain of [-2, 5] with recharts' own step choice landing on -2, 0.75, 3.5,
- * 6.25 — no 0 tick at all).
+ * The one Y-axis tick rule for every chart in VEN/ui: ticks land on exact multiples of a step
+ * whose own mantissa is 1, 2 or 5, so labels read as round numbers (0.2, 500, 1.4) instead of
+ * an arbitrary fraction of the data span. This is the Y-axis counterpart of `roundedTimeTicks`
+ * on the X axis — snapped to an absolute grid, not to wherever the domain happens to start.
  *
- * Returns `undefined` when the domain does not straddle zero (entirely non-negative or
- * entirely non-positive), so the caller falls back to recharts' default tick generation
- * unchanged — this only changes behavior for the mixed-sign case it exists to fix.
+ * It replaces `zeroAnchoredTicks`, which only ever fired for domains straddling zero and
+ * returned `undefined` otherwise — so every single-sign axis (PV export revenue in €/h, CO2 in
+ * g/h, a strictly-positive tariff in €/kWh) silently fell back to recharts' own tick
+ * generation over an unrounded domain, producing labels like `-0.31275 €/h`. Because this
+ * function is total, the compositions apply it to every axis with no caller opt-in — see
+ * `TimeSeriesChart`/`StackedTimeSeriesChart`, which is where the rule is actually enforced.
+ *
+ * Step choice: the *coarsest* candidate step that still yields `MIN_Y_TICKS`..`MAX_Y_TICKS`
+ * ticks without inflating the domain past `MAX_SPAN_GROWTH`. Coarsest-wins keeps labels at one
+ * or two significant digits in the common case, while a narrow band far from zero still gets
+ * the finer step it needs (1.3 / 1.4 / 1.5) rather than being flattened.
  */
-export function zeroAnchoredTicks(
-  domain: [number, number],
-  targetTickCount = 5
-): number[] | undefined {
-  const [min, max] = domain;
-  if (min >= 0 || max <= 0) return undefined;
+export function niceAxis(domain: [number, number], targetTickCount = 5): NiceAxis {
+  const [rawMin, rawMax] = domain;
+  const min = Number.isFinite(rawMin) ? rawMin : 0;
+  const max = Number.isFinite(rawMax) ? rawMax : 0;
+  // A zero-span domain has no scale of its own to derive a step from; fall back to the
+  // magnitude of the value itself (or 1 when that is 0 too) and widen symmetrically around it,
+  // so the axis still renders a real tick ladder instead of a single label.
+  const dataSpan = max - min;
+  const span = dataSpan > 0 ? dataSpan : Math.abs(max) || 1;
+  const lo = dataSpan > 0 ? min : min - span / 2;
+  const hi = dataSpan > 0 ? max : max + span / 2;
 
-  const span = max - min;
-  const rawStep = span / Math.max(targetTickCount - 1, 1);
-  const step = niceStep(rawStep);
-  if (step <= 0) return undefined;
+  const baseExponent = Math.floor(Math.log10(span));
+  let best: NiceAxis | null = null;
+  for (let exponent = baseExponent - 2; exponent <= baseExponent + 1; exponent++) {
+    for (const mantissa of [1, 2, 5]) {
+      const step = mantissa * Math.pow(10, exponent);
+      const ticks = ticksForStep(lo, hi, step);
+      if (ticks.length < MIN_Y_TICKS || ticks.length > MAX_Y_TICKS) continue;
+      const nicedSpan = ticks[ticks.length - 1] - ticks[0];
+      if (nicedSpan > span * MAX_SPAN_GROWTH) continue;
+      // Candidates are generated fine → coarse, so the last accepted one is the coarsest.
+      best = { domain: [ticks[0], ticks[ticks.length - 1]], ticks, step };
+    }
+  }
+  if (best) return best;
 
-  const ticks: number[] = [0];
-  const epsilon = step * 1e-6;
-  for (let t = step; t <= max + epsilon; t += step) ticks.push(roundToStep(t));
-  for (let t = -step; t >= min - epsilon; t -= step) ticks.push(roundToStep(t));
-  return ticks.sort((a, b) => a - b);
+  // No candidate satisfied both bounds (degenerate/zero-span domains): keep the original
+  // target density and accept whatever growth that implies — a rendered axis with round
+  // ticks still beats recharts' raw-domain fallback.
+  const step = niceStep(span / Math.max(targetTickCount - 1, 1));
+  const ticks = ticksForStep(lo, hi, step);
+  return { domain: [ticks[0], ticks[ticks.length - 1]], ticks, step };
+}
+
+/** Label formatter matching a `niceAxis` step: exactly as many decimals as the step needs, so
+ * a 0.05 step prints "-0.35" and a 200 step prints "600" — and float noise (0.30000000000004)
+ * never reaches the label. Used as the default axis `tickFormatter` when an axis declares no
+ * unit-specific one of its own (e.g. power axes keep `formatPowerTick`). */
+export function tickFormatterForStep(step: number): (value: number) => string {
+  const decimals = Math.max(0, -Math.floor(Math.log10(Math.abs(step)) + 1e-9));
+  return (value: number) => value.toFixed(decimals);
 }

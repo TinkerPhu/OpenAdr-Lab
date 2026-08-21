@@ -12,8 +12,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-const { lines, legends, tooltips, areas, xAxes } = vi.hoisted(() => ({
+const { lines, legends, tooltips, areas, xAxes, yAxes } = vi.hoisted(() => ({
   lines: [] as Array<Record<string, unknown>>,
+  yAxes: [] as Array<Record<string, unknown>>,
   legends: [] as Array<Record<string, unknown>>,
   tooltips: [] as Array<Record<string, unknown>>,
   areas: [] as Array<Record<string, unknown>>,
@@ -28,7 +29,10 @@ vi.mock("recharts", () => ({
     xAxes.push(props);
     return null;
   },
-  YAxis: () => null,
+  YAxis: (props: Record<string, unknown>) => {
+    yAxes.push(props);
+    return null;
+  },
   Tooltip: (props: Record<string, unknown>) => {
     tooltips.push(props);
     return null;
@@ -428,5 +432,57 @@ describe("TimeSeriesChart — band tooltip formatter", () => {
     );
     const formatter = tooltips[0].formatter as (v: unknown, n: string) => [string, string];
     expect(formatter(1, "power")).toEqual(["1.0 kW", "power"]);
+  });
+});
+
+/**
+ * The Y-axis rounding rule lives in this composition, not in its callers: a caller passes only
+ * a raw data domain (there is no `ticks` prop on TimeSeriesAxisSpec any more), and every axis
+ * comes out with round tick values. See `niceAxis` in axisDomain.ts.
+ */
+describe("TimeSeriesChart — rounded Y ticks (applied by the composition, not the caller)", () => {
+  beforeEach(() => {
+    yAxes.length = 0;
+  });
+
+  const renderWithAxes = (axisSpecs: TimeSeriesAxisSpec[]) =>
+    render(
+      <TimeSeriesChart
+        data={data}
+        tMin={1000}
+        tMax={2000}
+        xAxisTickFormatter={(t) => String(t)}
+        axes={axisSpecs}
+        series={[series[0]]}
+      />
+    );
+
+  it("rounds an ugly single-sign domain — the real PV export-revenue case", () => {
+    // Pre-fix this axis reached recharts as [-0.4172, 0] with no ticks, and rendered
+    // -0.4172 / -0.3129 / -0.2086 / ... as labels.
+    renderWithAxes([{ id: "cost", domain: [-0.4172, 0], unit: " €/h" }]);
+    const axis = yAxes.find((a) => a.yAxisId === "cost")!;
+    expect(axis.ticks).toEqual([-0.6, -0.4, -0.2, 0]);
+    expect(axis.domain).toEqual([-0.6, 0]);
+  });
+
+  it("formats ticks with the step's own precision when the axis declares no formatter", () => {
+    renderWithAxes([{ id: "cost", domain: [-0.4172, 0], unit: " €/h" }]);
+    const axis = yAxes.find((a) => a.yAxisId === "cost")!;
+    const format = axis.tickFormatter as (v: number) => string;
+    expect(format(-0.2)).toBe("-0.2");
+  });
+
+  it("keeps an axis' own unit-specific tickFormatter when it declares one", () => {
+    const formatter = (v: number) => `${v} kW`;
+    renderWithAxes([{ id: "power", domain: [-3.2, 1.1], tickFormatter: formatter }]);
+    expect(yAxes.find((a) => a.yAxisId === "power")!.tickFormatter).toBe(formatter);
+  });
+
+  it("leaves a hidden (tooltip-only) axis' domain untouched", () => {
+    renderWithAxes([{ id: "state", hidden: true, domain: [0, 1] }]);
+    const axis = yAxes.find((a) => a.yAxisId === "state")!;
+    expect(axis.domain).toEqual([0, 1]);
+    expect(axis.ticks).toBeUndefined();
   });
 });

@@ -11,7 +11,6 @@ import {
   minSpanDomain,
   MIN_POWER_SPAN_KW,
   roundedTimeTicks,
-  zeroAnchoredTicks,
   formatPowerTick,
 } from "../../charts/axisDomain";
 import { formatSignedPowerValue, formatPowerValue } from "../../charts/unitFormat";
@@ -138,7 +137,7 @@ export function SiteHeadroomChart({
       xAxisTickFormatter={formatTs}
       xAxisTicks={xAxisTicks}
       axes={[
-        { id: "power", width: 46, domain, tickFormatter: formatPowerTick, ticks: zeroAnchoredTicks(domain) },
+        { id: "power", width: 46, domain, tickFormatter: formatPowerTick },
       ]}
       series={series}
       bands={[

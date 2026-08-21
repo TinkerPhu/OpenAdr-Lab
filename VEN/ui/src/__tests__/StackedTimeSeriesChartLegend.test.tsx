@@ -12,8 +12,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import type { AssetId, StackedAreaPoint } from "../components/controller/types";
 
-const { areas, lines } = vi.hoisted(() => ({
+const { areas, lines, yAxes } = vi.hoisted(() => ({
   areas: [] as Array<Record<string, unknown>>,
+  yAxes: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
 }));
 
@@ -22,7 +23,10 @@ vi.mock("recharts", () => ({
   ResponsiveContainer: ({ children }: { children: ReactNode }) => children,
   CartesianGrid: () => null,
   XAxis: () => null,
-  YAxis: () => null,
+  YAxis: (props: Record<string, unknown>) => {
+    yAxes.push(props);
+    return null;
+  },
   Tooltip: () => null,
   ReferenceArea: () => null,
   ReferenceLine: () => null,
@@ -121,5 +125,23 @@ describe("StackedTimeSeriesChart — legend", () => {
     const negNames = areas.filter((a) => (a.name as string).endsWith(" -")).map((a) => a.name);
     expect(posNames.indexOf("pv +")).toBeLessThan(posNames.indexOf("ev +"));
     expect(negNames.indexOf("pv -")).toBeLessThan(negNames.indexOf("ev -"));
+  });
+});
+
+/** This composition owns its own <YAxis>, so it applies the shared rounding rule itself —
+ * same `niceAxis` primitive TimeSeriesChart uses. */
+describe("StackedTimeSeriesChart — rounded Y ticks", () => {
+  beforeEach(() => {
+    yAxes.length = 0;
+  });
+
+  it("renders round power ticks spanning the stacked data, including 0", () => {
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    const axis = yAxes.find((a) => a.yAxisId === "power")!;
+    const ticks = axis.ticks as number[];
+    expect(ticks).toContain(0);
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    expect(ticks).toEqual([...ticks].map((t) => Number(t.toFixed(1))));
+    expect(axis.domain).toEqual([ticks[0], ticks[ticks.length - 1]]);
   });
 });

@@ -6,7 +6,6 @@ import {
   MIN_CO2_RATE_SPAN_G_H,
   MIN_COST_RATE_SPAN_EUR_H,
   roundedTimeTicks,
-  zeroAnchoredTicks,
 } from "../../charts/axisDomain";
 import { formatCo2RateGH, formatCostRateEurH } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
@@ -90,8 +89,8 @@ export function GridRatesChart({
       xAxisTickFormatter={formatTs}
       xAxisTicks={xAxisTicks}
       axes={[
-        { id: "cost", unit: " €/h", width: 48, domain: costDomain, ticks: zeroAnchoredTicks(costDomain) },
-        { id: "co2", orientation: "right", unit: " g/h", width: 52, domain: co2Domain, ticks: zeroAnchoredTicks(co2Domain) },
+        { id: "cost", unit: " €/h", width: 48, domain: costDomain },
+        { id: "co2", orientation: "right", unit: " g/h", width: 52, domain: co2Domain },
       ]}
       series={series}
       nowMs={nowMs}

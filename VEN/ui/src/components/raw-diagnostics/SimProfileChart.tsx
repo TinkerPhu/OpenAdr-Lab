@@ -1,7 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { SimSnapshot } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, niceAxis } from "../charts/axisDomain";
 import { formatPowerValue } from "../charts/unitFormat";
 import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
 
@@ -21,6 +21,7 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
     points.map((p) => p.power_kw),
     MIN_POWER_SPAN_KW
   );
+  const powerAxis = niceAxis(powerDomain);
 
   return (
     <div data-testid="sim-profile-chart">
@@ -28,7 +29,7 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
       <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="name" />
-        <YAxis tickFormatter={formatPowerTick} domain={powerDomain} />
+        <YAxis tickFormatter={formatPowerTick} domain={powerAxis.domain} ticks={powerAxis.ticks} />
         <Tooltip formatter={(v: number) => formatPowerValue(v)} />
         <Line
           type="monotone"

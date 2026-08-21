@@ -12,6 +12,7 @@ import type { ComfortRate } from "../../api/types";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
 import { EmptyState } from "./EmptyState";
 import { formatTariffEurKwh, formatCo2IntensityGKwh } from "./unitFormat";
+import { niceAxis, tickFormatterForStep } from "./axisDomain";
 
 type CurvePoint = { fillPct: number; bidEurKwh: number; co2GKwh: number };
 
@@ -82,6 +83,12 @@ export function CurveChart({ rows, series = DEFAULT_SERIES }: CurveChartProps) {
     }))
     .sort((a, b) => a.fillPct - b.fillPct);
 
+  // Same Y-tick rule as the time-series compositions (niceAxis) — this chart owns its own
+  // <YAxis> pair. Both bids are strictly-positive prices anchored at 0, which `[0, "auto"]`
+  // expressed before but left recharts to tick over an unrounded auto-max.
+  const priceAxis = niceAxis([0, Math.max(...data.map((d) => d.bidEurKwh), 0)]);
+  const co2Axis = niceAxis([0, Math.max(...data.map((d) => d.co2GKwh), 0)]);
+
   return (
     <Box data-testid="comfort-curve-chart">
       <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
@@ -96,14 +103,18 @@ export function CurveChart({ rows, series = DEFAULT_SERIES }: CurveChartProps) {
           />
           <YAxis
             yAxisId="price"
-            domain={[0, "auto"]}
+            domain={priceAxis.domain}
+            ticks={priceAxis.ticks}
+            tickFormatter={tickFormatterForStep(priceAxis.step)}
             tick={{ fontSize: 11 }}
             width={48}
           />
           <YAxis
             yAxisId="co2"
             orientation="right"
-            domain={[0, "auto"]}
+            domain={co2Axis.domain}
+            ticks={co2Axis.ticks}
+            tickFormatter={tickFormatterForStep(co2Axis.step)}
             tick={{ fontSize: 11 }}
             width={48}
           />
