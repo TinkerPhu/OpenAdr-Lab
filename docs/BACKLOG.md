@@ -33,15 +33,12 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-24](#bl-24-oadrprogramconfigoadreventcacheoadrcapacityrequest-wiring) | Would let the VTN request/receive capacity reservations from the VEN — no such workflow exists today | Low | S if removed / unknown if built | Low — no consumer yet; recommend leaving parked until a real feature needs it |
 
 ### No direct user value — internal cleanup/consistency (do opportunistically, don't prioritize)
 
 | ID | Note | Gain |
 |---|---|---|
-| [BL-21](#bl-21-reconcile-duplicate-thermalmodelparams) | Duplicate dead struct, superseded by `assets/heater.rs`'s own | None |
 | [BL-23](#bl-23-hvacservice--route-wiring-or-removal-of-the-unused-impl) | Consistency-only decision, no behavior change either way | None |
-| [BL-26](#bl-26-assetstate-entities--resolve-the-name-collision-with-the-live-assetsassetstate) | Dead type shadowing a live one's name | None |
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
 
@@ -57,16 +54,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ---
 
-### BL-21: Reconcile duplicate ThermalModelParams
-**Req:** entities/design_vocabulary.rs §3.1.1 (`ThermalModelParams`)
-**Problem:** `entities/design_vocabulary.rs::ThermalModelParams` (thermal mass, insulation factor, min/max temperature) has zero references anywhere — `assets/heater.rs` already has its own, separately-defined thermal parameter struct that is the one actually wired into the heater's MILP model. This one is a leftover duplicate from the original spec-vocabulary pass, not a distinct future feature.
-**Fix:** Confirm `assets/heater.rs`'s struct is a full superset; if so, delete `entities/design_vocabulary.rs::ThermalModelParams` and its now-unused field on the (already-quarantined) `AssetProfile`. If it's missing fields the entities version has, fold those into the heater-side struct instead of keeping two.
-**Gain:** None (cleanup only) — dead code removal, no behavior or user-facing change.
-**Complexity:** Small. Comparison + deletion or field merge.
-**Verify:** `cargo build` clean after deletion; heater MILP tests unaffected.
-
----
-
 ### BL-23: `HvacService` — route wiring or removal of the unused impl
 **Req:** `services/hems.rs` (`HvacService`)
 **Problem:** `EvSessionService` is the live pattern for session lifecycle; `HvacService` sketches the same shape for heater targets, but `post_heater_target` sets the target directly instead of going through it — so `HvacService`'s methods are never called.
@@ -77,29 +64,9 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ---
 
-### BL-24: `OadrProgramConfig`/`OadrEventCache`/`OadrCapacityRequest` wiring
-**Req:** `entities/capacity.rs`
-**Problem:** Three unwired sketches in a file that otherwise holds live types (`OadrCapacityState`, `OadrReportObligation`). DISPATCH_SETPOINT handling landed as typed `DispatchWindow` state (matching the alert/SIMPLE pattern), so `OadrEventCache`'s anticipated consumer no longer exists; `OadrProgramConfig` and `OadrCapacityRequest` have no consumer at all — no code path builds or sends a capacity reservation request to the VTN in this shape.
-**Fix:** Consider removal for all three next time this file is triaged; for `OadrProgramConfig`/`OadrCapacityRequest`, no dependent feature identified yet — lowest priority of this group until one exists.
-**Gain:** Low — no consumer feature exists yet; value only materializes if/when a capacity-reservation workflow is actually needed.
-**Complexity:** Small (removal) — TBD if a consuming feature appears instead.
-**Verify:** Tied to whichever consuming feature lands first, or `cargo build` clean after removal.
-
----
-
-### BL-26: `AssetState` (entities) — resolve the name collision with the live `assets::AssetState`
-**Req:** `entities/design_vocabulary.rs` (`AssetState`)
-**Problem:** A second unreferenced type sharing a name with a real, heavily-used live type (`assets::mod::AssetState`, the per-device-kind enum driving `step`/`capability`). The entities-level one (device status snapshot: commanded/actual power, responsiveness, SoC, temperature, connection) has no consumer and predates the real `Asset` trait design.
-**Fix:** Most likely resolution: this was superseded by the live `assets::AssetState` + `AssetCapability` combination and should eventually be deleted rather than implemented — but that's a re-confirmation, not assumed here. If any of its fields (e.g. `last_confirmed_response`, `is_available`) represent monitoring data genuinely missing from the live type, fold those in instead.
-**Gain:** None (cleanup only) — dead type shadowing a live one's name, no behavior change.
-**Complexity:** Small — comparison against the live type, then either deletion or a small field migration.
-**Verify:** `cargo build` clean; no behavior change (nothing references it today).
-
----
-
 ### BL-29: `FlexibilityDirection`, `RateType`, `RateUnit` — narrow supporting enums
 **Req:** `entities/design_vocabulary.rs`
-**Problem:** Three small enums with no current consumer. `RateUnit` overlaps with the live `RateUnit`-shaped fields already handled ad hoc as bare `f64`/currency-implicit values in `TariffSnapshot`; `RateType` (per-kWh vs. per-kW) and `FlexibilityDirection` (import/export) are classification vocabulary for capacity-rate handling and capacity-request direction respectively — relevant once envelope reporting is extended or BL-24's `OadrCapacityRequest` is actually implemented.
+**Problem:** Three small enums with no current consumer. `RateUnit` overlaps with the live `RateUnit`-shaped fields already handled ad hoc as bare `f64`/currency-implicit values in `TariffSnapshot`; `RateType` (per-kWh vs. per-kW) and `FlexibilityDirection` (import/export) are classification vocabulary for capacity-rate handling and capacity-request direction respectively — relevant once envelope reporting is extended or a capacity-reservation-request workflow to the VTN is actually built (the earlier `OadrCapacityRequest` sketch tracking that, BL-24, was removed as dead code — no dependent feature ever appeared).
 **Fix:** Don't implement standalone — fold each into whichever feature actually needs it when that feature is built: `RateType`/`RateUnit` into a future multi-currency/multi-unit tariff handling pass (no BL item yet — add one if/when multi-currency support is requested); `FlexibilityDirection` into envelope-report-building work.
 **Gain:** None standalone — no value until folded into a parent feature that needs one of these enums.
 **Complexity:** N/A standalone — tracked here only so they're not forgotten, not as independent work items.

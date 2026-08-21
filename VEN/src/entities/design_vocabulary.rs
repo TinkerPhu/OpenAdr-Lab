@@ -125,15 +125,6 @@ pub struct PowerRange {
     pub power_steps_kw: Vec<f64>,
 }
 
-/// Parameters for thermal model — heater / heat pump (§3.1.1).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThermalModelParams {
-    pub thermal_mass_kwh_per_k: f64,     // energy to raise mass by 1K
-    pub insulation_factor_kw_per_k: f64, // heat loss rate in kW/K
-    pub min_temperature_c: f64,
-    pub max_temperature_c: f64,
-}
-
 /// Static configuration of a device — set at installation/configuration time (§3.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetProfile {
@@ -151,7 +142,6 @@ pub struct AssetProfile {
     pub response_delay_s: f64,         // expected time to confirm setpoint change
     pub deviation_threshold_kw: f64,   // |actual - planned| above this triggers replan
     pub default_value_curve: Option<DefaultValueCurve>,
-    pub thermal_model: Option<ThermalModelParams>,
     pub oadr_resource_name: String, // maps to OpenADR resource.resourceName
 }
 
@@ -159,36 +149,6 @@ pub struct AssetProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefaultValueCurve {
     pub rates: Vec<ComfortRate>,
-}
-
-/// Device health and communication status (§1.3). Moved here from the now-deleted
-/// entities/asset.rs (R-65) — its only remaining consumer is AssetState::responsiveness below.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum DeviceResponsiveness {
-    Responsive,   // device confirms setpoints within expected delay
-    Degraded,     // device responds but outside expected parameters
-    Unresponsive, // device not confirming setpoint changes
-    Offline,      // device not communicating at all
-}
-
-/// Live snapshot of device status — updated every measurement cycle (§3.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssetState {
-    pub ts: DateTime<Utc>,
-    pub asset_id: String,
-
-    pub commanded_kw: f64,       // setpoint sent to device
-    pub actual_kw: f64,          // measured power from device (positive = import)
-    pub power_deviation_kw: f64, // = actual_kw - commanded_kw (derived)
-
-    pub responsiveness: DeviceResponsiveness,
-    pub last_confirmed_response: Option<DateTime<Utc>>,
-
-    pub soc: Option<f64>,           // 0.0..1.0 for batteries/EV, None otherwise
-    pub temperature_c: Option<f64>, // for thermal assets
-    pub is_connected: bool,         // physically connected (EV plugged in, etc.)
-    pub is_available: bool,         // logically available for control
 }
 
 /// Learned behavioral patterns for uncontrollable/implicit assets (§3.3).
