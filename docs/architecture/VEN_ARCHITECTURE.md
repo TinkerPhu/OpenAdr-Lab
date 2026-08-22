@@ -654,12 +654,43 @@ behaviour classes (`state.rs::SimInjectState`):
 | DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
 | GET | `/flexibility` | 5 | `SiteFlexibilityEnvelope` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
 | GET | `/flexibility/history` | 5 | BL-43: `SiteFlexibilitySample[]` — the bounded in-memory ring (`AppState::flexibility_history`, 1h @ ~1s cadence, oldest first) every `/flexibility` write is also appended to, since the live snapshot alone has nothing to plot as a line |
+| GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
 | GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
 | DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |
 | GET / POST / DELETE | `/baseline-override` | 5 | Read / create / clear additive baseline-load adjustments |
+
+**Sustained-commitment capacity curve** (`GET /flexibility/capacity`,
+`controller::capacity_forecast::compute_capacity_curve`) — `SiteFlexibilityEnvelope` and
+`SiteFlexibilityForecastSlot` both answer "how much power" at an instant; this answers "for how
+long, and how much energy." It is a closed-form computation (no MILP re-solve, no forward
+trajectory simulation) run independently for two directions — sustained-import commitment and
+sustained-export commitment — each producing an ordered list of `(elapsed_s, power_kw)` step
+points plus the cumulative energy behind the curve
+(`entities::capacity_curve::CapacityCurve::energy_kwh_total`). Deliberately distinct from
+`envelope_forecast::compute_headroom_forecast`, whose per-slot values are independent
+point-in-time counterfactuals under the active plan's own schedule — integrating those over time
+double-counts (the same battery kWh headroom would appear at every slot it remains available).
+The capacity curve instead reads each asset's live state directly: battery/EV/heater-import are
+SoC- or thermal-reservoir-bounded (a constant rated power until the energy budget is exhausted,
+then a step to zero); PV is forecast-bound, not a reservoir (tracks
+`simulator::forecast::build_forecast_frames`' ceiling, never "runs out"); shiftable loads
+contribute a single time-bounded step to the import direction only (starting a load can only
+increase draw); base load and heater's current draw are constant net-grid-power terms on both
+curves (additive on import, subtractive on export) despite contributing no flexibility. All
+per-asset contributions are merged via a sweep-line event model and clipped to the `Grid` asset's
+`import_limit_kw`/`export_limit_kw` (the active VTN capacity event, not a fixed hardware rating).
+Exposed to OpenADR via `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER` report payload
+types (`controller::reporter`, `controller::report_intervals::build_capacity_forecast_intervals`)
+and to the VEN UI via a dedicated Diagnostics "Capacity Forecast" chart, distinct from the
+Dashboard's instantaneous Site Headroom chart.
+
+> **Verification status**: unit-tested and locally verified (`cargo test`, `clippy`, `fmt`,
+> file-size audit, VEN UI test/lint/build) at merge time; the E2E/resilience BDD suite has not yet
+> been run against this capability specifically — treat it as implemented-and-unit-verified, not
+> yet end-to-end-proven, until that gap is closed.
 
 ### 4.8 Trace
 
