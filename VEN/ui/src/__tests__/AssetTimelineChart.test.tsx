@@ -318,6 +318,8 @@ describe("AssetTimelineChart — clips data to [tMin, tMax]", () => {
     );
     expect(composedChartData.some((row) => row.ts === farOutside.ts)).toBe(false);
     expect(composedChartData.some((row) => row.ts === inWindow.ts)).toBe(true);
+  });
+});
 
 /**
  * Regression for the Controller PV cell: its two right-hand axes (cost €/h, CO2 g/h) used to
