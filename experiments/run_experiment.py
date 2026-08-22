@@ -462,7 +462,70 @@ def check_ev_mode_compatible(scenario, mode):
     return None
 
 
-def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_hour_utc, budget_eur):
+def resolve_ev_deadline(deadline_hour_utc, scenario_end, now):
+    """GB-37 follow-up: pick each roster EV session's deadline.
+
+    Prefers the *scenario's own end* over an absolute wall-clock hour. The
+    first GB-37 S-9 re-run (2026-08-20/21, docs/history/fleet_run_journal.md)
+    used `--ev-deadline-hour-utc 7` against a 24h run starting at local
+    midnight, which put every EV's deadline only ~9h in -- before the day's
+    cheapest price block. Once a deadline passes, `ev_milp.rs::from_state`
+    collapses `t_dead` to slot 0, so a MustRun session's hard core-energy
+    equality demands the whole 25-30 kWh inside one expired slot: infeasible
+    by construction, and the solver burned its full two-phase timeout on
+    every subsequent solve (ven-3/5/12 hit TIME_LIMIT on ~all solves and
+    never charged at all).
+
+    `scenario_end` (start + duration_minutes) is therefore the default, so
+    the EV has the whole window to place its charging. An explicit
+    `deadline_hour_utc` still wins for scenarios that genuinely want a
+    wall-clock deadline; it goes through `_persona_departure`'s
+    at-least-2h-out rule."""
+    if deadline_hour_utc is not None:
+        return _persona_departure(deadline_hour_utc, now)
+    if scenario_end is not None:
+        return scenario_end
+    return now + timedelta(hours=8)
+
+
+def reset_ev_soc(roster_path, fleet_map, soc):
+    """GB-37 follow-up: put every roster EV at a known SoC before a window runs.
+
+    Without this, each run inherits whatever SoC the previous run left behind,
+    which silently invalidates the run in two different ways:
+
+      * An EV already at/above the session's target_soc is rejected outright
+        (422 "computed target_energy_kwh is zero or negative"), so that VEN
+        contributes nothing -- or, worse, squeaks past the >1e-6 kWh check
+        with a near-zero target and looks like a live session while never
+        charging. Both happened in the 2026-08-20/21 S-9 re-run (ven-11 sat
+        at 79.9998% against a 0.8 target for the entire 24h).
+      * Even below target, a different starting SoC per VEN per run makes
+        cross-run KPI comparison meaningless -- the fleet is supposed to be a
+        controlled population (docs/guidelines/FLEET_EXPERIMENT_DESIGN.md).
+
+    Uses POST /sim/reset/:asset_id (VEN/src/routes/sim.rs), simulator-only
+    state -- EV SoC is not one of ven-1's real-measurement-backed fields
+    (those are PV and base_load, see its profile's `measurements:` block).
+    Best-effort per VEN: a failure is a WARN, never fatal, matching the rest
+    of this script's setup/teardown behaviour."""
+    roster = json.loads(Path(roster_path).read_text(encoding="utf-8"))["vens"]
+    for ven_name in roster:
+        entry = (fleet_map or {}).get(ven_name)
+        if not entry:
+            continue
+        base = f"http://{entry['lan_ip']}:{entry['port']}"
+        try:
+            r = requests.post(f"{base}/sim/reset/ev", json={"soc": soc}, timeout=10)
+            if r.status_code not in (200, 204):
+                print(f"WARN: ev-reset {ven_name}: {r.status_code} {r.text[:120]}")
+        except requests.RequestException as e:
+            print(f"WARN: ev-reset {ven_name}: {e}")
+    print(f"  ev-reset: {len(roster)} roster EVs -> soc={soc}")
+
+
+def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_hour_utc, budget_eur,
+                             scenario_end=None, soft_deadline=True):
     """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
     one identical, explicit EV session, addressed via `fleet_map`'s existing
     per-VEN host/port -- NOT `setup_persona_sessions`'s manifest, which (a)
@@ -478,10 +541,15 @@ def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_
     roster entry has no port of its own, so there is no meaningful fallback
     for a VEN missing from `fleet_map`; it is skipped with a WARN instead.
     Callers should validate `--fleet-map` was given alongside
-    `--ev-session-mode` (see main()) rather than relying on that WARN."""
+    `--ev-session-mode` (see main()) rather than relying on that WARN.
+
+    `soft_deadline` defaults True (-> EvMilpMode::MayRun) so an unmeetable
+    deadline degrades to "charge what you can" plus a plan warning instead of
+    an infeasible hard equality -- see resolve_ev_deadline's doc comment for
+    the run that made this necessary."""
     roster = json.loads(Path(roster_path).read_text(encoding="utf-8"))["vens"]
     now = datetime.now(timezone.utc)
-    dep = _persona_departure(deadline_hour_utc, now) if mode == "BY_DEADLINE" else now + timedelta(hours=8)
+    dep = resolve_ev_deadline(deadline_hour_utc, scenario_end, now)
     created = []  # (base_url, request_id)
     ven_names = []
     for ven_name in roster:
@@ -495,12 +563,14 @@ def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_
             "target_soc": target_soc,
             "deadlines": [{"latest_end": iso(dep)}],
             "mode": mode,
+            "soft_deadline": soft_deadline,
         }
         if budget_eur is not None:
             body["budget_eur"] = budget_eur
         try:
             request_id = post_user_request(base, body)
-            print(f"  ev-roster {ven_name}: mode={mode} target_soc={target_soc} deadline={iso(dep)}")
+            print(f"  ev-roster {ven_name}: mode={mode} target_soc={target_soc} "
+                  f"deadline={iso(dep)} soft={soft_deadline}")
         except requests.RequestException as e:
             print(f"WARN: ev-roster session for {ven_name}: {e}")
             request_id = None
@@ -707,13 +777,38 @@ def main():
     p.add_argument("--ev-roster", default=str(REPO_ROOT / "experiments" / "fleet_ev_roster.json"))
     p.add_argument("--ev-target-soc", type=float, default=0.8)
     p.add_argument(
-        "--ev-deadline-hour-utc", type=int, default=7,
-        help="Only used when --ev-session-mode BY_DEADLINE: next occurrence of this UTC "
-             "hour (at least 2h out) is used as every roster VEN's session deadline.",
+        "--ev-deadline-hour-utc", type=int, default=None,
+        help="Override each roster EV session's deadline with the next occurrence of this "
+             "UTC hour (at least 2h out). DEFAULT (omitted) is the scenario's own end "
+             "(start + duration_minutes), which is almost always what you want -- a "
+             "wall-clock hour landing mid-run makes the deadline expire partway through, "
+             "and an expired MustRun deadline is infeasible by construction (see "
+             "resolve_ev_deadline's doc comment and GB-37 in docs/BACKLOG.md).",
+    )
+    p.add_argument(
+        "--ev-hard-deadline", action="store_true",
+        help="Create roster EV sessions with soft_deadline=false (EvMilpMode::MustRun, a "
+             "hard core-energy equality) instead of the default soft/MayRun. Only for "
+             "deliberately testing hard-deadline behaviour -- an unmeetable hard deadline "
+             "makes the MILP infeasible and burns the full solver timeout every replan.",
     )
     p.add_argument(
         "--ev-budget-eur", type=float, default=None,
         help="Only used when --ev-session-mode MAX_COST: session budget_eur.",
+    )
+    p.add_argument(
+        "--ev-reset", action=argparse.BooleanOptionalAction, default=True,
+        help="GB-37: reset every --ev-roster VEN's EV to --ev-initial-soc before the run "
+             "(and again before the scenario window when a paired baseline ran), so every "
+             "run starts from a deterministic, comparable state. Without it a run inherits "
+             "the previous run's SoC -- an EV already at target is rejected (422) or gets a "
+             "near-zero-energy session that never charges. Requires --fleet-map. "
+             "Use --no-ev-reset to leave simulator EV state untouched.",
+    )
+    p.add_argument(
+        "--ev-initial-soc", type=float, default=0.3,
+        help="SoC every roster EV is reset to when --ev-reset is active (default 0.3, "
+             "matching the profiles' own initial_soc range).",
     )
     p.add_argument(
         "--fleet-map",
@@ -793,11 +888,23 @@ def main():
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
         ven_names = sorted(set(ven_names) | set(fleet_names))
 
+    # GB-37 follow-up: known EV SoC before anything else runs, so session
+    # creation sees a deterministic starting state (target_energy_kwh is
+    # computed from current SoC). Reset again before the scenario window
+    # below, so a paired baseline and its scenario both start from the same
+    # SoC rather than the scenario inheriting whatever the baseline left.
+    if args.ev_reset and fleet_map:
+        reset_ev_soc(args.ev_roster, fleet_map, args.ev_initial_soc)
+
     ev_roster_teardown = None
     if args.ev_session_mode:
+        # The scenario window starts at --start-at when given (the paired
+        # baseline, if any, runs first and is not part of it), else now.
+        scenario_end = (start_at or datetime.now(timezone.utc)) + timedelta(minutes=duration_min)
         ev_names, ev_roster_teardown = setup_ev_roster_sessions(
             args.ev_roster, fleet_map, args.ev_session_mode,
             args.ev_target_soc, args.ev_deadline_hour_utc, args.ev_budget_eur,
+            scenario_end=scenario_end, soft_deadline=not args.ev_hard_deadline,
         )
         ven_names = sorted(set(ven_names) | set(ev_names))
 
@@ -820,6 +927,12 @@ def main():
             if wait_s > 0:
                 print(f"  waiting for --start-at {args.start_at} ({int(wait_s)}s) ...")
                 time.sleep(wait_s)
+
+        # Re-reset after the paired baseline so the scenario window starts
+        # from the same SoC the baseline did -- otherwise the two windows
+        # aren't comparable, which is the whole point of GB-28's pairing.
+        if args.ev_reset and fleet_map and args.paired_baseline:
+            reset_ev_soc(args.ev_roster, fleet_map, args.ev_initial_soc)
 
         print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
         run_window(
@@ -880,8 +993,10 @@ def _self_check_ev_roster_sessions():
                 "ven-11": {"lan_ip": "192.168.1.104", "port": 8221},
                 # ven-99 deliberately absent -- must be skipped, not crash.
             }
+            scenario_end = datetime.now(timezone.utc) + timedelta(minutes=1440)
             ven_names, teardown = setup_ev_roster_sessions(
-                roster_path, fleet_map, "BY_DEADLINE", 0.8, 7, None,
+                roster_path, fleet_map, "BY_DEADLINE", 0.8, None, None,
+                scenario_end=scenario_end,
             )
             assert ven_names == ["ven-1", "ven-11"], ven_names
             assert len(posted) == 2, posted
@@ -890,6 +1005,11 @@ def _self_check_ev_roster_sessions():
             assert body0["asset_id"] == "ev" and body0["mode"] == "BY_DEADLINE", body0
             assert body0["target_soc"] == 0.8, body0
             assert "budget_eur" not in body0, body0
+            # Deadline defaults to the scenario's own end, not a wall-clock hour,
+            # and the session is soft (MayRun) so an unmeetable deadline degrades
+            # instead of going infeasible.
+            assert body0["deadlines"][0]["latest_end"] == iso(scenario_end), body0
+            assert body0["soft_deadline"] is True, body0
             teardown()
             assert deleted == [
                 "http://192.168.1.103:8211/user-requests/req-1",
@@ -898,6 +1018,26 @@ def _self_check_ev_roster_sessions():
     finally:
         requests.post, requests.delete = real_post, real_delete
     print("_self_check_ev_roster_sessions OK")
+
+
+def _self_check_resolve_ev_deadline():
+    """GB-37 follow-up: the deadline must default to the scenario's own end,
+    so it can't expire partway through the run (an expired MustRun deadline is
+    infeasible by construction -- see resolve_ev_deadline's doc comment)."""
+    now = datetime(2026, 8, 20, 19, 8, 0, tzinfo=timezone.utc)
+    scenario_end = datetime(2026, 8, 21, 22, 0, 0, tzinfo=timezone.utc)
+
+    # Default: scenario end wins, and it is after the run's own window.
+    assert resolve_ev_deadline(None, scenario_end, now) == scenario_end
+    # Explicit wall-clock hour still overrides (at least 2h out).
+    explicit = resolve_ev_deadline(7, scenario_end, now)
+    assert explicit.hour == 7 and explicit >= now + timedelta(hours=2), explicit
+    # This is exactly the bad case that broke the first re-run: an absolute
+    # hour lands only ~12h in, well before a 24h scenario's end.
+    assert explicit < scenario_end, (explicit, scenario_end)
+    # No scenario end and no explicit hour -> the old 8h fallback.
+    assert resolve_ev_deadline(None, None, now) == now + timedelta(hours=8)
+    print("_self_check_resolve_ev_deadline OK")
 
 
 def _self_check_scenario_ev_mode_guard():
@@ -923,6 +1063,7 @@ def _self_check_scenario_ev_mode_guard():
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
         _self_check_ev_roster_sessions()
+        _self_check_resolve_ev_deadline()
         _self_check_scenario_ev_mode_guard()
     else:
         main()
