@@ -271,6 +271,17 @@ describe("niceAxis", () => {
     expect(ticks.length).toBeGreaterThanOrEqual(3);
     expect(ticks).toContain(2);
   });
+
+  it("widens a degenerate [0, 0] domain upward only, never into negative labels", () => {
+    // Regression: CurveChart's price axis (`niceAxis([0, Math.max(...bids, 0)])`) and
+    // PlanHistory's solve-time axis hit exactly this domain whenever every value is 0 — both
+    // are non-negative-only quantities (price, milliseconds), so a symmetric widen around 0
+    // used to render an impossible negative tick (e.g. "-0.5 ms").
+    const { ticks, domain } = niceAxis([0, 0]);
+    expect(domain[0]).toBeGreaterThanOrEqual(0);
+    for (const t of ticks) expect(t).toBeGreaterThanOrEqual(0);
+    expect(ticks).toContain(0);
+  });
 });
 
 describe("tickFormatterForStep", () => {
