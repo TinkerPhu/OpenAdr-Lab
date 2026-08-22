@@ -202,12 +202,19 @@ export function niceAxis(domain: [number, number], targetTickCount = 5): NiceAxi
   const min = Number.isFinite(rawMin) ? rawMin : 0;
   const max = Number.isFinite(rawMax) ? rawMax : 0;
   // A zero-span domain has no scale of its own to derive a step from; fall back to the
-  // magnitude of the value itself (or 1 when that is 0 too) and widen symmetrically around it,
-  // so the axis still renders a real tick ladder instead of a single label.
+  // magnitude of the value itself (or 1 when that is 0 too) and widen around it, so the axis
+  // still renders a real tick ladder instead of a single label. A degenerate domain sitting
+  // exactly at 0 (e.g. CurveChart's `[0, max(...)]` or PlanHistory's solve-time axis when every
+  // sample is 0 ms) widens upward only, never symmetrically — every real caller that can reach
+  // this branch with a zero value is a non-negative quantity (price, ms, kW), so a symmetric
+  // widen would draw a negative tick the data can never actually take (e.g. "-0.5 ms"). A
+  // degenerate domain away from 0 (e.g. [2, 2]) has no such sign constraint and keeps widening
+  // symmetrically.
   const dataSpan = max - min;
   const span = dataSpan > 0 ? dataSpan : Math.abs(max) || 1;
-  const lo = dataSpan > 0 ? min : min - span / 2;
-  const hi = dataSpan > 0 ? max : max + span / 2;
+  const zeroPoint = dataSpan <= 0 && min === 0 && max === 0;
+  const lo = dataSpan > 0 ? min : zeroPoint ? 0 : min - span / 2;
+  const hi = dataSpan > 0 ? max : zeroPoint ? span : max + span / 2;
 
   const baseExponent = Math.floor(Math.log10(span));
   let best: NiceAxis | null = null;
