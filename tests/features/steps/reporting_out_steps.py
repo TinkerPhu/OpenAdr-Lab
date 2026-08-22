@@ -94,7 +94,10 @@ def step_history_reports_includes_event(context):
     def fetch():
         r = ven_get("/history/reports")
         r.raise_for_status()
-        return r.json()
+        # /history/reports is paginated (`history_page_route!` -> HistoryPage),
+        # so the body is {"rows": [...], "total": N}, not a bare list. Iterating
+        # the object directly would silently walk its *keys* (strings).
+        return r.json()["rows"]
 
     rows = poll_until(
         fetch,
