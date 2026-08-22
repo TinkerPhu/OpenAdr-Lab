@@ -488,6 +488,42 @@ def resolve_ev_deadline(deadline_hour_utc, scenario_end, now):
     return now + timedelta(hours=8)
 
 
+def reset_ev_soc(roster_path, fleet_map, soc):
+    """GB-37 follow-up: put every roster EV at a known SoC before a window runs.
+
+    Without this, each run inherits whatever SoC the previous run left behind,
+    which silently invalidates the run in two different ways:
+
+      * An EV already at/above the session's target_soc is rejected outright
+        (422 "computed target_energy_kwh is zero or negative"), so that VEN
+        contributes nothing -- or, worse, squeaks past the >1e-6 kWh check
+        with a near-zero target and looks like a live session while never
+        charging. Both happened in the 2026-08-20/21 S-9 re-run (ven-11 sat
+        at 79.9998% against a 0.8 target for the entire 24h).
+      * Even below target, a different starting SoC per VEN per run makes
+        cross-run KPI comparison meaningless -- the fleet is supposed to be a
+        controlled population (docs/guidelines/FLEET_EXPERIMENT_DESIGN.md).
+
+    Uses POST /sim/reset/:asset_id (VEN/src/routes/sim.rs), simulator-only
+    state -- EV SoC is not one of ven-1's real-measurement-backed fields
+    (those are PV and base_load, see its profile's `measurements:` block).
+    Best-effort per VEN: a failure is a WARN, never fatal, matching the rest
+    of this script's setup/teardown behaviour."""
+    roster = json.loads(Path(roster_path).read_text(encoding="utf-8"))["vens"]
+    for ven_name in roster:
+        entry = (fleet_map or {}).get(ven_name)
+        if not entry:
+            continue
+        base = f"http://{entry['lan_ip']}:{entry['port']}"
+        try:
+            r = requests.post(f"{base}/sim/reset/ev", json={"soc": soc}, timeout=10)
+            if r.status_code not in (200, 204):
+                print(f"WARN: ev-reset {ven_name}: {r.status_code} {r.text[:120]}")
+        except requests.RequestException as e:
+            print(f"WARN: ev-reset {ven_name}: {e}")
+    print(f"  ev-reset: {len(roster)} roster EVs -> soc={soc}")
+
+
 def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_hour_utc, budget_eur,
                              scenario_end=None, soft_deadline=True):
     """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
@@ -761,6 +797,20 @@ def main():
         help="Only used when --ev-session-mode MAX_COST: session budget_eur.",
     )
     p.add_argument(
+        "--ev-reset", action=argparse.BooleanOptionalAction, default=True,
+        help="GB-37: reset every --ev-roster VEN's EV to --ev-initial-soc before the run "
+             "(and again before the scenario window when a paired baseline ran), so every "
+             "run starts from a deterministic, comparable state. Without it a run inherits "
+             "the previous run's SoC -- an EV already at target is rejected (422) or gets a "
+             "near-zero-energy session that never charges. Requires --fleet-map. "
+             "Use --no-ev-reset to leave simulator EV state untouched.",
+    )
+    p.add_argument(
+        "--ev-initial-soc", type=float, default=0.3,
+        help="SoC every roster EV is reset to when --ev-reset is active (default 0.3, "
+             "matching the profiles' own initial_soc range).",
+    )
+    p.add_argument(
         "--fleet-map",
         help="experiments/fleet_map.json — host/port for each VEN. When given, --vens "
              "defaults to every VEN in the map (all 13) instead of ven-1,ven-2,ven-3, "
@@ -838,6 +888,14 @@ def main():
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
         ven_names = sorted(set(ven_names) | set(fleet_names))
 
+    # GB-37 follow-up: known EV SoC before anything else runs, so session
+    # creation sees a deterministic starting state (target_energy_kwh is
+    # computed from current SoC). Reset again before the scenario window
+    # below, so a paired baseline and its scenario both start from the same
+    # SoC rather than the scenario inheriting whatever the baseline left.
+    if args.ev_reset and fleet_map:
+        reset_ev_soc(args.ev_roster, fleet_map, args.ev_initial_soc)
+
     ev_roster_teardown = None
     if args.ev_session_mode:
         # The scenario window starts at --start-at when given (the paired
@@ -869,6 +927,12 @@ def main():
             if wait_s > 0:
                 print(f"  waiting for --start-at {args.start_at} ({int(wait_s)}s) ...")
                 time.sleep(wait_s)
+
+        # Re-reset after the paired baseline so the scenario window starts
+        # from the same SoC the baseline did -- otherwise the two windows
+        # aren't comparable, which is the whole point of GB-28's pairing.
+        if args.ev_reset and fleet_map and args.paired_baseline:
+            reset_ev_soc(args.ev_roster, fleet_map, args.ev_initial_soc)
 
         print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
         run_window(

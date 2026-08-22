@@ -1138,3 +1138,87 @@ attempt (`20260817-2016-s9_diurnal/`) removed; both locks released.
 GB-36 (new). GB-31/GB-24 remain open as before. Re-testing genuine EV
 price-response needs a follow-up `s9_diurnal` run launched with
 `--personas` — see GB-37 in `docs/BACKLOG.md`.
+
+---
+
+## S-9 re-run #2 with live EV sessions (2026-08-20/21): GB-37 partly proven, and a solver-timeout finding
+
+**Why**: the first GB-37 fix (roster + `--ev-session-mode`, merged 2026-08-19/20)
+was self-check-verified but never proven against the live fleet. This run was
+that verification: `s9_diurnal` again, 24h from local midnight
+(`--start-at 2026-08-20T22:00:00Z --no-paired-baseline --ev-session-mode
+BY_DEADLINE --ev-roster experiments/fleet_ev_roster.json --fleet-map
+experiments/fleet_map.json`). No redeploy was needed — GB-37 only touched the
+off-host orchestration script, not anything running in the VEN containers.
+
+**Pre-flight, and a mistake worth recording**: a 30-min `s2_price_spike` smoke
+test first (the new session path had never hit a live `/user-requests`). It
+found 4 of 6 roster EVs at/above the 0.8 target SoC, rejected with a correct
+422 (`computed target_energy_kwh is zero or negative`). Those four
+(ven-1/3/5/7) were reset to 0.3 via `POST /sim/reset/ev` and re-verified 201.
+**The mistake**: ven-11 and ven-12 had *succeeded* in the smoke test, so they
+were left alone — but succeeding meant they had charged, and by S-9 launch
+ven-11 sat at 79.9998% against a 0.8 target. Its session was created (it
+squeaked past the `>1e-6 kWh` check) but had essentially zero energy to
+deliver, so its EV never moved all run. Resetting only the VENs that *failed*
+was the error; the fix is to reset all of them unconditionally, now built into
+the script (`--ev-reset`, default on).
+
+**GB-37's core claim is proven — partly.** Two VENs charged for real, and in
+the right place: ven-1 at the full 7.4 kW (SoC 30 → 45.9%) and ven-7 at 1.93
+kW (30 → 36.6%), both between ~13:00 and 17:36 UTC — inside the day's cheapest
+price block (12:00-16:00, €0.08) and the west-facing PV peak. Nothing like
+this happened in the first S-9 run, where every EV was inert by construction.
+
+**But three VENs never charged at all, for a different reason.** ven-3, ven-5
+and ven-12 held valid active sessions at 30%/30.07%/25% SoC and charged
+nothing. Their plan diagnostics explain why:
+
+| VEN | avg solve | in-run solve_status | EV charged |
+|---|---|---|---|
+| ven-1 | 5.5 s | OPTIMAL 839, GAP_LIMIT 580 | yes, 7.4 kW |
+| ven-7 | 0.13 s | fine | yes, 1.93 kW |
+| ven-3 | 112 s | TIME_LIMIT 1363, INFEASIBLE 56 | no |
+| ven-5 | 115 s | TIME_LIMIT 1237, INFEASIBLE 14 | no |
+| ven-12 | 63 s | TIME_LIMIT 1419 (every solve) | no |
+
+`solver_timeout_s` defaults to 60 s and the solve is two-phase, matching the
+observed ~120 s ceiling. These VENs are not chronically too slow: ven-12 has
+1163 OPTIMAL solves in its lifetime `plan_history` and not one during this run
+window, so something specific to the run broke them.
+
+**Root cause (strongly supported, not fully confirmed)**: sessions were created
+with `--ev-deadline-hour-utc`'s then-default of 7, i.e. `2026-08-21T07:00:00Z`
+— only ~9h into a 24h run, and *before* the cheapest block. Once a deadline
+passes, `ev_milp.rs::from_state` collapses `t_dead` to slot 0, and because the
+harness never set `soft_deadline` it defaulted to false → `EvMilpMode::MustRun`
+→ the hard equality `ev_energy == e_core_kwh + e_ev_extra` demands the whole
+25-30 kWh inside one expired slot. Infeasible by construction, which fits the
+TIME_LIMIT storm and the INFEASIBLE counts. **The unexplained part**: ven-1 and
+ven-7 charged at 12:57-17:36, *after* that same expired deadline. That does not
+fit the mechanism cleanly, so this is the leading explanation rather than a
+closed case — a clean re-run showing all six EVs charging is what would confirm
+it.
+
+**Fixed forward** (commit on `fix/gb-37-ev-deadline`, not yet re-run):
+- `resolve_ev_deadline()` — the deadline now defaults to the scenario's own end
+  (`start + duration_minutes`) instead of an absolute wall-clock hour, so it
+  cannot expire partway through the window. `--ev-deadline-hour-utc` still
+  overrides for scenarios that genuinely want a wall-clock deadline.
+- `soft_deadline` defaults true (`MayRun`), so an unmeetable deadline degrades
+  to "charge what you can" plus a plan warning instead of an infeasible hard
+  equality. `--ev-hard-deadline` opts back in.
+- `reset_ev_soc()` — every roster EV is reset to `--ev-initial-soc` (0.3)
+  before the run and again before the scenario window when a paired baseline
+  ran, so both windows start from the same state and no run inherits the
+  previous one's SoC. This is the systematic version of the manual reset above.
+
+**KPI note**: `tariff_response` improved for some VENs (ven-1 +0.126 → -0.094,
+ven-3 -0.058) but ven-11 was unchanged (+0.371 → +0.374), consistent with its
+EV having been stuck at target. Given three VENs' planners were timing out and
+one EV was inert, **this run's fleet-wide `tariff_response` should not be read
+as a valid measurement** — it is a diagnostic of the above, not a result.
+
+**Not done / left open**: `s1_flat`..`s8_budget` and `s10_overexport` still
+deferred — deliberately held rather than launched into the same solver-timeout
+condition. GB-36 and GB-31/GB-24 remain open as before.
