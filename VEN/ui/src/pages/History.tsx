@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Box, Button, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField,
   Typography,
@@ -82,18 +82,20 @@ export function HistoryPage() {
   // Server clock (see Controller.tsx's nowMs for the full rationale), captured once and
   // then frozen — like `date`, the rolling window is meant to be computed once (not
   // re-anchored on every /health poll), so it doesn't reset the Events/Reports table
-  // pagination underneath a user mid-page. `serverNowMsRef` is set at most once, the
-  // first time /health resolves; until then it falls back to a Date.now() snapshot
-  // taken once at mount (not recomputed every render, which could otherwise change
-  // fromIso/toIso every render and loop the state-reset block below).
+  // pagination underneath a user mid-page. `frozenServerNowMs` is set at most once,
+  // adjusted during render the first time /health resolves (React's documented pattern
+  // for deriving state from a prop, same as `pagedRangeIso` below) rather than in an
+  // effect, which would cause an extra commit for the same outcome. Until then it falls
+  // back to a Date.now() snapshot taken once at mount (not recomputed every render,
+  // which could otherwise change fromIso/toIso every render and loop the state-reset
+  // block below).
   const health = useHealth();
-  // eslint-disable-next-line react-hooks/purity -- intentional: one-time Date.now() snapshot at mount, not recomputed per render
   const [mountNowMs] = useState(() => Date.now());
-  const serverNowMsRef = useRef<number | null>(null);
-  if (serverNowMsRef.current === null && health.data) {
-    serverNowMsRef.current = new Date(health.data.server_time).getTime();
+  const [frozenServerNowMs, setFrozenServerNowMs] = useState<number | null>(null);
+  if (frozenServerNowMs === null && health.data) {
+    setFrozenServerNowMs(new Date(health.data.server_time).getTime());
   }
-  const serverNowMs = serverNowMsRef.current ?? mountNowMs;
+  const serverNowMs = frozenServerNowMs ?? mountNowMs;
   const { fromIso, toIso } = useMemo(
     () => (date ? dayRangeIso(date) : last24hRangeIso(serverNowMs)),
     [date, serverNowMs]
