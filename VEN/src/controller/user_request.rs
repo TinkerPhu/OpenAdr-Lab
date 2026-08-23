@@ -1,25 +1,30 @@
-/// Stage 5 — User Request Manager: creates UserRequests from API bodies.
+/// Stage 5 — User Request Manager: creates UserRequests from domain params.
 ///
-/// Validates the request body, resolves target energy from asset state,
-/// and produces a UserRequest that links to an EvSession or HeaterTarget.
+/// Validates the request, resolves target energy from asset state, and
+/// produces a UserRequest that links to an EvSession or HeaterTarget.
+///
+/// R-25: the HTTP DTO for POST /user-requests (`CreateUserRequestBody` et al.,
+/// with `#[derive(Deserialize)]`) lives in `routes::hems::sessions` — this
+/// module only knows the domain-shaped params below, converted from the DTO
+/// at the routes boundary.
 use crate::entities::asset::ComfortRate;
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::design_vocabulary::UserRequestMode;
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
 use uuid::Uuid;
 
-/// Request body for POST /requests.
-#[derive(Debug, Deserialize)]
-pub struct CreateUserRequestBody {
+/// Domain params for creating a UserRequest — the DTO-free counterpart of
+/// POST /user-requests's body.
+#[derive(Debug)]
+pub struct CreateUserRequestParams {
     pub asset_id: String,
     pub target_soc: Option<f64>,
     pub target_energy_kwh: Option<f64>,
     pub desired_power_kw: Option<f64>,
-    pub deadlines: Vec<RequestDeadlineInput>,
+    pub deadlines: Vec<RequestDeadlineParams>,
     pub completion_policy: Option<String>,
-    pub comfort_rates: Option<Vec<ComfortRateInput>>,
+    pub comfort_rates: Option<Vec<ComfortRateParams>>,
     // ── Leeway fields (§8.2) ────────────────────────────────────────────────
     pub budget_eur: Option<f64>,     // top-level cost ceiling shorthand
     pub interruptible: Option<bool>, // planner may pause/resume
@@ -36,16 +41,16 @@ pub struct CreateUserRequestBody {
     pub mode: Option<UserRequestMode>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RequestDeadlineInput {
+#[derive(Debug)]
+pub struct RequestDeadlineParams {
     pub latest_end: DateTime<Utc>,
     pub max_total_cost_eur: Option<f64>,
     pub max_marginal_rate_eur_kwh: Option<f64>,
     pub min_completion: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ComfortRateInput {
+#[derive(Debug)]
+pub struct ComfortRateParams {
     pub fill: f64,
     pub bid: f64,
     /// Max gCO2/kWh the user accepts at this fill level (BL-17 comfort bidding).
@@ -71,12 +76,12 @@ impl std::fmt::Display for RequestError {
     }
 }
 
-/// Create a UserRequest from the POST /user-requests body.
+/// Create a UserRequest from POST /user-requests params.
 ///
 /// Returns the UserRequest. The caller (hems.rs handler) is responsible for
 /// creating and storing the appropriate device session (EvSession or HeaterTarget).
 pub fn create_from_body(
-    body: CreateUserRequestBody,
+    body: CreateUserRequestParams,
     asset_data: &[AssetRequestSlice],
     now: DateTime<Utc>,
 ) -> Result<UserRequest, RequestError> {
@@ -205,8 +210,8 @@ mod tests {
         }
     }
 
-    fn deadline_input(max_total_cost_eur: Option<f64>) -> RequestDeadlineInput {
-        RequestDeadlineInput {
+    fn deadline_input(max_total_cost_eur: Option<f64>) -> RequestDeadlineParams {
+        RequestDeadlineParams {
             latest_end: far_future(),
             max_total_cost_eur,
             max_marginal_rate_eur_kwh: None,
@@ -214,8 +219,8 @@ mod tests {
         }
     }
 
-    fn base_body() -> CreateUserRequestBody {
-        CreateUserRequestBody {
+    fn base_body() -> CreateUserRequestParams {
+        CreateUserRequestParams {
             asset_id: "ev".to_string(),
             target_soc: None,
             target_energy_kwh: None,
@@ -379,7 +384,7 @@ mod tests {
             max_marginal_co2: 200.0,
         }];
         let mut body = base_body();
-        body.comfort_rates = Some(vec![ComfortRateInput {
+        body.comfort_rates = Some(vec![ComfortRateParams {
             fill: 1.0,
             bid: 0.5,
             co2: None,
@@ -397,7 +402,7 @@ mod tests {
         // the resolved ComfortRate, not be silently dropped -- this is the exact gap the whole
         // CO2-comfort-bidding feature exists to close.
         let mut body = base_body();
-        body.comfort_rates = Some(vec![ComfortRateInput {
+        body.comfort_rates = Some(vec![ComfortRateParams {
             fill: 1.0,
             bid: 0.5,
             co2: Some(150.0),
