@@ -10267,3 +10267,61 @@ replan can still be in flight when the next scenario captures its idle baseline)
 3s settle buffer isn't enough under Node1's load during a full-suite run. Tagged `@autoretry`,
 matching the existing mitigation used on `reporter_resampling.feature`'s equally load-sensitive
 scenario, rather than lengthening the fixed sleep (still fragile) or weakening the assertion.
+
+---
+
+## GB-15 fix: renamed the legacy `ven-1-name` VTN entity to `ven-1` on live Node1 (2026-08-23)
+
+**Trigger**: while deploying 7 new Node2 VENs (`ven-14..20`, asset-mix diversity fill-in),
+`scripts/seed_vtn.py` hit its known GB-15 400 (updating "Summer Peak DR"'s targets — the
+VTN's `/vens` list had `ven-1-name`, not `ven-1`). User asked why this had never been fixed;
+investigated before touching anything.
+
+**Root cause, confirmed by re-reading the WP0.2/GB-02/GB-03 journal entry above and checking
+live data**: `ven-1` was never provisioned through the VTN API like every other VEN — it was
+pre-seeded by `openleadr-rs/fixtures/test_user_credentials.sql` with a legacy literal id
+`"ven-1"` (not a UUID) and `venName: "ven-1-name"`. That fixture is shared with openleadr-rs's
+own upstream CI, whose Rust integration tests assert directly on the `"ven-1-name"` string —
+an archived plan (`docs/plans/archive/rename-VEN-1-plan.md`, since deleted) had scoped editing
+the fixture plus ~50 submodule call sites and was abandoned, presumably for that blast-radius
+reason. The fix actually implemented back then (WP0.2) was to delete-and-reprovision `ven-1`
+via the VTN API instead — but only inside `tests/entrypoint.sh`, against the ephemeral,
+always-empty E2E Postgres. `scripts/seed_vtn.py`'s `provision_vens()` never got the same
+treatment against the long-lived Node1 production VTN, because its idempotency check ("do
+these credentials already authenticate?") always said yes for `ven-1` — its `CLIENT_ID`/
+`CLIENT_SECRET` were always `"ven-1"` regardless of the wrong `venName` — so it silently
+skipped `ven-1` on every run since 2026-02-06, and nobody had run the one-time cleanup query
+against live data.
+
+**Why a straight copy of `tests/entrypoint.sh`'s recipe wasn't safe here**: that recipe's
+`DELETE FROM ven WHERE id = 'ven-1'` assumes an empty database. Node1's live VTN had 15
+`report` rows and 4 `ven_program` enrollment rows FK'd to the legacy `ven-1` id
+(`report_ven_id_fkey`/`ven_program_ven_id_fkey`, both `NO ACTION`, not deferrable) —
+a bare delete would either fail outright or (if reports were deleted first) destroy 13 days
+of real report history for no reason.
+
+**Fix, done directly against Node1's `vtn-db-1` + VTN API** (`docker_host_lock` held
+throughout):
+1. `DELETE FROM "user" WHERE id = 'ven-1-user'` — cascades to `user_credentials`
+   (frees the `ven-1` client_id) and `user_ven`, leaving the legacy `ven` row orphaned but
+   still holding its report/enrollment history.
+2. Re-provisioned `ven-1` fresh via the VTN API (`POST /users`, `POST /users/{id}` for
+   credentials, `POST /vens` with `venName: "ven-1"`, `PUT /users/{id}` for the VEN role) —
+   identical mechanism to every other VEN, yielding a real UUID id
+   (`d062c849-deaa-4c16-a2ad-f7d17f7c4170`).
+3. `UPDATE report SET ven_id = '<new-uuid>' WHERE ven_id = 'ven-1'` (15 rows) and
+   `UPDATE ven_program SET ven_id = '<new-uuid>' WHERE ven_id = 'ven-1'` (4 rows) — repoints
+   history/enrollment to the new entity instead of losing it.
+4. `DELETE FROM ven WHERE id = 'ven-1'` — now safe, no remaining references.
+5. Re-ran `scripts/seed_vtn.py` — for the first time since 2026-02-06 it completed with no
+   error: all 3 programs' targets updated to `["ven-1", ...]`, all 10 stale seed events
+   deleted and recreated with correct `ven-1` targets (previously stuck on `ven-1-name`).
+6. `ven-1`'s container self-healed its VTN connection via its own auth-retry logic (no
+   restart needed — confirmed `/health` back to `vtn_connection: ok` within seconds).
+
+**Verification**: `GET /vens?venName=ven-1` returns exactly one entity with the new UUID;
+`GET /vens?venName=ven-1-name` returns empty; all program/event `targets` now say `"ven-1"`;
+report count under the new id still 15 (no data loss); `ven-1` `/health` reports
+`{"status":"ok", "vtn_connection":{"status":"ok"}}`.
+
+**Bookkeeping**: GB-15 row removed from `docs/BACKLOG.md`.
