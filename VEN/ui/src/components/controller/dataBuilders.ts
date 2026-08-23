@@ -211,7 +211,12 @@ export function deriveAssetSummaries(
     makeSummary("base_load", "Base Load", (baseLoadAsset?.power_kw ?? 0), null)
   );
 
-  // Dynamic assets (shiftable loads: wm, dw, etc.) — anything not in the hardcoded set
+  // Dynamic assets (shiftable loads: wm, dw, etc.) — anything not in the hardcoded set.
+  // Invariant this relies on: every key in `sim.assets` is a real simulator asset with a
+  // `GET /capability/:asset_id` endpoint behind it. A backend-only pseudo-asset injected
+  // into the same map would be summarized here as if it were a device, rendering a tile and
+  // firing a capability request that 404s — which is exactly what the removed `site-residual`
+  // virtual asset did (see docs/architecture/forecasting_model.md).
   const HARDCODED_IDS = new Set(["ev", "heater", "pv", "battery", "base_load"]);
   for (const [assetId, assetData] of Object.entries(sim.assets)) {
     if (HARDCODED_IDS.has(assetId)) continue;

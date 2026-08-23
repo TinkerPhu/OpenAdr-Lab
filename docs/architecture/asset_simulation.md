@@ -111,7 +111,6 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-stops, et
 | HeatPump | Consumption | ❌ entity only | — |
 | WashingMachine | Consumption | ❌ entity only | — |
 | CookingStove | Consumption | ❌ entity only | — |
-| SiteResidual | Virtual | ❌ entity only | — |
 | GenericConsumer | Consumption | ❌ entity only | — |
 | GenericProducer | Production | ❌ entity only | — |
 
@@ -503,6 +502,5 @@ purposes but have no physics simulation in the `assets/` module:
 | `HeatPump` | `AssetKind::HeatPump` |
 | `WashingMachine` | `AssetKind::WashingMachine` |
 | `CookingStove` | `AssetKind::CookingStove` |
-| `SiteResidual` | `AssetKind::SiteResidual` |
 | `GenericConsumer` | `AssetKind::GenericConsumer` |
 | `GenericProducer` | `AssetKind::GenericProducer` |

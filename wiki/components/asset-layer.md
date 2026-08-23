@@ -2,9 +2,9 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
-sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
+updated: 2026-08-21
+synced_commit: 35f7808
+sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
 
@@ -47,12 +47,13 @@ A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) track
 site power plus the VTN capacity limits each tick and keeps its own history; it is
 read-only — never dispatched.
 
-A second read-only virtual asset, **`site-residual`** (`controller/residual.rs`,
-Phase 5 WP5.1), is inserted into snapshots rather than living in `SimState`:
-`residual_kw = grid meter − Σ modelled asset power`, the unmodelled background
-load the planner budgets for and the learning pipeline trains on
-([[heuristics-pipeline]]). Zero import/export capability marks it
-point-reading-only.
+The Grid asset is the only virtual asset. A second one, `site-residual`
+(`residual_kw = grid meter − Σ modelled asset power`), existed from Phase 5
+WP5.1 until 2026-08-21; it was removed because `base_load` is itself derived
+externally as `grid_true − Σ(other asset measurements)`, which forces the
+residual to zero by construction — the site's unmetered load is `base_load`'s
+job in full ([[heuristics-pipeline]],
+`docs/architecture/forecasting_model.md`).
 
 **BaseLoad appliance noise** (Phase 5): a profile-configured `base_load.spikes`
 list adds trapezoidal daily appliance pulses (plateau at `amplitude_kw`, linear

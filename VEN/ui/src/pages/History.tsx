@@ -17,7 +17,7 @@ import type { ForecastAccuracySample, SiteFlexibilitySample } from "../api/types
 
 /** forecast-accuracy-tracking: only these three assets get near/far forecast samples
  * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
-const FORECAST_TRACKED_ASSETS = ["pv", "base_load", "site-residual"] as const;
+const FORECAST_TRACKED_ASSETS = ["pv", "base_load"] as const;
 
 /** Rows per page for the "Events received"/"Reports sent" tables — both can hold far more
  * rows than a [from, to) window alone bounds (e.g. many active events on a short
@@ -125,7 +125,6 @@ export function HistoryPage() {
   // Rules of hooks — fixed set, so called unconditionally rather than in the render loop below.
   const pvForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "pv");
   const baseLoadForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
-  const siteResidualForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "site-residual");
 
   const { data: ticks = [] } = ticksQuery;
   const { data: grid = [] } = gridQuery;
@@ -135,11 +134,9 @@ export function HistoryPage() {
   const reports = reportsPage.rows;
   const { data: pvForecast = [] } = pvForecastQuery;
   const { data: baseLoadForecast = [] } = baseLoadForecastQuery;
-  const { data: siteResidualForecast = [] } = siteResidualForecastQuery;
   const forecastByAsset: Record<string, ForecastAccuracySample[]> = {
     pv: pvForecast,
     base_load: baseLoadForecast,
-    "site-residual": siteResidualForecast,
   };
 
   // The query keys are derived from `date`, so react-query already refetches whenever the
@@ -158,7 +155,6 @@ export function HistoryPage() {
     reportsQuery.refetch();
     pvForecastQuery.refetch();
     baseLoadForecastQuery.refetch();
-    siteResidualForecastQuery.refetch();
   };
 
   // Clicking the date control means "show this day" even if the displayed value doesn't

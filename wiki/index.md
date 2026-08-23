@@ -24,7 +24,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
-- [[heuristics-pipeline]] — learned per-asset baselines: SITE_RESIDUAL signal, trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
+- [[heuristics-pipeline]] — learned base-load baselines: trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
 - [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay; battery/EV runaway-correction bug found and fixed, `/arbiter-diagnostics` readout added
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth; source-liveness E2E coverage (R-56)
 - [[real-measurement-mqtt]] — real PV/baseline-load meter readings over MQTT (ven-1 only), 3-tier PV precedence (measured > weather > sin), two-gate (env var + profile) enablement, live-tick-only (never feeds the planner)

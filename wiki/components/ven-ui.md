@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
+updated: 2026-08-21
+synced_commit: 35f7808
 sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -177,8 +177,8 @@ The page defaults to a rolling **last-24h** window on load (a "Last 24h" button 
 it explicitly) rather than requiring a manual date-range pick every visit — the common case
 ("what just happened") needed zero interaction. Clicking either date control switches out of
 rolling mode into that fixed date and force-refreshes the charts, since a manually-picked
-date is a request for that exact window, not "keep following now." For the three assets
-forecast-accuracy-tracking tracks (PV, base_load, site-residual), `AssetTimelineChart`
+date is a request for that exact window, not "keep following now." For the two assets
+forecast-accuracy-tracking tracks (PV, base_load), `AssetTimelineChart`
 overlays near-lead (fine dotted) and far-lead (coarse dashed) forecast lines from
 `GET /history/forecast-accuracy` alongside the actual-power line — see [[history-store]]'s
 "Forecast accuracy tracking" section for the backend mechanism and

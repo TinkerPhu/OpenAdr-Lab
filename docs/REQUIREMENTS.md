@@ -201,7 +201,6 @@ HEATER           — thermal consumer with storage characteristics
 HEAT_PUMP        — thermal consumer with storage characteristics
 WASHING_MACHINE  — batch consumer
 COOKING_STOVE    — heuristic/uncontrollable consumer
-SITE_RESIDUAL    — virtual asset: unmodeled site consumption
 GENERIC_CONSUMER / GENERIC_PRODUCER — fallbacks
 ```
 
@@ -367,7 +366,6 @@ Key implications:
 - Consumed and generated power are additive in the power balance because they carry predefined signs (consume = positive, generate = negative).
 - The tariff for import and export are both positive scalars, so `price = P_util × tariff(t, sign(P_util)) × dt` gives a positive cost when importing and negative cost (revenue) when exporting.
 - Generation and battery discharge result in net export to the utility **only if** their total magnitude exceeds simultaneous site consumption.
-- **SITE_RESIDUAL** is a virtual asset representing unmodelled consumption: `P_residual = P_utility − Σ P_modelled_assets`.
 
 ---
 

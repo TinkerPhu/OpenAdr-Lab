@@ -20,7 +20,6 @@ fn base_inputs(n: usize) -> MilpInputs {
         g_imp_kgco2_kwh: vec![0.30; n],
         p_pv_kw: vec![0.0; n],
         p_base_kw: vec![0.0; n],
-        p_residual_kw: vec![0.0; n],
         p_imp_max_phys_kw: vec![25.0; n],
         p_exp_max_phys_kw: vec![10.0; n],
         p_imp_max_cont_kw: vec![25.0; n],

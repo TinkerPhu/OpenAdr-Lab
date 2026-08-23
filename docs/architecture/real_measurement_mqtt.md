@@ -10,6 +10,12 @@ signal's precedence rule, the MQTT wire contract a publisher must implement,
 and what a downstream deployer needs to customize to connect their own
 hardware.
 
+Measurements are the "present" half of the VEN's inputs — what the meters say
+*right now*, as opposed to the forecast half. Note that only PV and base_load
+have feeds today; EV, heater, and battery do not. See
+[forecasting_model.md](forecasting_model.md) for how measurements, forecasts,
+and replanning fit together.
+
 Implemented in `VEN/src/measurement.rs` (the generic MQTT adapter),
 `VEN/src/measurement_translation.rs` (the per-device customization point),
 `controller/measurement_port.rs` (`MeasurementPort` trait),

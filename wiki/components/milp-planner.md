@@ -2,8 +2,8 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 329444a
+updated: 2026-08-21
+synced_commit: 35f7808
 sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
@@ -201,11 +201,10 @@ holds only pure/port-based logic, while everything needing the concrete
 `SimState` lives in the infra ring next to the simulator
 ([[ven-hexagonal-architecture]]).
 
-Per-slot baselines for `base_load` and `site-residual` come from learned
-heuristics when available ([[heuristics-pipeline]]) — `inputs.rs` samples
+Per-slot baselines for `base_load` come from learned heuristics when available
+([[heuristics-pipeline]]) — `inputs.rs` samples
 `daytime_profile_kw[weekday_bucket][hour] × seasonal_factor` per slot, falling
-back to the profile's flat `baseline_kw` / the live residual reading on
-cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
+back to the profile's flat `baseline_kw` on cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
 so equal-cost windows always resolve to the same schedule across replans.
 
 The terminal-energy reward (`c_terminal`) model — why heater/battery terminal

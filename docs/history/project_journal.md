@@ -10167,3 +10167,73 @@ zero-span domain case failed first (a single tick) and was fixed by widening sym
 
 **Verification:** `npx vitest run` 616 passed / 52 files (no existing expectation changed),
 `npx tsc --noEmit` clean, `npx eslint src` 0 errors, `npm run build` clean.
+
+## 2026-08-21 — Remove the `site-residual` virtual asset (BL-08 / Phase 5 WP5.1 reversal)
+
+**Trigger:** repeating `GET /api/ven-1/capability/site-residual → 404` in the VEN UI console.
+The immediate cause was a UI one: `deriveAssetSummaries` treats every key in `sim.assets` not
+in its hardcoded list as a "dynamic asset" (meant for shiftable loads like `wm`/`dw`), so the
+backend-injected `site-residual` pseudo-asset got a dashboard tile and a capability fetch that
+the backend 404s — `Simulator::find_asset` only knows real `AssetConfig`s. But investigating
+*why* a diagnostic quantity was sharing the `sim.assets` namespace with dispatchable assets
+turned into a modelling review, and the asset itself was removed rather than the symptom
+patched.
+
+**Why it had to go — two independent arguments.** First, it is algebraically forced to zero.
+`site-residual` was defined as `grid_meter_kw − Σ(modelled asset power)`, meant to surface
+consumption the planner couldn't otherwise see. But in a real deployment `base_load` is itself
+produced *externally* as `grid_true − Σ(other real asset measurements)` and fed to the VEN as
+`base_load`'s own measurement — substituting gives
+`residual = grid − ((grid − Σothers) + Σothers) = 0`. A tautology, independent of which assets
+are simulated vs. metered. Second, there is no independent grid-truth input at all:
+`sim.grid.net_power_w` is written in exactly one place (`simulator/grid_meter.rs`) as
+`Σ(modelled assets) + unmodelled_load_at(now, unmodelled_load_kw)`, and unlike PV and
+base_load, "grid" has no `MeasurementPort`. The codebase already half-knew this — the R-20
+comments in `routes/debug.rs` and `services/heuristics.rs` had it seeding a deliberately
+flat-zero synthetic backfill, and the WP5.1 entry in `KEY_LEARNINGS.md` recorded the
+simulator-side version of the tautology. What was new here was realizing the result survives
+full real metering, not just simulation.
+
+It was also redundant twice over: divergence between plan and reality is handled
+*structurally* by receding-horizon replanning re-anchored on measured NOW state, and
+*measured* by `forecast_accuracy_samples`. A third "residual" channel adds nothing.
+
+**Scope.** Deleted `controller/residual.rs` and both producers (the sim-tick publish path and
+the history sampler's own independent 1 s snapshot); removed the MILP `p_residual_kw` term
+end-to-end (`inputs.rs`, `types.rs`, `milp_interactions.rs`, all three solver phases including
+the phase-1 power-balance constraint, `results.rs`); dropped it from `HEURISTIC_ASSET_IDS`,
+`PRELOAD_ASSET_IDS`, and `record_forecast_accuracy_samples`; removed the
+`simulator.unmodelled_load_kw` profile knob (purpose-built for this asset only — leaving it
+would keep injecting an untracked diurnal load into the meter with nothing left to explain it;
+default was `0.0`, so no live profile changed behavior), which in turn made
+`load_with_params`' `sim_params` argument dead; removed the never-constructed
+`AssetType::SiteResidual`; and stripped it from the UI's asset maps and the History page's
+forecast-accuracy queries.
+
+No DB migration: `tick_samples` and `forecast_accuracy_samples` are generic over a free-text
+`asset_id`, so existing `'site-residual'` rows simply age out via the normal `prune_before`
+retention.
+
+**Two test expectations deliberately changed** (not weakened): `History.test.tsx` asserted
+3 forecast-accuracy refetches — that count *is* the tracked-asset-set size, now 2. And
+`solve_residual_kw_flows_into_net_import` proved `p_residual_kw` reached the balance
+constraint independently of `p_base_kw`; with the term gone, it was retargeted to
+`solve_base_kw_flows_into_net_import`, which asserts the same property for the term that
+remains. `simulator/tests.rs`'s `unmodelled_load_tests` module lost its two knob-specific
+tests but kept the third, renamed `tick_meter_equals_asset_sum` — that one is now the
+permanent invariant the removal establishes, so it earned its place rather than being deleted
+with the rest.
+
+**Key learning** (recorded in `KEY_LEARNINGS.md`, extending the WP5.1 entry): when a derived
+quantity is "the leftover after subtracting everything we know", check how its *inputs* were
+produced — if any input is already defined as that same leftover, the quantity is structurally
+zero and no better instrumentation will change it. A gap detector is only meaningful when an
+independent truth source exists that the other inputs don't already fully explain.
+
+**New doc:** `docs/architecture/forecasting_model.md` captures the conceptual model this
+discussion produced — exogenous drivers vs. endogenous response (the split is per-*driver*,
+not per-asset: PV takes weather as its driver and curtailment as its response, and the heater
+gap is a missing *exogenous driver*, not an unpolished simulation); why heuristics are the
+correct permanent tool for base_load rather than second-best simulation; the measurement gap
+(only PV and base_load have feeds — EV/heater/battery do not); and why divergence is
+re-anchored and measured rather than corrected.

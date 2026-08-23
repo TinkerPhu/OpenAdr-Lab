@@ -162,8 +162,8 @@ pub fn learn_asset_heuristics(
 /// sampling `power_kw_at` at each timestamp. Shared by the
 /// `/debug/heuristics/preload` route and this module's own tests. Generic
 /// over the power function rather than hardcoding `BaseLoad`'s formula so
-/// callers can seed e.g. `site-residual` with its own (flat 0, per R-20)
-/// model instead of silently reusing base_load's.
+/// callers can seed any asset with its own model instead of silently
+/// reusing base_load's.
 pub fn generate_synthetic_backfill(
     asset_id: &str,
     from: DateTime<Utc>,
@@ -255,16 +255,14 @@ mod tests {
 
     #[test]
     fn generate_synthetic_backfill_supports_a_flat_zero_power_fn() {
-        // R-20: site-residual has no independent meter-noise source in the
-        // simulator, so its synthetic backfill must be exactly flat 0 —
-        // not silently reuse base_load's appliance-noise formula.
+        // The power function is a caller-supplied parameter, not a hardcoded
+        // reuse of base_load's appliance-noise formula — a flat-0 model must
+        // round-trip exactly.
         let rows =
-            generate_synthetic_backfill("site-residual", now() - Duration::hours(1), now(), |_| {
-                0.0
-            });
+            generate_synthetic_backfill("flat_asset", now() - Duration::hours(1), now(), |_| 0.0);
         assert_eq!(rows.len(), 60);
         assert!(rows.iter().all(|r| r.power_kw == 0.0));
-        assert!(rows.iter().all(|r| r.asset_id == "site-residual"));
+        assert!(rows.iter().all(|r| r.asset_id == "flat_asset"));
     }
 
     #[test]

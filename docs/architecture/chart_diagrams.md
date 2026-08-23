@@ -312,7 +312,7 @@ data model; the classification and zone-building logic (`classifyPvPoint`,
 chart-kit concern, since it's specific to this one asset's domain model.
 
 **Forecast-accuracy overlay** (`AssetTimelineChart`, `nearForecast`/`farForecast` props,
-History page only, for PV/base_load/site-residual) — near-lead and far-lead forecast
+History page only, for PV/base_load) — near-lead and far-lead forecast
 samples folded into the same merged data array as the actual Power line (never their own
 override array — this is the cursor-correctness invariant applied to this specific
 feature), forward-filled (LOCF) so their step-function lines have a value at every slot

@@ -207,7 +207,8 @@ describe("HistoryPage", () => {
     expect(mockRefetch.grid).toHaveBeenCalledTimes(1);
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
-    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
+    // One refetch per FORECAST_TRACKED_ASSETS entry (pv, base_load).
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(2);
   });
 
   it("does not render a pager when a table's total fits on one page", () => {
@@ -278,7 +279,8 @@ describe("HistoryPage", () => {
     expect(mockRefetch.grid).toHaveBeenCalledTimes(1);
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
-    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
+    // One refetch per FORECAST_TRACKED_ASSETS entry (pv, base_load).
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(2);
   });
 });
 

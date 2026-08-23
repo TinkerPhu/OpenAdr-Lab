@@ -39,7 +39,7 @@ interface AssetTimelineChartProps {
   minPowerSpanKw?: number;
   /** forecast-accuracy-tracking: the plan's near-lead (`slots[1]`) forecast sample for this
    * asset from each plan cycle, overlaid on the power axis alongside the actual line. History
-   * page only — pass for the PV, base_load, and site-residual cells. */
+   * page only — pass for the PV and base_load cells. */
   nearForecast?: ForecastAccuracySample[];
   /** Same as `nearForecast`, but the far-lead (`slots.last()`) sample. */
   farForecast?: ForecastAccuracySample[];

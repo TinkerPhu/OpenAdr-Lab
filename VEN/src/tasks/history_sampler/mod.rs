@@ -174,19 +174,12 @@ pub(crate) fn spawn_history_sampler(
         loop {
             interval.tick().await;
             let now = Utc::now();
-            let mut snap = {
+            let snap = {
                 let sim_guard = sim.lock().await;
                 sim_guard
                     .snapshot()
                     .expect("SimState::snapshot is infallible")
             };
-            // SITE_RESIDUAL (BL-08): this loop's own 1s snapshot (independent of
-            // `tick_once`) needs site-residual inserted here too for `tick_samples`.
-            let residual_kw = crate::controller::residual::compute_site_residual_kw(&snap);
-            snap.assets.insert(
-                crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
-                crate::controller::residual::site_residual_snapshot(residual_kw),
-            );
             let tariffs_snap = state.planned_tariffs().await;
             let caps_snap = state.planned_capacity_limits().await;
             let envelope_snap = state.site_envelope().await;
