@@ -1,7 +1,13 @@
+import uuid
+
 import requests
 from behave import when, then
 from features.helpers.api_client import bff_get, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
+
+
+def _unique_report_name(client_name, base="TELEMETRY-REPORT"):
+    return f"{client_name}-{base}-{uuid.uuid4().hex[:6]}".upper()
 
 
 @when("I list reports via BFF")
@@ -51,7 +57,7 @@ def step_submit_report_ven1(context):
         "programID": event.get("programID", ""),
         "eventID": event["id"],
         "clientName": "ven-1",
-        "reportName": "TELEMETRY_USAGE",
+        "reportName": _unique_report_name("ven-1"),
         "resources": [],
     }
     context.report_response = requests.post(
@@ -102,7 +108,7 @@ def step_post_valid_report_body(context):
         "programID": "test-prog",
         "eventID": "test-evt",
         "clientName": "ven-1",
-        "reportName": "TELEMETRY_USAGE",
+        "reportName": _unique_report_name("ven-1"),
         "resources": [],
     }
     context.report_response = requests.post(
