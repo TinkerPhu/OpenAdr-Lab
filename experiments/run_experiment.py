@@ -529,7 +529,7 @@ def setup_ev_roster_sessions(roster_path, fleet_map, mode, target_soc, deadline_
     """GB-37: give every EV-bearing VEN in `roster_path` (experiments/fleet_ev_roster.json)
     one identical, explicit EV session, addressed via `fleet_map`'s existing
     per-VEN host/port -- NOT `setup_persona_sessions`'s manifest, which (a)
-    doesn't exist for the hand-authored ven-1..13 fleet and (b) assumes a
+    doesn't exist for the hand-authored ven-1..20 fleet and (b) assumes a
     single `host` for every VEN, which this two-host fleet (Node1 + Node2)
     doesn't satisfy. `mode` is applied uniformly across the whole roster, by
     design -- a causal/attribution scenario (e.g. tariff_response) needs one
@@ -766,7 +766,7 @@ def main():
         "--ev-session-mode",
         choices=["ASAP", "BY_DEADLINE", "OPPORTUNISTIC", "ASAP_FREE", "MAX_COST"],
         help="GB-37: give every EV in --ev-roster one identical session in this mode "
-             "before the scenario, torn down after -- for the hand-authored ven-1..13 "
+             "before the scenario, torn down after -- for the hand-authored ven-1..20 "
              "fleet, which --personas cannot address (see setup_ev_roster_sessions). "
              "Omit for scenarios that don't care about EV behavior; every EV then stays "
              "unplugged-equivalent (EvMilpMode::MustNotRun), as before this flag existed. "

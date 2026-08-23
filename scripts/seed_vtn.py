@@ -315,6 +315,23 @@ VENS_TO_PROVISION = [
      "dashboard_url": "http://192.168.1.104:8222"},
     {"ven_name": "ven-13", "client_id": "ven-13", "client_secret": "ven-13", "user_ref": "ven-13-user",
      "dashboard_url": "http://192.168.1.104:8223"},
+    # ven-14..ven-20: 7 more VENs on Node2, added to fill asset-mix diversity
+    # gaps in the fleet (battery+heater, PV+heater, battery+EV, and richer
+    # 3-asset combos) — see VEN/profiles/ven-{14..20}.yaml.
+    {"ven_name": "ven-14", "client_id": "ven-14", "client_secret": "ven-14", "user_ref": "ven-14-user",
+     "dashboard_url": "http://192.168.1.104:8224"},
+    {"ven_name": "ven-15", "client_id": "ven-15", "client_secret": "ven-15", "user_ref": "ven-15-user",
+     "dashboard_url": "http://192.168.1.104:8225"},
+    {"ven_name": "ven-16", "client_id": "ven-16", "client_secret": "ven-16", "user_ref": "ven-16-user",
+     "dashboard_url": "http://192.168.1.104:8226"},
+    {"ven_name": "ven-17", "client_id": "ven-17", "client_secret": "ven-17", "user_ref": "ven-17-user",
+     "dashboard_url": "http://192.168.1.104:8227"},
+    {"ven_name": "ven-18", "client_id": "ven-18", "client_secret": "ven-18", "user_ref": "ven-18-user",
+     "dashboard_url": "http://192.168.1.104:8228"},
+    {"ven_name": "ven-19", "client_id": "ven-19", "client_secret": "ven-19", "user_ref": "ven-19-user",
+     "dashboard_url": "http://192.168.1.104:8229"},
+    {"ven_name": "ven-20", "client_id": "ven-20", "client_secret": "ven-20", "user_ref": "ven-20-user",
+     "dashboard_url": "http://192.168.1.104:8230"},
 ]
 
 
