@@ -438,6 +438,8 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         n: usize,
         dt_h: &[f64],
     ) -> Vec<Constraint> {
+        // SAFETY: declare_vars_into_pool() (above) always runs before constraints()
+        // for this context — see the AssetMilpContext trait's call-order invariant.
         EvMilpContext::constraints(self, pool.ev.as_ref().unwrap(), n, dt_h)
     }
 
@@ -457,6 +459,8 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         } else {
             (c_startup_eur, c_ramp_eur_kw, 0.0_f64)
         };
+        // SAFETY: declare_vars_into_pool() always runs before objective() for this
+        // context — see the AssetMilpContext trait's call-order invariant.
         EvMilpContext::objective(
             self,
             pool.ev.as_ref().unwrap(),

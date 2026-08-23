@@ -26,7 +26,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | Low | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
 
 ### VTN user (aggregator / program operator)
@@ -41,16 +40,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-23](#bl-23-hvacservice--route-wiring-or-removal-of-the-unused-impl) | Consistency-only decision, no behavior change either way | None |
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
-
----
-
-### BL-18: AssetFlexibility — real-time per-asset flexibility snapshot
-**Req:** entities/design_vocabulary.rs §3.5 (`AssetFlexibility`)
-**Problem:** `AssetFlexibility` sketches an on-demand "how much can this asset flex right now" snapshot (`can_increase/decrease_consumption/production_kw`), computed per-asset rather than for the whole site. This is distinct from `FlexibilityEnvelope`, which is planner-produced, horizon-wide, and already reported to the VTN — `AssetFlexibility` would be the instantaneous, single-asset building block.
-**Fix:** Decide first whether this is still wanted as a separate real-time endpoint (e.g. for a live UI widget) or fully superseded by `FlexibilityEnvelope`; if wanted, compute it on demand from each asset's current state and `PowerRange`/`ThermalModelParams` limits, no persistence needed.
-**Gain:** Low-Medium — a real-time per-asset flex widget is a nice-to-have, but its incremental value over the already-shipped `FlexibilityEnvelope` is unclear until the design question is resolved.
-**Complexity:** Medium, but scope depends on the design decision above — resolve that first.
-**Verify:** TBD pending scope decision.
 
 ---
 
@@ -92,6 +81,7 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | GB-12 | BDD scenario for `Plan.solve_status == Infeasible` on `/plan`/`/plan/events`. Unit-level coverage exists (`run_planner_infeasible_constraints_fallback_no_panic` plus new solve_status assertions); no BDD scenario forces an infeasible solve today because doing so needs a fixture heavier than the existing `InfeasibleBatCtx` test double, which isn't exposed at the BDD/E2E layer | Low | Low |
 | GB-35 | GB-22's own "audit other `@ven-ui`/browser scenarios for the same gap" reminder, narrowed: a full `features/` tree audit (2026-08-16, closing GB-22) found the browser+real-backend-poll race pattern concretely limited to the scenarios GB-22 itself fixed, but also surfaced a broader, lower-priority class not addressed there — backend-only scenarios with long (90–300s) `poll_until` calls that share the same host-load sensitivity mechanism without the browser-page combo that caused GB-22's actual reported failures: `features/controller/05_ev_charging_scenarios.feature` (all 4 scenarios, `dispatcher_steps.py` timeouts up to 90s) plus other long-timeout call sites (`alerts_steps.py`, `ev_charging_steps.py`, `uc_steps.py`, `planner_steps.py` at 300s; `request_modes_steps.py`, `comfort_steps.py` at 180s). None have failed under contention yet (unlike the GB-22 instances), so isolating all of them pre-emptively would bloat the isolated pass without evidence; this item exists so the reminder isn't lost, not to isolate all of them by default | Low — speculative, no confirmed failures yet, same mechanism as GB-22 | Low — review each site if/when it's observed flaking, same "tag `@isolated` or raise the timeout" fix shape as GB-22 |
 | GB-38 | Three VENs' MILP hit the solver time limit on essentially every solve for a whole 24h run and consequently never charged their EVs at all, despite valid active sessions and 25-30% SoC (`docs/history/fleet_run_journal.md`, S-9 re-run 2026-08-20/21): ven-12 TIME_LIMIT on 1419/1419 solves (avg 63 s), ven-3 1363 TIME_LIMIT + 56 INFEASIBLE (avg 112 s), ven-5 1237 TIME_LIMIT + 14 INFEASIBLE (avg 115 s), against a `solver_timeout_s: 60` default applied per phase of a two-phase solve (~120 s ceiling, matching observed maxima). These are not chronically slow VENs — ven-12 has 1163 OPTIMAL solves in its lifetime `plan_history` and zero during that run window. The leading explanation is GB-37's expired-hard-deadline condition (fixed forward there) making the problem infeasible rather than merely large, but that is unconfirmed: ven-1/ven-7 charged normally *after* the same expired deadline, which the mechanism does not explain. Needs a clean re-run with the GB-37 deadline/soft-deadline fixes to see whether TIME_LIMIT disappears on its own before any solver tuning is attempted | Medium — a VEN whose planner times out silently contributes nothing to a scenario and quietly corrupts fleet-wide KPIs, with no error surfaced to the operator | Medium — first re-run S-9 post-GB-37 and re-measure; only if TIME_LIMIT persists, investigate problem size for heavy asset mixes (EV+heater, EV+PV+battery at 288 slots), the `MIP_GAP_TARGET` 0.02 tolerance, and whether `solver_timeout_s` should scale with binary count rather than being a flat 60 s |
+| GB-39 | Dark mode for VEN UI and VTN UI — no theme switching exists today, both UIs are light-only | Low — cosmetic/comfort, no functional gap | Low |
 
 ---
 

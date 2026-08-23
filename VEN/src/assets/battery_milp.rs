@@ -192,6 +192,8 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         n: usize,
         dt_h: &[f64],
     ) -> Vec<Constraint> {
+        // SAFETY: declare_vars_into_pool() (above) always runs before constraints()
+        // for this context — see the AssetMilpContext trait's call-order invariant.
         BatteryMilpContext::constraints(self, pool.bat.as_ref().unwrap(), n, dt_h)
     }
 
@@ -204,6 +206,8 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
     ) -> Expression {
+        // SAFETY: declare_vars_into_pool() always runs before objective() for this
+        // context — see the AssetMilpContext trait's call-order invariant.
         let v = pool.bat.as_ref().unwrap();
         let mut obj =
             BatteryMilpContext::objective(v, c_wear_eur_kwh, c_startup_eur, c_ramp_eur_kw, n, dt_h);

@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
-use crate::controller::trace::ControllerEvent;
-use crate::controller::{SolveRequest, SolverPort};
+use crate::controller::SolveRequest;
+#[cfg(test)]
+use crate::controller::SolverPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
@@ -16,8 +17,12 @@ use crate::entities::planner_params::PlannerParams;
 use crate::entities::solar::resolve_weather_pv_kw;
 use crate::entities::tariff_snapshot::{TariffSnapshot, TariffTimeSeries};
 use crate::entities::PlannerObjective;
+#[cfg(test)]
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
+#[cfg(test)]
 use crate::state::AppState;
+
+mod service;
 
 pub struct PlanningService;
 
@@ -27,6 +32,11 @@ pub struct PlanningService;
 /// `now_aligned`, giving the acceptance gate slot-comparable plans and making successive
 /// plans differ by exactly an integer multiple of `step_s` — never an arbitrary offset.
 /// Uses `rem_euclid` so pre-epoch timestamps (negative unix) are handled correctly.
+///
+/// # Panics
+/// Panics if `step_s == 0` (divide-by-zero in `rem_euclid`). Can't happen in production:
+/// `Profile::validate()` rejects both `plan_step_s == 0` and `plan_zones[0].step_s == 0`
+/// at startup, so `step_s` is always `> 0` here. Test callers must pass `step_s > 0`.
 pub fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
     let ts = raw.timestamp();
     let step = step_s as i64;
@@ -161,6 +171,8 @@ pub fn build_plan_cycle_inputs(
         v.push(0i64);
         for zone in &planner.plan_zones {
             for _ in 0..zone.slots {
+                // SAFETY: v is seeded with push(0i64) unconditionally above, so it
+                // always has >= 1 element by the time this loop runs.
                 v.push(v.last().unwrap() + zone.step_s as i64);
             }
         }
@@ -406,118 +418,6 @@ pub fn evaluate_acceptance_gate(
     }
 }
 
-impl PlanningService {
-    /// Run the MILP solver on a blocking thread via the injected `SolverPort`,
-    /// awaiting completion. Called by `tasks/planning.rs` once the cycle's
-    /// `SolveRequest` is built — mirrors `adopt_if_warranted`'s role as the
-    /// post-/pre-solve service-layer step.
-    pub async fn solve_plan(solver: &Arc<dyn SolverPort>, req: SolveRequest) -> Plan {
-        let solver = solver.clone();
-        tokio::task::spawn_blocking(move || {
-            let plan = solver.solve(req);
-            // Return this blocking thread's freed heap pages to the OS immediately.
-            // Without this, glibc keeps a large solve's dirtied pages mapped for reuse,
-            // so RSS ratchets up to the largest solve's high-water mark and never comes
-            // back down between cycles (observed: harder-solving VENs sitting 5-10x
-            // above trivial ones with no leak, just un-trimmed peak working set).
-            #[cfg(all(target_os = "linux", target_env = "gnu"))]
-            unsafe {
-                libc::malloc_trim(0);
-            }
-            plan
-        })
-        .await
-        .expect("planner task panicked")
-    }
-
-    /// Post-solve step: evaluate acceptance gate, adopt or reject, emit events, update state.
-    ///
-    /// Called by `tasks/planning.rs` after `spawn_blocking` returns the solved Plan.
-    /// Accepts `objective` explicitly since it lives in `AppCtx`, not `AppState`.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn adopt_if_warranted(
-        mut plan: Plan,
-        trigger: &PlanTrigger,
-        trigger_reason: &str,
-        threshold_eur: f64,
-        decay_s: f64,
-        gate_switch_penalty_eur: f64,
-        solver_ms: u64,
-        objective: PlannerObjective,
-        state: &AppState,
-        event_tx: &PlannerEventTx,
-        now: DateTime<Utc>,
-    ) -> PlanCycleResult {
-        // GB-25: stamp the real solve time before either the SSE emit or adoption below reads
-        // it, so both the live event and the persisted Plan/plan-history row agree. Mirrors how
-        // `results.rs` already stamps `mip_gap_target` at construction time.
-        plan.solver_ms = Some(solver_ms);
-
-        // Emit PlanReady before gate evaluation so SSE clients always receive it.
-        let _ = event_tx.send(PlannerEvent::PlanReady {
-            plan_id: plan.id,
-            objective,
-            solver_ms,
-            objective_eur: plan.objective_eur,
-            friction_eur: plan.friction_eur,
-            solve_status: plan.solve_status,
-            slot_count: plan.slots.len(),
-            trigger: trigger_reason.to_string(),
-        });
-
-        let current = state.active_plan().await;
-        let adopted = evaluate_acceptance_gate(
-            current.as_ref(),
-            &plan,
-            trigger,
-            threshold_eur,
-            decay_s,
-            gate_switch_penalty_eur,
-            now,
-        );
-
-        let slot_count = plan.slots.len();
-        if adopted {
-            info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
-            state.set_active_plan(Some(plan.clone())).await;
-            let anchor = heater_block_end(&plan, now);
-            state.set_anchor_until(anchor).await;
-
-            // §5.5: reset the arbiter's residual accumulator on every plan
-            // adoption (any trigger, not just hard ones) and re-snapshot each
-            // SoC-coupled asset's available capacity as the new baseline.
-            if let Some(sim_snap) = state.sim().await {
-                let mut new_capacities = std::collections::HashMap::new();
-                for asset_id in [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV] {
-                    if let Some(snap) = sim_snap.assets.get(asset_id) {
-                        let capacity_kwh = snap
-                            .available_charge_kwh
-                            .unwrap_or(0.0)
-                            .max(snap.available_discharge_kwh.unwrap_or(0.0));
-                        new_capacities.insert(asset_id.to_string(), capacity_kwh);
-                    }
-                }
-                state.reset_residual(&new_capacities).await;
-            }
-        } else {
-            info!(
-                trigger = %trigger_reason,
-                slot_count,
-                "planner: plan NOT adopted (periodic below threshold)"
-            );
-        }
-
-        let plan_cycle_event = ControllerEvent::PlanCycle {
-            ts: now,
-            trigger_reason: trigger_reason.to_string(),
-            total_slots: slot_count,
-        };
-        state.push_controller_event(plan_cycle_event).await;
-
-        PlanCycleResult { adopted, plan }
-    }
-}
-
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -525,6 +425,46 @@ mod tests {
     use super::*;
     use chrono::{Duration, TimeZone};
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn solve_plan_returns_fallback_plan_when_solver_panics() {
+        use crate::entities::plan::SolveStatus;
+        use crate::services::test_support::mock_simulator_port::MockSimulatorPort;
+        use crate::services::test_support::mock_solver_port::PanickingSolverPort;
+
+        let req = SolveRequest {
+            asset_contexts: vec![],
+            assets: MockSimulatorPort::empty_snapshot(),
+            tariffs: TariffTimeSeries::from_snapshots(&[]),
+            capacity: OadrCapacityState::default(),
+            alert_windows: vec![],
+            simple_windows: vec![],
+            planner: PlannerParams::default(),
+            grid_max_import_kw: 10.0,
+            grid_max_export_kw: 10.0,
+            asset_params: vec![],
+            now: Utc::now(),
+            trigger: PlanTrigger::Periodic,
+            ev_session: None,
+            heater_target: None,
+            shiftable_loads: vec![],
+            baseline_override: None,
+            objective_override: None,
+            pv_forecast_override: None,
+            asset_heuristics: Default::default(),
+            weather_pv_kw: None,
+        };
+        let solver: Arc<dyn SolverPort> = Arc::new(PanickingSolverPort);
+
+        let plan = PlanningService::solve_plan(&solver, req).await;
+
+        assert_eq!(plan.solve_status, SolveStatus::Infeasible);
+        assert!(
+            plan.warnings.iter().any(|w| w.message.contains("panicked")),
+            "fallback plan must carry a warning explaining the panic: {:?}",
+            plan.warnings
+        );
+    }
 
     #[test]
     fn test_align_to_step_rounds_down() {

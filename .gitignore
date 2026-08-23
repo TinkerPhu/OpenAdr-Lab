@@ -59,3 +59,7 @@ openspec/changes/pv-self-consumption-reward/*
 **/.openspec.yaml
 .obsidian/*
 
+# History-rewrite plan: contains the real addresses/name it exists to remove.
+# Must never be committed to this public repo. Delete once the rewrite is done.
+docs/plans/rewrite_repo_history_plan.md
+

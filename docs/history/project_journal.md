@@ -10324,4 +10324,80 @@ throughout):
 report count under the new id still 15 (no data loss); `ven-1` `/health` reports
 `{"status":"ok", "vtn_connection":{"status":"ok"}}`.
 
+## BL-18 resolved: closed as already-shipped, dead sketch removed (2026-08-23)
+
+**Problem:** BL-18 proposed a real-time per-asset "how much can this asset flex right now"
+widget, built around the `AssetFlexibility` struct sketched in
+`entities/design_vocabulary.rs §3.5` (`can_increase/decrease_consumption/production_kw`,
+computed on demand). The backlog entry flagged an open design question — was this still
+wanted, or superseded by the already-shipped `FlexibilityEnvelope`?
+
+**Finding:** Neither — the underlying capability was already built and shipped under
+different names, just not the ones `AssetFlexibility` used. `AssetCapability` +
+`AssetFlexibilityFloor` (`VEN/src/assets/mod.rs`) give exactly the same thing: a live
+min/max kW band per direction, computed per-asset-type (`battery.rs`, `ev.rs`, `pv.rs`,
+`grid.rs` each implement `flexibility_floor()`). It's rendered today in
+`VEN/ui/src/components/controller/FlexibilityForecastPanel.tsx`, mounted on the Controller
+page (WP-T6) — a standalone panel deliberately kept separate from `AssetCell` per its own
+header comment. `AssetFlexibility` itself was never referenced anywhere outside its own
+definition — a pure sketch, never wired to a route, computation, or UI consumer.
+
+**Resolution:** Deleted the unused `AssetFlexibility` struct from `design_vocabulary.rs`.
+No new feature work needed — `FlexibilityForecastPanel` already satisfies what BL-18 asked
+for. BL-18 removed from `docs/BACKLOG.md`.
+
 **Bookkeeping**: GB-15 row removed from `docs/BACKLOG.md`.
+
+## R-29 resolved: `unwrap()`/`expect()` triage across VEN production paths (2026-08-23)
+
+**Scope re-survey**: the register's file list/counts (2026-07-16) had drifted. A full
+re-survey found 21 real non-test call sites, not ~24 — `openadr_interface.rs`,
+`services/hems.rs`, and `user_request.rs` each had **zero** production unwrap/expect calls
+(already fixed since, or the register was wrong), and `openadr_interface.rs`'s path was
+stale (moved under `controller/`).
+
+**Real fixes (3 sites reachable with plausible input, not just theoretical):**
+1. `services/planning.rs::align_to_step` — `step_s == 0` caused a divide-by-zero in
+   `rem_euclid` *before* its `.expect()` was even reached. Traced to a real gap:
+   `Profile::validate()` rejected `plan_zones[0].step_s == 0` but never validated the
+   scalar `plan_step_s` fallback used when `plan_zones` is unset (the common case). Fixed
+   by adding that missing validation to `profile/validate.rs`, with a test-first case
+   (`test_validate_rejects_zero_plan_step_s_without_zones`) confirming it now fails to load.
+2. `services/planning.rs::solve_plan` — a panic inside `solver.solve()` (deep in the
+   MILP/HiGHS pipeline) propagated through `JoinHandle::await` as a `JoinError`, which
+   `.expect("planner task panicked")` re-panicked, crashing the whole planning cycle. This
+   contradicted `DomainError::PlanInfeasible`'s own doc comment ("SolverPort::solve stays
+   infallible by design"). Fixed by catching the `JoinError` and returning the same
+   `fallback_plan()` construction already used for real solve failures (re-exported from
+   `milp_planner::results` for this purpose), test-first via a `PanickingSolverPort` test
+   double in `test_support/mock_solver_port.rs`.
+3. `tasks/sim_tick/tick.rs::tick_once` — `SimState::snapshot().expect(...)`. Confirmed the
+   concrete production impl (`simulator/mod.rs`) always returns `Ok`; only the test-only
+   `MockSimulatorPort` can return `Err`, and `tick_once` binds the concrete `SimState`, not
+   the `dyn SimulatorPort` trait — not swappable at this call site. Downgraded to a
+   safety-justifying comment rather than threading an early-return through the rest of
+   the tick body, per the same reachability test as the comment-only sites below.
+
+**Comment-only sites (16, safe by construction or by a verified caller invariant, no
+behavior change)**: `milp_interactions.rs` ×4 (`BatEvCoexistInteraction`, safe because
+every caller checks `applicable()` first), `common/mod.rs` ×4 (`Vec::first/last` guarded by
+an `is_empty()` early-return; `DateTime::from_timestamp_millis` unreachable except ~262,000
+years from epoch), `services/planning.rs` and `milp_planner/inputs.rs` (`cum_s`/`v` seeded
+unconditionally before the loop that unwraps `.last()`), and the 6
+`AssetMilpContext::constraints()`/`objective()` sites across `heater_milp.rs`/`ev_milp.rs`/
+`battery_milp.rs` (safe under the trait's documented call-order invariant — verified against
+all 3 production callers: `solver_phase1.rs`, `solver_phase2.rs`, `solver_duals.rs`).
+
+**Not touched**: `routes/hems/sessions.rs`'s 2 unwraps (guarded by an `is_some() &&
+is_some()` check 12 lines above) — provably safe today, flagged as optional future polish,
+not required for closure.
+
+**Side effect**: `services/planning.rs` crossed its 500-production-line cap (R-40 watch-list
+item, already flagged near-cap at 473/500) once the `solve_plan` fix landed. Split following
+the existing `state/mod.rs`/`state/grid_signals.rs` precedent: `planning.rs` became
+`services/planning/mod.rs`, with the `impl PlanningService` block (`solve_plan`,
+`adopt_if_warranted`) moved to `services/planning/service.rs`.
+
+**Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed; `cargo fmt --check`;
+`cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
+passed. R-29 removed from `docs/reference/TECHNICAL_DEBTS.md`.

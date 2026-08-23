@@ -408,6 +408,8 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         n: usize,
         dt_h: &[f64],
     ) -> Vec<Constraint> {
+        // SAFETY: declare_vars_into_pool() (above) always runs before constraints()
+        // for this context — see the AssetMilpContext trait's call-order invariant.
         HeaterMilpContext::constraints(self, pool.heater.as_ref().unwrap(), n, dt_h)
     }
 
@@ -420,6 +422,8 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
     ) -> Expression {
+        // SAFETY: declare_vars_into_pool() always runs before objective() for this
+        // context — see the AssetMilpContext trait's call-order invariant.
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
             // Phase 1: below-min penalty only; tier=0, lambda_sw=0 (switching handled by Phase 2).

@@ -29,6 +29,8 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
   BL-27, BL-29, BL-34, BL-35; general items GB-04, GB-05, GB-07, GB-09, GB-11.
 - `docs/BACKLOG_OpenADR_Cert.md` — certification/transport line items (Cluster H).
 - `docs/reference/TECHNICAL_DEBTS.md` — the debt register (R-18…R-40).
+- `docs/FEATURE_VISIONS.md` — ideas blocked on a missing external input (no sensor/data
+  source exists yet), as opposed to unbuilt-but-buildable work in the registers above.
 - `docs/plans/refactoring_backlog.md` — detailed diagnostics for open register items (currently empty).
 - `docs/plans/roadmap/` — the per-phase implementation plans (phases 0–4 executed;
   phase 5 partially; phase 6 not started).

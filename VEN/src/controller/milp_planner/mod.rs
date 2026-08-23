@@ -66,6 +66,8 @@ mod types;
 
 use self::inputs::*;
 use self::results::*;
+
+pub(crate) use self::results::fallback_plan;
 #[cfg(test)]
 use self::solver_duals::*;
 #[cfg(test)]

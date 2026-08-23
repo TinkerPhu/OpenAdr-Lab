@@ -218,6 +218,7 @@ impl TimeSeries {
             };
         }
 
+        // SAFETY: the is_empty() early-return above guarantees self.samples is non-empty here.
         let first_ts = self.samples.first().unwrap().0;
         let last_ts = self.samples.last().unwrap().0;
 
@@ -250,6 +251,8 @@ impl TimeSeries {
 fn floor_to_grid(ts: DateTime<Utc>, width_ms: i64) -> DateTime<Utc> {
     let ts_ms = ts.timestamp_millis();
     let floored = ts_ms - ts_ms.rem_euclid(width_ms);
+    // SAFETY: from_timestamp_millis only fails ~262,000 years from epoch; `ts` is
+    // already a valid DateTime<Utc> and `floored` moves it by less than `width_ms`.
     DateTime::from_timestamp_millis(floored).unwrap()
 }
 
@@ -260,6 +263,8 @@ fn ceil_to_grid(ts: DateTime<Utc>, width_ms: i64) -> DateTime<Utc> {
     if rem == 0 {
         ts
     } else {
+        // SAFETY: same reasoning as floor_to_grid above — `ts` is already a valid
+        // DateTime<Utc> and this shifts it by less than `width_ms`.
         DateTime::from_timestamp_millis(ts_ms + (width_ms - rem)).unwrap()
     }
 }

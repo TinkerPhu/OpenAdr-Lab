@@ -193,6 +193,8 @@ impl AssetInteraction for BatEvCoexistInteraction {
         global: &GlobalMilpInputs,
         vars: &mut ProblemVariables,
     ) -> InteractionVars {
+        // SAFETY: every caller (solver_phase1/2, solver_duals) checks `applicable()`
+        // — which requires both `Some` — before invoking `declare_vars`.
         let bat = pool.bat.as_ref().unwrap();
         let ev = pool.ev.as_ref().unwrap();
         let x_coexist = (0..global.n)
@@ -217,6 +219,8 @@ impl AssetInteraction for BatEvCoexistInteraction {
         let InteractionVars::BatEvCoexist { x_coexist } = iv else {
             return vec![];
         };
+        // SAFETY: same call-order guarantee as declare_vars() above — every caller
+        // invokes constraints() only on interactions already filtered by applicable().
         let bat = pool.bat.as_ref().unwrap();
         let ev = pool.ev.as_ref().unwrap();
         let dis_max = bat.dis_max_kw;
