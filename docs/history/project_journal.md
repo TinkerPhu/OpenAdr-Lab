@@ -10401,3 +10401,23 @@ the existing `state/mod.rs`/`state/grid_signals.rs` precedent: `planning.rs` bec
 **Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed; `cargo fmt --check`;
 `cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
 passed. R-29 removed from `docs/reference/TECHNICAL_DEBTS.md`.
+
+## R-23 resolved: `AssetMilpContext` moved to the domain ring (2026-08-23)
+
+Domain-level `controller/solver_port.rs` (`SolveRequest`) was importing `AssetMilpContext`
+straight from the infra-ring `controller/milp_planner/asset_port.rs` — a domain→infra type
+dependency. Fixed by extracting the trait plus the types its signatures reference
+(`AssetKind`, `AssetMilpParams`, `BatteryScalars`, `EvScalars`, `HeaterScalars`,
+`MilpLoadMode`) into a new domain-ring module, `controller/asset_milp_port.rs`, following the
+existing `*_port.rs` pattern (`pub mod` + re-export in `controller/mod.rs`). `asset_port.rs`
+re-exports the same names back (`pub use crate::controller::asset_milp_port::{...}`) so all
+21 pre-existing internal `milp_planner::`/`asset_port::` import paths kept compiling
+unchanged — only `solver_port.rs`'s own import switched to the new module. Concrete
+solver-implementation structs (`BatteryMilpContext`, `EvMilpContext`, `HeaterMilpContext`,
+their `*MilpVars`/`*SolOutput` readback types) stayed in `asset_port.rs` — those are
+good_lp/HiGHS-specific solver internals, not part of the port's domain-facing contract.
+
+**Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed; `cargo fmt --check`;
+`cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
+passed; re-ran the invariant greps from `CLAUDE.md`'s `ven-architecture` rule (all clean, only
+doc-comment self-references matched). R-23 removed from `docs/reference/TECHNICAL_DEBTS.md`.

@@ -12,6 +12,15 @@ pub use vtn_port::VtnPort;
 pub mod solver_port;
 pub use solver_port::{SolveRequest, SolverPort};
 
+// ── AssetMilpContext port trait and contract types (R-23) ─────────────────────
+pub mod asset_milp_port;
+#[allow(unused_imports)]
+// public re-export surface; consumers import via milp_planner::asset_port
+pub use asset_milp_port::{
+    AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
+    MilpLoadMode,
+};
+
 // ── HistoryPort trait ──────────────────────────────────────────────────────────
 pub mod history_port;
 pub use history_port::HistoryPort;
