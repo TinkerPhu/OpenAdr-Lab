@@ -25,12 +25,14 @@ windows"). These need a controlled, not diverse, population: hold every other
 variable fixed and vary only the factor under test. Mixing asset types or EV
 modes here doesn't add realism, it adds confounds.
 
-## Why this matters for the hand-authored 13-VEN fleet specifically
+## Why this matters for the hand-authored fleet specifically
 
-`VEN/profiles/ven-1..13.yaml` are 13 individually hand-authored households —
+`VEN/profiles/ven-1..20.yaml` are 20 individually hand-authored households —
 asset-mix categories (PV+battery, EV-only, heater-only, EV+heater, …) have
-between 1 and 5 members each. Any per-category split of a KPI computed on
-this fleet is statistically thin. The S-9 diurnal run's
+between 1 and 5 members each (ven-14..20, added 2026-08-23, filled some of
+the thinnest gaps — battery+heater, residential PV+heater, battery+EV — but
+did not turn any category into a large, statistically powered sample). Any
+per-category split of a KPI computed on this fleet is statistically thin. The S-9 diurnal run's
 `energy_business.tariff_response` is the concrete case that motivated this
 document (`docs/history/fleet_run_journal.md`): a per-category read looked
 like a real trend at first glance, and turned out to be dominated by two
@@ -41,7 +43,7 @@ curve, and every EV silently inert for lack of a session — see GB-37 in
 `scripts/personas.py` / `--personas` currently targets a *different*,
 independently-generated fleet (`scripts/gen_fleet_profiles.py`, which writes
 its own `VEN/fleet/manifest.json` + `VEN/docker-compose.fleet.yml`) — it is
-not wired to the hand-authored `ven-1..13` fleet that `experiments/fleet_map.json`
+not wired to the hand-authored `ven-1..20` fleet that `experiments/fleet_map.json`
 and every `S-1`..`S-10` scenario target. Don't assume `--personas` is usable
 against the S-1..S-10 fleet without checking GB-37's status first.
 
@@ -64,7 +66,7 @@ against the S-1..S-10 fleet without checking GB-37's status first.
    statistical power (e.g. 10+ EV-only VENs to get a real correlation
    estimate), spin up a dedicated homogeneous sub-fleet with
    `scripts/gen_fleet_profiles.py --count N` rather than subdividing the
-   fixed 13-VEN fleet's already-thin categories. Check host capacity first
+   fixed 20-VEN fleet's already-thin categories. Check host capacity first
    (`free -h`, `docker stats`, `df -h` on the target host) — Node2 also
    carries build/test offload, so don't assume idle-container memory
    footprint scales linearly under a concurrent build.

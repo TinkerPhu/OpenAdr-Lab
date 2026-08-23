@@ -1,0 +1,96 @@
+# VEN-19: Battery + EV + PV — solar home with EV and the fleet's largest
+# stationary battery, no electric heater (gas heat)
+# Runs on a second physical host (VEN/scale_out/node2/ — see that
+# directory's README.md for why), not the primary VTN host.
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 16.0
+    max_charge_kw: 7.0
+    max_discharge_kw: 7.0
+    initial_soc: 0.50
+    round_trip_efficiency: 0.93
+    min_soc: 0.10
+  - type: ev
+    id: ev
+    max_charge_kw: 7.4
+    initial_soc: 0.30
+    battery_kwh: 50.0
+    soc_target: 0.80
+  - type: pv
+    id: pv
+    rated_kw: 10.0
+    inverter_max_kw: 9.0
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.6
+    spikes:
+      - center_hour: 8.0
+        amplitude_kw: 1.2
+        duration_h: 0.25
+        ramp_h: 0.03
+        jitter_h: 0.2
+        probability: 1.0
+        weekdays: [0, 1, 2, 3, 4]      # coffee, weekdays
+      - center_hour: 12.0
+        amplitude_kw: 2.0
+        duration_h: 0.5
+        ramp_h: 0.05
+        jitter_h: 0.25
+        probability: 1.0
+        weekdays: [0, 1, 2, 3, 4]      # lunch, weekdays
+      - center_hour: 18.0
+        amplitude_kw: 2.5
+        duration_h: 0.75
+        ramp_h: 0.08
+        jitter_h: 0.3
+        probability: 1.0
+        weekdays: [0, 1, 2, 3, 4]      # dinner, weekdays
+      - center_hour: 10.5
+        amplitude_kw: 2.2
+        duration_h: 1.0
+        ramp_h: 0.1
+        jitter_h: 0.5
+        probability: 1.0
+        weekdays: [5, 6]               # brunch, weekend
+      - center_hour: 17.0
+        amplitude_kw: 2.5
+        duration_h: 0.83
+        ramp_h: 0.08
+        jitter_h: 0.3
+        probability: 1.0
+        weekdays: [5, 6]               # dinner, weekend (earlier than weekday)
+      - center_hour: 20.0
+        amplitude_kw: 0.4
+        duration_h: 3.0
+        ramp_h: 0.2
+        jitter_h: 0.5
+        probability: 1.0
+        weekdays: []                    # TV/lights, every day
+
+simulator:
+  tick_s: 1
+  persist_every_s: 15
+  report_interval_s: 60
+
+planner:
+  plan_zones:
+    - step_s: 300
+      slots: 96   # 8 h at 5-min resolution
+    - step_s: 600
+      slots: 96   # 16 h at 10-min resolution
+    - step_s: 900
+      slots: 96   # 24 h at 15-min resolution
+
+# Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
+# 10 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
+# (which uses the real 14.4 kWp installation as calibration reference).
+# performance_ratio reuses ven-1's calibrated value since it's a site
+# electrical-loss factor, not size-dependent.
+weather_pv:
+  latitude_deg: 47.4491
+  longitude_deg: 7.8081
+  tilt_deg: 22.0
+  azimuth_deg: 267.0
+  rated_kwp: 10.0
+  performance_ratio: 0.84
