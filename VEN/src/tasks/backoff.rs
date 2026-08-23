@@ -2,6 +2,8 @@
 //! loops. On success the delay resets to `base_s`; on failure it doubles up
 //! to `max_s`. Jitter is ±10% of the pre-jitter delay, drawn from a seeded
 //! RNG so tests are exact (determinism rule: no unseeded randomness).
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -75,6 +77,36 @@ pub(crate) async fn record_fail_sleep(
         .await;
     state.record_event(now, "vtn_connection", message).await;
     tokio::time::sleep(delay).await;
+}
+
+/// R-26: shared startup-delay + backoff-loop scaffold for the near-identical
+/// `spawn_program_poll`/`spawn_report_poll` tasks. `step` owns the per-resource
+/// fetch/store logic for one iteration and must call `backoff.on_success()`/
+/// `on_failure()` plus the matching sleep itself (the two callers' Ok/Err
+/// bodies differ only in the resource name and the `AppState` setter, so a
+/// fixed success/failure callback split here would just relocate, not remove,
+/// that per-resource variation).
+///
+/// Not used by `poll_events.rs` (carries several more iteration-persistent
+/// mutable locals beyond `Backoff` — change-detection state, `vtn_ok`), nor by
+/// `obligation.rs`/`state_persist.rs` (fixed `tokio::time::interval`, no
+/// backoff) or `progress_ticker.rs` (interval + cancellation channel, a
+/// different return signature) — see R-26 in `docs/history/project_journal.md`.
+pub(crate) fn spawn_backoff_poll(
+    startup_delay_s: u64,
+    mut backoff: Backoff,
+    step: impl for<'a> Fn(&'a mut Backoff) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+        + Send
+        + 'static,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if startup_delay_s > 0 {
+            tokio::time::sleep(Duration::from_secs(startup_delay_s)).await;
+        }
+        loop {
+            step(&mut backoff).await;
+        }
+    })
 }
 
 #[cfg(test)]

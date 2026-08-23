@@ -10440,3 +10440,30 @@ domain params (`body.into()`) immediately after extraction, before any handler l
 tests lost in the rename); `cargo fmt --check`; `cargo clippy --all-targets --all-features --
 -D warnings` clean; `scripts/audit_file_sizes.py` passed; confirmed `controller/user_request.rs`
 no longer references `serde` at all. R-25 removed from `docs/reference/TECHNICAL_DEBTS.md`.
+
+## R-26 (partial) resolved: shared backoff-poll helper (2026-08-23)
+
+The register listed six task files as repeating a periodic-spawn scaffold, singling out
+`poll_programs.rs`/`poll_reports.rs` as 0.80 similar. On inspection the six don't actually
+share one scaffold: `poll_programs`/`poll_reports`/`poll_events` use a startup-delay +
+exponential-`Backoff` + sleep loop (no `tokio::time::interval` at all), while `obligation.rs`/
+`state_persist.rs` use a fixed `tokio::time::interval` with no backoff, and
+`progress_ticker.rs` layers a `tokio::select!` cancellation channel on top of `interval` and
+returns an extra `oneshot::Sender` — a different signature entirely.
+
+**Scope**: extracted `spawn_backoff_poll` (`tasks/backoff.rs`) — the shared startup-delay +
+loop scaffold, generic over a per-iteration step closure (HRTB over `&mut Backoff`, returning
+`Pin<Box<dyn Future>>` since stable Rust has no async closures yet) — and applied it to
+`poll_programs.rs`/`poll_reports.rs`, the two files the register's own 0.80-similarity number
+was about. **Deliberately not folded in**: `poll_events.rs` carries several more
+iteration-persistent mutable locals beyond `Backoff` (change-detection state, `vtn_ok`) —
+threading those through the same generic closure would mean restructuring the most
+business-critical poller's state handling for a Small/Low-gain hygiene item, a bad risk trade.
+`obligation.rs`/`state_persist.rs`/`progress_ticker.rs` keep their own scaffolds since they're
+structurally different (fixed interval vs. backoff; `progress_ticker.rs`'s cancellation channel
+has no equivalent in the backoff-poll shape at all).
+
+**Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed; `cargo fmt --check`;
+`cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
+passed. R-26 removed from `docs/reference/TECHNICAL_DEBTS.md` — the two files it quantified are
+deduplicated; the remaining four were never a single shared shape to extract.

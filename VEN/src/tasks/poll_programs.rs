@@ -2,7 +2,7 @@
 
 use crate::controller::VtnPort;
 use crate::state::AppState;
-use crate::tasks::backoff::Backoff;
+use crate::tasks::backoff::{spawn_backoff_poll, Backoff};
 use metrics::counter;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -23,12 +23,11 @@ pub(crate) fn spawn_program_poll(
     secs: u64,
     startup_delay_s: u64,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        if startup_delay_s > 0 {
-            tokio::time::sleep(std::time::Duration::from_secs(startup_delay_s)).await;
-        }
-        let mut backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
-        loop {
+    let backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
+    spawn_backoff_poll(startup_delay_s, backoff, move |backoff| {
+        let state = state.clone();
+        let vtn = vtn.clone();
+        Box::pin(async move {
             match vtn.fetch_programs().await {
                 Ok(programs) => {
                     counter!("poll_success_total", "resource" => "programs").increment(1);
@@ -47,6 +46,6 @@ pub(crate) fn spawn_program_poll(
                     tokio::time::sleep(backoff.on_failure()).await;
                 }
             }
-        }
+        })
     })
 }
