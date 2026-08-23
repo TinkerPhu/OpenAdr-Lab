@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::controller::user_request::{create_from_body, CreateUserRequestBody, RequestError};
+use crate::controller::user_request::{create_from_body, CreateUserRequestParams, RequestError};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
@@ -16,7 +16,7 @@ impl UserRequestService {
     /// Create a user request for the EV asset: creates an EvSession linked to the request.
     /// Returns both objects; the caller stores them in state.
     pub fn create_ev(
-        body: CreateUserRequestBody,
+        body: CreateUserRequestParams,
         asset_data: &[AssetRequestSlice],
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, EvSession), RequestError> {
@@ -56,7 +56,7 @@ impl UserRequestService {
 
     /// Create a user request for the heater/boiler asset: creates a HeaterTarget linked to the request.
     pub fn create_heater(
-        body: CreateUserRequestBody,
+        body: CreateUserRequestParams,
         asset_data: &[AssetRequestSlice],
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, HeaterTarget), RequestError> {
@@ -96,7 +96,7 @@ impl UserRequestService {
     // Not yet wired to a route — shiftable loads are created inline in routes/hems.rs.
     #[allow(dead_code)]
     pub fn create_shiftable(
-        body: CreateUserRequestBody,
+        body: CreateUserRequestParams,
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, ShiftableLoad), String> {
         let power = body.power_kw.unwrap();
@@ -186,15 +186,15 @@ impl UserRequestService {
     /// Determine which creation path to use based on the request body.
     // Not yet wired to a route — shiftable detection is done inline in routes/hems.rs.
     #[allow(dead_code)]
-    pub fn is_shiftable(body: &CreateUserRequestBody) -> bool {
+    pub fn is_shiftable(body: &CreateUserRequestParams) -> bool {
         body.power_kw.is_some() && body.duration_min.is_some()
     }
 
-    pub fn is_ev(body: &CreateUserRequestBody) -> bool {
+    pub fn is_ev(body: &CreateUserRequestParams) -> bool {
         body.asset_id == ids::ASSET_EV
     }
 
-    pub fn is_heater(body: &CreateUserRequestBody) -> bool {
+    pub fn is_heater(body: &CreateUserRequestParams) -> bool {
         body.asset_id == ids::ASSET_HEATER || body.asset_id == ids::ASSET_BOILER
     }
 }
@@ -210,7 +210,7 @@ mod tests {
     /// Check shiftable request creation from a minimal body.
     #[test]
     fn test_create_shiftable_builds_load() {
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: "washing_machine".to_string(),
             power_kw: Some(2.0),
@@ -373,13 +373,13 @@ mod tests {
     #[test]
     fn test_create_ev_builds_session() {
         let now = Utc::now();
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_EV.to_string(),
             target_soc: Some(0.9),
             target_energy_kwh: None,
             desired_power_kw: None,
-            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+            deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
                 latest_end: now + chrono::Duration::hours(6),
                 max_total_cost_eur: None,
                 max_marginal_rate_eur_kwh: None,
@@ -410,12 +410,12 @@ mod tests {
     fn test_create_ev_mode_passthrough_to_session() {
         use crate::entities::design_vocabulary::UserRequestMode;
         let now = Utc::now();
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             asset_id: ids::ASSET_EV.to_string(),
             target_soc: Some(0.9),
             target_energy_kwh: None,
             desired_power_kw: None,
-            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+            deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
                 latest_end: now + chrono::Duration::hours(6),
                 max_total_cost_eur: None,
                 max_marginal_rate_eur_kwh: None,
@@ -444,12 +444,12 @@ mod tests {
     fn test_create_heater_missing_mode_defaults_by_deadline() {
         use crate::entities::design_vocabulary::UserRequestMode;
         let now = Utc::now();
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             asset_id: ids::ASSET_HEATER.to_string(),
             target_soc: None,
             target_energy_kwh: Some(5.0),
             desired_power_kw: Some(2.0),
-            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+            deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
                 latest_end: now + chrono::Duration::hours(4),
                 max_total_cost_eur: None,
                 max_marginal_rate_eur_kwh: None,
@@ -477,13 +477,13 @@ mod tests {
     #[test]
     fn test_create_ev_unknown_asset_returns_err() {
         let now = Utc::now();
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: "nonexistent".to_string(),
             target_soc: Some(0.9),
             target_energy_kwh: None,
             desired_power_kw: None,
-            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+            deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
                 latest_end: now + chrono::Duration::hours(6),
                 max_total_cost_eur: None,
                 max_marginal_rate_eur_kwh: None,
@@ -513,13 +513,13 @@ mod tests {
     #[test]
     fn test_create_heater_builds_target() {
         let now = Utc::now();
-        let body = CreateUserRequestBody {
+        let body = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_HEATER.to_string(),
             target_soc: None,
             target_energy_kwh: Some(5.0),
             desired_power_kw: Some(2.0),
-            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+            deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
                 latest_end: now + chrono::Duration::hours(4),
                 max_total_cost_eur: None,
                 max_marginal_rate_eur_kwh: None,
@@ -548,7 +548,7 @@ mod tests {
     /// Discriminator helpers correctly categorise request bodies.
     #[test]
     fn test_discriminators() {
-        let base = CreateUserRequestBody {
+        let base = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: String::new(),
             target_soc: None,
@@ -569,7 +569,7 @@ mod tests {
         };
         assert!(UserRequestService::is_shiftable(&base));
 
-        let ev_body = CreateUserRequestBody {
+        let ev_body = CreateUserRequestParams {
             asset_id: ids::ASSET_EV.to_string(),
             power_kw: None,
             duration_min: None,

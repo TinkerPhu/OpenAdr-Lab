@@ -10421,3 +10421,22 @@ good_lp/HiGHS-specific solver internals, not part of the port's domain-facing co
 `cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
 passed; re-ran the invariant greps from `CLAUDE.md`'s `ven-architecture` rule (all clean, only
 doc-comment self-references matched). R-23 removed from `docs/reference/TECHNICAL_DEBTS.md`.
+
+## R-25 resolved: `CreateUserRequestBody` DTO moved to routes/ (2026-08-23)
+
+`CreateUserRequestBody` (the POST /user-requests HTTP DTO, `#[derive(Deserialize)]`) was
+defined in domain-ring `controller/user_request.rs` and imported by both `services/` and
+`routes/`. Fixed per the backlog's own prescription: renamed the domain-ring struct to
+`CreateUserRequestParams` (dropping `serde::Deserialize` — `RequestDeadlineInput`/
+`ComfortRateInput` became `RequestDeadlineParams`/`ComfortRateParams`), and defined the actual
+wire-format DTO (`CreateUserRequestBody`/`RequestDeadlineInput`/`ComfortRateInput`, still
+`Deserialize`) in `routes/hems/sessions.rs` with `From` conversions into the domain params.
+`services/user_request.rs`'s `UserRequestService` methods (`create_ev`, `create_heater`,
+`create_shiftable`, `is_shiftable`/`is_ev`/`is_heater`) now take `CreateUserRequestParams`
+throughout, including their unit tests. `post_requests` converts the deserialized DTO to
+domain params (`body.into()`) immediately after extraction, before any handler logic runs.
+
+**Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed (same count as before — no
+tests lost in the rename); `cargo fmt --check`; `cargo clippy --all-targets --all-features --
+-D warnings` clean; `scripts/audit_file_sizes.py` passed; confirmed `controller/user_request.rs`
+no longer references `serde` at all. R-25 removed from `docs/reference/TECHNICAL_DEBTS.md`.

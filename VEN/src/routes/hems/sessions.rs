@@ -4,18 +4,114 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::{SessionDetail, UserRequestWithSession};
-use crate::controller::user_request::CreateUserRequestBody;
+use crate::controller::user_request::{
+    ComfortRateParams, CreateUserRequestParams, RequestDeadlineParams,
+};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetRequestSlice;
+use crate::entities::design_vocabulary::UserRequestMode;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::services::user_request::UserRequestService;
 use crate::AppCtx;
+
+/// R-25: HTTP DTO for POST /user-requests — owned by the routes layer.
+/// Converts into the domain-owned `CreateUserRequestParams` before crossing
+/// into `controller::user_request`/`services::user_request`.
+#[derive(Debug, Deserialize)]
+pub struct CreateUserRequestBody {
+    pub asset_id: String,
+    pub target_soc: Option<f64>,
+    pub target_energy_kwh: Option<f64>,
+    pub desired_power_kw: Option<f64>,
+    pub deadlines: Vec<RequestDeadlineInput>,
+    pub completion_policy: Option<String>,
+    pub comfort_rates: Option<Vec<ComfortRateInput>>,
+    // ── Leeway fields (§8.2) ────────────────────────────────────────────────
+    pub budget_eur: Option<f64>,     // top-level cost ceiling shorthand
+    pub interruptible: Option<bool>, // planner may pause/resume
+    pub tolerance_min: Option<i64>,  // ±N minutes around deadline acceptable
+    // ── Shiftable-load fields (Plan C) ──────────────────────────────────────
+    pub power_kw: Option<f64>,
+    pub duration_min: Option<u32>,
+    pub earliest_start: Option<DateTime<Utc>>,
+    pub latest_end: Option<DateTime<Utc>>,
+    // ── Per-device overrides (Plan D) ────────────────────────────────────────
+    pub soft_deadline: Option<bool>,
+    pub target_temp_c: Option<f64>,
+    // ── Request mode (BL-28) — omitted = BY_DEADLINE (legacy behaviour) ─────
+    pub mode: Option<UserRequestMode>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RequestDeadlineInput {
+    pub latest_end: DateTime<Utc>,
+    pub max_total_cost_eur: Option<f64>,
+    pub max_marginal_rate_eur_kwh: Option<f64>,
+    pub min_completion: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ComfortRateInput {
+    pub fill: f64,
+    pub bid: f64,
+    /// Max gCO2/kWh the user accepts at this fill level (BL-17 comfort bidding).
+    /// `None` = no CO2 preference expressed, treated as 0.0.
+    pub co2: Option<f64>,
+}
+
+impl From<RequestDeadlineInput> for RequestDeadlineParams {
+    fn from(d: RequestDeadlineInput) -> Self {
+        RequestDeadlineParams {
+            latest_end: d.latest_end,
+            max_total_cost_eur: d.max_total_cost_eur,
+            max_marginal_rate_eur_kwh: d.max_marginal_rate_eur_kwh,
+            min_completion: d.min_completion,
+        }
+    }
+}
+
+impl From<ComfortRateInput> for ComfortRateParams {
+    fn from(c: ComfortRateInput) -> Self {
+        ComfortRateParams {
+            fill: c.fill,
+            bid: c.bid,
+            co2: c.co2,
+        }
+    }
+}
+
+impl From<CreateUserRequestBody> for CreateUserRequestParams {
+    fn from(b: CreateUserRequestBody) -> Self {
+        CreateUserRequestParams {
+            asset_id: b.asset_id,
+            target_soc: b.target_soc,
+            target_energy_kwh: b.target_energy_kwh,
+            desired_power_kw: b.desired_power_kw,
+            deadlines: b.deadlines.into_iter().map(Into::into).collect(),
+            completion_policy: b.completion_policy,
+            comfort_rates: b
+                .comfort_rates
+                .map(|rates| rates.into_iter().map(Into::into).collect()),
+            budget_eur: b.budget_eur,
+            interruptible: b.interruptible,
+            tolerance_min: b.tolerance_min,
+            power_kw: b.power_kw,
+            duration_min: b.duration_min,
+            earliest_start: b.earliest_start,
+            latest_end: b.latest_end,
+            soft_deadline: b.soft_deadline,
+            target_temp_c: b.target_temp_c,
+            mode: b.mode,
+        }
+    }
+}
 
 /// GET /user-requests — list all user requests with embedded session details.
 pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
@@ -81,6 +177,7 @@ pub async fn post_requests(
     State(ctx): State<AppCtx>,
     Json(body): Json<CreateUserRequestBody>,
 ) -> impl IntoResponse {
+    let body: CreateUserRequestParams = body.into();
     let now = Utc::now();
 
     // ── Shiftable-load fast-path (Plan C) ───────────────────────────────────
