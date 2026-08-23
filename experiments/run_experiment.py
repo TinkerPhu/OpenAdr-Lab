@@ -813,7 +813,7 @@ def main():
     p.add_argument(
         "--fleet-map",
         help="experiments/fleet_map.json — host/port for each VEN. When given, --vens "
-             "defaults to every VEN in the map (all 13) instead of ven-1,ven-2,ven-3, "
+             "defaults to every VEN in the map (all 20) instead of ven-1,ven-2,ven-3, "
              "remote (Node2) VENs are snapshotted over scp instead of local file copy, "
              "and GET /plan is polled on every VEN for the run's duration.",
     )
