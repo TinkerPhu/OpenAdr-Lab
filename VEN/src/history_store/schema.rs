@@ -123,7 +123,7 @@ pub(super) const SCHEMA_V7: &str = "
 DROP TABLE plan_snapshots;
 ";
 
-/// forecast-accuracy-tracking: near/far forecast samples for PV, base_load, and site-residual,
+/// forecast-accuracy-tracking: near/far forecast samples for PV and base_load,
 /// reconciled with the real value once `target_ts` elapses. `actual_kw`/`actual_at` start NULL
 /// and are filled in by `history_sampler`'s per-minute flush — see design.md Decision 4.
 pub(super) const SCHEMA_V8: &str = "
