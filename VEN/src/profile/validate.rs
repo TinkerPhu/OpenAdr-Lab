@@ -140,6 +140,12 @@ impl Profile {
             }
         }
 
+        // plan_step_s (scalar path — used only when plan_zones is unset; see
+        // Profile::effective_step_s()).
+        if self.planner.plan_zones.is_none() && self.planner.plan_step_s == 0 {
+            errors.push("planner.plan_step_s must be > 0".into());
+        }
+
         // plan_zones constraints: every zone's step_s must be a multiple of zone[0].step_s;
         // no zone may have step_s == 0 or slots == 0.
         if let Some(zones) = &self.planner.plan_zones {
@@ -814,6 +820,26 @@ planner:
         assert!(
             errs.iter().any(|e| e.contains("plan_zones")),
             "zero step_s should be rejected: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_plan_step_s_without_zones() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_step_s: 0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("plan_step_s")),
+            "zero plan_step_s with no plan_zones should be rejected: {errs:?}"
         );
     }
 

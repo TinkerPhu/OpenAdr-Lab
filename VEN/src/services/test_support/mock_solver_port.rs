@@ -19,3 +19,13 @@ impl SolverPort for MockSolverPort {
         self.plan.clone()
     }
 }
+
+/// Always panics — simulates an internal solver bug reaching `spawn_blocking`,
+/// for testing `PlanningService::solve_plan`'s `JoinError` fallback path (R-29).
+pub struct PanickingSolverPort;
+
+impl SolverPort for PanickingSolverPort {
+    fn solve(&self, _req: SolveRequest) -> Plan {
+        panic!("simulated solver panic");
+    }
+}

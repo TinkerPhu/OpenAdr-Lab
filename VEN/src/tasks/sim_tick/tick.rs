@@ -71,7 +71,7 @@ pub(crate) async fn tick_once(
         let base_clear = ctx.inject.base_load_kw.is_some();
 
         let pre_snap = sim_guard
-            .snapshot()
+            .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
             .expect("SimState::snapshot is infallible");
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.

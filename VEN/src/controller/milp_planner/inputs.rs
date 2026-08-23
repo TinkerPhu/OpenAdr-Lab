@@ -66,6 +66,8 @@ pub(crate) fn build_milp_inputs(
         let step_h = zone.step_s as f64 / 3600.0;
         for _ in 0..zone.slots {
             dt_h.push(step_h);
+            // SAFETY: cum_s is seeded with push(0) unconditionally above, so it
+            // always has >= 1 element by the time this loop runs.
             cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
         }
     }

@@ -240,18 +240,6 @@ pub struct AssetLedger {
     pub untracked_energy_kwh: f64, // = total_consumption - tracked (standby, uncontrolled)
 }
 
-/// Flexibility this asset offers right now — computed on demand, not stored (§3.5).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssetFlexibility {
-    pub asset_id: String,
-    pub ts: DateTime<Utc>,
-
-    pub can_increase_consumption_kw: f64,
-    pub can_decrease_consumption_kw: f64,
-    pub can_increase_production_kw: f64,
-    pub can_decrease_production_kw: f64,
-}
-
 /// External data source for weather, irradiation, or CO2 forecasts (§2.11).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalDataSource {

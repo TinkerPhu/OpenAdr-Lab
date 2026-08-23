@@ -26,10 +26,8 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-23 | `AssetMilpContext` trait is defined in the infra ring (`controller/milp_planner/asset_port.rs`) but referenced by domain-level `solver_port.rs` (`SolveRequest` holds `Vec<Box<dyn AssetMilpContext>>`) — a domain→infra type dependency. Move the trait definition into the domain ring; milp_planner and assets/ implement/consume it. | `VEN/src/controller/solver_port.rs`, `VEN/src/controller/milp_planner/asset_port.rs` | Small | Mechanical | 🟡 | Low — architecture correctness, no behavior change |
 | R-25 | `CreateUserRequestBody` (HTTP DTO for POST /requests) is defined in domain-ring `controller/user_request.rs` and imported by services and routes. Move the DTO to routes/ (or an api-types module); the domain function takes domain params. | `VEN/src/controller/user_request.rs`, `VEN/src/routes/hems/`, `VEN/src/services/user_request.rs` | Small | Mechanical | 🟡 | Low — architecture correctness, no behavior change |
 | R-26 | Six task files (poll_programs, poll_reports, poll_events, obligation, state_persist, progress_ticker) repeat the `tokio::time::interval` + `loop { tick().await; … }` scaffold; poll_programs vs poll_reports are 0.80 similar. Extract a shared periodic-spawn helper — also centralizes supervision. | `VEN/src/tasks/` | Small | Low | 🟡 | Low — maintenance/consistency only |
-| R-29 | ~24 `unwrap()/expect()` calls in VEN production paths (milp_interactions.rs ×4, common/mod.rs ×4, services/planning.rs ×3, user_request.rs ×2, routes/hems/sessions.rs ×2, openadr_interface.rs ×2, heater/ev/battery_milp.rs ×2 each, sim_tick/tick.rs, services/hems.rs, milp_planner/inputs.rs ×1 each). Triage each: convert to Result or add a safety-justifying comment. | `VEN/src/` | Small | Low | 🟡 | Medium — real panic/crash risk if any untriaged call sees an unexpected input |
 | R-33 | UI test gaps: `VTN/ui/src/pages/Metrics.tsx` is the only untested page in either UI; `JsonDialog.tsx` is byte-identical in both UIs (50 lines — accept the copy with a twin-note header, or fold into a shared package if one materializes). | `VTN/ui/src/pages/Metrics.tsx`, `*/ui/src/components/JsonDialog.tsx` | Small | Low | 🟡 | Low — test-coverage gap |
 | R-34 | Up to ~112 of 417 behave step definitions look unused (crude static match, false positives likely). Run `behave --dry-run` in the Node1 test container for the authoritative list, then delete dead steps. | `tests/features/steps/` | Small | Low | 🟡 | Low — repo hygiene only |
-| R-58 | Unconfirmed whether `PlanTrigger::CapacityChange`/`Alert` are actually wired to asset-level faults (thermal derate, BMS fault, breaker trip) rather than only tariff/VTN-sourced capacity changes — found during the deviation-scenarios analysis. Needs a verification pass: trace every call site that constructs these variants and confirm at least one covers an asset-originated fault, or extend one to. | `VEN/src/entities/asset.rs`, `VEN/src/services/planning.rs`, `VEN/src/assets/` | Small | Medium (unhandled asset fault may not trigger a replan) | 🟡 | Medium — an unwired asset fault could silently fail to trigger a needed replan |
 
 ## Low priority (🔵) — by topic
 
@@ -93,7 +91,7 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 
 | ID | Description | Gain |
 |----|-------------|------|
-| R-40 | File-size near-cap watch (production lines, 2026-07-16): `services/planning.rs` 473/500, `simulator/mod.rs` 470/500, `milp_planner/results.rs` 415/500, `tasks/poll_events.rs` 162/200, `tasks/planning.rs` ~198/200. Split proactively when next touched; `scripts/audit_file_sizes.py` is the authority. (`state/mod.rs` crossed the cap 2026-08-10 while adding the capacity-limit envelope and was split — its tariff/capacity/alert/SIMPLE/dispatch-window `AppState` accessors moved to `state/grid_signals.rs`, following the existing `state/obligations.rs`/`state/arbiter.rs` split-impl pattern.) | N/A — monitoring only, not an actionable fix until a cap is actually crossed |
+| R-40 | File-size near-cap watch (production lines, 2026-07-16): `simulator/mod.rs` 470/500, `milp_planner/results.rs` 415/500, `tasks/poll_events.rs` 162/200, `tasks/planning.rs` ~198/200. Split proactively when next touched; `scripts/audit_file_sizes.py` is the authority. (`state/mod.rs` crossed the cap 2026-08-10 while adding the capacity-limit envelope and was split — its tariff/capacity/alert/SIMPLE/dispatch-window `AppState` accessors moved to `state/grid_signals.rs`, following the existing `state/obligations.rs`/`state/arbiter.rs` split-impl pattern. `services/planning.rs` crossed the cap 2026-08-23 during R-29's `solve_plan` panic-fallback fix and was split the same way — its `impl PlanningService` block moved to `services/planning/service.rs`.) | N/A — monitoring only, not an actionable fix until a cap is actually crossed |
 
 ---
 
@@ -124,23 +122,15 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 3 items
-rated Medium: R-21, R-29, R-58 (R-22, R-52, R-56, R-24, R-08, R-64, R-63, R-43, and R-31 were
-also on this list and are now resolved — see below). Ordered by dependency, not by ID — work
-top-to-bottom.
+like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 1 item
+rated Medium: R-21 (R-22, R-52, R-56, R-24, R-08, R-64, R-63, R-43, R-31, and R-29 were also
+on this list and are now resolved — see below; R-58 moved to `docs/FEATURE_VISIONS.md`
+2026-08-23 — it turned out to require inventing new fault-input plumbing rather than wiring
+an existing one, so it isn't a buildable debt-fix task today).
 
-**Why this order:**
-
-1. **R-58** — asset-level fault-trigger verification (`entities/asset.rs`,
-   `services/planning.rs`, `assets/`).
-2. **R-29** — the `unwrap()`/`expect()` triage across all listed call sites, including
-   heater/ev/battery_milp.rs (R-08's dispatch-macro refactor turned out to be a pure
-   mechanical dispatch/file-organization change unrelated to error handling, so it did not
-   fold this triage in as originally planned — those 6 asset-file call sites remain part of
-   R-29's own scope, not a separate already-done step).
-3. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
-   workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
-   via FFI, not this codebase). Its task below is an investigation, not a code fix.
+**Why R-21 is last:** its own entry has no concrete fix, only a workaround (root cause is
+allocator/heap-state-dependent inside the native HiGHS library via FFI, not this codebase).
+Its task below is an investigation, not a code fix.
 
 Each item's tasks follow this repo's test-first convention (`test-first` rule, `CLAUDE.md`):
 write the test, confirm it fails, implement until green. Full verification before considering
@@ -148,36 +138,15 @@ an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_lock`, `cargo fmt --ch
 `cargo clippy --all-targets --all-features -- -D warnings`, `scripts/audit_file_sizes.py`;
 update `docs/history/project_journal.md` and remove the item from this register once resolved.
 
-### 1. R-58 — Verify `PlanTrigger::CapacityChange`/`Alert` cover asset-level faults
+### 1. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
 
-- [ ] 1.1 Trace every call site constructing `PlanTrigger::CapacityChange`/`Alert` in
-      `services/planning.rs` and `assets/`.
-- [ ] 1.2 Confirm at least one covers an asset-originated fault (thermal derate, BMS fault,
-      breaker trip), not only tariff/VTN-sourced capacity changes.
-- [ ] 1.3 If none do, write a failing test for the missing case (e.g. a simulated thermal
-      derate should emit `CapacityChange`) and extend the relevant call site.
-- [ ] 1.4 Full verification; remove R-58 from this register.
-
-### 2. R-29 — Triage the `unwrap()`/`expect()` call sites
-
-- [ ] 2.1 List all call sites: `milp_interactions.rs` ×4, `common/mod.rs` ×4,
-      `services/planning.rs` ×3, `user_request.rs` ×2, `routes/hems/sessions.rs` ×2,
-      `openadr_interface.rs` ×2, `heater/ev/battery_milp.rs` ×2 each, `sim_tick/tick.rs` ×1,
-      `services/hems.rs` ×1, `milp_planner/inputs.rs` ×1.
-- [ ] 2.2 For each: convert to `Result` if the panic path is reachable with attacker/user-
-      controlled or otherwise fallible input; otherwise add a one-line safety-justifying
-      comment explaining why it can't panic in practice.
-- [ ] 2.3 Full verification; remove R-29 from this register.
-
-### 3. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
-
-- [ ] 3.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+- [ ] 1.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
       `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 3.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+- [ ] 1.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
       try upgrading in isolation and re-running the full suite several times.
-- [ ] 3.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+- [ ] 1.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
       minimized repro; link it from this entry.
-- [ ] 3.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+- [ ] 1.4 If no upstream fix lands, formalize the existing workaround (e.g. a
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 3.5 This item stays in the register until the crash stops reproducing across several
+- [ ] 1.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
