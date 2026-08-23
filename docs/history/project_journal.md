@@ -10237,3 +10237,33 @@ gap is a missing *exogenous driver*, not an unpolished simulation); why heuristi
 correct permanent tool for base_load rather than second-best simulation; the measurement gap
 (only PV and base_load have feeds — EV/heater/battery do not); and why divergence is
 re-anchored and measured rather than corrected.
+
+## R-42 — De-collide fixed `reportName` in BDD report-submission steps (2026-08-23)
+
+`tests/features/steps/reports_steps.py` submitted every report with the fixed `reportName`
+`"TELEMETRY_USAGE"` (an OpenADR payload-type constant, not a name). The VTN's `report` table
+carries a **global unique index on `report_name`** (`openleadr-rs/migrations/20240826084440_initial_scheme.sql`),
+not scoped to event/client/program even though `report` already has its own `id` primary key.
+`VEN/src/vtn.rs`'s `upsert_report` already anticipates this — on a `409` it looks up the
+existing report *by name* and updates in place — so every scenario/rerun submitting the fixed
+name silently overwrote whatever report previously held it instead of exercising an
+independent submission.
+
+**Fix**: added `_unique_report_name(client_name, base="TELEMETRY-REPORT")` to
+`reports_steps.py`, returning an attributable, upper-cased, still-unique name (e.g.
+`VEN-1-TELEMETRY-REPORT-A3F9C2`) — used in `step_submit_report_ven1` and
+`step_post_valid_report_body`, the two step definitions whose submissions actually reach the
+VTN. `step_post_missing_program_id` was left unchanged: its payload omits `programID`, which
+`OadrReportBody` requires (non-`Option`), so axum's extractor rejects it before it ever
+reaches the VTN's report-name check.
+
+Verified on Node1 (`run_all_tests.sh --e2e`): `ven_reports.feature` and the report-submission
+scenarios in `use_cases.feature`/`ui_use_cases.feature` passed.
+
+**Unrelated flake found during verification**: `ven_planner.feature`'s "PV forecast override
+does not trigger a replan" failed once with a baseline-vs-new `created_at` gap of ~56s — the
+step's own docstring already documents this exact race (a previous scenario's cleanup-triggered
+replan can still be in flight when the next scenario captures its idle baseline) but its fixed
+3s settle buffer isn't enough under Node1's load during a full-suite run. Tagged `@autoretry`,
+matching the existing mitigation used on `reporter_resampling.feature`'s equally load-sensitive
+scenario, rather than lengthening the fixed sleep (still fragile) or weakening the assertion.
