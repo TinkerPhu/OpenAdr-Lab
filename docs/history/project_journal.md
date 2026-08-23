@@ -10467,3 +10467,28 @@ has no equivalent in the backoff-poll shape at all).
 `cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
 passed. R-26 removed from `docs/reference/TECHNICAL_DEBTS.md` — the two files it quantified are
 deduplicated; the remaining four were never a single shared shape to extract.
+
+## R-45 resolved: `put_report` now routes through `submission_outcome()` (2026-08-23)
+
+`routes/reports.rs::put_report` built `ReportSubmissionRecord::accepted`/`rejected` directly
+inline instead of calling the existing `submission_outcome()` helper `post_reports` already
+used — the two Ok/Err record-and-record-submission bodies had drifted into near-duplicates.
+Fixed by having `put_report` call `submission_outcome()` too: since `update_report`'s success
+payload isn't `()` (unlike `upsert_report`'s), built a throwaway `anyhow::Result<()>` mirroring
+the same error text (`format!("{e:#}")`) to fit the helper's existing signature, then matched
+on the real `result` afterward exactly as before for the HTTP response.
+
+**Verification**: `wsl cargo test -j 2` — 1147 passed, 0 failed; `cargo fmt --check`;
+`cargo clippy --all-targets --all-features -- -D warnings` clean; `scripts/audit_file_sizes.py`
+passed. R-45 removed from `docs/reference/TECHNICAL_DEBTS.md`.
+
+## Backlog-hygiene pass summary (2026-08-23)
+
+Worked R-23, R-25, R-26, R-34, R-45 from `docs/reference/TECHNICAL_DEBTS.md` in one session
+(user request, Node1/Node2 unavailable ~26h so all verification stayed on `wsl cargo`/local
+tooling only — no docker builds or E2E). R-23/R-25/R-26/R-45 resolved and merged to `main` one
+at a time (plan → implement → `wsl cargo test`/`fmt`/`clippy`/file-size-audit → rebase →
+fast-forward merge → push), each removed from the register above as it landed. **R-34 skipped**
+— its fix requires `behave --dry-run` in the Node1 test container for an authoritative unused-
+step-definitions list, which needs Node1; left in the register for a session with Node1
+available.

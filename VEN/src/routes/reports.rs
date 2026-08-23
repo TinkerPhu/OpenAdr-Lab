@@ -107,18 +107,28 @@ pub async fn put_report(
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_default();
-    match ctx.vtn.update_report(&id, body).await {
+    let result = ctx.vtn.update_report(&id, body).await;
+    let now = Utc::now();
+    // R-45: route through the same submission_outcome() call-and-record path
+    // post_reports uses, rather than re-deriving accepted/rejected inline.
+    // `result`'s Ok payload isn't `()`, so build a throwaway unit Result that
+    // mirrors the same error text for the helper's signature.
+    let outcome_result: anyhow::Result<()> = match &result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow::anyhow!("{e:#}")),
+    };
+    ctx.state
+        .record_report_submission(submission_outcome(
+            &outcome_result,
+            report_name.clone(),
+            event_id.clone(),
+            client_name,
+            now,
+        ))
+        .await;
+    match result {
         Ok(result) => {
             counter!("reports_sent_total").increment(1);
-            let now = Utc::now();
-            ctx.state
-                .record_report_submission(ReportSubmissionRecord::accepted(
-                    report_name.clone(),
-                    event_id.clone(),
-                    client_name,
-                    now,
-                ))
-                .await;
             record_report_sent(
                 ctx.history.clone(),
                 report_name.unwrap_or_default(),
@@ -130,15 +140,6 @@ pub async fn put_report(
         }
         Err(e) => {
             error!("report update failed: {e:#}");
-            ctx.state
-                .record_report_submission(ReportSubmissionRecord::rejected(
-                    report_name,
-                    event_id,
-                    client_name,
-                    Utc::now(),
-                    format!("{e:#}"),
-                ))
-                .await;
             (
                 axum::http::StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({"error": format!("{e:#}")})),
