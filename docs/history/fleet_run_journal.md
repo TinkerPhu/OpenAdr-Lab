@@ -1222,3 +1222,96 @@ as a valid measurement** — it is a diagnostic of the above, not a result.
 **Not done / left open**: `s1_flat`..`s8_budget` and `s10_overexport` still
 deferred — deliberately held rather than launched into the same solver-timeout
 condition. GB-36 and GB-31/GB-24 remain open as before.
+
+## S-1..S-8 + S-10 against the 20-VEN fleet (2026-08-23/24)
+
+Seven new VENs (ven-14..20) were deployed to Node2, bringing the hand-authored
+fleet from 13 to 20. `experiments/fleet_map.json`, the Node2 docker-compose,
+`experiments/fleet_ev_roster.json` (now 9 EV-bearing VENs: the original 6 plus
+ven-16/18/19), and `docs/guidelines/FLEET_EXPERIMENT_DESIGN.md` were already
+updated as part of that deploy — the only gap found was a stale "(all 13)"
+string in `run_experiment.py`'s `--fleet-map` help text (fixed,
+`b0b805c`). A live smoke test against all 20 VENs via `--fleet-map` confirmed
+the harness needed no other changes, so the plan was simply: run the deferred
+S-1..S-8/S-10 batch (9 scenarios) against the bigger fleet, then S-9.
+
+**Results — fleet totals across 20 VENs:**
+
+| Scenario | Import (kWh) | Export (kWh) | Cost (EUR) | Peak (kW) | Shift vs baseline (kWh) | Warnings | Max violation (EUR) |
+|---|---|---|---|---|---|---|---|
+| S-1 flat (baseline) | 6.556 | 0.094 | 1.297 | 1.064 | -- | 582 | 161505.68 |
+| S-2 price_spike | 6.676 | 0.028 | 0.932 | 3.702 | -0.455 | 582 | 161862.04 |
+| S-3 capacity_limit | 6.375 | 0.000 | 0.638 | 3.600 | -0.126 | 586 | 162199.58 |
+| S-4 alert | 6.022 | 0.000 | 0.482 | 3.600 | +1.382 | 786 | 1000.00 |
+| S-5 dispatch | 11.753 | 0.000 | 1.578 | 7.881 | -1.792 | 864 | 0.38 |
+| S-6 combined | 10.212 | 0.015 | 0.741 | 7.881 | +9.082 | 880 | 10733.86 |
+| S-7 stress | 8.484 | 0.011 | 0.753 | 8.381 | +10.965 | 908 | 132419.81 |
+| S-8 budget | 8.032 | 0.000 | 1.288 | 7.881 | +5.716 | 580 | 0.00 |
+| S-10 overexport | 4.613 | 0.733 | 0.488 | 2.150 | +7.690 | 864 | 0.34 |
+
+Same qualitative shape as the 13-VEN run: S-2's price signal alone barely
+moves the fleet total; capacity/alert/stress scenarios (S-3/S-4/S-6/S-7) show
+real import reduction and real `CAPACITY_VIOLATION`s; S-8's `BUDGET_SHORTFALL:
+4` confirms the direct `/user-requests` action fired against ven-11 as
+designed. `PEAK_PENALTY_EXCEEDED` dominates every scenario's warning count
+(576-864 of each total) — this is ven-9's deliberately-thin `penalty_rules`
+threshold (0.3 kW, below its own no-asset baseline) firing every cycle by
+design, not a regression; the `max_violation_eur` figures inherit the same
+uncapped-penalty-accumulation character noted in the 13-VEN run and should be
+read as "the diagnostics tooling is working," not as literal currency.
+
+**New finding — `TIME_LIMIT` solve status is now pervasive, fleet-wide, and
+unrelated to EV/GB-38.** Every one of these 9 scenarios shows a substantial
+`TIME_LIMIT` share of total solve cycles across the fleet (roughly 30-50%,
+e.g. S-10: 62 of ~154 cycles, S-7: 48 of ~129, S-1: 32 of ~108) — none of
+which use `--ev-session-mode` at all, so this cannot be GB-38's expired-EV-
+deadline mechanism (no EV sessions exist for S-1..S-8/S-10; the routine
+`ev-reset` calls only set SoC, they don't create sessions). This looks like a
+fleet-scale solver-contention effect specific to running 20 VENs' planners
+concurrently rather than 13 — plausibly connected to the tight Node2 memory
+margin flagged when the 7 new VENs were added (idle: ~490MB free, 229MB
+already swapped, before any run started). Not investigated further here —
+flagging for a decision on whether this needs its own backlog item or folds
+into GB-38's scope, and whether a live Node2 `free -h`/`docker stats` capture
+during a run (the capacity check flagged but not yet done) would confirm the
+memory-contention theory.
+
+**Methodology, four incidents during this run:**
+
+1. **Tool-tracking false-kill.** The Bash tool's own background-task tracking
+   reported the first S-1 launch attempt as "killed" while the underlying
+   process actually kept running — but with its stdio apparently torn down,
+   because every subsequent VEN snapshot/recorder-dump call failed silently
+   (`res.stderr` empty, `res.returncode != 0`) even though the same `scp`
+   command worked fine when run manually moments later. Fixed by discarding
+   that run's data and relaunching every subsequent invocation as a fully
+   detached `nohup ... & disown` process, polled via `wmic`/log-tail/`netstat`
+   directly rather than the tool's own background-task tracking.
+2. **A timing false alarm (S-4).** Misread a scenario's snapshot-dir name
+   (which reflects when a window *starts*) as its completion time, and
+   concluded S-4 was stuck ~2h into what should have been a ~60 min
+   paired-baseline run. It wasn't — verified via `netstat` (live ESTABLISHED
+   connections to the VTN and a VEN, i.e. active polling) and the process
+   finished normally shortly after.
+3. **A genuine mid-run network blip.** `WinError 10051` (network unreachable)
+   crashed the process mid-S-5, during `ev-reset`/`get_token` — the laptop's
+   own network dropped briefly and recovered within minutes (`ping`/`curl`
+   confirmed both hosts healthy again immediately after). S-1..S-4's data was
+   already safely snapshotted; S-5's corrupted partial dirs (baseline good,
+   scenario-window data was two stub lines) were discarded and a resume
+   script picked up from S-5 through S-10 cleanly.
+4. **Snapshot/scp overhead is tens of minutes, not seconds.** The gap between
+   one scenario's nominal end and the next one's dirname timestamp grew to
+   over an hour at points later in the run (S-5→S-6) — not a hang, but the
+   time `snapshot()` spends scp-ing every VEN's `history.sqlite` (some VENs,
+   especially ven-1 with real-weather data, exceed 60-70 MB and grow over the
+   run) plus three recorder-table dumps, sequentially, over the network, for
+   20 VENs instead of 13. Confirmed each time by checking for a live,
+   growing result directory (recent mtime, increasing `wc -l` on a
+   `plan-diagnostics.jsonl`) rather than assuming a stall from dirname age.
+
+**Not done / left open**: S-9 (24h diurnal, the GB-38 verification run) is
+scheduled for the next Zurich local midnight — held back from tonight because
+this batch didn't finish before then. The `TIME_LIMIT` fleet-scale finding
+above needs a decision on backlog placement. GB-36 and GB-31/GB-24 remain
+open as before.
