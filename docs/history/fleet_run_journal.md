@@ -1292,16 +1292,49 @@ wall-clock, a MILP solve that only gets a fraction of a core hits the timeout
 before proving optimality — which is exactly `TIME_LIMIT`, and explains why the
 symptom is fleet-wide and scenario-independent rather than tied to any signal.
 
-Suggestive but unconfirmed: all three CPU-hot VENs are among the seven added in
-this scale-up, and all three carry heater assets (ven-14 battery+heater, ven-17
-battery+heater+PV, ven-20 two-stage heater-only). Whether two-stage tank
-modelling specifically inflates solve cost, or those three simply happened to
-land on the same solve tick, is not established by a single capture.
+**And the CPU is going to heaters (GB-40).** The "three hot VENs all have
+heaters" hunch from the capture above was worth measuring properly, so per-VEN
+mean solve time was taken across the whole fleet from one S-7 window
+(`20260824-0312-s7_stress/*-plan-history.json`, 129 solves):
 
-Remedies not attempted here, in rough order of appeal: rebalance VENs across
-hosts (Node1 is 67% idle while Node2 saturates), stagger planner cycles so
-fewer VENs solve on the same tick, or raise `solver_timeout_s` (weakest — it
-treats the symptom and lengthens every cycle).
+| | n | mean solve |
+|---|---|---|
+| VENs with a heater | 10 | **84.2 s** |
+| VENs without | 10 | 18.0 s |
+
+A 4.7× difference, and the **eight slowest VENs in the fleet all carry a
+heater** — ven-5 121.4 s, ven-17 121.3 s, ven-3 120.2 s, ven-15 106.3 s,
+ven-14 105.4 s, ven-18 83.3 s, ven-10 70.2 s, ven-12 67.1 s. The top six sit
+at the `solver_timeout_s: 60` two-phase ceiling (~120 s), i.e. they time out
+nearly every cycle. That is self-reinforcing: a `TIME_LIMIT` solve consumes its
+*entire* budget before giving up, so the slowest VENs are also the most
+expensive, starving the others into timing out too — which is why the symptom
+appeared abruptly at 20 VENs rather than degrading gently.
+
+Heaters are not sufficient on their own, though: ven-2 (heater+PV) at 18.2 s
+and ven-20 (heater-only) at 29.0 s are both fast. The expensive cases pair a
+heater *with* other flexible assets, pointing at the heater's integer
+relay/staging variables interacting with the continuous ones rather than the
+heater formulation in isolation.
+
+**Rebalancing onto Node1 was considered and rejected.** Node1's 67% idle is not
+spare capacity: it runs pihole (network DNS *and* NTP), mosquitto, openvpn,
+influxdb, telegraf, the hargassner-* biomass boiler control, house_coordinator
+and the data-acquisition stack — ~25 containers. Idle headroom on a
+latency-sensitive host is burst capacity, not a harvestable resource, and MILP
+solves are exactly the CPU-saturating batch work that would sit on top of DNS
+and boiler-control latency. The blast radii are not comparable either: losing
+Node2 costs a test run, losing Node1 costs house DNS and heating. It is also
+self-defeating — Node1 serves the NTP these absolute-timestamp measurements
+depend on. Node2 stays the only VEN host.
+
+Remedies, in order of appeal: fix the heater formulation (GB-40 — addresses the
+cause); raise `replan_interval_s` to 600 s (halves fleet solver CPU, 2.9 → 1.5
+expected concurrent solves, costs no VENs and no host changes, but treats load
+rather than formulation); shrink the fleet (works, but the seven new VENs were
+added deliberately to fill asset-mix gaps and per-category KPIs are already
+thin at 20); raise `solver_timeout_s` (weakest — lengthens every cycle and
+makes the contention worse).
 
 **Methodology, four incidents during this run:**
 
