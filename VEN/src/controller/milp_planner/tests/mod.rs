@@ -823,5 +823,6 @@ mod modes;
 mod penalty;
 mod planner;
 mod pv;
+mod solve_cost;
 mod solver;
 mod stale_rates;

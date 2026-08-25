@@ -1317,6 +1317,45 @@ heater *with* other flexible assets, pointing at the heater's integer
 relay/staging variables interacting with the continuous ones rather than the
 heater formulation in isolation.
 
+**Isolated measurement: 561×, and it is a timeout, not a slowdown.** A
+benchmark (`VEN/src/controller/milp_planner/tests/solve_cost.rs`, `#[ignore]`d)
+solves the same ven-3-shaped site on the same 288-slot grid with and without
+the heater, nothing else changed:
+
+| | solve |
+|---|---|
+| without heater | **0.19 s** |
+| with heater | **108.55 s** |
+
+The with-heater figure sits at the two-phase `solver_timeout_s` ceiling — an
+*active* heater doesn't slow the solve, it **times it out**. The fleet's
+gentler 4.7× is an average diluting active heaters with idle ones (a
+`MustNotRun` heater has every `z` fixed to 0, so there is nothing to branch
+on), which also explains fast ven-2/ven-20. Debug build, but immaterial: the
+no-heater case at 0.19 s shows Rust-side constraint building is negligible, so
+the 108.55 s is essentially all HiGHS branch-and-bound.
+
+**This retires GB-38's root cause.** The S-9 re-run's unexplained wrinkle —
+three VENs timing out and never charging their EVs, while ven-1/ven-7 charged
+normally *after the same expired deadline* — was never explained by the
+expired-deadline theory. Heater presence explains all six EV-roster VENs
+exactly:
+
+| VEN | assets | heater | outcome |
+|---|---|---|---|
+| ven-3 | ev, heater, pv | yes | TIME_LIMIT, never charged |
+| ven-5 | ev, heater, pv, battery | yes | TIME_LIMIT, never charged |
+| ven-12 | ev, heater | yes | TIME_LIMIT, never charged |
+| ven-1 | ev, pv, battery | no | charged 7.4 kW |
+| ven-7 | ev, pv | no | charged 1.93 kW |
+| ven-11 | ev | no | blocked by the separate SoC-reset mistake |
+
+Six for six. The EVs never charged because their *planner* never produced a
+plan — not because a deadline had expired. The GB-37 deadline fix was still
+worth making, but it was not the fix for this. Confirmation comes free from the
+S-9 re-run already in flight: it carries the deadline fix, so if the same
+heater VENs still time out, the deadline was never the cause.
+
 **Rebalancing onto Node1 was considered and rejected.** Node1's 67% idle is not
 spare capacity: it runs pihole (network DNS *and* NTP), mosquitto, openvpn,
 influxdb, telegraf, the hargassner-* biomass boiler control, house_coordinator
