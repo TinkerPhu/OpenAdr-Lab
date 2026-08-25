@@ -3,6 +3,10 @@
 name: s1_flat
 description: Flat tariff baseline, no control signals
 tier: realistic
+# This scenario IS the fleet baseline, so run_batch.py gives it
+# --no-paired-baseline -- pairing a baseline against its own baseline window
+# only doubles its wall clock.
+is_baseline: true
 duration_minutes: 30
 actions:
   - at_minute: 0
