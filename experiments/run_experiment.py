@@ -60,14 +60,76 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def get_token(base, client_id, client_secret):
-    r = requests.post(
-        f"{base}/auth/token",
-        data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
-        timeout=10,
+def _with_retry(fn, what, attempts=4, base_delay_s=2.0, sleep=time.sleep):
+    """Retry `fn` through transient network failures with exponential backoff.
+
+    A multi-hour run must survive a brief network drop: a single
+    `WinError 10051` on one `get_token` call killed the whole S-1..S-10 batch
+    mid-S-5, discarding that scenario's window, even though the link recovered
+    within minutes. Only `requests.RequestException` is retried -- anything
+    else is a bug in this script, not a blip, and should surface at once.
+    Re-raises the last failure rather than returning None, so a genuinely dead
+    VTN still stops the run instead of producing an empty result set."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except requests.RequestException as e:
+            last = e
+            if attempt == attempts - 1:
+                break
+            delay = base_delay_s * (2 ** attempt)
+            print(
+                f"WARN: {what} failed ({e}); retrying in {delay:.0f}s "
+                f"({attempt + 1}/{attempts - 1})",
+                flush=True,
+            )
+            sleep(delay)
+    raise last
+
+
+def resolve_start_at(start_at_str, now, grace_minutes=15):
+    """Parse `--start-at`, tolerating a slightly-late launch.
+
+    Returns `(start_at, error)`: a future instant to sleep until, or
+    `(None, None)` to start immediately, or `(None, message)` to abort.
+
+    A timestamp already in the past used to be a hard error, which cost a real
+    24h S-9 launch when the scheduler fired ~4 min after local midnight -- the
+    only recovery was to re-launch by hand without `--start-at`, which is
+    precisely what the grace window now does. Beyond the grace window it still
+    errors: a run anchored to local midnight for solar reasons is not
+    meaningfully anchored if it starts hours off."""
+    if not start_at_str:
+        return None, None
+    start_at = datetime.strptime(start_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    if start_at > now:
+        return start_at, None
+    late_min = int((now - start_at).total_seconds() // 60)
+    if late_min <= grace_minutes:
+        print(
+            f"WARN: --start-at {start_at_str} passed {late_min} min ago (within the "
+            f"{grace_minutes} min grace window) -- starting the scenario window now",
+            flush=True,
+        )
+        return None, None
+    return None, (
+        f"--start-at {start_at_str} is {late_min} min in the past "
+        f"(grace window is {grace_minutes} min)"
     )
-    r.raise_for_status()
-    return r.json()["access_token"]
+
+
+def get_token(base, client_id, client_secret):
+    def _post():
+        r = requests.post(
+            f"{base}/auth/token",
+            data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()["access_token"]
+
+    return _with_retry(_post, f"get_token {base}")
 
 
 def auth(token):
@@ -79,9 +141,12 @@ def iso(dt):
 
 
 def post_event(base, token, body):
-    r = requests.post(f"{base}/events", headers=auth(token), json=body, timeout=10)
-    r.raise_for_status()
-    return r.json()["id"]
+    def _post():
+        r = requests.post(f"{base}/events", headers=auth(token), json=body, timeout=10)
+        r.raise_for_status()
+        return r.json()["id"]
+
+    return _with_retry(_post, f"post_event {base}")
 
 
 # GB-27: attached to the first event of a window (--request-reports, on by
@@ -742,6 +807,13 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
 
 
 def main():
+    # Line-buffer stdout: these runs are launched detached with their output
+    # redirected to a log file, where Python's default block buffering keeps
+    # hours of progress invisible -- during the 24h S-9 run the log stayed
+    # empty end to end, so every health check had to infer liveness from the
+    # process list and open sockets instead of just reading it.
+    sys.stdout.reconfigure(line_buffering=True)
+
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scenario", required=True)
     p.add_argument("--vtn-url", default="http://localhost:8200")
@@ -843,7 +915,9 @@ def main():
              "time (e.g. a diurnal price curve or an export-capacity test that needs to "
              "overlap actual peak PV output), this is how the run is anchored to local "
              "midnight / pre-solar-noon rather than whenever the script happens to be "
-             "launched. Errors immediately if the timestamp is already in the past.",
+             "launched. A timestamp up to 15 min in the past just warns and starts the "
+             "window immediately (a launch that misses the target by a few minutes "
+             "should not fail); further in the past is an error.",
     )
     args = p.parse_args()
 
@@ -854,11 +928,9 @@ def main():
             "reproducing GB-37's original bug: every EV inert for the whole run)"
         )
 
-    start_at = None
-    if args.start_at:
-        start_at = datetime.strptime(args.start_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        if start_at <= datetime.now(timezone.utc):
-            p.error(f"--start-at {args.start_at} is already in the past")
+    start_at, start_at_error = resolve_start_at(args.start_at, datetime.now(timezone.utc))
+    if start_at_error:
+        p.error(start_at_error)
 
     report_descriptors = REPORT_DESCRIPTORS if args.request_reports else None
 
@@ -1060,10 +1132,80 @@ def _self_check_scenario_ev_mode_guard():
     print("_self_check_scenario_ev_mode_guard OK")
 
 
+def _self_check_resolve_start_at():
+    """A launch that misses --start-at by a couple of minutes must still run.
+    Hard-failing on a slightly-past timestamp cost a real 24h S-9 launch (the
+    scheduler fired ~4 min after the target), and re-launching without
+    --start-at is exactly what the grace window does automatically."""
+    now = datetime(2026, 8, 24, 22, 4, 0, tzinfo=timezone.utc)
+
+    # Future timestamp: returned as-is, to be slept until.
+    future = resolve_start_at("2026-08-24T23:00:00Z", now)
+    assert future == (datetime(2026, 8, 24, 23, 0, 0, tzinfo=timezone.utc), None), future
+
+    # The exact case that failed: 4 min late -> start now, no error.
+    assert resolve_start_at("2026-08-24T22:00:00Z", now) == (None, None)
+
+    # Well past the grace window is still a hard error -- a run anchored to
+    # local midnight is meaningless if launched hours later.
+    _, err = resolve_start_at("2026-08-24T18:00:00Z", now)
+    assert err is not None and "244 min in the past" in err, err
+
+    assert resolve_start_at(None, now) == (None, None)
+    print("_self_check_resolve_start_at OK")
+
+
+def _self_check_with_retry():
+    """A transient network blip must not kill a multi-hour run. One killed the
+    S-1..S-10 batch mid-S-5 on a single get_token call (WinError 10051), even
+    though the network recovered within minutes."""
+    slept = []
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise requests.ConnectionError("transient")
+        return "ok"
+
+    assert _with_retry(flaky, "flaky", sleep=slept.append) == "ok"
+    assert calls["n"] == 3, calls
+    assert slept == [2.0, 4.0], slept  # exponential backoff
+
+    # A call that never recovers still raises, rather than silently returning
+    # None and letting the run continue against a dead VTN.
+    def always_fails():
+        raise requests.ConnectionError("down")
+
+    try:
+        _with_retry(always_fails, "always_fails", attempts=2, sleep=slept.append)
+    except requests.ConnectionError:
+        pass
+    else:
+        raise AssertionError("_with_retry must re-raise after the last attempt")
+
+    # A non-network error is a bug, not a blip -- surface it immediately
+    # instead of burning the retry budget on it.
+    def bad_bug():
+        raise ValueError("bug")
+
+    try:
+        _with_retry(bad_bug, "bad_bug", sleep=slept.append)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("_with_retry must not swallow non-RequestException errors")
+
+    print("_self_check_with_retry OK")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
         _self_check_ev_roster_sessions()
         _self_check_resolve_ev_deadline()
         _self_check_scenario_ev_mode_guard()
+        _self_check_resolve_start_at()
+        _self_check_with_retry()
     else:
         main()
