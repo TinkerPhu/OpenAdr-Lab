@@ -1268,13 +1268,40 @@ which use `--ev-session-mode` at all, so this cannot be GB-38's expired-EV-
 deadline mechanism (no EV sessions exist for S-1..S-8/S-10; the routine
 `ev-reset` calls only set SoC, they don't create sessions). This looks like a
 fleet-scale solver-contention effect specific to running 20 VENs' planners
-concurrently rather than 13 — plausibly connected to the tight Node2 memory
-margin flagged when the 7 new VENs were added (idle: ~490MB free, 229MB
-already swapped, before any run started). Not investigated further here —
-flagging for a decision on whether this needs its own backlog item or folds
-into GB-38's scope, and whether a live Node2 `free -h`/`docker stats` capture
-during a run (the capacity check flagged but not yet done) would confirm the
-memory-contention theory.
+concurrently rather than 13.
+
+**Cause identified — Node2 CPU saturation, not memory.** The under-load
+capacity capture was taken during the S-9 run (2026-08-25T18:05Z) and refutes
+the memory-contention theory this entry originally proposed:
+
+| | Node1 (VTN + ven-1..3) | Node2 (ven-4..20) |
+|---|---|---|
+| cores | 4 | 4 |
+| load avg (1m) | 1.41 | 3.64 |
+| CPU idle | 67% | 5-7% |
+| available RAM | 1.9 GiB | 2.0 GiB |
+| swap in/out (`vmstat` si/so) | 0 / 0 | **0 / 0** |
+
+Memory is not the constraint: `si`/`so` are flat zero on both hosts and ~2 GiB
+stays available on each, so the 204-229 MB of resident swap is stale carry-over,
+not active thrashing. **CPU is** — Node2 runs 17 VEN containers on 4 cores at
+85-89% busy with a run queue of 4-5, and at the moment of capture three VENs
+were each burning most of a core simultaneously (ven-14 94.6%, ven-20 93.2%,
+ven-17 86.6%; every other VEN under 12%). Since `solver_timeout_s` is
+wall-clock, a MILP solve that only gets a fraction of a core hits the timeout
+before proving optimality — which is exactly `TIME_LIMIT`, and explains why the
+symptom is fleet-wide and scenario-independent rather than tied to any signal.
+
+Suggestive but unconfirmed: all three CPU-hot VENs are among the seven added in
+this scale-up, and all three carry heater assets (ven-14 battery+heater, ven-17
+battery+heater+PV, ven-20 two-stage heater-only). Whether two-stage tank
+modelling specifically inflates solve cost, or those three simply happened to
+land on the same solve tick, is not established by a single capture.
+
+Remedies not attempted here, in rough order of appeal: rebalance VENs across
+hosts (Node1 is 67% idle while Node2 saturates), stagger planner cycles so
+fewer VENs solve on the same tick, or raise `solver_timeout_s` (weakest — it
+treats the symptom and lengthens every cycle).
 
 **Methodology, four incidents during this run:**
 
