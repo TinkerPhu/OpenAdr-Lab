@@ -1356,6 +1356,76 @@ worth making, but it was not the fix for this. Confirmation comes free from the
 S-9 re-run already in flight: it carries the deadline fix, so if the same
 heater VENs still time out, the deadline was never the cause.
 
+> **Retracted the next day — the paragraph above is wrong.** The S-9 re-run
+> (below) refutes it: the same heater VENs *did* still time out, and charged
+> their EVs to target regardless. A `TIME_LIMIT` solve still yields a feasible
+> incumbent, so it never blocked charging. The "six for six" was coincidence on
+> n=6, and the deadline fix was in fact the thing that made those EVs charge.
+> Kept rather than deleted because the reasoning error is the lesson: a perfect
+> correlation across six samples, with a mechanism that sounded right, still
+> wasn't causation — and the disconfirming test was already running when the
+> claim was committed.
+
+## S-9 re-run #3 (2026-08-24/25): GB-38 closed, GB-40 confirmed, GB-41 opened
+
+Third 24h diurnal run, first one carrying GB-37's `resolve_ev_deadline` +
+`soft_deadline` fixes, against the 20-VEN fleet. All nine EV-roster sessions
+were created with the deadline correctly resolved to the scenario's own end
+(`2026-08-25T22:05:35Z`, `soft=True`), and `reset_ev_soc` verifiably worked —
+every roster EV starts the window at exactly 30.0%.
+
+**GB-38 is closed, and the deadline really was the cause.** ven-3 and ven-5
+charged 30 → 76.6% and 30 → 79.5%, having charged *nothing* in the previous
+run. That is the deadline fix working.
+
+**GB-40 is confirmed, and its consequence is now bounded.** Across 5111 solves:
+
+| | n | solves | TIME_LIMIT |
+|---|---|---|---|
+| heater VENs | 10 | 2332 | **1643 (70%)** |
+| no-heater VENs | 10 | 2779 | 226 (8%) |
+
+A ~9× split — the clearest signal in the fleet dataset, and consistent with the
+561× isolated benchmark. But `TIME_LIMIT` **degrades cost-optimality, not
+function**: ven-3 (209/210 TIME_LIMIT, avg 118.6 s) and ven-5 (203/210, avg
+118.3 s) both charged to target anyway, because a timed-out MILP still returns
+a feasible incumbent. That is the specific point the retracted paragraph got
+wrong.
+
+**GB-41 (new, unexplained).** Four of nine EV VENs charged *nothing* — flat
+30.0% for all 1440 in-window samples:
+
+| VEN | heater | solve_status | avg solve | EV SoC |
+|---|---|---|---|---|
+| ven-1 | no | GAP 138 / OPT 21 / TL 101 | 36.8 s | 30 → **80.0** |
+| ven-3 | yes | TL 209 / INF 1 | 118.6 s | 30 → **76.6** |
+| ven-5 | yes | TL 203 / INF 7 | 118.3 s | 30 → **79.5** |
+| ven-7 | no | GAP 213 / OPT 74 | 4.3 s | 30 → **78.7** |
+| ven-19 | no | GAP 105 / OPT 33 / TL 112 | 50.3 s | 30 → **78.8** |
+| ven-11 | no | **OPT 291 (all)** | **0.21 s** | 30 → 30 |
+| ven-12 | yes | TL 240 (all) | 64.3 s | 30 → 30 |
+| ven-16 | no | GAP 148 / OPT 117 / TL 9 | 19.8 s | 30 → 30 |
+| ven-18 | yes | GAP 57 / TL 178 / INF 1 | 70.4 s | 30 → 30 |
+
+Neither known problem explains it. ven-11 solved **OPTIMAL on every one of 291
+cycles in 210 ms** and still never charged; ven-3/ven-5 timed out constantly and
+charged fine. So it is not solver cost, and not the deadline. Two of the four
+have heaters and two do not. A PV correlation is tempting (four of five
+chargers have PV, three of four failures lack it) but ven-18 has PV and failed,
+so it is already broken at n=9 — recorded as an observation, not a theory.
+GB-41 tracks it; the first step is separating planner from dispatcher (did those
+plans ever contain non-zero `p_ev_kw`?).
+
+**Methodology note — in-window filtering is not optional.** The first pass at
+these SoC deltas read each VEN's whole `tick_samples` table and produced
+nonsense (ven-16 "40 → 30", i.e. apparently discharging; ven-1 "+40" instead of
++50), because the snapshot databases carry weeks of history from before the run
+— ven-1's goes back to 07-11. Only after filtering to `[started_at,
+started_at+duration)` did every VEN correctly show the 30.0% reset value at
+t=0, which is itself the check that the filter is right. Any future per-VEN
+history analysis must filter by the run window first and verify that the
+starting values match the known reset state.
+
 **Rebalancing onto Node1 was considered and rejected.** Node1's 67% idle is not
 spare capacity: it runs pihole (network DNS *and* NTP), mosquitto, openvpn,
 influxdb, telegraf, the hargassner-* biomass boiler control, house_coordinator
