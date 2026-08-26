@@ -100,38 +100,6 @@ fn bench_profile(with_heater: bool) -> Profile {
     }
 }
 
-/// One solve of the heater case at a given optimality gap. Returns
-/// (wall seconds, solve status, objective).
-fn solve_at_gap(mip_gap_target: f64) -> (f64, crate::entities::plan::SolveStatus, f64) {
-    let now = fixed_now();
-    let mut profile = bench_profile(true);
-    profile.planner.mip_gap_target = mip_gap_target;
-    let mut sim = make_snap_from_profile(&profile);
-    set_heater_power(&mut sim, 6.0);
-    let tariffs = make_tariffs(0.25, 0.08, 300.0);
-
-    let started = Instant::now();
-    let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
-        &tariffs,
-        &no_capacity(),
-        &profile,
-        now,
-        crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
-        None,
-        None,
-    );
-    (
-        started.elapsed().as_secs_f64(),
-        plan.solve_status,
-        plan.objective_eur,
-    )
-}
-
 fn time_one_solve(with_heater: bool) -> (f64, usize) {
     let now = fixed_now();
     let profile = bench_profile(with_heater);
@@ -193,58 +161,171 @@ fn bench_heater_solve_cost() {
     );
 }
 
-/// GB-40: what does loosening the optimality gap actually buy, and cost?
+/// One decomposed solve at a given gap: phase 1 and phase 2 run separately so
+/// each phase's own termination reason is visible.
 ///
-/// Solves the heater case at 2 / 5 / 10%, holding `solver_timeout_s` at its 60 s
-/// default so the gap is the only variable. Two things are being measured:
+/// `solve_milp_two_phase` returns the *winning* solution, which is phase 2's
+/// whenever phase 2 succeeds — so a `Plan`'s `solve_status` reports the friction
+/// phase only. That collapses the two, and the first version of this benchmark
+/// presented it as if it characterised the whole solve. It does not: phase 1 is
+/// where cost optimality is decided, so it is the phase whose gap behaviour
+/// actually matters.
+struct PhaseRun {
+    p1_s: f64,
+    p1_status: good_lp::solvers::SolutionStatus,
+    p2_s: f64,
+    p2_status: Option<good_lp::solvers::SolutionStatus>,
+    objective_eur: f64,
+}
+
+fn solve_phases_at_gap(mip_gap_target: f64) -> PhaseRun {
+    let now = fixed_now();
+    let mut profile = bench_profile(true);
+    profile.planner.mip_gap_target = mip_gap_target;
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let cap = no_capacity();
+
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &sim, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let timeout = profile.planner.solver_timeout_s as f64;
+
+    let t = Instant::now();
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 must be feasible");
+    let p1_s = t.elapsed().as_secs_f64();
+
+    let t = Instant::now();
+    let p2 = solve_phase2(
+        &inputs,
+        &p1w,
+        &p2w,
+        p1.objective_eur,
+        profile.planner.phase2_epsilon_eur,
+        &p1,
+        &ctxs,
+        timeout,
+    );
+    let p2_s = t.elapsed().as_secs_f64();
+
+    let (p2_status, objective_eur) = match &p2 {
+        Ok((sol, _friction)) => (Some(sol.status), sol.objective_eur),
+        Err(_) => (None, p1.objective_eur),
+    };
+
+    PhaseRun {
+        p1_s,
+        p1_status: p1.status,
+        p2_s,
+        p2_status,
+        objective_eur,
+    }
+}
+
+/// GB-40: where does the optimality gap actually start to bind, and what does it cost?
 ///
-/// - `solve_status` — the mechanism. Raising the gap should convert `TimeLimit`
-///   (ran out of clock, quality unknown) into `GapLimit` (reached the target and
-///   stopped, quality bounded by construction).
-/// - `objective_eur` against the 2% run — the price. Comparing to 2% rather than
-///   to a true optimum is deliberate: 2% is what production runs today, so this
-///   answers the actual question ("what does loosening from here cost"), and it
-///   doesn't presuppose a reference optimum that may itself be unreachable
-///   within any sane time budget.
+/// The first sweep (2/5/10%) found no time saved and every solve terminating on
+/// the clock. Two follow-ups, both prompted by the right question — could the
+/// improvement sit at a value we skipped?
 ///
-/// The achieved gap is not observable through `good_lp` (see
-/// `PlannerConfig::mip_gap_target`), which is why this has to be measured
-/// offline here rather than read off production telemetry.
+/// 1. **Sweep much looser.** If 10% never binds, the achieved gap exceeds 10%,
+///    and a *tighter* target is strictly harder on both counts (smaller gap to
+///    close, less pruning to close it with). So intermediate values cannot help.
+///    The informative direction is the other one: keep loosening until the gap
+///    binds, and the crossover brackets the achieved gap — which is otherwise
+///    unobservable through `good_lp` (R-65 in `docs/reference/TECHNICAL_DEBTS.md`).
+///    That converts a qualitative "the relaxation is weak" into a number.
+/// 2. **Repeat each point.** HiGHS should be deterministic for identical input,
+///    so identical objectives across repeats would establish that the objective
+///    differences between gaps are a real consequence of the setting rather than
+///    search noise — a distinction the first sweep could not make.
 #[test]
 #[ignore = "GB-40 benchmark: production-sized solves, run explicitly with --ignored --nocapture"]
 fn bench_mip_gap_sweep() {
-    let _ = solve_at_gap(0.02); // warm-up: keep solver/allocator start-up out of the first figure
+    const REPEATS: usize = 3;
+    let gaps = [0.02_f64, 0.05, 0.10, 0.20, 0.35, 0.50];
 
-    let gaps = [0.02_f64, 0.05, 0.10];
-    let results: Vec<_> = gaps.iter().map(|&g| (g, solve_at_gap(g))).collect();
-    let baseline_obj = results[0].1 .2;
+    let _ = solve_phases_at_gap(0.02); // warm-up, discarded
 
-    println!("\n=== GB-40: MIP gap sweep (heater case, solver_timeout_s=60) ===");
     println!(
-        "  {:>6}  {:>9}  {:>12}  {:>14}  {:>10}",
-        "gap", "wall s", "status", "objective_eur", "vs 2%"
+        "\n=== GB-40: MIP gap sweep (heater case, solver_timeout_s=60, {REPEATS} repeats) ==="
     );
-    for (gap, (secs, status, obj)) in &results {
-        let delta = if baseline_obj.abs() > 1e-9 {
-            format!("{:+.2}%", (obj - baseline_obj) / baseline_obj.abs() * 100.0)
+    println!(
+        "  {:>5}  {:>9} {:>10}  {:>9} {:>10}  {:>8}  {:>13}  {:>9}",
+        "gap",
+        "phase1 s",
+        "p1 status",
+        "phase2 s",
+        "p2 status",
+        "total s",
+        "objective_eur",
+        "repeats"
+    );
+
+    let mut baseline: Option<f64> = None;
+    for &gap in &gaps {
+        let runs: Vec<PhaseRun> = (0..REPEATS).map(|_| solve_phases_at_gap(gap)).collect();
+
+        // Median wall time across repeats; objectives are checked for agreement
+        // rather than averaged — if they differ, that is itself the finding.
+        let mut p1_times: Vec<f64> = runs.iter().map(|r| r.p1_s).collect();
+        let mut p2_times: Vec<f64> = runs.iter().map(|r| r.p2_s).collect();
+        p1_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        p2_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p1_med = p1_times[REPEATS / 2];
+        let p2_med = p2_times[REPEATS / 2];
+
+        let obj = runs[0].objective_eur;
+        let identical = runs.iter().all(|r| {
+            (r.objective_eur - obj).abs() < 1e-9
+                && format!("{:?}", r.p1_status) == format!("{:?}", runs[0].p1_status)
+        });
+        let spread = if identical {
+            "identical".to_string()
         } else {
-            "n/a".to_string()
+            let lo = runs
+                .iter()
+                .map(|r| r.objective_eur)
+                .fold(f64::MAX, f64::min);
+            let hi = runs
+                .iter()
+                .map(|r| r.objective_eur)
+                .fold(f64::MIN, f64::max);
+            format!("VARIES {lo:.3}-{hi:.3}")
         };
+
+        if baseline.is_none() {
+            baseline = Some(obj);
+        }
+        let delta = baseline
+            .filter(|b| b.abs() > 1e-9)
+            .map(|b| format!("{:+.2}%", (obj - b) / b.abs() * 100.0))
+            .unwrap_or_else(|| "n/a".into());
+
         println!(
-            "  {:>5.0}%  {:>9.2}  {:>12}  {:>14.4}  {:>10}",
+            "  {:>4.0}%  {:>9.2} {:>10}  {:>9.2} {:>10}  {:>8.2}  {:>13.4}  {:>9}   {}",
             gap * 100.0,
-            secs,
-            format!("{status:?}"),
+            p1_med,
+            format!("{:?}", runs[0].p1_status),
+            p2_med,
+            runs[0]
+                .p2_status
+                .map(|s| format!("{s:?}"))
+                .unwrap_or_else(|| "Err".into()),
+            p1_med + p2_med,
             obj,
+            spread,
             delta
         );
     }
-    println!();
+    println!(
+        "\n  A phase reporting GapLimit stopped on the gap; TimeLimit means it ran out of clock.\n\
+           The loosest gap that still reports TimeLimit is a lower bound on the achieved gap.\n"
+    );
 
-    // No assertion on times or objectives: this is a measurement, and any
-    // threshold would fail on a slower machine for reasons unrelated to the
-    // gap. The one invariant worth holding is that the plumbing works at all --
-    // if the configured gap never reached the solver, every row would be
-    // identical, which is exactly the bug this change fixes.
-    assert_eq!(results.len(), gaps.len());
+    // Measurement, not a threshold: any assertion on times or objectives would
+    // fail on a slower machine for reasons unrelated to the formulation.
+    assert_eq!(gaps.len(), 6);
 }
