@@ -35,6 +35,7 @@ pub(crate) async fn tick_once(
     base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
     history: Option<Arc<dyn HistoryPort>>,
+    comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -49,6 +50,7 @@ pub(crate) async fn tick_once(
         pv_measurement_enabled,
         base_load_measurement.as_ref(),
         base_load_measurement_enabled,
+        comms_loss_config,
     )
     .await;
 
@@ -59,16 +61,12 @@ pub(crate) async fn tick_once(
         tick_forecast,
         tick_capacity_curves,
         cleared_fields,
-        pv_clear,
-        base_clear,
         absorbed_kwh_by_asset,
         (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
     ) = {
         let mut sim_guard = sim.lock().await;
 
         let cleared_fields = super::helpers::apply_sim_injections(&ctx.inject, &mut sim_guard);
-        let pv_clear = ctx.inject.pv_irradiance.is_some();
-        let base_clear = ctx.inject.base_load_kw.is_some();
 
         let pre_snap = sim_guard
             .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
@@ -104,14 +102,17 @@ pub(crate) async fn tick_once(
             live_base_load_kw,
             ctx.deviation_arbiter_enabled,
             ctx.incumbent_lever.as_deref(),
+            ctx.comms_loss,
         );
 
         let resolved_pv_generation_limit = super::helpers::resolve_pv_limit(
+            &pre_snap,
             ctx.plan_snap.as_ref(),
             &ctx.capacity_snap,
             &ctx.inject,
             now,
             outcome.pv_generation_limit_tighten_kw,
+            ctx.comms_loss,
         );
 
         let (heater_emergency_curtail, heater_emergency_absorb) =
@@ -165,8 +166,6 @@ pub(crate) async fn tick_once(
             tick_forecast,
             tick_capacity_curves,
             cleared_fields,
-            pv_clear,
-            base_clear,
             absorbed_kwh_by_asset,
             (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
         )
@@ -182,7 +181,8 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    super::post_lock::clear_inject_fields(&state, cleared_fields, pv_clear, base_clear).await;
+    super::post_lock::clear_inject_fields(&state, cleared_fields, ctx.pv_clear, ctx.base_clear)
+        .await;
 
     let snap_for_reports = tick_sim_snap.clone();
     let _sim_snapshot = super::publish::publish_sim_tick_result(

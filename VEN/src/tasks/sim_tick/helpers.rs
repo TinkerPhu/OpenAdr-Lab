@@ -10,7 +10,8 @@ use crate::entities::plan::Plan;
 use crate::entities::sim_inject::SimInjectState;
 use crate::simulator::SimState;
 
-use super::dispatch_override::apply_dispatch_override;
+use super::context::CommsLossState;
+use super::dispatch_override::{apply_comms_loss_clamp, apply_dispatch_override};
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
@@ -68,23 +69,35 @@ pub(crate) fn effective_capacity(
     effective_capacity
 }
 
-/// PHASE 1b: resolve the PV generation limit from capacity/plan/arbiter/manual
-/// sources, composing `effective_capacity` above with
-/// `controller::dispatcher::resolve_pv_generation_limit_kw`.
+/// PHASE 1b: resolve the PV generation limit from capacity/plan/arbiter/manual/
+/// comms-loss sources, composing `effective_capacity` above with
+/// `controller::dispatcher::resolve_pv_generation_limit_kw`. `sim_snap` is only
+/// needed to read the PV asset's `inverter_max_kw` ceiling for the comms-loss
+/// candidate (R-59).
 pub(crate) fn resolve_pv_limit(
+    sim_snap: &SimSnapshot,
     plan_snap: Option<&Plan>,
     capacity_snap: &OadrCapacityState,
     inject: &SimInjectState,
     now: DateTime<Utc>,
     arbiter_tighten_kw: Option<f64>,
+    comms_loss: Option<CommsLossState>,
 ) -> controller::dispatcher::ResolvedPvGenerationLimit {
     let capacity = effective_capacity(capacity_snap, inject);
+    let comms_loss_limit_kw = comms_loss.filter(|c| c.active).and_then(|c| {
+        sim_snap
+            .assets
+            .get(crate::ids::ASSET_PV)
+            .and_then(|s| s.val("inverter_max_kw"))
+            .map(|max_kw| c.max_power_pct * max_kw)
+    });
     controller::dispatcher::resolve_pv_generation_limit_kw(
         plan_snap,
         &capacity,
         now,
         arbiter_tighten_kw,
         inject.pv_generation_limit_kw,
+        comms_loss_limit_kw,
     )
 }
 
@@ -114,6 +127,7 @@ pub(crate) fn build_tick_setpoints(
     live_base_load_kw: Option<f64>,
     deviation_arbiter_enabled: bool,
     incumbent_lever: Option<&str>,
+    comms_loss: Option<CommsLossState>,
 ) -> controller::arbiter::ArbiterOutcome {
     let base_sp = match plan_snap {
         Some(plan) => {
@@ -170,5 +184,6 @@ pub(crate) fn build_tick_setpoints(
         alert_windows,
         live_pv_kw,
     );
+    apply_comms_loss_clamp(&mut outcome.setpoints, sim_snap, comms_loss);
     outcome
 }

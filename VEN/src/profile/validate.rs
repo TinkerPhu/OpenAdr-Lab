@@ -58,6 +58,19 @@ impl Profile {
             ));
         }
 
+        // Comms-loss curtailment bounds (R-59) — only when the profile opts in.
+        if let Some(cl) = &self.comms_loss {
+            if !(cl.max_power_pct > 0.0 && cl.max_power_pct <= 1.0) {
+                errors.push(format!(
+                    "comms_loss.max_power_pct must be in (0.0, 1.0], got {}",
+                    cl.max_power_pct
+                ));
+            }
+            if cl.debounce_s == 0 {
+                errors.push("comms_loss.debounce_s must be > 0".into());
+            }
+        }
+
         // Per-asset numeric bounds.
         for asset in &self.assets {
             match asset {
@@ -1035,5 +1048,61 @@ polling:
         assert!(errors
             .iter()
             .any(|e| e.contains("polling.startup_jitter_random_max_pct")));
+    }
+
+    // ── comms_loss bounds (R-59) ──────────────────────────────────────────
+
+    #[test]
+    fn validate_passes_when_comms_loss_absent() {
+        let p = make_valid_profile();
+        assert!(p.comms_loss.is_none());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_passes_for_valid_comms_loss_config() {
+        let mut p = make_valid_profile();
+        p.comms_loss = Some(crate::profile::comms_loss::CommsLossConfig {
+            max_power_pct: 0.7,
+            debounce_s: 60,
+        });
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_comms_loss_max_power_pct_zero() {
+        let mut p = make_valid_profile();
+        p.comms_loss = Some(crate::profile::comms_loss::CommsLossConfig {
+            max_power_pct: 0.0,
+            debounce_s: 60,
+        });
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("comms_loss.max_power_pct")));
+    }
+
+    #[test]
+    fn validate_rejects_comms_loss_max_power_pct_above_one() {
+        let mut p = make_valid_profile();
+        p.comms_loss = Some(crate::profile::comms_loss::CommsLossConfig {
+            max_power_pct: 1.5,
+            debounce_s: 60,
+        });
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("comms_loss.max_power_pct")));
+    }
+
+    #[test]
+    fn validate_rejects_comms_loss_debounce_s_zero() {
+        let mut p = make_valid_profile();
+        p.comms_loss = Some(crate::profile::comms_loss::CommsLossConfig {
+            max_power_pct: 0.7,
+            debounce_s: 0,
+        });
+        let errors = p.validate().unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("comms_loss.debounce_s")));
     }
 }

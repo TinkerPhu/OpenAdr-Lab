@@ -55,6 +55,13 @@ measurements:
   pv_enabled: true
   base_load_enabled: true
 
+# VTN-communication-loss power curtailment (R-59). Short debounce (10s) so
+# the resilience @resilience scenarios' VTN-outage windows (already 30s+)
+# comfortably clear it without needing a dedicated long-outage scenario.
+comms_loss:
+  max_power_pct: 0.7
+  debounce_s: 10
+
 packets:
   - asset: ev
     target_soc: 0.80

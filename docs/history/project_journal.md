@@ -10492,3 +10492,72 @@ fast-forward merge → push), each removed from the register above as it landed.
 — its fix requires `behave --dry-run` in the Node1 test container for an authoritative unused-
 step-definitions list, which needs Node1; left in the register for a session with Node1
 available.
+
+## R-59 resolved: VTN-comms-loss power curtailment fail-safe (2026-08-26)
+
+No documented fail-safe existed for VTN communication loss — assets just held their last
+commanded setpoint by accident, not by design. Market practice for grid-connected inverters is
+to curtail to a safe default (commonly ~70% of max inverter power) once a comms interruption is
+confirmed; this closes that gap for PV, EV, heater, and battery, scoped to VTN comms-loss only
+(the debt's "or to an asset controller" half stays open — `docs/FEATURE_VISIONS.md` R-58 already
+found no fault/health signal anywhere in the codebase to hook such a thing onto, a separate,
+currently-blocked gap).
+
+**Why dispatch-tick, not the planner**: `replan_interval_s` defaults to 300s vs. `tick_s`'s 1s —
+a MILP-level constraint would react up to ~300x slower, the wrong tier for a safety fail-safe.
+Every part of this lands in the per-tick dispatch layer instead.
+
+**New profile section** (`profile/comms_loss.rs`, mirroring the existing `weather_pv`/
+`measurements` opt-in idiom): `comms_loss: { max_power_pct: 0.7, debounce_s: 60 }` (both
+optional, those are the defaults). Absent by default — every existing profile and E2E scenario
+is unaffected unless it explicitly adds the section; only `VEN/profiles/test.yaml` opts in
+(10s debounce, for the new resilience scenario below).
+
+**Debounce derived from existing state, not new tracking**: `VtnConnectionStatus::comms_lost_for`
+(`state/connection.rs`) computes "unreachable for N seconds" from the already-tracked
+`connected`/`last_success_ts` fields — no new persisted state, and a `None` last_success_ts
+(cold start) is treated as "not yet debounced" rather than instant comms-loss. Resolved once per
+tick in `tasks/sim_tick/context.rs`'s `CommsLossState { active, max_power_pct }`, threaded as a
+plain parameter from `main.rs` (mirrors how `weather_pv_params` is threaded — profile config is
+read-only, resolved at startup, not stored on `AppState`).
+
+**PV**: new `PvCurtailmentSource::CommsLoss` variant, slotted into the existing
+`resolve_pv_generation_limit_kw` tightest-wins resolver as a fifth candidate — listed last so it
+wins exact ties over `Manual` (a safety fail-safe should win against a possibly-stale manual
+override left over from before the outage). No new resolver shape needed; the "any source can
+tighten, never loosen" machinery already generalized cleanly.
+
+**EV/heater/battery**: new `apply_comms_loss_clamp` (`tasks/sim_tick/dispatch_override.rs`),
+sibling to the existing `apply_dispatch_override`, run last in `build_tick_setpoints`'s pipeline
+(comms-loss outranks a VTN-instructed dispatch window — if the VTN can't be reached, any window
+it set is stale). Battery is capped symmetrically on both charge and discharge, matching the
+"one generic knob for all assets" design rather than special-casing bidirectional assets. Per-
+asset ceilings (`max_charge_kw`/`max_discharge_kw`/`max_kw`) were already exposed via
+`state_values()`/`AssetSnapshot.values` — no new snapshot plumbing needed.
+
+**UI transparency**: PV is covered for free (the `curtailment_source` numeric encoding already
+flows to history/dashboard). EV/heater/battery had no equivalent signal, so `/health` and
+`/vtn/status` gained a `comms_loss_active: bool` flag. Architecture note: `routes/` may not
+import `crate::profile` types (AB-06, `tests/architecture.rs`) — `AppCtx` carries only the
+primitive `comms_loss_debounce_s: Option<u64>`, not the full `CommsLossConfig`, so the routes
+layer never needs to reach into `profile::`.
+
+**BDD**: new scenario in `tests/features/ven_resilience.feature` (`@resilience`) stops the VTN
+container, waits past the test profile's 10s debounce, asserts `/health`'s new flag, then
+restarts and asserts it clears — reuses the exact `"test-vtn" service is stopped/restarted` step
+defs the existing backoff-recovery scenario already uses. New generic step
+`the VEN health response field "{field}" is "{expected}"` added to `ven_health_steps.py`.
+**Verification deferred to Node1** (unavailable in this session) — not run here.
+
+**Side effect**: `tasks/sim_tick/tick.rs` landed exactly at its 200-line cap — `pv_clear`/
+`base_clear` were hoisted from local `tick_once` bindings into `TickContext` fields (computed
+once in `resolve_tick_context` instead of recomputed as two local `let`s), freeing the two lines
+needed for the new `comms_loss_config` parameter and its two call-site threads. Added to the
+R-40 watch-list.
+
+**Verification**: `wsl cargo test -j 2` — 1176 passed, 0 failed (1147 + 29 new); `cargo fmt
+--check`; `cargo clippy --all-targets --all-features -- -D warnings` clean;
+`scripts/audit_file_sizes.py` passed; the `routes_must_not_import_profile` architecture test
+(`tests/architecture.rs`) passed after moving `AppCtx` to the primitive `debounce_s` field;
+confirmed no production profile (only `test.yaml`) has a `comms_loss:` section, so this is a
+pure opt-in addition. R-59 removed from `docs/reference/TECHNICAL_DEBTS.md`.
