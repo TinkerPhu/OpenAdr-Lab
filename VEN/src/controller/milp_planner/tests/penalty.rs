@@ -26,6 +26,7 @@ fn base_inputs(n: usize) -> MilpInputs {
         p_exp_max_cont_kw: vec![10.0; n],
         pen_imp_eur_kwh: 0.0,
         pen_exp_eur_kwh: 0.0,
+        mip_gap_target: 0.02,
         penalty_rules: vec![],
         e_bat_nom_kwh: None,
         e_bat_init_kwh: None,
