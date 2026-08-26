@@ -14,6 +14,7 @@ import {
   useArbiterSettings,
   usePutArbiterSettings,
   useArbiterDiagnostics,
+  useSim,
 } from "../api/hooks";
 import { EvCard } from "../components/devices/EvCard";
 import { HeaterCard } from "../components/devices/HeaterCard";
@@ -22,9 +23,11 @@ import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
 import { ArbiterSettingsCard } from "../components/devices/ArbiterSettingsCard";
 import { BaselineOverrideCard } from "../components/devices/BaselineOverrideCard";
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
+import { AssetSpecsTable } from "../components/devices/AssetSpecsTable";
 
 export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
+  const { data: sim } = useSim();
   const { data: evSettings } = useEvSettings();
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
@@ -52,6 +55,9 @@ export function DevicesPage() {
       </Typography>
       {isLoading && <CircularProgress />}
       {isError && <Alert severity="error">{String(error)}</Alert>}
+      <Box sx={{ mb: 3 }}>
+        <AssetSpecsTable sim={sim} />
+      </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
           <EvCard

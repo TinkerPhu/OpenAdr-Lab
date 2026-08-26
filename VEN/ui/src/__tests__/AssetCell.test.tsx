@@ -120,14 +120,12 @@ describe("AssetCell — rendering", () => {
     expect(attr).toBe("null");
   });
 
-  it("renders the specs line when the summary carries nameplate values", () => {
+  it("never renders a specs line, even when the summary carries nameplate values", () => {
+    // Nameplate specs (capacity/max import/export) moved to the Devices tab's
+    // AssetSpecsTable — the Controller tab's variable-height specs line used
+    // to desync AssetLeftSection's height from AssetMidSection's chart height
+    // across asset cells, breaking diagram alignment.
     renderCell([], { maxImportKw: 7.4, capacityKwh: 60 });
-    expect(screen.getByTestId("asset-specs-ev").textContent).toContain("60.0 kWh");
-    expect(screen.getByTestId("asset-specs-ev").textContent).toContain("max in");
-  });
-
-  it("omits the specs line when the summary has no nameplate values", () => {
-    renderCell([]);
     expect(screen.queryByTestId("asset-specs-ev")).toBeNull();
   });
 });
