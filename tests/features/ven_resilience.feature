@@ -79,5 +79,8 @@ Feature: Failure Recovery
     Then the VEN health response field "comms_loss_active" is "true"
     When the "test-vtn" service is restarted
     And I wait for the "test-vtn" service to be healthy
-    And I GET the VEN "/health" endpoint
-    Then the VEN health response field "comms_loss_active" is "false"
+    # A wide poll window, not a same-instant GET: the poll loop may still be
+    # mid-sleep in a previously-computed backoff delay right after the VTN
+    # container's own healthcheck passes (same latency class the
+    # "VEN backs off exponentially" scenario above documents).
+    Then the VEN health response field "comms_loss_active" becomes "false" within 60 seconds
