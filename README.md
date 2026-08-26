@@ -197,6 +197,12 @@ derived from it:
 
 ![VEN weather tab](docs/images/ven-weather.png)
 
+**Capacity Forecast** — the sustained-commitment power/duration/energy envelope: how far
+the site's max import/export commitment can be sustained over time, distinct from the
+Dashboard's instantaneous Site Headroom:
+
+![VEN capacity forecast tab](docs/images/ven-capacity-forecast.png)
+
 **VTN Operator UI** — the enrolled VENs of the fleet, and the events an operator dispatches:
 
 | VENs | Events |
