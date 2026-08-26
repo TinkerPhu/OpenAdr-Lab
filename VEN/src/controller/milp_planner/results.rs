@@ -121,7 +121,7 @@ pub(crate) fn fallback_plan(
         solve_status: SolveStatus::Infeasible,
         penalty_rules_active,
         solver_ms: None,
-        mip_gap_target: Some(MIP_GAP_TARGET),
+        mip_gap_target: Some(planner.mip_gap_target),
     }
 }
 
@@ -515,6 +515,6 @@ pub(crate) fn translate_to_plan(
         solve_status: map_solve_status(sol.status),
         penalty_rules_active,
         solver_ms: None,
-        mip_gap_target: Some(MIP_GAP_TARGET),
+        mip_gap_target: Some(planner.mip_gap_target),
     }
 }

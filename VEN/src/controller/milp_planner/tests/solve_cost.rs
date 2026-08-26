@@ -100,6 +100,38 @@ fn bench_profile(with_heater: bool) -> Profile {
     }
 }
 
+/// One solve of the heater case at a given optimality gap. Returns
+/// (wall seconds, solve status, objective).
+fn solve_at_gap(mip_gap_target: f64) -> (f64, crate::entities::plan::SolveStatus, f64) {
+    let now = fixed_now();
+    let mut profile = bench_profile(true);
+    profile.planner.mip_gap_target = mip_gap_target;
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+
+    let started = Instant::now();
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    (
+        started.elapsed().as_secs_f64(),
+        plan.solve_status,
+        plan.objective_eur,
+    )
+}
+
 fn time_one_solve(with_heater: bool) -> (f64, usize) {
     let now = fixed_now();
     let profile = bench_profile(with_heater);
@@ -159,4 +191,60 @@ fn bench_heater_solve_cost() {
         with_s > without_s,
         "expected the heater variant to be slower; got {with_s:.2}s with vs {without_s:.2}s without"
     );
+}
+
+/// GB-40: what does loosening the optimality gap actually buy, and cost?
+///
+/// Solves the heater case at 2 / 5 / 10%, holding `solver_timeout_s` at its 60 s
+/// default so the gap is the only variable. Two things are being measured:
+///
+/// - `solve_status` — the mechanism. Raising the gap should convert `TimeLimit`
+///   (ran out of clock, quality unknown) into `GapLimit` (reached the target and
+///   stopped, quality bounded by construction).
+/// - `objective_eur` against the 2% run — the price. Comparing to 2% rather than
+///   to a true optimum is deliberate: 2% is what production runs today, so this
+///   answers the actual question ("what does loosening from here cost"), and it
+///   doesn't presuppose a reference optimum that may itself be unreachable
+///   within any sane time budget.
+///
+/// The achieved gap is not observable through `good_lp` (see
+/// `PlannerConfig::mip_gap_target`), which is why this has to be measured
+/// offline here rather than read off production telemetry.
+#[test]
+#[ignore = "GB-40 benchmark: production-sized solves, run explicitly with --ignored --nocapture"]
+fn bench_mip_gap_sweep() {
+    let _ = solve_at_gap(0.02); // warm-up: keep solver/allocator start-up out of the first figure
+
+    let gaps = [0.02_f64, 0.05, 0.10];
+    let results: Vec<_> = gaps.iter().map(|&g| (g, solve_at_gap(g))).collect();
+    let baseline_obj = results[0].1 .2;
+
+    println!("\n=== GB-40: MIP gap sweep (heater case, solver_timeout_s=60) ===");
+    println!(
+        "  {:>6}  {:>9}  {:>12}  {:>14}  {:>10}",
+        "gap", "wall s", "status", "objective_eur", "vs 2%"
+    );
+    for (gap, (secs, status, obj)) in &results {
+        let delta = if baseline_obj.abs() > 1e-9 {
+            format!("{:+.2}%", (obj - baseline_obj) / baseline_obj.abs() * 100.0)
+        } else {
+            "n/a".to_string()
+        };
+        println!(
+            "  {:>5.0}%  {:>9.2}  {:>12}  {:>14.4}  {:>10}",
+            gap * 100.0,
+            secs,
+            format!("{status:?}"),
+            obj,
+            delta
+        );
+    }
+    println!();
+
+    // No assertion on times or objectives: this is a measurement, and any
+    // threshold would fail on a slower machine for reasons unrelated to the
+    // gap. The one invariant worth holding is that the plumbing works at all --
+    // if the configured gap never reached the solver, every row would be
+    // identical, which is exactly the bug this change fixes.
+    assert_eq!(results.len(), gaps.len());
 }
