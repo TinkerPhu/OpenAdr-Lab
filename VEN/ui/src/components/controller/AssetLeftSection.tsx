@@ -1,6 +1,5 @@
 import { Box, Typography } from "@mui/material";
 import { CELL_LEFT_SECTION_WIDTH } from "../charts/chartLayout";
-import { formatEnergyKwh, formatPowerValue } from "../charts/unitFormat";
 import type { AssetSummary } from "./types";
 
 interface AssetLeftSectionProps {
@@ -17,9 +16,6 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
     tempC,
     forecastEnergyKwh,
     activeRequest,
-    maxImportKw,
-    maxExportKw,
-    capacityKwh,
   } = summary;
 
   const sign = (n: number) => (n >= 0 ? "+" : "");
@@ -64,15 +60,6 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
           data-testid={`asset-forecast-energy-${assetId}`}
         >
           Forecast: {forecastEnergyKwh.toFixed(2)} kWh
-        </Typography>
-      )}
-
-      {(capacityKwh !== null || maxImportKw !== null || maxExportKw !== null) && (
-        <Typography variant="caption" color="text.secondary" data-testid={`asset-specs-${assetId}`}>
-          Specs:
-          {capacityKwh !== null && ` ${formatEnergyKwh(capacityKwh)}`}
-          {maxImportKw !== null && ` · max in ${formatPowerValue(maxImportKw)}`}
-          {maxExportKw !== null && ` · max out ${formatPowerValue(maxExportKw)}`}
         </Typography>
       )}
 

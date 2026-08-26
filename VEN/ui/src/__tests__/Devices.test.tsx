@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DevicesPage } from "../pages/Devices";
-import type { UserRequestWithSession, EvSettings, ArbiterSettings } from "../api/types";
+import type { UserRequestWithSession, EvSettings, ArbiterSettings, SimSnapshot } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -131,6 +131,7 @@ const mockEvSettingsData = vi.fn((): EvSettings => ({
 const mockArbiterSettingsData = vi.fn((): ArbiterSettings => ({
   deviation_arbiter_enabled: false,
 }));
+const mockSimData = vi.fn((): SimSnapshot | undefined => undefined);
 const mockPostRequest = vi.fn();
 const mockDeleteRequest = vi.fn();
 const mockPutEvSettings = vi.fn();
@@ -179,6 +180,7 @@ vi.mock("../api/hooks", () => ({
       updated_at: null,
     },
   }),
+  useSim: () => ({ data: mockSimData() }),
   useBaselineOverride: () => ({ data: null }),
   usePostBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -208,6 +210,7 @@ describe("DevicesPage", () => {
       paused_by_active_session: false,
     });
     mockArbiterSettingsData.mockReturnValue({ deviation_arbiter_enabled: false });
+    mockSimData.mockReturnValue(undefined);
   });
 
   // 1. All idle
@@ -218,6 +221,27 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("heater-idle-view")).toBeInTheDocument();
     expect(screen.getByTestId("heater-set-btn")).toBeInTheDocument();
     expect(screen.getByTestId("shiftable-empty")).toBeInTheDocument();
+  });
+
+  // 1b. Specs table (R-59 UI follow-up): absent without sim data
+  it("omits the device specs table when no sim data is available", () => {
+    renderPage();
+    expect(screen.queryByTestId("asset-specs-table")).toBeNull();
+  });
+
+  // 1c. Specs table renders nameplate values once sim data arrives
+  it("shows the device specs table with nameplate values once sim data arrives", () => {
+    mockSimData.mockReturnValue({
+      ts: "2026-01-01T10:00:00Z",
+      grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+      assets: {
+        ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
+      },
+    });
+    renderPage();
+    expect(screen.getByTestId("asset-specs-table")).toBeInTheDocument();
+    const row = screen.getByTestId("asset-specs-row-ev");
+    expect(within(row).getByText(/60\.0 kWh/)).toBeInTheDocument();
   });
 
   // 2. EV active request
