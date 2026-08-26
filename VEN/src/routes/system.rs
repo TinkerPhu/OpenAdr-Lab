@@ -8,6 +8,18 @@ use crate::entities::plan::{Plan, SolveStatus};
 use crate::state::{TaskStatus, VtnConnectionStatus};
 use crate::AppCtx;
 
+/// R-59: whether the comms-loss curtailment fail-safe is currently active —
+/// `false` unconditionally when the profile has no `comms_loss:` section.
+/// Takes only the primitive `debounce_s` (not the full `CommsLossConfig`)
+/// because `routes/` may not import `crate::profile` types (AB-06).
+fn comms_loss_active(
+    vtn: &VtnConnectionStatus,
+    comms_loss_debounce_s: Option<u64>,
+    now: DateTime<Utc>,
+) -> bool {
+    comms_loss_debounce_s.is_some_and(|debounce_s| vtn.comms_lost_for(now, debounce_s))
+}
+
 #[derive(Serialize)]
 pub struct HealthComponent {
     status: &'static str,
@@ -30,6 +42,11 @@ pub struct HealthResponse {
     /// Server clock, so a client can detect/correct for its own clock skew (e.g. a VM
     /// with a stale OS clock) instead of trusting `Date.now()` to position chart data.
     server_time: DateTime<Utc>,
+    /// R-59: whether the VTN-comms-loss power curtailment fail-safe is
+    /// currently active. `false` when the profile has no `comms_loss:`
+    /// section — not a component (never makes `status` "degraded" on its
+    /// own; it's an intentional safety response, not a fault).
+    comms_loss_active: bool,
 }
 
 fn component(ok: bool, detail: Option<String>) -> HealthComponent {
@@ -48,6 +65,7 @@ fn build_health_response(
     vtn: &VtnConnectionStatus,
     storage_ok: bool,
     planner_ok: bool,
+    comms_loss_debounce_s: Option<u64>,
     now: DateTime<Utc>,
 ) -> HealthResponse {
     let vtn_detail = vtn
@@ -72,6 +90,7 @@ fn build_health_response(
         status,
         components,
         server_time: now,
+        comms_loss_active: comms_loss_active(vtn, comms_loss_debounce_s, now),
     }
 }
 
@@ -95,6 +114,7 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
         &vtn,
         storage_ok,
         plan_is_ok(plan.as_ref()),
+        ctx.comms_loss_debounce_s,
         Utc::now(),
     ))
 }
@@ -106,18 +126,24 @@ pub struct VtnStatusResponse {
     last_error: Option<String>,
     current_backoff_s: f64,
     token_expires_at: Option<DateTime<Utc>>,
+    /// R-59: see `HealthResponse::comms_loss_active`'s doc comment.
+    comms_loss_active: bool,
 }
 
 fn build_vtn_status_response(
     vtn: VtnConnectionStatus,
     token_expires_at: Option<DateTime<Utc>>,
+    comms_loss_debounce_s: Option<u64>,
+    now: DateTime<Utc>,
 ) -> VtnStatusResponse {
+    let active = comms_loss_active(&vtn, comms_loss_debounce_s, now);
     VtnStatusResponse {
         connected: vtn.connected,
         last_success_ts: vtn.last_success_ts,
         last_error: vtn.last_error,
         current_backoff_s: vtn.current_backoff_s,
         token_expires_at,
+        comms_loss_active: active,
     }
 }
 
@@ -126,7 +152,12 @@ fn build_vtn_status_response(
 pub async fn vtn_status(State(ctx): State<AppCtx>) -> Json<VtnStatusResponse> {
     let vtn = ctx.state.vtn_connection_status().await;
     let token_expires_at = ctx.vtn.token_expires_at(Utc::now()).await;
-    Json(build_vtn_status_response(vtn, token_expires_at))
+    Json(build_vtn_status_response(
+        vtn,
+        token_expires_at,
+        ctx.comms_loss_debounce_s,
+        Utc::now(),
+    ))
 }
 
 #[derive(Serialize)]
@@ -217,7 +248,7 @@ mod tests {
 
     #[test]
     fn health_reports_degraded_vtn_component_after_failure() {
-        let resp = build_health_response(&degraded_vtn(), true, true, Utc::now());
+        let resp = build_health_response(&degraded_vtn(), true, true, None, Utc::now());
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.vtn_connection.status, "degraded");
         assert!(resp.components.vtn_connection.detail.is_some());
@@ -227,7 +258,7 @@ mod tests {
 
     #[test]
     fn health_all_ok_when_every_component_healthy() {
-        let resp = build_health_response(&healthy_vtn(), true, true, Utc::now());
+        let resp = build_health_response(&healthy_vtn(), true, true, None, Utc::now());
         assert_eq!(resp.status, "ok");
         assert_eq!(resp.components.ven_process.status, "ok");
         assert_eq!(resp.components.vtn_connection.status, "ok");
@@ -236,7 +267,7 @@ mod tests {
 
     #[test]
     fn health_storage_degraded_when_storage_not_ok() {
-        let resp = build_health_response(&healthy_vtn(), false, true, Utc::now());
+        let resp = build_health_response(&healthy_vtn(), false, true, None, Utc::now());
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.storage.status, "degraded");
     }
@@ -250,7 +281,7 @@ mod tests {
     #[test]
     fn health_server_time_echoes_the_injected_clock() {
         let now = Utc::now();
-        let resp = build_health_response(&healthy_vtn(), true, true, now);
+        let resp = build_health_response(&healthy_vtn(), true, true, None, now);
         assert_eq!(resp.server_time, now);
     }
 
@@ -260,10 +291,26 @@ mod tests {
     }
 
     #[test]
+    fn health_comms_loss_active_false_when_profile_has_no_comms_loss_section() {
+        let resp = build_health_response(&degraded_vtn(), true, true, None, Utc::now());
+        assert!(!resp.comms_loss_active);
+    }
+
+    #[test]
+    fn health_comms_loss_active_true_once_debounce_elapses() {
+        let now = Utc::now();
+        let mut vtn = healthy_vtn();
+        vtn.connected = false;
+        vtn.last_success_ts = Some(now - chrono::Duration::seconds(120));
+        let resp = build_health_response(&vtn, true, true, Some(60), now);
+        assert!(resp.comms_loss_active);
+    }
+
+    #[test]
     fn vtn_status_reports_connected_and_last_success() {
         let vtn = healthy_vtn();
         let last_success_ts = vtn.last_success_ts;
-        let resp = build_vtn_status_response(vtn, None);
+        let resp = build_vtn_status_response(vtn, None, None, Utc::now());
         assert!(resp.connected);
         assert_eq!(resp.last_success_ts, last_success_ts);
         assert_eq!(resp.last_error, None);
@@ -271,7 +318,7 @@ mod tests {
 
     #[test]
     fn vtn_status_reports_backoff_and_last_error_after_failure() {
-        let resp = build_vtn_status_response(degraded_vtn(), None);
+        let resp = build_vtn_status_response(degraded_vtn(), None, None, Utc::now());
         assert!(!resp.connected);
         assert_eq!(resp.last_error, Some("connection refused".to_string()));
         assert_eq!(resp.current_backoff_s, 60.0);
@@ -280,8 +327,17 @@ mod tests {
     #[test]
     fn vtn_status_carries_token_expires_at_through() {
         let expires_at = Utc::now();
-        let resp = build_vtn_status_response(healthy_vtn(), Some(expires_at));
+        let resp = build_vtn_status_response(healthy_vtn(), Some(expires_at), None, Utc::now());
         assert_eq!(resp.token_expires_at, Some(expires_at));
+    }
+
+    #[test]
+    fn vtn_status_comms_loss_active_reflects_debounced_state() {
+        let now = Utc::now();
+        let mut vtn = degraded_vtn();
+        vtn.last_success_ts = Some(now - chrono::Duration::seconds(120));
+        let resp = build_vtn_status_response(vtn, None, Some(60), now);
+        assert!(resp.comms_loss_active);
     }
 
     #[test]

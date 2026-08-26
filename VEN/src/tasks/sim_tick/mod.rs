@@ -43,6 +43,7 @@ pub(crate) fn spawn_sim_tick(
     base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
     history: Option<Arc<dyn HistoryPort>>,
+    comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -86,6 +87,7 @@ pub(crate) fn spawn_sim_tick(
                 base_load_measurement_enabled,
                 notifier.clone(),
                 history.clone(),
+                comms_loss_config,
             )
             .await;
 

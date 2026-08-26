@@ -7,10 +7,28 @@
 use crate::controller::{MeasurementPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::sim_inject::SimInjectState;
+use crate::profile::comms_loss::CommsLossConfig;
 use crate::state::AppState;
+
+/// R-59: resolved comms-loss curtailment state for this tick — `active` is
+/// the debounced "VTN has been unreachable long enough" verdict, computed
+/// once here so both the PV resolver and the EV/heater/battery clamp read
+/// the identical value. `None` overall (not just `active: false`) means the
+/// profile has no `comms_loss:` section at all (opt-out fast path).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CommsLossState {
+    pub active: bool,
+    pub max_power_pct: f64,
+}
 
 pub(crate) struct TickContext {
     pub inject: SimInjectState,
+    /// Whether a one-shot inject field was present this tick and should be
+    /// cleared post-lock — derived from `inject` here (pre-lock) so `tick.rs`
+    /// doesn't need its own local bindings just to smuggle two bools out of
+    /// the lock block.
+    pub pv_clear: bool,
+    pub base_clear: bool,
     pub weather_pv_kw_now: Option<f64>,
     pub pv_measured_kw_now: Option<f64>,
     pub base_load_measured_kw_now: Option<f64>,
@@ -36,6 +54,7 @@ pub(crate) struct TickContext {
     pub ev_session: Option<crate::entities::device_session::EvSession>,
     pub shiftable_loads: Vec<crate::entities::device_session::ShiftableLoad>,
     pub shiftable_runtimes: Vec<crate::entities::device_session::ShiftableLoadRuntime>,
+    pub comms_loss: Option<CommsLossState>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -48,8 +67,21 @@ pub(crate) async fn resolve_tick_context(
     pv_measurement_enabled: bool,
     base_load_measurement: &dyn MeasurementPort,
     base_load_measurement_enabled: bool,
+    comms_loss_config: Option<CommsLossConfig>,
 ) -> TickContext {
     let inject = state.inject_state().await;
+    let pv_clear = inject.pv_irradiance.is_some();
+    let base_clear = inject.base_load_kw.is_some();
+    let comms_loss = match comms_loss_config {
+        Some(cfg) => {
+            let vtn_status = state.vtn_connection_status().await;
+            Some(CommsLossState {
+                active: vtn_status.comms_lost_for(now, cfg.debounce_s),
+                max_power_pct: cfg.max_power_pct,
+            })
+        }
+        None => None,
+    };
 
     let weather_pv_kw_now =
         super::arbiter_glue::resolve_weather_pv_kw_now(weather, weather_pv_params, now).await;
@@ -70,6 +102,8 @@ pub(crate) async fn resolve_tick_context(
 
     TickContext {
         inject,
+        pv_clear,
+        base_clear,
         weather_pv_kw_now,
         pv_measured_kw_now,
         base_load_measured_kw_now,
@@ -85,6 +119,7 @@ pub(crate) async fn resolve_tick_context(
         ev_session: state.ev_session().await,
         shiftable_loads: state.shiftable_loads().await,
         shiftable_runtimes: state.shiftable_runtimes().await,
+        comms_loss,
     }
 }
 
@@ -109,8 +144,76 @@ mod tests {
             false,
             &crate::controller::NoopMeasurementPort,
             false,
+            None,
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn comms_loss_is_none_when_profile_has_no_comms_loss_section() {
+        let state = AppState::new();
+        let ctx = resolve(&state).await;
+        assert!(ctx.comms_loss.is_none());
+    }
+
+    #[tokio::test]
+    async fn comms_loss_active_false_when_configured_but_vtn_connected() {
+        let state = AppState::new();
+        let cfg = CommsLossConfig {
+            max_power_pct: 0.7,
+            debounce_s: 60,
+        };
+        let ctx = resolve_tick_context(
+            &state,
+            now(),
+            &crate::controller::NoopWeatherPort,
+            None,
+            &crate::controller::NoopMeasurementPort,
+            false,
+            &crate::controller::NoopMeasurementPort,
+            false,
+            Some(cfg),
+        )
+        .await;
+        let cl = ctx
+            .comms_loss
+            .expect("comms_loss must be Some when configured");
+        assert!(
+            !cl.active,
+            "VTN is connected by default — must not be active"
+        );
+        assert_eq!(cl.max_power_pct, 0.7);
+    }
+
+    #[tokio::test]
+    async fn comms_loss_active_true_once_debounce_elapses() {
+        let state = AppState::new();
+        let t0 = now();
+        state.record_vtn_poll_success(t0).await;
+        state
+            .record_vtn_poll_failure(t0, "boom".to_string(), 5.0)
+            .await;
+        let cfg = CommsLossConfig {
+            max_power_pct: 0.7,
+            debounce_s: 60,
+        };
+        let later = t0 + chrono::Duration::seconds(61);
+        let ctx = resolve_tick_context(
+            &state,
+            later,
+            &crate::controller::NoopWeatherPort,
+            None,
+            &crate::controller::NoopMeasurementPort,
+            false,
+            &crate::controller::NoopMeasurementPort,
+            false,
+            Some(cfg),
+        )
+        .await;
+        let cl = ctx
+            .comms_loss
+            .expect("comms_loss must be Some when configured");
+        assert!(cl.active, "past debounce window — must be active");
     }
 
     #[tokio::test]

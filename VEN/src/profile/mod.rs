@@ -1,3 +1,4 @@
+pub mod comms_loss;
 mod defaults;
 pub mod grid;
 pub mod polling;

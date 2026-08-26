@@ -73,6 +73,13 @@ pub struct AppCtx {
     pub pv_measurement_enabled: bool,
     pub base_load_measurement: Arc<dyn controller::MeasurementPort>,
     pub base_load_measurement_enabled: bool,
+    /// R-59: VTN-communication-loss curtailment debounce window, seconds.
+    /// `None` when the profile has no `comms_loss:` section —
+    /// `/health`/`/vtn/status` report `comms_loss_active: false`
+    /// unconditionally in that case. Only the primitive `debounce_s` is
+    /// carried (not the full `CommsLossConfig`) because `routes/` may not
+    /// import `crate::profile` types (AB-06, `tests/architecture.rs`).
+    pub comms_loss_debounce_s: Option<u64>,
 }
 
 #[tokio::main]
@@ -298,7 +305,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp, cl) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -316,6 +323,7 @@ async fn main() -> anyhow::Result<()> {
             base_load_measurement_enabled,
             notifier.clone(),
             history_port.clone(),
+            profile.comms_loss,
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -336,6 +344,7 @@ async fn main() -> anyhow::Result<()> {
                 blme,
                 sn.clone(),
                 hp.clone(),
+                cl,
             )
         });
     }
@@ -459,6 +468,7 @@ async fn main() -> anyhow::Result<()> {
         pv_measurement_enabled,
         base_load_measurement,
         base_load_measurement_enabled,
+        comms_loss_debounce_s: profile.comms_loss.map(|c| c.debounce_s),
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

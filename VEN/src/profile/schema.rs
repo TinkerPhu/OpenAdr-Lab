@@ -122,6 +122,11 @@ pub struct Profile {
     /// GB-09: per-VEN VTN poll cadence + startup jitter. Omitted -> 30/30/60s, zero-jitter defaults.
     #[serde(default)]
     pub polling: super::polling::PollConfig,
+    /// R-59: VTN-communication-loss power curtailment. Optional and
+    /// additive — absent by default, so every profile without it parses and
+    /// behaves exactly as before this section existed.
+    #[serde(default)]
+    pub comms_loss: Option<super::comms_loss::CommsLossConfig>,
 }
 
 impl Profile {

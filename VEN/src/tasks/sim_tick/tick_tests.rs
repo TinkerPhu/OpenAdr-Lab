@@ -56,6 +56,7 @@ mod tests {
             false,
             crate::services::notify::Notifier::new(None),
             None, // history
+            None, // comms_loss_config
         )
         .await;
         // passes if no panic
@@ -208,6 +209,7 @@ mod tests {
             false,
             crate::services::notify::Notifier::new(None),
             None, // history
+            None, // comms_loss_config
         )
         .await;
 

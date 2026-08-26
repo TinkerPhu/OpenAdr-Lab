@@ -31,6 +31,26 @@ impl Default for VtnConnectionStatus {
     }
 }
 
+impl VtnConnectionStatus {
+    /// R-59: true once the VTN has been continuously unreachable for at
+    /// least `debounce_s` seconds — derived from existing fields, no new
+    /// tracking needed. Avoids nuisance-tripping comms-loss curtailment on
+    /// a single transient poll blip (`tasks/backoff.rs` already retries with
+    /// exponential backoff). `last_success_ts: None` (never yet succeeded,
+    /// e.g. cold start) is treated as "not yet debounced" — optimistic,
+    /// matching `connected`'s own cold-start default — rather than as an
+    /// instant comms-loss.
+    pub fn comms_lost_for(&self, now: DateTime<Utc>, debounce_s: u64) -> bool {
+        if self.connected {
+            return false;
+        }
+        match self.last_success_ts {
+            Some(ts) => (now - ts).num_seconds() >= debounce_s as i64,
+            None => false,
+        }
+    }
+}
+
 impl AppState {
     /// Current VTN reachability snapshot for `/health` and `/vtn/status`.
     pub async fn vtn_connection_status(&self) -> VtnConnectionStatus {
@@ -113,5 +133,53 @@ mod tests {
         assert!(!state.storage_ok().await);
         state.set_storage_ok(true).await;
         assert!(state.storage_ok().await);
+    }
+
+    // ── comms_lost_for (R-59 debounce) ─────────────────────────────────────
+
+    #[test]
+    fn comms_lost_for_false_when_connected() {
+        let status = VtnConnectionStatus {
+            connected: true,
+            last_success_ts: Some(Utc::now() - chrono::Duration::seconds(120)),
+            last_error: None,
+            current_backoff_s: 0.0,
+        };
+        assert!(!status.comms_lost_for(Utc::now(), 60));
+    }
+
+    #[test]
+    fn comms_lost_for_false_when_disconnected_but_under_debounce() {
+        let now = Utc::now();
+        let status = VtnConnectionStatus {
+            connected: false,
+            last_success_ts: Some(now - chrono::Duration::seconds(10)),
+            last_error: Some("boom".into()),
+            current_backoff_s: 5.0,
+        };
+        assert!(!status.comms_lost_for(now, 60));
+    }
+
+    #[test]
+    fn comms_lost_for_true_when_disconnected_past_debounce() {
+        let now = Utc::now();
+        let status = VtnConnectionStatus {
+            connected: false,
+            last_success_ts: Some(now - chrono::Duration::seconds(61)),
+            last_error: Some("boom".into()),
+            current_backoff_s: 60.0,
+        };
+        assert!(status.comms_lost_for(now, 60));
+    }
+
+    #[test]
+    fn comms_lost_for_false_when_never_succeeded() {
+        let status = VtnConnectionStatus {
+            connected: false,
+            last_success_ts: None,
+            last_error: Some("boom".into()),
+            current_backoff_s: 5.0,
+        };
+        assert!(!status.comms_lost_for(Utc::now(), 60));
     }
 }

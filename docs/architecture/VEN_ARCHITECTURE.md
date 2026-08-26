@@ -482,9 +482,13 @@ power-stack chart shows the curtailed amount when present.
 
 The resolved limit reaches the simulator every tick: `SimState::tick()` takes a
 `pv_export_limit_override` parameter applied to `PvInverter.export_limit_kw`;
-`dispatcher::resolve_pv_export_limit_kw` computes it as the most restrictive of the live
-VTN/sim-inject capacity cap, the plan's own curtailment target, and (when the deviation arbiter
-is enabled) its backstop tighten value — `PvCurtailmentSource` tags which one won.
+`dispatcher::resolve_pv_generation_limit_kw` computes it as the most restrictive of the live
+VTN/sim-inject capacity cap, the plan's own curtailment target, (when the deviation arbiter is
+enabled) its backstop tighten value, a manual sim-inject override, and — once VTN comms-loss has
+been debounced (R-59, opt-in per profile via `comms_loss:`) — a `max_power_pct` fraction of
+`inverter_max_kw`. `PvCurtailmentSource` tags which one won; `CommsLoss` wins exact ties over
+every other source, since a safety fail-safe should not be overridable by a stale manual
+override left from before the outage.
 
 **Ground-truth precedence** (ven-1 only, when configured): a real measured PV reading
 outranks the weather-derived estimate, which in turn outranks the sin model — see

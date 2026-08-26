@@ -155,6 +155,9 @@ impl PvParams {
 /// Which source produced the currently-resolved PV generation limit. `None` means neither
 /// the plan nor a live capacity source is imposing a limit. On a tie (plan and capacity
 /// resolve to the same limit value), `Plan` wins — see `openspec/changes/pv-curtailment-history/`.
+/// R-59: `CommsLoss` is listed last so it wins exact ties over every other source, including
+/// `Manual` — a comms-loss safety fallback should win against a possibly-stale manual override
+/// left over from before the VTN became unreachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PvCurtailmentSource {
     #[default]
@@ -166,13 +169,17 @@ pub enum PvCurtailmentSource {
     /// offered once battery/EV/heater levers are exhausted). See `controller::arbiter`.
     Arbiter,
     /// An operator/tester manually set `SimInjectState.pv_generation_limit_kw` — the most
-    /// deliberate/explicit source, so it wins exact ties against every other source.
+    /// deliberate/explicit source, so it wins exact ties against every other source
+    /// except `CommsLoss`.
     Manual,
+    /// R-59: VTN communication-loss safety fail-safe — curtails to a debounced
+    /// `max_power_pct` of `inverter_max_kw`. See `controller::dispatcher::resolve_pv_generation_limit_kw`.
+    CommsLoss,
 }
 
 impl PvCurtailmentSource {
     /// Numeric encoding for the flattened `state_values()` map (which is `HashMap<String, f64>`):
-    /// `0.0` = none, `1.0` = plan, `2.0` = capacity, `3.0` = arbiter, `4.0` = manual.
+    /// `0.0` = none, `1.0` = plan, `2.0` = capacity, `3.0` = arbiter, `4.0` = manual, `5.0` = comms-loss.
     pub fn as_f64(self) -> f64 {
         match self {
             PvCurtailmentSource::None => 0.0,
@@ -180,6 +187,7 @@ impl PvCurtailmentSource {
             PvCurtailmentSource::Capacity => 2.0,
             PvCurtailmentSource::Arbiter => 3.0,
             PvCurtailmentSource::Manual => 4.0,
+            PvCurtailmentSource::CommsLoss => 5.0,
         }
     }
 }

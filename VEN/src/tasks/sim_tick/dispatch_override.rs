@@ -74,6 +74,49 @@ pub(crate) fn apply_dispatch_override(
     sp.insert(crate::ids::ASSET_BATTERY.to_string(), clamped);
 }
 
+/// R-59 fail-safe: once VTN comms-loss has been confirmed for the profile's
+/// configured debounce window, cap every controllable asset's setpoint to
+/// `max_power_pct` of its own ceiling — symmetric for the battery (both
+/// charge and discharge capped, no special-casing), one generic knob for all
+/// assets rather than one fail-safe per asset type. Runs last in the tick
+/// pipeline (after `apply_dispatch_override`) because a comms-loss fail-safe
+/// outranks a VTN-instructed dispatch window: if the VTN can't be reached,
+/// any window it set is stale/unverifiable. No-op when `comms_loss` is `None`
+/// (profile opt-out) or not yet `active` (debounce not elapsed).
+pub(crate) fn apply_comms_loss_clamp(
+    sp: &mut HashMap<String, f64>,
+    sim_snap: &SimSnapshot,
+    comms_loss: Option<super::context::CommsLossState>,
+) {
+    let Some(cl) = comms_loss.filter(|c| c.active) else {
+        return;
+    };
+    let pct = cl.max_power_pct;
+
+    for (asset_id, import_key, export_key) in [
+        (crate::ids::ASSET_EV, "max_charge_kw", None),
+        (crate::ids::ASSET_HEATER, "max_kw", None),
+        (
+            crate::ids::ASSET_BATTERY,
+            "max_charge_kw",
+            Some("max_discharge_kw"),
+        ),
+    ] {
+        let Some(snap) = sim_snap.assets.get(asset_id) else {
+            continue;
+        };
+        let Some(&sp_val) = sp.get(asset_id) else {
+            continue;
+        };
+        let max_charge = snap.val(import_key).unwrap_or(f64::MAX);
+        let max_discharge = export_key.and_then(|k| snap.val(k)).unwrap_or(0.0);
+        // Sign convention matches this file's existing battery clamp above:
+        // positive = charge/import, negative = discharge/export.
+        let clamped = sp_val.clamp(-(pct * max_discharge), pct * max_charge);
+        sp.insert(asset_id.to_string(), clamped);
+    }
+}
+
 #[cfg(test)]
 mod dispatch_override_tests {
     use super::*;
@@ -261,5 +304,119 @@ mod dispatch_override_tests {
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
         apply_dispatch_override(&mut sp, &sim, ts(700), &[win(2.0)], &[], None);
         assert!(!sp.contains_key("battery"), "window ended - no override");
+    }
+
+    // ── apply_comms_loss_clamp (R-59) ────────────────────────────────────────
+
+    fn snap_asset_with_values(power_kw: f64, values: &[(&str, f64)]) -> AssetSnapshot {
+        let mut snap = snap_asset(power_kw, f64::MAX, -f64::MAX);
+        snap.values = values.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        snap
+    }
+
+    fn comms_loss(
+        active: bool,
+        max_power_pct: f64,
+    ) -> Option<super::super::context::CommsLossState> {
+        Some(super::super::context::CommsLossState {
+            active,
+            max_power_pct,
+        })
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_noop_when_comms_loss_is_none() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "ev".to_string(),
+            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+        );
+        let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
+        apply_comms_loss_clamp(&mut sp, &sim, None);
+        assert_eq!(sp["ev"], 7.4, "no comms_loss config -> untouched");
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_noop_when_not_yet_active() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "ev".to_string(),
+            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+        );
+        let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(false, 0.7));
+        assert_eq!(sp["ev"], 7.4, "debounce not elapsed -> untouched");
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_caps_ev_charge_to_pct_of_max_charge_kw() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "ev".to_string(),
+            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+        );
+        let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.5));
+        assert!((sp["ev"] - 3.7).abs() < 1e-9, "got {}", sp["ev"]);
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_caps_heater_to_pct_of_max_kw() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "heater".to_string(),
+            snap_asset_with_values(6.0, &[("max_kw", 6.0)]),
+        );
+        let mut sp = HashMap::from([("heater".to_string(), 6.0)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.7));
+        assert!((sp["heater"] - 4.2).abs() < 1e-9, "got {}", sp["heater"]);
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_caps_battery_charge_and_discharge_symmetrically() {
+        let mut sim = make_sim(); // already has "battery" with cap_max_import/export, override values
+        sim.assets.insert(
+            "battery".to_string(),
+            snap_asset_with_values(0.0, &[("max_charge_kw", 5.0), ("max_discharge_kw", 5.0)]),
+        );
+        let mut sp = HashMap::from([("battery".to_string(), 5.0)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.6));
+        assert!(
+            (sp["battery"] - 3.0).abs() < 1e-9,
+            "charge got {}",
+            sp["battery"]
+        );
+
+        sp.insert("battery".to_string(), -5.0);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.6));
+        assert!(
+            (sp["battery"] - (-3.0)).abs() < 1e-9,
+            "discharge got {}",
+            sp["battery"]
+        );
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_leaves_setpoint_untouched_when_already_under_cap() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "ev".to_string(),
+            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+        );
+        let mut sp = HashMap::from([("ev".to_string(), 1.0)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.7));
+        assert!((sp["ev"] - 1.0).abs() < 1e-9, "got {}", sp["ev"]);
+    }
+
+    #[test]
+    fn apply_comms_loss_clamp_ignores_assets_missing_from_setpoints_map() {
+        let mut sim = make_sim();
+        sim.assets.insert(
+            "ev".to_string(),
+            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+        );
+        let mut sp = HashMap::new(); // ev has no setpoint entry this tick
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.5));
+        assert!(!sp.contains_key("ev"));
     }
 }

@@ -68,3 +68,16 @@ Feature: Failure Recovery
     And I refresh my VTN token as "any-business"
     And I create an event for the saved program named "backoff-recovery-evt"
     Then VEN-1 picks up event "backoff-recovery-evt" within 180 seconds
+
+  # R-59: VEN-1's test profile (VEN/profiles/test.yaml) opts into comms_loss
+  # curtailment with a short 10s debounce_s specifically so this scenario's
+  # outage window clears it well within a normal outage-detection wait.
+  Scenario: VEN curtails power once VTN comms-loss is confirmed
+    When the "test-vtn" service is stopped
+    And I wait 20 seconds
+    And I GET the VEN "/health" endpoint
+    Then the VEN health response field "comms_loss_active" is "true"
+    When the "test-vtn" service is restarted
+    And I wait for the "test-vtn" service to be healthy
+    And I GET the VEN "/health" endpoint
+    Then the VEN health response field "comms_loss_active" is "false"

@@ -23,3 +23,14 @@ def step_ven_health_has_components(context, names):
         assert components[name]["status"] in ("ok", "degraded"), (
             f"Component '{name}' has unexpected status shape: {components[name]}"
         )
+
+
+@then('the VEN health response field "{field}" is "{expected}"')
+def step_ven_health_field_is(context, field, expected):
+    body = context.ven_response.json()
+    assert field in body, f"Missing field '{field}' in {body}"
+    actual = body[field]
+    expected_value = {"true": True, "false": False}.get(expected, expected)
+    assert actual == expected_value, (
+        f"Expected health field '{field}' to be {expected_value!r}, got {actual!r}: {body}"
+    )

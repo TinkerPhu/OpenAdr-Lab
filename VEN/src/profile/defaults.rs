@@ -36,6 +36,16 @@ pub(super) fn default_history_retention_days() -> u32 {
     90
 }
 
+/// R-59: market-practice default (grid-code style comms-loss curtailment).
+pub(super) fn default_comms_loss_max_power_pct() -> f64 {
+    0.7
+}
+/// R-59: several consecutive failed VTN polls (backoff already absorbs
+/// transient blips) before curtailment engages.
+pub(super) fn default_comms_loss_debounce_s() -> u64 {
+    60
+}
+
 impl HeaterConfig {
     /// Effective thermal mass (kWh/°C).
     /// Priority: `volume_l` → `thermal_mass_kwh_per_c` → 2.0 (legacy default).
