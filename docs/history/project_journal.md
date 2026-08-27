@@ -1706,7 +1706,7 @@ Confirmed exact FK violation. Note: the `--build` flag was essential — without
 
 **Apply to dev branch:** Pulled `dev` (was 11 commits behind), applied the same fix, committed with DCO sign-off message `"fix: add missing users fixture in add_with_mixed_targets test"`, pushed to `origin/dev` as `b48c231`.
 
-**Update main repo submodule:** Committed `"submodule: fix missing users fixture in add_with_mixed_targets test"` pointing to `b48c231`, pushed to `origin/main` as `a7116d9`.
+**Update main repo submodule:** Committed `"submodule: fix missing users fixture in add_with_mixed_targets test"` pointing to `b48c231`, pushed to `origin/main` as `62879dc`.
 
 ---
 
@@ -2140,7 +2140,7 @@ Step text `"at 2 kW"` doesn't match `{kw:f}` — must use `"at 2.0 kW"`.
 
 **27 features passed, 0 failed — 123 scenarios, 801 steps — all green**
 
-Commits: `2bc0a1c` → `b461b88` → `932cfe6` → `c864e75`
+Commits: `95d7338` → `41a6c3b` → `daa83b6` → `e2cf66c`
 
 ---
 
@@ -2182,7 +2182,7 @@ Added a new **Controller** page to the VEN web UI at `/controller`, giving a "gl
 
 ### Commit
 
-`dd3cee6`
+`5f51eb6`
 
 ---
 
@@ -2260,7 +2260,7 @@ All 3 Controller UI scenarios pass:
 
 ### Commits
 
-`dea8d71`, `79911e3`, `8a001b1`, `ed8209e`, `d5de560`, `e565ad7`, `fd4b200`, `93e0a39`
+`2b6f2a3`, `f4d5c3e`, `422ae2b`, `8c35a36`, `0587f2a`, `9f6b960`, `724e622`, `8bdb764`
 
 ---
 
@@ -2326,7 +2326,7 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 
 ### Commits
 
-`13a541c`, `852cc50`, `01f7592`, `9bf31e4`, `0b7be38`
+`1c24cf6`, `8689138`, `0cbd956`, `e9ee57d`, `9d64c97`
 
 
 ---
@@ -2393,7 +2393,7 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 
 ### Commits
 
-`63244ef`, `219bcdc`, `12055ae`, `115fed3`, `08ea264`, `f104589`, `ebc4688`, `cbf24d6`
+`796d4e4`, `1ad6b41`, `64181b4`, `9275936`, `97ea239`, `74c04c4`, `773096f`, `10c5124`
 
 ---
 
@@ -2469,7 +2469,7 @@ Added a new BDD scenario: "Request for a non-storage asset is rejected" — `POS
 
 33 features, 144 scenarios, 899 steps — all passing with 0 failures on Node1-Server ARM64.
 
-**Commits:** `b4eea32`, `6a5163b`, `09a64fe`
+**Commits:** `0a9010a`, `7e13ad5`, `ab3bdd4`
 
 ---
 
@@ -2477,7 +2477,7 @@ Added a new BDD scenario: "Request for a non-storage asset is rejected" — `POS
 
 **Status: COMPLETE**
 **Date: 2026-03-15 → 2026-03-16**
-**Commits:** `c84f273`, `90edebb`, `b77c152` (+ Phase 1-3 from prior session)
+**Commits:** `50116c0`, `8e4d3ae`, `bb8b03d` (+ Phase 1-3 from prior session)
 
 ### Objective
 
@@ -2536,7 +2536,7 @@ Several times, `git pull` on Node1 showed "Already up to date" while Docker was 
 **Status: COMPLETE**
 **Date: 2026-03-16 → 2026-03-17**
 **Branch:** `005-ven-timeline-ui`
-**Commits:** `ad24e90`, `9d9ab4f`, `2812a37`, `bb37aa2`, `3ca3399`, `f054409`, `abe0f3e`, `ed4c35e`
+**Commits:** `0078209`, `d41fb20`, `8f0db0e`, `767cb08`, `7769ad0`, `67faee6`, `7176ed6`, `5992356`
 
 ### Objective
 
@@ -2985,33 +2985,33 @@ Phase C flexibility policy tests checked `import_cap_kw` on `firm_slots` (the ol
 
 #### What was done
 
-**CP1 — Types** (`cd6b4b8` base): Added `PlanReason` enum (IDLE, FIRM_OBLIGATION, CHEAP_TARIFF, EXPENSIVE_TARIFF, CURTAILMENT, POLICY_CAP), `PlanStep` struct, `LookaheadContext`, `SiteContext`, and `Plan.steps: Vec<PlanStep>` field.
+**CP1 — Types** (`0430bf4` base): Added `PlanReason` enum (IDLE, FIRM_OBLIGATION, CHEAP_TARIFF, EXPENSIVE_TARIFF, CURTAILMENT, POLICY_CAP), `PlanStep` struct, `LookaheadContext`, `SiteContext`, and `Plan.steps: Vec<PlanStep>` field.
 
-**CP2 — Unified per-step loop** (`cd6b4b8`): Replaced the old multi-phase planner with a single unified `rules_choose()` function that evaluates all rules for each asset at each timestep and returns a `(setpoint_kw, PlanReason)` pair. The B1 fix (reservations recorded as `reserved_up_kw` per step rather than reducing `import_cap_kw`) landed here too.
+**CP2 — Unified per-step loop** (`0430bf4`): Replaced the old multi-phase planner with a single unified `rules_choose()` function that evaluates all rules for each asset at each timestep and returns a `(setpoint_kw, PlanReason)` pair. The B1 fix (reservations recorded as `reserved_up_kw` per step rather than reducing `import_cap_kw`) landed here too.
 
-**CP3 — API exposure + BDD scenarios** (`3583178`): Added `GET /plan?summary` (returns plan with `steps: []` to omit the large audit trail from summary views). Added `plan_reasons.feature` (5 scenarios) and `plan_reason_steps.py`.
+**CP3 — API exposure + BDD scenarios** (`357e8a0`): Added `GET /plan?summary` (returns plan with `steps: []` to omit the large audit trail from summary views). Added `plan_reasons.feature` (5 scenarios) and `plan_reason_steps.py`.
 
 #### Bug fixes during BDD gate
 
 Multiple rounds of fixes were required before all 203 scenarios passed:
 
-1. **`resolve_E0502` borrow conflict** (`85a9658`): `run_planner()` had a lifetime conflict between mutable borrow of `lookahead` and immutable borrow inside the loop. Fixed by extracting `tariff_eur_per_kwh` and `reserved_up_kw` before the mutable borrow.
+1. **`resolve_E0502` borrow conflict** (`2c35261`): `run_planner()` had a lifetime conflict between mutable borrow of `lookahead` and immutable borrow inside the loop. Fixed by extracting `tariff_eur_per_kwh` and `reserved_up_kw` before the mutable borrow.
 
-2. **AmbiguousStep for `?summary`** (`660878b`): The new `GET /plan?summary` step conflicted with an existing generic GET step. Disambiguated by adding a dedicated `step_request_plan_summary` function.
+2. **AmbiguousStep for `?summary`** (`57793f0`): The new `GET /plan?summary` step conflicted with an existing generic GET step. Disambiguated by adding a dedicated `step_request_plan_summary` function.
 
-3. **Test design fixes** (`e257648`): Phase D scenarios required several test-side corrections:
+3. **Test design fixes** (`49bc51b`): Phase D scenarios required several test-side corrections:
    - PRICE events switched from 4-hour to 2-interval design (1h target + 3h reset) to prevent LOCF carrying the tariff beyond the event window
    - EV time_pressure packet corrected (POST format with `latest_end` as ISO timestamp)
    - `?summary` step renamed to avoid ambiguity
    - Phase C `reserved_up_kw` assertions updated for the B1 fix
 
-4. **Tariff lookup bug** (`2592c44`): `build_grid()` used `resample_uniform + HashMap` for tariff lookup — the HashMap key never matched because `resample_uniform` aligns to epoch-grid boundaries while planner slots start at `now` (arbitrary seconds). All lookups returned `None`, so every slot got `DEFAULT_IMPORT_PRICE`. Fixed by replacing all three maps with direct `interpolate_at(slot_start)` calls per slot.
+4. **Tariff lookup bug** (`aedc2ae`): `build_grid()` used `resample_uniform + HashMap` for tariff lookup — the HashMap key never matched because `resample_uniform` aligns to epoch-grid boundaries while planner slots start at `now` (arbitrary seconds). All lookups returned `None`, so every slot got `DEFAULT_IMPORT_PRICE`. Fixed by replacing all three maps with direct `interpolate_at(slot_start)` calls per slot.
 
-5. **Stale plan polling** (`35e95ac`): Scenarios 1–2 waited for any steps to exist but immediately got the stale pre-event plan. Added targeted `When I wait for a "{kind}" PlanStep for asset "{asset_id}"` polling steps that block until the specific reason kind appears.
+5. **Stale plan polling** (`9c39e19`): Scenarios 1–2 waited for any steps to exist but immediately got the stale pre-event plan. Added targeted `When I wait for a "{kind}" PlanStep for asset "{asset_id}"` polling steps that block until the specific reason kind appears.
 
-6. **IDLE scenario** (`c145928`): Scenario 4 polled all battery steps with `IDLE` kind — but ran right after Scenario 3 which posted a cheap-tariff event. Added a wait step to give the planner time to clear the stale tariff before asserting.
+6. **IDLE scenario** (`1f7becb`): Scenario 4 polled all battery steps with `IDLE` kind — but ran right after Scenario 3 which posted a cheap-tariff event. Added a wait step to give the planner time to clear the stale tariff before asserting.
 
-7. **EV sim override contamination** (`4b4357e` + `d7b38b1`): `phase_a_physics.feature` (added by a concurrent commit `5c0c77e`) sets `ev_plugged=false` in its last scenario and does not restore it. The `after_scenario` hook in `environment.py` was missing a sim override reset. First fix posted `{}` (insufficient — only clears UserOverrides, doesn't undo `EvState.plugged` mutation). Second fix posts `{"ev_plugged": True}` which explicitly restores `EvState.plugged` on the next sim tick, preventing contamination of all subsequent features.
+7. **EV sim override contamination** (`3fdeb8b` + `3d8440a`): `phase_a_physics.feature` (added by a concurrent commit `9cadfe0`) sets `ev_plugged=false` in its last scenario and does not restore it. The `after_scenario` hook in `environment.py` was missing a sim override reset. First fix posted `{}` (insufficient — only clears UserOverrides, doesn't undo `EvState.plugged` mutation). Second fix posts `{"ev_plugged": True}` which explicitly restores `EvState.plugged` on the next sim tick, preventing contamination of all subsequent features.
 
 #### Key learnings
 
@@ -3167,7 +3167,7 @@ Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE valu
 - **`vi.useFakeTimers()` breaks `userEvent` click tests** — fake timers stall MUI animation callbacks. Use `vi.spyOn(Date, 'now')` per-test instead of global fake timers.
 - **FIRM-only view always places boundary at allSlots.length** — the expand-horizon BDD scenario must click the expand button before checking the boundary divider is visible.
 - **`nav-simulation` was removed** in a prior commit but `ui.py open()` still waited for it, breaking all `@ven-ui` BDD tests until changed to `nav-dashboard`.
-- **controller_ui.feature rate chart tests** are pre-existing failures from `d7f8d51` (removed rate charts from Controller page without updating BDD steps) — not caused by this feature.
+- **controller_ui.feature rate chart tests** are pre-existing failures from `c54944f` (removed rate charts from Controller page without updating BDD steps) — not caused by this feature.
 
 ## Phase 29: VEN Backend Structural Refactor (016-refactor-ven-backend)
 
@@ -3279,7 +3279,7 @@ Starting from T047 (17 failures) a series of commits addressed RC1 (sim-Mutex st
 
 ### Why MILP solves are slow in tests
 
-Under the full test suite Node1 runs **3 VEN containers simultaneously**, each with its own HiGHS MILP planner. 3 HiGHS processes compete for 4 Node1 Cortex-A72 cores. Observed distribution (from VEN-1 logs): min=42s, median=80s, max=120s for 24 slots. The commit `e6ff7f9` measured 5-10s on an **unloaded** Node1 with one VEN — the 10-20× gap is entirely CPU contention.
+Under the full test suite Node1 runs **3 VEN containers simultaneously**, each with its own HiGHS MILP planner. 3 HiGHS processes compete for 4 Node1 Cortex-A72 cores. Observed distribution (from VEN-1 logs): min=42s, median=80s, max=120s for 24 slots. The commit `0d65f93` measured 5-10s on an **unloaded** Node1 with one VEN — the 10-20× gap is entirely CPU contention.
 
 A secondary amplifier: `deviation_trigger_ticks=10` causes DeviceDeviation to fire every 10s whenever actual power deviates from the plan (common during plan transitions). This keeps the planner in a continuous-solve loop with no 20s wait between solves, since a new trigger is always waiting when a solve finishes. The test profile uses 10 to make the DeviceDeviation BDD scenario fast; production profiles should use 60-120.
 
@@ -3366,7 +3366,7 @@ Final result: **307 passed, 0 failed** (Node1 `docker compose run`), confirmed b
 
 **Branch**: `019-introduce-simulator-port` (worktree `refactor-phase2`)  
 **Spec**: `specs/019-introduce-simulator-port/`  
-**Commit**: `c7c280a`
+**Commit**: `7010b0c`
 
 ### What Was Done
 
@@ -3460,7 +3460,7 @@ All 6 functions have adequate BDD coverage via existing feature files. No new sc
 
 **319 passed, 0 failed, 13 ignored** (332 total) — unchanged after cleanup.
 
-Commits: `25dff11` — T023 re-export removal + T001b audit.
+Commits: `d3cf1ac` — T023 re-export removal + T001b audit.
 
 
 ---
@@ -3524,7 +3524,7 @@ SC-004 now fully satisfied across all modules.
 
 **Branch**: `021-decouple-profile-domain` (off `refactoring_phase_3`)  
 **Status**: COMPLETE (2026-05-12)  
-**Commits**: `f085cb2`, `45ea6c2`
+**Commits**: `427478a`, `880b5ac`
 
 ### What changed
 
@@ -3709,7 +3709,7 @@ cargo test -> 387 passed, 0 failed
 
 ## Feature 025 — Type VTN Report Interface (OadrReportBody)
 
-**Commit:** 4ead54b (feat) + 9944537 (fix), 1ec10a5 (fix), 72448d7 (fix)
+**Commit:** 7417058 (feat) + 01c657c (fix), 7960b8f (fix), df71e6e (fix)
 
 ### What changed
 
@@ -3732,7 +3732,7 @@ OadrReportBody typed at VtnPort boundary
 
 ## Feature 026 — Reporter Domain Types (AssetReportSample replaces &SimState)
 
-**Commits:** 6b31253 (feat)
+**Commits:** 8915874 (feat)
 **Branch:** 026-reporter-domain-types
 **Date:** 2026-05-15
 
@@ -3785,7 +3785,7 @@ BDD targeted run -> 29/29 passed, 0 failed (SC-007)
 
 ## Feature 027 — Clean Timeline Infra Imports (VG-03)
 
-**Commit:** 2050373 (feat)
+**Commit:** 539b18d (feat)
 **Branch:** 027-clean-timeline-infra
 **Date:** 2026-05-15
 
@@ -3891,7 +3891,7 @@ BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed 
 
 ## Feature 028 — Profile Decoupling in sim_tick (VG-04)
 
-**Commit:** 5042f05 (feat)
+**Commit:** e767d9c (feat)
 **Branch:** 027-clean-timeline-infra
 **Date:** 2026-05-16
 
@@ -3973,7 +3973,7 @@ BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed
 
 ## Feature 029 — Wire VtnPort in planning and sim_tick tasks (VG-05, VG-06)
 
-**Commit:** 20ca281 (feat)
+**Commit:** 5627d1b (feat)
 **Branch:** 027-clean-timeline-infra
 **Date:** 2026-05-16
 
@@ -4263,7 +4263,7 @@ Prevents near-future heater relay chattering by pinning tier binary variables to
 
 **Issue encountered:** Three `HeaterMilpContext` struct literals in test support files (`milp_mocks.rs`, `tests/mod.rs`, `tests/solver.rs`) were missing the new `anchored_kw` field — compiler caught them all. Added `anchored_kw: vec![]` (empty = no anchoring).
 
-**Review fixes (commit b29e491):**
+**Review fixes (commit 73bdc58):**
 
 After completing Step 5, a review pass identified 4 bugs:
 
@@ -4387,14 +4387,14 @@ commit at which it was last verified, so `/wiki-sync` only touches pages whose s
 actually changed.
 
 **Verified:** lint script tested — clean on scaffold; correctly reports all four issue
-classes on a synthetic bad page (broken link, orphan, missing source, stale vs 2895762).
+classes on a synthetic bad page (broken link, orphan, missing source, stale vs 09be619).
 
 **Next:** review/edit `wiki/purpose.md`, then run `/wiki-sync` for the seed ingest
 (~15–25 pages, needs confirmation of the proposed page list).
 
 ## LLM Wiki Seeded (2026-07-04)
 
-Executed the /wiki-sync bootstrap: 23 content pages at commit 6cb8ca6 — overview (2),
+Executed the /wiki-sync bootstrap: 23 content pages at commit 9a3a8b8 — overview (2),
 architecture (4), components (6), concepts (7, incl. the wiki-maintenance workflow page),
 use-cases (1), decisions (3). `scripts/wiki_lint.sh` clean. Three review items filed in
 `wiki/review.md`, notably: `.claude/CLAUDE.md` still references the deleted
@@ -5564,7 +5564,7 @@ three SimState-coupled plan-cycle helpers moved services→
 `simulator/plan_context.rs` so the application layer only touches the
 simulator through `SimulatorPort`. 13 new BFF unit tests (TtlCache,
 AppError, VtnClient against a local axum stub — no new dev-deps).
-Merged to main as a fast-forward (2c79d53..1e7e807) after E2E (262
+Merged to main as a fast-forward (653c1d6..76b364c) after E2E (262
 scenarios, 0 failed) and resilience (5/5) on Node1.
 
 **Issues / key learnings.**
@@ -5575,7 +5575,7 @@ scenarios, 0 failed) and resilience (5/5) on Node1.
   E2E caught it. Fixed by pinning vite ^7 / plugin-react ^5 — same 0-vuln
   audit result without the bleeding-edge bundler.
 - *Review findings age fast on an active repo.* The review baseline
-  (466f792) predated the Phase 3–5 merges; a "delete unused
+  (b0bd0df) predated the Phase 3–5 merges; a "delete unused
   StaleRatePolicy" finding — and the owner decision made from it — was
   obsolete by execution time (WP4.4 had implemented it). Every finding
   must be re-verified against current main immediately before fixing.
@@ -6665,7 +6665,7 @@ points instead of `pv_used_kw`.
 ### E2E verify+deploy for `pv-curtailment-history`: a stale-image trap and an over-broad test assertion (2026-07-26)
 
 Deploying the feature to Node1 caught a genuine production bug on its own (see
-`717ca5c`: `PvInverter.inverter_max_kw`/`curtailment_source` lacked
+`91c5f85`: `PvInverter.inverter_max_kw`/`curtailment_source` lacked
 `#[serde(default)]`, so `simulator::persist::load()` failed to deserialize
 the *whole* persisted `SimState` blob — not just the PV part — on any
 pre-existing sim-state file). Fixed and redeployed before running the full
@@ -7361,7 +7361,7 @@ because that's what was actually committed there. Re-applied the fix directly to
 divergence source.
 
 **Root cause 2 — a real gap, not a regression.** `inverter_max_kw` (the true AC hardware ceiling,
-distinct from `rated_kw`'s DC panel peak) was added to the Rust struct/physics in `b86157c`
+distinct from `rated_kw`'s DC panel peak) was added to the Rust struct/physics in `1cd23f1`
 ("PV curtailment history") but deliberately left unconfigured — "defaults to `rated_kw` so
 existing profiles are unaffected." It wasn't disappearing; it had never been populated in any
 profile YAML on any branch. Set now: `12.5/10.0/7.5 kW` for ven-1/2/3, each below the corrected
@@ -7463,7 +7463,7 @@ both VENs first) still returned the stale pre-registration snapshot. Merging two
 scenarios into one only protects against a race *within* the scenario; it does nothing
 about a *preceding* scenario's cache-warming call. Real fix: poll `GET /vens` (bounded by
 the cache TTL, `_wait_for_ven_in_list` in `bff_crud_steps.py`) instead of trusting a
-single fetch (commit `5e28e51`). Lesson: a shared TTL cache in BDD tests needs retry-until
+single fetch (commit `7d31cec`). Lesson: a shared TTL cache in BDD tests needs retry-until
 assertions at the point of consumption, not just careful ordering of the producing steps.
 
 **Session also surfaced two infrastructure issues unrelated to BL-41 itself, fixed in
@@ -7617,7 +7617,7 @@ versions). Validated on ven-5 (heaviest solver, ~120s/cycle, one solve every ~7 
 30-minute trace across 5 solve cycles showed RSS returning to a flat ~45 MB baseline within
 15-45s of every solve completing, instead of climbing 294→332 MB over 10 minutes and never
 coming back down (the pre-fix behavior). Rolled out to all 13 VENs (ven-1..3 on Node1, ven-4..13
-on Node2); all confirmed healthy post-restart. Commit `447de6a`.
+on Node2); all confirmed healthy post-restart. Commit `edd186f`.
 
 **Key learnings**:
 - When a background shell command's local tracker dies early (observed repeatedly on
@@ -7763,7 +7763,7 @@ invocations.
 single-tick PV power steps on production ven-1, decaying per the normal
 `pv_alpha=0.1` model, that looked exactly like an external `/sim/inject` call but
 couldn't be attributed (`ven-ven-1-1` bypasses `ven-ui`'s nginx, so direct-port
-traffic left zero trace anywhere). This session shipped `ee6013b` (log source IP +
+traffic left zero trace anywhere). This session shipped `c65b6f9` (log source IP +
 payload on every `/sim/inject`/`/sim/inject/reset` call) and deployed it to
 production for the first time (it had been committed 2026-08-06 but never actually
 rebuilt/redeployed — confirmed via `docker inspect`'s `Created` timestamp predating
@@ -7802,7 +7802,7 @@ PV irradiance" pattern documented in
 they did not trigger this manually; nothing matched in shell/PowerShell history.
 Root cause not found this session — no smoking-gun process, scheduled task, or
 misconfigured `VEN_BASE_URL` was located. Rather than continue guessing,
-shipped defense-in-depth instrumentation instead (`6b80be8`):
+shipped defense-in-depth instrumentation instead (`2e9f714`):
 - `simulator.sim_inject_enabled` profile flag (default `true`) hard-disables
   `POST /sim/inject` (403) when `false` — set `false` on `VEN/profiles/ven-1.yaml`
   to stop further unattributed overrides on the live production VEN while the
@@ -7833,7 +7833,7 @@ parallel sessions on this LAN, across every round of this mystery back to the or
 2026-08-05 reports — silently POSTed a real PV override into production and reset it
 ~9.5s later (`sleep(1500)` + `sleep(8000)` in the test), exactly matching the
 "one-shot inject" shape chased through rounds 1–3. `source: None` on every capture
-was simply this test never having been updated to pass one. Fixed (`db555e1`): no
+was simply this test never having been updated to pass one. Fixed (`367a8a3`): no
 default — the suite now skips itself whenever `VITE_VEN_URL` isn't explicitly set,
 same fail-safe CI already relied on, minus the fallback that made it dangerous
 everywhere else. `sim_inject_enabled` stays `false` on `VEN/profiles/ven-1.yaml` for
@@ -7890,7 +7890,7 @@ route layer; full route behavior is BDD-covered).
 Prompted by a concept discussion about why the Controller/History diagrams kept needing
 repeated axis-labeling, sizing, and cursor-label fixes — git history showed the same bug
 classes fixed per-component instead of once centrally, most seriously the cursor/tooltip
-index-mismatch bug (`117b44f`, and its earlier twin `f7b911e` in `StackedAreaChart`):
+index-mismatch bug (`9f90b70`, and its earlier twin `04af9d3` in `StackedAreaChart`):
 recharts resolves a hovered tooltip's value by array index, so two series fed from
 separately-indexed arrays (e.g. a 1-minute actual line and a 5-minute forecast line) could
 show one series' value next to another series' timestamp.
@@ -7906,7 +7906,7 @@ into branchy config instead of removing it.
 **What changed**: `VEN/ui/src/components/charts/` is now the single home for chart-kit code
 — `chartLayout.ts`/`axisDomain.ts` moved out of `controller/`, `unitFormat.ts`/
 `mergeSeries.ts`/`NowLine.tsx`/`ZoneShading.tsx`/`tooltipStyle.ts`/`EmptyState.tsx` are new.
-`mergeSeries.ts` (`mergeTimestampedSeries`/`locfFillKeys`) is the generalized `117b44f` fix —
+`mergeSeries.ts` (`mergeTimestampedSeries`/`locfFillKeys`) is the generalized `9f90b70` fix —
 every multi-series chart now folds all its series into one timestamp-keyed row array before
 rendering, with a reusable test helper (`testUtils/assertTooltipMatchesData.ts`) that catches
 a reintroduction of the old per-series-array pattern (verified it actually fails against a
@@ -8669,7 +8669,7 @@ convention: resolved items are removed, gaps in numbering stay, resolution recor
 pass, re-confirmed post-merge). `cargo fmt --check`, `cargo clippy --all-targets
 --all-features -- -D warnings`, and the four VEN architecture-invariant greps all clean.
 `fix/report-obligation-lifecycle` was already rebased on `main` (no drift since the prior
-pass's commits), fast-forward merged, and pushed (`e683828..71b5a3b`). Deleted
+pass's commits), fast-forward merged, and pushed (`309f8a6..0678ba1`). Deleted
 `openspec/changes/report-obligation-lifecycle/` — its capabilities (GB-23's 404-drop, R-43's
 `GET /history/reports`, GB-21's corrected payload-type strings) are already reflected in
 `docs/architecture/VEN_ARCHITECTURE.md`, `docs/REQUIREMENTS.md`, and the wiki pages touched by
@@ -8870,11 +8870,11 @@ the flag and pointing at the dated report file; GB-30 row removed from `docs/BAC
 While starting a planned implementation pass on GB-23, found both GB-21 (report
 payload-type wire-schema mismatch) and GB-23 (report obligation not cleared on
 404) were already implemented and merged to `main` on 2026-08-12
-(`2fa0b61`, "fix: GB-23 drop obligations on 404, R-43 wire report history,
+(`8c32376`, "fix: GB-23 drop obligations on 404, R-43 wire report history,
 GB-21 fix capacity-reservation report payload names") — their BACKLOG.md rows
-were correctly removed at the time (`5af6ef7`'s bookkeeping note says so), but
-reappeared via `bdfd7fc` ("docs: record full 13-VEN fleet deploy + S-1..S-6
-experiment run"), whose branch had rebased against a pre-2fa0b61 `main` and
+were correctly removed at the time (`4a29b24`'s bookkeeping note says so), but
+reappeared via `5b4fb5f` ("docs: record full 13-VEN fleet deploy + S-1..S-6
+experiment run"), whose branch had rebased against a pre-8c32376 `main` and
 resurrected the deleted rows through a 3-way merge that didn't recognize the
 deletion as intentional. No code change needed — `VEN/src/services/obligation.rs`
 already carries the 404-drop logic and its dedicated test suite
@@ -8888,8 +8888,8 @@ Same pattern as the GB-21/GB-23 cleanup above, found while starting a planned
 implementation pass on BL-42: `BaselineOverrideCard.tsx` (132 lines, wired
 into `Devices.tsx`) and its test (`__tests__/BaselineOverrideCard.test.tsx`)
 already fully implement the per-slot Devices-tab editor BL-42 asked for —
-`feat(ui): add BaselineOverrideCard to Devices page (BL-42)` (`150f318`) plus
-a follow-up review-fix commit (`b370e38`), both already narrated in this
+`feat(ui): add BaselineOverrideCard to Devices page (BL-42)` (`4a9b7c5`) plus
+a follow-up review-fix commit (`42ae8c5`), both already narrated in this
 journal ("BL-42: Baseline Override Devices UI", "BL-42 closeout: review
 fixes + E2E verification"). Unlike GB-21/GB-23, this wasn't a merge
 resurrection — the implementing commit simply never removed the BACKLOG.md
@@ -9917,7 +9917,7 @@ BL-18 stays parked, unchanged.
 ## GB-37 part 2: code-enforce the EV-session-mode guard for tariff scenarios (2026-08-20)
 
 **Trigger:** A backlog review flagged GB-37 as "done" (two commits had landed:
-`b927a7c`, `44981e2`), but re-verification against the actual code found only 2 of its
+`be86e85`, `52de20f`), but re-verification against the actual code found only 2 of its
 3 required fix parts complete. Part 2 — "force every EV-bearing VEN onto a tariff-sensitive
 mode, never OPPORTUNISTIC/ASAP_FREE, for a tariff-response scenario" — existed only as a
 documentation warning (`--ev-session-mode`'s help text, `s9_diurnal.yaml`'s header comment):
@@ -10590,3 +10590,71 @@ the `deploy-node1` skill's rebuild+restart flow, `ui` restarted a second time pe
 nginx-upstream-caching note. Live-verified: `curl http://localhost:8211/health` shows
 `"comms_loss_active":false` (correctly opted-out — no production profile has `comms_loss:`
 configured); the new `ui` bundle contains `asset-specs-table`.
+
+---
+
+## Full history rewrite — commit identity unification (2026-08-27)
+
+**Why.** The repo is public, and its history carried six different author identities. Two were
+real addresses: a personal one on 3 commits and, more seriously, an **employer address on 6
+commits, public since 2026-05-03**. The author's real personal name was on 4 commits.
+Separately, **1481 of 1514 commits had the literal string `TinkerPhu` as their email** — not a
+valid address at all, which breaks DCO sign-off validation and means those commits almost
+certainly never counted toward GitHub attribution. One problem, two motivations: privacy and
+correctness.
+
+**What was done.** Every commit's author, committer *and* tagger identity was rewritten to
+`TinkerPhu <44361752+TinkerPhu@users.noreply.github.com>` with `git filter-repo`, using
+unconditional `--email-callback` / `--name-callback`. The ~106 `Signed-off-by:` trailers
+embedded in commit *messages* were fixed separately via `--replace-message`. All 1514 commits
+got new SHAs (`787aa780` → `62693c20`); **file contents are byte-identical** — verified by the
+root tree SHA being unchanged, which is the strongest available proof that not one byte of
+content moved. The 19 non-`main` remote branches (15 merged, 4 abandoned experiments) were
+deleted, and the annotated tag `All_tests_green_01` was rewritten and force-pushed too.
+Afterwards, 212 SHA references across 47 files (wiki `synced_commit:` pins,
+`project_journal.md`, `KEY_LEARNINGS.md`) were remapped through filter-repo's `commit-map`.
+
+**Known residue — the real addresses are not fully gone.** GitHub's `refs/pull/1/head` and
+`refs/pull/2/head` (PR #1 merged, PR #2 closed, both July 2026) still point at pre-rewrite
+commits, and **all 6 employer-address commits remain reachable through them**. These refs are
+GitHub-managed and cannot be deleted by pushing; a PR cannot be deleted, only closed. Removing
+them requires a GitHub Support request to garbage-collect the repository. `main` and the tag —
+everything the rewrite owns — are verifiably clean (0 residue, single identity). This is a
+partial result and is recorded as such rather than being written up as a complete scrub.
+
+**Issues hit, and what they cost.** Three review passes preceded execution and the plan was
+wrong in materially different ways each time:
+
+1. The first draft used `--replace-text` for the trailers. That option rewrites **blob contents
+   only** — the run would have reported success while leaving every trailer, including all 9
+   real addresses, untouched. A silent failure of the primary goal.
+2. The second draft's backup command (`git bundle create … --all $(git stash list --format=%H)`)
+   **is invalid syntax** — `git bundle` rejects bare SHAs. The "fix" for a lost-stash problem
+   would not have run at all.
+3. It also cloned the rewrite mirror from the local working copy, which was persistently
+   *behind* `origin/main`, and would have published a history missing origin's newest commits.
+4. `git-filter-repo`'s freshness check (`sanity_check()`: >1 pack or ≥100 loose objects) would
+   have aborted the run before touching a commit — the working repo had 4198 loose objects
+   across 4 packs. Cloning from the GitHub URL instead of locally fixes this *and* (3) at once,
+   since a network clone arrives packed.
+5. Executing the plan's own backup gate found it **mis-specified**: it compared the bundle's
+   `refs/heads/main` (local, behind) against an `origin` pin, so it failed on a perfectly good
+   backup. Reading would never have caught this.
+
+**Key learning**: a rehearsal against a throwaway origin is worth more than any amount of
+re-reading. The full sequence — rewrite, gates, branch deletion, tag force-push, SHA remap, and
+the rollback — was run end-to-end against a local fake origin first. It cost about 10 minutes
+and caught three defects. Also validated there: the remap script's "skip anything that isn't a
+known SHA" rule, which correctly refused 24 tokens including `999999999999998` (a float in
+prose) — blind substitution would have corrupted them.
+
+**Backup.** A pristine mirror plus an all-refs bundle (including the 4 stashes, given explicit
+refs since `--all` does not reach the `refs/stash` reflog) live outside the repo at
+`C:/DriveD/Tinker/openadr-lab-pre-email-rewrite-backup/`, with a README describing the restore.
+The rollback path was **tested**, not assumed: pushing the mirror back into a throwaway origin
+restored `main`, all 20 branches, and all 6 original identities. That backup contains the old
+addresses — it must stay local and must never be pushed or committed.
+
+**Aftermath.** Both Node hosts and the `oal-run` worktree were reset onto the rewritten history.
+Any SHA cited anywhere predating 2026-08-27 no longer resolves; the `commit-map` in the backup
+directory translates old→new if an old reference ever needs chasing.

@@ -3,7 +3,7 @@ title: Notification Feed
 type: component
 created: 2026-07-12
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events/, VEN/ui/src/pages/Notifications.tsx]
 tags: [notifications, ux, phase4]
 ---

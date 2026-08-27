@@ -3,7 +3,7 @@ title: Tariffs and Capacity State
 type: concept
 created: 2026-07-04
 updated: 2026-08-11
-synced_commit: 7380031
+synced_commit: f4ffb86
 sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/controller/rate_schedule.rs, VEN/src/history_store/schema.rs]
 tags: [tariff, capacity, domain, envelope]
 ---

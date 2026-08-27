@@ -3,7 +3,7 @@ title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
 updated: 2026-08-03
-synced_commit: 50961b5
+synced_commit: fab41e9
 sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
 ---

@@ -43,7 +43,7 @@ title: MILP Planner
 type: component        # overview | architecture | component | concept | use-case | decision | source | query
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 6cb8ca6 # repo HEAD (short sha) when content was last verified against sources
+synced_commit: 9a3a8b8 # repo HEAD (short sha) when content was last verified against sources
 sources: [VEN/src/controller/milp_planner/, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [planner, milp]
 ---

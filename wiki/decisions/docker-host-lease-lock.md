@@ -3,7 +3,7 @@ title: Node1 Lease Lock
 type: decision
 created: 2026-07-17
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [scripts/docker_host_lock.sh, scripts/wsl_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
 tags: [node1, docker, concurrency, dev-workflow]
 ---

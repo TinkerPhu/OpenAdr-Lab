@@ -3,7 +3,7 @@ title: Three-Tier Plan Grid
 type: concept
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: ba87f49
 sources: [docs/architecture/ven_milp_planner.md, VEN/src/tasks/planning/]
 tags: [planner, grid, zones, alignment]
 ---

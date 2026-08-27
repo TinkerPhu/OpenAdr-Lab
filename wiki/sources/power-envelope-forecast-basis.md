@@ -3,7 +3,7 @@ title: "Source: Power Envelope Forecast Basis (external research)"
 type: source
 created: 2026-08-11
 updated: 2026-08-11
-synced_commit: 9d2a538
+synced_commit: 75e199d
 sources: [docs/external_research/power-envelope-forecast-basis.md]
 tags: [capacity, envelope, doe, dso, external-research, open]
 ---

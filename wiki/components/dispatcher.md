@@ -3,7 +3,7 @@ title: Dispatcher
 type: component
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/controller/dispatcher.rs, VEN/src/tasks/sim_tick/, VEN/src/controller/monitor.rs, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [dispatcher, realtime, ledger]
 ---

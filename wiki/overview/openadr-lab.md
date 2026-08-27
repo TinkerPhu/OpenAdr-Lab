@@ -3,7 +3,7 @@ title: OpenADR Lab — System Overview
 type: overview
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: e138861
+synced_commit: 474dec3
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/VTN_ARCHITECTURE.md, docs/history/project_journal.md]
 tags: [overview, openadr, hems]
 ---

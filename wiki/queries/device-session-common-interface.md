@@ -3,7 +3,7 @@ title: "Query: Would a Common Interface for Device Sessions Help?"
 type: query
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/entities/user_request.rs, VEN/src/services/user_request.rs, VEN/src/entities/device_session.rs, VEN/src/assets/ev.rs, VEN/src/state/mod.rs, VEN/src/tasks/planning/]
 tags: [query, device-session, architecture, milp]
 ---

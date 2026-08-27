@@ -3,14 +3,14 @@ title: VEN Code vs Documentation Audit
 type: query
 created: 2026-07-05
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/, docs/architecture/VEN_ARCHITECTURE.md, .claude/CLAUDE.md]
 tags: [audit, drift, refactoring, ven]
 ---
 
 # VEN Code vs Documentation Audit
 
-Full read of `VEN/src/` (90 files, ~25 k lines) at e138861, checked against
+Full read of `VEN/src/` (90 files, ~25 k lines) at 474dec3, checked against
 `docs/architecture/VEN_ARCHITECTURE.md`, `.claude/CLAUDE.md` §ven-architecture, and the
 wiki's own component pages. Question: does the code match the documentation, and where
 should refactoring effort go?

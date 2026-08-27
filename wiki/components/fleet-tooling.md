@@ -3,7 +3,7 @@ title: Fleet Tooling
 type: component
 created: 2026-07-11
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, VEN/src/config.rs]
 tags: [fleet, docker, provisioning, ven, phase2]
 ---

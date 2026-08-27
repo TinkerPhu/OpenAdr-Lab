@@ -3,7 +3,7 @@ title: Simulator
 type: component
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/simulator/, VEN/src/state/mod.rs, VEN/src/routes/sim.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [simulator, physics, determinism]
 ---

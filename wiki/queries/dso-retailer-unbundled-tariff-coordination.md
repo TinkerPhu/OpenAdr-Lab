@@ -3,7 +3,7 @@ title: DSO/Retailer Coordination on Tariffs When Grid and Energy Sales Are Legal
 type: query
 created: 2026-07-31
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources:
   - docs/openadr_3_1_specs/
   - openleadr-rs/openleadr-wire/src/program.rs
