@@ -10561,3 +10561,32 @@ R-40 watch-list.
 (`tests/architecture.rs`) passed after moving `AppCtx` to the primitive `debounce_s` field;
 confirmed no production profile (only `test.yaml`) has a `comms_loss:` section, so this is a
 pure opt-in addition. R-59 removed from `docs/reference/TECHNICAL_DEBTS.md`.
+
+**E2E verification (2026-08-26, Node1)**: the `@resilience` BDD scenario deferred above was run.
+First attempt failed — the post-recovery assertion checked `comms_loss_active == false`
+immediately after the VTN container's own healthcheck passed, but the VEN's poll loop can still
+be mid-sleep in a previously-computed backoff delay from the outage (same latency class the
+pre-existing "VEN backs off exponentially" scenario documents), so a same-instant GET observed
+the stale pre-recovery value. Fixed with a new poll-based step
+(`the VEN health response field "{field}" becomes "{expected}" within {timeout} seconds`,
+`ven_health_steps.py`) reusing the existing `poll_until` helper, rather than a fixed extra sleep.
+Re-run: all 6 `@resilience` scenarios pass (5 pre-existing + the new one, 35s). **Key learning**:
+any BDD assertion checked right after a service-restart step needs a poll-based check, not an
+immediate one, if the thing being asserted depends on the VEN's own background poll loop
+re-succeeding rather than on the restarted service's healthcheck alone.
+
+**Follow-up UI fix (2026-08-26)**: a live UI review (unrelated report) found the Controller
+tab's per-asset "Specs:" line (`AssetLeftSection`, capacity/max import/export) was desyncing
+each asset cell's left-section height from its chart's height across asset types (some assets
+have applicable specs, some don't), breaking diagram alignment. Removed from
+`AssetLeftSection`; added a new `AssetSpecsTable` to the Devices tab instead (one table covering
+every asset with nameplate specs), reusing the existing `deriveAssetSummaries` derivation with
+empty tariffs/requests/timelines rather than duplicating the extraction logic. History tab was
+never affected (it doesn't use `AssetLeftSection`). 627/627 UI tests pass, eslint clean.
+
+**Deployed (2026-08-26, Node1 production stack)**: both changes rebuilt and deployed to
+`ven-1`/`ven-2`/`ven-3` + `ui` on Node1's always-on stack (not the ephemeral E2E test stack) via
+the `deploy-node1` skill's rebuild+restart flow, `ui` restarted a second time per its
+nginx-upstream-caching note. Live-verified: `curl http://localhost:8211/health` shows
+`"comms_loss_active":false` (correctly opted-out — no production profile has `comms_loss:`
+configured); the new `ui` bundle contains `asset-specs-table`.
