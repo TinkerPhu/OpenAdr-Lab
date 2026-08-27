@@ -3,7 +3,7 @@ title: OpenADR 3 Security Model
 type: concept
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
+synced_commit: 102a00b
 sources: [docs/openadr_3_1_specs/]
 tags: [security, oauth2, tls, openadr, spec]
 ---

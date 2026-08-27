@@ -3,7 +3,7 @@ title: History store persistence format, time encoding, compaction, docker locat
 type: query
 created: 2026-07-10
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [VEN/src/history_store/schema.rs, VEN/src/history_store/mod.rs, VEN/src/tasks/history_sampler/accumulator.rs, VEN/src/main.rs, VEN/docker-compose.yml, VEN/src/profile/schema.rs, VEN/src/profile/defaults.rs]
 tags: [history, sqlite, time, retention, docker]
 ---

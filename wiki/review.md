@@ -8,7 +8,7 @@ history), per `wiki/CLAUDE.md`.
 Format: `- [ ] YYYY-MM-DD — <description> (found during <workflow>; pages: page-slug, other-slug)`
 
 - [ ] 2026-07-31 — Stale-page remainder, batch 2 of the triage started 2026-07-31, narrowed
-  during the 2026-08-09 sync (093fbd1..329444a): that sync's own commit range touched and
+  during the 2026-08-09 sync (49389c1..4c4f149): that sync's own commit range touched and
   re-verified `ven-hexagonal-architecture`, `dispatcher`, `heuristics-pipeline`,
   `history-store`, `openadr-interface`, `device-session-common-interface`,
   `history-store-persistence-format`, and `ven-code-vs-docs-audit` already, so they're
@@ -18,7 +18,7 @@ Format: `- [ ] YYYY-MM-DD — <description> (found during <workflow>; pages: pag
   churn), `distributor-business-case-tiers` (large tests/features/ source list),
   `deviation-arbiter`, `tariffs-and-capacity`, `three-tier-plan-grid`, `milp-over-greedy`,
   `openadr-spec-use-cases`, `system-use-cases` — none of these had sources touched by
-  093fbd1..329444a specifically, so this sync didn't re-verify them either. Same triage
+  49389c1..4c4f149 specifically, so this sync didn't re-verify them either. Same triage
   method as batch 1: diff `synced_commit..HEAD` against each page's sources, fix real drift,
   bump `synced_commit` where the diff is cosmetic/unrelated. (found during /wiki-sync;
   pages: see lint output)

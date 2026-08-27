@@ -3,7 +3,7 @@ title: Wiki Maintenance Workflow
 type: concept
 created: 2026-07-04
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [wiki/CLAUDE.md, scripts/wiki_lint.sh, .claude/skills/, docs/reference/SESSION_START.md]
 tags: [wiki, workflow, meta]
 ---

@@ -3,7 +3,7 @@ title: Heuristics Pipeline (learned baselines)
 type: component
 created: 2026-07-16
 updated: 2026-08-21
-synced_commit: 35f7808
+synced_commit: 6a5a678
 sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, VEN/src/controller/report_intervals.rs, VEN/src/controller/reporter.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
 tags: [heuristics, forecasting, baseline, phase-5, wp5-4, baseline-reports]
 ---

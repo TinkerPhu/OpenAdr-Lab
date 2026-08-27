@@ -3,7 +3,7 @@ title: OpenADR Programs Explained — Examples from VTN and VEN View
 type: query
 created: 2026-07-06
 updated: 2026-07-06
-synced_commit: 3d28b1c
+synced_commit: d5a28b2
 sources:
   - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs

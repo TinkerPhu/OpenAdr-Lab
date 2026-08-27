@@ -3,7 +3,7 @@ title: "Decision: MILP over Greedy Scheduling"
 type: decision
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
+synced_commit: 102a00b
 sources: [docs/architecture/ven_milp_planner.md, docs/history/project_journal.md, docs/architecture/heater_tank_milp_planning_model.md]
 tags: [decision, planner, milp]
 ---

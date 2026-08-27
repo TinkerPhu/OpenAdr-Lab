@@ -3,7 +3,7 @@ title: Real-Measurement MQTT Feeds
 type: component
 created: 2026-08-03
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
 tags: [measurement, pv, baseload, mqtt, ven, real-hardware]
 ---
@@ -65,7 +65,7 @@ the synthetic profile+noise outright (no intermediate tier). Both feed into
 (`assets/pv.rs::step_inner`, `simulator/mod.rs`'s `BaseLoad` tick arm) — the same additive
 blend, not a binary null/keep switch, that a same-day fix
 ([[weather-forecast]]'s "found 2026-08-03" note doesn't cover this one; see that component's
-git history around commit `c93556e`) made correct for weather immediately before this
+git history around commit `7e5bec2`) made correct for weather immediately before this
 feature was built on top of it. Building the 3-tier precedence directly on that already-fixed
 mechanism, rather than before it, avoided reintroducing the same class of bug (a lingering
 offset silently suppressing the new measured tier).

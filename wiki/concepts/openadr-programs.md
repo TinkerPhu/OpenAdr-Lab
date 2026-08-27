@@ -3,7 +3,7 @@ title: OpenADR Programs
 type: concept
 created: 2026-07-06
 updated: 2026-07-07
-synced_commit: 466f792
+synced_commit: b0bd0df
 sources:
   - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs

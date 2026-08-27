@@ -3,7 +3,7 @@ title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
 updated: 2026-08-11
-synced_commit: 7380031
+synced_commit: f4ffb86
 sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events/, VEN/src/entities/capacity.rs, VEN/src/state/mod.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---

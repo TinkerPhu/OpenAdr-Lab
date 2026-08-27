@@ -949,7 +949,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   Fix: also listen for `tokio::signal::unix::signal(SignalKind::terminate())` via
   `tokio::select!` alongside `ctrl_c()`.
 - **A targeted "who called this endpoint" logging fix (source IP + payload on `/sim/inject`,
-  `ee6013b`) correctly showed *zero* calls during the incident window — and that absence was
+  `c65b6f9`) correctly showed *zero* calls during the incident window — and that absence was
   the actual diagnostic signal, not a monitoring gap.** When an endpoint-level trace shows
   nothing, the next place to look isn't "maybe the logging missed it" — it's every other code
   path that can produce the same observable state without going through that endpoint
@@ -1007,7 +1007,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `data` arrays (e.g. a 1-minute actual line and its own 5-minute forecast overlay) risks
   showing one series' real value next to another series' value from an unrelated timestamp.
   This bug class was fixed twice, independently, in two different files
-  (`AssetTimelineChart` in `117b44f`, `StackedAreaChart` earlier in `f7b911e`) before being
+  (`AssetTimelineChart` in `9f90b70`, `StackedAreaChart` earlier in `04af9d3`) before being
   recognized as one root cause and fixed structurally: fold every series into ONE
   timestamp-keyed row array before rendering, and give every `<Line>`/`<Area>` a `dataKey`
   accessor into that single array — never its own independent `data` prop. The fix is a
@@ -1318,3 +1318,41 @@ outes/sim.rs causes a T1+T2 double-solve race:
   the shared component, and delete the prop that let a caller skip it - the absence of an
   opt-out is the guarantee, not the helper's existence. Same lesson shape as the chart kit's
   data-presence filtering (`seriesHasData`) and the `generic-over-bespoke` rule.
+
+## Git identity and history rewriting
+
+- **Verify `git log -1 --format='%ae'` after the first commit in any new clone** (2026-08-27).
+  A `user.email` of `TinkerPhu` — not an address, just a bare string — went unnoticed for
+  **1481 commits**. Git never validates the value. Consequences compound quietly: DCO sign-off
+  can't validate, and GitHub can't attribute the commits to any account, so none of them
+  counted. The eventual fix was a full-history rewrite affecting every SHA in the repo, all
+  because nobody looked once at the start. A one-second check prevents a two-hour operation.
+- **`--replace-text` and `--replace-message` are different options in `git filter-repo`, and
+  confusing them fails silently.** `--replace-text` rewrites **blob contents only**;
+  `--replace-message` rewrites commit and tag *messages*. A plan to scrub addresses out of
+  `Signed-off-by:` trailers using `--replace-text` completes with a success message and changes
+  nothing. When a tool has two near-synonymous options, confirm which one touches the thing you
+  care about against its source or manual — not against what the name suggests.
+- **Rehearse destructive, outward-facing operations against a throwaway target first.** For the
+  history rewrite, the entire sequence (rewrite → gates → branch deletion → tag force-push →
+  SHA remap → rollback) was run end-to-end against a locally-cloned fake origin. Cost: ~10
+  minutes. It found three defects that three careful *reading* passes had missed — including a
+  verification gate that was itself mis-specified and failed on a good backup. Reading a plan
+  checks it for what you thought of; running it checks it for everything else.
+- **A backup is a hypothesis until you restore from it.** Two specific traps met here:
+  `git bundle create … --all <bare-sha>` is invalid (bundles require ref *names*, so stashes
+  need real refs created first), and `--all` does **not** reach the `refs/stash` reflog — it
+  captures only `stash@{0}`, silently dropping the rest. Restoring a bundle also gives back
+  commits and refs, never poppable `stash@{N}` entries. Test the restore path, and gate it
+  against the right baseline: a bundle taken from a local clone holds the *local* tip, which is
+  routinely behind `origin`.
+- **A rewritten repo's SHA references need a remap pass, and the remap must refuse to guess.**
+  Regex-matching 7–40 char hex tokens across docs produces real false positives — in this repo
+  `999999999999998` (a float in prose) and two 17-char IDs. Resolve each token as a *unique
+  prefix of a known old SHA* and leave everything else alone, reporting it. A stale reference is
+  recoverable; a silently rewritten wrong one is not.
+- **Force-pushing a rewrite does not remove commits from GitHub.** `refs/pull/*` refs for past
+  PRs are GitHub-managed, survive the rewrite, cannot be deleted by pushing, and keep their
+  original commits reachable — in this case all 6 commits carrying a real employer address. A
+  PR can be closed but never deleted. Genuine removal needs a GitHub Support GC request. Plan
+  for this before promising anyone that history was scrubbed.

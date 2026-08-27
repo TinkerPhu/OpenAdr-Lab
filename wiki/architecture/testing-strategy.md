@@ -3,7 +3,7 @@ title: Testing Strategy
 type: architecture
 created: 2026-07-04
 updated: 2026-08-03
-synced_commit: 50961b5
+synced_commit: fab41e9
 sources: [docs/guidelines/TESTING.md, tests/features/, .claude/CLAUDE.md, run_all_tests.sh]
 tags: [testing, bdd, pyramid]
 ---

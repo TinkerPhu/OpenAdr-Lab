@@ -3,7 +3,7 @@ title: "Decision: DTO Pass-Through, No Normalisation"
 type: decision
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
+synced_commit: 102a00b
 sources: [.claude/CLAUDE.md, docs/architecture/VTN_ARCHITECTURE.md, docs/openadr_3_1_specs/]
 tags: [decision, dto, api]
 ---

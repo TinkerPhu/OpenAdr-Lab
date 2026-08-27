@@ -3,7 +3,7 @@ title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---

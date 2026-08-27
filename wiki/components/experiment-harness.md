@@ -3,7 +3,7 @@ title: Experiment Harness
 type: component
 created: 2026-07-11
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [experiments/, VEN/src/tasks/sim_tick/tick.rs]
 tags: [experiments, kpi, scenarios, phase3]
 ---

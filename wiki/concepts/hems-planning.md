@@ -3,7 +3,7 @@ title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs, VEN/src/services/user_request.rs]
 tags: [hems, planning, sessions, domain]
 ---

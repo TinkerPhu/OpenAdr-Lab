@@ -3,7 +3,7 @@ title: VEN UI
 type: component
 created: 2026-07-04
 updated: 2026-08-21
-synced_commit: 35f7808
+synced_commit: 6a5a678
 sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -102,7 +102,7 @@ reactive correction" that is permanently dead — it listens for SSE `correction
 `correction_cleared` events that no backend code emits (predates and was never rewired to
 [[deviation-arbiter]]; see that page's DRIFT callout).
 
-**SessionProgressBoard** (`components/sessions/SessionProgressBoard.tsx`, f068d94)
+**SessionProgressBoard** (`components/sessions/SessionProgressBoard.tsx`, 9ba32e7)
 replaced the Phase-D-orphaned `PacketProgressBoard`, which had polled the deleted
 `GET /packets` endpoint and permanently rendered empty. It renders one card per
 [[hems-planning]] user request grouped Active/Done: EV fill gauge from the live sim
@@ -144,7 +144,7 @@ cover the null/Off rendering path.
 ## Timeline specifics
 
 The timeline renders the plan produced by the [[milp-planner]] including its variable-step
-zones ([[three-tier-plan-grid]]): zone shading uses per-zone opacity (fixed at 7edeb08 so
+zones ([[three-tier-plan-grid]]): zone shading uses per-zone opacity (fixed at 693b9b4 so
 Zone A is not invisible), and a **now-point** marker shows the live simulator value at the
 exact request time — deliberately *not* snapped to the plan grid
 (docs/architecture/ven_milp_planner.md §2.2, timeline now-point).

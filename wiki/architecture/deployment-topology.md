@@ -3,7 +3,7 @@ title: Deployment Topology
 type: architecture
 created: 2026-07-04
 updated: 2026-08-09
-synced_commit: 329444a
+synced_commit: 4c4f149
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh, VEN/scale_out/node2/]
 tags: [deployment, docker, node1]
 ---

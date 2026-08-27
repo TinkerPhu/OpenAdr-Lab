@@ -3,7 +3,7 @@ title: Sign Convention and Units
 type: concept
 created: 2026-07-04
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [docs/REQUIREMENTS.md]
 tags: [domain, units, convention]
 ---

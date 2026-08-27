@@ -3,7 +3,7 @@ title: "Query: what is the Planner tab in the VEN UI for?"
 type: query
 created: 2026-07-17
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
 tags: [ui, planner, ux]
 ---
@@ -57,9 +57,9 @@ Controller shows per-asset *timelines with zones* ([[three-tier-plan-grid]],
 
 The original answer classified `PacketProgressBoard` as one of the tab's two user-facing
 elements. It was in fact **dead UI**: it polled `GET /packets`, an endpoint removed with
-the EnergyPacket abstraction (Phase D, commits `efd861f`…`0079a77`), so it permanently
+the EnergyPacket abstraction (Phase D, commits `ba1ee92`…`b0543d7`), so it permanently
 rendered its empty state. Same day, it was rebuilt UI-only as **`SessionProgressBoard`**
-(`VEN/ui/src/components/sessions/SessionProgressBoard.tsx`, commit f068d94) on the live
+(`VEN/ui/src/components/sessions/SessionProgressBoard.tsx`, commit 9ba32e7) on the live
 [[hems-planning]] session vocabulary: `GET /user-requests` + live sim snapshot (EV SoC
 fill gauge, heater current→target temperature) + the active plan (`planned_kw_by_asset`
 summed to the session deadline vs `envelopes.energy_needed_kwh` → on-track/at-risk chip).
@@ -70,7 +70,7 @@ does not exist anywhere (tracked as BL-39). The table above reflects the rebuilt
 
 Filed in `docs/BACKLOG.md` (User-Value View, "comfort, control & trust"):
 
-- **BL-36 — resolved (f068d94)** with the rebuild: condensed session chips + a read-only
+- **BL-36 — resolved (9ba32e7)** with the rebuild: condensed session chips + a read-only
   objective chip on the Dashboard (`dash-session-strip`); the objective *control* stays on
   the Planner tab beside its weight legend, where the legend and live solve feedback teach
   the user what each objective does.

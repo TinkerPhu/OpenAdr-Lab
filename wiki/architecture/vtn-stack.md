@@ -3,7 +3,7 @@ title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
 updated: 2026-07-31
-synced_commit: e9f5207
+synced_commit: aff3f57
 sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
