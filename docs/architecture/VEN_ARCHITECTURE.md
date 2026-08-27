@@ -770,12 +770,10 @@ is a per-cycle UI summary, not per-warning queries.
 (`entities/plan.rs`), not just the transient `plan_ready` SSE event. `solver_ms` is stamped in
 `PlanningService::adopt_if_warranted` before either the SSE emit or `state.set_active_plan`, so
 the live event, `GET /plan`, and the plan-history row all agree. `mip_gap_target` is stamped at
-`Plan` construction time in `controller::milp_planner::results` from the per-profile
-`planner.mip_gap_target` setting (default `0.02`) — the same value carried on `MilpInputs` and
-passed to `good_lp`'s `with_mip_gap` at all three solve call sites (`solver_phase1`,
-`solver_phase2`, `solver_duals`). Raising it is the cheapest lever against `TIME_LIMIT` on
-combinatorially hard sites (GB-40), since it converts time-limited solves into gap-limited ones.
-This remains a proxy only: the *configured* tolerance, not the *achieved* gap as
+`Plan` construction time in `controller::milp_planner::results` from the shared
+`controller::milp_planner::types::MIP_GAP_TARGET` constant (`0.02`) — the same value passed to
+`good_lp`'s `with_mip_gap` at all three solve call sites (`solver_phase1`, `solver_phase2`,
+`solver_duals`). This remains a proxy only: the *configured* tolerance, not the *achieved* gap as
 a number on any given solve — `good_lp`'s public API exposes no achieved-gap query (tracked as
 debt in `docs/reference/TECHNICAL_DEBTS.md`).
 
