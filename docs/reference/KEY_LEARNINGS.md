@@ -1352,7 +1352,20 @@ outes/sim.rs causes a T1+T2 double-solve race:
   prefix of a known old SHA* and leave everything else alone, reporting it. A stale reference is
   recoverable; a silently rewritten wrong one is not.
 - **Force-pushing a rewrite does not remove commits from GitHub.** `refs/pull/*` refs for past
-  PRs are GitHub-managed, survive the rewrite, cannot be deleted by pushing, and keep their
-  original commits reachable — in this case all 6 commits carrying a real employer address. A
-  PR can be closed but never deleted. Genuine removal needs a GitHub Support GC request. Plan
-  for this before promising anyone that history was scrubbed.
+  PRs are GitHub-managed, survive the rewrite and the deletion of every branch, cannot be
+  removed by pushing, and keep their original commits fully reachable — HTTP 200 at
+  `/commit/<sha>`, address visible in the `.patch`, and still **attributed to whatever account
+  that address is registered to**. Because those commits are *referenced* rather than
+  unreachable, a garbage-collection request does not remove them either. A PR can be closed,
+  never deleted.
+  **The fix that actually works for a low-profile repo is delete-and-recreate**: check
+  stars/forks/watchers/releases/issues first (here: all zero apart from the 2 PRs themselves),
+  export anything that would be lost, re-clone the clean history *excluding* `refs/pull`, delete,
+  recreate, push back. Took minutes, removed everything, and CI workflows re-activated on their
+  own. Verify with a fresh mirror clone plus a 404 check on the specific old SHAs — not by
+  looking at the branch.
+- **Check identity exposure at the account level, not just the string level.** The real finding
+  was not "an email appears in metadata" but "GitHub links these commits to a second, employer-
+  associated account". `gh api repos/O/R/commits/<sha> --jq .author.login` answers this and
+  `git log` cannot. Also remove the address from that account's email list, or the same linkage
+  reappears anywhere else it was ever used to commit.

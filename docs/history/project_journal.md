@@ -10614,13 +10614,28 @@ deleted, and the annotated tag `All_tests_green_01` was rewritten and force-push
 Afterwards, 212 SHA references across 47 files (wiki `synced_commit:` pins,
 `project_journal.md`, `KEY_LEARNINGS.md`) were remapped through filter-repo's `commit-map`.
 
-**Known residue — the real addresses are not fully gone.** GitHub's `refs/pull/1/head` and
-`refs/pull/2/head` (PR #1 merged, PR #2 closed, both July 2026) still point at pre-rewrite
-commits, and **all 6 employer-address commits remain reachable through them**. These refs are
-GitHub-managed and cannot be deleted by pushing; a PR cannot be deleted, only closed. Removing
-them requires a GitHub Support request to garbage-collect the repository. `main` and the tag —
-everything the rewrite owns — are verifiably clean (0 residue, single identity). This is a
-partial result and is recorded as such rather than being written up as a complete scrub.
+**The force-push alone did not finish the job — and the gap was account-level.** GitHub's
+`refs/pull/1/head` and `refs/pull/2/head` (PR #1 merged, PR #2 closed, both July 2026) still
+pointed at pre-rewrite commits, keeping **all 6 employer-address commits reachable**: HTTP 200
+at `/commit/<sha>`, the address visible in the `.patch`, and — the part that actually mattered —
+GitHub still **attributing those commits to the separate employer-linked account**. Because the
+commits were *referenced* rather than merely unreachable, a garbage-collection request would not
+have removed them, and PR refs cannot be deleted by pushing (a PR can be closed, never deleted).
+
+**Resolved by deleting and recreating the repository (same day).** The cost was checked before
+acting and was negligible: 0 stars, 0 forks, 0 watchers, 0 releases, and no standalone issues —
+the only losses were the 2 closed PR records themselves, whose full text was exported to the
+backup directory first. The clean rewritten history was re-cloned to
+`clean-rewritten.git` (heads + tags only, deliberately excluding `refs/pull`), the repo deleted,
+recreated with identical settings, and the history pushed back. Verified afterwards: all 6 SHAs
+return **404 on both web and API**, a fresh mirror clone carries exactly `main` + the tag with a
+single identity and zero residue, and all three CI workflows re-activated automatically.
+
+**Lesson worth keeping**: "rewrite history and force-push" is not equivalent to "removed from
+GitHub". Pull-request refs outlive branch deletion and the rewrite itself. For a repo with no
+stars or forks, delete-and-recreate is both cheaper and more complete than a Support request —
+but check the star/fork/issue count *before* assuming that, since it is what makes the option
+cheap.
 
 **Issues hit, and what they cost.** Three review passes preceded execution and the plan was
 wrong in materially different ways each time:
