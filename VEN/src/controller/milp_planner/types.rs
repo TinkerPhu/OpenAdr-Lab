@@ -9,6 +9,19 @@ use crate::entities::planner_params::{PenaltyRuleParams, PlannerObjective, Plann
 // so all existing `use super::types::*` callers still resolve it.
 pub use super::asset_port::MilpLoadMode;
 
+/// GB-25: the MILP solver's configured optimality-gap tolerance, shared by all
+/// three solve call sites (`solver_phase1`, `solver_phase2`, `solver_duals`) and
+/// persisted on `Plan.mip_gap_target` as a proxy for solve quality — the
+/// *configured* target, not the achieved gap on any given solve. GB-31 added
+/// `SolveStatus::GapLimit`/`TimeLimit` (real termination reason, read from
+/// `good_lp`'s `SolutionStatus`), but the achieved gap as a *number* is still
+/// not persisted: `good_lp`'s public `Solution` trait exposes only that
+/// coarser status, not the underlying `highs::SolvedModel::mip_gap()` float —
+/// reaching that would mean bypassing `good_lp`'s solve path (which discards
+/// the `SolvedModel` after extracting the solution) and reimplementing its
+/// `Variable`→column-index mapping by hand. See `docs/reference/TECHNICAL_DEBTS.md`.
+pub(crate) const MIP_GAP_TARGET: f64 = 0.02;
+
 /// Map `good_lp`'s coarse solve-quality classification to our persisted
 /// `SolveStatus` (GB-31). `good_lp::solvers::SolutionStatus` has no
 /// `Infeasible`/`Unbounded` variants of its own — those solves return
@@ -135,10 +148,6 @@ pub(crate) struct MilpInputs {
     pub(crate) pen_imp_eur_kwh: f64,
     /// Per-kWh export violation penalty (scalar)
     pub(crate) pen_exp_eur_kwh: f64,
-    /// HiGHS optimality-gap tolerance (scalar, from PlannerConfig). Carried
-    /// here rather than as a solve parameter because all three solve sites
-    /// already take `&MilpInputs` but none take `&PlannerParams`.
-    pub(crate) mip_gap_target: f64,
     /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty = feature disabled.
     pub(crate) penalty_rules: Vec<PenaltyRuleParams>,
 

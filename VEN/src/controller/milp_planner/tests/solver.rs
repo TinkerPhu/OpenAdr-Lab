@@ -23,7 +23,6 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         p_exp_max_cont_kw: vec![10.0; n],
         pen_imp_eur_kwh: 0.0,
         pen_exp_eur_kwh: 0.0,
-        mip_gap_target: 0.02,
         penalty_rules: vec![],
         e_bat_nom_kwh: None,
         e_bat_init_kwh: None,
@@ -952,39 +951,5 @@ fn marginal_cost_reflects_binding_import_violation_penalty() {
         "slot 0: expected marginal cost ≈ tariff + violation penalty {:.3}, got {:.6}",
         expected,
         marginal[0]
-    );
-}
-
-/// The configured `mip_gap_target` must reach both the solver and the produced
-/// `Plan`. Before it was configurable this value was the hardcoded
-/// `MIP_GAP_TARGET` const, so `Plan.mip_gap_target` — which the UI renders and
-/// plan history persists — always read 0.02 no matter what the profile said.
-#[test]
-fn configured_mip_gap_target_reaches_the_plan() {
-    let now = fixed_now();
-    let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
-    profile.planner.mip_gap_target = 0.05;
-    let sim = make_snap_from_profile(&profile);
-    let tariffs = make_tariffs(0.25, 0.08, 300.0);
-
-    let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
-        &tariffs,
-        &no_capacity(),
-        &profile,
-        now,
-        crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
-        None,
-        None,
-    );
-
-    assert_eq!(
-        plan.mip_gap_target,
-        Some(0.05),
-        "profile's mip_gap_target must be persisted on the plan, not the old const"
     );
 }

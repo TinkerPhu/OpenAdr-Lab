@@ -408,7 +408,6 @@ pub(crate) fn build_milp_inputs(
         p_exp_max_cont_kw: p_exp_cont,
         pen_imp_eur_kwh: planner.pen_imp_eur_kwh,
         pen_exp_eur_kwh: planner.pen_exp_eur_kwh,
-        mip_gap_target: planner.mip_gap_target,
         penalty_rules: planner.penalty_rules.clone(),
         e_bat_nom_kwh: e_bat_nom,
         e_bat_init_kwh: e_bat_init,
