@@ -56,6 +56,10 @@ pub struct PlannerParams {
     pub plan_adoption_decay_s: f64,
     pub phase2_epsilon_eur: f64,
     pub solver_timeout_s: u64,
+    /// HiGHS optimality-gap tolerance, shared by all three solve call sites and
+    /// persisted on `Plan.mip_gap_target`. See `profile::schema::PlannerConfig`
+    /// for why it can only be tuned by offline benchmarking.
+    pub mip_gap_target: f64,
     pub planning_initial_delay_s: u64,
     /// Per-extra-switch surcharge [EUR] added to the effective acceptance threshold.
     /// 0.0 = disabled (default). Set to match `switching_penalty_eur` so that a noisier
@@ -116,6 +120,7 @@ impl Default for PlannerParams {
             plan_adoption_decay_s: 1500.0,
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
+            mip_gap_target: 0.02,
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,
             simple_level1_import_cap_pct: 0.5,

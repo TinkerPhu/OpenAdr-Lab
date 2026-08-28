@@ -137,6 +137,25 @@ pub struct PlannerConfig {
     #[serde(default = "super::defaults::default_solver_timeout_s")]
     pub solver_timeout_s: u64,
 
+    /// HiGHS optimality-gap tolerance, shared by all three solve call sites and
+    /// persisted on `Plan.mip_gap_target`. The solver stops once the incumbent
+    /// is within this fraction of the best known bound, reporting `GapLimit`;
+    /// raising it is the cheapest lever against `TIME_LIMIT` (GB-40). The
+    /// *achieved* gap is not observable through `good_lp` (R-65 in
+    /// `docs/reference/TECHNICAL_DEBTS.md`), so tune this by offline
+    /// benchmarking (`milp_planner/tests/solve_cost.rs`), not telemetry.
+    ///
+    /// Measured cost of loosening it (2026-08-28, `bench_heater_variants`,
+    /// five heater instances): at 0.20 phase 1 stops timing out and finishes in
+    /// 3–16 s instead of 54–57 s, for a mean **+3.9%** on phase 1's objective.
+    /// The realized loss is far below the tolerance because branch-and-bound
+    /// reaches a near-optimal incumbent early and then spends its time *proving*
+    /// optimality — the gap buys out the proof, not the answer. Note this does
+    /// not cure GB-40: phase 2 still burns its full budget at any gap.
+    /// Default: 0.02.
+    #[serde(default = "super::defaults::default_mip_gap_target")]
+    pub mip_gap_target: f64,
+
     /// Seconds the planning loop sleeps after startup before the first plan.
     /// Allows event polling to populate tariff rates first. Default: 5.
     #[serde(default = "super::defaults::default_planning_initial_delay_s")]

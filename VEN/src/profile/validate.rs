@@ -48,6 +48,14 @@ impl Profile {
                 self.planner.phase2_epsilon_eur
             ));
         }
+        // 0.0 is legal (prove exact optimality); 1.0 would accept any feasible
+        // solution, which is never a deliberate setting.
+        if !(0.0..1.0).contains(&self.planner.mip_gap_target) {
+            errors.push(format!(
+                "planner.mip_gap_target must be ≥ 0.0 and < 1.0, got {}",
+                self.planner.mip_gap_target
+            ));
+        }
 
         // Poll cadence + startup jitter bounds (GB-09).
         if self.polling.events_secs == 0 {
@@ -733,6 +741,67 @@ planner:
         assert!((cfg.plan_adoption_decay_s - 1500.0).abs() < 1e-9);
         assert_eq!(cfg.plan_step_s, 600);
         assert_eq!(cfg.plan_horizon_h, 48);
+        assert!((cfg.mip_gap_target - 0.02).abs() < 1e-9);
+    }
+
+    /// A profile that omits `mip_gap_target` must still get the 0.02 default
+    /// through serde — the milp test-suite aliases its `PlannerConfig` to the
+    /// domain `PlannerParams`, so it never exercises this path.
+    fn make_gap_profile(mip_gap_target: &str) -> Profile {
+        let yaml = format!(
+            r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+planner:
+{mip_gap_target}
+"#
+        );
+        serde_yaml::from_str(&yaml).unwrap()
+    }
+
+    #[test]
+    fn mip_gap_target_defaults_to_two_percent_when_absent() {
+        let p = make_gap_profile("  plan_horizon_h: 48");
+        assert!((p.planner.mip_gap_target - 0.02).abs() < 1e-9);
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn mip_gap_target_parses_from_yaml() {
+        let p = make_gap_profile("  mip_gap_target: 0.05");
+        assert!((p.planner.mip_gap_target - 0.05).abs() < 1e-9);
+        assert!(p.validate().is_ok(), "0.05 is a legal gap");
+    }
+
+    #[test]
+    fn validate_rejects_negative_mip_gap_target() {
+        let p = make_gap_profile("  mip_gap_target: -0.01");
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("mip_gap_target")),
+            "expected mip_gap_target violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mip_gap_target_at_or_above_one() {
+        // A gap of 1.0 means "any feasible solution will do" — a 100% optimality
+        // tolerance is never a deliberate setting, so treat it as misconfiguration.
+        let p = make_gap_profile("  mip_gap_target: 1.0");
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("mip_gap_target")),
+            "expected mip_gap_target violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_zero_mip_gap_target() {
+        // 0.0 is legal: prove exact optimality, at whatever time cost.
+        let p = make_gap_profile("  mip_gap_target: 0.0");
+        assert!(p.validate().is_ok());
     }
 
     #[test]

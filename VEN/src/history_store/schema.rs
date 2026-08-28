@@ -150,7 +150,7 @@ ALTER TABLE grid_samples ADD COLUMN export_limit_kw REAL;
 ";
 
 /// GB-25: per-plan-cycle solve-quality history — solve time, solver outcome, the
-/// configured MIP-gap proxy (see `controller::milp_planner::types::MIP_GAP_TARGET`), and a
+/// configured MIP-gap proxy (see `profile::planner::PlannerConfig::mip_gap_target`), and a
 /// diagnostic cost/warning summary. `warning_kinds` is a comma-joined TEXT column, narrower
 /// than a join table (see `entities::history::PlanHistorySample`'s doc comment). Deliberately
 /// not a revival of the dropped `plan_snapshots` table (R-63, SCHEMA_V7 above) — narrow typed
