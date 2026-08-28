@@ -14,6 +14,7 @@ use super::asset_port::{
     battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state,
 };
 use super::envelopes::build_plan_envelopes;
+use super::ev_diagnostics::unmet_warning as ev_unmet_warning;
 use super::types::*;
 
 /// Fallback plan returned when the MILP solver fails.
@@ -484,6 +485,7 @@ pub(crate) fn translate_to_plan(
         }
     }
 
+    warnings.extend(ev_unmet_warning(inputs, sol, ev_session, ev_cfg));
     // ── Assemble plan ───────────────────────────────────────────────────
     let envelopes = build_plan_envelopes(
         ev_session,
