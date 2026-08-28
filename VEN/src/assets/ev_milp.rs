@@ -562,6 +562,7 @@ mod milp_context_trait_tests {
         let cfg = super::EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
+            v2g_capable: false,
             battery_kwh: 60.0,
             soc_target: 0.8,
             soc_target_profile: 0.8,
@@ -639,6 +640,7 @@ mod milp_context_trait_tests {
         let cfg = super::EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
+            v2g_capable: false,
             battery_kwh: 60.0,
             soc_target: 0.8,
             soc_target_profile: 0.8,

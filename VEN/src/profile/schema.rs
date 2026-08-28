@@ -47,6 +47,7 @@ impl AssetProfile {
                 default_charge_kw: c.default_charge_kw,
                 min_charge_kw: c.min_charge_kw,
                 response_delay_s: c.response_delay_s,
+                v2g_capable: c.v2g_capable,
             }),
             AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
                 id: c.id.clone(),
@@ -207,6 +208,11 @@ pub struct EvConfig {
     /// BL-12: expected controller response delay (s), simulated as a single-tick lag.
     #[serde(default = "super::defaults::default_ev_response_delay")]
     pub response_delay_s: f64,
+    /// Whether this EV's EVSE hardware actually supports bidirectional
+    /// (vehicle-to-grid) discharge. Defaults to false — most EVSE installs
+    /// are charge-only, so `max_discharge_kw` is otherwise inert.
+    #[serde(default = "super::defaults::default_ev_v2g_capable")]
+    pub v2g_capable: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

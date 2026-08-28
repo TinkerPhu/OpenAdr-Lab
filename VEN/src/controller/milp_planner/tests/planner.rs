@@ -625,6 +625,7 @@ fn make_profile_n48() -> Profile {
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
+                v2g_capable: false,
             }),
             AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),

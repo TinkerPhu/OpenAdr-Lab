@@ -28,6 +28,9 @@ pub(super) fn default_ev_min_charge() -> f64 {
 pub(super) fn default_ev_response_delay() -> f64 {
     10.0
 }
+pub(super) fn default_ev_v2g_capable() -> bool {
+    false
+}
 
 pub(super) fn default_history_enabled() -> bool {
     true
