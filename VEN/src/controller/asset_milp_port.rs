@@ -59,17 +59,17 @@ pub struct EvScalars {
 pub struct HeaterScalars {
     pub mode: MilpLoadMode,
     pub t_dead_step: Option<usize>,
-    pub p_mid_kw: f64,
-    pub p_full_kw: f64,
+    /// Power per switchable stage [kW] = max_kw / n_stages.
+    pub p_step_kw: f64,
+    /// Number of switchable stages (1 or 2).
+    pub n_stages: u8,
     pub e_init_kwh: f64,
     pub e_max_kwh: f64,
     pub q_dem_kw: f64,
     pub e_target_kwh: f64,
     pub lambda_sw_eur: f64,
-    /// 1.0 if heater was at mid power on the last real tick; 0.0 otherwise.
-    pub initial_z_mid: f64,
-    /// 1.0 if heater was at full power on the last real tick; 0.0 otherwise.
-    pub initial_z_full: f64,
+    /// Stage index (0..=n_stages) the heater was at on the last real tick.
+    pub initial_y: f64,
     /// Terminal energy reward [EUR/kWh]. Mirrors HeaterMilpContext field.
     pub c_terminal_eur_kwh: f64,
 }

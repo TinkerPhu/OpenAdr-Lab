@@ -77,6 +77,7 @@ impl PlanningService {
         threshold_eur: f64,
         decay_s: f64,
         gate_switch_penalty_eur: f64,
+        heater_p_step_kw: f64,
         solver_ms: u64,
         objective: PlannerObjective,
         state: &AppState,
@@ -108,6 +109,7 @@ impl PlanningService {
             threshold_eur,
             decay_s,
             gate_switch_penalty_eur,
+            heater_p_step_kw,
             now,
         );
 

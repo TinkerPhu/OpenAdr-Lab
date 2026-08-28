@@ -10,60 +10,54 @@ use crate::controller::milp_planner::asset_port::{
     HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
 };
 
-/// Map a planned heater power [kW] to tier binary values (z_mid, z_full).
-/// Returns (Some(0|1), Some(0|1)) when kw matches a recognised tier within 0.1 kW,
-/// or (None, None) when the value doesn't match any tier (leave binaries free).
-fn kw_to_tier_pair(kw: f64, p_mid: f64, p_full: f64) -> (Option<f64>, Option<f64>) {
+/// Map a planned heater power [kW] to a stage index.
+/// Returns `Some(k)` when `kw` is within 0.1 kW of `k × p_step_kw` for some
+/// reachable stage, or `None` when it matches no stage (anchor left free).
+fn kw_to_stage(kw: f64, p_step_kw: f64, n_stages: f64) -> Option<f64> {
     const TOL: f64 = 0.1;
-    if kw.abs() < TOL {
-        (Some(0.0), Some(0.0))
-    } else if (kw - p_mid).abs() < TOL {
-        (Some(1.0), Some(0.0))
-    } else if (kw - p_full).abs() < TOL {
-        (Some(0.0), Some(1.0))
-    } else {
-        (None, None)
+    if p_step_kw <= 0.0 {
+        return if kw.abs() < TOL { Some(0.0) } else { None };
     }
+    let k = (kw / p_step_kw).round();
+    if !(0.0..=n_stages).contains(&k) {
+        return None;
+    }
+    ((kw - k * p_step_kw).abs() < TOL).then_some(k)
 }
 
 impl HeaterMilpContext {
     /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
         let must_not = self.mode == HeaterMilpMode::MustNotRun;
+        let n_stages = self.n_stages as f64;
 
-        // Compute per-slot anchor pairs once; warn when an anchored kW doesn't match any tier
-        // (can happen after a profile config change that shifts mid_kw or max_kw).
-        let anchor_pairs: Vec<(Option<f64>, Option<f64>)> = (0..n)
-            .map(|t| match self.anchored_kw.get(t).copied().flatten() {
-                Some(kw) => {
-                    let pair = kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw);
-                    if pair == (None, None) {
+        // GB-40: one integer stage index per slot instead of a binary per tier.
+        // Levels are evenly spaced (P = p_step_kw × y), so a single variable
+        // represents each reachable power exactly once. The old two-binary
+        // encoding let the relaxation express one power several ways
+        // (e.g. 4.5 kW as z=(0.5,0.5) or (0,0.75)), and that degeneracy is what
+        // stalled branch-and-bound. Integer bounds also subsume the old mutual-
+        // exclusion rows.
+        let y_heat = (0..n)
+            .map(|t| {
+                let anchor = self.anchored_kw.get(t).copied().flatten().and_then(|kw| {
+                    let st = kw_to_stage(kw, self.p_step_kw, n_stages);
+                    if st.is_none() {
                         tracing::warn!(
                             slot = t,
                             kw,
-                            p_mid = self.p_mid_kw,
-                            p_full = self.p_full_kw,
-                            "heater anchor: kw matches no tier — anchor dropped for this slot"
+                            p_step = self.p_step_kw,
+                            n_stages = self.n_stages,
+                            "heater anchor: kw matches no stage — anchor dropped for this slot"
                         );
                     }
-                    pair
+                    st
+                });
+                match anchor {
+                    Some(k) => vars.add(variable().min(k).max(k)),
+                    None if must_not => vars.add(variable().min(0.0).max(0.0)),
+                    None => vars.add(variable().integer().min(0.0).max(n_stages)),
                 }
-                None => (None, None),
-            })
-            .collect();
-
-        let z_heat_mid = (0..n)
-            .map(|t| match anchor_pairs[t].0 {
-                Some(v) => vars.add(variable().min(v).max(v)),
-                None if must_not => vars.add(variable().min(0.0).max(0.0)),
-                None => vars.add(variable().binary()),
-            })
-            .collect();
-        let z_heat_full = (0..n)
-            .map(|t| match anchor_pairs[t].1 {
-                Some(v) => vars.add(variable().min(v).max(v)),
-                None if must_not => vars.add(variable().min(0.0).max(0.0)),
-                None => vars.add(variable().binary()),
             })
             .collect();
 
@@ -85,18 +79,17 @@ impl HeaterMilpContext {
         let s_low = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
         // sw[t]: switching indicator ≥ 0 for all slots including t=0.
-        // t=0 measures the switch relative to the last observed hardware state (initial_z_*).
+        // t=0 measures the switch relative to the last observed hardware stage (initial_y).
         let sw = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
         HeaterMilpVars {
-            z_heat_mid,
-            z_heat_full,
+            y_heat,
             z_heat_ready,
             e_tank,
             s_low,
             sw,
-            p_mid_kw: self.p_mid_kw,
-            p_full_kw: self.p_full_kw,
+            p_step_kw: self.p_step_kw,
+            n_stages: self.n_stages,
         }
     }
 
@@ -105,13 +98,10 @@ impl HeaterMilpContext {
     pub fn constraints(&self, v: &HeaterMilpVars, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
 
-        // C0: mutual exclusion — mid and full are alternative modes.
-        for t in 0..n {
-            cs.push(constraint!(v.z_heat_mid[t] + v.z_heat_full[t] <= 1.0));
-        }
-
+        // (The old C0 mutual-exclusion rows are gone: with a single stage index
+        // bounded to [0, n_stages], unreachable combinations are inexpressible.)
         if self.mode == HeaterMilpMode::MustNotRun {
-            return cs; // all power vars already fixed to 0; no trajectory needed
+            return cs; // y already fixed to 0; no trajectory needed
         }
 
         // C1: pin initial tank energy.
@@ -123,18 +113,15 @@ impl HeaterMilpContext {
         // Expressed as two inequalities (== is not directly supported).
         for (t, &dt) in dt_h.iter().enumerate().take(n.saturating_sub(1)) {
             let net_const = -self.q_dem_kw * dt;
-            let p_mid_dt = self.p_mid_kw * dt;
-            let p_full_dt = self.p_full_kw * dt;
-            // LHS = e_tank[t+1] − e_tank[t] − p_mid_dt×z_mid[t] − p_full_dt×z_full[t]
+            let p_step_dt = self.p_step_kw * dt;
+            // LHS = e_tank[t+1] − e_tank[t] − p_step_dt×y[t]
             let lhs_ge = Expression::from(v.e_tank[t + 1])
                 - Expression::from(v.e_tank[t])
-                - p_mid_dt * v.z_heat_mid[t]
-                - p_full_dt * v.z_heat_full[t];
+                - p_step_dt * v.y_heat[t];
             cs.push(constraint!(lhs_ge >= net_const));
             let lhs_le = Expression::from(v.e_tank[t + 1])
                 - Expression::from(v.e_tank[t])
-                - p_mid_dt * v.z_heat_mid[t]
-                - p_full_dt * v.z_heat_full[t];
+                - p_step_dt * v.y_heat[t];
             cs.push(constraint!(lhs_le <= net_const));
         }
 
@@ -148,30 +135,16 @@ impl HeaterMilpContext {
             cs.push(constraint!(v.e_tank[t] + v.s_low[t] >= 0.0));
         }
 
-        // C5: switching indicators — sw[t] ≥ |z_x[t] − z_x[t−1]| for each binary.
-        // t=0 uses initial_z_* (last observed hardware state) as the previous slot,
-        // so switching at t=0 is allowed but incurs the relay penalty.
-        cs.push(constraint!(v.sw[0] >= v.z_heat_mid[0] - self.initial_z_mid));
-        cs.push(constraint!(v.sw[0] >= self.initial_z_mid - v.z_heat_mid[0]));
-        cs.push(constraint!(
-            v.sw[0] >= v.z_heat_full[0] - self.initial_z_full
-        ));
-        cs.push(constraint!(
-            v.sw[0] >= self.initial_z_full - v.z_heat_full[0]
-        ));
+        // C5: switching indicators — sw[t] ≥ |y[t] − y[t−1]|, i.e. the number of
+        // relay operations, since each stage is its own contactor. This corrects
+        // the old encoding, whose `max(|Δz_mid|, |Δz_full|)` charged off→full the
+        // same as off→mid even though it closes two relays rather than one.
+        // t=0 measures against the last observed hardware stage (initial_y).
+        cs.push(constraint!(v.sw[0] >= v.y_heat[0] - self.initial_y));
+        cs.push(constraint!(v.sw[0] >= self.initial_y - v.y_heat[0]));
         for t in 1..n {
-            cs.push(constraint!(
-                v.sw[t] >= v.z_heat_mid[t] - v.z_heat_mid[t - 1]
-            ));
-            cs.push(constraint!(
-                v.sw[t] >= v.z_heat_mid[t - 1] - v.z_heat_mid[t]
-            ));
-            cs.push(constraint!(
-                v.sw[t] >= v.z_heat_full[t] - v.z_heat_full[t - 1]
-            ));
-            cs.push(constraint!(
-                v.sw[t] >= v.z_heat_full[t - 1] - v.z_heat_full[t]
-            ));
+            cs.push(constraint!(v.sw[t] >= v.y_heat[t] - v.y_heat[t - 1]));
+            cs.push(constraint!(v.sw[t] >= v.y_heat[t - 1] - v.y_heat[t]));
         }
 
         // C6: deadline constraint.
@@ -212,16 +185,25 @@ impl HeaterMilpContext {
         if self.mode == HeaterMilpMode::MustNotRun {
             return obj;
         }
+        // GB-40: the three tier-keyed terms below were written against a
+        // `z_heat_full` indicator. With a single stage index they scale with
+        // `y/n_stages` instead — 1.0 at full, 0.5 at mid on a two-stage unit,
+        // where the indicator gave 0. That is a deliberate change: it keeps the
+        // ordering these terms exist to express (full is penalised more, and
+        // rewarded more, than mid) while making the middle stage carry its
+        // proportional share, and it avoids reintroducing a binary per slot
+        // purely to recover an all-or-nothing indicator.
+        let stage_frac = 1.0 / self.n_stages as f64;
         for (t, &dt) in dt_h.iter().enumerate().take(n) {
-            obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
+            obj += w_tier_penalty_eur * stage_frac * v.y_heat[t]; // prefer lower stages when equal cost
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
             obj += lambda_sw_eur * dt * v.sw[t]; // penalise relay switches; scale by dt_h
-                                                 // BL-34: reward full-tier operation by the session comfort curve's fill=1.0 price;
+                                                 // BL-34: reward higher-stage operation by the session comfort curve's fill=1.0 price;
                                                  // caller phase-gates this to Phase 2 only (0.0 in Phase 1), mirroring w_tier_penalty_eur.
-            obj += -comfort_full_reward_eur_kwh * dt * v.z_heat_full[t];
+            obj += -comfort_full_reward_eur_kwh * dt * stage_frac * v.y_heat[t];
             // BL-17 comfort bidding: same reward mechanism, but for the session's CO2 bid,
             // already monetized (€/kWh) via w_ghg at construction time (see from_state).
-            obj += -comfort_full_co2_reward_eur_kwh * dt * v.z_heat_full[t];
+            obj += -comfort_full_co2_reward_eur_kwh * dt * stage_frac * v.y_heat[t];
         }
         // Terminal energy reward (Phase 1 only — m_low > 0, lambda_sw == 0).
         // Makes the optimizer treat heat stored at horizon end as having forward
@@ -235,8 +217,7 @@ impl HeaterMilpContext {
     /// Read back the heater solution from the solved model.
     pub fn read_solution(sol: &impl Solution, v: &HeaterMilpVars, n: usize) -> HeaterSolOutput {
         HeaterSolOutput {
-            z_heat_mid: (0..n).map(|t| sol.value(v.z_heat_mid[t])).collect(),
-            z_heat_full: (0..n).map(|t| sol.value(v.z_heat_full[t])).collect(),
+            y_heat: (0..n).map(|t| sol.value(v.y_heat[t])).collect(),
             z_heat_ready: sol.value(v.z_heat_ready),
             e_tank_kwh: (0..n).map(|t| sol.value(v.e_tank[t])).collect(),
             s_low_kwh: (0..n).map(|t| sol.value(v.s_low[t])).collect(),
@@ -263,11 +244,7 @@ impl HeaterMilpContext {
         } else {
             (cfg.temp_min_c + cfg.temp_max_c) / 2.0
         };
-        let live_mid_kw = if cfg.mid_kw > 0.0 {
-            cfg.mid_kw
-        } else {
-            cfg.max_kw / 2.0
-        };
+        let p_step_kw = cfg.p_step_kw();
         let e_init = (current_temp - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
         let e_max = ((cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
@@ -277,16 +254,17 @@ impl HeaterMilpContext {
         } else {
             0.0
         };
-        let initial_z_mid = if (actual_kw - live_mid_kw).abs() < 0.1 {
-            1.0
-        } else {
-            0.0
-        };
-        let initial_z_full = if (actual_kw - cfg.max_kw).abs() < 0.1 {
-            1.0
-        } else {
-            0.0
-        };
+        // Last observed hardware stage, rounded to the nearest reachable level.
+        let initial_y =
+            kw_to_stage(actual_kw, p_step_kw, cfg.power_stages as f64).unwrap_or_else(|| {
+                if p_step_kw > 0.0 {
+                    (actual_kw / p_step_kw)
+                        .round()
+                        .clamp(0.0, cfg.power_stages as f64)
+                } else {
+                    0.0
+                }
+            });
         if let Some(target) = heater_target {
             let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
                 .clamp(0.0, e_max);
@@ -317,15 +295,14 @@ impl HeaterMilpContext {
             Self {
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
-                p_mid_kw: live_mid_kw,
-                p_full_kw: cfg.max_kw,
+                p_step_kw,
+                n_stages: cfg.power_stages,
                 e_init_kwh: e_init,
                 e_max_kwh: e_max,
                 q_dem_kw: q_dem,
                 e_target_kwh: e_target,
                 lambda_sw_eur: lambda_sw,
-                initial_z_mid,
-                initial_z_full,
+                initial_y,
                 c_terminal_eur_kwh,
                 anchored_kw,
                 comfort_full_reward_eur_kwh,
@@ -335,15 +312,14 @@ impl HeaterMilpContext {
             Self {
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
-                p_mid_kw: live_mid_kw,
-                p_full_kw: cfg.max_kw,
+                p_step_kw,
+                n_stages: cfg.power_stages,
                 e_init_kwh: e_init,
                 e_max_kwh: e_max,
                 q_dem_kw: q_dem,
                 e_target_kwh: e_max,
                 lambda_sw_eur: lambda_sw,
-                initial_z_mid,
-                initial_z_full,
+                initial_y,
                 c_terminal_eur_kwh,
                 anchored_kw,
                 comfort_full_reward_eur_kwh: 0.0,
@@ -377,15 +353,14 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
             crate::controller::milp_planner::HeaterScalars {
                 mode,
                 t_dead_step: self.t_dead_step,
-                p_mid_kw: self.p_mid_kw,
-                p_full_kw: self.p_full_kw,
+                p_step_kw: self.p_step_kw,
+                n_stages: self.n_stages,
                 e_init_kwh: self.e_init_kwh,
                 e_max_kwh: self.e_max_kwh,
                 q_dem_kw: self.q_dem_kw,
                 e_target_kwh: self.e_target_kwh,
                 lambda_sw_eur: self.lambda_sw_eur,
-                initial_z_mid: self.initial_z_mid,
-                initial_z_full: self.initial_z_full,
+                initial_y: self.initial_y,
                 c_terminal_eur_kwh: self.c_terminal_eur_kwh,
             },
         )
@@ -467,15 +442,14 @@ mod milp_tests {
         HeaterMilpContext {
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
-            p_mid_kw: 1.0,
-            p_full_kw: 2.0,
+            p_step_kw: 1.0,
+            n_stages: 2,
             e_init_kwh: 2.5,
             e_max_kwh: 5.0,
             q_dem_kw: 0.3,
             e_target_kwh: 5.0,
             lambda_sw_eur: 0.0,
-            initial_z_mid: 0.0,
-            initial_z_full: 0.0,
+            initial_y: 0.0,
             c_terminal_eur_kwh: 0.0,
             anchored_kw: vec![],
             comfort_full_reward_eur_kwh: 0.0,
@@ -531,7 +505,7 @@ mod milp_tests {
     }
 
     #[test]
-    fn heater_milp_must_not_run_returns_only_mutual_exclusion_constraints() {
+    fn heater_milp_must_not_run_emits_no_constraints() {
         let n = 4;
         use good_lp::variables;
         let mut vars = variables!();
@@ -541,8 +515,15 @@ mod milp_tests {
         };
         let hv = ctx.declare_vars(n, &mut vars);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
-        // MustNotRun: only C0 (n mutual exclusion constraints), early return after
-        assert_eq!(cs.len(), n);
+        // GB-40: MustNotRun now emits nothing at all. `y` is declared with bounds
+        // [0, 0], so "cannot run" is carried by the variable itself; the n
+        // mutual-exclusion rows this used to emit were already redundant, since
+        // the old tier binaries were likewise fixed to 0 in this mode.
+        assert!(
+            cs.is_empty(),
+            "MustNotRun should need no rows; y is bound to 0. got {}",
+            cs.len()
+        );
     }
 
     #[test]
@@ -566,11 +547,14 @@ mod milp_tests {
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
-        // n=4, MayRun, no deadline: 4 + 2 + 6 + 4 + 4 + 16 = 36
+        // n=4, MayRun, no deadline: C1 2 + C2 6 + C3 4 + C4 4 + C5 8 = 24.
+        // Was 36 before GB-40: C0 contributed 4 rows (now gone — integer bounds
+        // subsume mutual exclusion) and C5 contributed 16 rather than 8, since
+        // it constrained two tier binaries per step instead of one stage index.
         assert_eq!(
             cs.len(),
-            36,
-            "expected 36 constraints for n=4 MayRun no-deadline"
+            24,
+            "expected 24 constraints for n=4 MayRun no-deadline"
         );
     }
 
@@ -598,14 +582,15 @@ mod milp_tests {
     }
 
     #[test]
-    fn heater_milp_constraints_switching_four_per_step() {
+    fn heater_milp_constraints_two_switching_rows_per_step() {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
-        // C5: 4 at t=0 + 4×(n-1) at t=1..n-1 = 4n total switching constraints
-        // Verified through the total 36 constraint count for n=4
-        assert_eq!(cs.len(), 36);
+        // C5: 2 at t=0 + 2×(n-1) for t=1..n-1 = 2n switching rows — half the old
+        // count, since one stage index replaced the two tier binaries. Verified
+        // through the total 24-constraint count for n=4 (see dynamics_count).
+        assert_eq!(cs.len(), 24);
     }
 }
 
@@ -622,15 +607,14 @@ mod milp_context_trait_tests {
         HeaterMilpContext {
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
-            p_mid_kw: 1.0,
-            p_full_kw: 2.0,
+            p_step_kw: 1.0,
+            n_stages: 2,
             e_init_kwh: 2.5,
             e_max_kwh: 5.0,
             q_dem_kw: 0.3,
             e_target_kwh: 5.0,
             lambda_sw_eur: 0.01,
-            initial_z_mid: 0.0,
-            initial_z_full: 0.0,
+            initial_y: 0.0,
             c_terminal_eur_kwh: 0.0,
             anchored_kw: vec![],
             comfort_full_reward_eur_kwh: 0.0,
@@ -672,8 +656,8 @@ mod milp_context_trait_tests {
         match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Heater(h) => {
                 assert_eq!(h.mode, MilpLoadMode::MayRun);
-                assert!((h.p_mid_kw - 1.0).abs() < 1e-9);
-                assert!((h.p_full_kw - 2.0).abs() < 1e-9);
+                assert!((h.p_step_kw - 1.0).abs() < 1e-9);
+                assert_eq!(h.n_stages, 2);
                 assert!((h.e_init_kwh - 2.5).abs() < 1e-9);
                 assert!((h.lambda_sw_eur - 0.01).abs() < 1e-9);
                 assert!(h.t_dead_step.is_none());
@@ -702,13 +686,12 @@ mod milp_context_trait_tests {
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
         let v = pool.heater.as_ref().expect("pool.heater should be Some");
-        assert_eq!(v.z_heat_mid.len(), n);
-        assert_eq!(v.z_heat_full.len(), n);
+        assert_eq!(v.y_heat.len(), n);
         assert_eq!(v.e_tank.len(), n);
         assert_eq!(v.s_low.len(), n);
         assert_eq!(v.sw.len(), n);
-        assert!((v.p_mid_kw - 1.0).abs() < 1e-9);
-        assert!((v.p_full_kw - 2.0).abs() < 1e-9);
+        assert!((v.p_step_kw - 1.0).abs() < 1e-9);
+        assert_eq!(v.n_stages, 2);
     }
 
     #[test]
@@ -721,8 +704,8 @@ mod milp_context_trait_tests {
         let cs = AssetMilpContext::constraints(&ctx, &pool, n, &vec![300.0 / 3600.0; n]);
         assert_eq!(
             cs.len(),
-            36,
-            "n=4 MayRun no-deadline: expected 36 constraints"
+            24,
+            "n=4 MayRun no-deadline: expected 24 constraints"
         );
     }
 
@@ -841,50 +824,48 @@ mod milp_context_trait_tests {
         let n = 2;
         let ctx = HeaterMilpContext {
             anchored_kw: vec![Some(2.0), None], // full tier anchor on slot 0
-            ..make_ctx()                        // p_mid_kw=1.0, p_full_kw=2.0
+            ..make_ctx()                        // p_step_kw=1.0, n_stages=2
         };
         let mut vars = variables!();
         let hv = ctx.declare_vars(n, &mut vars);
         let dt_h: Vec<f64> = vec![300.0 / 3600.0; n];
         let cs = ctx.constraints(&hv, n, &dt_h);
         // Minimize z_full[0] + z_full[1]: slot 0 fixed → contributes 1.0; slot 1 minimized → 0.0.
-        let obj: Expression =
-            Expression::from(hv.z_heat_full[0]) + Expression::from(hv.z_heat_full[1]);
+        let obj: Expression = Expression::from(hv.y_heat[0]) + Expression::from(hv.y_heat[1]);
         let model = cs
             .into_iter()
             .fold(vars.minimise(&obj).using(highs), |m, c| m.with(c));
         let sol = model.solve().expect("anchored LP must be feasible");
         assert!(
-            (sol.value(hv.z_heat_full[0]) - 1.0).abs() < 1e-4,
+            (sol.value(hv.y_heat[0]) - 2.0).abs() < 1e-4,
             "slot 0 anchored to full tier: z_full[0] must be 1.0, got {:.6}",
-            sol.value(hv.z_heat_full[0])
+            sol.value(hv.y_heat[0])
         );
         assert!(
-            sol.value(hv.z_heat_mid[0]).abs() < 1e-4,
+            (sol.value(hv.y_heat[0]) - 2.0).abs() < 1e-4,
             "slot 0 anchored to full tier: z_mid[0] must be 0.0, got {:.6}",
-            sol.value(hv.z_heat_mid[0])
+            sol.value(hv.y_heat[0])
         );
     }
 
     #[test]
-    fn test_kw_to_tier_pair_off() {
-        assert_eq!(kw_to_tier_pair(0.0, 1.0, 2.0), (Some(0.0), Some(0.0)));
-        assert_eq!(kw_to_tier_pair(0.05, 1.0, 2.0), (Some(0.0), Some(0.0)));
+    fn kw_to_stage_maps_reachable_levels() {
+        // p_step = 1.0, two stages -> reachable {0.0, 1.0, 2.0}.
+        assert_eq!(kw_to_stage(0.0, 1.0, 2.0), Some(0.0));
+        assert_eq!(kw_to_stage(0.05, 1.0, 2.0), Some(0.0));
+        assert_eq!(kw_to_stage(1.0, 1.0, 2.0), Some(1.0));
+        assert_eq!(kw_to_stage(2.0, 1.0, 2.0), Some(2.0));
     }
 
     #[test]
-    fn test_kw_to_tier_pair_mid() {
-        assert_eq!(kw_to_tier_pair(1.0, 1.0, 2.0), (Some(1.0), Some(0.0)));
-    }
-
-    #[test]
-    fn test_kw_to_tier_pair_full() {
-        assert_eq!(kw_to_tier_pair(2.0, 1.0, 2.0), (Some(0.0), Some(1.0)));
-    }
-
-    #[test]
-    fn test_kw_to_tier_pair_unrecognised() {
-        assert_eq!(kw_to_tier_pair(1.5, 1.0, 2.0), (None, None));
+    fn kw_to_stage_rejects_unreachable_and_out_of_range() {
+        // Between stages by more than the tolerance -> no stage.
+        assert_eq!(kw_to_stage(1.5, 1.0, 2.0), None);
+        // Above the top stage -> no stage, rather than silently clamping.
+        assert_eq!(kw_to_stage(3.0, 1.0, 2.0), None);
+        // Single-stage element: 1.0 is not reachable when the only step is 2.0.
+        assert_eq!(kw_to_stage(1.0, 2.0, 1.0), None);
+        assert_eq!(kw_to_stage(2.0, 2.0, 1.0), Some(1.0));
     }
 
     // ── BL-34: comfort-curve full-tier reward unit tests ─────────────────────
@@ -1044,7 +1025,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
-            mid_kw: None,
+            power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
@@ -1113,7 +1094,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
-            mid_kw: None,
+            power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
@@ -1177,7 +1158,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
-            mid_kw: None,
+            power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,

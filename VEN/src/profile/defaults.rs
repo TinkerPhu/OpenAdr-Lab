@@ -307,6 +307,9 @@ pub(super) fn default_plan_adoption_threshold() -> f64 {
 pub(super) fn default_plan_adoption_decay() -> f64 {
     1500.0
 }
+pub(super) fn default_power_stages() -> u8 {
+    2
+}
 pub(super) fn default_solver_timeout_s() -> u64 {
     60
 }

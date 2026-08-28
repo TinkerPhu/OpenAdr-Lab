@@ -225,11 +225,11 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             .as_ref()
             .map(|v| Expression::from(v.p_ev[t]))
             .unwrap_or_else(|| Expression::from(0.0));
-        // Heater power balance from cached p_mid_kw/p_full_kw in HeaterMilpVars.
+        // Heater power balance from the cached per-stage power in HeaterMilpVars.
         let heat_kw: Expression = pool
             .heater
             .as_ref()
-            .map(|v| (v.p_mid_kw * v.z_heat_mid[t]) + (v.p_full_kw * v.z_heat_full[t]))
+            .map(|v| v.p_step_kw * v.y_heat[t])
             .unwrap_or_else(|| Expression::from(0.0));
 
         let power_balance_ref = model.add_constraint(constraint!(
@@ -308,18 +308,12 @@ pub(crate) fn read_solve_output<S: Solution>(
         (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
     };
 
-    let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out, e_heat_tank_out) =
-        if let Some(v) = &pool.heater {
-            let sol = HeaterMilpContext::read_solution(solution, v, n);
-            (
-                sol.z_heat_mid,
-                sol.z_heat_full,
-                sol.z_heat_ready,
-                sol.e_tank_kwh,
-            )
-        } else {
-            (vec![0.0; n], vec![0.0; n], 0.0, vec![])
-        };
+    let (y_heat_out, z_heat_ready_out, e_heat_tank_out) = if let Some(v) = &pool.heater {
+        let sol = HeaterMilpContext::read_solution(solution, v, n);
+        (sol.y_heat, sol.z_heat_ready, sol.e_tank_kwh)
+    } else {
+        (vec![0.0; n], 0.0, vec![])
+    };
 
     let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.shiftable_loads.len()];
     for (s, sv) in pool.shiftable.iter().enumerate() {
@@ -341,8 +335,7 @@ pub(crate) fn read_solve_output<S: Solution>(
         p_bat_ch_kw: bat_ch_kw,
         p_bat_dis_kw: bat_dis_kw,
         p_ev_kw: ev_kw_out,
-        z_heat_mid: z_heat_mid_out,
-        z_heat_full: z_heat_full_out,
+        y_heat: y_heat_out,
         e_bat_kwh,
         s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_ref[t])).collect(),
         s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_ref[t])).collect(),

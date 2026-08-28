@@ -51,11 +51,13 @@ impl HeaterEmergencyMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Heater {
     pub max_kw: f64,
-    /// Mid-tier power level [kW]. Hardware relay step: 0 / mid_kw / max_kw are the only
-    /// valid states. Setpoints are quantized to the nearest tier in step_inner().
-    /// Default 0.0 means "use max_kw / 2.0" — handles old persisted JSON without this field.
-    #[serde(default)]
-    pub mid_kw: f64,
+    /// Number of switchable power stages: 1 (on/off) or 2 (mid/full). Reachable
+    /// levels are `k × max_kw / power_stages` for k in 0..=power_stages; setpoints
+    /// are quantized to the nearest in step_inner(). Default 2 — also what old
+    /// persisted JSON without this field deserialises to, matching the previous
+    /// `max_kw / 2.0` mid-level fallback.
+    #[serde(default = "default_power_stages_sim")]
+    pub power_stages: u8,
     /// Forced-on floor power at temp_min_c (0.0 if none).
     pub min_power_kw: f64,
     /// Tank hysteresis lower bound. Overridable at runtime via SimInjectState.
@@ -99,11 +101,23 @@ pub struct HeaterState {
     pub actual_power_kw: f64,
 }
 
+/// Serde default for `Heater::power_stages` — see the field's doc comment.
+fn default_power_stages_sim() -> u8 {
+    2
+}
+
 impl Heater {
+    /// Power delivered per switchable stage [kW]. Every reachable level is a
+    /// whole multiple of this, which is what lets the MILP encode the tier as a
+    /// single integer (see `heater_milp.rs`).
+    pub fn p_step_kw(&self) -> f64 {
+        self.max_kw / self.power_stages.max(1) as f64
+    }
+
     pub fn from_params(cfg: &HeaterParams) -> Self {
         Self {
             max_kw: cfg.max_kw,
-            mid_kw: cfg.mid_kw.unwrap_or(cfg.max_kw / 2.0),
+            power_stages: cfg.power_stages.max(1),
             min_power_kw: 0.0,
             temp_min_c: cfg.temp_min_c,
             temp_max_c: cfg.temp_max_c,
@@ -155,20 +169,16 @@ impl Heater {
         dt: Duration,
     ) -> (HeaterState, f64) {
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        // Quantize to the nearest valid hardware tier: 0 / mid_kw / max_kw.
-        // The heater has two physical relays; intermediate values are impossible.
-        // mid_kw = 0.0 means "not set" (old persisted JSON); fall back to max_kw / 2.0.
-        let mid = if self.mid_kw > 0.0 {
-            self.mid_kw
+        // Quantize to the nearest reachable stage: k × p_step_kw. Each stage is
+        // its own contactor, so intermediate values are physically impossible.
+        let p_step = self.p_step_kw();
+        let tier = if p_step > 0.0 {
+            (setpoint_kw / p_step)
+                .round()
+                .clamp(0.0, self.power_stages.max(1) as f64)
+                * p_step
         } else {
-            self.max_kw / 2.0
-        };
-        let tier = if setpoint_kw < mid / 2.0 {
             0.0
-        } else if setpoint_kw < (mid + self.max_kw) / 2.0 {
-            mid
-        } else {
-            self.max_kw
         };
         // Thermostat overrides with hysteresis: once emergency fires at T_min,
         // keep running until T_min + 3 °C to prevent rapid relay cycling.
@@ -221,26 +231,18 @@ impl Heater {
             max_export_kw: 0.0,
             max_import_kw,
             adjustability: PowerAdjustability::Stepped,
-            // Full physical tier set (0 / mid / max) regardless of the current
-            // temperature-driven ceiling above — a hardware fact, not a live
-            // feasibility range. Same mid-resolution fallback as
-            // flexibility_floor_inner (mid_kw == 0.0 means old persisted JSON
-            // predating this field).
-            power_steps_kw: vec![
-                0.0,
-                if self.mid_kw > 0.0 {
-                    self.mid_kw
-                } else {
-                    self.max_kw / 2.0
-                },
-                self.max_kw,
-            ],
+            // Full physical stage set (0, p_step, 2·p_step, …) regardless of the
+            // current temperature-driven ceiling above — a hardware fact, not a
+            // live feasibility range.
+            power_steps_kw: (0..=self.power_stages.max(1))
+                .map(|k| k as f64 * self.p_step_kw())
+                .collect(),
         }
     }
 
-    /// Smallest nonzero achievable commitment. Hardware is a 3-tier relay
-    /// (0 / mid_kw / max_kw — see `step_inner`'s quantization), so unlike a
-    /// continuously-controllable asset the floor while running is `mid_kw`,
+    /// Smallest nonzero achievable commitment. Hardware is a staged relay
+    /// (0, p_step, … — see `step_inner`'s quantization), so unlike a
+    /// continuously-controllable asset the floor while running is one stage,
     /// not 0. In the overheat/too-cold branches, `capability_inner` already
     /// collapses `max_import_kw` to a single value (0 or `min_power_kw`) —
     /// mirror that here so min == max in those branches too, same as it does
@@ -250,10 +252,8 @@ impl Heater {
             0.0 // overheat — forced off, same as capability_inner's ceiling
         } else if state.temperature_c <= self.temp_min_c {
             self.min_power_kw // too cold — forced on, same as capability_inner's ceiling
-        } else if self.mid_kw > 0.0 {
-            self.mid_kw
         } else {
-            self.max_kw / 2.0
+            self.p_step_kw()
         };
         AssetFlexibilityFloor {
             min_export_kw: 0.0,
@@ -270,7 +270,8 @@ impl Heater {
         let mut m = HashMap::new();
         m.insert("temp_c".into(), state.temperature_c);
         m.insert("max_kw".into(), self.max_kw);
-        m.insert("mid_kw".into(), self.mid_kw);
+        m.insert("power_stages".into(), self.power_stages as f64);
+        m.insert("p_step_kw".into(), self.p_step_kw());
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);
         m.insert("temp_safety_max_c".into(), self.temp_safety_max_c);
@@ -510,7 +511,7 @@ mod tests {
     fn default_heater() -> Heater {
         Heater {
             max_kw: 2.5,
-            mid_kw: 1.25,
+            power_stages: 2,
             min_power_kw: 0.0,
             temp_min_c: 20.0,
             temp_max_c: 23.0,
@@ -531,7 +532,7 @@ mod tests {
     fn hot_water_heater() -> Heater {
         Heater {
             max_kw: 6.0,
-            mid_kw: 3.0,
+            power_stages: 2,
             min_power_kw: 0.0,
             temp_min_c: 40.0,
             temp_max_c: 80.0,
@@ -564,7 +565,7 @@ mod tests {
 
     #[test]
     fn capability_reports_stepped_adjustability_with_three_tiers() {
-        let heater = default_heater(); // mid_kw=1.25, max_kw=2.5
+        let heater = default_heater(); // p_step=1.25, max_kw=2.5
         let cap = heater.capability_inner(&state_at(21.5, 0.0)); // normal band
         assert_eq!(cap.adjustability, PowerAdjustability::Stepped);
         assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]);
@@ -585,30 +586,38 @@ mod tests {
     }
 
     #[test]
-    fn capability_power_steps_kw_falls_back_to_half_max_kw_when_mid_kw_unset() {
-        // mid_kw == 0.0 means old persisted JSON predating the field.
-        let mut heater = default_heater();
-        heater.mid_kw = 0.0;
+    fn capability_power_steps_kw_follows_power_stages() {
+        // GB-40: the reachable set is k × max_kw/power_stages, so it is derived
+        // rather than configured — a profile can no longer name a level the
+        // hardware cannot reach.
+        let mut heater = default_heater(); // max_kw = 2.5
+        heater.power_stages = 2;
         let cap = heater.capability_inner(&state_at(21.5, 0.0));
-        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]); // max_kw/2 == 1.25
+        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]);
+
+        heater.power_stages = 1;
+        let cap = heater.capability_inner(&state_at(21.5, 0.0));
+        assert_eq!(cap.power_steps_kw, vec![0.0, 2.5]);
     }
 
     // ── flexibility_floor ─────────────────────────────────────────────────────
 
     #[test]
-    fn flexibility_floor_uses_mid_kw_in_normal_band() {
-        let heater = default_heater(); // mid_kw=1.25, temp_min_c=20, temp_max_c=23
+    fn flexibility_floor_uses_one_stage_in_normal_band() {
+        let heater = default_heater(); // p_step=1.25, temp_min_c=20, temp_max_c=23
         let floor = heater.flexibility_floor_inner(&state_at(21.5, 0.0));
         assert_eq!(floor.min_import_kw, 1.25);
         assert_eq!(floor.min_export_kw, 0.0);
     }
 
     #[test]
-    fn flexibility_floor_falls_back_to_half_max_kw_when_mid_kw_unset() {
+    fn flexibility_floor_is_full_power_for_a_single_stage_element() {
+        // With one stage there is no partial level, so the floor while running
+        // is the whole element.
         let mut heater = default_heater();
-        heater.mid_kw = 0.0; // old persisted JSON without the field
+        heater.power_stages = 1;
         let floor = heater.flexibility_floor_inner(&state_at(21.5, 0.0));
-        assert_eq!(floor.min_import_kw, heater.max_kw / 2.0);
+        assert_eq!(floor.min_import_kw, heater.max_kw);
     }
 
     #[test]
@@ -628,7 +637,7 @@ mod tests {
         let floor = heater.flexibility_floor_inner(&state_at(20.0, 0.0));
         assert_eq!(
             floor.min_import_kw, heater.min_power_kw,
-            "must match capability_inner's forced-on ceiling, not mid_kw"
+            "must match capability_inner's forced-on ceiling, not one stage"
         );
     }
 
@@ -781,12 +790,12 @@ mod tests {
         let state = state_at(21.5, 0.0);
         let setpoint = 1.5;
         let (_ns, power) = heater.step_inner(&state, setpoint, Duration::seconds(1));
-        // Relay quantization: 1.5 kW falls between mid/2=0.625 and (mid+max)/2=1.875,
-        // so it snaps to the mid tier (1.25 kW). Exact passthrough is no longer possible.
+        // Relay quantization: 1.5 / 1.25 rounds to stage 1, i.e. 1.25 kW.
+        // Exact passthrough is not possible on a staged element.
         assert!(
-            (power - heater.mid_kw).abs() < 1e-9,
-            "heater should snap setpoint 1.5 to mid tier {}, got {power}",
-            heater.mid_kw
+            (power - heater.p_step_kw()).abs() < 1e-9,
+            "heater should snap setpoint 1.5 to one stage ({}), got {power}",
+            heater.p_step_kw()
         );
     }
 
@@ -996,16 +1005,25 @@ mod param_tests {
     fn heater_params_defaults() {
         let params = HeaterParams::default();
         assert!((params.max_kw - 5.0).abs() < f64::EPSILON);
-        assert_eq!(params.mid_kw, None);
+        assert_eq!(params.power_stages, 2);
     }
 
     #[test]
-    fn heater_params_mid_kw_some_none() {
-        assert_eq!(HeaterParams::default().mid_kw, None);
-        let params = HeaterParams {
-            mid_kw: Some(2.5),
+    fn heater_stage_size_is_derived_from_power_stages() {
+        // GB-40: the mid level is no longer a free field, so it cannot disagree
+        // with max_kw — it is always max_kw / power_stages.
+        let two = Heater::from_params(&HeaterParams {
+            max_kw: 5.0,
+            power_stages: 2,
             ..HeaterParams::default()
-        };
-        assert_eq!(params.mid_kw, Some(2.5));
+        });
+        assert!((two.p_step_kw() - 2.5).abs() < 1e-9);
+
+        let one = Heater::from_params(&HeaterParams {
+            max_kw: 5.0,
+            power_stages: 1,
+            ..HeaterParams::default()
+        });
+        assert!((one.p_step_kw() - 5.0).abs() < 1e-9);
     }
 }

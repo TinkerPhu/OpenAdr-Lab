@@ -308,12 +308,30 @@ pub struct PlanCycleResult {
     pub plan: Plan,
 }
 
-/// Count heater relay switches in `plan` for all slots starting at or after `now`.
+/// Power per switchable heater stage [kW] for this VEN, or 0.0 when it has no
+/// heater. This is what turns a planned-kW delta into a relay-operation count in
+/// `count_heater_switches`, so the adoption gate and the MILP's own `sw` cost
+/// agree on what a two-stage jump is worth.
+pub fn heater_stage_size_kw(asset_params: &[AssetParams]) -> f64 {
+    asset_params
+        .iter()
+        .find_map(|p| match p {
+            AssetParams::Heater(h) => Some(h.max_kw / h.power_stages.max(1) as f64),
+            _ => None,
+        })
+        .unwrap_or(0.0)
+}
+
+/// Count heater relay operations in `plan` for all slots starting at or after `now`.
 ///
-/// A switch is a transition where the heater power changes by more than 0.1 kW between
-/// consecutive future slots. Past slots are excluded so this reflects the remaining
-/// switching burden of the plan from the current moment onward.
-pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> f64 {
+/// Each stage is its own contactor, so a change of one stage is one operation and an
+/// off→full jump on a two-stage element is two — `p_step_kw` is what converts a kW
+/// delta into that count. This matches the MILP's own `sw` cost (GB-40); before the
+/// single-integer reformulation both sides counted any change as exactly 1, which
+/// undercharged the two-relay transitions. `p_step_kw <= 0.0` (no heater, or a
+/// degenerate config) falls back to counting transitions.
+/// Past slots are excluded so this reflects the remaining switching burden from now on.
+pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>, p_step_kw: f64) -> f64 {
     // zone_a_step_s is the reference slot width for switch weighting.
     // Falls back to horizon.step_size_s when no zones are present (legacy/test plans),
     // which keeps the per-switch weight at 1.0 for uniform-step plans.
@@ -331,9 +349,17 @@ pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> f64 {
             .get("heater")
             .copied()
             .unwrap_or(0.0);
-        if prev.is_some_and(|p| (p - kw).abs() > 0.1) {
-            let slot_step_s = (slot.end - slot.start).num_seconds() as f64;
-            count += slot_step_s / zone_a_step_s;
+        if let Some(p) = prev {
+            let delta_kw = (p - kw).abs();
+            if delta_kw > 0.1 {
+                let ops = if p_step_kw > 0.0 {
+                    (delta_kw / p_step_kw).round().max(1.0)
+                } else {
+                    1.0
+                };
+                let slot_step_s = (slot.end - slot.start).num_seconds() as f64;
+                count += ops * slot_step_s / zone_a_step_s;
+            }
         }
         prev = Some(kw);
     }
@@ -348,6 +374,7 @@ pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> f64 {
 ///
 /// `gate_switch_penalty_eur`: per-extra-switch surcharge added to the effective threshold.
 /// 0.0 disables the switch guard (backward-compatible default).
+#[allow(clippy::too_many_arguments)] // flat gate inputs: thresholds, decay and stage size are independent scalars with no natural grouping
 pub fn evaluate_acceptance_gate(
     current: Option<&Plan>,
     new_plan: &Plan,
@@ -355,6 +382,7 @@ pub fn evaluate_acceptance_gate(
     threshold_eur: f64,
     decay_s: f64,
     gate_switch_penalty_eur: f64,
+    heater_p_step_kw: f64,
     now: DateTime<Utc>,
 ) -> bool {
     let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
@@ -397,8 +425,9 @@ pub fn evaluate_acceptance_gate(
     // Switch surcharge: extra heater relay operations in the new plan raise the bar.
     // fully_decayed still bypasses — decay is an escape hatch for stale plans regardless.
     let switch_surcharge = if gate_switch_penalty_eur > 0.0 {
-        let extra =
-            (count_heater_switches(new_plan, now) - count_heater_switches(current, now)).max(0.0);
+        let extra = (count_heater_switches(new_plan, now, heater_p_step_kw)
+            - count_heater_switches(current, now, heater_p_step_kw))
+        .max(0.0);
         extra * gate_switch_penalty_eur
     } else {
         0.0
@@ -598,6 +627,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
+            2.0, // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -616,6 +646,7 @@ mod tests {
             5.0,
             3600.0,
             0.0,
+            2.0, // heater stage size [kW]
             Utc::now(),
         );
         assert!(adopt, "no existing plan must always adopt");
@@ -633,6 +664,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
+            2.0, // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -652,6 +684,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
+            2.0, // heater stage size [kW]
             Utc::now(),
         );
         assert!(adopt, "improvement exceeding threshold must be accepted");
@@ -671,6 +704,7 @@ mod tests {
             5.0, // high threshold that would normally block adoption
             0.0, // no decay
             0.0,
+            2.0, // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -895,7 +929,7 @@ mod tests {
         let now = fixed_now();
         let past = now - Duration::seconds(4 * 1200);
         let plan = make_plan_with_heater_slots(past, 1200, &[2.0, 0.0, 2.0, 0.0]);
-        assert_eq!(count_heater_switches(&plan, now), 0.0);
+        assert_eq!(count_heater_switches(&plan, now, 2.0), 0.0);
     }
 
     #[test]
@@ -903,7 +937,7 @@ mod tests {
         // All future slots at the same kW → no tier changes → 0 switches.
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0, 2.0, 2.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now), 0.0);
+        assert_eq!(count_heater_switches(&plan, now, 2.0), 0.0);
     }
 
     #[test]
@@ -913,7 +947,22 @@ mod tests {
         let now = fixed_now();
         let start = now - Duration::seconds(2 * 1200);
         let plan = make_plan_with_heater_slots(start, 1200, &[0.0, 0.0, 0.0, 2.0, 0.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now), 3.0);
+        assert_eq!(count_heater_switches(&plan, now, 2.0), 3.0);
+    }
+
+    #[test]
+    fn count_switches_charges_a_two_stage_jump_as_two_relay_operations() {
+        // GB-40: each stage is its own contactor, so off->full on a two-stage
+        // element closes both. The pre-reformulation count charged this the same
+        // as off->mid, which undercharged it. With p_step = 2.0, a 0 -> 4.0 kW
+        // transition is two operations, not one.
+        let now = fixed_now();
+        let plan = make_plan_with_heater_slots(now, 1200, &[0.0, 4.0]);
+        assert_eq!(count_heater_switches(&plan, now, 2.0), 2.0);
+
+        // ...while a single-stage move over the same span stays at one.
+        let plan_mid = make_plan_with_heater_slots(now, 1200, &[0.0, 2.0]);
+        assert_eq!(count_heater_switches(&plan_mid, now, 2.0), 1.0);
     }
 
     // ── gate switch-count guard tests ─────────────────────────────────────────
@@ -932,6 +981,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
+            2.0, // heater stage size [kW]
             now,
         );
         assert!(
@@ -953,6 +1003,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
+            2.0, // heater stage size [kW]
             now,
         );
         assert!(
@@ -977,6 +1028,7 @@ mod tests {
             1.0, // active threshold: forces gate to evaluate rather than short-circuit
             0.0,
             0.0, // switch guard disabled
+            2.0, // heater stage size [kW]
             now,
         );
         assert!(
@@ -998,6 +1050,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
+            2.0, // heater stage size [kW]
             now,
         );
         assert!(adopt, "hard trigger must bypass switch surcharge");
@@ -1021,6 +1074,7 @@ mod tests {
             1.0,
             3600.0,
             0.50,
+            2.0, // heater stage size [kW]
             now,
         );
         assert!(
@@ -1224,6 +1278,7 @@ mod tests {
             0.0,
             300.0,
             0.0,
+            2.0, // heater stage size [kW]
             10,
             PlannerObjective::MinCost,
             &state,
@@ -1269,6 +1324,7 @@ mod tests {
             0.0,
             300.0,
             0.0,
+            2.0, // heater stage size [kW]
             42,
             PlannerObjective::MinCost,
             &state,

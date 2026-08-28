@@ -76,7 +76,12 @@ pub struct HeaterParams {
     pub temp_max_c: f64,
     /// True hard safety ceiling, above `temp_max_c`. Only reachable in `Absorb` mode.
     pub temp_safety_max_c: f64,
-    pub mid_kw: Option<f64>,
+    /// Number of switchable power stages. A two-stage 3-phase resistive element
+    /// gives levels {0, max_kw/2, max_kw}; a single-stage one gives {0, max_kw}.
+    /// Levels are always evenly spaced at `max_kw / power_stages` — that spacing
+    /// is what lets the MILP encode the tier as one integer instead of a binary
+    /// per level (see `heater_milp.rs`).
+    pub power_stages: u8,
     pub thermal_mass_kwh_per_c: f64,
     pub k_loss_kw_per_c: f64,
     pub draw_kw: f64,
@@ -96,7 +101,7 @@ impl Default for HeaterParams {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
-            mid_kw: None,
+            power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,

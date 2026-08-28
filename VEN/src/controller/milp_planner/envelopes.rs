@@ -125,7 +125,7 @@ pub(crate) fn build_plan_envelopes(
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
                     power_min_kw: 0.0,
-                    power_max_kw: inputs.p_heat_full_kw,
+                    power_max_kw: inputs.p_heat_step_kw * inputs.heat_n_stages as f64,
                     window_start,
                     window_end,
                     slots_available,

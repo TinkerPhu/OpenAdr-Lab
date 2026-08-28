@@ -181,6 +181,7 @@ pub(super) async fn run_plan_cycle(
         planner.plan_adoption_threshold_eur,
         planner.plan_adoption_decay_s,
         planner.gate_switch_penalty_eur,
+        crate::services::planning::heater_stage_size_kw(asset_params),
         solver_ms,
         obj,
         state,

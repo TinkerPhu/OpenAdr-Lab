@@ -152,7 +152,7 @@ fn make_profile() -> Profile {
                 temp_min_c: 18.0,
                 temp_max_c: 23.0,
                 temp_safety_max_c: 23.0,
-                mid_kw: None,
+                power_stages: 2,
                 thermal_mass_kwh_per_c: 2.0,
                 k_loss_kw_per_c: 0.1,
                 draw_kw: 0.0,
@@ -260,11 +260,12 @@ fn make_snap_from_profile(profile: &Profile) -> SimSnapshot {
             AssetProfile::Heater(cfg) => {
                 let temp_c = cfg.temp_initial_c;
                 let max_kw = cfg.max_kw;
-                let mid_kw = cfg.mid_kw.unwrap_or(max_kw / 2.0);
+                let p_step_kw = max_kw / cfg.power_stages.max(1) as f64;
                 let mut values = HM::new();
                 values.insert("temp_c".into(), temp_c);
                 values.insert("max_kw".into(), max_kw);
-                values.insert("mid_kw".into(), mid_kw);
+                values.insert("power_stages".into(), cfg.power_stages as f64);
+                values.insert("p_step_kw".into(), p_step_kw);
                 values.insert("temp_min_c".into(), cfg.temp_min_c);
                 values.insert("temp_max_c".into(), cfg.temp_max_c);
                 let cap_max_import_kw = if temp_c >= cfg.temp_max_c {
@@ -406,7 +407,7 @@ fn make_heater_only_profile(
             temp_min_c,
             temp_max_c,
             temp_safety_max_c: temp_max_c,
-            mid_kw: None,
+            power_stages: 2,
             thermal_mass_kwh_per_c: thermal_mass,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
@@ -671,7 +672,7 @@ fn contexts_from_inputs(
             },
         }));
     }
-    if inputs.p_heat_full_kw > 0.0 {
+    if (inputs.p_heat_step_kw * inputs.heat_n_stages as f64) > 0.0 {
         let mode = match inputs.heater_mode {
             MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
             MilpLoadMode::MayRun => HeaterMilpMode::MayRun,
@@ -681,15 +682,14 @@ fn contexts_from_inputs(
             ctx: HeaterMilpContext {
                 mode,
                 t_dead_step: inputs.t_heat_dead_step,
-                p_mid_kw: inputs.p_heat_mid_kw,
-                p_full_kw: inputs.p_heat_full_kw,
+                p_step_kw: inputs.p_heat_step_kw,
+                n_stages: inputs.heat_n_stages,
                 e_init_kwh: inputs.e_heat_init_kwh,
                 e_max_kwh: inputs.e_heat_max_kwh,
                 q_dem_kw: inputs.q_heat_dem_kw,
                 e_target_kwh: inputs.e_heat_target_kwh,
                 lambda_sw_eur: inputs.lambda_heat_sw_eur,
-                initial_z_mid: inputs.heat_initial_z_mid,
-                initial_z_full: inputs.heat_initial_z_full,
+                initial_y: inputs.heat_initial_y,
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
