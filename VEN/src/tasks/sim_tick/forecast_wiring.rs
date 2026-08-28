@@ -22,19 +22,31 @@ use crate::simulator::SimState;
 /// comment). No active plan → empty forecast, and capacity curves with no PV
 /// contribution (battery/EV/heater/base load still read the live snapshot
 /// directly, unaffected by plan absence).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_tick_forecasts(
     sim: &SimState,
     plan_snap: Option<&Plan>,
     ev_session: Option<&EvSession>,
     shiftable_loads: &[ShiftableLoad],
     shiftable_runtimes: &[ShiftableLoadRuntime],
+    weather_pv_kw_slots: Option<&[f64]>,
+    pv_forecast_override: Option<f64>,
     now: DateTime<Utc>,
 ) -> (
     Vec<SiteFlexibilityForecastSlot>,
     (CapacityCurve, CapacityCurve),
 ) {
     let frames = plan_snap
-        .map(|plan| build_forecast_frames(sim, plan, ev_session, now))
+        .map(|plan| {
+            build_forecast_frames(
+                sim,
+                plan,
+                ev_session,
+                weather_pv_kw_slots,
+                pv_forecast_override,
+                now,
+            )
+        })
         .unwrap_or_default();
     let forecast = plan_snap
         .map(|plan| compute_headroom_forecast(&frames, plan, shiftable_loads, shiftable_runtimes))

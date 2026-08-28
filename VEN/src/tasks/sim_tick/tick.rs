@@ -149,15 +149,7 @@ pub(crate) async fn tick_once(
         );
 
         let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =
-            super::finalize::finalize_tick_outputs(
-                &mut sim_guard,
-                &ctx.capacity_snap,
-                ctx.plan_snap.as_ref(),
-                ctx.ev_session.as_ref(),
-                &ctx.shiftable_loads,
-                &ctx.shiftable_runtimes,
-                now,
-            );
+            super::finalize::finalize_tick_outputs(&mut sim_guard, &ctx, now);
 
         (
             tick_sensor,

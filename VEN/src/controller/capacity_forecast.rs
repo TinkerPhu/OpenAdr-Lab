@@ -12,9 +12,8 @@
 //! the CURRENT snapshot (`SimSnapshot`), not from forecast frames. PV is the
 //! one exception: its ceiling is driven by the weather forecast, not by
 //! anything the plan decided, so its forecast-frame data (`AssetForecastFrame`,
-//! built via `PvInverter::capability_trajectory`) is safe and correct to
-//! reuse here too — see `openspec/changes/flexibility-capacity-forecast/design.md`
-//! decision 4.
+//! resolved per slot via `entities::solar::pv_ceiling_kw`) is safe and correct
+//! to reuse here too.
 //!
 //! Every per-asset term is an ABSOLUTE achievable-power value (not a delta
 //! from current dispatch) — battery/EV/heater commit to their full rated

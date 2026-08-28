@@ -77,3 +77,17 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     Given the system is idle
     When I set pv plan forecast to 0.0 kW
     Then no plan cycle is triggered within 2 seconds
+
+  # --- Forward site-headroom forecast ---
+
+  Scenario: Site headroom never claims PV export capability after dark
+    # Guards the invariant plus the live wiring (dispatcher tick -> pre-lock
+    # weather resolution -> per-slot forecast frames -> endpoint). The
+    # multi-zone slot-alignment mechanism this was written for is covered
+    # deterministically by the Rust test
+    # `pv_ceiling_is_evaluated_at_each_slots_own_timestamp_on_a_zoned_horizon`
+    # (fixed `now`, two zones) — the E2E profiles are single-zone, so this
+    # scenario deliberately does not stand in for it.
+    Given the VEN is running with profile "test"
+    When I wait for the VEN site headroom forecast to cover the planning horizon
+    Then no night slot in the site headroom forecast claims PV export capability

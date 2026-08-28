@@ -11,22 +11,10 @@ use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::planner_params::PlannerParams;
+use crate::entities::solar::{pv_ceiling_kw, PvCeilingParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 
 use super::types::*;
-
-/// Natural sin-model irradiance [0,1] at time `ts`, without any user offset.
-/// Mirrors `PvInverter::natural_irradiance_at()` from `assets/pv.rs`.
-fn pv_natural_irradiance(ts: DateTime<Utc>) -> f64 {
-    use chrono::Timelike;
-    let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-    if (6.0..=18.0).contains(&hour) {
-        let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-        angle.sin().max(0.0)
-    } else {
-        0.0
-    }
-}
 
 /// Build the full MILP input parameter set from asset contexts and current runtime state.
 ///
@@ -189,28 +177,30 @@ pub(crate) fn build_milp_inputs(
         // weather_pv_kw (R-50), when present, takes precedence over the
         // sin-model/live-snapshot fallback but never over pv_forecast_override
         // — the deterministic-testing pin always wins.
-        let pv_kw = if let Some(forced_kw) = pv_forecast_override {
-            forced_kw.max(0.0)
-        } else if let Some(weather_kw) = weather_pv_kw.and_then(|v| v.get(i)) {
-            let inverter_max_kw = assets
-                .assets
-                .get("pv")
-                .and_then(|s| s.val("inverter_max_kw"))
-                .unwrap_or(f64::INFINITY);
-            weather_kw.max(0.0).min(inverter_max_kw)
-        } else if let Some(pv_snap) = assets.assets.get("pv") {
-            let natural = pv_natural_irradiance(slot_t);
-            let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
-            let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);
-            let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
-            let inverter_max_kw = pv_snap.val("inverter_max_kw").unwrap_or(rated_kw);
-            // pv_alpha is "fraction removed per zone-A step (zone_a_step_s)".
-            // Exponent is the number of zone-A-equivalent steps ahead.
-            let steps_ahead = slot_s as f64 / zone_a_step_s as f64;
-            let decayed_offset = irradiance_offset * (1.0 - pv_alpha).powf(steps_ahead);
-            ((natural + decayed_offset).clamp(0.0, 1.0) * rated_kw).min(inverter_max_kw)
-        } else {
-            pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
+        let pv_kw = match assets.assets.get("pv") {
+            Some(pv_snap) => {
+                let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
+                pv_ceiling_kw(
+                    &PvCeilingParams {
+                        rated_kw,
+                        inverter_max_kw: pv_snap.val("inverter_max_kw").unwrap_or(rated_kw),
+                        irradiance_offset: pv_snap.val("irradiance_offset").unwrap_or(0.0),
+                        pv_alpha: pv_snap.val("pv_alpha").unwrap_or(0.1),
+                        zone_a_step_s: zone_a_step_s as i64,
+                    },
+                    slot_t,
+                    slot_s,
+                    weather_pv_kw.and_then(|v| v.get(i)).copied(),
+                    pv_forecast_override,
+                )
+            }
+            // No live PV asset at all: the pin and the weather series still
+            // apply (a site can be told what PV will do without simulating
+            // one), otherwise fall back to the static profile curve.
+            None => pv_forecast_override
+                .map(|kw| kw.max(0.0))
+                .or_else(|| weather_pv_kw.and_then(|v| v.get(i)).map(|kw| kw.max(0.0)))
+                .unwrap_or_else(|| pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)),
         };
         p_pv.push(pv_kw);
         let base_kw_t = base_heuristic

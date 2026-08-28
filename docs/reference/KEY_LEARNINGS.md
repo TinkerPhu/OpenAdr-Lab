@@ -1369,3 +1369,29 @@ outes/sim.rs causes a T1+T2 double-solve race:
   associated account". `gh api repos/O/R/commits/<sha> --jq .author.login` answers this and
   `git log` cannot. Also remove the address from that account's email list, or the same linkage
   reappears anywhere else it was ever used to commit.
+- **Resampling onto a uniform grid and then zipping by index is a silent corruption when the
+  real grid is non-uniform.** The site-headroom forecast fed PV through
+  `capability_trajectory(duration, resolution)`, which emits points every `resolution`, then
+  paired `traj[i]` with `future_slots[i]`. The planning horizon is multi-zone
+  (`plan_zones`: 96×300s + 96×600s + 96×900s), so index and wall-clock time diverge the moment
+  the second zone starts: a night slot 33h out was handed the PV ceiling belonging to 2:30pm the
+  previous day, advertising ~12 kW of export capability in the dark. Nothing crashed and no test
+  caught it, because the first zone — where every unit test's uniform fixture lives — is exactly
+  the region where the bug is invisible. **When an API takes a single `resolution`, check whether
+  the consumer's grid actually has one**; if slot widths vary, the only safe key is each slot's
+  own timestamp plus its cumulative elapsed offset, never `index × nominal_step`.
+- **Duplicate copies of a formula drift in ways a shared one cannot.** The same sin-model PV
+  curve existed four times (planner input, `PvInverter::capability_trajectory`,
+  `PvInverter::build_milp_context`, plus a mirrored `natural_irradiance` helper). Only the
+  planner's copy had been taught about weather and cumulative slot offsets; the others silently
+  stayed on the old model, so the plan and the headroom chart drawn against it disagreed on
+  every cloudy hour *in addition* to the alignment bug. Collapsing them into one domain function
+  (`entities::solar::pv_ceiling_kw`) made both defects structurally impossible and deleted three
+  dead APIs that only the stale copies were keeping alive.
+- **Diagnose against live data before proposing a mechanism.** The night-time export headroom was
+  first attributed to EV V2G, and a `v2g_capable` profile flag was designed, implemented, and
+  deployed on that theory. One `curl /sim` would have shown the EV already at
+  `max_discharge_kw: 0.0` and `cap_max_export_kw: -0.0` — it could not have been the cause. The
+  flag is defensible hardening on its own merits, but it fixed nothing, and the real defect
+  survived a full implement/test/deploy cycle. **Confirm the suspected component is actually
+  non-zero in production before building anything on the hypothesis.**
