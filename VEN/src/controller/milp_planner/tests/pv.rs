@@ -287,6 +287,8 @@ fn bmi_with_weather(
         pv_forecast_override,
         &std::collections::HashMap::new(),
         weather_pv_kw,
+        None,
+        None,
     )
 }
 

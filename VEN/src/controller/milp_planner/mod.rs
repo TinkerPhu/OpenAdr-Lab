@@ -139,6 +139,8 @@ pub fn run_planner(
         crate::entities::design_vocabulary::AssetHeuristics,
     >,
     weather_pv_kw: Option<&[f64]>,
+    diurnal_import_ref: Option<&crate::common::TimeSeries>,
+    diurnal_co2_ref: Option<&crate::common::TimeSeries>,
 ) -> Plan {
     // Guard: MilpVarPool has one named slot per kind; silently overwrites on duplicates.
     debug_assert!(
@@ -175,6 +177,8 @@ pub fn run_planner(
         pv_forecast_override,
         asset_heuristics,
         weather_pv_kw,
+        diurnal_import_ref,
+        diurnal_co2_ref,
     );
     // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
     // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
@@ -263,6 +267,8 @@ impl crate::controller::SolverPort for MilpSolver {
             req.pv_forecast_override,
             &req.asset_heuristics,
             req.weather_pv_kw.as_deref(),
+            req.diurnal_import_eur_kwh.as_ref(),
+            req.diurnal_co2_g_kwh.as_ref(),
         )
     }
 }

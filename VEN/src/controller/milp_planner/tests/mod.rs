@@ -761,6 +761,8 @@ fn build_milp_inputs_with_override(
         pv_forecast_override,
         &std::collections::HashMap::new(),
         None,
+        None,
+        None,
     )
 }
 
@@ -799,6 +801,8 @@ fn run_planner(
         objective_override,
         None,
         &std::collections::HashMap::new(),
+        None,
+        None,
         None,
     )
 }

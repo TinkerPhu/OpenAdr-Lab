@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
+use crate::common::TimeSeries;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
@@ -57,6 +58,12 @@ pub(crate) fn build_milp_inputs(
     // precedence over that fallback but not over pv_forecast_override
     // (deterministic-testing pin always wins).
     weather_pv_kw: Option<&[f64]>,
+    // GB-42: history-store-backed diurnal reference series for
+    // HEURISTIC_FORECAST's 168h-back (day-type-mismatch) lookback, resolved
+    // once per cycle by the caller (services::planning::build_solve_request).
+    // `None` when history is disabled or has no data yet for either series.
+    diurnal_import_ref: Option<&TimeSeries>,
+    diurnal_co2_ref: Option<&TimeSeries>,
 ) -> MilpInputs {
     let n: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
     let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
@@ -130,6 +137,7 @@ pub(crate) fn build_milp_inputs(
         &slot_bounds,
         0.25,
         "Tariff data",
+        diurnal_import_ref,
     );
     let c_imp = stale_outcome.values;
 
@@ -144,6 +152,7 @@ pub(crate) fn build_milp_inputs(
         &slot_bounds,
         300.0,
         "GHG data",
+        diurnal_co2_ref,
     );
     // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh.
     let g_co2: Vec<f64> = co2_stale_outcome
