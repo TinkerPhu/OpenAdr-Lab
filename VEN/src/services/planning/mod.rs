@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::info;
 
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
@@ -436,7 +436,12 @@ pub fn evaluate_acceptance_gate(
     if fully_decayed || improvement > effective_threshold + switch_surcharge {
         true
     } else {
-        debug!(
+        // GB-41: was `debug!`, which the default `RUST_LOG=info` never captures — a rejected
+        // plan (the currently-dispatched plan is kept as-is) is a decision worth seeing in
+        // normal logs, not just on-demand, since it's otherwise invisible from outside.
+        info!(
+            current_plan_id = %current.id,
+            rejected_plan_id = %new_plan.id,
             improvement_eur = improvement,
             effective_threshold_eur = effective_threshold,
             switch_surcharge_eur = switch_surcharge,

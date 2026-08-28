@@ -543,6 +543,23 @@ fn test_by_deadline_soft_comfort_curve_shapes_core_commitment() {
         charged_low < 0.5,
         "low-value curve isn't worth the tariff cost, skips charging, got {charged_low}"
     );
+    assert!(
+        plan_low
+            .warnings
+            .iter()
+            .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
+        "GB-41: a MayRun session that legitimately skips its unmet core energy must say so \
+         in plan.warnings, not just leave it inferable from a flat SoC trace; got {:?}",
+        plan_low.warnings
+    );
+    assert!(
+        !plan_high
+            .warnings
+            .iter()
+            .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
+        "a session that commits to its core energy must not raise the unmet-energy warning; got {:?}",
+        plan_high.warnings
+    );
 }
 
 /// A session using the asset's default comfort curve (no override) behaves

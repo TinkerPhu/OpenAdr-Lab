@@ -277,6 +277,7 @@ export type WarningKind =
   | "BUDGET_SHORTFALL"
   | "CAPACITY_VIOLATION"
   | "PEAK_PENALTY_EXCEEDED"
+  | "EV_CORE_ENERGY_UNMET"
   | "OTHER";
 
 export type Plan = {

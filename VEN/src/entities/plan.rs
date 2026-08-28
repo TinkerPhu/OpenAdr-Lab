@@ -271,7 +271,7 @@ pub enum WarningSeverity {
 
 /// Stable, machine-readable classification of a `PlanWarning` (GB-25).
 ///
-/// Covers exactly the 5 real construction sites in
+/// Covers exactly the 6 real construction sites in
 /// `controller::milp_planner::results` today, plus `Other` as a catch-all for
 /// any future warning that hasn't earned its own variant yet. `services::notify`
 /// dedups new-vs-carried-over warnings on `kind` (not `message`, which can
@@ -290,6 +290,11 @@ pub enum WarningKind {
     CapacityViolation,
     /// WP6.3 (BL-09) — a penalty-rule threshold was still exceeded after solving (penalty accepted).
     PeakPenaltyExceeded,
+    /// GB-41 diagnostic: a soft-deadline (`MayRun`) EV session still has unmet core energy
+    /// (`target_soc` not reached) but the solver chose `z_ev_core = 0` for the whole horizon —
+    /// a legitimate cost-optimal outcome, but one that looks identical to a stuck/inert EV from
+    /// the outside, so it must be visible rather than silently inferred from a flat SoC trace.
+    EvCoreEnergyUnmet,
     /// Reserved for future warning sites not yet classified above.
     Other,
 }
