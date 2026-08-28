@@ -246,9 +246,9 @@ pub struct SiteFlexibilityForecastSlot {
 /// `TimeLimit`/`GapLimit` (GB-31) cover the two ways a *feasible* solve can
 /// still be non-optimal: HiGHS stopped at `solver_timeout_s` before
 /// certifying optimality, or it stopped once the solution was within
-/// `MIP_GAP_TARGET` of the best known bound (the more common case in
+/// `planner.mip_gap_target` of the best known bound (the more common case in
 /// practice) — both read straight from `good_lp`'s `SolutionStatus`, not
-/// hardcoded. See `MIP_GAP_TARGET`'s doc comment for what's still not
+/// hardcoded. See that profile field's doc comment for what's still not
 /// exposed (the achieved gap as a number, as opposed to this coarser
 /// within-target/not classification).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -396,7 +396,7 @@ pub struct Plan {
     /// (e.g. hand-built test fixtures) — never a synthesized `0`.
     #[serde(default)]
     pub solver_ms: Option<u64>,
-    /// GB-25 — the solver's configured MIP gap tolerance (`MIP_GAP_TARGET`) at
+    /// GB-25 — the solver's configured MIP gap tolerance (`planner.mip_gap_target`) at
     /// the time this plan was solved. A proxy only: the *configured* target,
     /// not the *achieved* gap on this particular solve (good_lp/highs expose no
     /// achieved-gap query today — see `docs/reference/TECHNICAL_DEBTS.md`).

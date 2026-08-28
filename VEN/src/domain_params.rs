@@ -40,6 +40,7 @@ pub fn build_domain_params(
         plan_adoption_decay_s: profile.planner.plan_adoption_decay_s,
         phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
         solver_timeout_s: profile.planner.solver_timeout_s,
+        mip_gap_target: profile.planner.mip_gap_target,
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
         gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
         simple_level1_import_cap_pct: profile.planner.simple_level1_import_cap_pct,
