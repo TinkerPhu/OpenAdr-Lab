@@ -47,6 +47,10 @@ pub struct EvParams {
     pub min_charge_kw: f64,
     /// BL-12: expected controller response delay (s), simulated as a single-tick lag.
     pub response_delay_s: f64,
+    /// Whether this EV's EVSE hardware actually supports bidirectional
+    /// (vehicle-to-grid) discharge. False by default — `max_discharge_kw` is
+    /// otherwise inert (see `EvCharger::from_params`).
+    pub v2g_capable: bool,
 }
 
 impl Default for EvParams {
@@ -61,6 +65,7 @@ impl Default for EvParams {
             default_charge_kw: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
+            v2g_capable: false,
         }
     }
 }

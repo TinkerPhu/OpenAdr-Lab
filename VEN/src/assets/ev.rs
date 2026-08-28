@@ -23,7 +23,16 @@ fn snap_to_min_charge(setpoint_kw: f64, min_charge_kw: f64) -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvCharger {
     pub max_charge_kw: f64,
+    /// Usable V2G discharge power — already gated by `v2g_capable` at
+    /// construction time (see `from_params`), so every reader downstream
+    /// (physics, capability, forecast) can treat this as "actually usable"
+    /// without re-checking the flag.
     pub max_discharge_kw: f64,
+    /// Whether the profile declared this EVSE as V2G-capable hardware.
+    /// Kept for diagnostics/transparency; not consulted anywhere else —
+    /// `max_discharge_kw` is already zeroed in `from_params` when this is
+    /// false.
+    pub v2g_capable: bool,
     pub battery_kwh: f64,
     /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
     pub soc_target: f64,
@@ -59,7 +68,15 @@ impl EvCharger {
     pub fn from_params(cfg: &EvParams) -> Self {
         Self {
             max_charge_kw: cfg.max_charge_kw,
-            max_discharge_kw: cfg.max_discharge_kw,
+            // Not V2G-capable hardware means max_discharge_kw is inert,
+            // regardless of what the profile happens to specify — this is
+            // the single gate every downstream consumer relies on.
+            max_discharge_kw: if cfg.v2g_capable {
+                cfg.max_discharge_kw
+            } else {
+                0.0
+            },
+            v2g_capable: cfg.v2g_capable,
             battery_kwh: cfg.battery_kwh,
             soc_target: cfg.soc_target,
             soc_target_profile: cfg.soc_target,
@@ -326,6 +343,7 @@ mod tests {
         let cfg = EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
+            v2g_capable: false,
             battery_kwh: 40.0,
             soc_target: 0.8,
             soc_target_profile: 0.8,
@@ -457,6 +475,7 @@ mod tests {
         let ev = EvCharger {
             max_charge_kw: 10.0,
             max_discharge_kw: 10.0,
+            v2g_capable: true,
             battery_kwh: 10.0,
             soc_target: 1.0,
             soc_target_profile: 1.0,
@@ -591,6 +610,33 @@ mod param_tests {
     #[test]
     fn ev_params_default_values() {
         assert!((EvParams::default().max_charge_kw - 7.4).abs() < f64::EPSILON);
+        assert!(!EvParams::default().v2g_capable, "V2G must default to off");
+    }
+
+    #[test]
+    fn from_params_zeroes_discharge_when_not_v2g_capable() {
+        let params = EvParams {
+            max_discharge_kw: 10.0,
+            v2g_capable: false,
+            ..EvParams::default()
+        };
+        let ev = EvCharger::from_params(&params);
+        assert_eq!(
+            ev.max_discharge_kw, 0.0,
+            "a configured discharge rating must be inert unless v2g_capable is set"
+        );
+    }
+
+    #[test]
+    fn from_params_keeps_discharge_when_v2g_capable() {
+        let params = EvParams {
+            max_discharge_kw: 10.0,
+            v2g_capable: true,
+            ..EvParams::default()
+        };
+        let ev = EvCharger::from_params(&params);
+        assert_eq!(ev.max_discharge_kw, 10.0);
+        assert!(ev.v2g_capable);
     }
 
     #[test]

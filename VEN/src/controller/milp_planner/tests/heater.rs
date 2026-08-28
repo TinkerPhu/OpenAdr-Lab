@@ -643,6 +643,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 default_charge_kw: 0.0,
                 min_charge_kw: 0.0,
                 response_delay_s: 10.0,
+                v2g_capable: false,
             }),
             AssetProfile::Pv(PvParams {
                 id: "pv".into(),
