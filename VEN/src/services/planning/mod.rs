@@ -1,17 +1,19 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::sync::Arc;
 use tracing::info;
 
+use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
-use crate::controller::SolveRequest;
 #[cfg(test)]
 use crate::controller::SolverPort;
+use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::solar::resolve_weather_pv_kw;
@@ -81,6 +83,49 @@ pub async fn resolve_weather_pv_kw_for_cycle(
     )
 }
 
+/// GB-42: fetch this cycle's diurnal-reference window (up to 168h back, plus
+/// margin) from the history store and split it into import-tariff and CO2
+/// `TimeSeries`, for `HeuristicForecast`'s 168h-back (day-type-mismatch)
+/// lookback in `stale_rates::diurnal_fill`. `None`/`None` when no
+/// `HistoryPort` is configured, the query fails, or a given series has no
+/// samples in the window — `apply_stale_rate_policy` degrades to LAST_KNOWN
+/// in that case, same as before this existed.
+async fn resolve_diurnal_reference_for_cycle(
+    history: Option<&Arc<dyn HistoryPort>>,
+    now: DateTime<Utc>,
+) -> (Option<TimeSeries>, Option<TimeSeries>) {
+    let Some(history) = history else {
+        return (None, None);
+    };
+    let from = now - Duration::hours(24 * 7 + 4);
+    let history = history.clone();
+    let rows = match tokio::task::spawn_blocking(move || history.query_grid(from, now)).await {
+        Ok(Ok(rows)) => rows,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "GB-42: diurnal reference history query failed");
+            return (None, None);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "GB-42: diurnal reference history query task panicked");
+            return (None, None);
+        }
+    };
+    let to_series = |f: fn(&GridSample) -> Option<f64>| {
+        let samples: Vec<(DateTime<Utc>, f64)> = rows
+            .iter()
+            .filter_map(|r| f(r).map(|v| (r.ts, v)))
+            .collect();
+        (!samples.is_empty()).then_some(TimeSeries {
+            samples,
+            interpolation: Interpolation::Step,
+        })
+    };
+    (
+        to_series(|r| r.import_tariff_eur_kwh),
+        to_series(|r| r.co2_g_kwh),
+    )
+}
+
 /// Assemble the fully-owned `SolveRequest` for one plan cycle from already-computed
 /// per-cycle locals. Kept as a function (not an inline struct literal in the task
 /// loop) so the loop body stays focused on orchestration. `async` only because it
@@ -114,10 +159,13 @@ pub async fn build_solve_request(
     wall_now: DateTime<Utc>,
     cum_s: &[i64],
     n_slots: usize,
+    history: Option<&Arc<dyn HistoryPort>>,
 ) -> SolveRequest {
     let weather_pv_kw =
         resolve_weather_pv_kw_for_cycle(weather, weather_pv_params, wall_now, now, cum_s, n_slots)
             .await;
+    let (diurnal_import_eur_kwh, diurnal_co2_g_kwh) =
+        resolve_diurnal_reference_for_cycle(history, now).await;
     SolveRequest {
         asset_contexts,
         assets,
@@ -139,6 +187,8 @@ pub async fn build_solve_request(
         pv_forecast_override,
         asset_heuristics,
         weather_pv_kw,
+        diurnal_import_eur_kwh,
+        diurnal_co2_g_kwh,
     }
 }
 
@@ -487,6 +537,8 @@ mod tests {
             pv_forecast_override: None,
             asset_heuristics: Default::default(),
             weather_pv_kw: None,
+            diurnal_import_eur_kwh: None,
+            diurnal_co2_g_kwh: None,
         };
         let solver: Arc<dyn SolverPort> = Arc::new(PanickingSolverPort);
 

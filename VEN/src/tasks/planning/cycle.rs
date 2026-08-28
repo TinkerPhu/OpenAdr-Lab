@@ -155,6 +155,7 @@ pub(super) async fn run_plan_cycle(
         wall_now,
         &cum_s,
         n_slots,
+        history.as_ref(),
     )
     .await;
     let mut plan = crate::services::PlanningService::solve_plan(solver, solve_req).await;

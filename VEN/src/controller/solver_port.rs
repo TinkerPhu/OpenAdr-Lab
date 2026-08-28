@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
+use crate::common::TimeSeries;
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
@@ -53,6 +54,12 @@ pub struct SolveRequest {
     /// gone stale — see `entities::solar::weather_pv_kw_for_slots` and
     /// `WeatherForecast::is_fresh`.
     pub weather_pv_kw: Option<Vec<f64>>,
+    /// GB-42: history-store-backed diurnal reference series for
+    /// HEURISTIC_FORECAST's stale-slot fill, resolved once per cycle
+    /// (`services::planning::resolve_diurnal_reference_for_cycle`). `None`
+    /// when no `HistoryPort` is configured or it has no data yet.
+    pub diurnal_import_eur_kwh: Option<TimeSeries>,
+    pub diurnal_co2_g_kwh: Option<TimeSeries>,
 }
 
 /// Port to the MILP planning engine. Always infallible: implementations must

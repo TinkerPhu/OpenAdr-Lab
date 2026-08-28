@@ -10673,3 +10673,47 @@ addresses — it must stay local and must never be pushed or committed.
 **Aftermath.** Both Node hosts and the `oal-run` worktree were reset onto the rewritten history.
 Any SHA cited anywhere predating 2026-08-27 no longer resolves; the `commit-map` in the backup
 directory translates old→new if an old reference ever needs chasing.
+
+## GB-42: Diurnal-Persistence Heuristic for `StaleRatePolicy::HeuristicForecast` (2026-08-28)
+
+`HeuristicForecast` — the **default** stale-rate policy — was a stub
+(`milp_planner/stale_rates.rs`) that silently behaved like `LastKnown`: every stale slot (beyond
+published tariff/CO2 coverage, typically the second half of a 48h horizon) got a single frozen
+value. Its doc comment blamed an unbuilt "Phase 5 (BL-14)" prerequisite that had since been
+removed from the backlog, so nothing was driving it forward.
+
+**Design: dual-source diurnal lookup, not always-DB.** The obvious reading of "fill a stale slot
+from the same clock time 24h earlier" suggests pulling from the `grid_samples` history store for
+every lookback. Investigation found a structural shortcut instead: a stale slot's 24h-back
+reference timestamp (`slot_start - 24h`) is **always `>= now`**, because stale slots only begin
+at `coverage_end` (~`now + 24h`). That means the 24h-back reference is almost always still inside
+the *currently known, already-fetched* forward tariff/CO2 series — no database round-trip needed
+for the common case. Only the 168h-back fallback (triggered by a weekday/weekend day-type
+mismatch — Friday's shape is a bad estimate for Saturday) genuinely needs history, since
+`slot_start - 168h` is always in the past. `diurnal_fill` (new, `stale_rates.rs`) therefore tries
+the in-memory series first when day types match, the history-backed `diurnal_reference` series
+when they don't, and falls through to `LastKnown` when neither has data — preserving the old
+stub's guarantee for a fresh VEN with no history yet.
+
+**Plumbing mirrors the existing R-50 weather-forecast pattern exactly**: a new async helper,
+`resolve_diurnal_reference_for_cycle` (`services/planning/mod.rs`), fetches a ~7-day
+`HistoryPort::query_grid` window once per solve cycle (wrapped in `spawn_blocking`, since
+`HistoryPort` is sync) and converts it to two `TimeSeries`, threaded through two new
+`SolveRequest` fields (`diurnal_import_eur_kwh`, `diurnal_co2_g_kwh`) down to
+`apply_stale_rate_policy`. `stale_rates.rs` itself never gained a `HistoryPort`/DB dependency —
+it stays a pure `TimeSeries`-in/out function, preserving the module's own "pure per-cycle
+computation" contract and the hexagonal dependency rule (milp_planner is Infra ring; the DB read
+lives in the Application-ring `services::planning`).
+
+**Verification**: 4 new unit tests in `stale_rates.rs` covering the in-series 24h path, the
+history-backed 168h path, the weekday/weekend guard actually switching lookback distance, and the
+no-reference-data degrade-to-`LastKnown` guarantee. Full `cargo test -p ven-app` (1179 tests) —
+including R-21's known intermittent heap-corruption flake around the heaviest HiGHS tests — passed
+clean with zero flakes on this run. `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -- -D warnings`, and `scripts/audit_file_sizes.py` all green.
+
+**Deferred, not blocking**: GB-42's own text flagged a possible second-order interaction with
+GB-40 (flat stale prices create ties that aid branch-and-bound pruning; restoring real variation
+could cut or add solve time, "genuinely unknown"). A `tests/solve_cost.rs` before/after benchmark
+to measure this was not run as part of this change — worth doing as a follow-up before drawing
+conclusions about GB-40, but not a merge blocker per the backlog item's own framing.
