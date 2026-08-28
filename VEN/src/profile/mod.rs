@@ -1,6 +1,7 @@
 pub mod comms_loss;
 mod defaults;
 pub mod grid;
+pub mod planner;
 pub mod polling;
 pub mod schema;
 mod validate;
