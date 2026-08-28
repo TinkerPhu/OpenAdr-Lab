@@ -22,7 +22,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 
 | ID | Description | Affected files | Effort | Risk | Priority | Gain |
 |----|-------------|----------------|--------|------|----------|------|
-| R-21 | `cargo test` intermittently crashes with heap corruption (SIGABRT, varying malloc messages) around the two heaviest HiGHS tests (`run_planner_n48_full_horizon`, `solve_ven3_heater_three_tier_zones_feasible`). Same tests pass clean in isolation every time; also crashes with `--test-threads=1`, so it is allocator/heap-state-dependent in the native HiGHS library, not a plain data race. Test-infra only — no production path. Workaround: run the affected module in isolation when the full suite crashes. | `VEN/src/controller/milp_planner/` (HiGHS FFI via `good_lp`), test harness only | Medium | Low (flake) | 🟡 | Medium — CI/test-suite trust, no production impact |
 | R-33 | UI test gaps: `VTN/ui/src/pages/Metrics.tsx` is the only untested page in either UI; `JsonDialog.tsx` is byte-identical in both UIs (50 lines — accept the copy with a twin-note header, or fold into a shared package if one materializes). | `VTN/ui/src/pages/Metrics.tsx`, `*/ui/src/components/JsonDialog.tsx` | Small | Low | 🟡 | Low — test-coverage gap |
 | R-34 | Up to ~112 of 417 behave step definitions look unused (crude static match, false positives likely). Run `behave --dry-run` in the Node1 test container for the authoritative list, then delete dead steps. | `tests/features/steps/` | Small | Low | 🟡 | Low — repo hygiene only |
 
@@ -112,31 +111,9 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 1 item
-rated Medium: R-21 (R-22, R-52, R-56, R-24, R-08, R-64, R-63, R-43, R-31, and R-29 were also
-on this list and are now resolved — see below; R-58 moved to `docs/FEATURE_VISIONS.md`
-2026-08-23 — it turned out to require inventing new fault-input plumbing rather than wiring
-an existing one, so it isn't a buildable debt-fix task today).
-
-**Why R-21 is last:** its own entry has no concrete fix, only a workaround (root cause is
-allocator/heap-state-dependent inside the native HiGHS library via FFI, not this codebase).
-Its task below is an investigation, not a code fix.
-
-Each item's tasks follow this repo's test-first convention (`test-first` rule, `CLAUDE.md`):
-write the test, confirm it fails, implement until green. Full verification before considering
-an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_lock`, `cargo fmt --check`,
-`cargo clippy --all-targets --all-features -- -D warnings`, `scripts/audit_file_sizes.py`;
-update `docs/history/project_journal.md` and remove the item from this register once resolved.
-
-### 1. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
-
-- [ ] 1.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
-      `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 1.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
-      try upgrading in isolation and re-running the full suite several times.
-- [ ] 1.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
-      minimized repro; link it from this entry.
-- [ ] 1.4 If no upstream fix lands, formalize the existing workaround (e.g. a
-      `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 1.5 This item stays in the register until the crash stops reproducing across several
-      full-suite runs — remove only then, not merely once a workaround is documented.
+like Medium-High/Low-Medium). No item is currently rated plain High or Medium — R-21 (the
+last item on this list) was resolved 2026-08-28 (see below); R-22, R-52, R-56, R-24, R-08,
+R-64, R-63, R-43, R-31, and R-29 were also on this list and are resolved; R-58 moved to
+`docs/FEATURE_VISIONS.md` 2026-08-23 — it turned out to require inventing new fault-input
+plumbing rather than wiring an existing one, so it isn't a buildable debt-fix task today.
+This list is currently empty pending a new Gain: High/Medium item.
