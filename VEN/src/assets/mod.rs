@@ -306,30 +306,6 @@ impl AssetConfig {
         delegate_asset!(self, default_post_deadline_comfort_bid())
     }
 
-    pub fn simulate_free(
-        &self,
-        state: &AssetState,
-        duration: Duration,
-        now: DateTime<Utc>,
-    ) -> Trajectory {
-        use Asset as _;
-        delegate_asset!(self, simulate_free(state, duration, now))
-    }
-
-    pub fn capability_trajectory(
-        &self,
-        state: &AssetState,
-        duration: Duration,
-        resolution: Duration,
-        now: DateTime<Utc>,
-    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
-        use Asset as _;
-        delegate_asset!(
-            self,
-            capability_trajectory(state, duration, resolution, now)
-        )
-    }
-
     /// Available storage energy. Returns `(discharge_kwh, charge_kwh)`.
     /// Returns `None` for non-storage assets or an unplugged EV.
     pub fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {

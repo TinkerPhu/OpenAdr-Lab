@@ -10720,43 +10720,67 @@ conclusions about GB-40, but not a merge blocker per the backlog item's own fram
 
 ---
 
-## R-21 — `cargo test` intermittent heap-corruption crash: investigated, closed (2026-08-28)
+## PV forward-ceiling alignment: night-time export headroom on a multi-zone horizon (2026-08-28)
 
-**What was done**: R-21 (`docs/reference/TECHNICAL_DEBTS.md`, first logged 2026-07-15) tracked an
-intermittent `cargo test` SIGABRT/heap-corruption crash around the two heaviest HiGHS-backed
-tests (`run_planner_n48_full_horizon`, `solve_ven3_heater_three_tier_zones_feasible`), believed
-allocator/heap-state-dependent inside the native HiGHS FFI (`good_lp` → `highs` → `highs-sys`)
-rather than a Rust-level data race, since it reproduced even with `--test-threads=1`. This
-session executed the register's own 5-step investigation task list end to end (in worktree
-`work-off-backlog`, branch renamed `fix/r21-cargo-test-heap-corruption` for the pivot).
+**Symptom.** ven-1's Dashboard "Site Headroom" chart showed a constant ~17.3 kW of export
+capability through the middle of the night, deep in the 48h horizon — while the *near-term*
+night, a few hours out, correctly showed ~4.8 kW. PV is dark and the battery can only discharge
+5 kW, so ~17 kW was physically impossible.
 
-**Repro attempts**: 18 consecutive `wsl cargo test -p ven-app` runs under `wsl_lock` — 3 full-suite
-runs at default thread count, and 10 isolated `milp_planner::` runs at `--test-threads=1` (the
-exact configuration the register describes as having crashed before), plus 5 earlier full-suite
-runs earlier in the session. **Zero reproductions of the heap-corruption crash across all 18.**
-The project journal independently shows two earlier, unrelated runs (search "R-21" above) that
-also completed with no flake — no run on record, before or during this investigation, has
-actually caught the crash in the act.
+**First diagnosis was wrong, and shipped.** The gap was attributed to EV V2G discharge being
+assumed by the headroom formula. A `v2g_capable` profile flag (default `false`, gating
+`max_discharge_kw` at `EvCharger::from_params`) was designed, implemented, tested and deployed
+to Node1/Node2 on that theory. It is defensible hardening in its own right — a nonzero
+`max_discharge_kw` really would have been advertised as usable export without any hardware
+check — but it changed nothing here: `curl /sim` on ven-1 showed the EV already at
+`max_discharge_kw: 0.0`, `cap_max_export_kw: -0.0`. The mechanism was never verified against live
+data before building on it. Recorded in `KEY_LEARNINGS.md`.
 
-**Upstream check**: `good_lp` 1.15.2 / `highs` 2.4.0 / `highs-sys` 1.15.0 (from `VEN/Cargo.lock`)
-are the versions in use; no newer patch release exists to try, and neither crate's GitHub issue
-tracker has a report matching this symptom (heap corruption / double-free / SIGABRT from
-sequential `Highs` instance creation in one process). No dependency bump has touched
-`good_lp`/`highs`/`highs-sys` since the 2026-07-16 `cargo update` that predates R-21's own
-creation, so nothing has silently fixed it via an upgrade either.
+**Actual root cause — uniform resample, non-uniform grid.** `simulator::forecast::insert_pv_points`
+derived PV's ceiling via `PvInverter::capability_trajectory(duration, resolution)`, which emits
+points on a *uniform* grid, taking `resolution` from the gap between the first two slots (300s).
+It then paired `traj[i]` with `future_slots[i]` **by index**. The planning horizon is multi-zone
+(`plan_zones`: 96×300s + 96×600s + 96×900s), so index and wall-clock time diverge the moment the
+second zone begins. Slot 227 — 2026-08-30 04:10 UTC, night — received the ceiling computed for
+`now + 300s × 228` = 2026-08-29 14:30, mid-afternoon. Sin-model irradiance there is 0.79 →
+11.4 kW, plus the battery's 5 kW = 16.4 kW predicted against 16.73 kW observed live. The first
+96 slots (zone A) are correctly aligned, which is exactly why the near-term night looked right
+and why no unit test caught it: every fixture used a single-zone uniform horizon.
 
-**Unrelated finding along the way**: this worktree's directory had been renamed on disk
-(`.claude/worktrees/042-gb42-diurnal-stale-rate` → `work-off-backlog`) without a `cargo clean`,
-so two previously-compiled test binaries had the old path baked in via
-`env!("CARGO_MANIFEST_DIR")`, causing spurious `NotFound` failures
-(`schema_snapshot_matches_fixture`, `tests/architecture.rs`) unrelated to R-21. Fixed with
-`cargo clean -p ven-app` and a rebuild. Not a project-wide bug — an artifact of this session's
-worktree rename — so no new debt entry was added for it.
+**Second defect, found while fixing the first.** The headroom path resolved PV from the sin
+model while the planner resolved it from the weather feed (`resolve_weather_pv_kw`, R-50) — so
+plan and headroom disagreed on every cloudy hour, independently of alignment. In total the same
+sin-model formula existed four times: `milp_planner::inputs` (the only copy taught about weather
+and cumulative offsets), `PvInverter::capability_trajectory`, `PvInverter::build_milp_context`,
+and a mirrored `pv_natural_irradiance` helper.
 
-**Disposition**: with no repro across 18 fresh runs, no upstream fix to apply, and no historical
-record of the crash actually occurring, R-21 is removed from `docs/reference/TECHNICAL_DEBTS.md`
-per the register's own closure bar (task 1.5: "remove only once the crash stops reproducing
-across several full-suite runs"). If it resurfaces, re-add it with the new occurrence's exact
-malloc/SIGABRT text and environment (host, `good_lp`/`highs-sys` versions) — that detail was
-never captured on the original 2026-07-15 report either, which likely contributed to how hard it
-was to pin down here.
+**Fix.** Extracted the planner's already-correct implementation into one domain function,
+`entities::solar::pv_ceiling_kw` (+ `PvCeilingParams`, `natural_irradiance_at`), with precedence
+deterministic pin → weather → sin-model-with-decaying-inject-offset, clipped to
+`inverter_max_kw`. It takes each slot's **own** timestamp and its **cumulative** elapsed seconds,
+never `index × nominal_step`. Both `milp_planner::inputs` and `insert_pv_points` now call it, so
+the two cannot drift again. The per-slot weather series is resolved pre-lock in
+`resolve_tick_context` (the port fetch is async, the tick tail is not) against the plan's own
+remaining slot starts, through the same `resolve_weather_pv_kw` and `WEATHER_STALENESS_THRESHOLD`
+the planner uses. The deterministic `pv_plan_kw` pin is honoured on both sides too. The Capacity
+Forecast diagnostics page inherited the same misalignment via the shared `AssetForecastFrame`s
+and is fixed by the same change.
+
+**Dead code removed** (all production-dead, only definitions plus their own tests):
+`capability_trajectory` across its three layers (`Asset` default impl, `AssetConfig` dispatch,
+`PvInverter` override — its sole production caller was the replaced line), `simulate_free`
+(both layers), `PvInverter::forecast_kw_at` (zero references), and `PvMilpContext` +
+`PvInverter::build_milp_context` (`AssetConfig::build_milp_context` returns `None` for PV). A
+stale doc reference to a `precompute_lookahead()` that no longer exists went with them. The
+equivalent-looking `BaseLoadMilpContext` was left in place and filed as R-66 rather than
+expanding this change's scope.
+
+**Incidental refactor.** `finalize_tick_outputs` now takes `&TickContext` instead of a dozen
+forwarded fields — every input it needs beyond `sim`/`now` already lived there. This was forced
+by `tasks/sim_tick/tick.rs` crossing its 200-line cap when the two new PV arguments were
+threaded through (R-40 had already flagged that file as sitting exactly at the cap); collapsing
+the call site removed 10 lines and the plumbing.
+
+**Key learning.** When an API takes a single `resolution`, check whether the consumer's grid
+actually has one. If slot widths vary, the only safe key is each slot's own timestamp plus its
+cumulative elapsed offset — an index is not a time.

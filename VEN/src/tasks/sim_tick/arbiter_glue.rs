@@ -100,25 +100,39 @@ pub(crate) async fn resolve_overlay_enabled(
     ev_settings_tick.opportunistic_charging_enabled && !session_active
 }
 
-/// Weather-sourced PV power for this exact instant — same translation
-/// (staleness gating, transposition physics, calibration) the planner's own
-/// PV input uses (R-50); reused here via the one shared entry point rather
-/// than re-derived.
-pub(crate) async fn resolve_weather_pv_kw_now(
+/// Weather-sourced PV for this tick: the value at this exact instant, plus one
+/// value per remaining plan slot for the site-headroom / capacity forecast.
+///
+/// Both come from a SINGLE `latest()` fetch and a SINGLE
+/// `weather_pv_forecast_series` evaluation — that series runs solar-position
+/// and transposition physics over every forecast sample plus a snow
+/// trajectory, and the tick loop runs once a second, so resolving the instant
+/// and the slot grid separately would double that work on every tick of every
+/// VEN. Same staleness gating and same translation the planner's own PV input
+/// uses (R-50), reached through the one shared entry point rather than
+/// re-derived, so a plan and the headroom drawn against it never disagree.
+pub(crate) async fn resolve_weather_pv_kw_for_tick(
     weather: &dyn crate::controller::WeatherForecastPort,
     weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
     now: DateTime<Utc>,
-) -> Option<f64> {
-    weather_pv_params?;
-    let forecast = weather.latest().await;
-    crate::entities::solar::resolve_weather_pv_kw(
-        weather_pv_params,
-        forecast.as_ref(),
-        now,
-        crate::services::planning::WEATHER_STALENESS_THRESHOLD,
-        &[now],
-    )
-    .and_then(|v| v.first().copied())
+    slot_starts: &[DateTime<Utc>],
+) -> (Option<f64>, Option<Vec<f64>>) {
+    let Some(params) = weather_pv_params else {
+        return (None, None);
+    };
+    let Some(forecast) = weather.latest().await else {
+        return (None, None);
+    };
+    if !forecast.is_fresh(now, crate::services::planning::WEATHER_STALENESS_THRESHOLD) {
+        return (None, None);
+    }
+    let series = crate::entities::solar::weather_pv_forecast_series(params, &forecast);
+    let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
+        .first()
+        .copied();
+    let slots_kw = (!slot_starts.is_empty())
+        .then(|| crate::entities::solar::weather_pv_kw_for_slots(&series, slot_starts));
+    (now_kw, slots_kw)
 }
 
 /// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt).

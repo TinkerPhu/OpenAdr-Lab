@@ -3,12 +3,19 @@ use chrono::{DateTime, Duration, Utc};
 use super::{AssetCapability, AssetConfig, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState};
 use crate::assets::HistoryPoint;
 
-/// Trajectory produced by simulate_forward() / simulate_free().
+/// Trajectory produced by simulate_forward().
 pub struct Trajectory {
     pub points: Vec<TrajectoryPoint>,
 }
 
 /// State is the state AFTER the step at `ts`.
+// `ts`/`power_kw` are read only by the tests that pin `simulate_forward`'s
+// contract — that each point pairs the state BEFORE its window's step with the
+// *actual* (possibly clamped) power achieved DURING it, at that window's own
+// start. `insert_simulated_points`, the sole production consumer, relies on
+// exactly that alignment while reading only `state`, so the fields document and
+// guard an invariant it depends on rather than being unused scaffolding.
+#[allow(dead_code)]
 pub struct TrajectoryPoint {
     pub ts: DateTime<Utc>,
     /// Signed: positive = import, negative = export.
@@ -60,38 +67,6 @@ pub trait Asset: Send + Sync {
     /// `AssetFlexibilityFloor`'s doc comment. No default: every asset type must
     /// state its own answer explicitly rather than silently inherit a wrong one.
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
-
-    /// Free-run: step with setpoint=0.0 for `duration`. Single physics step.
-    /// Override for assets where "free run" means something other than zero setpoint.
-    fn simulate_free(
-        &self,
-        initial: &AssetState,
-        duration: Duration,
-        now: DateTime<Utc>,
-    ) -> Trajectory {
-        self.simulate_forward(initial, &[(now, 0.0), (now + duration, 0.0)])
-    }
-
-    /// Capability at each `resolution` step in free-run (setpoint=0.0).
-    /// Steps `duration / resolution` times; returns (timestamp, capability) pairs.
-    /// Used by `precompute_lookahead()`.
-    fn capability_trajectory(
-        &self,
-        initial: &AssetState,
-        duration: Duration,
-        resolution: Duration,
-        now: DateTime<Utc>,
-    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
-        let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
-        let mut state = initial.clone();
-        let mut result = Vec::with_capacity(n);
-        for i in 1..=n {
-            let (next, _) = self.step(&state, 0.0, resolution);
-            result.push((now + resolution * i as i32, self.capability(&next)));
-            state = next;
-        }
-        result
-    }
 
     /// Project state forward over an explicit setpoint schedule (default impl).
     /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
@@ -176,7 +151,7 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.step(state, setpoint_kw, dt)
     }
 
-    // simulate_forward, simulate_free, capability_trajectory: default impls inherited from Asset
+    // simulate_forward: default impl inherited from Asset
 }
 
 #[cfg(test)]
@@ -301,7 +276,7 @@ mod handle_tests {
         }
     }
 
-    // ── Asset trait defaults: simulate_forward / simulate_free / capability_trajectory ──
+    // ── Asset trait defaults: simulate_forward ──
     //
     // AssetHandle doesn't override these -- they're the trait's own default
     // implementations (real accumulation/projection logic used by lookahead
@@ -374,63 +349,5 @@ mod handle_tests {
             "power must be clamped to max_charge_kw, got {}",
             traj.points[0].power_kw
         );
-    }
-
-    #[test]
-    fn simulate_free_holds_soc_steady_at_zero_setpoint() {
-        // simulate_free's default impl is simulate_forward([(now,0.0),(now+dur,0.0)]) --
-        // for a battery, idling at 0 kW must never drift SoC (no self-discharge model),
-        // pinning down that "free run" really means "untouched", not "drains/charges".
-        let config = make_battery_config(10.0, 5.0);
-        let now = Utc::now();
-        let initial = make_battery_state(0.5, 0.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &initial,
-            history: &history,
-        };
-
-        let traj = handle.simulate_free(&initial, Duration::hours(2), now);
-
-        assert_eq!(traj.points.len(), 2);
-        for p in &traj.points {
-            assert!((p.power_kw - 0.0).abs() < 1e-9);
-            assert!((soc_of(&p.state) - 0.5).abs() < 1e-9);
-        }
-    }
-
-    #[test]
-    fn capability_trajectory_projects_n_steps_reflecting_evolving_state() {
-        // A battery starting already at soc=1.0 (full): idling still yields
-        // max_import_kw=0.0 at every step, because capability is a step function
-        // of state, not a constant -- this verifies capability_trajectory actually
-        // re-derives capability() from the *stepped* state at each point, not just
-        // returning the initial capability() n times.
-        let config = make_battery_config(10.0, 5.0);
-        let now = Utc::now();
-        let initial = make_battery_state(1.0, 0.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &initial,
-            history: &history,
-        };
-
-        let points =
-            handle.capability_trajectory(&initial, Duration::hours(2), Duration::hours(1), now);
-
-        assert_eq!(points.len(), 2); // duration/resolution = 2h/1h = 2 steps
-        assert_eq!(points[0].0, now + Duration::hours(1));
-        assert_eq!(points[1].0, now + Duration::hours(2));
-        for (_, cap) in &points {
-            assert!(
-                (cap.max_import_kw - 0.0).abs() < 1e-9,
-                "already-full battery must show zero import capability at every projected step"
-            );
-            assert!((cap.max_export_kw + 5.0).abs() < 1e-9); // still able to discharge
-        }
     }
 }

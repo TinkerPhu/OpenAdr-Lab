@@ -7,24 +7,22 @@ use chrono::{DateTime, Utc};
 
 use crate::controller;
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::OadrCapacityState;
 use crate::entities::capacity_curve::CapacityCurve;
-use crate::entities::device_session::{EvSession, ShiftableLoad, ShiftableLoadRuntime};
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::models::SensorSnapshot;
 use crate::simulator::SimState;
 
 /// Extract snapshots, push history, update grid asset, compute envelope +
 /// both forward-looking forecasts. Returns the tuple needed for post-lock
 /// async state publishing.
-#[allow(clippy::too_many_arguments)]
+///
+/// Takes the whole `TickContext` rather than a dozen forwarded fields: every
+/// input it needs beyond `sim`/`now` is already resolved there (pre-lock,
+/// async), including the per-slot weather PV series and the deterministic PV
+/// pin the planner reads as `pv_forecast_override`.
 pub(crate) fn finalize_tick_outputs(
     sim: &mut SimState,
-    capacity_snap: &OadrCapacityState,
-    plan_snap: Option<&Plan>,
-    ev_session: Option<&EvSession>,
-    shiftable_loads: &[ShiftableLoad],
-    shiftable_runtimes: &[ShiftableLoadRuntime],
+    ctx: &super::context::TickContext,
     now: DateTime<Utc>,
 ) -> (
     SensorSnapshot,
@@ -52,9 +50,9 @@ pub(crate) fn finalize_tick_outputs(
     // Done here (not inside tick()) so capacity_snap is available.
     {
         let net_power_kw = sim.grid.net_power_w / 1000.0;
-        let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
+        let import_limit_kw = ctx.capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
         // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
-        let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
+        let export_limit_kw_signed = -(ctx.capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
         sim.grid_asset
             .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
     }
@@ -63,10 +61,12 @@ pub(crate) fn finalize_tick_outputs(
     let tick_envelope = controller::envelope::compute_envelope(&tick_sim_snap, now);
     let (tick_forecast, tick_capacity_curves) = super::forecast_wiring::compute_tick_forecasts(
         sim,
-        plan_snap,
-        ev_session,
-        shiftable_loads,
-        shiftable_runtimes,
+        ctx.plan_snap.as_ref(),
+        ctx.ev_session.as_ref(),
+        &ctx.shiftable_loads,
+        &ctx.shiftable_runtimes,
+        ctx.weather_pv_kw_slots.as_deref(),
+        ctx.inject.pv_plan_kw,
         now,
     );
 

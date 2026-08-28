@@ -694,6 +694,24 @@ types (`controller::reporter`, `controller::report_intervals::build_capacity_for
 and to the VEN UI via a dedicated Diagnostics "Capacity Forecast" chart, distinct from the
 Dashboard's instantaneous Site Headroom chart.
 
+**PV's forward ceiling — one definition for the plan and the forecasts.** Every
+forward-looking PV value resolves through `entities::solar::pv_ceiling_kw`: the planner's
+`p_pv_kw` solver input (`controller::milp_planner::inputs`) and the per-slot forecast frames
+(`simulator::forecast::build_forecast_frames`) that feed both the site-headroom forecast and
+the capacity curves above. Precedence is deterministic pin → weather forecast
+(`resolve_weather_pv_kw`, R-50, same staleness gate) → live sin-model snapshot with the
+decaying manual-inject offset, clipped to `inverter_max_kw`. Two properties matter and are
+regression-tested:
+
+- **Each slot is evaluated at its own timestamp**, using cumulative elapsed seconds — never a
+  slot index times a nominal step. The planning horizon is multi-zone (`plan_zones`, widening
+  `step_s` per zone), so index and wall-clock time diverge past the first zone.
+- **The plan and the headroom drawn against it read the same number**, because they call the
+  same function rather than each keeping their own sin-model copy.
+
+The forecast never reads `Plan.pv_forecast_kw` (a solve-time value that may be minutes stale);
+it re-resolves against the live weather feed every tick.
+
 > **Verification status**: unit-tested and locally verified (`cargo test`, `clippy`, `fmt`,
 > file-size audit, VEN UI test/lint/build) at merge time; the E2E/resilience BDD suite has not yet
 > been run against this capability specifically — treat it as implemented-and-unit-verified, not

@@ -295,6 +295,71 @@ fn interpolate_ac_kw(sorted: &[&WeatherPvForecastSlot], t: DateTime<Utc>) -> f64
     a.forecast_ac_kw + (b.forecast_ac_kw - a.forecast_ac_kw) * frac
 }
 
+// ── PV generation ceiling: one definition, every consumer ────────────────────
+
+/// Natural sin-model irradiance [0,1] at `ts`, with no user offset applied.
+/// Domain-owned single copy — `assets::PvInverter` (infra) and
+/// `controller::milp_planner::inputs` (application) previously each kept
+/// their own mirrored implementation of this identical formula.
+pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
+    let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+    if (6.0..=18.0).contains(&hour) {
+        let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+        angle.sin().max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// PV configuration that is constant across a planning horizon, needed to
+/// resolve the generation ceiling at any one slot within it.
+#[derive(Debug, Clone, Copy)]
+pub struct PvCeilingParams {
+    pub rated_kw: f64,
+    pub inverter_max_kw: f64,
+    /// Live perturbation from a manual `pv_irradiance` inject, decaying at
+    /// `pv_alpha` per zone-A step.
+    pub irradiance_offset: f64,
+    pub pv_alpha: f64,
+    /// Width of zone A (the finest plan zone) — the unit `pv_alpha` decays
+    /// per. NOT the width of the slot being resolved: on a multi-zone
+    /// horizon those differ.
+    pub zone_a_step_s: i64,
+}
+
+/// PV's generation ceiling (kW, positive magnitude) at one future slot.
+///
+/// Precedence: deterministic override → weather forecast → live sin-model
+/// snapshot with decaying inject offset. This is the single definition every
+/// forward-looking PV consumer resolves through — the planner's `p_pv_kw`
+/// input and the site-headroom/capacity forecast frames — so a plan and the
+/// headroom drawn against it can never disagree about what PV can do.
+///
+/// `slot_s` is the CUMULATIVE seconds from the horizon's `now` to this slot's
+/// start — never `slot_index × step_s`. Plan grids are multi-zone and
+/// non-uniform, so index and elapsed time diverge past the first zone;
+/// conflating them is what made night slots inherit a daytime ceiling.
+pub fn pv_ceiling_kw(
+    params: &PvCeilingParams,
+    slot_t: DateTime<Utc>,
+    slot_s: i64,
+    weather_kw: Option<f64>,
+    forced_kw: Option<f64>,
+) -> f64 {
+    // The deterministic-testing pin always wins, deliberately un-clamped by
+    // `inverter_max_kw` so a test can force any value it likes.
+    if let Some(forced) = forced_kw {
+        return forced.max(0.0);
+    }
+    if let Some(weather) = weather_kw {
+        return weather.max(0.0).min(params.inverter_max_kw);
+    }
+    let steps_ahead = slot_s as f64 / params.zone_a_step_s.max(1) as f64;
+    let decayed_offset = params.irradiance_offset * (1.0 - params.pv_alpha).powf(steps_ahead);
+    ((natural_irradiance_at(slot_t) + decayed_offset).clamp(0.0, 1.0) * params.rated_kw)
+        .min(params.inverter_max_kw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,6 +774,80 @@ mod tests {
         assert!(
             result.is_none(),
             "no forecast ever received must fall back to None"
+        );
+    }
+
+    // ── pv_ceiling_kw ────────────────────────────────────────────────────────
+
+    fn ceiling_params() -> PvCeilingParams {
+        PvCeilingParams {
+            rated_kw: 14.4,
+            inverter_max_kw: 12.5,
+            irradiance_offset: 0.0,
+            pv_alpha: 0.1,
+            zone_a_step_s: 300,
+        }
+    }
+
+    #[test]
+    fn pv_ceiling_kw_forced_override_wins_over_everything() {
+        let p = ceiling_params();
+        let noon = Utc.with_ymd_and_hms(2026, 6, 21, 12, 0, 0).unwrap();
+        // Deliberately above inverter_max_kw: the deterministic pin is not
+        // clamped, so a test can force any value.
+        let kw = pv_ceiling_kw(&p, noon, 0, Some(4.0), Some(99.0));
+        assert!((kw - 99.0).abs() < 1e-9, "forced pin must win, got {kw}");
+    }
+
+    #[test]
+    fn pv_ceiling_kw_weather_wins_over_sin_model_and_clamps_to_inverter() {
+        let p = ceiling_params();
+        let midnight = Utc.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap();
+        // Sin model would say 0 at midnight; weather says 9.0 → weather wins.
+        assert!((pv_ceiling_kw(&p, midnight, 0, Some(9.0), None) - 9.0).abs() < 1e-9);
+        // ...but never above the inverter's own AC ceiling.
+        assert!((pv_ceiling_kw(&p, midnight, 0, Some(99.0), None) - 12.5).abs() < 1e-9);
+        // A malformed negative weather value must not flip sign into import.
+        assert!(pv_ceiling_kw(&p, midnight, 0, Some(-3.0), None).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pv_ceiling_kw_falls_back_to_sin_model_at_the_slots_own_time() {
+        let p = ceiling_params();
+        let night = Utc.with_ymd_and_hms(2026, 6, 21, 3, 0, 0).unwrap();
+        let noon = Utc.with_ymd_and_hms(2026, 6, 21, 12, 0, 0).unwrap();
+        assert!(
+            pv_ceiling_kw(&p, night, 0, None, None).abs() < 1e-9,
+            "night must be zero"
+        );
+        // Noon: sin(pi/2) = 1.0 -> 14.4 kW DC, clipped to the 12.5 kW inverter.
+        assert!((pv_ceiling_kw(&p, noon, 0, None, None) - 12.5).abs() < 1e-9);
+    }
+
+    /// The whole reason `slot_s` is cumulative seconds rather than a slot
+    /// index: on a multi-zone horizon the inject offset must decay by real
+    /// elapsed time, not by how many slots happen to have gone by.
+    #[test]
+    fn pv_ceiling_kw_offset_decays_by_elapsed_time_not_slot_index() {
+        let p = PvCeilingParams {
+            irradiance_offset: 0.5,
+            pv_alpha: 0.1,
+            ..ceiling_params()
+        };
+        let night = Utc.with_ymd_and_hms(2026, 6, 21, 3, 0, 0).unwrap();
+        // 300s in = exactly one zone-A step -> offset x 0.9.
+        let one_step = pv_ceiling_kw(&p, night, 300, None, None);
+        let expected = (0.5_f64 * 0.9_f64).clamp(0.0, 1.0) * 14.4;
+        assert!(
+            (one_step - expected).abs() < 1e-9,
+            "expected {expected}, got {one_step}"
+        );
+        // 900s in (one 15-min zone-C slot) is THREE zone-A steps, not one.
+        let three_steps = pv_ceiling_kw(&p, night, 900, None, None);
+        let expected3 = (0.5_f64 * 0.9_f64.powi(3)).clamp(0.0, 1.0) * 14.4;
+        assert!(
+            (three_steps - expected3).abs() < 1e-9,
+            "expected {expected3}, got {three_steps}"
         );
     }
 }
