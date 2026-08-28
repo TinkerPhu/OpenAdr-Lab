@@ -10717,3 +10717,46 @@ GB-40 (flat stale prices create ties that aid branch-and-bound pruning; restorin
 could cut or add solve time, "genuinely unknown"). A `tests/solve_cost.rs` before/after benchmark
 to measure this was not run as part of this change — worth doing as a follow-up before drawing
 conclusions about GB-40, but not a merge blocker per the backlog item's own framing.
+
+---
+
+## R-21 — `cargo test` intermittent heap-corruption crash: investigated, closed (2026-08-28)
+
+**What was done**: R-21 (`docs/reference/TECHNICAL_DEBTS.md`, first logged 2026-07-15) tracked an
+intermittent `cargo test` SIGABRT/heap-corruption crash around the two heaviest HiGHS-backed
+tests (`run_planner_n48_full_horizon`, `solve_ven3_heater_three_tier_zones_feasible`), believed
+allocator/heap-state-dependent inside the native HiGHS FFI (`good_lp` → `highs` → `highs-sys`)
+rather than a Rust-level data race, since it reproduced even with `--test-threads=1`. This
+session executed the register's own 5-step investigation task list end to end (in worktree
+`work-off-backlog`, branch renamed `fix/r21-cargo-test-heap-corruption` for the pivot).
+
+**Repro attempts**: 18 consecutive `wsl cargo test -p ven-app` runs under `wsl_lock` — 3 full-suite
+runs at default thread count, and 10 isolated `milp_planner::` runs at `--test-threads=1` (the
+exact configuration the register describes as having crashed before), plus 5 earlier full-suite
+runs earlier in the session. **Zero reproductions of the heap-corruption crash across all 18.**
+The project journal independently shows two earlier, unrelated runs (search "R-21" above) that
+also completed with no flake — no run on record, before or during this investigation, has
+actually caught the crash in the act.
+
+**Upstream check**: `good_lp` 1.15.2 / `highs` 2.4.0 / `highs-sys` 1.15.0 (from `VEN/Cargo.lock`)
+are the versions in use; no newer patch release exists to try, and neither crate's GitHub issue
+tracker has a report matching this symptom (heap corruption / double-free / SIGABRT from
+sequential `Highs` instance creation in one process). No dependency bump has touched
+`good_lp`/`highs`/`highs-sys` since the 2026-07-16 `cargo update` that predates R-21's own
+creation, so nothing has silently fixed it via an upgrade either.
+
+**Unrelated finding along the way**: this worktree's directory had been renamed on disk
+(`.claude/worktrees/042-gb42-diurnal-stale-rate` → `work-off-backlog`) without a `cargo clean`,
+so two previously-compiled test binaries had the old path baked in via
+`env!("CARGO_MANIFEST_DIR")`, causing spurious `NotFound` failures
+(`schema_snapshot_matches_fixture`, `tests/architecture.rs`) unrelated to R-21. Fixed with
+`cargo clean -p ven-app` and a rebuild. Not a project-wide bug — an artifact of this session's
+worktree rename — so no new debt entry was added for it.
+
+**Disposition**: with no repro across 18 fresh runs, no upstream fix to apply, and no historical
+record of the crash actually occurring, R-21 is removed from `docs/reference/TECHNICAL_DEBTS.md`
+per the register's own closure bar (task 1.5: "remove only once the crash stops reproducing
+across several full-suite runs"). If it resurfaces, re-add it with the new occurrence's exact
+malloc/SIGABRT text and environment (host, `good_lp`/`highs-sys` versions) — that detail was
+never captured on the original 2026-07-15 report either, which likely contributed to how hard it
+was to pin down here.
