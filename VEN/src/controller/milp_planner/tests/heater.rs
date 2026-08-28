@@ -622,7 +622,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
             AssetProfile::Heater(HeaterParams {
                 id: "heater".into(),
                 max_kw: 6.0,
-                mid_kw: Some(3.0),
+                power_stages: 2,
                 temp_initial_c: 47.82, // live temperature from ven-3
                 temp_min_c: 45.0,
                 temp_max_c: 60.0,
@@ -765,5 +765,57 @@ fn heater_planned_state_temp_c_populated() {
             temp_c >= 18.0 - 1e-6,
             "slot {t}: temp_c={temp_c:.2} below temp_min_c=18.0"
         );
+    }
+}
+
+/// GB-40: the single-integer encoding makes the reachable power set structural
+/// rather than something the objective has to be steered towards — every planned
+/// heater value must be a whole multiple of `max_kw / power_stages`. Before the
+/// reformulation two independent binaries could in principle be driven to a
+/// combination the hardware cannot produce; now that is inexpressible.
+#[test]
+fn planned_heater_kw_only_takes_reachable_stage_levels() {
+    for (stages, expected) in [(2u8, vec![0.0, 1.5, 3.0]), (1u8, vec![0.0, 3.0])] {
+        let now = fixed_now();
+        let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
+        // make_heater_only_profile uses max_kw = 3.0.
+        profile.assets = profile
+            .assets
+            .into_iter()
+            .map(|a| match a {
+                AssetProfile::Heater(mut h) => {
+                    h.power_stages = stages;
+                    AssetProfile::Heater(h)
+                }
+                other => other,
+            })
+            .collect();
+        let sim = make_snap_from_profile(&profile);
+        let tariffs = make_tariffs(0.25, 0.08, 300.0);
+        let plan = run_planner(
+            build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+            &sim,
+            &tariffs,
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
+        );
+        for slot in &plan.slots {
+            let kw = slot
+                .planned_kw_by_asset
+                .get("heater")
+                .copied()
+                .unwrap_or(0.0);
+            assert!(
+                expected.iter().any(|e| (kw - e).abs() < 1e-6),
+                "power_stages={stages}: planned {kw} kW is not a reachable level {expected:?}"
+            );
+        }
     }
 }

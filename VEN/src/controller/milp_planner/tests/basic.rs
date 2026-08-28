@@ -277,22 +277,23 @@ fn heater_mid_kw_defaults_to_half_max() {
         None,
         None,
     );
-    assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
-    assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
+    assert!((inp.p_heat_step_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
+    assert!(((inp.p_heat_step_kw * inp.heat_n_stages as f64) - 3.0).abs() < 1e-9);
 }
 
 #[test]
-fn heater_mid_kw_uses_explicit_value() {
-    // HeaterConfig.mid_kw = Some(2.0) → p_heat_mid_kw = 2.0
+fn heater_single_stage_step_is_full_power() {
+    // GB-40: power_stages replaced the free `mid_kw` field, so a single-stage
+    // element's only nonzero level is max_kw — previously expressed by setting
+    // mid_kw == max_kw, which nothing validated.
     let now = fixed_now();
     let mut profile = make_profile();
-    // Replace heater with one that has explicit mid_kw
     profile.assets = profile
         .assets
         .into_iter()
         .map(|a| match a {
             AssetProfile::Heater(mut h) => {
-                h.mid_kw = Some(2.0);
+                h.power_stages = 1;
                 AssetProfile::Heater(h)
             }
             other => other,
@@ -308,7 +309,9 @@ fn heater_mid_kw_uses_explicit_value() {
         None,
         None,
     );
-    assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
+    // make_profile()'s heater is max_kw = 3.0.
+    assert_eq!(inp.heat_n_stages, 1);
+    assert!((inp.p_heat_step_kw - 3.0).abs() < 1e-9);
 }
 
 #[test]

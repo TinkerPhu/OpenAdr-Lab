@@ -193,10 +193,10 @@ pub(crate) struct MilpInputs {
     pub(crate) heater_mode: MilpLoadMode,
     /// Deadline step index. None = no hard deadline (autonomous MayRun path).
     pub(crate) t_heat_dead_step: Option<usize>,
-    /// Mid power level [kW] = mid_kw.unwrap_or(max_kw / 2.0)
-    pub(crate) p_heat_mid_kw: f64,
-    /// Full power level [kW] = max_kw
-    pub(crate) p_heat_full_kw: f64,
+    /// Power per heater stage [kW] = max_kw / n_stages.
+    pub(crate) p_heat_step_kw: f64,
+    /// Number of heater stages (1 or 2).
+    pub(crate) heat_n_stages: u8,
     /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
     pub(crate) e_heat_init_kwh: f64,
     /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
@@ -209,10 +209,8 @@ pub(crate) struct MilpInputs {
     pub(crate) lambda_heat_sw_eur: f64,
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
     pub(crate) w_tier_penalty_eur: f64,
-    /// Initial heater mid-power binary (1.0 if heater was at mid power last tick).
-    pub(crate) heat_initial_z_mid: f64,
-    /// Initial heater full-power binary (1.0 if heater was at full power last tick).
-    pub(crate) heat_initial_z_full: f64,
+    /// Stage index the heater was at on the last real tick.
+    pub(crate) heat_initial_y: f64,
 
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
     /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
@@ -361,10 +359,8 @@ pub(crate) struct SolveOutput {
     pub(crate) p_bat_dis_kw: Vec<f64>,
     /// EV charge power per step [kW]; all 0.0 when EV absent/MustNotRun
     pub(crate) p_ev_kw: Vec<f64>,
-    /// Heater mid-level binary (0/1) per step
-    pub(crate) z_heat_mid: Vec<f64>,
-    /// Heater full-level binary (0/1) per step
-    pub(crate) z_heat_full: Vec<f64>,
+    /// Heater stage index (0..=n_stages) per step
+    pub(crate) y_heat: Vec<f64>,
     /// Battery SoC trajectory [kWh], len = n + 1; index 0 = initial SoC
     pub(crate) e_bat_kwh: Vec<f64>,
     /// Import contractual-limit violation slack [kW]

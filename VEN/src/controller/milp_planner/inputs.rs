@@ -266,15 +266,14 @@ pub(crate) fn build_milp_inputs(
 
     let mut heater_mode = MilpLoadMode::MustNotRun;
     let mut t_heat_dead: Option<usize> = None;
-    let mut p_mid = 0.0_f64;
-    let mut p_full = 0.0_f64;
+    let mut p_step = 0.0_f64;
+    let mut heat_n_stages = 0_u8;
     let mut e_heat_init = 0.0_f64;
     let mut e_heat_max = 0.0_f64;
     let mut q_heat_dem = 0.0_f64;
     let mut e_heat_target = 0.0_f64;
     let mut lambda_sw = 0.0_f64;
-    let mut heat_iz_mid = 0.0_f64;
-    let mut heat_iz_full = 0.0_f64;
+    let mut heat_iy = 0.0_f64;
 
     for ctx in asset_contexts {
         match ctx.milp_params(n, now) {
@@ -304,15 +303,14 @@ pub(crate) fn build_milp_inputs(
             AssetMilpParams::Heater(h) => {
                 heater_mode = h.mode;
                 t_heat_dead = h.t_dead_step;
-                p_mid = h.p_mid_kw;
-                p_full = h.p_full_kw;
+                p_step = h.p_step_kw;
+                heat_n_stages = h.n_stages;
                 e_heat_init = h.e_init_kwh;
                 e_heat_max = h.e_max_kwh;
                 q_heat_dem = h.q_dem_kw;
                 e_heat_target = h.e_target_kwh;
                 lambda_sw = h.lambda_sw_eur;
-                heat_iz_mid = h.initial_z_mid;
-                heat_iz_full = h.initial_z_full;
+                heat_iy = h.initial_y;
             }
             AssetMilpParams::Unknown => {}
         }
@@ -428,16 +426,15 @@ pub(crate) fn build_milp_inputs(
         v_ev_extra_eur_kwh: v_ev_extra,
         heater_mode,
         t_heat_dead_step: t_heat_dead,
-        p_heat_mid_kw: p_mid,
-        p_heat_full_kw: p_full,
+        p_heat_step_kw: p_step,
+        heat_n_stages,
         e_heat_init_kwh: e_heat_init,
         e_heat_max_kwh: e_heat_max,
         q_heat_dem_kw: q_heat_dem,
         e_heat_target_kwh: e_heat_target,
         lambda_heat_sw_eur: lambda_sw,
         w_tier_penalty_eur: planner.w_tier_penalty_eur,
-        heat_initial_z_mid: heat_iz_mid,
-        heat_initial_z_full: heat_iz_full,
+        heat_initial_y: heat_iy,
         shiftable_loads: milp_loads,
         soc_ev_init,
     }

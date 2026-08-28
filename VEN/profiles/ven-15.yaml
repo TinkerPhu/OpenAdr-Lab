@@ -1,13 +1,13 @@
 # VEN-15: PV + Heater household, no battery/EV — residential-scale
 # counterpart to ven-2's commercial tank, with a two-stage heater
-# (max_kw/mid_kw) like ven-5's, at residential size.
+# (power_stages: 2 -> levels 0 / max_kw÷2 / max_kw) like ven-5's, at
+# residential size.
 # Runs on a second physical host (VEN/scale_out/node2/ — see that
 # directory's README.md for why), not the primary VTN host.
 assets:
   - type: heater
     id: heater
     max_kw: 4.5
-    mid_kw: 2.0
     temp_initial_c: 50.0
     temp_min_c: 42.0
     temp_max_c: 62.0

@@ -196,8 +196,7 @@ pub(crate) fn translate_to_plan(
 
         // ── Heater allocation ───────────────────────────────────────────
         if inputs.heater_mode != MilpLoadMode::MustNotRun {
-            let heat_kw = sol.z_heat_mid[t] * inputs.p_heat_mid_kw
-                + sol.z_heat_full[t] * inputs.p_heat_full_kw;
+            let heat_kw = sol.y_heat[t] * inputs.p_heat_step_kw;
             if heat_kw > 0.01 {
                 if let Some(ref hid) = heater_id {
                     let surplus_power_kw = surplus_remaining_kw.min(heat_kw);

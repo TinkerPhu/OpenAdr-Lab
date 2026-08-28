@@ -7,7 +7,6 @@ assets:
   - type: heater
     id: heater
     max_kw: 7.0
-    mid_kw: 3.5
     temp_initial_c: 58.0
     temp_min_c: 40.0
     temp_max_c: 75.0

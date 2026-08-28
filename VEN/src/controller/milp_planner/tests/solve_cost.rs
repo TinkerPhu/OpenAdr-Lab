@@ -33,7 +33,7 @@ fn bench_profile(with_heater: bool) -> Profile {
         assets.push(AssetProfile::Heater(HeaterParams {
             id: "heater".into(),
             max_kw: 6.0,
-            mid_kw: Some(3.0),
+            power_stages: 2,
             temp_initial_c: 47.82,
             temp_min_c: 45.0,
             temp_max_c: 60.0,

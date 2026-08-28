@@ -41,24 +41,17 @@ pub(crate) fn build_phase2_warm_start(
         iv.push((pool.grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
     }
     if let Some(v) = &pool.heater {
-        let iz_mid = inputs.heat_initial_z_mid;
-        let iz_full = inputs.heat_initial_z_full;
+        let iy = inputs.heat_initial_y;
         for t in 0..n {
-            let zm = p1.z_heat_mid[t];
-            let zf = p1.z_heat_full[t];
-            iv.push((v.z_heat_mid[t], zm));
-            iv.push((v.z_heat_full[t], zf));
+            let y = p1.y_heat[t];
+            iv.push((v.y_heat[t], y));
             let e = p1.e_heat_tank_kwh.get(t).copied().unwrap_or(0.0);
             iv.push((v.e_tank[t], e));
             iv.push((v.s_low[t], (-e).max(0.0)));
-            let zm_prev = if t == 0 { iz_mid } else { p1.z_heat_mid[t - 1] };
-            let zf_prev = if t == 0 {
-                iz_full
-            } else {
-                p1.z_heat_full[t - 1]
-            };
-            let sw = (zm - zm_prev).abs().max((zf - zf_prev).abs());
-            iv.push((v.sw[t], sw));
+            let y_prev = if t == 0 { iy } else { p1.y_heat[t - 1] };
+            // Matches C5: sw is the relay-operation count, so a two-stage jump
+            // seeds 2 rather than the 1 the old max-of-two-binaries gave.
+            iv.push((v.sw[t], (y - y_prev).abs()));
         }
         iv.push((v.z_heat_ready, p1.z_heat_ready));
     }

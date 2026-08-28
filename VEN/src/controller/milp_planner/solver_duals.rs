@@ -141,7 +141,7 @@ fn declare_fixed_ev_vars(
     }
 }
 
-/// Heater vars with the tier binaries (`z_heat_mid`/`z_heat_full`/`z_heat_ready`) fixed
+/// Heater vars with the stage index (`y_heat`) and `z_heat_ready` fixed
 /// continuous; tank energy/switching stay free.
 fn declare_fixed_heater_vars(
     inputs: &MilpInputs,
@@ -149,15 +149,12 @@ fn declare_fixed_heater_vars(
     n: usize,
     vars: &mut ProblemVariables,
 ) -> HeaterMilpVars {
-    let z_heat_mid = (0..n)
+    let n_stages = inputs.heat_n_stages as f64;
+    let y_heat = (0..n)
         .map(|t| {
-            let v = round_bin(winning.z_heat_mid[t]);
-            vars.add(variable().min(v).max(v))
-        })
-        .collect();
-    let z_heat_full = (0..n)
-        .map(|t| {
-            let v = round_bin(winning.z_heat_full[t]);
+            // Round to the nearest reachable stage rather than to 0/1 — y is a
+            // general integer now, so `round_bin` would collapse stage 2 to 1.
+            let v = winning.y_heat[t].round().clamp(0.0, n_stages);
             vars.add(variable().min(v).max(v))
         })
         .collect();
@@ -173,14 +170,13 @@ fn declare_fixed_heater_vars(
     let s_low = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let sw = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     HeaterMilpVars {
-        z_heat_mid,
-        z_heat_full,
+        y_heat,
         z_heat_ready,
         e_tank,
         s_low,
         sw,
-        p_mid_kw: inputs.p_heat_mid_kw,
-        p_full_kw: inputs.p_heat_full_kw,
+        p_step_kw: inputs.p_heat_step_kw,
+        n_stages: inputs.heat_n_stages,
     }
 }
 

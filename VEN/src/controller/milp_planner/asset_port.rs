@@ -176,9 +176,10 @@ pub struct HeaterMilpContext {
     /// Deadline step index (None = no hard deadline; autonomous MayRun path).
     pub t_dead_step: Option<usize>,
     /// Mid power level [kW].
-    pub p_mid_kw: f64,
-    /// Full power level [kW] = max_kw.
-    pub p_full_kw: f64,
+    /// Power per switchable stage [kW] = max_kw / n_stages.
+    pub p_step_kw: f64,
+    /// Number of switchable stages (1 or 2).
+    pub n_stages: u8,
     /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
     pub e_init_kwh: f64,
     /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
@@ -189,10 +190,8 @@ pub struct HeaterMilpContext {
     pub e_target_kwh: f64,
     /// Relay switching penalty [EUR/switch event] added to the objective.
     pub lambda_sw_eur: f64,
-    /// Initial heater mid-power binary (1.0 if heater was at mid power last tick).
-    pub initial_z_mid: f64,
-    /// Initial heater full-power binary (1.0 if heater was at full power last tick).
-    pub initial_z_full: f64,
+    /// Last observed hardware stage index (0..=n_stages) at plan time.
+    pub initial_y: f64,
     /// Terminal energy reward [EUR/kWh stored at horizon end]. Auto-computed:
     /// mean(c_imp) + c_ctrl_imp_malus. 0.0 disables.
     pub c_terminal_eur_kwh: f64,
@@ -212,10 +211,8 @@ pub struct HeaterMilpContext {
 /// Typed LP variable handles for one heater in the MILP model.
 #[derive(Debug, Clone)]
 pub struct HeaterMilpVars {
-    /// Binary: 1 = mid power tier active at slot t. len = n.
-    pub z_heat_mid: Vec<Variable>,
-    /// Binary: 1 = full power tier active at slot t. len = n.
-    pub z_heat_full: Vec<Variable>,
+    /// Integer stage index in [0, n_stages] at slot t; power = p_step_kw × y. len = n.
+    pub y_heat: Vec<Variable>,
     /// Binary: 1 when deadline is met (MayRun only; fixed 0 in MustRun / autonomous).
     pub z_heat_ready: Variable,
     /// Continuous: tank energy above T_min [kWh] at slot t. Domain [−e_max, e_max]. len = n.
@@ -224,17 +221,16 @@ pub struct HeaterMilpVars {
     pub s_low: Vec<Variable>,
     /// Continuous ≥ 0: switching indicator per step. sw[0] measures switch from initial hardware state. len = n.
     pub sw: Vec<Variable>,
-    /// Mid power level [kW] — cached from context for cross-asset power balance.
-    pub p_mid_kw: f64,
-    /// Full power level [kW] — cached from context for cross-asset power balance.
-    pub p_full_kw: f64,
+    /// Power per stage [kW] — cached from context for cross-asset power balance.
+    pub p_step_kw: f64,
+    /// Number of switchable stages (1 or 2); max power = p_step_kw × n_stages.
+    pub n_stages: u8,
 }
 
 /// Per-heater MILP solution readback.
 #[derive(Debug, Clone)]
 pub struct HeaterSolOutput {
-    pub z_heat_mid: Vec<f64>,
-    pub z_heat_full: Vec<f64>,
+    pub y_heat: Vec<f64>,
     pub z_heat_ready: f64,
     /// Tank energy above T_min [kWh] per slot. len = n.
     pub e_tank_kwh: Vec<f64>,

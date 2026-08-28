@@ -28,6 +28,20 @@ impl Profile {
         if self.planner.replan_interval_s == 0 {
             errors.push("planner.replan_interval_s must be > 0".into());
         }
+        // A staged resistive element has 1 or 2 switchable stages; anything else
+        // would imply power levels the hardware cannot reach. `mid_kw`, which this
+        // replaced, had no validation at all -- which is how two profiles came to
+        // declare a mid level that was not half of max.
+        for a in &self.assets {
+            if let AssetProfile::Heater(h) = a {
+                if !(1..=2).contains(&h.power_stages) {
+                    errors.push(format!(
+                        "heater '{}': power_stages must be 1 or 2, got {}",
+                        h.id, h.power_stages
+                    ));
+                }
+            }
+        }
         if self.planner.phase2_epsilon_eur < 0.0 {
             errors.push(format!(
                 "planner.phase2_epsilon_eur must be ≥ 0.0, got {}",
@@ -275,7 +289,7 @@ mod tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: None,
-            mid_kw: None,
+            power_stages: 2,
             volume_l: None,
             thermal_mass_kwh_per_c: None,
             k_loss_kw_per_c: None,
@@ -295,7 +309,7 @@ mod tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: None,
-            mid_kw: None,
+            power_stages: 2,
             volume_l: None,
             thermal_mass_kwh_per_c: None,
             k_loss_kw_per_c: None,

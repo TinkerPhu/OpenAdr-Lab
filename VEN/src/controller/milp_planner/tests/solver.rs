@@ -43,16 +43,15 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         v_ev_extra_eur_kwh: 0.0,
         heater_mode: MilpLoadMode::MustNotRun,
         t_heat_dead_step: None,
-        p_heat_mid_kw: 0.0,
-        p_heat_full_kw: 0.0,
+        p_heat_step_kw: 0.0,
+        heat_n_stages: 0,
         e_heat_init_kwh: 0.0,
         e_heat_max_kwh: 0.0,
         q_heat_dem_kw: 0.0,
         e_heat_target_kwh: 0.0,
         lambda_heat_sw_eur: 0.0,
         w_tier_penalty_eur: 0.0,
-        heat_initial_z_mid: 0.0,
-        heat_initial_z_full: 0.0,
+        heat_initial_y: 0.0,
         shiftable_loads: vec![],
         soc_ev_init: None,
     }
@@ -310,15 +309,14 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
             ctx: HeaterMilpContext {
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
-                p_mid_kw: 1.0,
-                p_full_kw: 2.0,
+                p_step_kw: 1.0,
+                n_stages: 2,
                 e_init_kwh: 0.0,
                 e_max_kwh: 20.0,
                 q_dem_kw: 0.0,
                 e_target_kwh: 0.0, // no forced target — running is purely reward-driven
                 lambda_sw_eur: 0.0,
-                initial_z_mid: 0.0,
-                initial_z_full: 0.0,
+                initial_y: 0.0,
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
@@ -347,8 +345,12 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
             .expect("solver failed (CO2 reward=0.50)")
             .0;
 
-    let full_slots_no: f64 = out_no_reward.z_heat_full.iter().sum();
-    let full_slots_with: f64 = out_with_reward.z_heat_full.iter().sum();
+    let at_full = |o: &SolveOutput| -> f64 {
+        // "at full" is the top stage now, not a dedicated indicator.
+        o.y_heat.iter().filter(|&&y| y > 1.5).count() as f64
+    };
+    let full_slots_no: f64 = at_full(&out_no_reward);
+    let full_slots_with: f64 = at_full(&out_with_reward);
     assert!(
         full_slots_no < 0.5,
         "without a CO2 reward, the tier penalty should keep the heater off full tier: \
@@ -696,8 +698,8 @@ fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
     inputs.p_pv_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
     inputs.c_imp_eur_kwh = vec![0.0; n]; // free energy — removes tariff signal, malus must do the work
     inputs.heater_mode = MilpLoadMode::MayRun;
-    inputs.p_heat_mid_kw = 3.0;
-    inputs.p_heat_full_kw = 6.0;
+    inputs.p_heat_step_kw = 3.0;
+    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
     inputs.e_heat_init_kwh = 2.0; // warm tank, not in thermal emergency
     inputs.e_heat_max_kwh = 10.0;
     inputs.e_heat_target_kwh = 10.0;
@@ -716,7 +718,7 @@ fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
 
     for t in 0..n {
         assert!(
-                out.z_heat_full[t] < 0.5,
+                out.y_heat[t] < 1.5,
                 "slot {t}: planner chose full tier despite PV exactly covering mid — import malus should prevent this"
             );
         assert!(
@@ -739,8 +741,8 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
     inputs.c_imp_eur_kwh = vec![0.0, 0.0, 0.40, 0.40];
     inputs.heater_mode = MilpLoadMode::MustRun;
     inputs.t_heat_dead_step = Some(n - 1);
-    inputs.p_heat_mid_kw = 3.0;
-    inputs.p_heat_full_kw = 6.0;
+    inputs.p_heat_step_kw = 3.0;
+    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
     inputs.e_heat_init_kwh = 0.0; // cold tank — must heat
     inputs.e_heat_max_kwh = 10.0;
     inputs.e_heat_target_kwh = 6.0; // reachable in free slots at full tier
@@ -755,11 +757,11 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
     .expect("solver failed");
 
     // Without malus, full tier in the free slots is cheaper than paying 0.40 later.
-    let used_full = out.z_heat_full.iter().any(|&z| z > 0.5);
+    let used_full = out.y_heat.iter().any(|&y| y > 1.5);
     assert!(
         used_full,
         "without malus the planner should pre-store at full tier during free slots; z_full={:?}",
-        out.z_heat_full
+        out.y_heat
     );
 }
 
@@ -780,15 +782,14 @@ fn heater_terminal_reward_raises_end_state() {
                 ctx: HeaterMilpContext {
                     mode: HeaterMilpMode::MayRun,
                     t_dead_step: None,
-                    p_mid_kw: 1.0,
-                    p_full_kw: 2.0,
+                    p_step_kw: 1.0,
+                    n_stages: 2,
                     e_init_kwh: 0.0,
                     e_max_kwh: 4.0,
                     q_dem_kw: 0.0,
                     e_target_kwh: 4.0,
                     lambda_sw_eur: 0.0,
-                    initial_z_mid: 0.0,
-                    initial_z_full: 0.0,
+                    initial_y: 0.0,
                     c_terminal_eur_kwh: c_terminal,
                     anchored_kw: vec![],
                     comfort_full_reward_eur_kwh: 0.0,
@@ -860,8 +861,8 @@ fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
     inputs.p_pv_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
     inputs.c_imp_eur_kwh = vec![0.0; n];
     inputs.heater_mode = MilpLoadMode::MayRun;
-    inputs.p_heat_mid_kw = 3.0;
-    inputs.p_heat_full_kw = 6.0;
+    inputs.p_heat_step_kw = 3.0;
+    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
     inputs.e_heat_init_kwh = 0.0;
     inputs.e_heat_max_kwh = 10.0;
     inputs.e_heat_target_kwh = 10.0;

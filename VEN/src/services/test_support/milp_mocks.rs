@@ -238,20 +238,19 @@ pub struct MockHeaterCtx {
 
 impl MockHeaterCtx {
     #[allow(dead_code)] // full HeaterMilpMode mock coverage; no current test exercises MayRun
-    pub fn may_run(p_full_kw: f64, p_mid_kw: f64, e_init_kwh: f64, e_max_kwh: f64) -> Self {
+    pub fn may_run(p_step_kw: f64, n_stages: u8, e_init_kwh: f64, e_max_kwh: f64) -> Self {
         Self {
             ctx: HeaterMilpContext {
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
-                p_mid_kw,
-                p_full_kw,
+                p_step_kw,
+                n_stages,
                 e_init_kwh,
                 e_max_kwh,
                 q_dem_kw: 0.3,
                 e_target_kwh: e_max_kwh,
                 lambda_sw_eur: 0.0,
-                initial_z_mid: 0.0,
-                initial_z_full: 0.0,
+                initial_y: 0.0,
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
@@ -279,15 +278,14 @@ impl AssetMilpContext for MockHeaterCtx {
         AssetMilpParams::Heater(HeaterScalars {
             mode,
             t_dead_step: self.ctx.t_dead_step,
-            p_mid_kw: self.ctx.p_mid_kw,
-            p_full_kw: self.ctx.p_full_kw,
+            p_step_kw: self.ctx.p_step_kw,
+            n_stages: self.ctx.n_stages,
             e_init_kwh: self.ctx.e_init_kwh,
             e_max_kwh: self.ctx.e_max_kwh,
             q_dem_kw: self.ctx.q_dem_kw,
             e_target_kwh: self.ctx.e_target_kwh,
             lambda_sw_eur: self.ctx.lambda_sw_eur,
-            initial_z_mid: self.ctx.initial_z_mid,
-            initial_z_full: self.ctx.initial_z_full,
+            initial_y: self.ctx.initial_y,
             c_terminal_eur_kwh: self.ctx.c_terminal_eur_kwh,
         })
     }

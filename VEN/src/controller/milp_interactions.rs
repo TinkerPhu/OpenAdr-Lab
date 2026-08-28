@@ -274,7 +274,7 @@ pub struct CtrlImportMalusInteraction {
 fn controllable_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
     let mut e = Expression::from(0.0);
     if let Some(v) = &pool.heater {
-        e += v.p_mid_kw * v.z_heat_mid[t] + v.p_full_kw * v.z_heat_full[t];
+        e += v.p_step_kw * v.y_heat[t];
     }
     if let Some(v) = &pool.ev {
         e += v.p_ev[t];
