@@ -7,10 +7,12 @@
 # more than one `wsl cargo build/check/test/clippy` at a time can exhaust the
 # pagefile and crash WSL. Multiple worktrees / AI sessions on this same
 # Windows host share the one WSL instance, so anything that runs a
-# large-memory WSL command must hold this lock first. The lock lives INSIDE
-# WSL (not any worktree), so it covers every session that reaches this WSL
-# instance, the same way docker_host_lock.sh's lock lives on Node1 for every
-# session that reaches that host.
+# large-memory WSL command must hold this lock first. The lock lives on a
+# Windows-mounted path reachable from WSL (not inside any worktree, and not
+# inside the WSL VM's own filesystem — see the R-67 note below for why), so
+# it covers every session that reaches this WSL instance, the same way
+# docker_host_lock.sh's lock lives on Node1 for every session that reaches
+# that host.
 #
 # Usage:
 #   bash scripts/wsl_lock.sh acquire -m "cargo check on 033-task-status"   # 20-min lease
@@ -24,11 +26,23 @@
 # MAX_WAIT_SEC then exits 2 ("rerun to keep waiting"). Owner identity =
 # user@host:<worktree path>, so release/refresh only act on a lock you own.
 #
+# R-67 (fixed 2026-08-29): the lock used to live at /tmp/openadr_wsl.lock,
+# INSIDE the WSL VM. WSL2 shuts the VM down when idle and wipes /tmp on
+# restart, which silently erased the lock — a later `acquire` then saw no
+# lock at all (not an expired one) and succeeded immediately, so two
+# sessions could hold it "at once" with neither aware of the other. The
+# lock now lives on a Windows-mounted path (/mnt/c/...) so it survives a
+# VM restart, the same way docker_host_lock.sh's lock survives because it
+# lives on the persistent remote host rather than inside a throwaway VM.
+# Override the path with WSL_LOCK_PATH if this default ever collides.
+#
 set -euo pipefail
 
 LEASE_MIN="${WSL_LOCK_LEASE_MIN:-20}"
 POLL_SEC="${WSL_LOCK_POLL_SEC:-10}"
 MAX_WAIT_SEC="${WSL_LOCK_MAX_WAIT_SEC:-540}"
+# Windows-mounted (survives a WSL VM restart) — see the R-67 note above.
+LOCK_PATH="${WSL_LOCK_PATH:-/mnt/c/Users/Public/.openadr_wsl_lock}"
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OWNER="$(whoami)@$(hostname):${repo_root}"
@@ -39,9 +53,13 @@ usage() { sed -n '2,22p' "$0"; exit 1; }
 # mutex; the owner file is metadata) — same design as docker_host_lock.sh's remote_op,
 # just via `wsl` instead of `ssh`.
 wsl_op() { # $1=op  $2=description
-    wsl bash -s -- "$1" "$OWNER" "$LEASE_MIN" "${2:-}" <<'REMOTE'
-op="$1"; owner="$2"; lease_min="$3"; desc="$4"
-lock="/tmp/openadr_wsl.lock"
+    # MSYS_NO_PATHCONV: this script is normally invoked from Git Bash, whose
+    # MSYS layer rewrites bare /mnt/c/... arguments as if they were paths to
+    # convert (e.g. to "C:/Program Files/Git/mnt/c/..."), silently corrupting
+    # LOCK_PATH before wsl.exe ever sees it. Found while fixing R-67, the same
+    # day, one command after the fix it was verifying.
+    MSYS_NO_PATHCONV=1 wsl bash -s -- "$1" "$OWNER" "$LEASE_MIN" "${2:-}" "$LOCK_PATH" <<'REMOTE'
+op="$1"; owner="$2"; lease_min="$3"; desc="$4"; lock="$5"
 now=$(date +%s)
 expiry=$(( now + lease_min * 60 ))
 write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner"; }

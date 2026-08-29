@@ -10772,7 +10772,7 @@ and is fixed by the same change.
 (both layers), `PvInverter::forecast_kw_at` (zero references), and `PvMilpContext` +
 `PvInverter::build_milp_context` (`AssetConfig::build_milp_context` returns `None` for PV). A
 stale doc reference to a `precompute_lookahead()` that no longer exists went with them. The
-equivalent-looking `BaseLoadMilpContext` was left in place and filed as R-66 rather than
+equivalent-looking `BaseLoadMilpContext` was left in place and filed as R-68 rather than
 expanding this change's scope.
 
 **Incidental refactor.** `finalize_tick_outputs` now takes `&TickContext` instead of a dozen
