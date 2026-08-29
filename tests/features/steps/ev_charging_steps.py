@@ -18,12 +18,6 @@ def step_given_inject_ev_soc_target(context, soc):
     r.raise_for_status()
 
 
-@when("I inject ev_soc_target {soc:f} via sim inject")
-def step_when_inject_ev_soc_target(context, soc):
-    r = ven_post("/sim/inject", json={"ev_soc_target": soc})
-    r.raise_for_status()
-
-
 # ── Given: user request (Given wrapper for existing When step) ───────────────
 
 @given("I POST a user request for EV with target_soc {soc:f} and latest_end in {hours:d} hours")
@@ -39,24 +33,6 @@ def step_given_post_user_request_ev(context, soc, hours):
     })
     r.raise_for_status()
     context.last_created_request = r.json()
-
-
-# ── Given: POST packet directly (explicit packet creation) ───────────────────
-
-@given("I POST an EV packet with target_soc {soc:f} and latest_end_h {hours:f}")
-def step_given_post_ev_packet(context, soc, hours):
-    from datetime import datetime, timedelta, timezone
-    latest_end = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    r = ven_post("/packets", json={
-        "asset_id": "ev",
-        "target_soc": soc,
-        "target_energy_kwh": None,
-        "latest_end": latest_end,
-    })
-    r.raise_for_status()
-    context.last_created_packet = r.json()
 
 
 # ── When: poll for plan import cap ───────────────────────────────────────────

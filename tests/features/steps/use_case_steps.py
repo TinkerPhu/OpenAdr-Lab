@@ -293,44 +293,7 @@ def step_ven1_event_has_interval_period(context, name):
     assert "start" in ip, "intervalPeriod missing 'start'"
 
 
-@when('I create a timed UC event "{name}" with type "{ptype}" priority {pri:d} and {count:d} intervals')
-def step_create_timed_uc_event(context, name, ptype, pri, count):
-    body = {
-        "programID": context.saved_program_id,
-        "eventName": name,
-        "priority": pri,
-        "intervals": _build_intervals(ptype, count, timed=True),
-    }
-    context.response = vtn_post("/events", context.vtn_token, json=body)
-    if context.response.status_code == 201:
-        context.created_event = context.response.json()
-        if not hasattr(context, "uc_events"):
-            context.uc_events = {}
-        context.uc_events[name] = context.created_event
-
-
 # ── event deletion ───────────────────────────────────────────────────────────
-
-@when('I create a short-lived UC event "{name}" with type "{ptype}" priority {pri:d} and value {val:g}')
-def step_create_short_lived_uc_event(context, name, ptype, pri, val):
-    now = datetime.now(timezone.utc)
-    body = {
-        "programID": context.saved_program_id,
-        "eventName": name,
-        "priority": pri,
-        "intervalPeriod": {
-            "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "duration": "PT15S",
-        },
-        "intervals": [{"id": 0, "payloads": [{"type": ptype, "values": [val]}]}],
-    }
-    context.response = vtn_post("/events", context.vtn_token, json=body)
-    if context.response.status_code == 201:
-        context.created_event = context.response.json()
-        if not hasattr(context, "uc_events"):
-            context.uc_events = {}
-        context.uc_events[name] = context.created_event
-
 
 @when('I create a UC event "{name}" with type "{ptype}" priority {pri:d} and value {val:g}')
 def step_create_uc_event_with_value(context, name, ptype, pri, val):
@@ -448,35 +411,11 @@ def step_wait_ven1_event_value(context, name, val):
     )
 
 
-@when('I wait for VEN-2 event "{name}" to have payload value {val:g}')
-def step_wait_ven2_event_value(context, name, val):
-    def check():
-        events = _ven2_events()
-        evt = _find_event(events, name)
-        if evt is None:
-            return False
-        actual = evt["intervals"][0]["payloads"][0]["values"][0]
-        return abs(actual - val) < 0.001
-    poll_until(
-        lambda: check(),
-        lambda result: result is True,
-        timeout=60,
-        description=f"VEN-2 event '{name}' has payload value {val}",
-    )
-
-
 # ── additional VEN assertions ──────────────────────────────────────────────
 
 @then('the VEN-1 event "{name}" has payload value {val:g}')
 def step_ven1_event_payload_value(context, name, val):
     evt = _get_ven_event(_ven1_events, name)
-    actual = evt["intervals"][0]["payloads"][0]["values"][0]
-    assert abs(actual - val) < 0.001, f"Expected payload value {val}, got {actual}"
-
-
-@then('the VEN-2 event "{name}" has payload value {val:g}')
-def step_ven2_event_payload_value(context, name, val):
-    evt = _get_ven_event(_ven2_events, name)
     actual = evt["intervals"][0]["payloads"][0]["values"][0]
     assert abs(actual - val) < 0.001, f"Expected payload value {val}, got {actual}"
 

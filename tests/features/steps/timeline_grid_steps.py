@@ -194,15 +194,6 @@ def step_format_unchanged(context):
 
 # ── Then — US3: Resolution ───────────────────────────────────────────────────
 
-@then("the total array length is between {low:d} and {high:d}")
-def step_array_length_range(context, low, high):
-    data = _get_timeline_all(context)
-    length = len(list(data.values())[0])
-    assert low <= length <= high, (
-        f"Array length {length} not in range [{low}, {high}]"
-    )
-
-
 @then("the history-portion array length is between {low:d} and {high:d}")
 def step_history_length_range(context, low, high):
     # History is resolution-driven and resampled onto a uniform grid; future is

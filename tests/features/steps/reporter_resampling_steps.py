@@ -143,17 +143,6 @@ def step_intervals_sequential_ids(context):
         )
 
 
-@then('each interval has an intervalPeriod with start and duration "{duration}"')
-def step_intervals_have_period(context, duration):
-    intervals = context.report_intervals
-    for i, iv in enumerate(intervals):
-        period = iv.get("intervalPeriod", {})
-        assert "start" in period, f"Interval {i} missing intervalPeriod.start"
-        assert period.get("duration") == duration, (
-            f"Interval {i} duration={period.get('duration')}, expected {duration}"
-        )
-
-
 @then("each interval contains a USAGE payload")
 def step_intervals_have_usage(context):
     intervals = context.report_intervals

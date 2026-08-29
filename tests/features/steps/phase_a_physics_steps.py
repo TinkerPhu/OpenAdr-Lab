@@ -57,15 +57,6 @@ def step_given_system_idle(context):
 
 # ── When: SoC reset and override helpers ─────────────────────────────────────
 
-@when("the battery SoC is reset to {soc:f}")
-def step_when_battery_soc_reset(context, soc):
-    """Force battery SoC to a specific value via POST /sim/reset/battery."""
-    r = ven_post("/sim/reset/battery", json={"soc": soc})
-    assert r.status_code == 204, (
-        f"Expected 204 from /sim/reset/battery, got {r.status_code}: {r.text}"
-    )
-
-
 @given("I inject ev_soc {soc:f} via sim inject")
 def step_given_inject_ev_soc(context, soc):
     r = ven_post("/sim/inject", json={"ev_soc": soc})

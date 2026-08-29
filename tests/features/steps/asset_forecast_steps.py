@@ -97,13 +97,6 @@ def step_forecast_boundary_point(context, tolerance, offset_s):
     )
 
 
-@then("all forecast sample values are 0.0")
-def step_forecast_all_zero(context):
-    samples = context.forecast_json.get("samples", [])
-    for i, s in enumerate(samples):
-        assert s["value"] == 0.0, f"Sample {i} has non-zero value: {s['value']}"
-
-
 @then("the average forecast sample value is positive")
 def step_forecast_average_positive(context):
     samples = context.forecast_json.get("samples", [])
@@ -184,20 +177,3 @@ def step_history_no_future(context):
         assert ts <= now + timedelta(seconds=2), (
             f"Sample {i} has future timestamp: {ts} > {now}"
         )
-
-
-# ── Then: timeline (GET /timeline/:asset_id, old format, kept for ven_timeline.feature) ─
-
-@then("the timeline response has a non-empty samples list")
-def step_timeline_non_empty(context):
-    data = context.timeline_json
-    assert data is not None, "No timeline JSON in context"
-    assert "samples" in data, f"Response missing 'samples': {list(data.keys()) if isinstance(data, dict) else type(data)}"
-    assert len(data["samples"]) > 0, "Expected non-empty samples, got empty list"
-
-
-@then("the timeline response is a valid history response")
-def step_timeline_valid(context):
-    data = context.timeline_json
-    assert data is not None, "No timeline JSON in context"
-    assert "samples" in data, f"Response missing 'samples' key"

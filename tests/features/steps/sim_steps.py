@@ -34,13 +34,6 @@ def step_schema_has_control_key(context, asset, key):
     )
 
 
-@when("I query VEN-1 decision trace")
-def step_query_trace(context):
-    r = ven_get("/trace/events")
-    r.raise_for_status()
-    context.trace_response = r.json()
-
-
 @then('the sim response top-level keys are "{keys}"')
 def step_sim_top_level_keys(context, keys):
     required = {k.strip() for k in keys.split(",")}
@@ -50,14 +43,6 @@ def step_sim_top_level_keys(context, keys):
     )
     assert actual == required, (
         f"Expected exactly top-level keys {required}, got extra: {actual - required}"
-    )
-
-
-@then('the sim response has field "{field}"')
-def step_sim_has_field(context, field):
-    assert field in context.sim_response, (
-        f"Expected field '{field}' in sim response, "
-        f"got keys: {list(context.sim_response.keys())}"
     )
 
 
@@ -109,60 +94,12 @@ def step_sim_has_device(context, device):
     )
 
 
-@then("the trace response is a list")
-def step_trace_is_list(context):
-    assert isinstance(context.trace_response, list), (
-        f"Expected trace to be a list, got {type(context.trace_response)}"
-    )
-
-
-@then('each trace entry has fields "{fields}"')
-def step_trace_entry_fields(context, fields):
-    # ControllerEvent uses "type" and "ts" as common fields (tagged enum).
-    required = [f.strip() for f in fields.split(",")]
-    for i, entry in enumerate(context.trace_response):
-        for field in required:
-            assert field in entry, (
-                f"Trace entry {i} missing field '{field}', "
-                f"got keys: {list(entry.keys())}"
-            )
-
-
 @then('the sensor raw source is "{source}"')
 def step_sensor_raw_source(context, source):
     raw = context.ven_sensor.get("raw", {})
     actual = raw.get("source") if isinstance(raw, dict) else None
     assert actual == source, (
         f"Expected sensor raw source '{source}', got '{actual}'"
-    )
-
-
-@then('the trace contains an entry with mode "{mode}"')
-def step_trace_contains_mode(context, mode):
-    entries = context.trace_response
-    assert any(e.get("mode") == mode for e in entries), (
-        f"No trace entry with mode '{mode}'. "
-        f"Modes found: {[e.get('mode') for e in entries[:10]]}"
-    )
-
-
-@then('the trace does not contain mode "{mode}"')
-def step_trace_does_not_contain_mode(context, mode):
-    entries = context.trace_response
-    assert not any(e.get("mode") == mode for e in entries), (
-        f"Found unexpected trace entry with mode '{mode}'"
-    )
-
-
-@then('the trace shows event "{event_name}" as active')
-def step_trace_shows_event_active(context, event_name):
-    entries = context.trace_response
-    assert any(
-        event_name in e.get("active_events", [])
-        for e in entries
-    ), (
-        f"No trace entry with event '{event_name}' in active_events. "
-        f"Recent active events: {[e.get('active_events', []) for e in entries[:5]]}"
     )
 
 

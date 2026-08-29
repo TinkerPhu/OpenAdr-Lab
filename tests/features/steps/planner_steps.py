@@ -204,22 +204,6 @@ def step_create_cheap_4h_price(context):
 # Then: assertions on /packets and /plan
 # ---------------------------------------------------------------------------
 
-@then("the packets list has at least {count:d} item")
-@then("the packets list has at least {count:d} items")
-def step_packets_at_least(context, count):
-    data = context.last_response_json
-    assert isinstance(data, list), f"Expected list, got {type(data)}: {data}"
-    assert len(data) >= count, f"Expected >= {count} packets, got {len(data)}"
-
-
-@then('at least one packet has asset_id "{asset_id}"')
-def step_packet_has_asset(context, asset_id):
-    data = context.last_response_json
-    assert any(p.get("asset_id") == asset_id for p in data), (
-        f"No packet with asset_id '{asset_id}'. Packets: {[p.get('asset_id') for p in data]}"
-    )
-
-
 @then('the plan has field "{field}"')
 def step_plan_has_field(context, field):
     plan = context.ven_plan
@@ -276,24 +260,3 @@ def step_no_slot_exceeds_import_threshold(context, kw):
     )
 
 
-@then('the plan contains a packet with asset_id"{asset_id}" in a non-terminal status')
-def step_plan_packet_non_terminal(context, asset_id):
-    plan = context.ven_plan
-    terminal = {"COMPLETED", "PARTIAL_COMPLETED", "ABANDONED", "FAILED"}
-    packets = plan.get("packets", [])
-    found = any(
-        p.get("asset_id") == asset_id and p.get("status") not in terminal
-        for p in packets
-    )
-    assert found, (
-        f"No non-terminal packet with asset_id '{asset_id}'. "
-        f"Packets: {[(p.get('asset_id'), p.get('status')) for p in packets]}"
-    )
-
-
-@then("the plan contains at least {count:d} packet")
-@then("the plan contains at least {count:d} packets")
-def step_plan_has_packets(context, count):
-    plan = context.ven_plan
-    packets = plan.get("packets", [])
-    assert len(packets) >= count, f"Expected >= {count} packets in plan, got {len(packets)}"
