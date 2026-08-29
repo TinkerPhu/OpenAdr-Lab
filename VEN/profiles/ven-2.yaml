@@ -70,8 +70,9 @@ simulator:
 planner:
   # replan_interval_s: 300        # default
   # solver_timeout_s: 60          # default
-  # mip_gap_target: 0.02          # default (HiGHS optimality tolerance; raising it
-  #                               # trades plan cost for solve time -- see GB-40)
+  mip_gap_target: 0.06          # GB-40: heater-bearing VEN, loosened from the 0.02
+                                 # default for solve-time relief; see
+                                 # docs/reference/GB40_MIP_GAP_BENCHMARK.md
   # planning_initial_delay_s: 5   # default
   # plan_step_s: 600              # default (10 min slots, 288 slots over 48 h)
   # plan_horizon_h: 48            # default — 2 solar windows for the 15.5 h-fill tank
