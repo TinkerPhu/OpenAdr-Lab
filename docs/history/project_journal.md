@@ -10772,8 +10772,11 @@ and is fixed by the same change.
 (both layers), `PvInverter::forecast_kw_at` (zero references), and `PvMilpContext` +
 `PvInverter::build_milp_context` (`AssetConfig::build_milp_context` returns `None` for PV). A
 stale doc reference to a `precompute_lookahead()` that no longer exists went with them. The
-equivalent-looking `BaseLoadMilpContext` was left in place and filed as R-68 rather than
-expanding this change's scope.
+equivalent-looking `BaseLoadMilpContext` was initially left in place and filed as a debt entry
+rather than expanding this change's scope. The ID it was filed under (`R-66`) turned out to
+collide with an already-live entry (the `run_all_tests.sh` capacity-check heuristic) and was
+renumbered to `R-68` in a separate commit — which is what actually prompted deleting
+`BaseLoadMilpContext` outright in this follow-up rather than carrying a debt entry at all.
 
 **Incidental refactor.** `finalize_tick_outputs` now takes `&TickContext` instead of a dozen
 forwarded fields — every input it needs beyond `sim`/`now` already lived there. This was forced
@@ -10839,3 +10842,18 @@ Windows-mounted path. Diagnostic that settles it quickly: `wsl bash -lc uptime` 
 
 *Unrelated gates still gate.* `cargo audit` failed on this branch for a reason that had nothing to
 do with it (`h2` 0.4.15, RUSTSEC-2026-0258). Fixed here rather than carried forward.
+
+---
+
+## Delete dead `BaseLoadMilpContext` (R-68 closed)
+
+Follow-up to the PV slot-alignment fix above. That change filed `BaseLoadMilpContext` +
+`BaseLoad::build_milp_context` (`VEN/src/assets/base_load.rs`) as a debt entry rather than
+deleting it outright, since it was equivalent-but-unrelated dead code found along the way. The ID
+it was filed under collided with an already-live entry and was renumbered to `R-68` separately —
+at which point there was no remaining reason not to just delete the two-function, zero-caller
+struct instead of tracking it. Confirmed dead the same way as its PV twin: `AssetConfig::
+build_milp_context` returns `None` for base load (its own doc comment: "non-MILP assets (PV, base
+load, grid)"), base load actually reaches the solver as the precomputed `p_base` vector built in
+`milp_planner::inputs`, and grep found no reference anywhere outside the struct's own definition
+— not even a test.
