@@ -83,6 +83,9 @@ simulator:
   report_interval_s: 60
 
 planner:
+  mip_gap_target: 0.06          # GB-40: heater-bearing VEN, loosened from the 0.02
+                                 # default for solve-time relief; see
+                                 # docs/reference/GB40_MIP_GAP_BENCHMARK.md
   plan_zones:
     - step_s: 300
       slots: 96   # 8 h at 5-min resolution
