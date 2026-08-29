@@ -164,19 +164,34 @@ fn bench_heater_solve_cost() {
 
 // ── GB-40 A/B harness ────────────────────────────────────────────────────────
 //
-// Five fixed start conditions, held in a const so every arm of the experiment
+// Ten fixed start conditions, held in a const so every arm of the experiment
 // provably solves the same instances. They vary tank fill, the stage the
-// hardware is already in, and the price signal — five genuinely different MILP
-// instances rather than five repeats of one, which is what makes a per-variant
-// comparison meaningful rather than a noise measurement.
+// hardware is already in, and the price signal — ten genuinely different MILP
+// instances rather than repeats of a few, which is what lets a per-gap mean
+// across the set distinguish a real quality/gap relationship from per-instance
+// branch-and-bound incumbent variance (the original 5-instance sweep's +4-7%
+// noisy band above 13% could not tell those apart; see GB-40 2026-08-29).
+// Extended from the original 5 (kept as the first five entries, so this run
+// is directly comparable to that one) to cover both temperature extremes
+// (T_min=45/T_max=60 boundaries, not just the mid-band the original 5 leaned
+// toward), all three power stages evenly (0/3/6 kW), and a wider price range
+// (0.10-0.60 vs the original 0.25-0.40), including two intentionally
+// "contradictory" combinations (full power already committed near T_max;
+// full power at a warm tank with cheap import) that a real fleet VEN can
+// land in mid-transition and that the original 5 didn't exercise.
 //
 // (tank °C, initial heater kW, import €/kWh, label)
-const HEATER_VARIANTS: [(f64, f64, f64, &str); 5] = [
+const HEATER_VARIANTS: [(f64, f64, f64, &str); 10] = [
     (47.82, 6.0, 0.25, "cool tank, emergency full"),
     (46.0, 0.0, 0.25, "near T_min, starting off"),
     (50.0, 3.0, 0.25, "mid-band, mid stage"),
     (55.0, 0.0, 0.25, "warm tank, little need"),
     (47.82, 6.0, 0.40, "cool tank, expensive power"),
+    (45.5, 3.0, 0.25, "near T_min, mid stage"),
+    (59.5, 6.0, 0.25, "near T_max, emergency full"),
+    (52.0, 0.0, 0.15, "mid-band, off, cheap power"),
+    (48.0, 3.0, 0.60, "cool-ish, mid stage, very expensive power"),
+    (56.0, 6.0, 0.10, "warm tank, full power, very cheap power"),
 ];
 
 struct VariantResult {
@@ -261,7 +276,7 @@ fn solve_variant(temp_c: f64, initial_kw: f64, import_eur_kwh: f64) -> VariantRe
 #[test]
 #[ignore = "GB-40 A/B harness: 5 production-sized solves, run with --ignored --nocapture"]
 fn bench_heater_variants() {
-    println!("\n=== GB-40 heater A/B: 5 start conditions, phases timed separately ===");
+    println!("\n=== GB-40 heater A/B: 10 start conditions, phases timed separately ===");
     println!(
         "  {:>3}  {:>8} {:>10} {:>13}  {:>8} {:>10}  {:>8}  condition",
         "#", "p1 s", "p1 status", "p1 objective", "p2 s", "p2 status", "total s"
@@ -283,7 +298,7 @@ fn bench_heater_variants() {
     println!();
 }
 
-/// GB-40: fine-grained MIP-gap quality sweep across all 5 fixed heater
+/// GB-40: fine-grained MIP-gap quality sweep across all 10 fixed heater
 /// instances, searching for the point where loosening the gap stops being
 /// (nearly) free.
 ///
@@ -291,7 +306,7 @@ fn bench_heater_variants() {
 /// that phase 1 flips `TimeLimit` -> `GapLimit` somewhere between 10% and 20%,
 /// and that 20% costs a mean +3.9% on phase 1's objective across the 5
 /// instances (measured separately, one gap at a time). This sweep interleaves
-/// both axes at once: 9 gap values x 5 instances = 45 solves, so the
+/// both axes at once: 9 gap values x 10 instances = 90 solves, so the
 /// quality-vs-gap curve can be read per instance and averaged, rather than
 /// inferred from two endpoints.
 ///
@@ -305,7 +320,7 @@ fn bench_heater_variants() {
 fn bench_mip_gap_quality_sweep() {
     const GAPS: [f64; 9] = [0.02, 0.04, 0.07, 0.10, 0.13, 0.16, 0.18, 0.20, 0.22];
 
-    println!("\n=== GB-40 MIP-gap quality sweep: 9 gaps x 5 heater instances ===");
+    println!("\n=== GB-40 MIP-gap quality sweep: 9 gaps x 10 heater instances ===");
     println!(
         "  {:>4}  {:>3}  {:>8} {:>10} {:>13} {:>9}  {:>8} {:>10}  condition",
         "gap", "#", "p1 s", "p1 status", "p1 objective", "vs 2%", "p2 s", "p2 status"
@@ -351,7 +366,7 @@ fn bench_mip_gap_quality_sweep() {
     }
 
     println!(
-        "\n  --- mean quality cost per gap, across all 5 instances (vs each instance's own 2%) ---"
+        "\n  --- mean quality cost per gap, across all 10 instances (vs each instance's own 2%) ---"
     );
     println!("  {:>4}  {:>10}", "gap", "mean Δ%");
     for (gap, sum, n) in &gap_means {
