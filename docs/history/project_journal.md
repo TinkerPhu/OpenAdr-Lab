@@ -10857,3 +10857,50 @@ build_milp_context` returns `None` for base load (its own doc comment: "non-MILP
 load, grid)"), base load actually reaches the solver as the precomputed `p_base` vector built in
 `milp_planner::inputs`, and grep found no reference anywhere outside the struct's own definition
 — not even a test.
+
+---
+
+## Dead behave step definitions removed (R-34 closed, 2026-08-29)
+
+**What was done.** R-34's own fix ("run `behave --dry-run` in the Node1 test container for the
+authoritative list") turned out to be insufficient by itself — `behave --dry-run` reports the
+undefined-step count (0, both before and after) but does not print which registered step
+*definitions* went unmatched. Wrote a short script instead that imports every module in
+`tests/features/steps/`, parses every `.feature` file under `tests/features/` (all 61, including
+`@resilience`/`@upstream_pending`-tagged and outline-expanded scenarios), and calls behave's own
+`registry.find_match()` for every step to build the set of matched definition locations. Anything
+registered but never in that set is dead. Ran it via a throwaway `python:3.11-slim` container
+against the actual step files (no docker-compose stack needed — step matching doesn't touch any
+service), independent of the file counts (417/112) the register's original estimate used, which
+had already drifted from a `site_headroom_steps.py` addition on main.
+
+Found 71 dead step-definition entries (64 unique functions — some patterns had duplicate
+`@given`/`@when` decorators on the same function, or two functions sharing one literal step text
+where the second silently shadowed the first). Removed all of them across 17 files; one file,
+`controller_ui_steps.py`, was deleted entirely — every step in it used the pre-"V2" controller UI
+wording (`"the VEN-1 controller UI"` vs. the live `"...controller V2 UI"`), so the whole file was
+superseded, not just individually stale. `sim_ui_steps.py` shrank from a full EV-override-toggle
+step suite (superseded UI, same pattern as the controller file) down to the one still-used
+`step_reset_ven_overrides`. Two now-orphaned imports (`json`, `ven_post` in
+`entity_model_steps.py`) were cleaned up alongside; a handful of *other* unused imports turned up
+in the same pyflakes pass but predated this change (not introduced by the deletions) and were left
+alone to keep the diff scoped to R-34.
+
+**Verification.** Re-ran the matcher script against the result: 0 dead definitions, 0 undefined
+feature steps (443 registered defs now, all matched). Then a full `docker compose ... test-runner`
+run on Node1 (both the main pass and the `@isolated` pass) plus a `--tags=@resilience` run: 279 + 6
+scenarios, 0 failures across both.
+
+**Issues & key learnings.**
+
+*A debt register's own prescribed fix can be wrong about the tool.* R-34 assumed `behave
+--dry-run`'s CLI output would name the dead definitions directly; it only confirms feature-side
+coverage (nothing undefined), which is the complementary question. Finding truly-dead definitions
+needs the registry inspected from the definition side, not the dry-run report.
+
+*A duplicate Python function name across two `@then` decorators is invisible to behave but not to
+pyflakes.* `entity_model_steps.py` has two functions both named `step_response_json_has_field`,
+each with a different literal step pattern — both register and match fine at runtime (behave keys
+on the decorator pattern, not the Python name), but the second definition shadows the first in the
+module namespace. Pre-existing, left as-is (out of scope for a dead-step removal pass), but a real
+readability trap if either one needed editing later.
