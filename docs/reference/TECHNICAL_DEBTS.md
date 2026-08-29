@@ -1,5 +1,14 @@
 # Technical Debts Register
 
+> **Next ID: R-69.** Use this number for the next new item filed, then increment this
+> line to R-70. When resolving and removing an item — even the current highest ID —
+> do NOT decrement this line: it tracks every ID ever issued, not the count of rows
+> currently in the table, so a removed row never frees its number for reuse. This is
+> the single source of truth for the next ID; do not derive it by scanning for the
+> highest `R-NN` currently present, since a removed top item would make that scan
+> under-count and hand out a number that was already used once (see R-66/R-68 below,
+> caused by exactly that kind of drift before this line existed).
+>
 > Verified against code 2026-07-16. Detailed diagnostics for large refactors:
 > `docs/plans/refactoring_backlog.md`.
 >
@@ -25,7 +34,7 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-21 | `cargo test` intermittently crashes with heap corruption (SIGABRT, varying malloc messages) around the two heaviest HiGHS tests (`run_planner_n48_full_horizon`, `solve_ven3_heater_three_tier_zones_feasible`). Same tests pass clean in isolation every time; also crashes with `--test-threads=1`, so it is allocator/heap-state-dependent in the native HiGHS library, not a plain data race. Test-infra only — no production path. Workaround: run the affected module in isolation when the full suite crashes. | `VEN/src/controller/milp_planner/` (HiGHS FFI via `good_lp`), test harness only | Medium | Low (flake) | 🟡 | Medium — CI/test-suite trust, no production impact |
 | R-33 | UI test gaps: `VTN/ui/src/pages/Metrics.tsx` is the only untested page in either UI; `JsonDialog.tsx` is byte-identical in both UIs (50 lines — accept the copy with a twin-note header, or fold into a shared package if one materializes). | `VTN/ui/src/pages/Metrics.tsx`, `*/ui/src/components/JsonDialog.tsx` | Small | Low | 🟡 | Low — test-coverage gap |
 | R-34 | Up to ~112 of 417 behave step definitions look unused (crude static match, false positives likely). Run `behave --dry-run` in the Node1 test container for the authoritative list, then delete dead steps. | `tests/features/steps/` | Small | Low | 🟡 | Low — repo hygiene only |
-| R-66 | `BaseLoadMilpContext` and `BaseLoad::build_milp_context` (`VEN/src/assets/base_load.rs`) appear production-dead: `AssetConfig::build_milp_context` documents and returns `None` for base load ("non-MILP assets (PV, base load, grid)"), and base load enters the solver as the precomputed `p_base` vector in `milp_planner::inputs` instead. Found while removing the equivalent dead PV pair (`PvMilpContext`/`PvInverter::build_milp_context`) alongside the PV slot-alignment fix; left in place only because it was outside that change's scope. Confirm no caller (including tests), then delete. | `VEN/src/assets/base_load.rs` | Trivial | Low | 🔵 | Low — dead-code hygiene |
+| R-68 | `BaseLoadMilpContext` and `BaseLoad::build_milp_context` (`VEN/src/assets/base_load.rs`) appear production-dead: `AssetConfig::build_milp_context` documents and returns `None` for base load ("non-MILP assets (PV, base load, grid)"), and base load enters the solver as the precomputed `p_base` vector in `milp_planner::inputs` instead. Found while removing the equivalent dead PV pair (`PvMilpContext`/`PvInverter::build_milp_context`) alongside the PV slot-alignment fix; left in place only because it was outside that change's scope. Confirm no caller (including tests), then delete. | `VEN/src/assets/base_load.rs` | Trivial | Low | 🔵 | Low — dead-code hygiene |
 
 ## Low priority (🔵) — by topic
 
@@ -47,7 +56,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-38 | (a) `VEN/Cargo.toml` carries blueprint-era comments (commented-out `openleadr-client` etc.); (b) verify `VTN/data/db` (runtime artifact) is gitignored. | `VEN/Cargo.toml`, `VTN/data/` | Trivial | Low | None — pure hygiene |
 | R-44 | `/health` handler (`routes/system.rs::health`) deep-clones the full `VtnConnectionStatus` and active `Plan` on every poll just to read a couple of fields. Cheap today but grows with `Plan` size; consider a narrower state accessor. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/routes/system.rs` | Trivial | Low | Low — cheap today, future-proofing only |
 | R-66 | `run_all_tests.sh`'s GB-24 pre-flight capacity check (`MIN_AVAILABLE_MEM_MB=800`) is a first-pass heuristic from one live `ssh Node2 "free -m"` observation (2026-08-14: 3794 MB total, 2482–2919 MB available with the resident fleet running), not empirically calibrated against an actual degraded run's memory profile. Same class as R-27 (hard-coded tuning constants). May need tuning if it proves too strict (blocks a run that would've been fine) or too loose (still lets a degraded run through). | `run_all_tests.sh` | Trivial | Low | Low — config-flexibility/accuracy concern only, not a functional defect |
-| R-67 | `scripts/wsl_lock.sh:44` stores its lock at `/tmp/openadr_wsl.lock`, i.e. **inside the WSL VM**. WSL2 shuts the VM down when idle (no `vmIdleTimeout` set in `.wslconfig`), which wipes `/tmp` and the lock with it. A later `acquire` from another worktree then sees *no* lock rather than an expired one and succeeds immediately, so the mutual exclusion silently stops holding — two sessions run cargo builds concurrently while both believe they own the lease. Observed 2026-08-28/29: WSL restarted five times in one session; the lock vanished at least three times mid-work (`refresh` reporting `NOT LOCKED — nothing to refresh` on a lease with ~25 min left), and twice a `setsid nohup` build died with the VM, leaving a frozen logfile with no error and no `Finished` line — indistinguishable from a hung build. Note the lease-expiry design assumes lock state outlives the work it guards; that assumption is false here. `docker_host_lock.sh` is unaffected (its lock lives on the target docker host, not in WSL). | `scripts/wsl_lock.sh`, `.wslconfig` | Trivial — move the lock to a Windows-mounted path (`/mnt/c/...`) so it survives VM restarts; optionally also set `vmIdleTimeout=-1` | Medium | Medium — silently defeats the mutual exclusion it exists to provide, and the failure is invisible: both sessions report holding the lock |
 
 ### UI performance
 
