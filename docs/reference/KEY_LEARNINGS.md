@@ -1395,3 +1395,34 @@ outes/sim.rs causes a T1+T2 double-solve race:
   flag is defensible hardening on its own merits, but it fixed nothing, and the real defect
   survived a full implement/test/deploy cycle. **Confirm the suspected component is actually
   non-zero in production before building anything on the hypothesis.**
+
+## Measuring the right column, and locks that quietly stop locking (043, 2026-08-29)
+
+**Verify that a benchmark measures the quantity in dispute.** A MIP-gap sweep produced real,
+repeatable numbers that were used to justify deleting a feature — but it reported *phase 2's*
+objective, and when both phases of a two-phase solve time out, that number tracks wall-clock
+work rather than plan quality. The question was "what does a looser gap cost in plan quality?",
+and the answer lives in phase 1's `c_star`. Re-measured properly: +3.9% mean for an 86% cut in
+phase-1 solve time. Before citing a benchmark as evidence, name the quantity the decision turns
+on and confirm the harness reports *that* column.
+
+**A loose MIP gap costs far less than the tolerance suggests.** The gap bounds the worst-case
+distance to the true optimum; it is not a prediction of loss. Branch-and-bound typically reaches
+a near-optimal incumbent early and then spends nearly all remaining time *proving* optimality, so
+raising the tolerance buys out the proof rather than the answer. A 20% gap cost ~4% in practice.
+Corollary: when a solve is time-limited rather than gap-limited, the incumbent is usually much
+better than the status alone implies.
+
+**File-size caps can silently delete features.** A working, tested feature was reverted in August
+partly because `profile/schema.rs` had 10 lines of headroom and the field needed 11. Nothing was
+wrong with the feature. When a cap starts driving design decisions, split the file — that is the
+signal the cap exists to send. Confirmation it was not over-engineering: within hours a parallel
+session added another profile field that would also have breached the cap.
+
+**A lease lock stored inside the WSL VM is not a lock.** `scripts/wsl_lock.sh` keeps its state at
+`/tmp/openadr_wsl.lock`; WSL2 idle-shutdown wipes `/tmp`. A later `acquire` from another worktree
+then sees *no* lock rather than an expired one and succeeds immediately — mutual exclusion stops
+holding while both sessions report owning the lease (R-67). The general rule: lock state must
+outlive the process it guards *and* the environment it lives in. Diagnostic: an unexpected
+`FREE`/`NOT LOCKED`, or a detached build whose log freezes with no error and no `Finished` line,
+should prompt `wsl bash -lc uptime` — "up 1 min" means the VM restarted and took the job with it.

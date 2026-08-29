@@ -10784,3 +10784,58 @@ the call site removed 10 lines and the plumbing.
 **Key learning.** When an API takes a single `resolution`, check whether the consumer's grid
 actually has one. If slot widths vary, the only safe key is each slot's own timestamp plus its
 cumulative elapsed offset — an index is not a time.
+
+---
+
+## Configurable MIP gap, restored on a measurement instead of an argument (2026-08-29)
+
+**What was done.** `planner.mip_gap_target` is a per-profile setting again (default `0.02`,
+so fleet behaviour is unchanged until a profile opts in), and the `MIP_GAP_TARGET` constant
+is gone — all three solve sites read the value off `MilpInputs`. This reinstates work that
+was added and then reverted in August (`5b8923c3`). Landed as two commits: a pure move of
+`PlannerConfig` out of `profile/schema.rs` into `profile/planner.rs`, then the restore on top.
+
+**Why the refactor came first.** The revert gave two reasons, and only one was about the
+feature. The binding one was mechanical: `schema.rs` sat at 490/500 production lines and the
+field needs 11, so it could not be added without shaving something unrelated. That is a bad
+reason to lose a feature, and it would recur on the next planner knob — `PlannerConfig` is the
+fastest-growing block in the profile. Moving it out (verbatim, re-exported from `schema`, so no
+call site changed) took `schema.rs` to 333/500. The move proved load-bearing within hours: main
+concurrently gained a `v2g_capable` field, and un-refactored `schema.rs` would have been at
+507/500 — over the cap — for the other session too.
+
+**Why the feature came back.** The revert's other reason was "unproven value", which was fair
+at the time: the August sweep reported *phase 2's* objective, and when both phases time out that
+number tracks wall-clock work rather than plan quality, so it could not price anything. Phase 1's
+`c_star` is the correct metric. Re-measured against five paired heater instances
+(`bench_heater_variants`): at a 0.20 gap, phase 1 stops timing out and finishes in 3–16 s instead
+of 54–57 s, costing a mean **+3.9%** on phase 1's own objective. The realized loss sits far below
+the tolerance because branch-and-bound reaches a near-optimal incumbent early and then spends its
+budget *proving* optimality — the gap buys out the proof, not the answer. The figure is an upper
+bound, since the looser run also had ~4× less search time to improve its incumbent.
+
+This does **not** close GB-40. Phase 2 still burns its full budget at every gap tested and is now
+the larger remaining half of the solve.
+
+**Issues & key learnings.**
+
+*A measurement that cannot answer the question is not evidence.* The August sweep produced real
+numbers, and they were used to justify deleting the feature. But the quantity measured (phase 2's
+objective under a double timeout) was not the quantity in dispute (plan quality). Reading the
+right column mattered more than collecting more data.
+
+*Two independent objections can hide behind one decision.* "Unused knob, unproven value" bundled a
+line-count constraint with an evidence gap. Answering only the evidence half would have failed the
+file-size audit; answering only the line-count half would have restored an unjustified knob.
+
+*A repo-local lease lock stored inside the WSL VM is not a lock.* `wsl_lock.sh` keeps its state at
+`/tmp/openadr_wsl.lock`, and WSL2 idle-shutdown wipes `/tmp`. A later `acquire` from another
+worktree then sees *no* lock rather than an expired one and succeeds immediately, so mutual
+exclusion silently stops holding while both sessions report owning the lease. This cost two
+destroyed builds (a frozen logfile with no error and no `Finished` line — indistinguishable from a
+hang) and one genuine concurrent-build collision. Filed as R-67; the fix is to move the lock to a
+Windows-mounted path. Diagnostic that settles it quickly: `wsl bash -lc uptime` — an unexpected
+"up 1 min" means the VM restarted and any detached job died with it.
+
+*Unrelated gates still gate.* `cargo audit` failed on this branch for a reason that had nothing to
+do with it (`h2` 0.4.15, RUSTSEC-2026-0258). Fixed here rather than carried forward.
