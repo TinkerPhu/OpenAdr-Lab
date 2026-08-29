@@ -162,30 +162,51 @@ fn bench_heater_solve_cost() {
     );
 }
 
-/// One decomposed solve at a given gap: phase 1 and phase 2 run separately so
-/// each phase's own termination reason is visible.
-///
-/// `solve_milp_two_phase` returns the *winning* solution, which is phase 2's
-/// whenever phase 2 succeeds — so a `Plan`'s `solve_status` reports the friction
-/// phase only. That collapses the two, and the first version of this benchmark
-/// presented it as if it characterised the whole solve. It does not: phase 1 is
-/// where cost optimality is decided, so it is the phase whose gap behaviour
-/// actually matters.
-struct PhaseRun {
+// ── GB-40 A/B harness ────────────────────────────────────────────────────────
+//
+// Five fixed start conditions, held in a const so every arm of the experiment
+// provably solves the same instances. They vary tank fill, the stage the
+// hardware is already in, and the price signal — five genuinely different MILP
+// instances rather than five repeats of one, which is what makes a per-variant
+// comparison meaningful rather than a noise measurement.
+//
+// (tank °C, initial heater kW, import €/kWh, label)
+const HEATER_VARIANTS: [(f64, f64, f64, &str); 5] = [
+    (47.82, 6.0, 0.25, "cool tank, emergency full"),
+    (46.0, 0.0, 0.25, "near T_min, starting off"),
+    (50.0, 3.0, 0.25, "mid-band, mid stage"),
+    (55.0, 0.0, 0.25, "warm tank, little need"),
+    (47.82, 6.0, 0.40, "cool tank, expensive power"),
+];
+
+struct VariantResult {
     p1_s: f64,
-    p1_status: good_lp::solvers::SolutionStatus,
+    p1_status: String,
+    p1_objective: f64,
     p2_s: f64,
-    p2_status: Option<good_lp::solvers::SolutionStatus>,
-    objective_eur: f64,
+    p2_status: String,
 }
 
-fn solve_phases_at_gap(mip_gap_target: f64) -> PhaseRun {
+/// Solve one variant at a given MIP gap tolerance, phases run separately.
+///
+/// `solve_milp_two_phase` returns the *winning* (phase-2) solution, so a single
+/// status hides which phase actually ran out of clock — a conflation that
+/// already produced one wrong conclusion in this investigation. Phase 1 is where
+/// cost optimality is decided, so it is the phase whose status and objective
+/// matter here.
+fn solve_at(
+    temp_c: f64,
+    initial_kw: f64,
+    import_eur_kwh: f64,
+    mip_gap_target: f64,
+) -> VariantResult {
     let now = fixed_now();
     let mut profile = bench_profile(true);
     profile.planner.mip_gap_target = mip_gap_target;
     let mut sim = make_snap_from_profile(&profile);
-    set_heater_power(&mut sim, 6.0);
-    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    set_heater_temp(&mut sim, temp_c);
+    set_heater_power(&mut sim, initial_kw);
+    let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
     let cap = no_capacity();
 
     let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
@@ -211,122 +232,133 @@ fn solve_phases_at_gap(mip_gap_target: f64) -> PhaseRun {
     );
     let p2_s = t.elapsed().as_secs_f64();
 
-    let (p2_status, objective_eur) = match &p2 {
-        Ok((sol, _friction)) => (Some(sol.status), sol.objective_eur),
-        Err(_) => (None, p1.objective_eur),
-    };
-
-    PhaseRun {
+    VariantResult {
         p1_s,
-        p1_status: p1.status,
+        p1_status: format!("{:?}", p1.status),
+        p1_objective: p1.objective_eur,
         p2_s,
-        p2_status,
-        objective_eur,
+        p2_status: match &p2 {
+            Ok((sol, _)) => format!("{:?}", sol.status),
+            Err(_) => "Err".to_string(),
+        },
     }
 }
 
-/// GB-40: where does the optimality gap actually start to bind, and what does it cost?
+/// Solve one variant at the profile's default MIP gap (0.02).
+fn solve_variant(temp_c: f64, initial_kw: f64, import_eur_kwh: f64) -> VariantResult {
+    solve_at(temp_c, initial_kw, import_eur_kwh, 0.02)
+}
+
+/// GB-40 A/B: one row per start condition, for comparing a formulation change
+/// against the committed baseline on identical instances.
 ///
-/// The first sweep (2/5/10%) found no time saved and every solve terminating on
-/// the clock. Two follow-ups, both prompted by the right question — could the
-/// improvement sit at a value we skipped?
-///
-/// 1. **Sweep much looser.** If 10% never binds, the achieved gap exceeds 10%,
-///    and a *tighter* target is strictly harder on both counts (smaller gap to
-///    close, less pruning to close it with). So intermediate values cannot help.
-///    The informative direction is the other one: keep loosening until the gap
-///    binds, and the crossover brackets the achieved gap — which is otherwise
-///    unobservable through `good_lp` (R-65 in `docs/reference/TECHNICAL_DEBTS.md`).
-///    That converts a qualitative "the relaxation is weak" into a number.
-/// 2. **Repeat each point.** HiGHS should be deterministic for identical input,
-///    so identical objectives across repeats would establish that the objective
-///    differences between gaps are a real consequence of the setting rather than
-///    search noise — a distinction the first sweep could not make.
+/// Read the result this way: a genuine win is phase 1 flipping off `TimeLimit`
+/// together with a large time drop. The same-instance run-to-run spread on this
+/// machine is ~±4 s on ~112 s (three baseline runs gave 108.6 / 116.6 / 112.0),
+/// so anything inside that band is noise. `p1_objective` is comparable across
+/// arms because the instance is byte-identical, and catches a "faster but
+/// worse" outcome that timing alone would hide.
 #[test]
-#[ignore = "GB-40 benchmark: production-sized solves, run explicitly with --ignored --nocapture"]
-fn bench_mip_gap_sweep() {
-    const REPEATS: usize = 3;
-    let gaps = [0.02_f64, 0.05, 0.10, 0.20, 0.35, 0.50];
-
-    let _ = solve_phases_at_gap(0.02); // warm-up, discarded
-
+#[ignore = "GB-40 A/B harness: 5 production-sized solves, run with --ignored --nocapture"]
+fn bench_heater_variants() {
+    println!("\n=== GB-40 heater A/B: 5 start conditions, phases timed separately ===");
     println!(
-        "\n=== GB-40: MIP gap sweep (heater case, solver_timeout_s=60, {REPEATS} repeats) ==="
+        "  {:>3}  {:>8} {:>10} {:>13}  {:>8} {:>10}  {:>8}  condition",
+        "#", "p1 s", "p1 status", "p1 objective", "p2 s", "p2 status", "total s"
     );
-    println!(
-        "  {:>5}  {:>9} {:>10}  {:>9} {:>10}  {:>8}  {:>13}  {:>9}",
-        "gap",
-        "phase1 s",
-        "p1 status",
-        "phase2 s",
-        "p2 status",
-        "total s",
-        "objective_eur",
-        "repeats"
-    );
-
-    let mut baseline: Option<f64> = None;
-    for &gap in &gaps {
-        let runs: Vec<PhaseRun> = (0..REPEATS).map(|_| solve_phases_at_gap(gap)).collect();
-
-        // Median wall time across repeats; objectives are checked for agreement
-        // rather than averaged — if they differ, that is itself the finding.
-        let mut p1_times: Vec<f64> = runs.iter().map(|r| r.p1_s).collect();
-        let mut p2_times: Vec<f64> = runs.iter().map(|r| r.p2_s).collect();
-        p1_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        p2_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p1_med = p1_times[REPEATS / 2];
-        let p2_med = p2_times[REPEATS / 2];
-
-        let obj = runs[0].objective_eur;
-        let identical = runs.iter().all(|r| {
-            (r.objective_eur - obj).abs() < 1e-9
-                && format!("{:?}", r.p1_status) == format!("{:?}", runs[0].p1_status)
-        });
-        let spread = if identical {
-            "identical".to_string()
-        } else {
-            let lo = runs
-                .iter()
-                .map(|r| r.objective_eur)
-                .fold(f64::MAX, f64::min);
-            let hi = runs
-                .iter()
-                .map(|r| r.objective_eur)
-                .fold(f64::MIN, f64::max);
-            format!("VARIES {lo:.3}-{hi:.3}")
-        };
-
-        if baseline.is_none() {
-            baseline = Some(obj);
-        }
-        let delta = baseline
-            .filter(|b| b.abs() > 1e-9)
-            .map(|b| format!("{:+.2}%", (obj - b) / b.abs() * 100.0))
-            .unwrap_or_else(|| "n/a".into());
-
+    for (i, (temp_c, kw, imp, label)) in HEATER_VARIANTS.iter().enumerate() {
+        let r = solve_variant(*temp_c, *kw, *imp);
         println!(
-            "  {:>4.0}%  {:>9.2} {:>10}  {:>9.2} {:>10}  {:>8.2}  {:>13.4}  {:>9}   {}",
-            gap * 100.0,
-            p1_med,
-            format!("{:?}", runs[0].p1_status),
-            p2_med,
-            runs[0]
-                .p2_status
-                .map(|s| format!("{s:?}"))
-                .unwrap_or_else(|| "Err".into()),
-            p1_med + p2_med,
-            obj,
-            spread,
-            delta
+            "  {:>3}  {:>8.2} {:>10} {:>13.4}  {:>8.2} {:>10}  {:>8.2}  {}",
+            i + 1,
+            r.p1_s,
+            r.p1_status,
+            r.p1_objective,
+            r.p2_s,
+            r.p2_status,
+            r.p1_s + r.p2_s,
+            label
         );
+    }
+    println!();
+}
+
+/// GB-40: fine-grained MIP-gap quality sweep across all 5 fixed heater
+/// instances, searching for the point where loosening the gap stops being
+/// (nearly) free.
+///
+/// The 2026-08-28 coarse sweep (2/5/10/20/35/50%, one instance) established
+/// that phase 1 flips `TimeLimit` -> `GapLimit` somewhere between 10% and 20%,
+/// and that 20% costs a mean +3.9% on phase 1's objective across the 5
+/// instances (measured separately, one gap at a time). This sweep interleaves
+/// both axes at once: 9 gap values x 5 instances = 45 solves, so the
+/// quality-vs-gap curve can be read per instance and averaged, rather than
+/// inferred from two endpoints.
+///
+/// Read it the same way as `bench_heater_variants`: phase 1's status is the
+/// primary signal (`TimeLimit` -> `GapLimit` is the step change that matters),
+/// `p1_objective` is the quality cost relative to the tightest gap (2%) on the
+/// same instance, and the "optimum" this is searching for is the loosest gap
+/// whose mean quality cost is still small next to the time it buys back.
+#[test]
+#[ignore = "GB-40 gap-quality sweep: 45 production-sized solves, run with --ignored --nocapture"]
+fn bench_mip_gap_quality_sweep() {
+    const GAPS: [f64; 9] = [0.02, 0.04, 0.07, 0.10, 0.13, 0.16, 0.18, 0.20, 0.22];
+
+    println!("\n=== GB-40 MIP-gap quality sweep: 9 gaps x 5 heater instances ===");
+    println!(
+        "  {:>4}  {:>3}  {:>8} {:>10} {:>13} {:>9}  {:>8} {:>10}  condition",
+        "gap", "#", "p1 s", "p1 status", "p1 objective", "vs 2%", "p2 s", "p2 status"
+    );
+
+    // baseline[i] = instance i's phase-1 objective at the tightest gap (2%),
+    // established before the sweep so every row's "vs 2%" is against the same
+    // per-instance reference rather than a running one.
+    let baseline: Vec<f64> = HEATER_VARIANTS
+        .iter()
+        .map(|(temp_c, kw, imp, _)| solve_at(*temp_c, *kw, *imp, GAPS[0]).p1_objective)
+        .collect();
+
+    // gap_means[g] accumulates the per-instance %-deltas at gap g, so the
+    // closing summary can report a mean quality cost per gap across all 5
+    // instances rather than leaving the reader to eyeball 45 rows.
+    let mut gap_means: Vec<(f64, f64, usize)> = GAPS.iter().map(|g| (*g, 0.0, 0)).collect();
+
+    for (gi, &gap) in GAPS.iter().enumerate() {
+        for (i, (temp_c, kw, imp, label)) in HEATER_VARIANTS.iter().enumerate() {
+            let r = solve_at(*temp_c, *kw, *imp, gap);
+            let base = baseline[i];
+            let delta_pct = if base.abs() > 1e-9 {
+                (r.p1_objective - base) / base.abs() * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "  {:>3.0}%  {:>3}  {:>8.2} {:>10} {:>13.4} {:>+8.2}%  {:>8.2} {:>10}  {}",
+                gap * 100.0,
+                i + 1,
+                r.p1_s,
+                r.p1_status,
+                r.p1_objective,
+                delta_pct,
+                r.p2_s,
+                r.p2_status,
+                label
+            );
+            gap_means[gi].1 += delta_pct;
+            gap_means[gi].2 += 1;
+        }
+    }
+
+    println!(
+        "\n  --- mean quality cost per gap, across all 5 instances (vs each instance's own 2%) ---"
+    );
+    println!("  {:>4}  {:>10}", "gap", "mean Δ%");
+    for (gap, sum, n) in &gap_means {
+        println!("  {:>3.0}%  {:>+9.2}%", gap * 100.0, sum / *n as f64);
     }
     println!(
         "\n  A phase reporting GapLimit stopped on the gap; TimeLimit means it ran out of clock.\n\
-           The loosest gap that still reports TimeLimit is a lower bound on the achieved gap.\n"
+           This is a measurement, not a threshold -- read the printed table, not an assertion.\n"
     );
-
-    // Measurement, not a threshold: any assertion on times or objectives would
-    // fail on a slower machine for reasons unrelated to the formulation.
-    assert_eq!(gaps.len(), 6);
 }
