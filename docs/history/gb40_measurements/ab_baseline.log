@@ -1,0 +1,26 @@
+   Compiling ven-app v0.1.0 (/mnt/c/DriveD/Tinker/oal-run/VEN)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 43s
+     Running unittests src/main.rs (target/debug/deps/ven_app-be597328af4b6bfa)
+
+running 1 test
+
+=== GB-40 heater A/B: 5 start conditions, phases timed separately ===
+    #      p1 s  p1 status  p1 objective      p2 s  p2 status   total s  condition
+test controller::milp_planner::tests::solve_cost::bench_heater_variants has been running for over 60 seconds
+    1     54.78  TimeLimit        5.5849     54.15  TimeLimit    108.93  cool tank, emergency full
+    2     57.26  TimeLimit        5.6611     54.16  TimeLimit    111.43  near T_min, starting off
+    3     54.15  TimeLimit        5.3549     57.42  TimeLimit    111.57  mid-band, mid stage
+    4     54.15  TimeLimit        5.4285     54.17  TimeLimit    108.32  warm tank, little need
+    5     54.15  TimeLimit        9.2006     57.12  TimeLimit    111.27  cool tank, expensive power
+
+test controller::milp_planner::tests::solve_cost::bench_heater_variants ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1177 filtered out; finished in 551.95s
+
+     Running tests/architecture.rs (target/debug/deps/architecture-23b06a4adc7d3335)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+EXIT=0

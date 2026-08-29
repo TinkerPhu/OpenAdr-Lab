@@ -1,0 +1,208 @@
+   Compiling libc v0.2.186
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling tracing v0.1.44
+   Compiling jobserver v0.1.35
+   Compiling parking_lot_core v0.9.12
+   Compiling cc v1.2.67
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling parking_lot v0.12.5
+   Compiling cmake v0.1.58
+   Compiling mio v1.2.2
+   Compiling socket2 v0.6.5
+   Compiling tokio v1.52.3
+   Compiling zerovec v0.11.6
+   Compiling aws-lc-sys v0.42.0
+   Compiling serde_core v1.0.228
+   Compiling tokio-util v0.7.18
+   Compiling getrandom v0.2.17
+   Compiling tinystr v0.8.3
+   Compiling ring v0.17.14
+   Compiling openssl-sys v0.9.117
+   Compiling icu_locale_core v2.2.0
+   Compiling zerotrie v0.2.4
+   Compiling potential_utf v0.1.5
+   Compiling icu_collections v2.2.0
+   Compiling h2 v0.4.19
+   Compiling serde v1.0.228
+   Compiling icu_provider v2.2.0
+   Compiling hyper v1.10.1
+   Compiling clang-sys v1.8.1
+   Compiling getrandom v0.3.4
+   Compiling bindgen v0.72.1
+   Compiling hyper-util v0.1.20
+   Compiling openssl v0.10.81
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling rand_core v0.9.5
+   Compiling native-tls v0.2.18
+   Compiling idna_adapter v1.2.2
+   Compiling crossbeam-utils v0.8.22
+   Compiling highs-sys v1.15.0
+   Compiling serde_json v1.0.150
+   Compiling aws-lc-rs v1.17.1
+   Compiling rustls v0.23.42
+   Compiling idna v1.1.0
+   Compiling rustls-webpki v0.103.13
+   Compiling tower v0.5.3
+   Compiling rand_chacha v0.9.0
+   Compiling libsqlite3-sys v0.30.1
+   Compiling quanta v0.12.6
+   Compiling tokio-rustls v0.26.4
+   Compiling hyper-rustls v0.27.9
+   Compiling rand v0.9.5
+   Compiling tokio-native-tls v0.3.1
+   Compiling url v2.5.8
+   Compiling crossbeam-epoch v0.9.20
+   Compiling serde_urlencoded v0.7.1
+   Compiling rand_xoshiro v0.7.0
+   Compiling rand_core v0.6.4
+   Compiling metrics-util v0.19.1
+   Compiling axum-core v0.4.5
+   Compiling thiserror v2.0.18
+   Compiling thiserror v1.0.69
+   Compiling rand_chacha v0.3.1
+   Compiling highs v2.4.0
+   Compiling tower-http v0.6.11
+   Compiling hyper-tls v0.6.0
+   Compiling getrandom v0.4.3
+   Compiling tracing-serde v0.2.0
+   Compiling tokio-stream v0.1.18
+   Compiling serde_path_to_error v0.1.20
+   Compiling rusqlite v0.32.1
+   Compiling rumqttc v0.25.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling chrono v0.4.45
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling axum v0.7.9
+   Compiling reqwest v0.12.28
+   Compiling uuid v1.24.0
+   Compiling good_lp v1.15.2
+   Compiling rand v0.8.7
+   Compiling metrics-exporter-prometheus v0.16.2
+   Compiling ven-app v0.1.0 (/mnt/c/DriveD/Tinker/OpenAdr-Lab/.claude/worktrees/mip-gap-sweep-10/VEN)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7m 38s
+     Running unittests src/main.rs (target/debug/deps/ven_app-971c19c0ce2d0e8c)
+
+running 1 test
+
+=== GB-40 MIP-gap quality sweep: 9 gaps x 10 heater instances ===
+   gap    #      p1 s  p1 status  p1 objective     vs 2%      p2 s  p2 status  condition
+test controller::milp_planner::tests::solve_cost::bench_mip_gap_quality_sweep has been running for over 60 seconds
+    2%    1     57.10  TimeLimit        5.5849    +0.00%     54.20  TimeLimit  cool tank, emergency full
+    2%    2     54.18  TimeLimit        5.6611    +0.00%     57.11  TimeLimit  near T_min, starting off
+    2%    3     52.78  TimeLimit        5.3549    +0.00%     57.23  TimeLimit  mid-band, mid stage
+    2%    4     52.77  TimeLimit        5.4285    +0.00%     57.14  TimeLimit  warm tank, little need
+    2%    5     54.16  TimeLimit        9.2006    +0.00%     54.19  TimeLimit  cool tank, expensive power
+    2%    6     24.88   GapLimit        5.6627    +0.00%     54.17  TimeLimit  near T_min, mid stage
+    2%    7     54.17  TimeLimit        5.2411    +0.00%     54.95  TimeLimit  near T_max, emergency full
+    2%    8     57.10  TimeLimit        2.9629    +0.00%     54.17  TimeLimit  mid-band, off, cheap power
+    2%    9     24.96   GapLimit       13.5337    +0.00%     57.11  TimeLimit  cool-ish, mid stage, very expensive power
+    2%   10     54.16  TimeLimit        1.7931    +0.00%     54.18  TimeLimit  warm tank, full power, very cheap power
+    4%    1     54.19  TimeLimit        5.5849    -0.00%     57.11  TimeLimit  cool tank, emergency full
+    4%    2     54.16  TimeLimit        5.7822    +2.14%     54.42  TimeLimit  near T_min, starting off
+    4%    3     57.09  TimeLimit        5.3651    +0.19%     54.18  TimeLimit  mid-band, mid stage
+    4%    4     54.23  TimeLimit        5.3603    -1.26%     54.53  TimeLimit  warm tank, little need
+    4%    5     57.12  TimeLimit        9.2006    +0.00%     54.18  TimeLimit  cool tank, expensive power
+    4%    6     54.16  TimeLimit        5.8346    +3.04%     57.12  TimeLimit  near T_min, mid stage
+    4%    7     54.16  TimeLimit        5.2737    +0.62%     54.25  TimeLimit  near T_max, emergency full
+    4%    8     56.01  TimeLimit        2.9766    +0.46%     57.12  TimeLimit  mid-band, off, cheap power
+    4%    9     54.16  TimeLimit       13.9117    +2.79%     54.21  TimeLimit  cool-ish, mid stage, very expensive power
+    4%   10     57.11  TimeLimit        1.8058    +0.71%     54.24  TimeLimit  warm tank, full power, very cheap power
+    7%    1     27.26   GapLimit        5.5914    +0.12%     54.18  TimeLimit  cool tank, emergency full
+    7%    2     15.94   GapLimit        5.7500    +1.57%     54.18  TimeLimit  near T_min, starting off
+    7%    3     55.33  TimeLimit        5.5282    +3.24%     57.14  TimeLimit  mid-band, mid stage
+    7%    4     16.08   GapLimit        5.2718    -2.89%     55.78  TimeLimit  warm tank, little need
+    7%    5      3.80   GapLimit        9.2132    +0.14%     57.15  TimeLimit  cool tank, expensive power
+    7%    6     15.35   GapLimit        5.8542    +3.38%     54.27  TimeLimit  near T_min, mid stage
+    7%    7     37.56   GapLimit        5.3836    +2.72%     57.30  TimeLimit  near T_max, emergency full
+    7%    8     54.23  TimeLimit        3.0491    +2.91%     54.18  TimeLimit  mid-band, off, cheap power
+    7%    9     14.79   GapLimit       13.9014    +2.72%     54.18  TimeLimit  cool-ish, mid stage, very expensive power
+    7%   10     54.17  TimeLimit        1.8629    +3.90%     57.12  TimeLimit  warm tank, full power, very cheap power
+   10%    1     31.47   GapLimit        5.4425    -2.55%     54.18  TimeLimit  cool tank, emergency full
+   10%    2      6.97   GapLimit        5.8905    +4.05%     54.19  TimeLimit  near T_min, starting off
+   10%    3      6.88   GapLimit        5.4998    +2.70%     54.18  TimeLimit  mid-band, mid stage
+   10%    4     47.70   GapLimit        5.4459    +0.32%     54.23  TimeLimit  warm tank, little need
+   10%    5     15.31   GapLimit        9.0817    -1.29%     57.16  TimeLimit  cool tank, expensive power
+   10%    6     23.76   GapLimit        5.6873    +0.43%     54.18  TimeLimit  near T_min, mid stage
+   10%    7      9.74   GapLimit        5.3239    +1.58%     54.52  TimeLimit  near T_max, emergency full
+   10%    8      8.53   GapLimit        3.0124    +1.67%     54.18  TimeLimit  mid-band, off, cheap power
+   10%    9     25.33   GapLimit       14.6331    +8.12%     54.19  TimeLimit  cool-ish, mid stage, very expensive power
+   10%   10     54.29  TimeLimit        1.8908    +5.45%     54.89  TimeLimit  warm tank, full power, very cheap power
+   13%    1     11.93   GapLimit        5.9105    +5.83%     54.22  TimeLimit  cool tank, emergency full
+   13%    2      6.85   GapLimit        6.0539    +6.94%     55.99  TimeLimit  near T_min, starting off
+   13%    3      6.83   GapLimit        5.4998    +2.70%     57.35  TimeLimit  mid-band, mid stage
+   13%    4      2.14   GapLimit        5.7339    +5.63%     57.13  TimeLimit  warm tank, little need
+   13%    5      2.63   GapLimit        9.8103    +6.63%     54.35  TimeLimit  cool tank, expensive power
+   13%    6      8.90   GapLimit        5.8794    +3.83%     54.29  TimeLimit  near T_min, mid stage
+   13%    7      8.73   GapLimit        5.3989    +3.01%     54.18  TimeLimit  near T_max, emergency full
+   13%    8     18.58   GapLimit        3.0568    +3.17%     57.11  TimeLimit  mid-band, off, cheap power
+   13%    9      8.34   GapLimit       13.8380    +2.25%     57.17  TimeLimit  cool-ish, mid stage, very expensive power
+   13%   10     36.48   GapLimit        1.7890    -0.23%     57.11  TimeLimit  warm tank, full power, very cheap power
+   16%    1     16.08   GapLimit        6.1970   +10.96%     55.33  TimeLimit  cool tank, emergency full
+   16%    2      5.42   GapLimit        6.2113    +9.72%     57.11  TimeLimit  near T_min, starting off
+   16%    3      6.70   GapLimit        5.4998    +2.70%     57.11  TimeLimit  mid-band, mid stage
+   16%    4      2.17   GapLimit        5.7339    +5.63%     54.20  TimeLimit  warm tank, little need
+   16%    5      2.68   GapLimit        9.8103    +6.63%     54.22  TimeLimit  cool tank, expensive power
+   16%    6     10.71   GapLimit        6.0677    +7.15%     54.35  TimeLimit  near T_min, mid stage
+   16%    7     54.16  TimeLimit        5.9872   +14.24%     57.16  TimeLimit  near T_max, emergency full
+   16%    8     15.20   GapLimit        3.3458   +12.92%     54.18  TimeLimit  mid-band, off, cheap power
+   16%    9      1.64   GapLimit       15.7842   +16.63%     57.12  TimeLimit  cool-ish, mid stage, very expensive power
+   16%   10     54.16  TimeLimit        1.9586    +9.23%     54.18  TimeLimit  warm tank, full power, very cheap power
+   18%    1     43.42   GapLimit        5.8737    +5.17%     54.19  TimeLimit  cool tank, emergency full
+   18%    2      5.67   GapLimit        6.0961    +7.68%     54.40  TimeLimit  near T_min, starting off
+   18%    3     10.15   GapLimit        5.8042    +8.39%     54.18  TimeLimit  mid-band, mid stage
+   18%    4      2.15   GapLimit        5.7339    +5.63%     57.13  TimeLimit  warm tank, little need
+   18%    5      2.81   GapLimit        9.8103    +6.63%     57.13  TimeLimit  cool tank, expensive power
+   18%    6     20.80   GapLimit        6.0873    +7.50%     54.22  TimeLimit  near T_min, mid stage
+   18%    7      9.54   GapLimit        5.3239    +1.58%     54.17  TimeLimit  near T_max, emergency full
+   18%    8     12.82   GapLimit        3.1148    +5.13%     54.24  TimeLimit  mid-band, off, cheap power
+   18%    9      1.61   GapLimit       15.7842   +16.63%     56.69  TimeLimit  cool-ish, mid stage, very expensive power
+   18%   10      8.83   GapLimit        1.8210    +1.55%     55.55  TimeLimit  warm tank, full power, very cheap power
+   20%    1     12.72   GapLimit        5.6547    +1.25%     54.18  TimeLimit  cool tank, emergency full
+   20%    2      4.62   GapLimit        5.8694    +3.68%     57.23  TimeLimit  near T_min, starting off
+   20%    3      6.17   GapLimit        5.4907    +2.54%     57.27  TimeLimit  mid-band, mid stage
+   20%    4      2.32   GapLimit        5.7339    +5.63%     57.11  TimeLimit  warm tank, little need
+   20%    5      2.83   GapLimit        9.8103    +6.63%     54.36  TimeLimit  cool tank, expensive power
+   20%    6     14.60   GapLimit        5.6435    -0.34%     57.15  TimeLimit  near T_min, mid stage
+   20%    7      6.50   GapLimit        5.7600    +9.90%     57.12  TimeLimit  near T_max, emergency full
+   20%    8      8.20   GapLimit        3.4176   +15.35%     57.12  TimeLimit  mid-band, off, cheap power
+   20%    9      1.62   GapLimit       15.7842   +16.63%     54.17  TimeLimit  cool-ish, mid stage, very expensive power
+   20%   10     12.67   GapLimit        2.0128   +12.25%     54.17  TimeLimit  warm tank, full power, very cheap power
+   22%    1     17.35   GapLimit        5.6494    +1.16%     57.16  TimeLimit  cool tank, emergency full
+   22%    2      4.82   GapLimit        6.5768   +16.17%     57.12  TimeLimit  near T_min, starting off
+   22%    3      7.22   GapLimit        5.5185    +3.05%     57.11  TimeLimit  mid-band, mid stage
+   22%    4      2.19   GapLimit        5.7339    +5.63%     54.17  TimeLimit  warm tank, little need
+   22%    5      2.59   GapLimit        9.8103    +6.63%     54.37  TimeLimit  cool tank, expensive power
+   22%    6     13.24   GapLimit        5.8343    +3.03%     54.19  TimeLimit  near T_min, mid stage
+   22%    7      6.78   GapLimit        5.7600    +9.90%     54.21  TimeLimit  near T_max, emergency full
+   22%    8      8.70   GapLimit        3.3775   +13.99%     54.26  TimeLimit  mid-band, off, cheap power
+   22%    9      1.73   GapLimit       15.7842   +16.63%     54.19  TimeLimit  cool-ish, mid stage, very expensive power
+   22%   10      6.53   GapLimit        1.9523    +8.88%     57.12  TimeLimit  warm tank, full power, very cheap power
+
+  --- mean quality cost per gap, across all 10 instances (vs each instance's own 2%) ---
+   gap     mean Δ%
+    2%      +0.00%
+    4%      +0.87%
+    7%      +1.78%
+   10%      +2.05%
+   13%      +3.98%
+   16%      +9.58%
+   18%      +6.59%
+   20%      +7.35%
+   22%      +8.51%
+
+  A phase reporting GapLimit stopped on the gap; TimeLimit means it ran out of clock.
+This is a measurement, not a threshold -- read the printed table, not an assertion.
+
+test controller::milp_planner::tests::solve_cost::bench_mip_gap_quality_sweep ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 8134.75s
+
+     Running tests/architecture.rs (target/debug/deps/architecture-1b3a71017ef5f941)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
