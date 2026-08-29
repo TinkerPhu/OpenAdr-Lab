@@ -70,6 +70,10 @@ averaged across all 10 scenarios.
 `GapLimit`/`Optimal` — i.e. the solver used its full budget rather than
 stopping once within the target gap of the best known bound.
 
+This table is the per-gap mean across all 10 scenarios. The per-scenario rows
+behind it (each combination's own time, status, objective and delta) are kept
+as raw solver output in `docs/history/gb40_measurements/`.
+
 ## Reading the table
 
 - **Phase 2 does not respond to `mip_gap_target` at all.** ~55 s and 10/10
