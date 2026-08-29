@@ -34,23 +34,6 @@ def step_given_post_ev_session(context, soc, hours):
     context.last_response_json = r.json()
 
 
-@when("I POST an EV session with target_soc {soc:f} and departure in {hours:f} hours")
-def step_when_post_ev_session(context, soc, hours):
-    departure = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    r = ven_post("/user-requests", json={
-        "asset_id": "ev",
-        "target_soc": soc,
-        "deadlines": [{"latest_end": departure}],
-    })
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
 # ── Shiftable Loads (now via /user-requests) ────────────────────────────────────
 
 @when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window:d} hours')
@@ -92,26 +75,6 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
     # /user-requests returns the UserRequest, not the ShiftableLoad — its own "id" is what
     # DELETE /user-requests/:id needs (not the linked session_id).
     context.last_shiftable_load_id = r.json().get("id")
-
-
-@when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')
-def step_when_post_shiftable_load_min_window(context, asset_id, kw, minutes, window_min):
-    now = datetime.now(timezone.utc)
-    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/user-requests", json={
-        "asset_id": asset_id,
-        "deadlines": [],
-        "power_kw": kw,
-        "duration_min": minutes,
-        "earliest_start": earliest_start,
-        "latest_end": latest_end,
-    })
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
 
 
 @given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')

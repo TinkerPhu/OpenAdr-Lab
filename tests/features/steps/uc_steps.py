@@ -47,26 +47,6 @@ def step_wait_plan_import_cap(context, cap):
 # When: POST /requests with CONTINUE policy
 # ---------------------------------------------------------------------------
 
-@when("I create a fresh EV packet with target_soc 0.99")
-def step_create_fresh_ev_packet(context):
-    """Create an EV EnergyPacket targeting 99% SoC.
-
-    Always works regardless of current SoC (even after 0.80 completion),
-    since 0.99 > any completed target in the test profile.
-    """
-    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    r = ven_post("/packets", json={
-        "asset_id": "ev",
-        "target_soc": 0.99,
-        "desired_power_kw": 7.0,
-        "latest_end": latest_end,
-    })
-    r.raise_for_status()
-    context.fresh_ev_packet_id = r.json().get("id")
-
-
 @when('I POST a CONTINUE policy request for asset "{asset_id}" with two deadline tiers')
 def step_post_continue_request(context, asset_id):
     """Create a CONTINUE-policy EnergyPacket with two deadline tiers.
@@ -209,17 +189,6 @@ def step_plan_envelopes_have_asset(context, asset_id):
     assert found, (
         f"No envelope with asset_id='{asset_id}'. "
         f"Envelope assets: {[e.get('asset_id') for e in envs]}"
-    )
-
-
-@then('the flexibility envelopes contain an entry for asset "{asset_id}"')
-def step_flexibility_envelopes_have_asset(context, asset_id):
-    data = context.last_response_json
-    assert isinstance(data, list), f"Expected list of envelopes, got {type(data)}"
-    found = any(e.get("asset_id") == asset_id for e in data)
-    assert found, (
-        f"No envelope with asset_id='{asset_id}'. "
-        f"Assets: {[e.get('asset_id') for e in data]}"
     )
 
 

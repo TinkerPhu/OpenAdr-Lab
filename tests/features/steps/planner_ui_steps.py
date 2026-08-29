@@ -101,15 +101,6 @@ def step_matrix_has_tariff_header(context):
     assert header is not None and header.is_visible(), "Tariff header row not visible"
 
 
-@when("I click the first visible matrix cell")
-def step_click_first_matrix_cell(context):
-    page = context.browser_page
-    page.wait_for_selector('[data-testid^="matrix-cell-"]', timeout=45000)
-    cells = page.query_selector_all('[data-testid^="matrix-cell-"]')
-    assert len(cells) > 0, "No matrix cells to click"
-    cells[0].dispatch_event("click")
-
-
 @when("I click the first matrix cell with nonzero power")
 def step_click_first_nonzero_matrix_cell(context):
     """Click the first matrix cell that has a nonzero power value (has an associated step)."""
