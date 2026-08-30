@@ -14,7 +14,7 @@ use crate::entities::device_session::{
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
-use crate::models::SensorSnapshot;
+use crate::simulator::SensorSnapshot;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};

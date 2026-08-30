@@ -9,7 +9,7 @@ use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
-use crate::models::SensorSnapshot;
+use crate::simulator::SensorSnapshot;
 use crate::simulator::SimState;
 
 /// Extract snapshots, push history, update grid asset, compute envelope +
