@@ -114,10 +114,31 @@ impl std::fmt::Display for VtnHttpError {
 
 impl std::error::Error for VtnHttpError {}
 
-/// Build the error for a non-2xx VTN response, logging a structured line
-/// either way: as parsed RFC 7807 fields if the body is problem+json shaped,
-/// or the raw body otherwise. Called at every "not `is_success()`" branch in
-/// this client so no call site has to duplicate the parse-or-fallback logic.
+/// Parse a non-2xx VTN response body into a human-readable problem message,
+/// without logging: RFC 7807 title/detail if the body is problem+json shaped,
+/// or the raw body otherwise. Used where the caller doesn't yet know whether
+/// the response is a terminal failure (e.g. `upsert_report`'s speculative
+/// 409, which may still resolve via name-based upsert) — logging here would
+/// fire on every recoverable case, not just real failures.
+fn describe_problem(body: &str) -> String {
+    match serde_json::from_str::<ProblemDetails>(body) {
+        Ok(problem) if problem.title.is_some() || problem.detail.is_some() => {
+            format!(
+                "{} — {}",
+                problem.title.unwrap_or_default(),
+                problem.detail.unwrap_or_default()
+            )
+        }
+        _ => body.to_string(),
+    }
+}
+
+/// Build the error for a non-2xx VTN response, logging a structured ERROR
+/// line either way: as parsed RFC 7807 fields if the body is problem+json
+/// shaped, or the raw body otherwise. Called at every terminal
+/// "not `is_success()`" branch in this client so no call site has to
+/// duplicate the parse-or-fallback logic — but NOT for a status a caller may
+/// still recover from (see `describe_problem` for that case).
 fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
     match serde_json::from_str::<ProblemDetails>(body) {
         Ok(problem) if problem.title.is_some() || problem.detail.is_some() => {
@@ -402,27 +423,50 @@ impl VtnClient {
         let (status, text) = self.post_json_raw("/reports", &value).await?;
 
         if status == StatusCode::CONFLICT {
-            // A VTN 409 is NOT proof of a reportName duplicate: openleadr-rs
-            // maps both unique violations and foreign-key violations (e.g. the
-            // referenced event was cascade-deleted) to 409. Attempt the
-            // name-based upsert when possible, but every failure on this path
-            // must carry the VTN's problem body — it names the real cause.
-            let vtn_problem = http_error("/reports", status, &text);
+            // A VTN 409 here is the expected, steady-state outcome for every
+            // periodic report submission after the first (reporter.rs gives
+            // each report a name stable per event/obligation, so re-submitting
+            // it necessarily 409s and falls through to a name-based PUT) — it
+            // is not proof of a reportName duplicate either way: openleadr-rs
+            // also maps foreign-key violations (e.g. the referenced event was
+            // cascade-deleted) to 409. So this branch must NOT log at ERROR
+            // until it knows recovery actually failed — see `describe_problem`.
+            let vtn_problem = describe_problem(&text);
             if let Some(name) = body.reportName.as_deref() {
                 match self.find_report_by_name(name).await {
                     Ok(id) => {
                         self.update_report(&id, value).await?;
+                        tracing::debug!(
+                            path = "/reports",
+                            report_name = name,
+                            "409 on POST /reports resolved via name-based upsert"
+                        );
                         return Ok(());
                     }
-                    Err(lookup_err) => anyhow::bail!(
-                        "409 on POST /reports and upsert of reportName '{name}' failed \
-                         ({lookup_err:#}); VTN said: {vtn_problem:#}"
-                    ),
+                    Err(lookup_err) => {
+                        tracing::error!(
+                            path = "/reports",
+                            status = status.as_u16(),
+                            report_name = name,
+                            vtn_problem,
+                            "409 on POST /reports and name-based upsert failed"
+                        );
+                        anyhow::bail!(
+                            "409 on POST /reports and upsert of reportName '{name}' failed \
+                             ({lookup_err:#}); VTN said: {vtn_problem}"
+                        )
+                    }
                 }
             }
+            tracing::error!(
+                path = "/reports",
+                status = status.as_u16(),
+                vtn_problem,
+                "409 on POST /reports without reportName — cannot upsert by name"
+            );
             anyhow::bail!(
                 "409 on POST /reports without reportName — cannot upsert by name; \
-                 VTN said: {vtn_problem:#}"
+                 VTN said: {vtn_problem}"
             );
         }
 
@@ -503,6 +547,7 @@ mod tests {
     use axum::{Json, Router};
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::Mutex;
     use tokio::net::TcpListener;
 
     async fn token_handler() -> Json<serde_json::Value> {
@@ -767,6 +812,76 @@ mod tests {
         assert!(
             msg.contains("foreign key constraint"),
             "error must carry the VTN problem detail, got: {msg}"
+        );
+    }
+
+    async fn update_ok_handler() -> Json<serde_json::Value> {
+        Json(json!({"status": "ok"}))
+    }
+
+    /// Like `spawn_conflict_vtn`, but also serves `PUT /reports/:id` so a
+    /// 409-then-upsert can actually complete — steady-state periodic
+    /// reporting on a real VTN (every submission after the first for a given
+    /// report name).
+    async fn spawn_conflict_then_upsertable_vtn(own_reports: Vec<serde_json::Value>) -> String {
+        let state = Arc::new(own_reports);
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/reports",
+                get(paginated_handler).post(conflict_post_handler),
+            )
+            .route("/reports/:id", axum::routing::put(update_ok_handler))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLogs {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_report_409_recovered_by_name_does_not_log_at_error_level() {
+        // Steady-state case: the report already exists under this name (a
+        // prior submission created it), so this 409 is fully expected and
+        // must resolve silently via the name-based PUT — no ERROR noise.
+        let existing = json!({"id": "rep-1", "reportName": "auto-test-ven-evt-1"});
+        let base_url = spawn_conflict_then_upsertable_vtn(vec![existing]).await;
+        let client = make_client(base_url);
+
+        let captured = CapturedLogs::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .without_time()
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        client
+            .upsert_report(report_body(Some("auto-test-ven-evt-1")))
+            .await
+            .expect("409 with a matching existing report must recover via upsert");
+
+        drop(_guard);
+        let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            !log.contains("ERROR"),
+            "a recoverable 409 must not log at error level, got:\n{log}"
         );
     }
 
