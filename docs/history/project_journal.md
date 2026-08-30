@@ -10904,3 +10904,23 @@ each with a different literal step pattern — both register and match fine at r
 on the decorator pattern, not the Python name), but the second definition shadows the first in the
 module namespace. Pre-existing, left as-is (out of scope for a dead-step removal pass), but a real
 readability trap if either one needed editing later.
+
+---
+
+## `models.rs` folded into `simulator/snapshot.rs` (R-28 closed, 2026-08-30)
+
+**What was done.** `VEN/src/models.rs` (`SensorSnapshot`, `SensorInput`) predated the hexagonal
+ring layout and had no domain (`entities/`/`controller/`) consumer — every real usage was
+infra/adapter: `simulator/snapshot.rs::to_sensor_snapshot()` is the sole constructor (already
+commented "backward compatibility with /sensors endpoint"), `state/mod.rs` holds it as a plain
+data field, `tasks/sim_tick/{finalize,publish}.rs` move it through the tick pipeline, and
+`routes/events.rs` (de)serializes it over HTTP. Moved both types into `simulator/snapshot.rs`
+next to their constructor, re-exported via `pub use snapshot::{SensorSnapshot, SensorInput};` in
+`simulator/mod.rs` (matching the existing `PvSmoothingState` re-export pattern), deleted
+`models.rs`, and repointed the 5 `use crate::models::...` call sites to `crate::simulator::...`.
+Pure module move — no type/field/logic changes.
+
+**Verification.** `cargo check`/`cargo build`, `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -- -D warnings`, and `cargo test -p ven-app` (1183 passed, 0 failed) all clean on
+WSL. `scripts/audit_file_sizes.py` passed (`simulator/snapshot.rs` ~212/500 lines). Ring-invariant
+greps re-checked, unaffected. No E2E run needed — no HTTP contract or behavior change.

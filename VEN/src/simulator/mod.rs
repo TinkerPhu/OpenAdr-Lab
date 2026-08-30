@@ -22,6 +22,7 @@ use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotErro
 use crate::entities::asset_params::AssetParams;
 use energy::EnergyCounter;
 pub use pv_smoothing::PvSmoothingState;
+pub use snapshot::{SensorInput, SensorSnapshot};
 
 /// Tracks the user-induced base load perturbation between ticks.
 ///

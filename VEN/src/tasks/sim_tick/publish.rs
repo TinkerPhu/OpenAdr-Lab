@@ -14,7 +14,7 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::models::SensorSnapshot;
+use crate::simulator::SensorSnapshot;
 use crate::simulator::SimState;
 use crate::state::AppState;
 

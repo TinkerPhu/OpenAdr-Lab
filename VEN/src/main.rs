@@ -8,7 +8,6 @@ mod history_store;
 mod ids;
 mod measurement;
 mod measurement_translation;
-mod models;
 mod planner_events;
 mod profile;
 mod routes;
