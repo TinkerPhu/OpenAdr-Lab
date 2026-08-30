@@ -17,6 +17,7 @@ import type {
   WeatherResponse,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
+import { debugLog } from "../utils/debugLog";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -32,12 +33,12 @@ export class VenApi {
 
   private async getReq(path: string): Promise<Response> {
     const url = this.url(path);
-    console.log(`[VEN] GET ${url}`);
+    debugLog(`[VEN] GET ${url}`);
     try {
       const r = await fetch(url, {
         headers: { "X-Request-ID": requestId() },
       });
-      console.log(`[VEN] GET ${url} → ${r.status}`);
+      debugLog(`[VEN] GET ${url} → ${r.status}`);
       return r;
     } catch (err) {
       console.error(`[VEN] GET ${url} → network error:`, err);
@@ -47,7 +48,7 @@ export class VenApi {
 
   private async jsonReq(method: string, path: string, body: unknown): Promise<Response> {
     const url = this.url(path);
-    console.log(`[VEN] ${method} ${url}`);
+    debugLog(`[VEN] ${method} ${url}`);
     try {
       const r = await fetch(url, {
         method,
@@ -57,7 +58,7 @@ export class VenApi {
         },
         body: JSON.stringify(body),
       });
-      console.log(`[VEN] ${method} ${url} → ${r.status}`);
+      debugLog(`[VEN] ${method} ${url} → ${r.status}`);
       return r;
     } catch (err) {
       console.error(`[VEN] ${method} ${url} → network error:`, err);
@@ -467,9 +468,9 @@ export class VenApi {
 
   async deleteRequest(id: string): Promise<void> {
     const url = this.url(`/user-requests/${id}`);
-    console.log(`[VEN] DELETE ${url}`);
+    debugLog(`[VEN] DELETE ${url}`);
     const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
-    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    debugLog(`[VEN] DELETE ${url} → ${r.status}`);
     if (!r.ok) throw new Error((await r.text()) || `DELETE /user-requests/${id} failed: ${r.status}`);
   }
 
@@ -521,9 +522,9 @@ export class VenApi {
 
   async deleteBaselineOverride(): Promise<void> {
     const url = this.url("/baseline-override");
-    console.log(`[VEN] DELETE ${url}`);
+    debugLog(`[VEN] DELETE ${url}`);
     const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
-    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    debugLog(`[VEN] DELETE ${url} → ${r.status}`);
     if (!r.ok) throw new Error(`DELETE /baseline-override failed: ${r.status}`);
   }
 }

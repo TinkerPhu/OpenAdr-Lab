@@ -12,6 +12,7 @@ import { EventsPage } from "./pages/Events";
 import { VensPage } from "./pages/Vens";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
+import { debugLog } from "./utils/debugLog";
 
 type BffContextType = {
   api: BffApi;
@@ -27,7 +28,7 @@ export function useBffContext(): BffContextType {
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
-  console.log("[VTN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
+  debugLog("[VTN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
   const vtnOk = data?.vtn?.reachable && data?.vtn?.authOk;
   const status = isError ? "offline" : vtnOk ? "ok" : data ? "degraded" : "unknown";
   const color = status === "ok" ? "success" : status === "offline" ? "error" : status === "degraded" ? "warning" : "default";
@@ -44,12 +45,12 @@ function HealthChip() {
   );
 }
 
-console.log("[VTN-UI] Module loaded at", new Date().toISOString());
+debugLog("[VTN-UI] Module loaded at", new Date().toISOString());
 
 export default function App() {
-  console.log("[VTN-UI] App render");
+  debugLog("[VTN-UI] App render");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const api = useMemo(() => { console.log("[VTN-UI] BffApi created"); return new BffApi(); }, []);
+  const api = useMemo(() => { debugLog("[VTN-UI] BffApi created"); return new BffApi(); }, []);
   const queryClient = useQueryClient();
 
   function handleRefreshAll() {
