@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBffContext } from "../App";
 import type { EventInput, ProgramInput } from "./types";
+import { debugLog } from "../utils/debugLog";
 
 export function useHealth() {
   const { api } = useBffContext();
-  console.log("[VTN-UI] useHealth hook called");
+  debugLog("[VTN-UI] useHealth hook called");
   return useQuery({
     queryKey: ["health"],
-    queryFn: () => { console.log("[VTN-UI] useHealth queryFn firing"); return api.health(); },
+    queryFn: () => { debugLog("[VTN-UI] useHealth queryFn firing"); return api.health(); },
     refetchInterval: 10_000,
   });
 }

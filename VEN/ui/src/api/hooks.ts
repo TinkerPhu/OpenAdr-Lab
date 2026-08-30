@@ -8,6 +8,7 @@ import type {
   PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
   EventLogEntry,
 } from "./types";
+import { debugLog } from "../utils/debugLog";
 
 // Mirrors the backend's own EVENT_LOG_RING_CAP (VEN/src/state/event_log.rs) —
 // keeps the client-side list from growing unbounded over a long-lived SSE
@@ -16,10 +17,10 @@ const EVENT_LOG_CLIENT_CAP = 200;
 
 export function useHealth() {
   const { api } = useVenContext();
-  console.log("[VEN-UI] useHealth hook called, baseUrl:", api.baseUrl);
+  debugLog("[VEN-UI] useHealth hook called, baseUrl:", api.baseUrl);
   return useQuery({
     queryKey: ["health", api.baseUrl],
-    queryFn: () => { console.log("[VEN-UI] useHealth queryFn firing"); return api.health(); },
+    queryFn: () => { debugLog("[VEN-UI] useHealth queryFn firing"); return api.health(); },
     refetchInterval: 10_000,
   });
 }

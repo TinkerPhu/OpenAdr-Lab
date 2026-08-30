@@ -1,4 +1,5 @@
 import type { EventInput, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
+import { debugLog } from "../utils/debugLog";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -14,7 +15,7 @@ export class BffApi {
 
   private async jsonReq(method: string, path: string, body?: unknown): Promise<Response> {
     const url = this.url(path);
-    console.log(`[BFF] ${method} ${url}`);
+    debugLog(`[BFF] ${method} ${url}`);
     const opts: RequestInit = {
       method,
       headers: {
@@ -25,7 +26,7 @@ export class BffApi {
     if (body !== undefined) opts.body = JSON.stringify(body);
     try {
       const r = await fetch(url, opts);
-      console.log(`[BFF] ${method} ${url} → ${r.status}`);
+      debugLog(`[BFF] ${method} ${url} → ${r.status}`);
       return r;
     } catch (err) {
       console.error(`[BFF] ${method} ${url} → network error:`, err);
@@ -35,12 +36,12 @@ export class BffApi {
 
   private async getReq(path: string): Promise<Response> {
     const url = this.url(path);
-    console.log(`[BFF] GET ${url}`);
+    debugLog(`[BFF] GET ${url}`);
     try {
       const r = await fetch(url, {
         headers: { "X-Request-ID": requestId() },
       });
-      console.log(`[BFF] GET ${url} → ${r.status}`);
+      debugLog(`[BFF] GET ${url} → ${r.status}`);
       return r;
     } catch (err) {
       console.error(`[BFF] GET ${url} → network error:`, err);

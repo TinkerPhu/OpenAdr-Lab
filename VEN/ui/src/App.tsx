@@ -27,6 +27,7 @@ import { MeasurementPage } from "./pages/Measurement";
 import { DevicesPage } from "./pages/Devices";
 import { PlanHistoryPage } from "./pages/PlanHistory";
 import { CapacityForecastPage } from "./pages/CapacityForecast";
+import { debugLog } from "./utils/debugLog";
 
 type VenContextType = {
   venUrl: string;
@@ -45,7 +46,7 @@ export function useVenContext(): VenContextType {
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
-  console.log("[VEN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
+  debugLog("[VEN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
   // WP-T1 (docs/history/project_journal.md, search "WP-T"): /health now returns
   // {status, components} — read the real status instead of assuming "ok"
   // whenever a response merely arrived (that was the misleading-chip bug).
@@ -96,10 +97,10 @@ function NavMenu({ menuTestId, label, items }: { menuTestId: string; label: stri
   );
 }
 
-console.log("[VEN-UI] Module loaded at", new Date().toISOString());
+debugLog("[VEN-UI] Module loaded at", new Date().toISOString());
 
 export default function App() {
-  console.log("[VEN-UI] App render");
+  debugLog("[VEN-UI] App render");
   const [venUrl, setVenUrl] = useState(DEFAULT_VENS[0].url);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const queryClient = useQueryClient();
@@ -118,7 +119,7 @@ export default function App() {
   // refreshes), fall back to the first default rather than rendering a
   // Select value with no matching MenuItem.
   const safeVenUrl = vens.some((v) => v.url === venUrl) ? venUrl : DEFAULT_VENS[0].url;
-  const api = useMemo(() => { console.log("[VEN-UI] VenApi created for", safeVenUrl); return new VenApi(safeVenUrl); }, [safeVenUrl]);
+  const api = useMemo(() => { debugLog("[VEN-UI] VenApi created for", safeVenUrl); return new VenApi(safeVenUrl); }, [safeVenUrl]);
 
   function handleVenChange(url: string) {
     setVenUrl(url);

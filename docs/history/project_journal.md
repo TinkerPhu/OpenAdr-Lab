@@ -10924,3 +10924,25 @@ Pure module move — no type/field/logic changes.
 --all-features -- -D warnings`, and `cargo test -p ven-app` (1183 passed, 0 failed) all clean on
 WSL. `scripts/audit_file_sizes.py` passed (`simulator/snapshot.rs` ~212/500 lines). Ring-invariant
 greps re-checked, unaffected. No E2E run needed — no HTTP contract or behavior change.
+
+---
+
+## Gated production `console.log` debug traces behind dev-only helper (R-30 closed, 2026-08-30)
+
+**What was done.** Both UIs had raw `console.log("[VEN-UI] ...")`/`console.log("[VTN-UI] ...")`/
+`console.log("[VEN] ...")`/`console.log("[BFF] ...")` calls left in production code — module-load
+timestamps, `App`/`HealthChip` render traces, and every HTTP request/response line in
+`api/client.ts`. Added `src/utils/debugLog.ts` to each UI package (`VEN/ui`, `VTN/ui`) — a
+one-line wrapper that calls `console.log` only when `import.meta.env.DEV` is true, which Vite
+sets to `false` in a production build — and swapped all 26 call sites (`App.tsx`, `main.tsx`,
+`api/hooks.ts`, `api/client.ts` in both packages) from `console.log` to `debugLog`. `console.error`
+calls (real network-failure logging) were left untouched — only the debug-trace lines were in
+scope. `VTN/ui/tsconfig.json` was missing `"vite/client"` from its `types` array (present in
+`VEN/ui/tsconfig.json`), which `import.meta.env` needs to typecheck — added to match.
+
+**Verification.** `tsc && vite build` clean for both UIs; `npm test -- --run` green (VEN/ui 449/449
+across 46 files, VTN/ui 71/71 across 6 files — VEN/ui's run threw 7 vitest worker-pool-startup
+timeouts, an environment flake on this low-memory host unrelated to the change, exit code 0
+regardless); `eslint src` reports 0 errors for both (pre-existing warnings unrelated to this
+change untouched). No behavior change — output is identical in a dev server, silent in a
+production build.

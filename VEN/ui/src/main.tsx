@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTheme, ThemeProvider, CssBaseline } from "@mui/material";
 import App from "./App";
+import { debugLog } from "./utils/debugLog";
 
 const theme = createTheme({
   palette: {
@@ -11,7 +12,7 @@ const theme = createTheme({
   },
 });
 
-console.log("[VEN-UI] main.tsx executing at", new Date().toISOString());
+debugLog("[VEN-UI] main.tsx executing at", new Date().toISOString());
 
 const queryClient = new QueryClient({
   defaultOptions: {
