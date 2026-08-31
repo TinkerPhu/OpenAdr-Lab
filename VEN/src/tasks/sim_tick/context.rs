@@ -256,7 +256,7 @@ mod tests {
         let state = AppState::new();
         let heuristic = AssetHeuristics {
             asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
-            daytime_profile_kw: [vec![0.7; 24], vec![0.9; 24]],
+            daytime_profile_kw: std::array::from_fn(|bucket| vec![0.7 + 0.02 * bucket as f64; 24]),
             seasonal_factor: 1.05,
             last_updated: Some(now()),
             recent_mean_abs_error_kw: None,

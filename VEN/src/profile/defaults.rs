@@ -1,4 +1,5 @@
 use super::grid::GridConfig;
+use super::heuristics::HeuristicsConfig;
 use super::polling::PollConfig;
 use super::schema::{HeaterConfig, PlannerConfig, SimulatorConfig};
 use crate::entities::PlannerObjective;
@@ -195,6 +196,33 @@ impl Default for GridConfig {
         Self {
             max_import_kw: default_max_import_kw(),
             max_export_kw: default_max_export_kw(),
+        }
+    }
+}
+
+// Each delegates to the single canonical `services::heuristics::HeuristicsConfig::default()`
+// so the numeric literals live in exactly one place, not duplicated across
+// the profile-layer and runtime defaulting mechanisms.
+pub(super) fn default_heuristics_rolling_window_days() -> u32 {
+    crate::services::heuristics::HeuristicsConfig::default().rolling_window_days
+}
+pub(super) fn default_heuristics_ewma_halflife_days() -> f64 {
+    crate::services::heuristics::HeuristicsConfig::default().ewma_halflife_days
+}
+pub(super) fn default_heuristics_shrinkage_k_days() -> f64 {
+    crate::services::heuristics::HeuristicsConfig::default().shrinkage_k_days
+}
+pub(super) fn default_heuristics_min_samples_for_confidence() -> usize {
+    crate::services::heuristics::HeuristicsConfig::default().min_samples_for_confidence
+}
+
+impl Default for HeuristicsConfig {
+    fn default() -> Self {
+        Self {
+            rolling_window_days: default_heuristics_rolling_window_days(),
+            ewma_halflife_days: default_heuristics_ewma_halflife_days(),
+            shrinkage_k_days: default_heuristics_shrinkage_k_days(),
+            min_samples_for_confidence: default_heuristics_min_samples_for_confidence(),
         }
     }
 }

@@ -157,13 +157,14 @@ pub struct DefaultValueCurve {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AssetHeuristics {
     pub asset_id: String,
-    /// Typical power by time of day, one 24-hour curve per weekday/weekend
-    /// bucket: `[0]` = weekday (Mon-Fri), `[1]` = weekend (Sat/Sun). A
-    /// single scaled curve can't represent a genuinely different daily
-    /// shape (e.g. brunch replacing coffee+lunch), so weekday and weekend
-    /// each get their own learned curve rather than one curve times a
-    /// per-day multiplier.
-    pub daytime_profile_kw: [Vec<f64>; 2],
+    /// Typical power by time of day, one 24-hour curve per day of the week:
+    /// index = `chrono::Weekday::num_days_from_monday()`, i.e. `[0]` = Monday
+    /// … `[6]` = Sunday. A single scaled curve can't represent a genuinely
+    /// different daily shape (e.g. brunch replacing coffee+lunch on Sat/Sun,
+    /// or a school-schedule-driven difference between individual weekdays),
+    /// so each day of the week gets its own learned curve rather than one
+    /// curve times a per-day multiplier.
+    pub daytime_profile_kw: [Vec<f64>; 7],
     /// Multiplier for current season (e.g. 1.2 = 20% more in winter)
     pub seasonal_factor: f64,
     pub last_updated: Option<DateTime<Utc>>,
@@ -180,18 +181,14 @@ pub struct AssetHeuristics {
 
 impl AssetHeuristics {
     /// Sample this heuristic's expected power at `slot_t`:
-    /// `daytime_profile_kw[weekday_bucket][hour] × seasonal_factor`.
+    /// `daytime_profile_kw[day_of_week_bucket][hour] × seasonal_factor`.
     /// Shared by `services::forecast::build_heuristic_forecasts` (the
     /// `/forecast` API) and `controller::milp_planner::inputs` (the
     /// planner's own solve inputs) so both consumers can never silently
     /// diverge into two different sampling formulas.
     pub fn sample_kw(&self, slot_t: DateTime<Utc>) -> f64 {
-        use chrono::{Datelike, Timelike, Weekday};
-        let bucket = if matches!(slot_t.weekday(), Weekday::Sat | Weekday::Sun) {
-            1
-        } else {
-            0
-        };
+        use chrono::{Datelike, Timelike};
+        let bucket = slot_t.weekday().num_days_from_monday() as usize;
         let hour = slot_t.hour() as usize;
         let base = self.daytime_profile_kw[bucket]
             .get(hour)
@@ -306,11 +303,17 @@ mod tests {
 
     #[test]
     fn sample_kw_multiplies_hour_and_seasonal_factor() {
-        let mut weekday_profile = vec![0.5; 24];
-        weekday_profile[8] = 2.0;
+        let mut monday_profile = vec![0.5; 24];
+        monday_profile[8] = 2.0;
         let h = AssetHeuristics {
             asset_id: "base_load".to_string(),
-            daytime_profile_kw: [weekday_profile, vec![0.0; 24]],
+            daytime_profile_kw: std::array::from_fn(|i| {
+                if i == 0 {
+                    monday_profile.clone()
+                } else {
+                    vec![0.0; 24]
+                }
+            }),
             seasonal_factor: 1.1,
             last_updated: None,
             recent_mean_abs_error_kw: None,
@@ -326,7 +329,7 @@ mod tests {
     fn sample_kw_defaults_missing_indices_gracefully() {
         let h = AssetHeuristics {
             asset_id: "x".to_string(),
-            daytime_profile_kw: [vec![], vec![]],
+            daytime_profile_kw: std::array::from_fn(|_| vec![]),
             seasonal_factor: 1.0,
             last_updated: None,
             recent_mean_abs_error_kw: None,
@@ -336,35 +339,32 @@ mod tests {
     }
 
     #[test]
-    fn sample_kw_picks_weekday_bucket_for_weekday_and_weekend_bucket_for_weekend() {
-        let mut weekday_profile = vec![0.0; 24];
-        weekday_profile[8] = 1.2; // weekday coffee peak
-        let mut weekend_profile = vec![0.0; 24];
-        weekend_profile[10] = 2.2; // weekend brunch peak
+    fn sample_kw_picks_the_correct_day_of_week_bucket() {
+        // One distinct profile per day of the week (Mon=0..Sun=6), each
+        // peaking at hour 8 with a value equal to its bucket index + 1 —
+        // proves sample_kw resolves all 7 buckets independently, not just
+        // a binary weekday/weekend split.
+        let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|bucket| {
+            let mut profile = vec![0.0; 24];
+            profile[8] = (bucket + 1) as f64;
+            profile
+        });
         let h = AssetHeuristics {
             asset_id: "base_load".to_string(),
-            daytime_profile_kw: [weekday_profile, weekend_profile],
+            daytime_profile_kw,
             seasonal_factor: 1.0,
             last_updated: None,
             recent_mean_abs_error_kw: None,
         };
 
-        // 2023-01-02 was a Monday, 2023-01-07 a Saturday.
-        let tuesday_8am = Utc.with_ymd_and_hms(2023, 1, 3, 8, 0, 0).unwrap();
-        let saturday_10am = Utc.with_ymd_and_hms(2023, 1, 7, 10, 0, 0).unwrap();
-
-        assert!((h.sample_kw(tuesday_8am) - 1.2).abs() < 1e-9);
-        assert!((h.sample_kw(saturday_10am) - 2.2).abs() < 1e-9);
-        // Cross-check: weekday bucket has nothing at hour 10, weekend
-        // bucket has nothing at hour 8 — proves the bucket actually
-        // switches rather than falling back to a shared curve.
-        assert_eq!(
-            h.sample_kw(Utc.with_ymd_and_hms(2023, 1, 3, 10, 0, 0).unwrap()),
-            0.0
-        );
-        assert_eq!(
-            h.sample_kw(Utc.with_ymd_and_hms(2023, 1, 7, 8, 0, 0).unwrap()),
-            0.0
-        );
+        // 2023-01-02 was a Monday, so 2023-01-02..08 covers Mon..Sun.
+        for (offset, expected) in (0..7).zip(1..=7) {
+            let day = Utc.with_ymd_and_hms(2023, 1, 2 + offset, 8, 0, 0).unwrap();
+            assert!(
+                (h.sample_kw(day) - expected as f64).abs() < 1e-9,
+                "day offset {offset} expected {expected}, got {}",
+                h.sample_kw(day)
+            );
+        }
     }
 }

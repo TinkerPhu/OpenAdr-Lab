@@ -1,9 +1,11 @@
 //! WP5.2 (BL-14) — learn per-asset behavioral heuristics from history.
 //!
 //! `learn_asset_heuristics` is a pure `&dyn HistoryPort -> AssetHeuristics`
-//! aggregation: two independent EWMA-recency-weighted mean-power-by-hour-of-day
-//! passes, one fed by weekday ticks and one by weekend ticks, plus a
-//! rolling-30-day seasonal factor. `generate_synthetic_backfill` is
+//! aggregation: seven independent EWMA-recency-weighted mean-power-by-hour-of-day
+//! passes, one per day of the week (`chrono::Weekday::num_days_from_monday()`),
+//! each shrunk toward the flat overall mean in proportion to how much data
+//! that bucket/hour cell actually has, plus a rolling-30-day seasonal factor.
+//! `generate_synthetic_backfill` is
 //! the counterpart used both by the on-demand preload route
 //! (`routes/debug.rs`) and this module's own tests, so the "looks like 4
 //! weeks of real history" demonstration and the test assertions can never
@@ -17,27 +19,51 @@ use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::history::TickSample;
 use crate::entities::DomainError;
 
+#[derive(Clone, Copy)]
 pub struct HeuristicsConfig {
     /// How far back to query history. Uses whatever's actually available
-    /// when less exists (e.g. a freshly preloaded 4-week backfill).
+    /// when less exists (e.g. a freshly preloaded 4-week backfill). Kept
+    /// well under ~91 days (one season) — the 30-day-vs-window
+    /// `seasonal_factor` split below assumes the whole window is roughly
+    /// one season; a longer window would blend seasons together.
     pub rolling_window_days: u32,
     /// EWMA half-life for recency weighting — a sample this many days old
     /// contributes half the weight of a sample from `now`.
     pub ewma_halflife_days: f64,
+    /// Shrinkage strength, in day-equivalents of data, for blending a
+    /// bucket/hour cell's own mean toward the flat `overall_mean`: a cell
+    /// with `effective_days == shrinkage_k_days` of data is blended 50/50;
+    /// far more data than this and the cell is mostly trusted on its own;
+    /// far less (including zero) and it leans mostly on `overall_mean`. See
+    /// `learn_asset_heuristics`'s profile-build step for the formula.
+    pub shrinkage_k_days: f64,
     /// Cold-start gate: fewer ticks than this and the job declines to
     /// produce a heuristic (`Ok(None)`), leaving LAST_KNOWN/flat fallback
-    /// in place rather than fitting noise.
+    /// in place rather than fitting noise. Global, not per-bucket — a
+    /// specific day-of-week bucket can still be far sparser than the
+    /// overall average without tripping this gate; thin buckets are instead
+    /// protected by `shrinkage_k_days` above.
     pub min_samples_for_confidence: usize,
 }
 
 impl Default for HeuristicsConfig {
     fn default() -> Self {
         Self {
-            rolling_window_days: 42,
-            ewma_halflife_days: 14.0,
+            rolling_window_days: 56,
+            ewma_halflife_days: 28.0,
+            shrinkage_k_days: 2.5,
             min_samples_for_confidence: 100,
         }
     }
+}
+
+/// Continuous blend weight for a bucket/hour cell's own mean vs. the flat
+/// `overall_mean`, given how much data (`effective_days`) that cell has.
+/// `effective_days == 0` -> `0.0` (pure `overall_mean`, the old discrete
+/// fallback's exact boundary case); `effective_days == k_days` -> `0.5`;
+/// `effective_days -> \infty` -> `1.0` (pure cell mean).
+fn shrinkage_blend(effective_days: f64, k_days: f64) -> f64 {
+    effective_days / (effective_days + k_days)
 }
 
 fn ewma_weight(age_days: f64, halflife_days: f64) -> f64 {
@@ -68,9 +94,9 @@ pub fn learn_asset_heuristics(
         return Ok(None);
     }
 
-    // [0] = weekday (Mon-Fri) bucket, [1] = weekend (Sat/Sun) bucket.
-    let mut hour_sum = [[0.0_f64; 24]; 2];
-    let mut hour_weight = [[0.0_f64; 24]; 2];
+    // Index = chrono::Weekday::num_days_from_monday(): [0]=Mon..[6]=Sun.
+    let mut hour_sum = [[0.0_f64; 24]; 7];
+    let mut hour_weight = [[0.0_f64; 24]; 7];
     let mut overall_sum = 0.0_f64;
     let mut overall_weight = 0.0_f64;
 
@@ -78,11 +104,7 @@ pub fn learn_asset_heuristics(
         let age_days = (now - t.ts).num_seconds() as f64 / 86_400.0;
         let w = ewma_weight(age_days, cfg.ewma_halflife_days);
         let hour = t.ts.hour() as usize;
-        let bucket = if matches!(t.ts.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
-            1
-        } else {
-            0
-        };
+        let bucket = t.ts.weekday().num_days_from_monday() as usize;
 
         hour_sum[bucket][hour] += t.power_kw * w;
         hour_weight[bucket][hour] += w;
@@ -96,14 +118,23 @@ pub fn learn_asset_heuristics(
         0.0
     };
 
-    let daytime_profile_kw: [Vec<f64>; 2] = std::array::from_fn(|bucket| {
+    // Self-calibrated from the queried data (ticks per hour of history),
+    // rather than importing tasks::history_sampler's private downsample
+    // constant — avoids coupling this application-ring module to an infra
+    // implementation detail that could change independently.
+    let avg_ticks_per_hour = ticks.len() as f64 / (cfg.rolling_window_days as f64 * 24.0);
+
+    let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|bucket| {
         (0..24)
             .map(|h| {
-                if hour_weight[bucket][h] > 0.0 {
+                let effective_days = hour_weight[bucket][h] / avg_ticks_per_hour.max(1e-9);
+                let blend = shrinkage_blend(effective_days, cfg.shrinkage_k_days);
+                let cell_mean = if hour_weight[bucket][h] > 0.0 {
                     hour_sum[bucket][h] / hour_weight[bucket][h]
                 } else {
-                    overall_mean
-                }
+                    0.0 // unused: blend == 0 here
+                };
+                blend * cell_mean + (1.0 - blend) * overall_mean
             })
             .collect()
     });
@@ -281,8 +312,9 @@ mod tests {
             .expect("4 weeks of 1-min samples must clear the cold-start gate");
 
         assert_eq!(heuristics.asset_id, "base_load");
-        assert_eq!(heuristics.daytime_profile_kw[0].len(), 24);
-        assert_eq!(heuristics.daytime_profile_kw[1].len(), 24);
+        for bucket in 0..7 {
+            assert_eq!(heuristics.daytime_profile_kw[bucket].len(), 24);
+        }
 
         // BL-14's own verify condition: the learned profile shows a clear
         // peak near the configured spike hour vs. a quiet hour. The coffee
@@ -313,8 +345,8 @@ mod tests {
     fn learn_asset_heuristics_captures_distinct_weekday_and_weekend_shapes() {
         // Weekday-only dinner at 18:00, weekend-only brunch at 10:30 — a
         // shape a single scaled curve could never represent. The learned
-        // weekday bucket must peak near dinner and stay quiet at brunch
-        // time, and vice versa for the weekend bucket.
+        // Monday bucket ([0]) must peak near dinner and stay quiet at brunch
+        // time, and vice versa for the Saturday bucket ([5]).
         let weekday_dinner = ApplianceSpikeParams {
             center_hour: 18.0,
             jitter_h: 0.05,
@@ -340,7 +372,12 @@ mod tests {
         });
 
         let end = now();
-        let start = end - Duration::days(28);
+        // 8 weeks, not 4: with the 7-way weekday split each individual
+        // weekday bucket (e.g. Monday) only gets one instance per week of
+        // history, so 4 weeks (4 Mondays) is too thin against the default
+        // rolling_window_days=56/shrinkage_k_days=2.5 to clear shrinkage's
+        // pull toward overall_mean and show a clean peak.
+        let start = end - Duration::days(56);
         let rows = generate_synthetic_backfill("base_load", start, end, base_load_power_kw_at(&bl));
         let port = MockHistoryPort::new();
         port.append_tick_samples(&rows).unwrap();
@@ -348,24 +385,45 @@ mod tests {
         let cfg = HeuristicsConfig::default();
         let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg, None)
             .unwrap()
-            .expect("4 weeks of 1-min samples must clear the cold-start gate");
+            .expect("8 weeks of 1-min samples must clear the cold-start gate");
 
-        let weekday_at_18 = heuristics.daytime_profile_kw[0][18];
-        let weekday_at_10 = heuristics.daytime_profile_kw[0][10];
-        let weekend_at_18 = heuristics.daytime_profile_kw[1][18];
-        let weekend_at_10 = heuristics.daytime_profile_kw[1][10];
+        let weekday_at_18 = heuristics.daytime_profile_kw[0][18]; // Monday
+        let weekday_at_10 = heuristics.daytime_profile_kw[0][10]; // Monday
+        let weekend_at_18 = heuristics.daytime_profile_kw[5][18]; // Saturday
+        let weekend_at_10 = heuristics.daytime_profile_kw[5][10]; // Saturday
 
+        // Relative/shape checks, not absolute floors: with the 7-way split
+        // a single weekday's bucket (e.g. just Mondays) has far fewer
+        // effective samples than the old pooled Mon-Fri "weekday" bucket
+        // did, so `shrinkage_blend` (further tempered by EWMA recency
+        // weighting) deliberately pulls it toward `overall_mean` more than
+        // the old discrete fallback would have — an absolute `> 1.0` floor
+        // on the peak hour no longer holds even though the shape is
+        // correctly learned. Same pattern as
+        // `learn_asset_heuristics_distinguishes_individual_weekdays` above.
         assert!(
-            weekday_at_18 > 1.0,
-            "weekday bucket should show the dinner bump at 18:00, got {weekday_at_18}"
+            weekday_at_18 > weekday_at_10,
+            "weekday bucket should show the dinner bump at 18:00 above its own quiet 10:00, \
+             got {weekday_at_18} vs {weekday_at_10}"
+        );
+        assert!(
+            weekday_at_18 > weekend_at_18,
+            "weekday bucket's 18:00 dinner bump should exceed the weekend bucket's quiet 18:00, \
+             got {weekday_at_18} vs {weekend_at_18}"
         );
         assert!(
             weekday_at_10 < 0.5,
             "weekday bucket should stay quiet at 10:00 (no brunch on weekdays), got {weekday_at_10}"
         );
         assert!(
-            weekend_at_10 > 1.0,
-            "weekend bucket should show the brunch bump at 10:00, got {weekend_at_10}"
+            weekend_at_10 > weekend_at_18,
+            "weekend bucket should show the brunch bump at 10:00 above its own quiet 18:00, \
+             got {weekend_at_10} vs {weekend_at_18}"
+        );
+        assert!(
+            weekend_at_10 > weekday_at_10,
+            "weekend bucket's 10:00 brunch bump should exceed the weekday bucket's quiet 10:00, \
+             got {weekend_at_10} vs {weekday_at_10}"
         );
         assert!(
             weekend_at_18 < 0.5,
@@ -486,7 +544,7 @@ mod tests {
         // change `sample_kw`'s output for any existing input.
         let base = AssetHeuristics {
             asset_id: "base_load".to_string(),
-            daytime_profile_kw: [vec![0.5; 24], vec![0.7; 24]],
+            daytime_profile_kw: std::array::from_fn(|_| vec![0.5; 24]),
             seasonal_factor: 1.2,
             last_updated: None,
             recent_mean_abs_error_kw: None,
@@ -497,5 +555,82 @@ mod tests {
         };
         let t = now();
         assert_eq!(base.sample_kw(t), with_error.sample_kw(t));
+    }
+
+    // ── 7-day-of-week buckets + continuous shrinkage ────────────────────
+
+    #[test]
+    fn learn_asset_heuristics_distinguishes_individual_weekdays() {
+        // Tuesday-only vs Wednesday-only spikes at different hours — a
+        // shape the old weekday/weekend split couldn't represent at all
+        // (both would land in the same "weekday" bucket). Uses an 8-week
+        // backfill so each individual weekday bucket gets enough instances.
+        let tuesday_only = ApplianceSpikeParams {
+            center_hour: 14.0,
+            jitter_h: 0.05,
+            amplitude_kw: 2.0,
+            duration_h: 0.5,
+            ramp_h: 0.05,
+            probability: 1.0,
+            weekdays: vec![1], // Tuesday
+        };
+        let wednesday_only = ApplianceSpikeParams {
+            center_hour: 20.0,
+            jitter_h: 0.05,
+            amplitude_kw: 2.0,
+            duration_h: 0.5,
+            ramp_h: 0.05,
+            probability: 1.0,
+            weekdays: vec![2], // Wednesday
+        };
+        let bl = BaseLoad::from_params(&BaseLoadParams {
+            baseline_kw: 0.3,
+            spikes: vec![tuesday_only, wednesday_only],
+            ..BaseLoadParams::default()
+        });
+
+        let end = now();
+        let start = end - Duration::days(56);
+        let rows = generate_synthetic_backfill("base_load", start, end, base_load_power_kw_at(&bl));
+        let port = MockHistoryPort::new();
+        port.append_tick_samples(&rows).unwrap();
+
+        let cfg = HeuristicsConfig::default();
+        let heuristics = learn_asset_heuristics(&port, "base_load", end, &cfg, None)
+            .unwrap()
+            .expect("8 weeks of 1-min samples must clear the cold-start gate");
+
+        let tuesday_at_14 = heuristics.daytime_profile_kw[1][14];
+        let wednesday_at_14 = heuristics.daytime_profile_kw[2][14];
+        let tuesday_at_20 = heuristics.daytime_profile_kw[1][20];
+        let wednesday_at_20 = heuristics.daytime_profile_kw[2][20];
+
+        assert!(
+            tuesday_at_14 > wednesday_at_14,
+            "Tuesday bucket should show its own 14:00 spike, Wednesday shouldn't: \
+             {tuesday_at_14} vs {wednesday_at_14}"
+        );
+        assert!(
+            wednesday_at_20 > tuesday_at_20,
+            "Wednesday bucket should show its own 20:00 spike, Tuesday shouldn't: \
+             {wednesday_at_20} vs {tuesday_at_20}"
+        );
+    }
+
+    #[test]
+    fn shrinkage_blend_is_zero_at_zero_effective_days() {
+        // Boundary case: must reduce exactly to the old discrete
+        // fallback's "100% overall_mean" behavior when a cell has no data.
+        assert_eq!(shrinkage_blend(0.0, 2.5), 0.0);
+    }
+
+    #[test]
+    fn shrinkage_blend_is_half_when_effective_days_equals_k() {
+        assert!((shrinkage_blend(2.5, 2.5) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn shrinkage_blend_approaches_one_for_large_effective_days() {
+        assert!(shrinkage_blend(1000.0, 2.5) > 0.99);
     }
 }

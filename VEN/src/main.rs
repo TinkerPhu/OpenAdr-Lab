@@ -79,6 +79,13 @@ pub struct AppCtx {
     /// carried (not the full `CommsLossConfig`) because `routes/` may not
     /// import `crate::profile` types (AB-06, `tests/architecture.rs`).
     pub comms_loss_debounce_s: Option<u64>,
+    /// Base-load heuristics learner config, resolved once from the profile
+    /// at startup (`services::heuristics::HeuristicsConfig` — all-`Copy`
+    /// primitives, safe to clone into `AppCtx`). Threading a single shared
+    /// value into both `tasks::heuristics_job` and
+    /// `routes::debug::preload_heuristics` closes a latent drift risk where
+    /// each independently called `HeuristicsConfig::default()`.
+    pub heuristics_config: services::heuristics::HeuristicsConfig,
 }
 
 #[tokio::main]
@@ -437,13 +444,17 @@ async fn main() -> anyhow::Result<()> {
             },
         );
     }
+    // Resolved once from the profile, reused both by the daily learner job
+    // below and by the `/debug/heuristics/preload` route via `AppCtx` — a
+    // single shared value instead of each independently defaulting.
+    let heuristics_config = profile.heuristics_config();
     if let Some(history) = history_port.clone() {
         let s = state.clone();
         tasks::supervised_spawn(
             "heuristics_job",
             TASK_COOLDOWN_S,
             state.clone(),
-            move || tasks::spawn_heuristics_job(history.clone(), s.clone()),
+            move || tasks::spawn_heuristics_job(history.clone(), s.clone(), heuristics_config),
         );
     }
 
@@ -468,6 +479,7 @@ async fn main() -> anyhow::Result<()> {
         base_load_measurement,
         base_load_measurement_enabled,
         comms_loss_debounce_s: profile.comms_loss.map(|c| c.debounce_s),
+        heuristics_config,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

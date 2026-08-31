@@ -39,6 +39,7 @@ pub(crate) async fn run_heuristics_once(
     history: Arc<dyn HistoryPort>,
     state: &AppState,
     now: DateTime<Utc>,
+    cfg: &HeuristicsConfig,
 ) {
     for asset_id in HEURISTIC_ASSET_IDS {
         let history = history.clone();
@@ -47,14 +48,9 @@ pub(crate) async fn run_heuristics_once(
         // before it gets overwritten below, so `learn_asset_heuristics` can
         // compute how far off its own past predictions were.
         let previous = state.asset_heuristics().await.get(asset_id).cloned();
+        let cfg = *cfg;
         let result = tokio::task::spawn_blocking(move || {
-            learn_asset_heuristics(
-                history.as_ref(),
-                &id,
-                now,
-                &HeuristicsConfig::default(),
-                previous.as_ref(),
-            )
+            learn_asset_heuristics(history.as_ref(), &id, now, &cfg, previous.as_ref())
         })
         .await;
         match result {
@@ -73,6 +69,7 @@ pub(crate) async fn run_heuristics_once(
 pub(crate) fn spawn_heuristics_job(
     history: Arc<dyn HistoryPort>,
     state: AppState,
+    heuristics_config: HeuristicsConfig,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last_run_day: Option<i64> = None;
@@ -81,7 +78,7 @@ pub(crate) fn spawn_heuristics_job(
             interval.tick().await;
             let now = Utc::now();
             if day_boundary_crossed(&mut last_run_day, now) {
-                run_heuristics_once(history.clone(), &state, now).await;
+                run_heuristics_once(history.clone(), &state, now, &heuristics_config).await;
             }
         }
     })
@@ -148,7 +145,7 @@ mod tests {
         history.append_tick_samples(&rows).unwrap();
 
         let state = AppState::new();
-        run_heuristics_once(history, &state, now).await;
+        run_heuristics_once(history, &state, now, &HeuristicsConfig::default()).await;
 
         let all = state.asset_heuristics().await;
         let base_load_heuristics = all
@@ -161,5 +158,51 @@ mod tests {
         );
         // Only heuristic-eligible assets with seeded history get an entry.
         assert_eq!(all.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_heuristics_once_respects_a_custom_min_samples_threshold() {
+        // Seed only 50 ticks — fewer than the default cold-start gate (100),
+        // but more than a deliberately lowered custom one (10). Proves `cfg`
+        // (not a hardcoded default) actually reaches `learn_asset_heuristics`.
+        let now = Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap();
+        let bl = BaseLoad::from_params(&BaseLoadParams::default());
+        let rows = generate_synthetic_backfill(
+            "base_load",
+            now - Duration::minutes(50),
+            now,
+            crate::services::heuristics::base_load_power_kw_at(&bl),
+        );
+        assert_eq!(rows.len(), 50);
+
+        let history: Arc<dyn HistoryPort> = Arc::new(MockHistoryPort::new());
+        history.append_tick_samples(&rows).unwrap();
+
+        let default_state = AppState::new();
+        run_heuristics_once(
+            history.clone(),
+            &default_state,
+            now,
+            &HeuristicsConfig::default(),
+        )
+        .await;
+        assert!(
+            default_state.asset_heuristics().await.is_empty(),
+            "default cold-start gate (100) should decline 50 samples"
+        );
+
+        let custom_cfg = HeuristicsConfig {
+            min_samples_for_confidence: 10,
+            ..HeuristicsConfig::default()
+        };
+        let custom_state = AppState::new();
+        run_heuristics_once(history, &custom_state, now, &custom_cfg).await;
+        assert!(
+            custom_state
+                .asset_heuristics()
+                .await
+                .contains_key("base_load"),
+            "custom cfg with a lowered threshold (10) should clear the gate on the same 50 samples"
+        );
     }
 }

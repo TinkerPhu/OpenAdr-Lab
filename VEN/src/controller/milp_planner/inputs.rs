@@ -99,7 +99,7 @@ pub(crate) fn build_milp_inputs(
     // enough history) — see the per-slot loop below for the heuristic path.
     let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
     // WP5.2 (BL-14): when a learned heuristic exists, the planner samples a
-    // per-slot value (`daytime_profile_kw[weekday_bucket][hour] ×
+    // per-slot value (`daytime_profile_kw[day_of_week_bucket][hour] ×
     // seasonal_factor`) instead of repeating a flat scalar across the whole
     // horizon — this is what makes the Controller tab's future-horizon line
     // for base_load show real daily structure instead of a flat line once

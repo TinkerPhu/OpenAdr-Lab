@@ -332,7 +332,7 @@ mod tests {
     fn flat_heuristic(kw: f64) -> AssetHeuristics {
         AssetHeuristics {
             asset_id: "x".to_string(),
-            daytime_profile_kw: [vec![kw; 24], vec![kw; 24]],
+            daytime_profile_kw: std::array::from_fn(|_| vec![kw; 24]),
             seasonal_factor: 1.0,
             last_updated: None,
             recent_mean_abs_error_kw: None,
