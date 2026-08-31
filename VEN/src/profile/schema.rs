@@ -130,6 +130,10 @@ pub struct Profile {
     /// behaves exactly as before this section existed.
     #[serde(default)]
     pub comms_loss: Option<super::comms_loss::CommsLossConfig>,
+    /// Base-load heuristics learner tuning (window/half-life/shrinkage/
+    /// cold-start gate). Omitted -> today's tuned defaults.
+    #[serde(default)]
+    pub heuristics: super::heuristics::HeuristicsConfig,
 }
 
 impl Profile {
@@ -138,6 +142,12 @@ impl Profile {
     /// route) treat that as "derived state unavailable," not an error.
     pub fn weather_pv_params(&self) -> Option<PvForecastParams> {
         self.weather_pv.as_ref().map(WeatherPvConfig::to_params)
+    }
+
+    /// Base-load heuristics learner config, resolved from the profile's
+    /// `heuristics:` section (or its defaults if omitted).
+    pub fn heuristics_config(&self) -> crate::services::heuristics::HeuristicsConfig {
+        self.heuristics.to_config()
     }
 
     /// Whether this VEN's profile enables trusting a real measured PV

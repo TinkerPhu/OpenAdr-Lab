@@ -93,6 +93,32 @@ impl Profile {
             }
         }
 
+        // Base-load heuristics learner bounds.
+        if self.heuristics.rolling_window_days == 0 {
+            errors.push("heuristics.rolling_window_days must be > 0".into());
+        }
+        if self.heuristics.rolling_window_days >= 91 {
+            errors.push(format!(
+                "heuristics.rolling_window_days ({}) is ≥ ~91 days (one season) — this would \
+                 blend across seasons and break the existing 30-day-vs-window seasonal_factor \
+                 mechanism (see services::heuristics::learn_asset_heuristics). Keep it well below 91.",
+                self.heuristics.rolling_window_days
+            ));
+        }
+        if self.heuristics.ewma_halflife_days <= 0.0 {
+            errors.push(format!(
+                "heuristics.ewma_halflife_days must be > 0.0, got {}",
+                self.heuristics.ewma_halflife_days
+            ));
+        }
+        if self.heuristics.shrinkage_k_days <= 0.0 {
+            errors.push(format!(
+                "heuristics.shrinkage_k_days must be > 0.0 (0 would divide by zero when a \
+                 bucket has no history), got {}",
+                self.heuristics.shrinkage_k_days
+            ));
+        }
+
         // Per-asset numeric bounds.
         for asset in &self.assets {
             match asset {
@@ -1187,5 +1213,81 @@ polling:
         });
         let errors = p.validate().unwrap_err();
         assert!(errors.iter().any(|e| e.contains("comms_loss.debounce_s")));
+    }
+
+    // ── heuristics bounds ────────────────────────────────────────────────
+
+    #[test]
+    fn validate_passes_for_default_heuristics_config() {
+        let p = make_valid_profile();
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_heuristics_rolling_window_days_zero() {
+        let mut p = make_valid_profile();
+        p.heuristics.rolling_window_days = 0;
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("heuristics.rolling_window_days")));
+    }
+
+    #[test]
+    fn validate_rejects_heuristics_rolling_window_days_at_or_above_91() {
+        let mut p = make_valid_profile();
+        p.heuristics.rolling_window_days = 91;
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("heuristics.rolling_window_days")));
+    }
+
+    #[test]
+    fn validate_rejects_heuristics_ewma_halflife_days_zero() {
+        let mut p = make_valid_profile();
+        p.heuristics.ewma_halflife_days = 0.0;
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("heuristics.ewma_halflife_days")));
+    }
+
+    #[test]
+    fn validate_rejects_heuristics_shrinkage_k_days_zero() {
+        let mut p = make_valid_profile();
+        p.heuristics.shrinkage_k_days = 0.0;
+        let errors = p.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("heuristics.shrinkage_k_days")));
+    }
+
+    #[test]
+    fn heuristics_section_parses_from_yaml() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+heuristics:
+  rolling_window_days: 70
+  ewma_halflife_days: 35.0
+  shrinkage_k_days: 3.0
+  min_samples_for_confidence: 200
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.heuristics.rolling_window_days, 70);
+        assert_eq!(p.heuristics.ewma_halflife_days, 35.0);
+        assert_eq!(p.heuristics.shrinkage_k_days, 3.0);
+        assert_eq!(p.heuristics.min_samples_for_confidence, 200);
+
+        let cfg = p.heuristics_config();
+        assert_eq!(cfg.rolling_window_days, 70);
+        assert_eq!(cfg.ewma_halflife_days, 35.0);
+        assert_eq!(cfg.shrinkage_k_days, 3.0);
+        assert_eq!(cfg.min_samples_for_confidence, 200);
     }
 }

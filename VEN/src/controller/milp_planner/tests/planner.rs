@@ -180,15 +180,15 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
     // daytime_profile_kw[h] = h as f64 kW — slots at 06:00/06:30/07:00/07:30
     // UTC sample hours 6,6,7,7, so the expected per-slot baseline is
     // 6.0, 6.0, 7.0, 7.0 kW: not constant, and traceable to a known formula.
-    // Same curve in both weekday/weekend buckets — this test only cares
-    // about hour-of-day variation, not the weekday/weekend split itself.
+    // Same curve in every day-of-week bucket — this test only cares about
+    // hour-of-day variation, not the day-of-week split itself.
     let profile_by_hour: Vec<f64> = (0..24).map(|h| h as f64).collect();
     let mut heuristics = std::collections::HashMap::new();
     heuristics.insert(
         "base_load".to_string(),
         crate::entities::design_vocabulary::AssetHeuristics {
             asset_id: "base_load".to_string(),
-            daytime_profile_kw: [profile_by_hour.clone(), profile_by_hour],
+            daytime_profile_kw: std::array::from_fn(|_| profile_by_hour.clone()),
             seasonal_factor: 1.0,
             last_updated: Some(now),
             recent_mean_abs_error_kw: None,
@@ -238,10 +238,10 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
 
 #[test]
 fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
-    // WP D2 (weekday/weekend split): a heuristic with distinct weekday and
-    // weekend buckets must produce different plan.slots[t].baseline_kw for
-    // the same hour-of-day depending on which weekday the plan is for —
-    // this is the direct end-to-end proof of the 2-bucket restructure.
+    // 7-day-of-week buckets: a heuristic with distinct per-day buckets must
+    // produce different plan.slots[t].baseline_kw for the same hour-of-day
+    // depending on which day of the week the plan is for — this is the
+    // direct end-to-end proof of the day-of-week restructure.
     use chrono::TimeZone;
     // 2023-01-03 was a Tuesday, 2023-01-07 a Saturday.
     let tuesday = Utc.with_ymd_and_hms(2023, 1, 3, 6, 0, 0).unwrap();
@@ -274,12 +274,20 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
     weekday_profile[6] = 6.0;
     let mut weekend_profile = vec![0.0; 24];
     weekend_profile[6] = 11.0;
+    // Mon-Fri (indices 0-4) get weekday_profile, Sat/Sun (5/6) get weekend_profile.
+    let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|bucket| {
+        if bucket <= 4 {
+            weekday_profile.clone()
+        } else {
+            weekend_profile.clone()
+        }
+    });
     let mut heuristics = std::collections::HashMap::new();
     heuristics.insert(
         "base_load".to_string(),
         crate::entities::design_vocabulary::AssetHeuristics {
             asset_id: "base_load".to_string(),
-            daytime_profile_kw: [weekday_profile, weekend_profile],
+            daytime_profile_kw,
             seasonal_factor: 1.0,
             last_updated: Some(tuesday),
             recent_mean_abs_error_kw: None,

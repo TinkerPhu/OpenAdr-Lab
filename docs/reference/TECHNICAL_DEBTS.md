@@ -105,13 +105,26 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
   (8.97 kWh/day → ~3.9 kWh weekday / ~4.9 kWh weekend). `AssetHeuristics.daytime_profile_kw`
   was restructured from one 24-hour curve + a `weekday_weights[7]` scalar multiplier to
   `[Vec<f64>; 2]` (weekday/weekend), and profiles now carry weekday-conditional spikes
-  (brunch replacing coffee+lunch, dinner shifted earlier on Sat/Sun). **Deliberate scope
-  limit, not an oversight:** the split is weekday-vs-weekend (2 buckets), not one curve per
-  day of the week (7 buckets) — chosen because 4 weeks of history gives each weekend bucket
-  ~8 days of samples (plenty for a stable mean) while a 7-way split would starve each
-  individual weekday bucket to ~4 samples. Revisit if per-weekday granularity (e.g.
-  distinguishing Friday-evening routines from Tuesday) is ever wanted — would need a longer
-  seeding window before it's statistically meaningful.
+  (brunch replacing coffee+lunch, dinner shifted earlier on Sat/Sun).
+- 2026-08-30 revisit: the weekday/weekend limit above was revisited and lifted.
+  `AssetHeuristics.daytime_profile_kw` is now `[Vec<f64>; 7]`
+  (`chrono::Weekday::num_days_from_monday()`-indexed — Mon=0..Sun=6), so individual
+  weekdays (e.g. Friday-evening routines vs. Tuesday) are distinguishable, not just
+  weekday-vs-weekend. The sample-starvation concern the old note raised was addressed two
+  ways rather than by capping bucket count: (1) `HeuristicsConfig`'s
+  `rolling_window_days`/`ewma_halflife_days` moved from 42/14 to 56/28 — widened enough to
+  give each day-of-week bucket a comparable effective sample size to the old weekend
+  bucket's, but deliberately kept well under the ~91-day season boundary so the existing
+  30-day-vs-window `seasonal_factor` mechanism still holds; (2) the learner's discrete
+  zero/nonzero fallback (a bucket/hour cell with no ticks used the flat `overall_mean`, any
+  data at all got 100% trust) was replaced with a continuous shrinkage blend
+  (`shrinkage_k_days`, default 2.5) that leans a thin bucket toward `overall_mean` in
+  proportion to how much data it actually has, rather than an all-or-nothing cliff. All
+  three knobs, plus `min_samples_for_confidence`, are now profile-configurable
+  (`profile/heuristics.rs`, `Profile.heuristics`). Known residual limitation:
+  `min_samples_for_confidence` remains a *global* cold-start gate, not per-bucket — a
+  specific day-of-week bucket can in principle be far sparser than the overall average
+  without tripping it (thin buckets are protected by shrinkage instead, not by this gate).
 
 ---
 

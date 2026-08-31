@@ -27,8 +27,8 @@ const PRELOAD_WINDOW_DAYS: i64 = 28;
 pub struct PreloadedAssetSummary {
     pub asset_id: String,
     pub samples_seeded: usize,
-    /// `[0]` = weekday (Mon-Fri) profile, `[1]` = weekend (Sat/Sun) profile.
-    pub daytime_profile_kw: [Vec<f64>; 2],
+    /// Index = `chrono::Weekday::num_days_from_monday()`: `[0]`=Mon..`[6]`=Sun.
+    pub daytime_profile_kw: [Vec<f64>; 7],
     pub seasonal_factor: f64,
 }
 
@@ -42,6 +42,7 @@ pub(crate) async fn preload_heuristics(
     base_load: BaseLoad,
     state: &AppState,
     now: DateTime<Utc>,
+    cfg: &HeuristicsConfig,
 ) -> Result<Vec<PreloadedAssetSummary>, crate::entities::DomainError> {
     let from = now - Duration::days(PRELOAD_WINDOW_DAYS);
     let mut summaries = Vec::new();
@@ -60,14 +61,9 @@ pub(crate) async fn preload_heuristics(
         // R-60: same previous-heuristic lookup as the daily job — see
         // `tasks::heuristics_job::run_heuristics_once`.
         let previous = state.asset_heuristics().await.get(asset_id).cloned();
+        let cfg = *cfg;
         let learned = tokio::task::spawn_blocking(move || {
-            learn_asset_heuristics(
-                h.as_ref(),
-                &id,
-                now,
-                &HeuristicsConfig::default(),
-                previous.as_ref(),
-            )
+            learn_asset_heuristics(h.as_ref(), &id, now, &cfg, previous.as_ref())
         })
         .await
         .expect("preload learn task must not panic")?;
@@ -138,7 +134,15 @@ pub async fn post_heuristics_preload(State(ctx): State<AppCtx>) -> impl IntoResp
             .into_response();
     };
 
-    match preload_heuristics(history, base_load, &ctx.state, Utc::now()).await {
+    match preload_heuristics(
+        history,
+        base_load,
+        &ctx.state,
+        Utc::now(),
+        &ctx.heuristics_config,
+    )
+    .await
+    {
         Ok(summaries) => (
             StatusCode::OK,
             Json(serde_json::json!({ "preloaded": summaries })),
@@ -180,9 +184,15 @@ mod tests {
         let state = AppState::new();
         let now = Utc::now();
 
-        let summaries = preload_heuristics(history, base_load_with_coffee(), &state, now)
-            .await
-            .expect("preload must succeed");
+        let summaries = preload_heuristics(
+            history,
+            base_load_with_coffee(),
+            &state,
+            now,
+            &HeuristicsConfig::default(),
+        )
+        .await
+        .expect("preload must succeed");
 
         let base_load_summary = summaries
             .iter()

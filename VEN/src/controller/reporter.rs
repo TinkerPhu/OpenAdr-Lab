@@ -1126,7 +1126,7 @@ mod tests {
             "base_load".to_string(),
             crate::entities::design_vocabulary::AssetHeuristics {
                 asset_id: "base_load".to_string(),
-                daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
+                daytime_profile_kw: std::array::from_fn(|_| vec![1.0; 24]),
                 seasonal_factor: 1.0,
                 last_updated: None,
                 recent_mean_abs_error_kw: None,

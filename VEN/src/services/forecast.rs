@@ -257,7 +257,7 @@ fn slot_confidence(sample: &crate::entities::weather::WeatherForecastSample) -> 
 }
 
 /// Build one `AssetForecast` per learned heuristic, tagged
-/// `ForecastSource::Heuristic`, sampling `daytime_profile_kw[weekday_bucket][hour]
+/// `ForecastSource::Heuristic`, sampling `daytime_profile_kw[day_of_week_bucket][hour]
 /// × seasonal_factor` at each of `slot_starts`.
 pub fn build_heuristic_forecasts(
     heuristics: &HashMap<String, AssetHeuristics>,
@@ -538,14 +538,20 @@ mod tests {
         let monday_8am = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 8, 0, 0).unwrap();
         let monday_3am = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 3, 0, 0).unwrap();
 
-        let mut weekday_profile = vec![0.3; 24];
-        weekday_profile[8] = 1.5;
+        let mut monday_profile = vec![0.3; 24];
+        monday_profile[8] = 1.5;
         let mut heuristics = HashMap::new();
         heuristics.insert(
             "base_load".to_string(),
             AssetHeuristics {
                 asset_id: "base_load".to_string(),
-                daytime_profile_kw: [weekday_profile, vec![0.3; 24]],
+                daytime_profile_kw: std::array::from_fn(|bucket| {
+                    if bucket == 0 {
+                        monday_profile.clone()
+                    } else {
+                        vec![0.3; 24]
+                    }
+                }),
                 seasonal_factor: 1.0,
                 last_updated: Some(ts(0)),
                 recent_mean_abs_error_kw: None,
@@ -567,7 +573,7 @@ mod tests {
             "base_load".to_string(),
             AssetHeuristics {
                 asset_id: "base_load".to_string(),
-                daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
+                daytime_profile_kw: std::array::from_fn(|_| vec![1.0; 24]),
                 seasonal_factor: 1.5,
                 last_updated: Some(now),
                 recent_mean_abs_error_kw: None,
@@ -585,14 +591,20 @@ mod tests {
     fn test_build_heuristic_forecasts_picks_weekend_bucket_on_saturday() {
         // 2023-01-02 was a Monday, 2023-01-07 a Saturday.
         let saturday_10am = chrono::Utc.with_ymd_and_hms(2023, 1, 7, 10, 0, 0).unwrap();
-        let mut weekend_profile = vec![0.3; 24];
-        weekend_profile[10] = 2.2; // brunch peak
+        let mut saturday_profile = vec![0.3; 24];
+        saturday_profile[10] = 2.2; // brunch peak
         let mut heuristics = HashMap::new();
         heuristics.insert(
             "base_load".to_string(),
             AssetHeuristics {
                 asset_id: "base_load".to_string(),
-                daytime_profile_kw: [vec![0.3; 24], weekend_profile],
+                daytime_profile_kw: std::array::from_fn(|bucket| {
+                    if bucket == 5 {
+                        saturday_profile.clone()
+                    } else {
+                        vec![0.3; 24]
+                    }
+                }),
                 seasonal_factor: 1.0,
                 last_updated: Some(ts(0)),
                 recent_mean_abs_error_kw: None,
@@ -602,7 +614,7 @@ mod tests {
         let forecasts = build_heuristic_forecasts(&heuristics, &[saturday_10am], ts(0));
         assert!(
             (forecasts[0].power_kw[0] - 2.2).abs() < 1e-9,
-            "a Saturday slot must sample the weekend bucket"
+            "a Saturday slot must sample the Saturday bucket"
         );
     }
 
@@ -730,7 +742,7 @@ mod tests {
     fn base_load_heuristic() -> AssetHeuristics {
         AssetHeuristics {
             asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
-            daytime_profile_kw: [vec![0.7; 24], vec![0.7; 24]],
+            daytime_profile_kw: std::array::from_fn(|_| vec![0.7; 24]),
             seasonal_factor: 1.0,
             last_updated: Some(ts(0)),
             recent_mean_abs_error_kw: None,
