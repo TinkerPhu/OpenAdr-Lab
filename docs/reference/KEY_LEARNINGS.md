@@ -1419,6 +1419,20 @@ wrong with the feature. When a cap starts driving design decisions, split the fi
 signal the cap exists to send. Confirmation it was not over-engineering: within hours a parallel
 session added another profile field that would also have breached the cap.
 
+**A stray detached-HEAD checkout will silently accept commits nothing points at.** Working in the
+bare repo root (distinct from this project's normal `.claude/worktrees/*` checkouts) turned out
+to be in detached HEAD on a stale `main` tip, unnoticed until a commit made there produced a
+byte-identical duplicate of a fix another concurrent session had already merged to `main`
+minutes earlier. `git status`'s "detached from `<sha>`" line and `gitStatus`'s "Current branch:
+HEAD" are the tells — check for them before committing anything in an unfamiliar checkout, not
+after. Recovering safely meant extracting the real work as a patch (`git diff HEAD -- <paths>`)
+rather than trying to `reset`/`rebase` the stale tree onto the current tip: a plain
+`git reset --mixed` onto a divergent tip surfaces every commit `main` gained in the meantime as a
+phantom "modification" (including files the newer history had deleted), because the reset moves
+the diff baseline without touching the working tree. `git apply --3way --index` of a clean patch
+onto a fresh branch off the confirmed-current tip, then a full fmt/clippy/test pass before
+committing, avoided silently reintroducing already-refactored-away code.
+
 **A lease lock stored inside the WSL VM is not a lock.** `scripts/wsl_lock.sh` keeps its state at
 `/tmp/openadr_wsl.lock`; WSL2 idle-shutdown wipes `/tmp`. A later `acquire` from another worktree
 then sees *no* lock rather than an expired one and succeeds immediately — mutual exclusion stops
@@ -1426,3 +1440,4 @@ holding while both sessions report owning the lease (R-67). The general rule: lo
 outlive the process it guards *and* the environment it lives in. Diagnostic: an unexpected
 `FREE`/`NOT LOCKED`, or a detached build whose log freezes with no error and no `Finished` line,
 should prompt `wsl bash -lc uptime` — "up 1 min" means the VM restarted and took the job with it.
+

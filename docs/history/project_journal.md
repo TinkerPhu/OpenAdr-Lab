@@ -10946,3 +10946,56 @@ timeouts, an environment flake on this low-memory host unrelated to the change, 
 regardless); `eslint src` reports 0 errors for both (pre-existing warnings unrelated to this
 change untouched). No behavior change — output is identical in a dev server, silent in a
 production build.
+
+---
+
+## Heuristics learner: weekday/weekend split replaced with per-weekday buckets + continuous shrinkage (2026-08-31)
+
+**What was done.** Revisited the "deliberate scope limit" recorded in `TECHNICAL_DEBTS.md` when
+the base-load heuristics learner (BL-14/WP5.2) first shipped a 2-bucket weekday/weekend split.
+`AssetHeuristics.daytime_profile_kw` moved from `[Vec<f64>; 2]` to `[Vec<f64>; 7]`
+(`chrono::Weekday::num_days_from_monday()`-indexed), so individual weekdays (Friday-evening
+routines vs. Tuesday, say) are now distinguishable rather than lumped into one "weekday" curve.
+The sample-starvation concern that originally justified capping the split at 2 buckets was
+addressed two ways instead of limiting bucket count: `rolling_window_days`/`ewma_halflife_days`
+moved from 42/14 to 56/28 (wide enough to give each day-of-week bucket a comparable effective
+sample size to the old weekend bucket's, kept well under the ~91-day season boundary so the
+existing 30-day-vs-window `seasonal_factor` split still holds), and the learner's discrete
+zero/nonzero fallback (no ticks → flat `overall_mean`, any ticks at all → 100% trust) was
+replaced with a continuous shrinkage blend (`shrinkage_blend`, `shrinkage_k_days` default 2.5)
+that leans a thin bucket toward `overall_mean` in proportion to how much data it actually has.
+All three knobs, plus the existing `min_samples_for_confidence`, are now profile-configurable
+(new `profile/heuristics.rs`, `Profile.heuristics`, with bounds validation) so per-site regularity
+differences (school-age kids vs. not, shift work vs. 9-to-5) can be tuned. `HeuristicsConfig` is
+resolved once from the profile at VEN startup and threaded into both the daily learner job and
+the debug preload route via `AppCtx`, closing a latent drift risk where each independently called
+`::default()`.
+
+One test (`learn_asset_heuristics_captures_distinct_weekday_and_weekend_shapes`) needed its
+assertions changed from absolute floors (`weekday_at_18 > 1.0`) to relative/shape comparisons
+(`weekday_at_18 > weekday_at_10`, `> weekend_at_18`, etc.): a single weekday's bucket has far
+fewer effective samples than the old pooled Mon-Fri bucket did, so the new shrinkage design
+deliberately blends its peak toward `overall_mean` more than the old discrete fallback did — the
+shape is still learned correctly, but the old absolute threshold no longer holds by design, not
+by defect.
+
+**Verification.** `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+and `cargo test -p ven-app` (1195 passed, 0 failed, plus the `architecture` integration test)
+clean on WSL.
+
+**Key learning — a bare repo root left in detached HEAD is a trap.** This work was authored in an
+uncommitted working tree sitting on the bare repo root (not any of the project's normal
+worktrees), which had drifted into a detached HEAD on a stale `main` tip. A first attempt to
+land it (`git reset --mixed` onto the current `main` tip) looked catastrophic — dozens of files
+suddenly appeared "modified," including one the newer `main` had *deleted* — because the reset
+only moves where diffs are measured from; it does not rebase a stale working tree past
+commits `main` gained in the meantime (here, an R-28 module fold and an R-30 UI logging fix from
+other concurrent sessions). The fix was to extract a patch of only the intended files
+(`git diff HEAD -- <paths>`, plus `git add -N` for the one new file so it's included), branch
+cleanly off the current `main` tip, and `git apply --3way --index` the patch there — verifying
+with a full fmt/clippy/test pass before committing. General rule: never build directly on a
+working tree whose branch/base you haven't just confirmed against the current shared history;
+prefer a fresh branch off a known-good tip plus a targeted patch over `reset`/`rebase` gymnastics
+on a possibly-stale tree. See `KEY_LEARNINGS.md` for the durable version of this lesson.
+
+---
