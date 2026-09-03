@@ -128,6 +128,23 @@ impl BaseLoad {
     /// shape to fit instead of a perfectly flat baseline. Returns `0.0`
     /// when no spikes are configured (unconfigured profiles keep today's
     /// flat behavior).
+    /// The load before any Behaviour-B offset: a real measurement if present,
+    /// else the learned heuristic tier (BL-40), else profile + simulated
+    /// appliance noise. `measured_kw` is passed rather than read from
+    /// `self.measured_load_kw` so `SimState::peek_base_load_kw` — which previews
+    /// a tick before `tick()` writes that field — can share this precedence
+    /// instead of mirroring it by hand.
+    pub fn natural_base_kw(
+        &self,
+        measured_kw: Option<f64>,
+        heuristic_kw: Option<f64>,
+        now: DateTime<Utc>,
+    ) -> f64 {
+        measured_kw
+            .or(heuristic_kw)
+            .unwrap_or_else(|| self.baseline_kw_profile + self.appliance_noise_kw(now))
+    }
+
     pub fn appliance_noise_kw(&self, now: DateTime<Utc>) -> f64 {
         let day_ordinal = now.date_naive().num_days_from_ce() as u64;
         let weekday = now.weekday().num_days_from_monday() as u8;

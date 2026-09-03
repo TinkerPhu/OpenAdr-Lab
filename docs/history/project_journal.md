@@ -10999,3 +10999,59 @@ prefer a fresh branch off a known-good tip plus a targeted patch over `reset`/`r
 on a possibly-stale tree. See `KEY_LEARNINGS.md` for the durable version of this lesson.
 
 ---
+
+## 2026-09-03 — Live-tick physics deduplication (R-70), and the phantom-surplus bug it uncovered
+
+**What.** Consolidated three independently-maintained copies of the PV/base-load
+tick physics onto one implementation each, and fixed a real production bug found while
+doing it.
+
+**Why.** An architectural audit of the assets/simulator area (filed as R-69/R-70/R-71)
+found `SimState::tick()` carrying its own inline copy of the natural-irradiance
+formula — never routed to `entities::solar::natural_irradiance_at`, not even
+indirectly, despite `pv.rs`, `pv_preview.rs`, and `simulator/forecast.rs` all
+correctly reaching it. `pv_preview.rs`/`base_load_preview.rs` separately hand-copied
+`tick()`'s override/EMA-decay arithmetic, documented as "must stay in lockstep" and
+guarded only by one equivalence test each. This was sequenced as preparation work
+before the planned `asset-dispatch-trait-objects` change (Spec A of the
+asset-max-power-forecast master plan), whose Decision D5 rewrites this exact function
+into a `TickOverridable` capability trait — deduplicating afterwards would have baked
+the fork permanently into the new trait methods.
+
+**The bug the dedup uncovered.** `PvInverter::step_inner` clips DC potential to the
+inverter's AC ceiling (`-dc_potential_kw.min(inverter_max_kw)`); `peek_pv_kw` had no
+such clipping at all. With the production shape (14.4 kW panels, 12.5 kW inverter) the
+preview over-reported export by up to 1.9 kW whenever DC potential exceeded the
+inverter ceiling — i.e. every clear-sky midday — feeding a phantom surplus to
+`apply_surplus_ev_overlay`. The existing guard test never caught it because every
+helper in `peek_pv_kw_tests.rs` sets `inverter_max_kw == rated_kw`, so the clipping
+branch was never compared. Confirmed by reverting only `pv_preview.rs` and watching
+the new regression test fail with exactly `peek -14.4` vs `tick -12.5`.
+
+**How.** The non-obvious constraint shaping the extraction: `tick()` *mutates*
+smoothing state while the preview functions must stay read-only, so a literal
+lift-and-share was impossible. Each smoothing type now has a **pure** `next_offset`/
+`next_offset_kw` plus a thin mutating `update` that calls it and writes back —
+previews call the pure half, `tick()` calls the mutating one. PV's precedence and
+clipping rules moved into `PvInverter::resolve_power_kw`, taking an explicit
+`PvPowerInputs` (rather than reading `self`'s live fields) so the preview — which
+holds this tick's values as not-yet-written parameters — can share the same function
+`step_inner` uses. Base load's measured→heuristic→profile precedence became
+`BaseLoad::natural_base_kw`; the final `(natural + offset).max(0.0)` combine also
+moved into a shared `BaseLoadSmoothingState::baseline_kw` after a self-review caught
+it still being hand-copied — the exact class of bug (a clamp duplicated instead of
+shared) this change was fixing on the PV side.
+
+**Verification.** `cargo test -p ven-app` (1196 passed, 0 failed), `cargo fmt --check`,
+`cargo clippy --all-targets --all-features -- -D warnings`, and
+`scripts/audit_file_sizes.py` all clean on WSL. New regression test
+`peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential` covers the
+previously-unexercised clipping path.
+
+**Key learning.** "Guarded by an equivalence test" is only as strong as the test's
+parameter coverage — here every fixture pinned `inverter_max_kw == rated_kw`, so the
+one branch where the two implementations actually differed was structurally invisible
+to the guard. When two implementations must agree, prefer sharing the code over
+testing the agreement; where a test is the only option, deliberately vary the
+parameters that distinguish the implementations, not just the ones that exercise the
+happy path. See `KEY_LEARNINGS.md` for the durable version of this lesson.

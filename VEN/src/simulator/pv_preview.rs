@@ -3,21 +3,24 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::assets::{AssetConfig, PvInverter};
+use crate::assets::{AssetConfig, PvInverter, PvPowerInputs};
 
 use super::SimState;
 
 impl SimState {
-    /// Preview this tick's PV output *before* `tick()` mutates state (same
-    /// irradiance formula, and the same weather/manual-override precedence,
-    /// as `tick()` in `mod.rs`; read-only). `None` if no PV asset is
-    /// configured.
+    /// Preview this tick's PV output *before* `tick()` mutates state
+    /// (read-only). `None` if no PV asset is configured.
     ///
     /// Lets `apply_surplus_ev_overlay` avoid a one-tick lag from reading last
     /// tick's `AssetSnapshot.power_kw` (see its doc comment for the full
-    /// rationale). Must stay in lockstep with `tick()`'s irradiance formula —
-    /// `peek_pv_kw_matches_tick_output_for_same_now` in `simulator/tests.rs`
-    /// guards against drift.
+    /// rationale). Shares its arithmetic with the live tick rather than
+    /// mirroring it by hand: the natural curve comes from
+    /// `PvInverter::natural_irradiance_at`, the offset decay from
+    /// `PvSmoothingState::next_offset` (the pure half of what `tick()` calls
+    /// as `update`), and the precedence/clipping rules from
+    /// `PvInverter::resolve_power_kw` (the same function `step_inner` calls).
+    /// `peek_pv_kw_matches_tick_output_for_same_now` in
+    /// `simulator/tests/peek_pv_kw_tests.rs` guards against re-drift.
     pub fn peek_pv_kw(
         &self,
         now: DateTime<Utc>,
@@ -32,34 +35,21 @@ impl SimState {
             _ => None,
         })?;
 
-        // Mirrors SimState::tick's / PvInverter::step_inner's precedence exactly: a
-        // forced override (posted this exact tick) wins outright; otherwise weather
-        // (if present) is the base with the decaying offset blended additively on
-        // top; otherwise the sin model + offset. Kept in lockstep by the
-        // peek_pv_kw_matches_tick_output_for_same_now equivalence test.
-        let raw_kw = if let Some(forced) = pv_irradiance_override {
-            -(pv_cfg.rated_kw * forced.clamp(0.0, 1.0))
-        } else {
-            const PLAN_STEP_S: f64 = 300.0;
-            let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
-            let mut offset = self.pv_smoothing.irradiance_offset * per_tick_factor;
-            if offset.abs() < 0.005 {
-                offset = 0.0;
-            }
-            match pv_measured_kw.or(weather_pv_kw) {
-                Some(base_kw) => -(base_kw.max(0.0) + offset * pv_cfg.rated_kw).max(0.0),
-                None => {
-                    let natural_irradiance = PvInverter::natural_irradiance_at(now);
-                    let irradiance = (natural_irradiance + offset).clamp(0.0, 1.0);
-                    -(pv_cfg.rated_kw * irradiance)
-                }
-            }
-        };
-        Some(
-            pv_cfg
-                .generation_limit_kw
-                .map(|lim| raw_kw.max(lim))
-                .unwrap_or(raw_kw),
-        )
+        // Reproduce exactly what `tick()` is about to do to the smoothing state,
+        // without writing it back: same natural curve, same offset arithmetic.
+        let natural_irradiance = PvInverter::natural_irradiance_at(now);
+        let offset = self.pv_smoothing.next_offset(
+            pv_irradiance_override,
+            natural_irradiance,
+            dt_s,
+            pv_alpha,
+        );
+        Some(pv_cfg.resolve_power_kw(&PvPowerInputs {
+            measured_power_kw: pv_measured_kw,
+            weather_power_kw: weather_pv_kw,
+            irradiance: (natural_irradiance + offset).clamp(0.0, 1.0),
+            irradiance_offset: offset,
+            irradiance_forced: pv_irradiance_override.is_some(),
+        }))
     }
 }

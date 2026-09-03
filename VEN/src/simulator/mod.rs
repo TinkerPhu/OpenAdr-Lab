@@ -35,6 +35,58 @@ pub struct BaseLoadSmoothingState {
     pub load_offset_kw: f64,
 }
 
+impl BaseLoadSmoothingState {
+    /// Alpha decay factor shared by all Behaviour B controls. Converts per-plan-step
+    /// alpha (one step = 300 s) to a per-tick factor so the offset reaches
+    /// (1−alpha) × original after exactly one plan step, matching the forecast
+    /// formula exp(−t/tau_s).
+    const PLAN_STEP_S: f64 = 300.0;
+
+    /// Apply this tick's forced value (if any) or decay the offset, returning the
+    /// resulting baseline (kW, never negative). Mirrors `PvSmoothingState::update`.
+    pub fn update(
+        &mut self,
+        forced_kw: Option<f64>,
+        natural_base_kw: f64,
+        dt_s: f64,
+        base_load_alpha: f64,
+    ) -> f64 {
+        self.load_offset_kw =
+            self.next_offset_kw(forced_kw, natural_base_kw, dt_s, base_load_alpha);
+        Self::baseline_kw(natural_base_kw, self.load_offset_kw)
+    }
+
+    /// Combine the natural load with a resolved offset. Trivial, but shared with
+    /// `SimState::peek_base_load_kw` on purpose: a missing clamp in one of two
+    /// hand-copied implementations is exactly the bug this change was fixing on
+    /// the PV side (see `PvInverter::resolve_power_kw`).
+    pub fn baseline_kw(natural_base_kw: f64, offset_kw: f64) -> f64 {
+        (natural_base_kw + offset_kw).max(0.0)
+    }
+
+    /// Pure counterpart of `update` — see `PvSmoothingState::next_offset` for why
+    /// the pure/mutating split exists (`peek_base_load_kw` previews a tick without
+    /// advancing state).
+    pub fn next_offset_kw(
+        &self,
+        forced_kw: Option<f64>,
+        natural_base_kw: f64,
+        dt_s: f64,
+        base_load_alpha: f64,
+    ) -> f64 {
+        if let Some(forced_kw) = forced_kw {
+            return forced_kw - natural_base_kw;
+        }
+        let per_tick_factor = (1.0 - base_load_alpha).powf(dt_s / Self::PLAN_STEP_S);
+        let decayed = self.load_offset_kw * per_tick_factor;
+        if decayed.abs() < 0.005 {
+            0.0
+        } else {
+            decayed
+        }
+    }
+}
+
 /// One entry in the generic asset list.
 /// Config is NOT stored here — it lives in `SimState.asset_configs` (parallel by index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,21 +254,7 @@ impl SimState {
         base_load_measured_kw: Option<f64>,
         base_load_heuristic_kw: Option<f64>,
     ) {
-        let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
-            + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
-
-        let natural_irradiance = if (6.0..=18.0).contains(&hour) {
-            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-            angle.sin()
-        } else {
-            0.0
-        };
-
-        // Alpha decay factor shared by all Behaviour B controls.
-        // Converts per-plan-step alpha (one step = 300 s) to a per-tick factor so the
-        // offset reaches (1−alpha) × original after exactly one plan step, matching
-        // the forecast formula exp(−t/tau_s).
-        const PLAN_STEP_S: f64 = 300.0;
+        let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
         // Behaviour B — PV perturbation overlay.
         let irradiance =
@@ -258,21 +296,14 @@ impl SimState {
                     // override folds into the offset relative to it, so a forced value
                     // lands exactly on `forced_kw` — not `forced_kw` plus a hidden bump.
                     bl.measured_load_kw = base_load_measured_kw;
-                    let natural_base_kw = bl
-                        .measured_load_kw
-                        .or(base_load_heuristic_kw)
-                        .unwrap_or_else(|| bl.baseline_kw_profile + bl.appliance_noise_kw(now));
-                    if let Some(forced_kw) = base_load_kw_override {
-                        self.base_load_smoothing.load_offset_kw = forced_kw - natural_base_kw;
-                    } else {
-                        let per_tick_factor = (1.0 - base_load_alpha).powf(dt_s / PLAN_STEP_S);
-                        self.base_load_smoothing.load_offset_kw *= per_tick_factor;
-                        if self.base_load_smoothing.load_offset_kw.abs() < 0.005 {
-                            self.base_load_smoothing.load_offset_kw = 0.0;
-                        }
-                    }
-                    bl.baseline_kw =
-                        (natural_base_kw + self.base_load_smoothing.load_offset_kw).max(0.0);
+                    let natural_base_kw =
+                        bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now);
+                    bl.baseline_kw = self.base_load_smoothing.update(
+                        base_load_kw_override,
+                        natural_base_kw,
+                        dt_s,
+                        base_load_alpha,
+                    );
                 }
                 AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override or snap back to profile default
