@@ -1441,3 +1441,32 @@ outlive the process it guards *and* the environment it lives in. Diagnostic: an 
 `FREE`/`NOT LOCKED`, or a detached build whose log freezes with no error and no `Finished` line,
 should prompt `wsl bash -lc uptime` — "up 1 min" means the VM restarted and took the job with it.
 
+## "Guarded by an equivalence test" is only as strong as the test's parameter coverage (R-70, 2026-09-03)
+
+`SimState::peek_pv_kw` and `PvInverter::step_inner` were two hand-maintained
+implementations of the same PV calculation, explicitly documented as "must stay in
+lockstep" and guarded by `peek_pv_kw_matches_tick_output_for_same_now`. They had
+nonetheless already drifted: `step_inner` clipped DC potential to `inverter_max_kw`,
+the preview did not. With the production shape (14.4 kW panels, 12.5 kW inverter) the
+preview over-reported PV export by up to 1.9 kW every clear-sky midday, feeding a
+phantom surplus into `apply_surplus_ev_overlay`.
+
+The guard test never caught it because **every fixture in the test file pinned
+`inverter_max_kw == rated_kw`** — the single branch where the two implementations
+actually differed was structurally invisible to the test meant to protect it. The test
+wasn't weak on the happy path; it simply never varied the one parameter that
+distinguished the two code paths.
+
+Rules that follow:
+- When two implementations must agree, **share the code** rather than testing the
+  agreement. An equivalence test is a fallback, not a design.
+- When a duplicate genuinely can't be avoided (here: the live tick mutates smoothing
+  state, the preview must stay read-only), factor the shared arithmetic into a **pure**
+  function both call, and let only the write-back differ. `PvSmoothingState::next_offset`
+  (pure) + `update` (mutating wrapper) is the shape that worked.
+- When a shared function can't take `self` because one caller holds the values as
+  not-yet-written parameters, pass an explicit inputs struct (`PvPowerInputs`) instead
+  of duplicating the logic around the field access.
+- Where an equivalence test is the only option, deliberately vary the parameters that
+  *distinguish* the implementations — not just the ones that exercise the common path.
+  Ask: "which input would make these two diverge?" and pin a fixture on it.

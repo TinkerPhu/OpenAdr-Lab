@@ -19,6 +19,20 @@ fn pv_state(rated_kw: f64) -> SimState {
     )
 }
 
+/// Like `pv_state`, but with an inverter whose AC ceiling sits *below* the DC
+/// panel peak — the real production shape (14.4 kW panels, 12.5 kW inverter).
+fn pv_state_with_inverter_cap(rated_kw: f64, inverter_max_kw: f64) -> SimState {
+    SimState::from_params(
+        &[AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw,
+            inverter_max_kw,
+            co2_g_kwh: 0.0,
+        })],
+        noon(),
+    )
+}
+
 fn noon() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 7, 12, 12, 0, 0).unwrap()
 }
@@ -77,6 +91,62 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         "peek_pv_kw ({preview}) must equal tick()'s actual PV output ({}) for the same `now` — \
          any divergence reintroduces the one-tick lag this method exists to prevent",
         pv_entry.last_power_kw
+    );
+}
+
+#[test]
+fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
+    // Regression: every other helper in this file sets inverter_max_kw == rated_kw,
+    // so the inverter-clipping branch of PvInverter::step_inner was never compared
+    // against peek_pv_kw — and peek_pv_kw had no clipping at all. With the real
+    // production shape (DC panel peak above the inverter's AC ceiling) the preview
+    // over-reported export by (rated_kw − inverter_max_kw), feeding a phantom
+    // surplus to apply_surplus_ev_overlay around solar noon.
+    let mut sim = pv_state_with_inverter_cap(14.4, 12.5);
+    let now = noon(); // full irradiance: DC potential 14.4 kW, well over the 12.5 kW cap
+    let dt_s = 30.0;
+
+    let preview = sim
+        .peek_pv_kw(now, dt_s, None, 0.1, None, None)
+        .expect("PV asset is configured");
+
+    sim.tick(
+        dt_s,
+        HashMap::new(),
+        now,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        PvCurtailmentSource::None,
+        None, // pv_measured_kw
+        None, // base_load_measured_kw
+        None, // base_load_heuristic_kw
+    );
+
+    let pv_entry = sim
+        .assets
+        .iter()
+        .find(|e| e.id == crate::ids::ASSET_PV)
+        .expect("PV asset entry must exist");
+    assert!(
+        (pv_entry.last_power_kw - preview).abs() < 1e-9,
+        "peek_pv_kw ({preview}) must equal tick()'s actual PV output ({}) when the \
+         inverter clips DC potential",
+        pv_entry.last_power_kw
+    );
+    assert!(
+        (preview + 12.5).abs() < 1e-6,
+        "both must clip to inverter_max_kw (-12.5 kW), not the -14.4 kW DC peak, got {preview}"
     );
 }
 

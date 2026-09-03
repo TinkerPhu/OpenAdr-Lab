@@ -13,6 +13,19 @@ fn f64_infinity() -> f64 {
     f64::INFINITY
 }
 
+/// The per-tick inputs `PvInverter::resolve_power_kw` needs, passed explicitly
+/// so the live tick (which reads them off the config it just wrote) and
+/// `SimState::peek_pv_kw` (which holds them as not-yet-written parameters) can
+/// share one implementation of the precedence and clipping rules.
+pub struct PvPowerInputs {
+    pub measured_power_kw: Option<f64>,
+    pub weather_power_kw: Option<f64>,
+    /// Already-resolved irradiance (natural curve + offset, clamped to [0,1]).
+    pub irradiance: f64,
+    pub irradiance_offset: f64,
+    pub irradiance_forced: bool,
+}
+
 /// PV Inverter config. Generates power (export = negative).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvInverter {
@@ -123,22 +136,13 @@ impl PvInverter {
     /// from any recently-released manual override blended additively on top
     /// of whichever base wins.
     pub fn step_inner(&self, _state: &PvState, _setpoint_kw: f64, _dt: Duration) -> (PvState, f64) {
-        let base_kw = self.measured_power_kw.or(self.weather_power_kw);
-        let dc_potential_kw = if self.irradiance_forced {
-            self.rated_kw * self.irradiance
-        } else {
-            match base_kw {
-                Some(kw) => (kw.max(0.0) + self.irradiance_offset * self.rated_kw).max(0.0),
-                None => self.rated_kw * self.irradiance,
-            }
-        };
-        // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
-        // see openspec/changes/pv-curtailment-history/.
-        let raw_kw = -dc_potential_kw.min(self.inverter_max_kw); // negative = export
-        let actual_kw = self
-            .generation_limit_kw
-            .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
-            .unwrap_or(raw_kw);
+        let actual_kw = self.resolve_power_kw(&PvPowerInputs {
+            measured_power_kw: self.measured_power_kw,
+            weather_power_kw: self.weather_power_kw,
+            irradiance: self.irradiance,
+            irradiance_offset: self.irradiance_offset,
+            irradiance_forced: self.irradiance_forced,
+        });
         (
             PvState {
                 actual_power_kw: actual_kw,
@@ -147,6 +151,34 @@ impl PvInverter {
             },
             actual_kw,
         )
+    }
+
+    /// The precedence + clipping rules `step_inner` applies, as a pure function
+    /// of explicitly-passed inputs rather than of `self`'s live fields.
+    ///
+    /// `SimState::peek_pv_kw` previews a tick *before* `tick()` writes this
+    /// tick's weather/measurement/override values onto the config, so it holds
+    /// those values as parameters and cannot go through `step_inner`. Both call
+    /// this instead. Keeping one implementation is what stops the two from
+    /// drifting — they already had: the preview was missing `inverter_max_kw`
+    /// clipping entirely, overstating export by (rated_kw − inverter_max_kw)
+    /// whenever DC potential exceeded the inverter's AC ceiling.
+    pub fn resolve_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
+        let base_kw = inputs.measured_power_kw.or(inputs.weather_power_kw);
+        let dc_potential_kw = if inputs.irradiance_forced {
+            self.rated_kw * inputs.irradiance
+        } else {
+            match base_kw {
+                Some(kw) => (kw.max(0.0) + inputs.irradiance_offset * self.rated_kw).max(0.0),
+                None => self.rated_kw * inputs.irradiance,
+            }
+        };
+        // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
+        // see openspec/changes/pv-curtailment-history/.
+        let raw_kw = -dc_potential_kw.min(self.inverter_max_kw); // negative = export
+        self.generation_limit_kw
+            .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
+            .unwrap_or(raw_kw)
     }
 
     /// Export-only: PV never imports, so `max_import_kw` is pinned to 0

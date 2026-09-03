@@ -30,7 +30,7 @@ pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
 pub use history::{AssetHistoryBuffer, HistoryPoint};
-pub use pv::{PvInverter, PvState};
+pub use pv::{PvInverter, PvPowerInputs, PvState};
 
 // ─── Input type for a runtime-controllable parameter ─────────────────────────
 

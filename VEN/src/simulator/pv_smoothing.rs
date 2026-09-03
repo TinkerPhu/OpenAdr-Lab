@@ -26,16 +26,32 @@ impl PvSmoothingState {
         dt_s: f64,
         pv_alpha: f64,
     ) -> f64 {
-        if let Some(forced) = forced {
-            self.irradiance_offset = forced - natural_irradiance;
-        } else {
-            let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / Self::PLAN_STEP_S);
-            self.irradiance_offset *= per_tick_factor;
-            if self.irradiance_offset.abs() < 0.005 {
-                self.irradiance_offset = 0.0;
-            }
-        }
+        self.irradiance_offset = self.next_offset(forced, natural_irradiance, dt_s, pv_alpha);
         (natural_irradiance + self.irradiance_offset).clamp(0.0, 1.0)
+    }
+
+    /// Pure counterpart of `update`: what the offset *would* become this tick,
+    /// without writing it back. `SimState::peek_pv_kw` previews a tick without
+    /// advancing state, so it needs this arithmetic while `update` needs the
+    /// same arithmetic plus the write — sharing it here is what keeps the live
+    /// tick and the preview from drifting.
+    pub fn next_offset(
+        &self,
+        forced: Option<f64>,
+        natural_irradiance: f64,
+        dt_s: f64,
+        pv_alpha: f64,
+    ) -> f64 {
+        if let Some(forced) = forced {
+            return forced - natural_irradiance;
+        }
+        let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / Self::PLAN_STEP_S);
+        let decayed = self.irradiance_offset * per_tick_factor;
+        if decayed.abs() < 0.005 {
+            0.0
+        } else {
+            decayed
+        }
     }
 }
 
