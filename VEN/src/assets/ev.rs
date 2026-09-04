@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    MilpParticipant, RequestResolvable,
+    MilpParticipant, RequestResolvable, TickOverridable, TickOverrides,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -386,6 +386,29 @@ impl Asset for EvCharger {
 
     fn as_request_resolvable(&self) -> Option<&dyn RequestResolvable> {
         Some(self)
+    }
+
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        Some(self)
+    }
+}
+
+impl TickOverridable for EvCharger {
+    /// Moved here verbatim from `SimState::tick()`'s `AssetConfig::Ev` match
+    /// arm (design.md Decision D5). The only `TickOverridable` implementor
+    /// that touches `state`: plugged-state is `AssetState`, not config.
+    fn apply_tick_overrides(&mut self, state: &mut AssetState, overrides: &TickOverrides) {
+        // Behaviour C: ev_plugged — hold override or snap back to profile
+        // default (plugged=true) when released. Without snap-back, releasing
+        // the inject leaves the EV permanently unplugged because there is no
+        // physics to re-plug it.
+        if let AssetState::Ev(s) = state {
+            s.plugged = overrides.ev_plugged_override.unwrap_or(true);
+        }
+        // Behaviour C: ev_soc_target — override BMS charge ceiling.
+        self.soc_target = overrides
+            .ev_soc_target_override
+            .unwrap_or(self.soc_target_profile);
     }
 }
 

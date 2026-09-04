@@ -9,6 +9,7 @@ use super::{
 use crate::assets::HistoryPoint;
 use crate::common::TimeSeries;
 use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
 
@@ -180,6 +181,15 @@ pub trait Asset: Send + Sync {
         None
     }
 
+    /// Whether this asset accepts tick-time environment/Behaviour-C overrides
+    /// (irradiance, ambient temp, plugged-state, etc.) from `SimState::tick()`
+    /// — Pv/Heater/BaseLoad/Ev today, not Battery (design.md Decision D5).
+    /// `&mut self` (unlike the other three capability accessors) because
+    /// every implementor mutates.
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        None
+    }
+
     /// Project state forward over an explicit setpoint schedule (default impl).
     /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
     fn simulate_forward(
@@ -338,6 +348,57 @@ impl<'a> Asset for AssetHandle<'a> {
     }
 
     // simulate_forward: default impl inherited from Asset
+}
+
+/// Capability: this asset accepts tick-time environment/Behaviour-C overrides
+/// from `SimState::tick()`. Implemented by Pv/Heater/BaseLoad/Ev — Battery has
+/// no arm in `tick()`'s current match, so it declines.
+///
+/// Deferred from Spec A's Phase 0 (design.md Decision D5's addendum): the
+/// self-contained `&mut self` shape only works once each implementor's
+/// cross-cutting tick-level state (PV's/BaseLoad's smoothing) is resolved
+/// *before* this is called, not inside it — see `SimState::tick()`, which
+/// resolves `TickOverrides`' fields ahead of the per-asset loop.
+pub trait TickOverridable {
+    /// `state` is threaded through (unlike the other three capability traits)
+    /// because EV's plugged-state override writes to `AssetState`, not just
+    /// its own config — every other implementor ignores it.
+    fn apply_tick_overrides(&mut self, state: &mut AssetState, overrides: &TickOverrides);
+}
+
+/// Bundles the per-tick override inputs `TickOverridable` implementors need,
+/// pre-resolved where resolution requires cross-asset state (`pv_irradiance`/
+/// `pv_irradiance_offset`, `base_load_baseline_kw` — see `SimState::tick()`'s
+/// pre-loop resolution). One flat struct shared by 4 heterogeneous asset
+/// kinds, each reading only its own fields — same shape as
+/// `MilpParticipant::build_milp_context`'s signature, shared by 3 kinds.
+pub struct TickOverrides {
+    // PV
+    pub pv_irradiance: f64,
+    pub pv_irradiance_offset: f64,
+    pub pv_alpha: f64,
+    pub pv_generation_limit_kw: Option<f64>,
+    pub pv_curtailment_source: PvCurtailmentSource,
+    pub pv_weather_power_kw: Option<f64>,
+    pub pv_measured_power_kw: Option<f64>,
+    pub pv_irradiance_forced: bool,
+
+    // Heater
+    pub heater_ambient_temp_c_override: Option<f64>,
+    pub heater_temp_min_override: Option<f64>,
+    pub heater_temp_max_override: Option<f64>,
+    pub heater_emergency_curtail_override: Option<bool>,
+    pub heater_emergency_absorb_override: Option<bool>,
+
+    // BaseLoad — `base_load_baseline_kw` is the pre-resolved
+    // `self.base_load_smoothing.update(...)` result, `None` if no BaseLoad
+    // asset is configured (see `SimState::tick()`).
+    pub base_load_measured_kw: Option<f64>,
+    pub base_load_baseline_kw: Option<f64>,
+
+    // EV
+    pub ev_plugged_override: Option<bool>,
+    pub ev_soc_target_override: Option<f64>,
 }
 
 #[cfg(test)]

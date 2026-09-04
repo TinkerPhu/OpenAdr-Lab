@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+    TickOverridable, TickOverrides,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -373,6 +374,25 @@ impl Asset for BaseLoad {
 
     // No as_milp_participant/as_request_resolvable/as_thermostat override —
     // BaseLoad implements none of D4's three capability traits, same as PV.
+
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        Some(self)
+    }
+}
+
+impl TickOverridable for BaseLoad {
+    /// Moved here verbatim from `SimState::tick()`'s `AssetConfig::BaseLoad`
+    /// match arm (design.md Decision D5), now reading the pre-resolved
+    /// `base_load_baseline_kw` (see `SimState::tick()`'s pre-loop
+    /// resolution, hoisted the same way PV's irradiance already is) rather
+    /// than computing it inline. `state` unused — no `AssetState` mutation
+    /// needed.
+    fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
+        self.measured_load_kw = overrides.base_load_measured_kw;
+        if let Some(baseline_kw) = overrides.base_load_baseline_kw {
+            self.baseline_kw = baseline_kw;
+        }
+    }
 }
 
 #[cfg(test)]
