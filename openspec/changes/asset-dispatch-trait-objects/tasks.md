@@ -140,16 +140,21 @@ per the note in section 2.
       `assets/mod.rs`). 6 new equivalence tests
       (`assets::phase2a_heater_tests`). Full suite green (1219 = 1213 + 6),
       fmt/clippy/file-size-audit clean.
-- [ ] 4.4 PV: implements none of D4's three capability traits (inherits all
-      three `as_*` `None` defaults) — universal `Asset` methods only. Same,
-      paying particular attention to `VEN/src/simulator/pv_preview.rs` and
-      `VEN/src/simulator/tests/peek_pv_kw_tests.rs`.
-- [ ] 4.5 BaseLoad: implements none of D4's three capability traits, same as
-      PV — universal `Asset` methods only. Same, paying particular attention
-      to `VEN/src/simulator/base_load_preview.rs`.
+- [x] 4.4 PV: implements none of D4's three capability traits (inherits all
+      three `as_*` `None` defaults) — universal `Asset` methods only. No
+      change needed to `pv_preview.rs`/`peek_pv_kw_tests.rs` — those consume
+      `PvInverter::resolve_power_kw` (from `tick-physics-deduplication`),
+      unrelated to this trait wiring. 3 new equivalence tests
+      (`assets::phase2a_pv_tests`), including a check that all three
+      capability accessors are `None`.
+- [x] 4.5 BaseLoad: implements none of D4's three capability traits, same as
+      PV — universal `Asset` methods only. 3 new equivalence tests
+      (`assets::phase2a_base_load_tests`), same shape as PV's.
 
-Run the full test suite (per `docs/guidelines/TESTING.md`) after each of 4.1–4.5
-— never leave two types' trait impls half-written.
+**Phase 2a complete.** Full test suite green (1225 = 1219 + 6), fmt/clippy/
+file-size-audit clean. All 5 asset types now implement their full `Asset` +
+capability-trait surface; `SimState.asset_configs` itself is still untouched
+(next: section 5's atomic storage cutover).
 
 ## 5. Storage cutover (Phase 2b of design.md's Migration Plan — one atomic commit)
 
