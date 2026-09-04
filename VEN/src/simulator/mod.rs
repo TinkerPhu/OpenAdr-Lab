@@ -261,6 +261,34 @@ impl SimState {
             self.pv_smoothing
                 .update(pv_irradiance_override, natural_irradiance, dt_s, pv_alpha);
 
+        // Behaviour B — base load perturbation overlay. Hoisted out of the
+        // per-asset loop below (Spec A Phase 2b prerequisite for
+        // `TickOverridable`, mirroring how PV's `irradiance` is already
+        // resolved above, before any asset-specific match): needs the
+        // BaseLoad config's own fields (`baseline_kw_profile`,
+        // `appliance_noise_kw`) to compute `natural_base_kw`, so it's found
+        // by a read-only pre-pass rather than known ahead of time like PV's
+        // natural-irradiance curve is. `None` if no BaseLoad asset is
+        // configured, matching today's behavior of the match arm simply
+        // never firing in that case.
+        let base_load_baseline_kw = self
+            .asset_configs
+            .iter()
+            .find_map(|cfg| match cfg {
+                AssetConfig::BaseLoad(bl) => {
+                    Some(bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now))
+                }
+                _ => None,
+            })
+            .map(|natural_base_kw| {
+                self.base_load_smoothing.update(
+                    base_load_kw_override,
+                    natural_base_kw,
+                    dt_s,
+                    base_load_alpha,
+                )
+            });
+
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
         let mut total_kw = 0.0;
 
@@ -295,15 +323,11 @@ impl SimState {
                     // same role here that `natural_irradiance` plays for PV above: the
                     // override folds into the offset relative to it, so a forced value
                     // lands exactly on `forced_kw` — not `forced_kw` plus a hidden bump.
+                    // Resolved above, before this loop, alongside PV's `irradiance`.
                     bl.measured_load_kw = base_load_measured_kw;
-                    let natural_base_kw =
-                        bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now);
-                    bl.baseline_kw = self.base_load_smoothing.update(
-                        base_load_kw_override,
-                        natural_base_kw,
-                        dt_s,
-                        base_load_alpha,
-                    );
+                    if let Some(baseline_kw) = base_load_baseline_kw {
+                        bl.baseline_kw = baseline_kw;
+                    }
                 }
                 AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override or snap back to profile default
