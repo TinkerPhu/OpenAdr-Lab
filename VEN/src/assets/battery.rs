@@ -2,10 +2,14 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
+    RequestResolvable,
+};
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::PowerAdjustability;
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::BatteryParams;
+use crate::entities::device_session::{EvSession, HeaterTarget};
 
 /// Battery storage config. Bidirectional.
 /// Positive setpoint = charge (import), negative = discharge (export).
@@ -256,6 +260,122 @@ impl Asset for Battery {
             unreachable!()
         };
         self.flexibility_floor_inner(s)
+    }
+
+    fn default_setpoint(&self) -> f64 {
+        Self::default_setpoint(self)
+    }
+
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
+        Self::control_schema(self)
+    }
+
+    fn update_config(&mut self, values: HashMap<String, f64>) {
+        Self::update_config(self, values)
+    }
+
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
+        Self::default_comfort_rates(self)
+    }
+
+    fn default_completion_policy(&self) -> CompletionPolicy {
+        Self::default_completion_policy(self)
+    }
+
+    fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        Self::default_post_deadline_comfort_bid(self)
+    }
+
+    fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        Self::state_values(self, s)
+    }
+
+    fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        Self::reset(self, s, values)
+    }
+
+    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        Self::forecast(self, s, timespan, now)
+    }
+
+    fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
+        Some(self)
+    }
+
+    fn as_request_resolvable(&self) -> Option<&dyn RequestResolvable> {
+        Some(self)
+    }
+}
+
+impl MilpParticipant for Battery {
+    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 3 heterogeneous asset kinds — see trait doc
+    fn build_milp_context(
+        &self,
+        state: &AssetState,
+        _n: usize,
+        _cum_s: &[i64],
+        _now: DateTime<Utc>,
+        _ev_session: Option<&EvSession>,
+        _heater_target: Option<&HeaterTarget>,
+        _ev_min_charge_kw: f64,
+        _v_ev_extra_eur_kwh: f64,
+        _v_ev_core_eur_kwh: f64,
+        _asap_lateness_eur_kwh_h: f64,
+        _v_ev_free_charge_eur_kwh: f64,
+        _lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
+        _heater_anchor: Vec<Option<f64>>,
+        _w_ghg_eur_kg: f64,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        Box::new(
+            crate::controller::milp_planner::asset_port::BatteryMilpContext::from_state(
+                state,
+                self,
+                c_terminal_eur_kwh,
+            ),
+        )
+    }
+}
+
+impl RequestResolvable for Battery {
+    fn resolve_request_target(
+        &self,
+        state: &AssetState,
+        target_soc: Option<f64>,
+        desired_power_kw: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        Self::resolve_request_target(self, s, target_soc, desired_power_kw)
+    }
+
+    /// Moved here verbatim from `AssetConfig::available_storage_kwh`'s Battery
+    /// arm (no prior `Battery`-only inherent method existed for this).
+    fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        Some((
+            (s.soc - self.min_soc).max(0.0) * self.capacity_kwh,
+            (1.0 - s.soc).max(0.0) * self.capacity_kwh,
+        ))
+    }
+
+    /// Battery cannot opportunistically absorb surplus — matches
+    /// `AssetConfig::surplus_charge_kw`'s existing `_ => None` fallback for
+    /// every non-EV asset kind today.
+    fn surplus_charge_kw(&self, _state: &AssetState, _surplus_kw: f64) -> Option<f64> {
+        None
     }
 }
 

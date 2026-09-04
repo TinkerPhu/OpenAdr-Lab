@@ -109,9 +109,12 @@ equivalence against the still-live `AssetConfig`-dispatched behavior.
 `TickOverridable` (D5) is out of scope for this section — deferred to task 5.3
 per the note in section 2.
 
-- [ ] 4.1 Battery: implements `MilpParticipant` + `RequestResolvable` (per D4's
-      table — no `Thermostat`). Run full test suite; confirm no behavior
-      change.
+- [x] 4.1 Battery: implements `MilpParticipant` + `RequestResolvable` (per D4's
+      table — no `Thermostat`). `available_storage_kwh` had no prior
+      `Battery`-only inherent method (was inline in `AssetConfig`'s own impl)
+      — added directly on the trait impl. Full test suite green (1206
+      passed = 1199 + 7 new equivalence tests), fmt/clippy/file-size-audit/
+      ven-architecture-invariant checks all clean.
 - [ ] 4.2 EV: implements `MilpParticipant` + `RequestResolvable`. Same,
       including `VEN/src/controller/milp_planner/tests/mod.rs` if it
       constructs `AssetConfig::Ev(...)` fixtures.
