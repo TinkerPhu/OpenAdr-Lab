@@ -212,6 +212,24 @@ macro_rules! delegate_asset_state {
 }
 
 impl AssetConfig {
+    // ── Spec A Phase 1: trait-object bridge ─────────────────────────────────
+
+    /// Temporary bridge (`asset-dispatch-trait-objects` tasks.md 3.1/3.2):
+    /// construct the `Box<dyn Asset>` equivalent of this config, proving
+    /// trait-object dispatch produces identical results to today's
+    /// enum dispatch ahead of the Phase 2b storage cutover. Deleted in
+    /// Phase 3 once `AssetConfig` itself is gone — callers construct
+    /// `Box<dyn Asset>` directly by then, no bridge needed.
+    pub fn to_boxed_asset(&self) -> Box<dyn Asset> {
+        match self {
+            AssetConfig::Battery(cfg) => Box::new(cfg.clone()),
+            AssetConfig::Ev(cfg) => Box::new(cfg.clone()),
+            AssetConfig::Heater(cfg) => Box::new(cfg.clone()),
+            AssetConfig::Pv(cfg) => Box::new(cfg.clone()),
+            AssetConfig::BaseLoad(cfg) => Box::new(cfg.clone()),
+        }
+    }
+
     // ── Asset trait dispatch ────────────────────────────────────────────────
 
     pub fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
@@ -400,5 +418,98 @@ impl AssetConfig {
             ))),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod phase1_bridge_tests {
+    //! Spec A Phase 1 (`asset-dispatch-trait-objects` tasks.md 3.2): proves
+    //! `Box<dyn Asset>` dispatch (via `AssetConfig::to_boxed_asset`) produces
+    //! identical results to today's enum dispatch, for at least one asset
+    //! type, ahead of the Phase 2b storage cutover.
+
+    use super::*;
+    use crate::entities::asset_params::BatteryParams;
+    use chrono::Duration;
+
+    fn battery_config() -> AssetConfig {
+        AssetConfig::Battery(Battery::from_params(&BatteryParams {
+            id: "battery".to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: None,
+        }))
+    }
+
+    fn battery_state() -> AssetState {
+        AssetState::Battery(Battery::initial_state(&BatteryParams {
+            id: "battery".to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: None,
+        }))
+    }
+
+    #[test]
+    fn boxed_asset_step_matches_enum_dispatched_step() {
+        let cfg = battery_config();
+        let state = battery_state();
+        let boxed = cfg.to_boxed_asset();
+
+        let (enum_state, enum_kw) = cfg.step(&state, 3.0, Duration::hours(1));
+        let (boxed_state, boxed_kw) = boxed.step(&state, 3.0, Duration::hours(1));
+
+        assert_eq!(enum_kw, boxed_kw, "actual power must match");
+        assert_eq!(
+            enum_state.actual_power_kw(),
+            boxed_state.actual_power_kw(),
+            "resulting state's power must match"
+        );
+        let AssetState::Battery(enum_bs) = enum_state else {
+            unreachable!()
+        };
+        let AssetState::Battery(boxed_bs) = boxed_state else {
+            unreachable!()
+        };
+        assert!(
+            (enum_bs.soc - boxed_bs.soc).abs() < 1e-12,
+            "resulting SoC must match: enum={}, boxed={}",
+            enum_bs.soc,
+            boxed_bs.soc
+        );
+    }
+
+    #[test]
+    fn boxed_asset_capability_matches_enum_dispatched_capability() {
+        let cfg = battery_config();
+        let state = battery_state();
+        let boxed = cfg.to_boxed_asset();
+
+        let enum_cap = cfg.capability(&state);
+        let boxed_cap = boxed.capability(&state);
+
+        assert_eq!(enum_cap.max_export_kw, boxed_cap.max_export_kw);
+        assert_eq!(enum_cap.max_import_kw, boxed_cap.max_import_kw);
+    }
+
+    #[test]
+    fn boxed_asset_flexibility_floor_matches_enum_dispatched_flexibility_floor() {
+        let cfg = battery_config();
+        let state = battery_state();
+        let boxed = cfg.to_boxed_asset();
+
+        let enum_floor = cfg.flexibility_floor(&state);
+        let boxed_floor = boxed.flexibility_floor(&state);
+
+        assert_eq!(enum_floor.min_export_kw, boxed_floor.min_export_kw);
+        assert_eq!(enum_floor.min_import_kw, boxed_floor.min_import_kw);
     }
 }
