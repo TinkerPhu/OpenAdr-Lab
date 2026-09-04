@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+    TickOverridable, TickOverrides,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -428,6 +429,30 @@ impl Asset for PvInverter {
     // fallback for PV in build_milp_context/resolve_request_target/
     // available_storage_kwh/surplus_charge_kw/thermostat_setpoint_kw/
     // plan_trajectory.
+
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        Some(self)
+    }
+}
+
+impl TickOverridable for PvInverter {
+    /// Moved here verbatim from `SimState::tick()`'s `AssetConfig::Pv` match
+    /// arm (design.md Decision D5). `state` unused — PV's overrides are all
+    /// config fields, no `AssetState` mutation needed.
+    fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
+        self.irradiance = overrides.pv_irradiance;
+        self.irradiance_offset = overrides.pv_irradiance_offset;
+        self.pv_alpha = overrides.pv_alpha;
+        self.generation_limit_kw = overrides.pv_generation_limit_kw;
+        self.curtailment_source = overrides.pv_curtailment_source;
+        // Weather is never nulled by a manual override anymore — a
+        // recently-released override's decaying irradiance_offset blends
+        // additively on top of it instead (see `PvInverter::step_inner`).
+        // Only a forced override (this exact tick) takes exclusive control.
+        self.weather_power_kw = overrides.pv_weather_power_kw;
+        self.measured_power_kw = overrides.pv_measured_power_kw;
+        self.irradiance_forced = overrides.pv_irradiance_forced;
+    }
 }
 
 #[cfg(test)]

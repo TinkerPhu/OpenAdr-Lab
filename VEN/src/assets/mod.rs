@@ -26,7 +26,8 @@ pub mod pv;
 // #[allow(dead_code)]'d for before this file split.
 #[allow(unused_imports)]
 pub use asset_trait::{
-    Asset, AssetHandle, MilpParticipant, RequestResolvable, Thermostat, Trajectory, TrajectoryPoint,
+    Asset, AssetHandle, MilpParticipant, RequestResolvable, Thermostat, TickOverridable,
+    TickOverrides, Trajectory, TrajectoryPoint,
 };
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
@@ -1229,6 +1230,240 @@ mod phase2a_trivial_delegation_smoke_tests {
         };
         exercise_trivial_methods(
             AssetConfig::BaseLoad(BaseLoad::from_params(&params)).to_boxed_asset(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase2b_tick_overridable_tests {
+    //! Spec A Phase 2b prerequisite (`asset-dispatch-trait-objects` tasks.md
+    //! 5.3 groundwork): proves each `TickOverridable` impl reproduces exactly
+    //! what `SimState::tick()`'s hand-written match arm used to do, for the
+    //! same inputs. `tick()` itself isn't rewired to call these yet (that's
+    //! the atomic storage-cutover step) -- these tests exercise the trait
+    //! directly via the Phase 1 `to_boxed_asset()` bridge.
+
+    use super::*;
+    use crate::entities::asset_params::PvCurtailmentSource;
+    use crate::entities::asset_params::{BaseLoadParams, EvParams, HeaterParams, PvParams};
+
+    fn default_overrides() -> TickOverrides {
+        TickOverrides {
+            pv_irradiance: 0.0,
+            pv_irradiance_offset: 0.0,
+            pv_alpha: 0.1,
+            pv_generation_limit_kw: None,
+            pv_curtailment_source: PvCurtailmentSource::None,
+            pv_weather_power_kw: None,
+            pv_measured_power_kw: None,
+            pv_irradiance_forced: false,
+            heater_ambient_temp_c_override: None,
+            heater_temp_min_override: None,
+            heater_temp_max_override: None,
+            heater_emergency_curtail_override: None,
+            heater_emergency_absorb_override: None,
+            base_load_measured_kw: None,
+            base_load_baseline_kw: None,
+            ev_plugged_override: None,
+            ev_soc_target_override: None,
+        }
+    }
+
+    #[test]
+    fn pv_apply_tick_overrides_sets_all_fields() {
+        let mut boxed = AssetConfig::Pv(PvInverter::from_params(&PvParams {
+            id: "pv".to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 8.5,
+            co2_g_kwh: 40.0,
+        }))
+        .to_boxed_asset();
+        let mut state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+            generation_limit_kw: None,
+            curtailment_source: PvCurtailmentSource::None,
+        });
+
+        let overrides = TickOverrides {
+            pv_irradiance: 0.75,
+            pv_irradiance_offset: 0.05,
+            pv_alpha: 0.2,
+            // No generation_limit_kw here deliberately: with one set, a
+            // clamped result can't distinguish "irradiance_forced won" from
+            // "some other override won and got clamped to the same value."
+            pv_generation_limit_kw: None,
+            pv_curtailment_source: PvCurtailmentSource::Plan,
+            pv_weather_power_kw: Some(4.0),
+            pv_measured_power_kw: Some(4.2),
+            pv_irradiance_forced: true,
+            ..default_overrides()
+        };
+        boxed
+            .as_tick_overridable()
+            .expect("PV must implement TickOverridable")
+            .apply_tick_overrides(&mut state, &overrides);
+
+        // Confirm the forced-irradiance branch actually took effect downstream:
+        // irradiance_forced + irradiance must win outright over the weather/
+        // measured overrides also present, per PvInverter's own documented
+        // precedence -- 0.75 * 10 kW = 7.5 kW, not the weather(4.0) or
+        // measured(4.2) values.
+        let (_, actual_kw) = boxed.step(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (actual_kw + 7.5).abs() < 1e-9,
+            "forced irradiance=0.75 on a 10kW array must yield -7.5 kW \
+             regardless of weather/measured overrides, got {actual_kw}"
+        );
+    }
+
+    #[test]
+    fn heater_apply_tick_overrides_matches_inherent_method() {
+        let params = HeaterParams {
+            id: "heater".to_string(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        };
+        let mut via_trait = Heater::from_params(&params);
+        let mut via_inherent = Heater::from_params(&params);
+        let mut state = AssetState::Heater(HeaterState {
+            temperature_c: 20.0,
+            actual_power_kw: 0.0,
+        });
+
+        let overrides = TickOverrides {
+            heater_ambient_temp_c_override: Some(5.0),
+            heater_temp_min_override: Some(17.0),
+            heater_temp_max_override: Some(24.0),
+            heater_emergency_curtail_override: Some(true),
+            heater_emergency_absorb_override: None,
+            ..default_overrides()
+        };
+        // Dot-syntax always resolves to the inherent method (it shadows the
+        // trait method of the same name) -- exactly the ambiguity flagged in
+        // tasks.md, confirmed here: fully-qualified syntax is required to
+        // reach the trait impl on a concrete `Heater`. Through `dyn
+        // TickOverridable` (what `tick()`'s rewrite will actually use) this
+        // doesn't arise -- a trait object only exposes the trait's own methods.
+        TickOverridable::apply_tick_overrides(&mut via_trait, &mut state, &overrides);
+        via_inherent.apply_tick_overrides(Some(5.0), Some(17.0), Some(24.0), Some(true), None);
+
+        assert_eq!(via_trait.ambient_temp_c, via_inherent.ambient_temp_c);
+        assert_eq!(via_trait.temp_min_c, via_inherent.temp_min_c);
+        assert_eq!(via_trait.temp_max_c, via_inherent.temp_max_c);
+        assert_eq!(via_trait.emergency_mode, via_inherent.emergency_mode);
+    }
+
+    #[test]
+    fn base_load_apply_tick_overrides_sets_measured_and_baseline() {
+        let mut bl = BaseLoad::from_params(&BaseLoadParams {
+            id: "base_load".to_string(),
+            baseline_kw: 0.5,
+            spikes: vec![],
+        });
+        let mut state = AssetState::BaseLoad(BaseLoadState {
+            actual_power_kw: 0.0,
+        });
+
+        let overrides = TickOverrides {
+            base_load_measured_kw: Some(1.2),
+            base_load_baseline_kw: Some(1.5),
+            ..default_overrides()
+        };
+        bl.apply_tick_overrides(&mut state, &overrides);
+
+        assert_eq!(bl.measured_load_kw, Some(1.2));
+        assert_eq!(bl.baseline_kw, 1.5);
+    }
+
+    #[test]
+    fn base_load_apply_tick_overrides_leaves_baseline_unchanged_when_none() {
+        // Mirrors tick()'s "no BaseLoad asset found" case: base_load_baseline_kw
+        // is None, and the original match arm never fires at all, so
+        // baseline_kw must be left exactly as it was.
+        let mut bl = BaseLoad::from_params(&BaseLoadParams {
+            id: "base_load".to_string(),
+            baseline_kw: 0.5,
+            spikes: vec![],
+        });
+        let mut state = AssetState::BaseLoad(BaseLoadState {
+            actual_power_kw: 0.0,
+        });
+
+        bl.apply_tick_overrides(&mut state, &default_overrides());
+
+        assert_eq!(bl.baseline_kw, 0.5, "baseline_kw must be untouched");
+    }
+
+    #[test]
+    fn ev_apply_tick_overrides_sets_plugged_state_and_soc_target() {
+        let params = EvParams {
+            id: "ev".to_string(),
+            max_charge_kw: 7.0,
+            max_discharge_kw: 7.0,
+            initial_soc: 0.4,
+            battery_kwh: 50.0,
+            soc_target: 0.8,
+            default_charge_kw: 7.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 0.0,
+            v2g_capable: true,
+        };
+        let mut ev = EvCharger::from_params(&params);
+        let mut state = AssetState::Ev(EvCharger::initial_state(&params));
+
+        let overrides = TickOverrides {
+            ev_plugged_override: Some(false),
+            ev_soc_target_override: Some(0.6),
+            ..default_overrides()
+        };
+        ev.apply_tick_overrides(&mut state, &overrides);
+
+        let AssetState::Ev(s) = state else {
+            panic!("expected Ev state")
+        };
+        assert!(!s.plugged, "plugged override must be applied to state");
+        assert_eq!(ev.soc_target, 0.6);
+    }
+
+    #[test]
+    fn ev_apply_tick_overrides_snaps_back_to_profile_defaults_when_none() {
+        let params = EvParams {
+            id: "ev".to_string(),
+            max_charge_kw: 7.0,
+            max_discharge_kw: 7.0,
+            initial_soc: 0.4,
+            battery_kwh: 50.0,
+            soc_target: 0.8,
+            default_charge_kw: 7.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 0.0,
+            v2g_capable: true,
+        };
+        let mut ev = EvCharger::from_params(&params);
+        ev.soc_target = 0.5; // simulate a lingering override from a prior tick
+        let mut state = AssetState::Ev(EvCharger::initial_state(&params));
+        if let AssetState::Ev(s) = &mut state {
+            s.plugged = false;
+        }
+
+        ev.apply_tick_overrides(&mut state, &default_overrides());
+
+        let AssetState::Ev(s) = state else {
+            panic!("expected Ev state")
+        };
+        assert!(s.plugged, "no override must snap back to plugged=true");
+        assert_eq!(
+            ev.soc_target, ev.soc_target_profile,
+            "no override must snap back to the profile soc_target"
         );
     }
 }

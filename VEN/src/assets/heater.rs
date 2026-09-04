@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
-    Thermostat,
+    Thermostat, TickOverridable, TickOverrides,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -449,6 +449,30 @@ impl Asset for Heater {
 
     fn as_thermostat(&self) -> Option<&dyn Thermostat> {
         Some(self)
+    }
+
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        Some(self)
+    }
+}
+
+impl TickOverridable for Heater {
+    /// Delegates to the pre-existing inherent `Heater::apply_tick_overrides`
+    /// (design.md Decision D5). Deliberately named the same as the trait
+    /// method it wraps — safe because Rust always resolves `Self::method(...)`
+    /// to an inherent method over a same-named trait method, and the two have
+    /// different arities (5 plain args here vs. `(state, overrides)` on the
+    /// trait) so there's no ambiguity either way. Kept rather than renamed to
+    /// avoid touching the inherent method's own (unrelated) call sites.
+    fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
+        Self::apply_tick_overrides(
+            self,
+            overrides.heater_ambient_temp_c_override,
+            overrides.heater_temp_min_override,
+            overrides.heater_temp_max_override,
+            overrides.heater_emergency_curtail_override,
+            overrides.heater_emergency_absorb_override,
+        );
     }
 }
 
