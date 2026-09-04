@@ -334,7 +334,9 @@ def step_ev_right_visible(context):
 
 @then("the EV asset cell right section is not visible")
 def step_ev_right_not_visible(context):
-    right = context.browser_page.query_selector(tid("asset-cell-ev-right"))
-    assert right is None or not right.is_visible(), (
-        "asset-cell-ev-right is still visible after collapse"
+    # Must wait like the "is visible" counterpart above — an instant
+    # query_selector() right after a collapse click races the UI's
+    # transition/re-render and can read the pre-collapse DOM state.
+    context.browser_page.wait_for_selector(
+        tid("asset-cell-ev-right"), state="hidden", timeout=45000
     )
