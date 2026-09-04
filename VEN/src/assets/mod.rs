@@ -1015,3 +1015,108 @@ mod phase2a_heater_tests {
         assert_eq!(enum_scalars.p_step_kw, boxed_scalars.p_step_kw);
     }
 }
+
+#[cfg(test)]
+mod phase2a_pv_tests {
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.4). PV
+    //! implements none of D4's three capability traits — only the 9
+    //! universal methods need equivalence coverage.
+
+    use super::*;
+    use crate::entities::asset_params::PvParams;
+    use chrono::Duration;
+
+    fn cfg_and_state() -> (AssetConfig, AssetState) {
+        let params = PvParams {
+            id: "pv".to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 8.5,
+            co2_g_kwh: 40.0,
+        };
+        (
+            AssetConfig::Pv(PvInverter::from_params(&params)),
+            AssetState::Pv(PvInverter::initial_state(&params)),
+        )
+    }
+
+    #[test]
+    fn state_values_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        assert_eq!(
+            cfg.state_values(&state),
+            cfg.to_boxed_asset().state_values(&state)
+        );
+    }
+
+    #[test]
+    fn forecast_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+        let timespan = Duration::seconds(300);
+        assert_eq!(
+            cfg.forecast(&state, timespan, now).samples,
+            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
+        );
+    }
+
+    #[test]
+    fn no_capability_trait_overrides() {
+        let (cfg, _) = cfg_and_state();
+        let boxed = cfg.to_boxed_asset();
+        assert!(boxed.as_milp_participant().is_none());
+        assert!(boxed.as_request_resolvable().is_none());
+        assert!(boxed.as_thermostat().is_none());
+    }
+}
+
+#[cfg(test)]
+mod phase2a_base_load_tests {
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.5).
+    //! BaseLoad implements none of D4's three capability traits — only the
+    //! 9 universal methods need equivalence coverage.
+
+    use super::*;
+    use crate::entities::asset_params::BaseLoadParams;
+    use chrono::Duration;
+
+    fn cfg_and_state() -> (AssetConfig, AssetState) {
+        let params = BaseLoadParams {
+            id: "base_load".to_string(),
+            baseline_kw: 0.6,
+            spikes: vec![],
+        };
+        (
+            AssetConfig::BaseLoad(BaseLoad::from_params(&params)),
+            AssetState::BaseLoad(BaseLoad::initial_state(&params)),
+        )
+    }
+
+    #[test]
+    fn state_values_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        assert_eq!(
+            cfg.state_values(&state),
+            cfg.to_boxed_asset().state_values(&state)
+        );
+    }
+
+    #[test]
+    fn forecast_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+        let timespan = Duration::seconds(300);
+        assert_eq!(
+            cfg.forecast(&state, timespan, now).samples,
+            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
+        );
+    }
+
+    #[test]
+    fn no_capability_trait_overrides() {
+        let (cfg, _) = cfg_and_state();
+        let boxed = cfg.to_boxed_asset();
+        assert!(boxed.as_milp_participant().is_none());
+        assert!(boxed.as_request_resolvable().is_none());
+        assert!(boxed.as_thermostat().is_none());
+    }
+}

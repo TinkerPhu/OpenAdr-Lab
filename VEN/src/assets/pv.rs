@@ -6,7 +6,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::PowerAdjustability;
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 
 fn f64_infinity() -> f64 {
@@ -376,6 +376,58 @@ impl Asset for PvInverter {
         };
         self.flexibility_floor_inner(s)
     }
+
+    fn default_setpoint(&self) -> f64 {
+        Self::default_setpoint(self)
+    }
+
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
+        Self::control_schema(self)
+    }
+
+    fn update_config(&mut self, values: HashMap<String, f64>) {
+        Self::update_config(self, values)
+    }
+
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
+        Self::default_comfort_rates(self)
+    }
+
+    fn default_completion_policy(&self) -> CompletionPolicy {
+        Self::default_completion_policy(self)
+    }
+
+    fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        Self::default_post_deadline_comfort_bid(self)
+    }
+
+    fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
+        let AssetState::Pv(s) = state else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        Self::state_values(self, s)
+    }
+
+    fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
+        let AssetState::Pv(s) = state else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        Self::reset(self, s, values)
+    }
+
+    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
+        let AssetState::Pv(s) = state else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        Self::forecast(self, s, timespan, now)
+    }
+
+    // No as_milp_participant/as_request_resolvable/as_thermostat override —
+    // PV implements none of D4's three capability traits; the trait's own
+    // None defaults apply, matching AssetConfig's existing `_ => None`
+    // fallback for PV in build_milp_context/resolve_request_target/
+    // available_storage_kwh/surplus_charge_kw/thermostat_setpoint_kw/
+    // plan_trajectory.
 }
 
 #[cfg(test)]
