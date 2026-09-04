@@ -4,10 +4,12 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+    MilpParticipant, RequestResolvable,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::PowerAdjustability;
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::EvParams;
+use crate::entities::device_session::{EvSession, HeaterTarget};
 
 /// Snap a commanded EV setpoint to 0 if it falls strictly between 0 and the minimum
 /// sustained charge rate (BL-12) — does not apply to V2G discharge (negative setpoints).
@@ -331,6 +333,141 @@ impl Asset for EvCharger {
             unreachable!()
         };
         self.flexibility_floor_inner(s)
+    }
+
+    fn default_setpoint(&self) -> f64 {
+        Self::default_setpoint(self)
+    }
+
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
+        Self::control_schema(self)
+    }
+
+    fn update_config(&mut self, values: HashMap<String, f64>) {
+        Self::update_config(self, values)
+    }
+
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
+        Self::default_comfort_rates(self)
+    }
+
+    fn default_completion_policy(&self) -> CompletionPolicy {
+        Self::default_completion_policy(self)
+    }
+
+    fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        Self::default_post_deadline_comfort_bid(self)
+    }
+
+    fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        Self::state_values(self, s)
+    }
+
+    fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        Self::reset(self, s, values)
+    }
+
+    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        Self::forecast(self, s, timespan, now)
+    }
+
+    fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
+        Some(self)
+    }
+
+    fn as_request_resolvable(&self) -> Option<&dyn RequestResolvable> {
+        Some(self)
+    }
+}
+
+impl MilpParticipant for EvCharger {
+    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 3 heterogeneous asset kinds — see trait doc
+    fn build_milp_context(
+        &self,
+        state: &AssetState,
+        n: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+        ev_session: Option<&EvSession>,
+        _heater_target: Option<&HeaterTarget>,
+        ev_min_charge_kw: f64,
+        v_ev_extra_eur_kwh: f64,
+        v_ev_core_eur_kwh: f64,
+        asap_lateness_eur_kwh_h: f64,
+        v_ev_free_charge_eur_kwh: f64,
+        _lambda_sw: f64,
+        _c_terminal_eur_kwh: f64,
+        _heater_anchor: Vec<Option<f64>>,
+        w_ghg_eur_kg: f64,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        Box::new(
+            crate::controller::milp_planner::asset_port::EvMilpContext::from_state(
+                state,
+                self,
+                n,
+                cum_s,
+                now,
+                ev_session,
+                ev_min_charge_kw,
+                v_ev_extra_eur_kwh,
+                v_ev_core_eur_kwh,
+                asap_lateness_eur_kwh_h,
+                v_ev_free_charge_eur_kwh,
+                w_ghg_eur_kg,
+            ),
+        )
+    }
+}
+
+impl RequestResolvable for EvCharger {
+    fn resolve_request_target(
+        &self,
+        state: &AssetState,
+        target_soc: Option<f64>,
+        desired_power_kw: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        Self::resolve_request_target(self, s, target_soc, desired_power_kw)
+    }
+
+    /// Moved here verbatim from `AssetConfig::available_storage_kwh`'s EV arm
+    /// (no prior `EvCharger`-only inherent method existed for this). `None`
+    /// for an unplugged EV, matching the original match's `if s.plugged` guard.
+    fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        if !s.plugged {
+            return None;
+        }
+        Some((
+            (s.soc - self.min_soc).max(0.0) * self.battery_kwh,
+            (1.0 - s.soc).max(0.0) * self.battery_kwh,
+        ))
+    }
+
+    /// Moved here verbatim from `AssetConfig::surplus_charge_kw`'s only real
+    /// arm (EV is the only asset kind that absorbs surplus today).
+    fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
+        let AssetState::Ev(s) = state else {
+            unreachable!("EvCharger/state mismatch")
+        };
+        if s.plugged && s.soc < self.soc_target {
+            Some(surplus_kw.min(self.max_charge_kw))
+        } else {
+            None
+        }
     }
 }
 
