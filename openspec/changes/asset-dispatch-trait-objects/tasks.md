@@ -301,8 +301,9 @@ commit, not incrementally per asset type.
 
 ## 7. Verification
 
-- [ ] 7.1 UI unit tests: `cd VEN/ui && npm test` (unaffected by this change but
-      part of the required full-suite pass per `docs/guidelines/TESTING.md`).
+- [x] 7.1 UI unit tests: VEN UI 627/627 passed, VTN UI 71/71 passed —
+      unaffected by this change, as expected, run per the required full-suite
+      pass in `docs/guidelines/TESTING.md`.
 - [x] 7.2 Rust unit + integration: `wsl cargo test -j 2` under `wsl_lock.sh` —
       1236 passed, 0 failed, 3 ignored.
 - [ ] 7.3 E2E BDD: `bash run_all_tests.sh --e2e` on Node1 (acquire
