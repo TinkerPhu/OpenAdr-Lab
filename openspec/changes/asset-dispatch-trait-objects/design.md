@@ -304,6 +304,21 @@ Pv/Heater/BaseLoad/Ev, declined by Battery/(future ShiftableLoad) via the same
 becomes a loop calling the accessor, not a hand-written enum match — closing
 the exact gap D3 was written to catch.
 
+**Addendum, found during implementation (2026-09-04):** this self-contained
+shape assumes each asset resolves its own cross-cutting state, but PV's own
+cross-cutting smoothing (`SimState.pv_smoothing`) is already hoisted out of the
+per-asset loop in today's code — computed once, then copied onto `pv`'s own
+fields inside the match. BaseLoad's `self.base_load_smoothing.update(...)`
+call is *not* yet hoisted the same way. Implementing `TickOverridable` for
+BaseLoad therefore requires that hoist as a prerequisite step, done as part of
+implementing this trait (task 5.3) rather than assumed here. `TickOverrides`
+must carry pre-resolved values (PV's `irradiance`/`offset`, BaseLoad's
+`baseline_kw`), not the raw override/alpha inputs, so each asset's impl only
+assigns fields rather than recomputing smoothing itself. Consequently
+`TickOverridable`'s trait definition is deferred to task 5.3 (bundled with its
+implementation and the `tick()` rewrite), not defined in Phase 0 alongside the
+other three capability traits — see tasks.md section 2's note.
+
 **Rationale:** this is not new scope creep — it's the concrete instance D3
 explicitly reserved a task for ("that file needs its own migration task, not
 just a syntax find/replace"). Folding it into the existing capability-trait

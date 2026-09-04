@@ -1,7 +1,16 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, Utc};
 
-use super::{AssetCapability, AssetConfig, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState};
+use super::{
+    AssetCapability, AssetConfig, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState,
+    ControlDescriptor,
+};
 use crate::assets::HistoryPoint;
+use crate::common::TimeSeries;
+use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::timeline::HeaterPlanTrajectory;
 
 /// Trajectory produced by simulate_forward().
 pub struct Trajectory {
@@ -68,6 +77,109 @@ pub trait Asset: Send + Sync {
     /// state its own answer explicitly rather than silently inherit a wrong one.
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
 
+    // ── AssetConfig-scoped methods (Spec A D4) ──────────────────────────────
+    //
+    // "Universal" per D4's audit means universal across `AssetConfig`'s 5
+    // variants specifically (all dispatched via the delegate_asset! macros
+    // today, no `_ =>` fallback) — NOT universal across every `Asset`
+    // implementor. `Grid` also implements `Asset` but is deliberately outside
+    // `AssetConfig` (see `grid.rs`'s own doc comment: "not part of the
+    // controllable asset dispatch loop") and has no sim-inject/MILP/forecast
+    // concept of its own. So these get panicking defaults, same contract as
+    // `id`/`current_state`/`history` above: real physics types override them
+    // for real (wired in Spec A's Phase 2a, not this phase), Grid inherits the
+    // default and is never called this way in practice.
+
+    /// The setpoint a dispatcher should hold this asset at absent any explicit
+    /// command (e.g. battery/EV/heater hold at 0.0 — dispatcher-controlled).
+    fn default_setpoint(&self) -> f64 {
+        unimplemented!("Asset::default_setpoint() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// This asset's runtime-controllable parameters, for `GET /sim/schema`.
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
+        unimplemented!("Asset::control_schema() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// Apply user-edited config values (e.g. from the sim-inject UI).
+    fn update_config(&mut self, _values: HashMap<String, f64>) {
+        unimplemented!("Asset::update_config() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// MILP comfort-curve default (fill vs. max marginal price/CO2), used when
+    /// no user-set comfort curve exists for this asset's session.
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
+        unimplemented!(
+            "Asset::default_comfort_rates() only applies to AssetConfig-backed asset kinds"
+        )
+    }
+
+    /// What happens once this asset's MILP objective is satisfied (stop vs.
+    /// keep optimizing opportunistically).
+    fn default_completion_policy(&self) -> CompletionPolicy {
+        unimplemented!(
+            "Asset::default_completion_policy() only applies to AssetConfig-backed asset kinds"
+        )
+    }
+
+    /// Comfort bid applied past a missed deadline, if any.
+    fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        unimplemented!(
+            "Asset::default_post_deadline_comfort_bid() only applies to AssetConfig-backed asset kinds"
+        )
+    }
+
+    /// This state's config-relevant values, keyed for the generic sim-inject/
+    /// diagnostics UI (e.g. `{"soc": 0.6, "capacity_kwh": 10.0}`).
+    fn state_values(&self, _state: &AssetState) -> HashMap<String, f64> {
+        unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// Overwrite mutable state fields from user-supplied key/value pairs (the
+    /// inverse of `state_values`, for the sim-inject UI).
+    fn reset(&self, _state: &mut AssetState, _values: HashMap<String, f64>) {
+        unimplemented!("Asset::reset() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// Forecast this asset's own power over `timespan` from `now`, holding its
+    /// current setpoint (no plan-awareness — see `simulator::forecast` for
+    /// the plan-driven equivalent).
+    fn forecast(
+        &self,
+        _state: &AssetState,
+        _timespan: Duration,
+        _now: DateTime<Utc>,
+    ) -> TimeSeries {
+        unimplemented!("Asset::forecast() only applies to AssetConfig-backed asset kinds")
+    }
+
+    // ── Optional capabilities (Spec A D4) ───────────────────────────────────
+    //
+    // Unlike the universal methods above, these three have a safe, meaningful
+    // default: `None`, "this asset kind doesn't do that." Each is implemented
+    // only by the asset kinds D4's audit found already have real (non-`_ =>
+    // None`) behavior for it. A type simply doesn't implement the trait if it
+    // has no such capability, rather than implementing a stub that returns
+    // `None` — see design.md Decision D4's rationale.
+
+    /// This asset's MILP planning context, if it participates in MILP
+    /// scheduling at all (Battery/EV/Heater today; PV/BaseLoad do not).
+    fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
+        None
+    }
+
+    /// Whether a user can issue a direct request against this asset (target
+    /// SoC, surplus absorption) — storage-shaped assets only (Battery/EV
+    /// today).
+    fn as_request_resolvable(&self) -> Option<&dyn RequestResolvable> {
+        None
+    }
+
+    /// Whether this asset has thermostat-shaped behavior (Heater only today).
+    fn as_thermostat(&self) -> Option<&dyn Thermostat> {
+        None
+    }
+
     /// Project state forward over an explicit setpoint schedule (default impl).
     /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
     fn simulate_forward(
@@ -98,6 +210,80 @@ pub trait Asset: Send + Sync {
         }
         Trajectory { points }
     }
+}
+
+/// Capability: this asset participates in MILP planning. Implemented by
+/// Battery/EV/Heater — exactly `AssetMilpContext`'s existing `AssetKind` scope
+/// (`VEN/src/controller/asset_milp_port.rs`). See design.md Decision D4's
+/// correction note for why `default_comfort_rates`/`default_completion_policy`/
+/// `default_post_deadline_comfort_bid` are NOT here despite sounding
+/// MILP-specific — all 5 asset kinds already implement them for real, so
+/// they're universal `Asset` methods instead.
+#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
+pub trait MilpParticipant {
+    /// Build the MILP context for this asset. Signature carries the full
+    /// per-planning-cycle context every implementor needs (session/target
+    /// state, reward weights) even though most parameters apply to only one
+    /// or two asset kinds — see `AssetConfig::build_milp_context`'s existing
+    /// doc history for why this wasn't split further.
+    #[allow(clippy::too_many_arguments)] // one entry point for 3 heterogeneous asset kinds' MILP setup — see trait doc
+    fn build_milp_context(
+        &self,
+        state: &AssetState,
+        n: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+        ev_session: Option<&EvSession>,
+        heater_target: Option<&HeaterTarget>,
+        ev_min_charge_kw: f64,
+        v_ev_extra_eur_kwh: f64,
+        v_ev_core_eur_kwh: f64,
+        asap_lateness_eur_kwh_h: f64,
+        v_ev_free_charge_eur_kwh: f64,
+        lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
+        heater_anchor: Vec<Option<f64>>,
+        w_ghg_eur_kg: f64,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext>;
+}
+
+/// Capability: a user can issue a direct request against this asset (a target
+/// SoC/power, or opportunistic surplus absorption). Implemented by the two
+/// storage-shaped assets, Battery and EV.
+#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
+pub trait RequestResolvable {
+    /// Resolve a user request into `(energy_kwh, power_kw)`, or `None` if the
+    /// request implies no meaningful action (e.g. already at/above target).
+    fn resolve_request_target(
+        &self,
+        state: &AssetState,
+        target_soc: Option<f64>,
+        desired_power_kw: Option<f64>,
+    ) -> Option<(f64, f64)>;
+
+    /// `(discharge_kwh, charge_kwh)` currently available, or `None` if the
+    /// asset can't participate right now (e.g. an unplugged EV).
+    fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)>;
+
+    /// How much of `surplus_kw` this asset could opportunistically absorb
+    /// right now, or `None` if it can't absorb surplus at all (e.g. EV
+    /// already at its charge target, or unplugged).
+    fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64>;
+}
+
+/// Capability: this asset has thermostat-shaped behavior (a target
+/// temperature driving an on/off or discrete-stage setpoint). Implemented by
+/// Heater only, today.
+#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
+pub trait Thermostat {
+    /// A stateful trajectory computer seeded from the live state, for
+    /// recomputing the plan's own thermal trajectory — `None` if the current
+    /// state gives no basis to project from.
+    fn plan_trajectory(&self, live_state: &AssetState) -> Option<HeaterPlanTrajectory>;
+
+    /// The on/off (or discrete-stage) setpoint \[kW\] that drives temperature
+    /// toward `target_c` from the current state.
+    fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64;
 }
 
 // ─── AssetHandle ──────────────────────────────────────────────────────────────
