@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::assets::AssetConfig;
+use crate::assets::BaseLoad;
 
 use super::SimState;
 
@@ -32,10 +32,10 @@ impl SimState {
         base_load_measured_kw: Option<f64>,
         base_load_heuristic_kw: Option<f64>,
     ) -> Option<f64> {
-        let bl_cfg = self.asset_configs.iter().find_map(|cfg| match cfg {
-            AssetConfig::BaseLoad(bl) => Some(bl),
-            _ => None,
-        })?;
+        let bl_cfg = self
+            .asset_configs
+            .iter()
+            .find_map(|cfg| cfg.as_any().downcast_ref::<BaseLoad>())?;
 
         // Reproduce exactly what `tick()` is about to do, without writing it back:
         // the same `natural_base_kw` precedence and the same offset arithmetic.

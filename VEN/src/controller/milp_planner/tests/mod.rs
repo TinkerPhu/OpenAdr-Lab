@@ -4,7 +4,7 @@ use crate::assets::{
     battery::{Battery, BatteryState},
     ev::{EvCharger, EvState},
     heater::{Heater, HeaterState},
-    AssetConfig, AssetState,
+    AssetState, MilpParticipant,
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
 use crate::entities::asset_params::AssetParams;
@@ -521,11 +521,12 @@ fn build_asset_contexts(
                     soc,
                     actual_power_kw: 0.0,
                 });
-                let ac = AssetConfig::Battery(Battery::from_params(cfg));
+                let ac = Battery::from_params(cfg);
                 let c_terminal = cfg
                     .c_terminal_eur_kwh
                     .unwrap_or(avg_imp_eur_kwh * cfg.round_trip_efficiency);
-                if let Some(ctx) = ac.build_milp_context(
+                ctxs.push(MilpParticipant::build_milp_context(
+                    &ac,
                     &state,
                     n,
                     &cum_s,
@@ -541,9 +542,7 @@ fn build_asset_contexts(
                     c_terminal,
                     vec![],
                     profile.planner.w_ghg,
-                ) {
-                    ctxs.push(ctx);
-                }
+                ));
             }
             AssetProfile::Ev(cfg) => {
                 let soc = snap
@@ -563,8 +562,9 @@ fn build_asset_contexts(
                     plugged,
                     pending_command_kw: 0.0,
                 });
-                let ac = AssetConfig::Ev(EvCharger::from_params(cfg));
-                if let Some(ctx) = ac.build_milp_context(
+                let ac = EvCharger::from_params(cfg);
+                ctxs.push(MilpParticipant::build_milp_context(
+                    &ac,
                     &state,
                     n,
                     &cum_s,
@@ -580,9 +580,7 @@ fn build_asset_contexts(
                     0.0,
                     vec![],
                     profile.planner.w_ghg,
-                ) {
-                    ctxs.push(ctx);
-                }
+                ));
             }
             AssetProfile::Heater(cfg) => {
                 let heater_snap = snap.assets.get("heater");
@@ -594,11 +592,12 @@ fn build_asset_contexts(
                     temperature_c: temp_c,
                     actual_power_kw,
                 });
-                let ac = AssetConfig::Heater(Heater::from_params(cfg));
+                let ac = Heater::from_params(cfg);
                 let c_terminal = cfg
                     .c_terminal_eur_kwh
                     .unwrap_or(avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
-                if let Some(ctx) = ac.build_milp_context(
+                ctxs.push(MilpParticipant::build_milp_context(
+                    &ac,
                     &state,
                     n,
                     &cum_s,
@@ -614,9 +613,7 @@ fn build_asset_contexts(
                     c_terminal,
                     vec![],
                     profile.planner.w_ghg,
-                ) {
-                    ctxs.push(ctx);
-                }
+                ));
             }
             _ => {}
         }

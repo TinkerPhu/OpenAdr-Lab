@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::assets::{AssetConfig, PvInverter, PvPowerInputs};
+use crate::assets::{PvInverter, PvPowerInputs};
 
 use super::SimState;
 
@@ -30,10 +30,10 @@ impl SimState {
         weather_pv_kw: Option<f64>,
         pv_measured_kw: Option<f64>,
     ) -> Option<f64> {
-        let pv_cfg = self.asset_configs.iter().find_map(|cfg| match cfg {
-            AssetConfig::Pv(pv) => Some(pv),
-            _ => None,
-        })?;
+        let pv_cfg = self
+            .asset_configs
+            .iter()
+            .find_map(|cfg| cfg.as_any().downcast_ref::<PvInverter>())?;
 
         // Reproduce exactly what `tick()` is about to do to the smoothing state,
         // without writing it back: same natural curve, same offset arithmetic.

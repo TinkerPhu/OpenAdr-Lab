@@ -271,27 +271,33 @@ pub async fn post_requests(
     // WP4.2 (BL-19): user comfort-curve overrides beat the built-in defaults.
     let comfort_overrides = ctx.state.comfort_overrides_map().await;
     let asset_data: Vec<AssetRequestSlice> = {
-        use crate::assets::{AssetConfig as AC, AssetState as AS};
+        use crate::assets::{AssetState as AS, Battery, EvCharger};
         let sim = ctx.sim.lock().await;
         sim.assets
             .iter()
             .zip(sim.asset_configs.iter())
             .map(|(entry, cfg)| {
                 let (current_soc, default_soc_target, capacity_kwh, max_charge_kw) =
-                    match (&entry.state, cfg) {
-                        (AS::Ev(s), AC::Ev(c)) => (
+                    if let (AS::Ev(s), Some(c)) =
+                        (&entry.state, cfg.as_any().downcast_ref::<EvCharger>())
+                    {
+                        (
                             Some(s.soc),
                             Some(c.soc_target),
                             Some(c.battery_kwh),
                             Some(c.max_charge_kw),
-                        ),
-                        (AS::Battery(s), AC::Battery(c)) => (
+                        )
+                    } else if let (AS::Battery(s), Some(c)) =
+                        (&entry.state, cfg.as_any().downcast_ref::<Battery>())
+                    {
+                        (
                             Some(s.soc),
                             Some(1.0),
                             Some(c.capacity_kwh),
                             Some(c.max_charge_kw),
-                        ),
-                        _ => (None, None, None, None),
+                        )
+                    } else {
+                        (None, None, None, None)
                     };
                 AssetRequestSlice {
                     id: entry.id.clone(),

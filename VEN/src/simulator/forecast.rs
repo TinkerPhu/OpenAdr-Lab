@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use crate::assets::{Asset, AssetConfig, AssetHandle};
+use crate::assets::{Asset, AssetHandle};
 use crate::controller::simulator_port::{AssetForecastFrame, AssetForecastPoint};
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::{Plan, PlanTimeSlot};
@@ -63,8 +63,16 @@ pub fn build_forecast_frames(
         .collect();
 
     for (entry, cfg) in sim.iter_assets() {
-        match cfg {
-            AssetConfig::Pv(pv) => {
+        // Dispatched by `asset_type_str()` rather than a match on the old
+        // `AssetConfig` enum (Spec A) — PV needs its concrete type (no
+        // `simulate_forward`, ceiling comes from weather instead), the rest
+        // share `insert_simulated_points` with a per-kind `include_at` filter.
+        match cfg.asset_type_str() {
+            "pv" => {
+                let pv = cfg
+                    .as_any()
+                    .downcast_ref::<crate::assets::PvInverter>()
+                    .expect("asset_type_str() == \"pv\" implies a PvInverter");
                 insert_pv_points(
                     &mut frames,
                     pv,
@@ -75,10 +83,10 @@ pub fn build_forecast_frames(
                     now,
                 );
             }
-            AssetConfig::BaseLoad(_) => {
+            "base_load" => {
                 // Uncontrollable, fixed point — never contributes flexibility.
             }
-            AssetConfig::Ev(_) => {
+            "ev" => {
                 insert_simulated_points(&mut frames, entry, cfg, &future_slots, |slot| {
                     // EvState::plugged is never toggled by step() (verified: no
                     // `plugged =` assignment in ev.rs::step_inner) — a pure
@@ -93,7 +101,8 @@ pub fn build_forecast_frames(
                     ev_session.is_none_or(|s| slot.start < s.departure_time)
                 });
             }
-            AssetConfig::Battery(_) | AssetConfig::Heater(_) => {
+            _ => {
+                // battery, heater
                 insert_simulated_points(&mut frames, entry, cfg, &future_slots, |_| true);
             }
         }
@@ -110,7 +119,7 @@ pub fn build_forecast_frames(
 fn insert_simulated_points(
     frames: &mut [AssetForecastFrame],
     entry: &super::AssetEntry,
-    cfg: &AssetConfig,
+    cfg: &dyn Asset,
     future_slots: &[&PlanTimeSlot],
     include_at: impl Fn(&PlanTimeSlot) -> bool,
 ) {

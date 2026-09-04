@@ -251,6 +251,7 @@ impl Heater {
     /// State values for a future MILP time slot, given the thermal energy stored
     /// above `temp_min_c` at the start of that slot (kWh).
     /// Returns `{"temp_c": <temperature>}`.
+    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::heater_future_state is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
     pub fn future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64> {
         let temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c;
         HashMap::from([("temp_c".into(), temp_c)])
@@ -464,6 +465,10 @@ impl Asset for Heater {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn Asset> {
+        Box::new(self.clone())
     }
 
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {

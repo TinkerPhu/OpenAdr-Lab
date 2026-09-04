@@ -9,7 +9,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 
-use crate::assets::{AssetConfig, PvInverter};
+use crate::assets::PvInverter;
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
@@ -45,9 +45,11 @@ pub fn apply_pending_pv_inject(
 ) {
     if let Some(forced) = inject.pv_irradiance {
         let natural = PvInverter::natural_irradiance_at(now);
-        if let Some((_, AssetConfig::Pv(pv))) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
-            pv.irradiance_offset = forced - natural;
-            pv.pv_alpha = inject.pv_irradiance_alpha;
+        if let Some((_, cfg)) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
+            if let Some(pv) = cfg.as_any_mut().downcast_mut::<PvInverter>() {
+                pv.irradiance_offset = forced - natural;
+                pv.pv_alpha = inject.pv_irradiance_alpha;
+            }
         }
     }
 }
@@ -82,14 +84,15 @@ pub fn build_asset_contexts(
     sim_snap
         .iter_assets()
         .filter_map(|(entry, cfg)| {
+            let is_heater = cfg.asset_type_str() == "heater";
             // Use per-asset c_terminal: heater and battery get their own coefficient;
             // EV gets 0.0 (deadline constraint handles the charging incentive).
-            let c_terminal = match cfg {
-                AssetConfig::Heater(_) => heater_c_terminal_eur_kwh,
-                AssetConfig::Battery(_) => battery_c_terminal_eur_kwh,
+            let c_terminal = match cfg.asset_type_str() {
+                "heater" => heater_c_terminal_eur_kwh,
+                "battery" => battery_c_terminal_eur_kwh,
                 _ => 0.0,
             };
-            cfg.build_milp_context(
+            Some(cfg.as_milp_participant()?.build_milp_context(
                 &entry.state,
                 n_slots,
                 cum_s,
@@ -103,13 +106,13 @@ pub fn build_asset_contexts(
                 planner.v_ev_free_charge_eur_kwh,
                 lambda_sw,
                 c_terminal,
-                if matches!(cfg, AssetConfig::Heater(_)) {
+                if is_heater {
                     heater_anchor.to_vec()
                 } else {
                     vec![]
                 },
                 planner.w_ghg,
-            )
+            ))
         })
         .collect()
 }
@@ -153,16 +156,15 @@ mod tests {
 
         let natural = PvInverter::natural_irradiance_at(now);
         let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV).unwrap();
-        match cfg {
-            AssetConfig::Pv(pv) => {
-                assert!(
-                    (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
-                    "offset must be forced-minus-natural irradiance"
-                );
-                assert!((pv.pv_alpha - 0.25).abs() < 1e-9);
-            }
-            other => panic!("expected Pv config, got {other:?}"),
-        }
+        let pv = cfg
+            .as_any()
+            .downcast_ref::<PvInverter>()
+            .expect("expected Pv config");
+        assert!(
+            (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
+            "offset must be forced-minus-natural irradiance"
+        );
+        assert!((pv.pv_alpha - 0.25).abs() < 1e-9);
     }
 
     fn cum_seconds(n: usize, step_s: i64) -> Vec<i64> {

@@ -125,7 +125,15 @@ mod tests {
         save(&state, data_dir).await.unwrap();
         let loaded = load(data_dir).await.expect("must load what was just saved");
 
-        let (loaded_entry, _) = loaded.find_asset("battery").unwrap();
+        // Bare `load()` never restores `asset_configs` (skipped from serde since
+        // `Box<dyn Asset>` isn't (de)serializable) -- only `load_with_params`,
+        // which always rebuilds it from current params afterward, produces a
+        // SimState usable with `find_asset`. So look the entry up directly.
+        let loaded_entry = loaded
+            .assets
+            .iter()
+            .find(|e| e.id == "battery")
+            .expect("battery asset entry must exist after a bare load");
         match &loaded_entry.state {
             crate::assets::AssetState::Battery(s) => {
                 assert!((s.soc - 0.73).abs() < 1e-9, "soc must survive round-trip");
@@ -211,13 +219,14 @@ mod tests {
             }
             other => panic!("expected Battery state, got {other:?}"),
         }
-        match cfg {
-            crate::assets::AssetConfig::Battery(b) => assert!(
-                (b.capacity_kwh - 20.0).abs() < 1e-9,
-                "config must come from the *current* params, not the persisted file"
-            ),
-            other => panic!("expected Battery config, got {other:?}"),
-        }
+        let b = cfg
+            .as_any()
+            .downcast_ref::<crate::assets::Battery>()
+            .expect("expected Battery config");
+        assert!(
+            (b.capacity_kwh - 20.0).abs() < 1e-9,
+            "config must come from the *current* params, not the persisted file"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -10,12 +10,9 @@ use uuid::Uuid;
 
 use crate::assets::AssetState;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
-use crate::entities::asset::AssetType;
-use crate::entities::timeline::{
-    HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot,
-};
+use crate::entities::timeline::{TimelineAssetData, TimelinePoint, TimelineSnapshot};
 
-use super::{AssetConfig, SimState};
+use super::SimState;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SensorSnapshot {
@@ -81,29 +78,23 @@ impl SimState {
         for (entry, cfg) in self.iter_assets() {
             let values = cfg.state_values(&entry.state);
             let cap = cfg.capability(&entry.state);
-            let (available_discharge_kwh, available_charge_kwh) =
-                match cfg.available_storage_kwh(&entry.state) {
-                    Some((dis, ch)) => (Some(dis), Some(ch)),
-                    None => (None, None),
-                };
-            let asset_type = match cfg {
-                AssetConfig::Battery(_) => "battery",
-                AssetConfig::Ev(_) => "ev",
-                AssetConfig::Heater(_) => "heater",
-                AssetConfig::Pv(_) => "pv",
-                AssetConfig::BaseLoad(_) => "base_load",
-            }
-            .to_string();
+            let (available_discharge_kwh, available_charge_kwh) = match cfg
+                .as_request_resolvable()
+                .and_then(|r| r.available_storage_kwh(&entry.state))
+            {
+                Some((dis, ch)) => (Some(dis), Some(ch)),
+                None => (None, None),
+            };
             assets_map.insert(
                 entry.id.clone(),
                 AssetSnapshot {
                     power_kw: entry.last_power_kw,
-                    asset_type,
+                    asset_type: cfg.asset_type_str().to_string(),
                     cap_max_import_kw: cap.max_import_kw,
                     cap_max_export_kw: cap.max_export_kw,
                     available_discharge_kwh,
                     available_charge_kwh,
-                    default_setpoint_kw: cfg.default_setpoint(&entry.state),
+                    default_setpoint_kw: cfg.default_setpoint(),
                     setpoint_kw: entry.setpoint_kw,
                     values,
                 },
@@ -148,28 +139,14 @@ impl SimState {
                     .recent_avg_power(chrono::Duration::seconds(60), now)
                     .unwrap_or_else(|| entry.history.latest().map(|p| p.power_kw).unwrap_or(0.0));
                 let current_state_values = cfg.state_values(&entry.state);
-                let asset_type = match cfg {
-                    AssetConfig::Battery(_) => AssetType::Battery,
-                    AssetConfig::Ev(_) => AssetType::Ev,
-                    AssetConfig::Heater(_) => AssetType::Heater,
-                    AssetConfig::Pv(_) => AssetType::Pv,
-                    AssetConfig::BaseLoad(_) => AssetType::GenericConsumer,
-                };
-                let plan_trajectory = match (cfg, &entry.state) {
-                    (AssetConfig::Heater(h), AssetState::Heater(s)) => {
-                        let e_max_kwh = (h.temp_max_c - h.temp_min_c) * h.thermal_mass_kwh_per_c;
-                        let e_kwh = ((s.temperature_c - h.temp_min_c) * h.thermal_mass_kwh_per_c)
-                            .clamp(0.0, e_max_kwh);
-                        Some(HeaterPlanTrajectory {
-                            e_kwh,
-                            temp_min_c: h.temp_min_c,
-                            thermal_mass: h.thermal_mass_kwh_per_c,
-                            q_dem_kw: h.forecast_demand_kw(h.ambient_temp_c),
-                            e_max_kwh,
-                        })
-                    }
-                    _ => None,
-                };
+                let asset_type = cfg.asset_type();
+                // Was a third inline copy of Heater's plan-trajectory math
+                // (alongside `Heater::plan_trajectory` and
+                // `Thermostat::plan_trajectory`) — now just calls through the
+                // capability trait, same as everywhere else that needs it.
+                let plan_trajectory = cfg
+                    .as_thermostat()
+                    .and_then(|t| t.plan_trajectory(&entry.state));
                 (
                     entry.id.clone(),
                     TimelineAssetData {

@@ -169,7 +169,11 @@ fn peek_pv_kw_override_bypasses_decay() {
 #[test]
 fn peek_pv_kw_respects_generation_limit_kw() {
     let mut sim = pv_state(10.0);
-    if let Some(AssetConfig::Pv(pv)) = sim.asset_configs.first_mut() {
+    if let Some(pv) = sim
+        .asset_configs
+        .first_mut()
+        .and_then(|c| c.as_any_mut().downcast_mut::<crate::assets::PvInverter>())
+    {
         pv.generation_limit_kw = Some(-2.0);
     } else {
         panic!("expected a PV asset config");

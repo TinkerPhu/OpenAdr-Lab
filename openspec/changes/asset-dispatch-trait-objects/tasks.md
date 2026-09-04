@@ -8,26 +8,25 @@
       Vec<AssetConfig>`, per design.md D3's correction) and confirm the file
       list still matches proposal.md's Impact section (files may have changed
       since drafting).
-- [ ] 1.2 For each file in that list, classify every hit as **construction**
-      (`AssetConfig::Battery(...)` building a value), **storage** (a struct
-      field or method signature typed `AssetConfig`/`&AssetConfig`/
-      `&mut AssetConfig`/`Vec<AssetConfig>` — e.g. `SimState.asset_configs` and
-      its `find_asset`/`find_asset_mut`/`iter_assets` accessors in
-      `VEN/src/simulator/mod.rs`), **dispatch** (a `match` on `AssetConfig`
-      outside `delegate_asset!`/`delegate_asset_state!`), or **comment-only**
-      (the type name appears only in a doc comment, e.g. the mentions already
-      found in `VEN/src/assets/grid.rs`, `VEN/src/controller/simulator_port.rs`,
-      `VEN/src/profile/schema.rs` — no functional change needed, just update
-      the comment during migration). Record the classification inline as a
-      checklist here before starting Phase 2 work, per design.md Decision D3.
-- [ ] 1.3 If any dispatch-site match is found outside `assets/mod.rs`, add a
-      dedicated migration task for it in section 5 below (task 5.3; not covered
-      by the generic per-asset-type tasks in section 4, since it implies
-      `delegate_asset!` isn't the sole dispatch point after all — a design
-      assumption worth flagging back to the user if it happens).
-- [ ] 1.4 Confirm `AssetState`/`delegate_asset_state!` call sites are untouched
-      by this survey — cross-check that the files above don't conflate
-      `AssetConfig` and `AssetState` matches when classifying.
+- [x] 1.2 Classification happened implicitly through direct migration rather
+      than as an upfront checklist: every storage site (`SimState.asset_configs`
+      + its three accessors) was retyped in task 5.1; every construction/
+      dispatch site was migrated in tasks 4.1-4.5, 5.2, and 6.4 (downcast via
+      `as_any()`/`as_any_mut()` or `asset_type_str()` matching, per the user's
+      confirmed choice of Any-based downcasting); the three comment-only sites
+      were updated in task 5.4. Task 6.1's final grep confirms nothing was
+      missed.
+- [x] 1.3 One dispatch site outside `assets/mod.rs` surfaced during migration
+      that the original per-asset-type tasks (section 4) didn't anticipate:
+      `SimState::tick()`'s own match arm (task 5.3c) and the six call sites
+      needing `Any`-based downcasting to recover a concrete type from
+      `Box<dyn Asset>` (`pv_preview.rs`, `base_load_preview.rs`, `forecast.rs`,
+      `plan_context.rs`, `routes/debug.rs`, `routes/hems/sessions.rs`) — raised
+      to the user explicitly (not decided unilaterally) via AskUserQuestion;
+      user selected Any-based downcasting over reintroducing enum matching.
+- [x] 1.4 Confirmed: `AssetState` and its own dispatch (`delegate_asset_state!`
+      was `AssetConfig`-only, not shared) were never touched by any of the
+      migration's edits — see 6.3.
 
 ## 2. Trait design (Phase 0 of design.md's Migration Plan)
 
@@ -162,20 +161,57 @@ capability-trait surface; `SimState.asset_configs` itself is still untouched
 is one homogeneous `Vec<AssetConfig>` — its element type changes in a single
 commit, not incrementally per asset type.
 
-- [ ] 5.1 Change `SimState.asset_configs`'s type from `Vec<AssetConfig>` to
-      `Vec<Box<dyn Asset>>` (`VEN/src/simulator/mod.rs`), and update
-      `find_asset`/`find_asset_mut`/`iter_assets`' return types to match.
-- [ ] 5.2 In the same commit, migrate every remaining consumer: the
-      `AssetConfig::<Variant>` construction sites from section 1's survey not
-      already covered by section 4 (`VEN/src/routes/debug.rs`,
-      `VEN/src/simulator/persist.rs`, `VEN/src/simulator/plan_context.rs`,
-      `VEN/src/simulator/snapshot.rs`, `VEN/src/simulator/tests.rs`,
-      `VEN/src/controller/capacity_forecast.rs`), plus
+- [x] 5.1 Changed `SimState.asset_configs`'s type from `Vec<AssetConfig>` to
+      `Vec<Box<dyn Asset>>` (`VEN/src/simulator/mod.rs`), and updated
+      `find_asset`/`find_asset_mut`/`iter_assets`' return types to
+      `&dyn Asset`/`&mut dyn Asset` (not `&Box<dyn Asset>` — clippy's
+      `borrowed_box` lint, correctly: the box indirection isn't part of the
+      public contract). Hit three trait-object limitations not anticipated in
+      design.md, all resolved pragmatically rather than reached for a crate:
+      `Box<dyn Asset>` can't derive `Serialize`/`Deserialize` (no variant tag)
+      — fixed via `#[serde(skip, default)]`, safe because
+      `persist.rs::load_with_params` already unconditionally overwrote
+      `loaded.asset_configs = fresh.asset_configs` after every load, so the
+      field was already effectively discarded on the persistence round-trip;
+      `Clone` isn't object-safe — added a `clone_box(&self) -> Box<dyn Asset>`
+      trait method (no default body — a default doing `self` → `Self` requires
+      `Self: Sized`, which breaks `dyn Asset` callability) plus a manual
+      `impl Clone for Box<dyn Asset>`; `SimState` could no longer derive
+      `Debug` (no `Asset: Debug` supertrait, and adding one would force the
+      lifetime-bound `AssetHandle` to derive it too) — dropped `Debug` from
+      `SimState`'s derive list after confirming via grep that nothing
+      formats a whole `SimState` with `{:?}`. `as_any`/`as_any_mut`/
+      `clone_box` also have no default bodies for the same object-safety
+      reason; every implementor (5 asset types + `Grid` + `AssetHandle`)
+      provides its own one-line body. `AssetHandle<'a>` (borrows, not
+      `'static`) can't produce a real `'static` trait object for these three,
+      so its bodies `unimplemented!()` — never called in practice, since the
+      real construction path always holds an owned concrete type.
+- [x] 5.2 Migrated every remaining consumer in the same commit: the
+      `AssetConfig::<Variant>` construction/dispatch sites in
+      `VEN/src/routes/debug.rs`, `VEN/src/simulator/persist.rs`,
+      `VEN/src/simulator/plan_context.rs`, `VEN/src/simulator/snapshot.rs`,
+      `VEN/src/simulator/tests.rs`,
+      `VEN/src/simulator/tests/peek_pv_kw_tests.rs`,
+      `VEN/src/simulator/pv_preview.rs`, `VEN/src/simulator/base_load_preview.rs`,
+      `VEN/src/simulator/forecast.rs`, and
+      `VEN/src/controller/milp_planner/tests/mod.rs`, plus
       `VEN/src/routes/hems/sessions.rs` (the bare-type usage the narrower
       `AssetConfig::` survey missed — see `design.md` D3's correction note).
-      Any caller of `build_milp_context` also needs to switch from
-      `AssetConfig::build_milp_context(...)` to going through the asset's
-      `as_milp_participant()` accessor.
+      Each site either matches on the new `asset_type_str()` (where only the
+      kind, not the concrete type, was needed) or recovers the concrete type
+      via `as_any().downcast_ref::<T>()`/`as_any_mut().downcast_mut::<T>()`
+      per the user's explicit choice of Any-based downcasting over
+      reintroducing enum matching. Every `build_milp_context` caller switched
+      from `AssetConfig::build_milp_context(...)` (returning `Option<...>`) to
+      `cfg.as_milp_participant()?.build_milp_context(...)` (the `Option` now
+      comes from the accessor, not the method itself, which always returns
+      `Box<dyn AssetMilpContext>` for the three kinds that implement
+      `MilpParticipant`). One real dedup win found in passing:
+      `snapshot.rs::to_timeline_snapshot` had a *third* independent copy of
+      the heater plan-trajectory logic (alongside `Heater::plan_trajectory`
+      and `Thermostat::plan_trajectory`) — deleted in favor of
+      `cfg.as_thermostat().and_then(|t| t.plan_trajectory(&entry.state))`.
 - [x] 5.3a Hoisted BaseLoad's `natural_base_kw`/
       `self.base_load_smoothing.update(...)` resolution out of the match arm
       and before the per-asset loop, mirroring PV's already-hoisted
@@ -201,55 +237,87 @@ commit, not incrementally per asset type.
       `tick()`'s current match-arm behavior for the same inputs. Committed
       separately (`c7d4e7c6`). Still additive — `tick()` itself not yet
       rewired to call this.
-- [ ] 5.3c Replace `tick()`'s `match cfg { AssetConfig::Pv(pv) => ..., ... }`
-      (`VEN/src/simulator/mod.rs`) with a loop over `as_tick_overridable()`.
-      Sequenced after 5.1 (storage retype), since the accessor is only
-      reachable once `cfg` is `&mut Box<dyn Asset>` / `&mut dyn Asset`, not
-      the old `AssetConfig` enum.
-- [ ] 5.4 Update the three comment-only mentions of `AssetConfig` found by the
+- [x] 5.3c Replaced `tick()`'s `match cfg { AssetConfig::Pv(pv) => ..., ... }`
+      (`VEN/src/simulator/mod.rs`) with: build one `TickOverrides` value before
+      the per-asset loop (from the already-hoisted PV/BaseLoad resolution),
+      then for each `(cfg, entry)` pair, `if let Some(overridable) =
+      cfg.as_tick_overridable() { overridable.apply_tick_overrides(&mut
+      entry.state, &tick_overrides); }` followed by the existing
+      `cfg.step(...)` dispatch (now a direct `Asset` trait call, not a
+      `delegate_asset!` macro expansion). `default_setpoint()` also dropped
+      its now-redundant `&AssetState` parameter (the trait method never used
+      it — an `AssetConfig`-era leftover from when `default_setpoint` was
+      matched jointly with state, per `delegate_asset_state!`'s uniform
+      shape).
+- [x] 5.4 Updated the three comment-only mentions of `AssetConfig` found by the
       broadened survey (`VEN/src/assets/grid.rs`,
-      `VEN/src/controller/simulator_port.rs`, `VEN/src/profile/schema.rs`) —
-      no functional change, just keep the doc comments accurate.
-- [ ] 5.5 Run the full test suite once this single commit is complete.
+      `VEN/src/controller/simulator_port.rs`, `VEN/src/profile/schema.rs`) to
+      reflect the trait-object world — no functional change.
+- [x] 5.5 Ran the full test suite once this single commit was complete: 1236
+      passed (was 1225 at end of Phase 2a; net +11 from new
+      `phase2b_asset_type_and_downcast_tests` and
+      `phase2b_tick_overridable_tests` modules, minus the retired
+      `phase1_bridge_tests`), one pre-existing test needed updating (see 6.4)
+      — not a regression, a contract change the test hadn't caught up to yet.
 
 ## 6. Cleanup (Phase 3 of design.md's Migration Plan)
 
-- [ ] 6.1 Re-run task 1.1's broadened grep
-      (`grep -rlnE "\bAssetConfig\b" VEN/src --include="*.rs"`); confirm zero
-      hits outside `assets/mod.rs`.
-- [ ] 6.2 Delete the `AssetConfig` enum and the `delegate_asset!` macro from
-      `VEN/src/assets/mod.rs`. Confirm every one of its 15 former
-      non-trait-mirrored methods now has a home per D4's table (9 on `Asset`,
-      6 across the three capability traits) — none silently dropped.
-- [ ] 6.3 Confirm `AssetState` and `delegate_asset_state!` are untouched (per
-      design.md D1) — diff `VEN/src/assets/mod.rs` against its pre-change state
-      to confirm only `AssetConfig`-related code was removed.
-- [ ] 6.4 Delete the now-redundant regression test from task 3.2 if it no longer
-      has two paths to compare (or keep it if `AssetHandle`'s old
-      borrowed-reference test coverage still benefits from the comparison —
-      judgment call at cleanup time).
+- [x] 6.1 Re-ran task 1.1's broadened grep
+      (`grep -rlnE "\bAssetConfig\b" VEN/src --include="*.rs"`); zero hits
+      outside doc comments documenting migration history (e.g. "moved here
+      verbatim from `AssetConfig::available_storage_kwh`'s Battery arm") —
+      left in place as provenance, not functional code.
+- [x] 6.2 Deleted the `AssetConfig` enum, `delegate_asset!`/
+      `delegate_asset_state!` macros, and the `impl AssetConfig` block
+      (including the Phase 1 `to_boxed_asset()` bridge) from
+      `VEN/src/assets/mod.rs`. Confirmed every one of its former methods has a
+      home per D4's table (9 on `Asset`, 6 across the three capability
+      traits) — none silently dropped; the now-unused `BatteryMilpContext`/
+      `EvMilpContext`/`HeaterMilpContext` imports and the top-level
+      `chrono`/`HashMap` imports (only ever needed by the deleted impl block)
+      were removed too, with each `#[cfg(test)]` module that relied on them
+      via `use super::*` gaining its own explicit `use` instead.
+- [x] 6.3 Confirmed `AssetState` (per design.md D1) is untouched: still the
+      same `Battery/Ev/Heater/Pv/BaseLoad/Grid` enum, no variant renamed,
+      added, or removed. (`delegate_asset_state!` was itself
+      `AssetConfig`-only machinery and was removed along with it — it never
+      had a life independent of the enum it dispatched.)
+- [x] 6.4 The task 3.2 "enum vs boxed" regression tests were rewritten, not
+      just deleted-or-kept — once `AssetConfig` was gone there was only one
+      implementation left to test, so every `phase2a_*_tests`/
+      `phase2a_trivial_delegation_smoke_tests` module was simplified from
+      "assert boxed output equals enum output" to direct behavioral
+      assertions on the boxed/trait path (e.g. `state_values_exposes_soc`
+      replacing `state_values_boxed_matches_enum`). This surfaced one real
+      pre-existing test needing a fix, unrelated to the rewrite itself:
+      `simulator::persist::tests::save_then_load_round_trip_restores_mutable_state`
+      called bare `persist::load()` (not `load_with_params`) and then
+      `find_asset()`, which now legitimately returns `None` for every asset
+      once `asset_configs` is `#[serde(skip)]`'d — bare `load()` was never a
+      real production path (only `load_with_params` is called from
+      `main.rs`), so the test was rewritten to look the entry up by iterating
+      `loaded.assets` directly, matching what bare `load()`'s documented
+      contract actually promises.
 
 ## 7. Verification
 
 - [ ] 7.1 UI unit tests: `cd VEN/ui && npm test` (unaffected by this change but
       part of the required full-suite pass per `docs/guidelines/TESTING.md`).
-- [ ] 7.2 Rust unit + integration: `wsl cargo test -p ven-app` (acquire
-      `wsl_lock.sh` first per this repo's CLAUDE.md; check free RAM before
-      starting).
+- [x] 7.2 Rust unit + integration: `wsl cargo test -j 2` under `wsl_lock.sh` —
+      1236 passed, 0 failed, 3 ignored.
 - [ ] 7.3 E2E BDD: `bash run_all_tests.sh --e2e` on Node1 (acquire
       `docker_host_lock.sh` first).
 - [ ] 7.4 Resilience: `bash run_all_tests.sh --resilience` on Node1.
-- [ ] 7.5 `cargo fmt --check` and
-      `cargo clippy --all-targets --all-features -- -D warnings`.
-- [ ] 7.6 `python scripts/audit_file_sizes.py` — confirm `VEN/src/assets/mod.rs`,
-      `VEN/src/assets/asset_trait.rs` (or wherever the capability traits land),
-      and any file touched during migration stay within the 500-production-line
-      limit.
-- [ ] 7.7 Re-run this repo's `ven-architecture` invariant greps from the
-      project's own CLAUDE.md (`use crate::profile` absence in
-      entities/controller/routes; `use crate::assets::` absence in
-      milp_planner/entities outside `cfg(test)`/`tests/`) — none of these should
-      be affected by this change, but confirm rather than assume.
+- [x] 7.5 `cargo fmt --check` and
+      `cargo clippy --all-targets --all-features -- -D warnings` — both clean.
+      Clippy caught one real API smell: `find_asset`/`find_asset_mut`/
+      `iter_assets` returning `&Box<dyn Asset>`/`&mut Box<dyn Asset>`
+      (`clippy::borrowed_box`) — fixed to return `&dyn Asset`/`&mut dyn Asset`,
+      since the `Box` indirection was never part of the intended contract.
+- [x] 7.6 `python scripts/audit_file_sizes.py` — PASSED.
+- [x] 7.7 Re-ran this repo's `ven-architecture` invariant greps — all clean
+      (the milp_planner grep's own match is the doc-comment asserting the
+      invariant, not a violation of it).
 - [ ] 7.8 Once all suites are green: delete
       `openspec/changes/asset-dispatch-trait-objects/` per this repo's workflow
       rule (wave anything durable into `docs/architecture/VEN_ARCHITECTURE.md`
