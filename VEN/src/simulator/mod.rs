@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::assets::{
-    AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
-    PvInverter,
+    Asset, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater, PvInverter,
+    TickOverrides,
 };
 use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
@@ -118,10 +118,28 @@ pub struct GridMeter {
 }
 
 /// Full simulator state — persisted to disk.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// No longer `#[derive(Debug)]`: `Box<dyn Asset>` doesn't implement `Debug`
+/// (no supertrait bound requiring it — `AssetHandle` doesn't derive `Debug`
+/// today, and adding the bound would force it to). Confirmed nothing
+/// actually formats a whole `SimState` with `{:?}` before removing this.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SimState {
     /// Physics config — parallel to `assets` by index, loaded from profile.
-    pub asset_configs: Vec<AssetConfig>,
+    ///
+    /// `#[serde(skip)]`: `Box<dyn Asset>` can't derive `Deserialize` (no way
+    /// to know which concrete type a JSON blob names without extra tagging
+    /// machinery). This is safe and, in fact, already how this field
+    /// behaved before Spec A: `persist::load_with_params` unconditionally
+    /// overwrites the deserialized value with `SimState::from_params(...)`'s
+    /// fresh one immediately after every load
+    /// (`loaded.asset_configs = fresh.asset_configs`) — the persisted value
+    /// was already discarded, never actually used, kept only because
+    /// `AssetConfig` happened to derive `Serialize`/`Deserialize`. Old
+    /// persisted files with this field present still load fine — serde
+    /// ignores unknown fields by default (no `deny_unknown_fields` here).
+    #[serde(skip, default)]
+    pub asset_configs: Vec<Box<dyn Asset>>,
     /// Mutable state + history for each asset.
     pub assets: Vec<AssetEntry>,
     pub grid: GridMeter,
@@ -153,22 +171,25 @@ impl SimState {
     }
 
     /// Look up entry + config by id (immutable).
-    pub fn find_asset(&self, id: &str) -> Option<(&AssetEntry, &AssetConfig)> {
+    pub fn find_asset(&self, id: &str) -> Option<(&AssetEntry, &dyn Asset)> {
         self.assets
             .iter()
             .zip(self.asset_configs.iter())
             .find(|(e, _)| e.id == id)
+            .map(|(e, c)| (e, c.as_ref()))
     }
 
     /// Look up entry + config by id (mutable). Uses index to satisfy borrow checker.
-    pub fn find_asset_mut(&mut self, id: &str) -> Option<(&mut AssetEntry, &mut AssetConfig)> {
+    pub fn find_asset_mut(&mut self, id: &str) -> Option<(&mut AssetEntry, &mut dyn Asset)> {
         let idx = self.assets.iter().position(|a| a.id == id)?;
-        Some((&mut self.assets[idx], &mut self.asset_configs[idx]))
+        Some((&mut self.assets[idx], self.asset_configs[idx].as_mut()))
     }
 
     /// Iterator over (entry, config) pairs — parallel by index.
-    pub fn iter_assets(&self) -> impl Iterator<Item = (&AssetEntry, &AssetConfig)> {
-        self.assets.iter().zip(self.asset_configs.iter())
+    pub fn iter_assets(&self) -> impl Iterator<Item = (&AssetEntry, &dyn Asset)> {
+        self.assets
+            .iter()
+            .zip(self.asset_configs.iter().map(|c| c.as_ref()))
     }
 
     /// Initialize from domain asset parameters.
@@ -177,12 +198,12 @@ impl SimState {
     }
     /// Like `from_params`, but with an explicit RNG for deterministic tests (R-24).
     pub fn from_params_seeded(params: &[AssetParams], now: DateTime<Utc>, rng: StdRng) -> Self {
-        let mut configs: Vec<AssetConfig> = Vec::new();
+        let mut configs: Vec<Box<dyn Asset>> = Vec::new();
         let mut entries: Vec<AssetEntry> = Vec::new();
 
         for ap in params {
             let (id, cfg, state) = asset_config_and_state_from_params(ap);
-            let setpoint_kw = cfg.default_setpoint(&state);
+            let setpoint_kw = cfg.default_setpoint();
             entries.push(AssetEntry {
                 id,
                 state,
@@ -274,12 +295,8 @@ impl SimState {
         let base_load_baseline_kw = self
             .asset_configs
             .iter()
-            .find_map(|cfg| match cfg {
-                AssetConfig::BaseLoad(bl) => {
-                    Some(bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now))
-                }
-                _ => None,
-            })
+            .find_map(|cfg| cfg.as_any().downcast_ref::<BaseLoad>())
+            .map(|bl| bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now))
             .map(|natural_base_kw| {
                 self.base_load_smoothing.update(
                     base_load_kw_override,
@@ -289,65 +306,51 @@ impl SimState {
                 )
             });
 
+        // Bundles this tick's override inputs for `TickOverridable`
+        // (design.md Decision D5) — pre-resolved where resolution needs
+        // cross-asset state (`pv_irradiance`/`pv_irradiance_offset`,
+        // `base_load_baseline_kw`, both resolved above), so each asset's
+        // `apply_tick_overrides` only assigns fields, never recomputes
+        // smoothing. Built once, shared read-only by every asset in the loop
+        // below (Battery declines — no arm in the old match for it either).
+        let tick_overrides = TickOverrides {
+            pv_irradiance: irradiance,
+            pv_irradiance_offset: self.pv_smoothing.irradiance_offset,
+            pv_alpha,
+            pv_generation_limit_kw: pv_generation_limit_override,
+            pv_curtailment_source,
+            // Weather is never nulled by a manual override anymore — a
+            // recently-released override's decaying irradiance_offset blends
+            // additively on top of it instead (see `PvInverter::step_inner`).
+            // Only a forced override (this exact tick) takes exclusive control.
+            pv_weather_power_kw: weather_pv_kw,
+            pv_measured_power_kw: pv_measured_kw,
+            pv_irradiance_forced: pv_irradiance_override.is_some(),
+            heater_ambient_temp_c_override: ambient_temp_c_override,
+            heater_temp_min_override,
+            heater_temp_max_override,
+            heater_emergency_curtail_override,
+            heater_emergency_absorb_override,
+            base_load_measured_kw,
+            base_load_baseline_kw,
+            ev_plugged_override,
+            ev_soc_target_override,
+        };
+
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
         let mut total_kw = 0.0;
 
         for (cfg, entry) in self.asset_configs.iter_mut().zip(self.assets.iter_mut()) {
             // ── Apply environment and Behaviour C state injections ────────
-            match cfg {
-                AssetConfig::Pv(pv) => {
-                    pv.irradiance = irradiance;
-                    pv.irradiance_offset = self.pv_smoothing.irradiance_offset;
-                    pv.pv_alpha = pv_alpha;
-                    pv.generation_limit_kw = pv_generation_limit_override;
-                    pv.curtailment_source = pv_curtailment_source;
-                    // Weather is never nulled by a manual override anymore — a
-                    // recently-released override's decaying irradiance_offset
-                    // blends additively on top of it instead (see
-                    // PvInverter::step_inner). Only a forced override (this
-                    // exact tick) takes exclusive control.
-                    pv.weather_power_kw = weather_pv_kw;
-                    pv.measured_power_kw = pv_measured_kw;
-                    pv.irradiance_forced = pv_irradiance_override.is_some();
-                }
-                AssetConfig::Heater(h) => h.apply_tick_overrides(
-                    ambient_temp_c_override,
-                    heater_temp_min_override,
-                    heater_temp_max_override,
-                    heater_emergency_curtail_override,
-                    heater_emergency_absorb_override,
-                ),
-                AssetConfig::BaseLoad(bl) => {
-                    // Behaviour B: base load — one-shot sets offset; EMA decays it back.
-                    // `natural_base_kw` (profile + simulated appliance noise) plays the
-                    // same role here that `natural_irradiance` plays for PV above: the
-                    // override folds into the offset relative to it, so a forced value
-                    // lands exactly on `forced_kw` — not `forced_kw` plus a hidden bump.
-                    // Resolved above, before this loop, alongside PV's `irradiance`.
-                    bl.measured_load_kw = base_load_measured_kw;
-                    if let Some(baseline_kw) = base_load_baseline_kw {
-                        bl.baseline_kw = baseline_kw;
-                    }
-                }
-                AssetConfig::Ev(ev) => {
-                    // Behaviour C: ev_plugged — hold override or snap back to profile default
-                    // (plugged=true) when released. Without snap-back, releasing the inject
-                    // leaves the EV permanently unplugged because there is no physics to
-                    // re-plug it.
-                    if let AssetState::Ev(s) = &mut entry.state {
-                        s.plugged = ev_plugged_override.unwrap_or(true);
-                    }
-                    // Behaviour C: ev_soc_target — override BMS charge ceiling.
-                    ev.soc_target = ev_soc_target_override.unwrap_or(ev.soc_target_profile);
-                }
-                _ => {}
+            if let Some(overridable) = cfg.as_tick_overridable() {
+                overridable.apply_tick_overrides(&mut entry.state, &tick_overrides);
             }
 
             // ── Dispatch physics ──────────────────────────────────────────
             let sp = setpoints
                 .get(&entry.id)
                 .copied()
-                .unwrap_or_else(|| cfg.default_setpoint(&entry.state));
+                .unwrap_or_else(|| cfg.default_setpoint());
             let (new_state, actual_kw) = cfg.step(&entry.state, sp, dt);
             entry.state = new_state;
             entry.last_power_kw = actual_kw;
@@ -363,32 +366,32 @@ impl SimState {
 // `to_sensor_snapshot`/`to_sim_snapshot`/`to_timeline_snapshot` live in
 // `snapshot.rs` to keep this file under the file-size cap.
 
-/// Convert domain asset parameters into (asset_id, AssetConfig, initial AssetState).
-fn asset_config_and_state_from_params(ap: &AssetParams) -> (String, AssetConfig, AssetState) {
+/// Convert domain asset parameters into (asset_id, boxed Asset, initial AssetState).
+fn asset_config_and_state_from_params(ap: &AssetParams) -> (String, Box<dyn Asset>, AssetState) {
     match ap {
         AssetParams::Battery(c) => (
             c.id.clone(),
-            AssetConfig::Battery(Battery::from_params(c)),
+            Box::new(Battery::from_params(c)),
             AssetState::Battery(Battery::initial_state(c)),
         ),
         AssetParams::Ev(c) => (
             c.id.clone(),
-            AssetConfig::Ev(EvCharger::from_params(c)),
+            Box::new(EvCharger::from_params(c)),
             AssetState::Ev(EvCharger::initial_state(c)),
         ),
         AssetParams::Heater(c) => (
             c.id.clone(),
-            AssetConfig::Heater(Heater::from_params(c)),
+            Box::new(Heater::from_params(c)),
             AssetState::Heater(Heater::initial_state(c)),
         ),
         AssetParams::Pv(c) => (
             c.id.clone(),
-            AssetConfig::Pv(PvInverter::from_params(c)),
+            Box::new(PvInverter::from_params(c)),
             AssetState::Pv(PvInverter::initial_state(c)),
         ),
         AssetParams::BaseLoad(c) => (
             c.id.clone(),
-            AssetConfig::BaseLoad(BaseLoad::from_params(c)),
+            Box::new(BaseLoad::from_params(c)),
             AssetState::BaseLoad(BaseLoad::initial_state(c)),
         ),
     }

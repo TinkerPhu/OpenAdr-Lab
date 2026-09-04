@@ -204,6 +204,7 @@ impl EvCharger {
     /// **start** of slot `t` (index `n` is the SoC at the end of the last slot).
     /// `p_ev_kw[t]` is net charge power (kW) during slot `t`, `dt_h` is slot
     /// duration in hours.  Values are clamped to `[0.0, 1.0]`.
+    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::ev_soc_trajectory is a separate "Mirrors" reimplementation (the one actually called from results.rs); found while removing AssetConfig, not fixed here (R-73)
     pub fn soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64> {
         let n = p_ev_kw.len();
         let mut traj = Vec::with_capacity(n + 1);
@@ -217,6 +218,7 @@ impl EvCharger {
 
     /// State values for a future MILP time slot given the SoC at the start of
     /// that slot. Returns `{"soc": <0..1>}`.
+    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::ev_future_state_at is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
     pub fn future_state_values_at(soc: f64) -> HashMap<String, f64> {
         HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
     }
@@ -402,6 +404,10 @@ impl Asset for EvCharger {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn Asset> {
+        Box::new(self.clone())
     }
 
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {

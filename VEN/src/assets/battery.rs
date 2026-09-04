@@ -128,6 +128,7 @@ impl Battery {
 
     /// State values for a future MILP time slot, given the battery energy stored
     /// at the start of that slot (kWh). Returns `{"soc": <0..1>}`.
+    #[allow(dead_code)] // pre-existing, unrelated to Spec A: `asset_port.rs::battery_future_state` is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
     pub fn future_state_values(&self, e_kwh: f64) -> HashMap<String, f64> {
         let soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0);
         HashMap::from([("soc".into(), soc)])
@@ -329,6 +330,10 @@ impl Asset for Battery {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn Asset> {
+        Box::new(self.clone())
     }
 }
 

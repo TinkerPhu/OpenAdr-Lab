@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
 
 use super::{
-    AssetCapability, AssetConfig, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState,
-    ControlDescriptor,
+    AssetCapability, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState, ControlDescriptor,
 };
 use crate::assets::HistoryPoint;
 use crate::common::TimeSeries;
@@ -191,6 +190,16 @@ pub trait Asset: Send + Sync {
     /// Mutable counterpart of `as_any` — see its doc comment.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
+    /// Clone this asset into a new heap-allocated trait object. Needed
+    /// because `SimState` (which owns `Vec<Box<dyn Asset>>`) derives `Clone`
+    /// (for `clone_sim_snapshot`'s cheap-copy-then-release-the-lock
+    /// pattern), but `Clone::clone(&self) -> Self` itself isn't object-safe
+    /// — `Self` is erased by the time you're holding `&dyn Asset`. Each
+    /// concrete type's one-line body (`Box::new(self.clone())`) just reuses
+    /// its own `#[derive(Clone)]`; `Box<dyn Asset>`'s `Clone` impl (below)
+    /// calls through this.
+    fn clone_box(&self) -> Box<dyn Asset>;
+
     // ── Optional capabilities (Spec A D4) ───────────────────────────────────
     //
     // Unlike the universal methods above, these three have a safe, meaningful
@@ -256,6 +265,12 @@ pub trait Asset: Send + Sync {
             });
         }
         Trajectory { points }
+    }
+}
+
+impl Clone for Box<dyn Asset> {
+    fn clone(&self) -> Self {
+        self.clone_box()
     }
 }
 
@@ -353,7 +368,7 @@ pub trait Thermostat {
 // AssetHandle is used in tests and serves as the intended path for dyn Asset dispatch.
 #[allow(dead_code)]
 pub struct AssetHandle<'a> {
-    pub config: &'a AssetConfig,
+    pub config: &'a dyn Asset,
     pub id: &'a str,
     pub state: &'a AssetState,
     pub history: &'a AssetHistoryBuffer,
@@ -400,6 +415,15 @@ impl<'a> Asset for AssetHandle<'a> {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         unimplemented!(
             "AssetHandle::as_any_mut() is not supported — downcast the concrete asset type instead"
+        )
+    }
+
+    /// `AssetHandle<'a>` isn't `'static` either (see `as_any`'s doc comment),
+    /// so it can never produce a `Box<dyn Asset>` (which defaults to
+    /// `Box<dyn Asset + 'static>`). Never called in practice.
+    fn clone_box(&self) -> Box<dyn Asset> {
+        unimplemented!(
+            "AssetHandle::clone_box() is not supported — it borrows and can't be made 'static"
         )
     }
 }
@@ -467,14 +491,14 @@ mod handle_tests {
         })
     }
 
-    fn make_battery_config(capacity_kwh: f64, max_kw: f64) -> AssetConfig {
-        AssetConfig::Battery(Battery {
+    fn make_battery_config(capacity_kwh: f64, max_kw: f64) -> Battery {
+        Battery {
             capacity_kwh,
             max_charge_kw: max_kw,
             max_discharge_kw: max_kw,
             round_trip_efficiency: 1.0,
             min_soc: 0.1,
-        })
+        }
     }
 
     #[test]

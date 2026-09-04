@@ -11,7 +11,7 @@ use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
-use crate::assets::{AssetConfig, BaseLoad};
+use crate::assets::BaseLoad;
 use crate::controller::HistoryPort;
 use crate::services::forecast::build_heuristic_forecasts;
 use crate::services::heuristics::{
@@ -121,10 +121,7 @@ pub async fn post_heuristics_preload(State(ctx): State<AppCtx>) -> impl IntoResp
     let base_load = {
         let sim = ctx.sim.lock().await;
         sim.find_asset(crate::ids::ASSET_BASE_LOAD)
-            .and_then(|(_, cfg)| match cfg {
-                AssetConfig::BaseLoad(bl) => Some(bl.clone()),
-                _ => None,
-            })
+            .and_then(|(_, cfg)| cfg.as_any().downcast_ref::<BaseLoad>().cloned())
     };
     let Some(base_load) = base_load else {
         return (

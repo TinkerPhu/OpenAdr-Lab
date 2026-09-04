@@ -320,10 +320,7 @@ mod pv_weather_blend_tests {
         let pv_cfg = sim
             .asset_configs
             .iter()
-            .find_map(|c| match c {
-                crate::assets::AssetConfig::Pv(pv) => Some(pv),
-                _ => None,
-            })
+            .find_map(|c| c.as_any().downcast_ref::<crate::assets::PvInverter>())
             .expect("pv asset config must exist");
         assert!(
             pv_cfg.weather_power_kw.is_some(),

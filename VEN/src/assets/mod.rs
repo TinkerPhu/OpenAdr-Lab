@@ -1,11 +1,3 @@
-use chrono::{DateTime, Duration, Utc};
-use std::collections::HashMap;
-
-use crate::common::{Interpolation, TimeSeries};
-use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, EvMilpContext, HeaterMilpContext,
-};
-
 mod asset_trait;
 pub mod base_load;
 pub mod battery;
@@ -171,374 +163,22 @@ pub struct GridState {
     pub export_limit_kw: f64,
 }
 
-/// Runtime config dispatch enum. Holds physics config for each asset type.
-/// This is the renamed + restructured successor to what was previously called `AssetState`
-/// (which conflated config and state).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "asset_type", rename_all = "snake_case")]
-pub enum AssetConfig {
-    Battery(Battery),
-    Ev(EvCharger),
-    Heater(Heater),
-    Pv(PvInverter),
-    BaseLoad(BaseLoad),
-}
-
-/// Forwards a method call to the config held by whichever `AssetConfig` variant `self` is,
-/// declaring the `Battery|Ev|Heater|Pv|BaseLoad` variant list exactly once. For methods whose
-/// signature is uniform across all 5 variants (mirrors the `Asset` trait or is a simple
-/// per-config accessor) — see `delegate_asset_state!` for methods that also match on `AssetState`.
-macro_rules! delegate_asset {
-    ($self:expr, $method:ident($($arg:expr),*)) => {
-        match $self {
-            AssetConfig::Battery(cfg) => cfg.$method($($arg),*),
-            AssetConfig::Ev(cfg) => cfg.$method($($arg),*),
-            AssetConfig::Heater(cfg) => cfg.$method($($arg),*),
-            AssetConfig::Pv(cfg) => cfg.$method($($arg),*),
-            AssetConfig::BaseLoad(cfg) => cfg.$method($($arg),*),
-        }
-    };
-}
-
-/// Like `delegate_asset!`, but also matches `$state` against the same variant so the config
-/// and state can be destructured together (e.g. `state_values`, `reset`, `forecast`). Falls
-/// back to `$default` on a config/state variant mismatch — mirrors the hand-written `_ => ...`
-/// arm every one of these methods had before the macro existed.
-macro_rules! delegate_asset_state {
-    ($self:expr, $state:expr, $method:ident($($arg:expr),*), $default:expr) => {
-        match ($self, $state) {
-            (AssetConfig::Battery(cfg), AssetState::Battery(s)) => cfg.$method(s, $($arg),*),
-            (AssetConfig::Ev(cfg), AssetState::Ev(s)) => cfg.$method(s, $($arg),*),
-            (AssetConfig::Heater(cfg), AssetState::Heater(s)) => cfg.$method(s, $($arg),*),
-            (AssetConfig::Pv(cfg), AssetState::Pv(s)) => cfg.$method(s, $($arg),*),
-            (AssetConfig::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.$method(s, $($arg),*),
-            _ => $default,
-        }
-    };
-}
-
-impl AssetConfig {
-    // ── Spec A Phase 1: trait-object bridge ─────────────────────────────────
-
-    /// Temporary bridge (`asset-dispatch-trait-objects` tasks.md 3.1/3.2):
-    /// construct the `Box<dyn Asset>` equivalent of this config, proving
-    /// trait-object dispatch produces identical results to today's
-    /// enum dispatch ahead of the Phase 2b storage cutover. Deleted in
-    /// Phase 3 once `AssetConfig` itself is gone — callers construct
-    /// `Box<dyn Asset>` directly by then, no bridge needed.
-    pub fn to_boxed_asset(&self) -> Box<dyn Asset> {
-        match self {
-            AssetConfig::Battery(cfg) => Box::new(cfg.clone()),
-            AssetConfig::Ev(cfg) => Box::new(cfg.clone()),
-            AssetConfig::Heater(cfg) => Box::new(cfg.clone()),
-            AssetConfig::Pv(cfg) => Box::new(cfg.clone()),
-            AssetConfig::BaseLoad(cfg) => Box::new(cfg.clone()),
-        }
-    }
-
-    // ── Asset trait dispatch ────────────────────────────────────────────────
-
-    pub fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        use Asset as _;
-        delegate_asset!(self, step(state, setpoint_kw, dt))
-    }
-
-    pub fn capability(&self, state: &AssetState) -> AssetCapability {
-        use Asset as _;
-        delegate_asset!(self, capability(state))
-    }
-
-    pub fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        use Asset as _;
-        delegate_asset!(self, flexibility_floor(state))
-    }
-
-    // ── Dispatch methods (previously on AssetState) ─────────────────────────
-
-    pub fn default_setpoint(&self, _state: &AssetState) -> f64 {
-        delegate_asset!(self, default_setpoint())
-    }
-
-    /// Returns a stateful trajectory computer seeded from the current live state,
-    /// or `None` for assets without planned state to recompute (battery, EV, PV, etc.).
-    pub fn plan_trajectory(
-        &self,
-        live_state: &AssetState,
-    ) -> Option<crate::entities::timeline::HeaterPlanTrajectory> {
-        match self {
-            Self::Heater(cfg) => Heater::plan_trajectory(cfg, live_state),
-            _ => None,
-        }
-    }
-
-    pub fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        delegate_asset_state!(self, state, state_values(), HashMap::new())
-    }
-
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        delegate_asset!(self, control_schema())
-    }
-
-    pub fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        delegate_asset_state!(self, state, reset(values), ())
-    }
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        delegate_asset!(self, update_config(values))
-    }
-
-    pub fn forecast(
-        &self,
-        state: &AssetState,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> TimeSeries {
-        delegate_asset_state!(
-            self,
-            state,
-            forecast(timespan, now),
-            TimeSeries::empty(Interpolation::Linear)
-        )
-    }
-
-    pub fn resolve_request_target(
-        &self,
-        state: &AssetState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
-        match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => {
-                cfg.resolve_request_target(s, target_soc, desired_power_kw)
-            }
-            (Self::Ev(cfg), AssetState::Ev(s)) => {
-                cfg.resolve_request_target(s, target_soc, desired_power_kw)
-            }
-            _ => None,
-        }
-    }
-
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        delegate_asset!(self, default_comfort_rates())
-    }
-
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        delegate_asset!(self, default_completion_policy())
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        delegate_asset!(self, default_post_deadline_comfort_bid())
-    }
-
-    /// Available storage energy. Returns `(discharge_kwh, charge_kwh)`.
-    /// Returns `None` for non-storage assets or an unplugged EV.
-    pub fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
-        match (self, state) {
-            (Self::Battery(b), AssetState::Battery(s)) => Some((
-                (s.soc - b.min_soc).max(0.0) * b.capacity_kwh,
-                (1.0 - s.soc).max(0.0) * b.capacity_kwh,
-            )),
-            (Self::Ev(e), AssetState::Ev(s)) if s.plugged => Some((
-                (s.soc - e.min_soc).max(0.0) * e.battery_kwh,
-                (1.0 - s.soc).max(0.0) * e.battery_kwh,
-            )),
-            _ => None,
-        }
-    }
-
-    /// Thermostat ON/OFF setpoint [kW] for heating assets given a target temperature.
-    /// Returns `None` for non-thermostat assets.
-    pub fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> Option<f64> {
-        match (self, state) {
-            (Self::Heater(hcfg), AssetState::Heater(hs)) => Some(if hs.temperature_c < target_c {
-                hcfg.max_kw
-            } else {
-                0.0
-            }),
-            _ => None,
-        }
-    }
-
-    /// Surplus-charge absorption [kW] for assets that can opportunistically consume excess PV.
-    /// Returns `None` when the asset cannot absorb surplus right now.
-    pub fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
-        match (self, state) {
-            (Self::Ev(ecfg), AssetState::Ev(es)) if es.plugged && es.soc < ecfg.soc_target => {
-                Some(surplus_kw.min(ecfg.max_charge_kw))
-            }
-            _ => None,
-        }
-    }
-
-    /// Build the MILP context for this asset, or `None` for non-MILP assets (PV, base load, grid).
-    #[allow(clippy::too_many_arguments)]
-    pub fn build_milp_context(
-        &self,
-        state: &AssetState,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        ev_session: Option<&crate::entities::device_session::EvSession>,
-        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-        ev_min_charge_kw: f64,
-        v_ev_extra_eur_kwh: f64,
-        v_ev_core_eur_kwh: f64,
-        asap_lateness_eur_kwh_h: f64,
-        v_ev_free_charge_eur_kwh: f64,
-        lambda_sw: f64,
-        c_terminal_eur_kwh: f64,
-        heater_anchor: Vec<Option<f64>>,
-        w_ghg_eur_kg: f64,
-    ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        match self {
-            Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(
-                state,
-                cfg,
-                c_terminal_eur_kwh,
-            ))),
-            Self::Ev(cfg) => Some(Box::new(EvMilpContext::from_state(
-                state,
-                cfg,
-                n,
-                cum_s,
-                now,
-                ev_session,
-                ev_min_charge_kw,
-                v_ev_extra_eur_kwh,
-                v_ev_core_eur_kwh,
-                asap_lateness_eur_kwh_h,
-                v_ev_free_charge_eur_kwh,
-                w_ghg_eur_kg,
-            ))),
-            Self::Heater(cfg) => Some(Box::new(HeaterMilpContext::from_state(
-                state,
-                cfg,
-                n,
-                cum_s,
-                now,
-                heater_target,
-                lambda_sw,
-                c_terminal_eur_kwh,
-                heater_anchor,
-                w_ghg_eur_kg,
-            ))),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod phase1_bridge_tests {
-    //! Spec A Phase 1 (`asset-dispatch-trait-objects` tasks.md 3.2): proves
-    //! `Box<dyn Asset>` dispatch (via `AssetConfig::to_boxed_asset`) produces
-    //! identical results to today's enum dispatch, for at least one asset
-    //! type, ahead of the Phase 2b storage cutover.
-
-    use super::*;
-    use crate::entities::asset_params::BatteryParams;
-    use chrono::Duration;
-
-    fn battery_config() -> AssetConfig {
-        AssetConfig::Battery(Battery::from_params(&BatteryParams {
-            id: "battery".to_string(),
-            capacity_kwh: 10.0,
-            max_charge_kw: 5.0,
-            max_discharge_kw: 5.0,
-            initial_soc: 0.5,
-            round_trip_efficiency: 0.9,
-            min_soc: 0.1,
-            c_terminal_eur_kwh: None,
-        }))
-    }
-
-    fn battery_state() -> AssetState {
-        AssetState::Battery(Battery::initial_state(&BatteryParams {
-            id: "battery".to_string(),
-            capacity_kwh: 10.0,
-            max_charge_kw: 5.0,
-            max_discharge_kw: 5.0,
-            initial_soc: 0.5,
-            round_trip_efficiency: 0.9,
-            min_soc: 0.1,
-            c_terminal_eur_kwh: None,
-        }))
-    }
-
-    #[test]
-    fn boxed_asset_step_matches_enum_dispatched_step() {
-        let cfg = battery_config();
-        let state = battery_state();
-        let boxed = cfg.to_boxed_asset();
-
-        let (enum_state, enum_kw) = cfg.step(&state, 3.0, Duration::hours(1));
-        let (boxed_state, boxed_kw) = boxed.step(&state, 3.0, Duration::hours(1));
-
-        assert_eq!(enum_kw, boxed_kw, "actual power must match");
-        assert_eq!(
-            enum_state.actual_power_kw(),
-            boxed_state.actual_power_kw(),
-            "resulting state's power must match"
-        );
-        let AssetState::Battery(enum_bs) = enum_state else {
-            unreachable!()
-        };
-        let AssetState::Battery(boxed_bs) = boxed_state else {
-            unreachable!()
-        };
-        assert!(
-            (enum_bs.soc - boxed_bs.soc).abs() < 1e-12,
-            "resulting SoC must match: enum={}, boxed={}",
-            enum_bs.soc,
-            boxed_bs.soc
-        );
-    }
-
-    #[test]
-    fn boxed_asset_capability_matches_enum_dispatched_capability() {
-        let cfg = battery_config();
-        let state = battery_state();
-        let boxed = cfg.to_boxed_asset();
-
-        let enum_cap = cfg.capability(&state);
-        let boxed_cap = boxed.capability(&state);
-
-        assert_eq!(enum_cap.max_export_kw, boxed_cap.max_export_kw);
-        assert_eq!(enum_cap.max_import_kw, boxed_cap.max_import_kw);
-    }
-
-    #[test]
-    fn boxed_asset_flexibility_floor_matches_enum_dispatched_flexibility_floor() {
-        let cfg = battery_config();
-        let state = battery_state();
-        let boxed = cfg.to_boxed_asset();
-
-        let enum_floor = cfg.flexibility_floor(&state);
-        let boxed_floor = boxed.flexibility_floor(&state);
-
-        assert_eq!(enum_floor.min_export_kw, boxed_floor.min_export_kw);
-        assert_eq!(enum_floor.min_import_kw, boxed_floor.min_import_kw);
-    }
-}
-
 #[cfg(test)]
 mod phase2a_battery_tests {
-    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.1): proves
-    //! Battery's newly-wired trait methods (9 universal + MilpParticipant +
-    //! RequestResolvable) produce identical results whether reached via
-    //! `AssetConfig`'s enum dispatch or `Box<dyn Asset>` (via the Phase 1
-    //! bridge). Only methods with real per-call unwrap/branch logic are
-    //! covered — the fully stateless delegations (`default_setpoint`,
-    //! `control_schema`, `update_config`, `default_comfort_rates`,
-    //! `default_completion_policy`, `default_post_deadline_comfort_bid`) are
-    //! already compiler-checked 1:1 forwards with no unwrap step that could
-    //! silently diverge.
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.1): Battery's
+    //! `Asset`/`MilpParticipant`/`RequestResolvable` trait methods, called
+    //! through `Box<dyn Asset>` — the only dispatch path once `AssetConfig`
+    //! is deleted (Phase 3). Originally written as "enum vs boxed"
+    //! equivalence tests during the migration; simplified to direct
+    //! assertions now that there's only one implementation to test.
 
     use super::*;
     use crate::controller::milp_planner::{AssetKind, AssetMilpParams};
     use crate::entities::asset_params::BatteryParams;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
+    use std::collections::HashMap;
 
-    fn cfg_and_state(initial_soc: f64) -> (AssetConfig, AssetState) {
+    fn boxed_and_state(initial_soc: f64) -> (Box<dyn Asset>, AssetState) {
         let params = BatteryParams {
             id: "battery".to_string(),
             capacity_kwh: 10.0,
@@ -550,115 +190,71 @@ mod phase2a_battery_tests {
             c_terminal_eur_kwh: None,
         };
         (
-            AssetConfig::Battery(Battery::from_params(&params)),
+            Box::new(Battery::from_params(&params)),
             AssetState::Battery(Battery::initial_state(&params)),
         )
     }
 
     #[test]
-    fn state_values_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state(0.5);
-        assert_eq!(
-            cfg.state_values(&state),
-            cfg.to_boxed_asset().state_values(&state)
-        );
+    fn state_values_exposes_soc() {
+        let (boxed, state) = boxed_and_state(0.5);
+        assert_eq!(boxed.state_values(&state).get("soc"), Some(&0.5));
     }
 
     #[test]
-    fn reset_boxed_matches_enum() {
-        let (cfg, _) = cfg_and_state(0.5);
-        let values = HashMap::from([("soc".to_string(), 0.8)]);
-
-        let mut enum_state = AssetState::Battery(BatteryState {
+    fn reset_applies_soc_override() {
+        let (boxed, _) = boxed_and_state(0.5);
+        let mut state = AssetState::Battery(BatteryState {
             soc: 0.5,
             actual_power_kw: 0.0,
         });
-        cfg.reset(&mut enum_state, values.clone());
-
-        let mut boxed_state = AssetState::Battery(BatteryState {
-            soc: 0.5,
-            actual_power_kw: 0.0,
-        });
-        cfg.to_boxed_asset().reset(&mut boxed_state, values);
-
-        assert_eq!(enum_state.soc(), boxed_state.soc());
+        boxed.reset(&mut state, HashMap::from([("soc".to_string(), 0.8)]));
+        assert_eq!(state.soc(), Some(0.8));
     }
 
     #[test]
-    fn forecast_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state(0.5);
-        let now = Utc::now();
-        let timespan = Duration::seconds(300);
-
-        let enum_series = cfg.forecast(&state, timespan, now);
-        let boxed_series = cfg.to_boxed_asset().forecast(&state, timespan, now);
-
-        assert_eq!(enum_series.samples, boxed_series.samples);
+    fn forecast_produces_samples() {
+        let (boxed, state) = boxed_and_state(0.5);
+        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
+        assert!(!series.samples.is_empty());
     }
 
     #[test]
-    fn resolve_request_target_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state(0.5);
-        let enum_result = cfg.resolve_request_target(&state, Some(0.9), None);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn resolve_request_target_toward_higher_soc_returns_energy_and_power() {
+        let (boxed, state) = boxed_and_state(0.5);
+        let result = boxed
             .as_request_resolvable()
             .expect("Battery must implement RequestResolvable")
             .resolve_request_target(&state, Some(0.9), None);
-        assert_eq!(enum_result, boxed_result);
+        assert!(result.is_some(), "request toward a higher SoC must resolve");
     }
 
     #[test]
-    fn available_storage_kwh_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state(0.6);
-        let enum_result = cfg.available_storage_kwh(&state);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn available_storage_kwh_reports_both_directions() {
+        let (boxed, state) = boxed_and_state(0.6);
+        let result = boxed
             .as_request_resolvable()
             .expect("Battery must implement RequestResolvable")
             .available_storage_kwh(&state);
-        assert_eq!(enum_result, boxed_result);
+        assert!(result.is_some(), "Battery always reports available storage");
     }
 
     #[test]
-    fn surplus_charge_kw_boxed_returns_none_matching_enum() {
-        let (cfg, state) = cfg_and_state(0.5);
-        let enum_result = cfg.surplus_charge_kw(&state, 2.0);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn surplus_charge_kw_always_none() {
+        let (boxed, state) = boxed_and_state(0.5);
+        let result = boxed
             .as_request_resolvable()
             .expect("Battery must implement RequestResolvable")
             .surplus_charge_kw(&state, 2.0);
-        assert_eq!(enum_result, boxed_result);
-        assert_eq!(boxed_result, None, "Battery never absorbs surplus");
+        assert_eq!(result, None, "Battery never absorbs surplus");
     }
 
     #[test]
-    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
-        let (cfg, state) = cfg_and_state(0.5);
+    fn build_milp_context_reports_battery_kind_and_scalars() {
+        let (boxed, state) = boxed_and_state(0.5);
         let now = Utc::now();
 
-        let enum_ctx = cfg
-            .build_milp_context(
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                None,
-                None,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![],
-                0.0,
-            )
-            .expect("Battery must build a MILP context");
-        let boxed_ctx = cfg
-            .to_boxed_asset()
+        let ctx = boxed
             .as_milp_participant()
             .expect("Battery must implement MilpParticipant")
             .build_milp_context(
@@ -679,31 +275,25 @@ mod phase2a_battery_tests {
                 0.0,
             );
 
-        assert_eq!(enum_ctx.asset_kind(), AssetKind::Battery);
-        assert_eq!(boxed_ctx.asset_kind(), AssetKind::Battery);
-
-        let AssetMilpParams::Battery(enum_scalars) = enum_ctx.milp_params(4, now) else {
+        assert_eq!(ctx.asset_kind(), AssetKind::Battery);
+        let AssetMilpParams::Battery(scalars) = ctx.milp_params(4, now) else {
             panic!("expected Battery scalars");
         };
-        let AssetMilpParams::Battery(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
-            panic!("expected Battery scalars");
-        };
-        assert_eq!(enum_scalars.e_nom_kwh, boxed_scalars.e_nom_kwh);
-        assert_eq!(enum_scalars.e_init_kwh, boxed_scalars.e_init_kwh);
-        assert_eq!(enum_scalars.eff_ch, boxed_scalars.eff_ch);
-        assert_eq!(enum_scalars.eff_dis, boxed_scalars.eff_dis);
+        assert_eq!(scalars.e_nom_kwh, 10.0);
+        assert!((scalars.e_init_kwh - 5.0).abs() < 1e-9, "0.5 soc * 10 kWh");
     }
 }
 
 #[cfg(test)]
 mod phase2a_ev_tests {
     //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.2) — see
-    //! `phase2a_battery_tests`'s module doc for what's covered and why.
+    //! `phase2a_battery_tests`'s module doc for the "why boxed-only now"
+    //! rationale.
 
     use super::*;
     use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::EvParams;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
 
     fn ev_params() -> EvParams {
         EvParams {
@@ -720,120 +310,82 @@ mod phase2a_ev_tests {
         }
     }
 
-    fn cfg_and_state() -> (AssetConfig, AssetState) {
+    fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = ev_params();
         (
-            AssetConfig::Ev(EvCharger::from_params(&params)),
+            Box::new(EvCharger::from_params(&params)),
             AssetState::Ev(EvCharger::initial_state(&params)),
         )
     }
 
     #[test]
-    fn state_values_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        assert_eq!(
-            cfg.state_values(&state),
-            cfg.to_boxed_asset().state_values(&state)
-        );
+    fn state_values_exposes_soc() {
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(boxed.state_values(&state).get("soc"), Some(&0.4));
     }
 
     #[test]
-    fn forecast_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let now = Utc::now();
-        let timespan = Duration::seconds(300);
-        assert_eq!(
-            cfg.forecast(&state, timespan, now).samples,
-            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
-        );
+    fn forecast_produces_samples() {
+        let (boxed, state) = boxed_and_state();
+        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
+        assert!(!series.samples.is_empty());
     }
 
     #[test]
-    fn resolve_request_target_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let enum_result = cfg.resolve_request_target(&state, Some(0.9), None);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn resolve_request_target_toward_higher_soc_returns_energy_and_power() {
+        let (boxed, state) = boxed_and_state();
+        let result = boxed
             .as_request_resolvable()
             .expect("EvCharger must implement RequestResolvable")
             .resolve_request_target(&state, Some(0.9), None);
-        assert_eq!(enum_result, boxed_result);
+        assert!(result.is_some());
     }
 
     #[test]
-    fn available_storage_kwh_boxed_matches_enum_when_plugged() {
-        let (cfg, state) = cfg_and_state();
-        let enum_result = cfg.available_storage_kwh(&state);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn available_storage_kwh_reports_both_directions_when_plugged() {
+        let (boxed, state) = boxed_and_state();
+        let result = boxed
             .as_request_resolvable()
             .expect("EvCharger must implement RequestResolvable")
             .available_storage_kwh(&state);
-        assert!(enum_result.is_some());
-        assert_eq!(enum_result, boxed_result);
+        assert!(result.is_some());
     }
 
     #[test]
-    fn available_storage_kwh_boxed_matches_enum_when_unplugged() {
-        let (cfg, _) = cfg_and_state();
+    fn available_storage_kwh_none_when_unplugged() {
+        let (boxed, _) = boxed_and_state();
         let unplugged = AssetState::Ev(EvState {
             soc: 0.4,
             plugged: false,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
         });
-        let enum_result = cfg.available_storage_kwh(&unplugged);
-        let boxed_result = cfg
-            .to_boxed_asset()
+        let result = boxed
             .as_request_resolvable()
             .unwrap()
             .available_storage_kwh(&unplugged);
-        assert_eq!(enum_result, None, "unplugged EV must report no storage");
-        assert_eq!(enum_result, boxed_result);
+        assert_eq!(result, None, "unplugged EV must report no storage");
     }
 
     #[test]
-    fn surplus_charge_kw_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let enum_result = cfg.surplus_charge_kw(&state, 3.0);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn surplus_charge_kw_positive_when_plugged_and_below_target() {
+        let (boxed, state) = boxed_and_state();
+        let result = boxed
             .as_request_resolvable()
             .expect("EvCharger must implement RequestResolvable")
             .surplus_charge_kw(&state, 3.0);
         assert!(
-            enum_result.is_some(),
+            result.is_some(),
             "EV below soc_target and plugged must absorb surplus"
         );
-        assert_eq!(enum_result, boxed_result);
     }
 
     #[test]
-    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
-        let (cfg, state) = cfg_and_state();
+    fn build_milp_context_reports_ev_scalars() {
+        let (boxed, state) = boxed_and_state();
         let now = Utc::now();
 
-        let enum_ctx = cfg
-            .build_milp_context(
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                None,
-                None,
-                1.4,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![],
-                0.0,
-            )
-            .expect("EvCharger must build a MILP context");
-        let boxed_ctx = cfg
-            .to_boxed_asset()
+        let ctx = boxed
             .as_milp_participant()
             .expect("EvCharger must implement MilpParticipant")
             .build_milp_context(
@@ -854,27 +406,23 @@ mod phase2a_ev_tests {
                 0.0,
             );
 
-        let AssetMilpParams::Ev(enum_scalars) = enum_ctx.milp_params(4, now) else {
+        let AssetMilpParams::Ev(scalars) = ctx.milp_params(4, now) else {
             panic!("expected Ev scalars");
         };
-        let AssetMilpParams::Ev(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
-            panic!("expected Ev scalars");
-        };
-        assert_eq!(enum_scalars.p_max_kw, boxed_scalars.p_max_kw);
-        assert_eq!(enum_scalars.e_extra_max_kwh, boxed_scalars.e_extra_max_kwh);
-        assert_eq!(enum_scalars.mode, boxed_scalars.mode);
+        assert_eq!(scalars.p_max_kw, 7.0);
     }
 }
 
 #[cfg(test)]
 mod phase2a_heater_tests {
     //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.3) — see
-    //! `phase2a_battery_tests`'s module doc for what's covered and why.
+    //! `phase2a_battery_tests`'s module doc for the "why boxed-only now"
+    //! rationale.
 
     use super::*;
     use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::HeaterParams;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
 
     fn heater_params() -> HeaterParams {
         HeaterParams {
@@ -893,99 +441,63 @@ mod phase2a_heater_tests {
         }
     }
 
-    fn cfg_and_state() -> (AssetConfig, AssetState) {
+    fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = heater_params();
         (
-            AssetConfig::Heater(Heater::from_params(&params)),
+            Box::new(Heater::from_params(&params)),
             AssetState::Heater(Heater::initial_state(&params)),
         )
     }
 
     #[test]
-    fn state_values_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        assert_eq!(
-            cfg.state_values(&state),
-            cfg.to_boxed_asset().state_values(&state)
-        );
+    fn state_values_exposes_temp_c() {
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(boxed.state_values(&state).get("temp_c"), Some(&20.0));
     }
 
     #[test]
-    fn forecast_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let now = Utc::now();
-        let timespan = Duration::seconds(300);
-        assert_eq!(
-            cfg.forecast(&state, timespan, now).samples,
-            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
-        );
+    fn forecast_produces_samples() {
+        let (boxed, state) = boxed_and_state();
+        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
+        assert!(!series.samples.is_empty());
     }
 
     #[test]
-    fn plan_trajectory_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let enum_result = cfg.plan_trajectory(&state);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn plan_trajectory_returns_a_trajectory() {
+        let (boxed, state) = boxed_and_state();
+        let result = boxed
             .as_thermostat()
             .expect("Heater must implement Thermostat")
             .plan_trajectory(&state);
-        assert!(enum_result.is_some());
-        assert_eq!(enum_result.map(|t| t.e_kwh), boxed_result.map(|t| t.e_kwh));
+        assert!(result.is_some());
     }
 
     #[test]
-    fn thermostat_setpoint_kw_boxed_matches_enum_below_target() {
-        let (cfg, state) = cfg_and_state(); // temp_initial_c=20.0
-        let enum_result = cfg.thermostat_setpoint_kw(&state, 22.0);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn thermostat_setpoint_kw_below_target_calls_for_max_kw() {
+        let (boxed, state) = boxed_and_state(); // temp_initial_c=20.0
+        let result = boxed
             .as_thermostat()
             .expect("Heater must implement Thermostat")
             .thermostat_setpoint_kw(&state, 22.0);
-        assert_eq!(enum_result, Some(3.0), "below target must call for max_kw");
-        assert_eq!(enum_result, Some(boxed_result));
+        assert_eq!(result, 3.0, "below target must call for max_kw");
     }
 
     #[test]
-    fn thermostat_setpoint_kw_boxed_matches_enum_above_target() {
-        let (cfg, state) = cfg_and_state(); // temp_initial_c=20.0
-        let enum_result = cfg.thermostat_setpoint_kw(&state, 18.0);
-        let boxed = cfg.to_boxed_asset();
-        let boxed_result = boxed
+    fn thermostat_setpoint_kw_above_target_calls_for_nothing() {
+        let (boxed, state) = boxed_and_state(); // temp_initial_c=20.0
+        let result = boxed
             .as_thermostat()
             .expect("Heater must implement Thermostat")
             .thermostat_setpoint_kw(&state, 18.0);
-        assert_eq!(enum_result, Some(0.0), "above target must call for nothing");
-        assert_eq!(enum_result, Some(boxed_result));
+        assert_eq!(result, 0.0, "above target must call for nothing");
     }
 
     #[test]
-    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
-        let (cfg, state) = cfg_and_state();
+    fn build_milp_context_reports_heater_scalars() {
+        let (boxed, state) = boxed_and_state();
         let now = Utc::now();
 
-        let enum_ctx = cfg
-            .build_milp_context(
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                None,
-                None,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![None; 4],
-                0.0,
-            )
-            .expect("Heater must build a MILP context");
-        let boxed_ctx = cfg
-            .to_boxed_asset()
+        let ctx = boxed
             .as_milp_participant()
             .expect("Heater must implement MilpParticipant")
             .build_milp_context(
@@ -1006,15 +518,10 @@ mod phase2a_heater_tests {
                 0.0,
             );
 
-        let AssetMilpParams::Heater(enum_scalars) = enum_ctx.milp_params(4, now) else {
+        let AssetMilpParams::Heater(scalars) = ctx.milp_params(4, now) else {
             panic!("expected Heater scalars");
         };
-        let AssetMilpParams::Heater(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
-            panic!("expected Heater scalars");
-        };
-        assert_eq!(enum_scalars.e_init_kwh, boxed_scalars.e_init_kwh);
-        assert_eq!(enum_scalars.e_max_kwh, boxed_scalars.e_max_kwh);
-        assert_eq!(enum_scalars.p_step_kw, boxed_scalars.p_step_kw);
+        assert!((scalars.e_max_kwh - 10.0).abs() < 1e-9, "(23-18)*2 kWh/C");
     }
 }
 
@@ -1026,9 +533,9 @@ mod phase2a_pv_tests {
 
     use super::*;
     use crate::entities::asset_params::PvParams;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
 
-    fn cfg_and_state() -> (AssetConfig, AssetState) {
+    fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = PvParams {
             id: "pv".to_string(),
             rated_kw: 10.0,
@@ -1036,35 +543,27 @@ mod phase2a_pv_tests {
             co2_g_kwh: 40.0,
         };
         (
-            AssetConfig::Pv(PvInverter::from_params(&params)),
+            Box::new(PvInverter::from_params(&params)),
             AssetState::Pv(PvInverter::initial_state(&params)),
         )
     }
 
     #[test]
-    fn state_values_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        assert_eq!(
-            cfg.state_values(&state),
-            cfg.to_boxed_asset().state_values(&state)
-        );
+    fn state_values_exposes_rated_kw() {
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(boxed.state_values(&state).get("rated_kw"), Some(&10.0));
     }
 
     #[test]
-    fn forecast_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let now = Utc::now();
-        let timespan = Duration::seconds(300);
-        assert_eq!(
-            cfg.forecast(&state, timespan, now).samples,
-            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
-        );
+    fn forecast_produces_samples() {
+        let (boxed, state) = boxed_and_state();
+        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
+        assert!(!series.samples.is_empty());
     }
 
     #[test]
     fn no_capability_trait_overrides() {
-        let (cfg, _) = cfg_and_state();
-        let boxed = cfg.to_boxed_asset();
+        let (boxed, _) = boxed_and_state();
         assert!(boxed.as_milp_participant().is_none());
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
@@ -1079,44 +578,36 @@ mod phase2a_base_load_tests {
 
     use super::*;
     use crate::entities::asset_params::BaseLoadParams;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
 
-    fn cfg_and_state() -> (AssetConfig, AssetState) {
+    fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = BaseLoadParams {
             id: "base_load".to_string(),
             baseline_kw: 0.6,
             spikes: vec![],
         };
         (
-            AssetConfig::BaseLoad(BaseLoad::from_params(&params)),
+            Box::new(BaseLoad::from_params(&params)),
             AssetState::BaseLoad(BaseLoad::initial_state(&params)),
         )
     }
 
     #[test]
-    fn state_values_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        assert_eq!(
-            cfg.state_values(&state),
-            cfg.to_boxed_asset().state_values(&state)
-        );
+    fn state_values_exposes_baseline_kw() {
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(boxed.state_values(&state).get("baseline_kw"), Some(&0.6));
     }
 
     #[test]
-    fn forecast_boxed_matches_enum() {
-        let (cfg, state) = cfg_and_state();
-        let now = Utc::now();
-        let timespan = Duration::seconds(300);
-        assert_eq!(
-            cfg.forecast(&state, timespan, now).samples,
-            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
-        );
+    fn forecast_produces_samples() {
+        let (boxed, state) = boxed_and_state();
+        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
+        assert!(!series.samples.is_empty());
     }
 
     #[test]
     fn no_capability_trait_overrides() {
-        let (cfg, _) = cfg_and_state();
-        let boxed = cfg.to_boxed_asset();
+        let (boxed, _) = boxed_and_state();
         assert!(boxed.as_milp_participant().is_none());
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
@@ -1144,6 +635,7 @@ mod phase2a_trivial_delegation_smoke_tests {
     use crate::entities::asset_params::{
         BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
     };
+    use std::collections::HashMap;
 
     fn exercise_trivial_methods(mut boxed: Box<dyn Asset>) {
         let _ = boxed.default_setpoint();
@@ -1166,9 +658,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             min_soc: 0.1,
             c_terminal_eur_kwh: None,
         };
-        exercise_trivial_methods(
-            AssetConfig::Battery(Battery::from_params(&params)).to_boxed_asset(),
-        );
+        exercise_trivial_methods(Box::new(Battery::from_params(&params)));
     }
 
     #[test]
@@ -1185,7 +675,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             response_delay_s: 0.0,
             v2g_capable: true,
         };
-        exercise_trivial_methods(AssetConfig::Ev(EvCharger::from_params(&params)).to_boxed_asset());
+        exercise_trivial_methods(Box::new(EvCharger::from_params(&params)));
     }
 
     #[test]
@@ -1204,9 +694,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             switching_penalty_eur: 0.0,
             c_terminal_eur_kwh: None,
         };
-        exercise_trivial_methods(
-            AssetConfig::Heater(Heater::from_params(&params)).to_boxed_asset(),
-        );
+        exercise_trivial_methods(Box::new(Heater::from_params(&params)));
     }
 
     #[test]
@@ -1217,9 +705,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             inverter_max_kw: 8.5,
             co2_g_kwh: 40.0,
         };
-        exercise_trivial_methods(
-            AssetConfig::Pv(PvInverter::from_params(&params)).to_boxed_asset(),
-        );
+        exercise_trivial_methods(Box::new(PvInverter::from_params(&params)));
     }
 
     #[test]
@@ -1229,9 +715,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             baseline_kw: 0.6,
             spikes: vec![],
         };
-        exercise_trivial_methods(
-            AssetConfig::BaseLoad(BaseLoad::from_params(&params)).to_boxed_asset(),
-        );
+        exercise_trivial_methods(Box::new(BaseLoad::from_params(&params)));
     }
 }
 
@@ -1368,6 +852,7 @@ mod phase2b_tick_overridable_tests {
     use super::*;
     use crate::entities::asset_params::PvCurtailmentSource;
     use crate::entities::asset_params::{BaseLoadParams, EvParams, HeaterParams, PvParams};
+    use chrono::Duration;
 
     fn default_overrides() -> TickOverrides {
         TickOverrides {
@@ -1393,13 +878,12 @@ mod phase2b_tick_overridable_tests {
 
     #[test]
     fn pv_apply_tick_overrides_sets_all_fields() {
-        let mut boxed = AssetConfig::Pv(PvInverter::from_params(&PvParams {
+        let mut boxed: Box<dyn Asset> = Box::new(PvInverter::from_params(&PvParams {
             id: "pv".to_string(),
             rated_kw: 10.0,
             inverter_max_kw: 8.5,
             co2_g_kwh: 40.0,
-        }))
-        .to_boxed_asset();
+        }));
         let mut state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
             generation_limit_kw: None,
