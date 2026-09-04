@@ -3,49 +3,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
+    Thermostat,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::PowerAdjustability;
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::HeaterParams;
+use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
 
-/// Which safety-envelope override is active for this tick, if any.
-///
-/// `temp_min_c`/`temp_max_c` are a comfort/service band, not the asset's true physical
-/// limits (see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section). Outside that band
-/// there is a wider safety envelope — ambient temperature on the low side (no physical harm
-/// ever), `temp_safety_max_c` on the high side (a real hard ceiling) — that only an active VTN
-/// emergency directive should unlock. No such directive is wired in yet; today this is settable
-/// via `SimInjectState` (manual/test/demo) or automatically by the deviation arbiter's heater
-/// lever (`controller::arbiter`) once enabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HeaterEmergencyMode {
-    /// Normal operation: comfort band enforced as today (emergency heat at temp_min_c,
-    /// forced off at temp_max_c).
-    Normal,
-    /// Emergency curtailment: suppress the forced-on emergency heat at temp_min_c,
-    /// letting the tank drift toward ambient. temp_max_c ceiling is unaffected.
-    Curtail,
-    /// Emergency energy absorption: suppress the forced-off ceiling at temp_max_c,
-    /// allowing heating up to temp_safety_max_c instead. temp_min_c floor is unaffected.
-    Absorb,
-}
-
-impl HeaterEmergencyMode {
-    /// Resolve from the two independent SimInjectState override flags. Curtail wins if
-    /// both are somehow set (callers shouldn't set both truthy).
-    pub fn from_overrides(curtail: Option<bool>, absorb: Option<bool>) -> Self {
-        if curtail.unwrap_or(false) {
-            Self::Curtail
-        } else if absorb.unwrap_or(false) {
-            Self::Absorb
-        } else {
-            Self::Normal
-        }
-    }
-}
+// HeaterEmergencyMode moved to heater_emergency.rs (Spec A Phase 2a, file-size split).
+pub use super::heater_emergency::HeaterEmergencyMode;
 
 /// Heater config. Consumes power for space heating (positive = import).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,12 +53,6 @@ pub struct Heater {
     pub draw_kw: f64,
     /// Set each tick by sim from SimInjectState.ambient_temp_c; NOT from YAML.
     pub ambient_temp_c: f64,
-}
-
-impl Default for HeaterEmergencyMode {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 /// Heater mutable state.
@@ -317,75 +279,8 @@ impl Heater {
         }
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![
-            ControlDescriptor {
-                key: "heater_temp_c".into(),
-                label: "T_tank".into(),
-                kind: ControlKind::Slider,
-                min: Some(18.0),
-                max: Some(95.0),
-                unit: "°C".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "heater_setpoint_c".into(),
-                label: "Comfort target".into(),
-                kind: ControlKind::Slider,
-                min: Some(18.0),
-                max: Some(95.0),
-                unit: "°C".into(),
-                display_scale: None,
-                // Compared against temp_c by the dispatcher (build_setpoints) to
-                // derive ON/OFF — not a continuous value like T_tank, and no
-                // override is active most of the time. nullable so "no override"
-                // reads as "Off" (pinned to the top of the range) rather than a
-                // numeric value indistinguishable from an active override.
-                nullable: true,
-            },
-            ControlDescriptor {
-                key: "heater_temp_min_c".into(),
-                label: "T_tank_min".into(),
-                kind: ControlKind::Slider,
-                min: Some(18.0),
-                max: Some(94.0),
-                unit: "°C".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "heater_temp_max_c".into(),
-                label: "T_tank_max".into(),
-                kind: ControlKind::Slider,
-                min: Some(19.0),
-                max: Some(95.0),
-                unit: "°C".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "heater_emergency_curtail".into(),
-                label: "Emergency curtail".into(),
-                kind: ControlKind::Switch,
-                min: None,
-                max: None,
-                unit: "".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "heater_emergency_absorb".into(),
-                label: "Emergency absorb".into(),
-                kind: ControlKind::Switch,
-                min: None,
-                max: None,
-                unit: "".into(),
-                display_scale: None,
-                nullable: false,
-            },
-        ]
-    }
+    // control_schema() moved to heater_control_schema.rs (Spec A Phase 2a,
+    // file-size split) — still `impl Heater`, just a separate block/file.
 
     pub fn reset(&self, state: &mut HeaterState, values: HashMap<String, f64>) {
         if let Some(&t) = values.get("temp_c") {
@@ -501,6 +396,119 @@ impl Asset for Heater {
             unreachable!()
         };
         self.flexibility_floor_inner(s)
+    }
+
+    fn default_setpoint(&self) -> f64 {
+        Self::default_setpoint(self)
+    }
+
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
+        Self::control_schema(self)
+    }
+
+    fn update_config(&mut self, values: HashMap<String, f64>) {
+        Self::update_config(self, values)
+    }
+
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
+        Self::default_comfort_rates(self)
+    }
+
+    fn default_completion_policy(&self) -> CompletionPolicy {
+        Self::default_completion_policy(self)
+    }
+
+    fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        Self::default_post_deadline_comfort_bid(self)
+    }
+
+    fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
+        let AssetState::Heater(s) = state else {
+            unreachable!("Heater/state mismatch")
+        };
+        Self::state_values(self, s)
+    }
+
+    fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
+        let AssetState::Heater(s) = state else {
+            unreachable!("Heater/state mismatch")
+        };
+        Self::reset(self, s, values)
+    }
+
+    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
+        let AssetState::Heater(s) = state else {
+            unreachable!("Heater/state mismatch")
+        };
+        Self::forecast(self, s, timespan, now)
+    }
+
+    fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
+        Some(self)
+    }
+
+    fn as_thermostat(&self) -> Option<&dyn Thermostat> {
+        Some(self)
+    }
+}
+
+impl MilpParticipant for Heater {
+    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 3 heterogeneous asset kinds — see trait doc
+    fn build_milp_context(
+        &self,
+        state: &AssetState,
+        n: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+        _ev_session: Option<&EvSession>,
+        heater_target: Option<&HeaterTarget>,
+        _ev_min_charge_kw: f64,
+        _v_ev_extra_eur_kwh: f64,
+        _v_ev_core_eur_kwh: f64,
+        _asap_lateness_eur_kwh_h: f64,
+        _v_ev_free_charge_eur_kwh: f64,
+        lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
+        heater_anchor: Vec<Option<f64>>,
+        w_ghg_eur_kg: f64,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        Box::new(
+            crate::controller::milp_planner::asset_port::HeaterMilpContext::from_state(
+                state,
+                self,
+                n,
+                cum_s,
+                now,
+                heater_target,
+                lambda_sw,
+                c_terminal_eur_kwh,
+                heater_anchor,
+                w_ghg_eur_kg,
+            ),
+        )
+    }
+}
+
+impl Thermostat for Heater {
+    fn plan_trajectory(&self, live_state: &AssetState) -> Option<HeaterPlanTrajectory> {
+        Self::plan_trajectory(self, live_state)
+    }
+
+    /// Moved here verbatim from `AssetConfig::thermostat_setpoint_kw`'s only
+    /// real arm (Heater is the only asset kind with thermostat behavior
+    /// today). Returns `f64` directly rather than `Option<f64>` — the
+    /// original's `None` case was purely "not a Heater," which capability-gating
+    /// (`as_thermostat() -> Option<&dyn Thermostat>`) already handles; within
+    /// this arm the original always returned `Some(...)`.
+    fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64 {
+        let AssetState::Heater(s) = state else {
+            unreachable!("Heater/state mismatch")
+        };
+        if s.temperature_c < target_c {
+            self.max_kw
+        } else {
+            0.0
+        }
     }
 }
 

@@ -15,6 +15,8 @@ mod ev_comfort;
 mod ev_milp;
 pub mod grid;
 pub mod heater;
+mod heater_control_schema;
+mod heater_emergency;
 mod heater_milp;
 mod history;
 pub mod pv;
@@ -859,5 +861,157 @@ mod phase2a_ev_tests {
         assert_eq!(enum_scalars.p_max_kw, boxed_scalars.p_max_kw);
         assert_eq!(enum_scalars.e_extra_max_kwh, boxed_scalars.e_extra_max_kwh);
         assert_eq!(enum_scalars.mode, boxed_scalars.mode);
+    }
+}
+
+#[cfg(test)]
+mod phase2a_heater_tests {
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.3) — see
+    //! `phase2a_battery_tests`'s module doc for what's covered and why.
+
+    use super::*;
+    use crate::controller::milp_planner::AssetMilpParams;
+    use crate::entities::asset_params::HeaterParams;
+    use chrono::Duration;
+
+    fn heater_params() -> HeaterParams {
+        HeaterParams {
+            id: "heater".to_string(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        }
+    }
+
+    fn cfg_and_state() -> (AssetConfig, AssetState) {
+        let params = heater_params();
+        (
+            AssetConfig::Heater(Heater::from_params(&params)),
+            AssetState::Heater(Heater::initial_state(&params)),
+        )
+    }
+
+    #[test]
+    fn state_values_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        assert_eq!(
+            cfg.state_values(&state),
+            cfg.to_boxed_asset().state_values(&state)
+        );
+    }
+
+    #[test]
+    fn forecast_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+        let timespan = Duration::seconds(300);
+        assert_eq!(
+            cfg.forecast(&state, timespan, now).samples,
+            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
+        );
+    }
+
+    #[test]
+    fn plan_trajectory_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let enum_result = cfg.plan_trajectory(&state);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_thermostat()
+            .expect("Heater must implement Thermostat")
+            .plan_trajectory(&state);
+        assert!(enum_result.is_some());
+        assert_eq!(enum_result.map(|t| t.e_kwh), boxed_result.map(|t| t.e_kwh));
+    }
+
+    #[test]
+    fn thermostat_setpoint_kw_boxed_matches_enum_below_target() {
+        let (cfg, state) = cfg_and_state(); // temp_initial_c=20.0
+        let enum_result = cfg.thermostat_setpoint_kw(&state, 22.0);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_thermostat()
+            .expect("Heater must implement Thermostat")
+            .thermostat_setpoint_kw(&state, 22.0);
+        assert_eq!(enum_result, Some(3.0), "below target must call for max_kw");
+        assert_eq!(enum_result, Some(boxed_result));
+    }
+
+    #[test]
+    fn thermostat_setpoint_kw_boxed_matches_enum_above_target() {
+        let (cfg, state) = cfg_and_state(); // temp_initial_c=20.0
+        let enum_result = cfg.thermostat_setpoint_kw(&state, 18.0);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_thermostat()
+            .expect("Heater must implement Thermostat")
+            .thermostat_setpoint_kw(&state, 18.0);
+        assert_eq!(enum_result, Some(0.0), "above target must call for nothing");
+        assert_eq!(enum_result, Some(boxed_result));
+    }
+
+    #[test]
+    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+
+        let enum_ctx = cfg
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![None; 4],
+                0.0,
+            )
+            .expect("Heater must build a MILP context");
+        let boxed_ctx = cfg
+            .to_boxed_asset()
+            .as_milp_participant()
+            .expect("Heater must implement MilpParticipant")
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![None; 4],
+                0.0,
+            );
+
+        let AssetMilpParams::Heater(enum_scalars) = enum_ctx.milp_params(4, now) else {
+            panic!("expected Heater scalars");
+        };
+        let AssetMilpParams::Heater(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
+            panic!("expected Heater scalars");
+        };
+        assert_eq!(enum_scalars.e_init_kwh, boxed_scalars.e_init_kwh);
+        assert_eq!(enum_scalars.e_max_kwh, boxed_scalars.e_max_kwh);
+        assert_eq!(enum_scalars.p_step_kw, boxed_scalars.p_step_kw);
     }
 }
