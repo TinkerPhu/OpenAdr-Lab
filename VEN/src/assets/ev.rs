@@ -388,6 +388,22 @@ impl Asset for EvCharger {
         Some(self)
     }
 
+    fn asset_type(&self) -> crate::entities::asset::AssetType {
+        crate::entities::asset::AssetType::Ev
+    }
+
+    fn asset_type_str(&self) -> &'static str {
+        "ev"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
         Some(self)
     }

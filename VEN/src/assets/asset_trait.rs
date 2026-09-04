@@ -8,7 +8,7 @@ use super::{
 };
 use crate::assets::HistoryPoint;
 use crate::common::TimeSeries;
-use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use crate::entities::asset::{AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
@@ -153,6 +153,43 @@ pub trait Asset: Send + Sync {
     ) -> TimeSeries {
         unimplemented!("Asset::forecast() only applies to AssetConfig-backed asset kinds")
     }
+
+    /// Domain-level type classification, for the API/timeline snapshots.
+    /// **Not** 1:1 with the 5 `AssetConfig` variants — `BaseLoad` maps to
+    /// `AssetType::GenericConsumer`, not its own variant (see `AssetType`'s
+    /// own doc comment for the wider consumer/producer catalog this fits
+    /// into, spanning asset kinds this codebase hasn't implemented yet).
+    fn asset_type(&self) -> AssetType {
+        unimplemented!("Asset::asset_type() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// Lowercase snake_case label for the same purpose as `asset_type`, but
+    /// for contexts that want the literal `AssetConfig` variant name (e.g.
+    /// `"base_load"`, not `"generic_consumer"`) rather than the wider
+    /// domain classification. Deliberately a separate method, not derived
+    /// from `asset_type()` — the two diverge for `BaseLoad`, and inverting
+    /// `AssetType::GenericConsumer` back to a specific string wouldn't be
+    /// safe once other consumer kinds share that same variant.
+    fn asset_type_str(&self) -> &'static str {
+        unimplemented!("Asset::asset_type_str() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// Recover this asset's concrete type from a `&dyn Asset`/`Box<dyn Asset>`
+    /// — for the handful of call sites that need one specific asset kind
+    /// (e.g. a PV-only sim-inject handler), not a generic `Asset` operation.
+    /// Deliberately narrow: prefer a real trait method for anything more
+    /// than a one-off, narrowly-scoped need.
+    ///
+    /// No default body: `self` inside a default method is `Self`-generic and
+    /// unsized from the trait's own point of view, so coercing it to
+    /// `&dyn Any` would require a `Self: Sized` bound — which would make this
+    /// method uncallable through `dyn Asset` at all, defeating the purpose.
+    /// Each concrete type's `impl Asset` provides the one-line body instead
+    /// (trivially `self`, since every type is already `Sized`).
+    fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Mutable counterpart of `as_any` — see its doc comment.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
     // ── Optional capabilities (Spec A D4) ───────────────────────────────────
     //
@@ -348,6 +385,23 @@ impl<'a> Asset for AssetHandle<'a> {
     }
 
     // simulate_forward: default impl inherited from Asset
+
+    /// `AssetHandle<'a>` isn't `'static` (it borrows), so it can never
+    /// actually be represented as `dyn Any` — downcast the concrete
+    /// `AssetConfig` variant it wraps instead. Never called in practice:
+    /// `to_boxed_asset()` (the trait-object construction path) hands out the
+    /// owned concrete type directly, not an `AssetHandle`.
+    fn as_any(&self) -> &dyn std::any::Any {
+        unimplemented!(
+            "AssetHandle::as_any() is not supported — downcast the concrete asset type instead"
+        )
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        unimplemented!(
+            "AssetHandle::as_any_mut() is not supported — downcast the concrete asset type instead"
+        )
+    }
 }
 
 /// Capability: this asset accepts tick-time environment/Behaviour-C overrides

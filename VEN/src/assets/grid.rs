@@ -135,6 +135,14 @@ impl Asset for Grid {
         let power_kw = state.actual_power_kw();
         (state.clone(), power_kw)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

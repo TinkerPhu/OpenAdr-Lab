@@ -176,27 +176,36 @@ commit, not incrementally per asset type.
       Any caller of `build_milp_context` also needs to switch from
       `AssetConfig::build_milp_context(...)` to going through the asset's
       `as_milp_participant()` accessor.
-- [ ] 5.3 Confirmed dispatch site (design.md D5): rewrite `SimState::tick()`'s
-      `match cfg { AssetConfig::Pv(pv) => ..., ... }`
-      (`VEN/src/simulator/mod.rs:231-289`) as a `TickOverridable` capability
-      trait. Both the trait definition and its implementations happen here
-      (not in sections 2/4 — see section 2's note on why this was deferred):
-      1. Hoist BaseLoad's `natural_base_kw`/`self.base_load_smoothing.update(...)`
-         resolution out of the match arm and before the per-asset loop,
-         mirroring how PV's `self.pv_smoothing.update(...)` is already hoisted
-         today — this is the prerequisite that makes BaseLoad's override
-         handling self-contained.
-      2. Define `TickOverridable::apply_tick_overrides(&mut self, overrides:
-         &TickOverrides)` and `TickOverrides`, carrying **pre-resolved**
-         values (PV's resolved `irradiance`/`offset`, BaseLoad's resolved
-         `baseline_kw`) rather than the raw override/alpha inputs `tick()`
-         takes as bare arguments — each asset's impl should only need to
-         assign fields, not recompute smoothing.
-      3. Implement it for Pv/Heater/BaseLoad/Ev (Battery declines — no arm in
-         `tick()`'s current match); add the `as_tick_overridable()` accessor
-         to `Asset` in the same commit as the other three (retroactively
-         completing task 2.3 for this fourth trait).
-      4. Replace the match with a loop over `as_tick_overridable()`.
+- [x] 5.3a Hoisted BaseLoad's `natural_base_kw`/
+      `self.base_load_smoothing.update(...)` resolution out of the match arm
+      and before the per-asset loop, mirroring PV's already-hoisted
+      `self.pv_smoothing.update(...)`. Verified behavior-preserving (all
+      `peek_base_load_kw_matches_tick_output_*` equivalence tests still pass
+      unchanged). Committed separately (`c13b60f4`).
+- [x] 5.3b Defined `TickOverridable::apply_tick_overrides(&mut self, state:
+      &mut AssetState, overrides: &TickOverrides)` and `TickOverrides` (in
+      `asset_trait.rs`, alongside the other three capability traits) — note
+      the signature grew a `state` param beyond design.md's original sketch:
+      EV's plugged-state override writes to `AssetState`, not just config,
+      so a `&mut self`-only signature couldn't have worked for it. Implemented
+      for Pv/Heater/BaseLoad/Ev (Battery declines); added
+      `as_tick_overridable()` (`&mut self` accessor, unlike the other three)
+      to `Asset`. **Naming-collision finding:** Heater's trait method shares
+      a name with its pre-existing inherent `apply_tick_overrides` (different
+      arity) — dot-syntax on a concrete `Heater` always resolves to the
+      inherent one; reaching the trait impl needs fully-qualified
+      `TickOverridable::apply_tick_overrides(...)` syntax. Confirmed by a
+      real compile error, not just reasoned about. Doesn't affect `tick()`'s
+      planned rewrite (dispatches through `dyn TickOverridable`, which only
+      exposes the trait's own methods). 6 new tests proving each impl matches
+      `tick()`'s current match-arm behavior for the same inputs. Committed
+      separately (`c7d4e7c6`). Still additive — `tick()` itself not yet
+      rewired to call this.
+- [ ] 5.3c Replace `tick()`'s `match cfg { AssetConfig::Pv(pv) => ..., ... }`
+      (`VEN/src/simulator/mod.rs`) with a loop over `as_tick_overridable()`.
+      Sequenced after 5.1 (storage retype), since the accessor is only
+      reachable once `cfg` is `&mut Box<dyn Asset>` / `&mut dyn Asset`, not
+      the old `AssetConfig` enum.
 - [ ] 5.4 Update the three comment-only mentions of `AssetConfig` found by the
       broadened survey (`VEN/src/assets/grid.rs`,
       `VEN/src/controller/simulator_port.rs`, `VEN/src/profile/schema.rs`) —

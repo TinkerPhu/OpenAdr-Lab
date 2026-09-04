@@ -314,6 +314,22 @@ impl Asset for Battery {
     fn as_request_resolvable(&self) -> Option<&dyn RequestResolvable> {
         Some(self)
     }
+
+    fn asset_type(&self) -> crate::entities::asset::AssetType {
+        crate::entities::asset::AssetType::Battery
+    }
+
+    fn asset_type_str(&self) -> &'static str {
+        "battery"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl MilpParticipant for Battery {
