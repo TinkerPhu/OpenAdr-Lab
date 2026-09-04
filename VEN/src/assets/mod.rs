@@ -690,3 +690,174 @@ mod phase2a_battery_tests {
         assert_eq!(enum_scalars.eff_dis, boxed_scalars.eff_dis);
     }
 }
+
+#[cfg(test)]
+mod phase2a_ev_tests {
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.2) — see
+    //! `phase2a_battery_tests`'s module doc for what's covered and why.
+
+    use super::*;
+    use crate::controller::milp_planner::AssetMilpParams;
+    use crate::entities::asset_params::EvParams;
+    use chrono::Duration;
+
+    fn ev_params() -> EvParams {
+        EvParams {
+            id: "ev".to_string(),
+            max_charge_kw: 7.0,
+            max_discharge_kw: 7.0,
+            initial_soc: 0.4,
+            battery_kwh: 50.0,
+            soc_target: 0.8,
+            default_charge_kw: 7.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 0.0,
+            v2g_capable: true,
+        }
+    }
+
+    fn cfg_and_state() -> (AssetConfig, AssetState) {
+        let params = ev_params();
+        (
+            AssetConfig::Ev(EvCharger::from_params(&params)),
+            AssetState::Ev(EvCharger::initial_state(&params)),
+        )
+    }
+
+    #[test]
+    fn state_values_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        assert_eq!(
+            cfg.state_values(&state),
+            cfg.to_boxed_asset().state_values(&state)
+        );
+    }
+
+    #[test]
+    fn forecast_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+        let timespan = Duration::seconds(300);
+        assert_eq!(
+            cfg.forecast(&state, timespan, now).samples,
+            cfg.to_boxed_asset().forecast(&state, timespan, now).samples
+        );
+    }
+
+    #[test]
+    fn resolve_request_target_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let enum_result = cfg.resolve_request_target(&state, Some(0.9), None);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("EvCharger must implement RequestResolvable")
+            .resolve_request_target(&state, Some(0.9), None);
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn available_storage_kwh_boxed_matches_enum_when_plugged() {
+        let (cfg, state) = cfg_and_state();
+        let enum_result = cfg.available_storage_kwh(&state);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("EvCharger must implement RequestResolvable")
+            .available_storage_kwh(&state);
+        assert!(enum_result.is_some());
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn available_storage_kwh_boxed_matches_enum_when_unplugged() {
+        let (cfg, _) = cfg_and_state();
+        let unplugged = AssetState::Ev(EvState {
+            soc: 0.4,
+            plugged: false,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+        });
+        let enum_result = cfg.available_storage_kwh(&unplugged);
+        let boxed_result = cfg
+            .to_boxed_asset()
+            .as_request_resolvable()
+            .unwrap()
+            .available_storage_kwh(&unplugged);
+        assert_eq!(enum_result, None, "unplugged EV must report no storage");
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn surplus_charge_kw_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state();
+        let enum_result = cfg.surplus_charge_kw(&state, 3.0);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("EvCharger must implement RequestResolvable")
+            .surplus_charge_kw(&state, 3.0);
+        assert!(
+            enum_result.is_some(),
+            "EV below soc_target and plugged must absorb surplus"
+        );
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
+        let (cfg, state) = cfg_and_state();
+        let now = Utc::now();
+
+        let enum_ctx = cfg
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                1.4,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![],
+                0.0,
+            )
+            .expect("EvCharger must build a MILP context");
+        let boxed_ctx = cfg
+            .to_boxed_asset()
+            .as_milp_participant()
+            .expect("EvCharger must implement MilpParticipant")
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                1.4,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![],
+                0.0,
+            );
+
+        let AssetMilpParams::Ev(enum_scalars) = enum_ctx.milp_params(4, now) else {
+            panic!("expected Ev scalars");
+        };
+        let AssetMilpParams::Ev(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
+            panic!("expected Ev scalars");
+        };
+        assert_eq!(enum_scalars.p_max_kw, boxed_scalars.p_max_kw);
+        assert_eq!(enum_scalars.e_extra_max_kwh, boxed_scalars.e_extra_max_kwh);
+        assert_eq!(enum_scalars.mode, boxed_scalars.mode);
+    }
+}

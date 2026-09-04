@@ -115,9 +115,14 @@ per the note in section 2.
       — added directly on the trait impl. Full test suite green (1206
       passed = 1199 + 7 new equivalence tests), fmt/clippy/file-size-audit/
       ven-architecture-invariant checks all clean.
-- [ ] 4.2 EV: implements `MilpParticipant` + `RequestResolvable`. Same,
-      including `VEN/src/controller/milp_planner/tests/mod.rs` if it
-      constructs `AssetConfig::Ev(...)` fixtures.
+- [x] 4.2 EV: implements `MilpParticipant` + `RequestResolvable`. Same pattern
+      as Battery, including `available_storage_kwh`/`surplus_charge_kw` moved
+      verbatim from `AssetConfig`'s match arms (no prior `EvCharger`-only
+      inherent methods existed for either). 7 new equivalence tests
+      (`assets::phase2a_ev_tests`), covering plugged/unplugged branches.
+      `VEN/src/controller/milp_planner/tests/mod.rs` needed no change (its
+      `AssetConfig::Ev(...)` fixtures are unaffected — additive change only).
+      Full suite green (1213 = 1206 + 7), fmt/clippy/file-size-audit clean.
 - [ ] 4.3 Heater: implements `MilpParticipant` + `Thermostat` (per D4's table —
       no `RequestResolvable`). Same.
 - [ ] 4.4 PV: implements none of D4's three capability traits (inherits all
