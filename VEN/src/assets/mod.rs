@@ -1120,3 +1120,115 @@ mod phase2a_base_load_tests {
         assert!(boxed.as_thermostat().is_none());
     }
 }
+
+#[cfg(test)]
+mod phase2a_trivial_delegation_smoke_tests {
+    //! Closes a real gap found on review: the 6 trivial-delegation universal
+    //! methods (`default_setpoint`, `control_schema`, `update_config`,
+    //! `default_comfort_rates`, `default_completion_policy`,
+    //! `default_post_deadline_comfort_bid`) were never actually invoked
+    //! through `Box<dyn Asset>` in any test — their correctness rested on
+    //! "inherent methods always shadow same-named trait methods" (correct
+    //! per Rust's method resolution rules, and empirically consistent with
+    //! the full suite never hanging/crashing on a stack overflow), but that's
+    //! inference, not proof. These smoke tests call each one through the
+    //! boxed path directly, for every asset type, confirming real dispatch
+    //! to the inherent method rather than infinite self-recursion into the
+    //! trait's own panicking default (which would stack-overflow, not
+    //! silently misbehave — so "doesn't crash" here is a real, meaningful
+    //! assertion, not a tautology).
+
+    use super::*;
+    use crate::entities::asset_params::{
+        BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
+    };
+
+    fn exercise_trivial_methods(mut boxed: Box<dyn Asset>) {
+        let _ = boxed.default_setpoint();
+        let _ = boxed.control_schema();
+        boxed.update_config(HashMap::new());
+        let _ = boxed.default_comfort_rates();
+        let _ = boxed.default_completion_policy();
+        let _ = boxed.default_post_deadline_comfort_bid();
+    }
+
+    #[test]
+    fn battery_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
+        let params = BatteryParams {
+            id: "battery".to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: None,
+        };
+        exercise_trivial_methods(
+            AssetConfig::Battery(Battery::from_params(&params)).to_boxed_asset(),
+        );
+    }
+
+    #[test]
+    fn ev_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
+        let params = EvParams {
+            id: "ev".to_string(),
+            max_charge_kw: 7.0,
+            max_discharge_kw: 7.0,
+            initial_soc: 0.4,
+            battery_kwh: 50.0,
+            soc_target: 0.8,
+            default_charge_kw: 7.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 0.0,
+            v2g_capable: true,
+        };
+        exercise_trivial_methods(AssetConfig::Ev(EvCharger::from_params(&params)).to_boxed_asset());
+    }
+
+    #[test]
+    fn heater_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
+        let params = HeaterParams {
+            id: "heater".to_string(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        };
+        exercise_trivial_methods(
+            AssetConfig::Heater(Heater::from_params(&params)).to_boxed_asset(),
+        );
+    }
+
+    #[test]
+    fn pv_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
+        let params = PvParams {
+            id: "pv".to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 8.5,
+            co2_g_kwh: 40.0,
+        };
+        exercise_trivial_methods(
+            AssetConfig::Pv(PvInverter::from_params(&params)).to_boxed_asset(),
+        );
+    }
+
+    #[test]
+    fn base_load_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
+        let params = BaseLoadParams {
+            id: "base_load".to_string(),
+            baseline_kw: 0.6,
+            spikes: vec![],
+        };
+        exercise_trivial_methods(
+            AssetConfig::BaseLoad(BaseLoad::from_params(&params)).to_boxed_asset(),
+        );
+    }
+}
