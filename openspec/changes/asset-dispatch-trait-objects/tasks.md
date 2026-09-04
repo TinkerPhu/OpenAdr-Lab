@@ -123,8 +123,23 @@ per the note in section 2.
       `VEN/src/controller/milp_planner/tests/mod.rs` needed no change (its
       `AssetConfig::Ev(...)` fixtures are unaffected — additive change only).
       Full suite green (1213 = 1206 + 7), fmt/clippy/file-size-audit clean.
-- [ ] 4.3 Heater: implements `MilpParticipant` + `Thermostat` (per D4's table —
-      no `RequestResolvable`). Same.
+- [x] 4.3 Heater: implements `MilpParticipant` + `Thermostat` (per D4's table —
+      no `RequestResolvable`). `plan_trajectory` already took `&AssetState`
+      directly (an associated fn, `Heater::plan_trajectory(cfg, live_state)`,
+      not `&self`) — trait impl just delegates. `thermostat_setpoint_kw`
+      simplified from the original's `Option<f64>` to plain `f64` (the
+      `None` case was purely "not a Heater," now handled by
+      `as_thermostat()`'s own `Option`). **File-size fix required:**
+      `heater.rs` hit 574 lines (over the 500 cap) after the new trait impls
+      — split `control_schema` into `heater_control_schema.rs` and
+      `HeaterEmergencyMode` into `heater_emergency.rs` (both legitimate
+      separate concerns, same pattern as `pv_preview.rs`/
+      `base_load_preview.rs` splitting out of `simulator/mod.rs`) — the
+      `control_schema` split alone (507 lines) wasn't enough on its own,
+      both splits were needed to clear the cap (both new files register in
+      `assets/mod.rs`). 6 new equivalence tests
+      (`assets::phase2a_heater_tests`). Full suite green (1219 = 1213 + 6),
+      fmt/clippy/file-size-audit clean.
 - [ ] 4.4 PV: implements none of D4's three capability traits (inherits all
       three `as_*` `None` defaults) — universal `Asset` methods only. Same,
       paying particular attention to `VEN/src/simulator/pv_preview.rs` and
