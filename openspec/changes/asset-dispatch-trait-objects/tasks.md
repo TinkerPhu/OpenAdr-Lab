@@ -83,14 +83,18 @@ task 5.3, where the `tick()` rewrite actually happens, not guessed at here.
 
 ## 3. Trait-object conversion (Phase 1 of design.md's Migration Plan)
 
-- [ ] 3.1 Introduce the trait-object storage/construction path (per design.md
-      D2: extend `AssetHandle` rather than a new parallel type) alongside the
-      existing `AssetConfig` enum. Both must compile and all tests must pass
-      after this task — no deletions yet.
-- [ ] 3.2 Write a unit test proving the new trait-object path produces identical
-      `step`/`capability`/`flexibility_floor` results to the existing
-      enum-dispatched path for at least one asset type (Battery), as a
-      regression guard for the rest of the migration.
+- [x] 3.1 Introduced `AssetConfig::to_boxed_asset(&self) -> Box<dyn Asset>`
+      (`VEN/src/assets/mod.rs`) as the trait-object construction path,
+      alongside the existing enum — a temporary bridge (matches each variant,
+      clones the concrete type into a box), not a new permanent wrapper type,
+      consistent with D2's "extend, don't introduce a parallel type" (the
+      bridge itself is deleted in Phase 3; `AssetHandle`'s own role is
+      unrelated and untouched, see D2's note on what `AssetHandle` becomes).
+- [x] 3.2 Added `assets::phase1_bridge_tests` (3 tests: `step`, `capability`,
+      `flexibility_floor`) proving `Box<dyn Asset>` dispatch via the bridge
+      produces bit-identical results to `AssetConfig`'s enum dispatch, for
+      Battery. 1199/1199 tests pass (1196 + these 3), fmt/clippy/file-size
+      audit clean.
 
 ## 4. Per-type trait implementation (Phase 2a of design.md's Migration Plan — incremental)
 
