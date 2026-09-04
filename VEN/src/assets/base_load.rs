@@ -378,6 +378,25 @@ impl Asset for BaseLoad {
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
         Some(self)
     }
+
+    /// `GenericConsumer`, not a dedicated `BaseLoad` variant — matches
+    /// `to_timeline_snapshot`'s pre-existing mapping (see `Asset::asset_type`'s
+    /// doc comment for why this diverges from `asset_type_str`).
+    fn asset_type(&self) -> crate::entities::asset::AssetType {
+        crate::entities::asset::AssetType::GenericConsumer
+    }
+
+    fn asset_type_str(&self) -> &'static str {
+        "base_load"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl TickOverridable for BaseLoad {

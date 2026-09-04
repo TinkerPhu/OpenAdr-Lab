@@ -15,6 +15,7 @@ mod ev_comfort;
 mod ev_milp;
 pub mod grid;
 pub mod heater;
+mod heater_capabilities;
 mod heater_control_schema;
 mod heater_emergency;
 mod heater_milp;
@@ -1230,6 +1231,127 @@ mod phase2a_trivial_delegation_smoke_tests {
         };
         exercise_trivial_methods(
             AssetConfig::BaseLoad(BaseLoad::from_params(&params)).to_boxed_asset(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase2b_asset_type_and_downcast_tests {
+    //! Spec A Phase 2b groundwork: `asset_type`/`asset_type_str` (needed by
+    //! `simulator/snapshot.rs`) and `as_any`/`as_any_mut` (needed by the
+    //! remaining `AssetConfig`-matching call sites) must reproduce exactly
+    //! what those call sites' own match arms currently return.
+
+    use super::*;
+    use crate::entities::asset::AssetType;
+
+    #[test]
+    fn asset_type_and_str_match_snapshot_rs_existing_mapping() {
+        // Mirrors simulator/snapshot.rs's two independent matches verbatim --
+        // including BaseLoad's deliberate divergence (GenericConsumer vs.
+        // "base_load", not a 1:1 pair).
+        let cases: Vec<(Box<dyn Asset>, AssetType, &str)> = vec![
+            (
+                Box::new(Battery::from_params(
+                    &crate::entities::asset_params::BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 10.0,
+                        max_charge_kw: 5.0,
+                        max_discharge_kw: 5.0,
+                        initial_soc: 0.5,
+                        round_trip_efficiency: 0.9,
+                        min_soc: 0.1,
+                        c_terminal_eur_kwh: None,
+                    },
+                )),
+                AssetType::Battery,
+                "battery",
+            ),
+            (
+                Box::new(EvCharger::from_params(
+                    &crate::entities::asset_params::EvParams {
+                        id: "ev".into(),
+                        max_charge_kw: 7.0,
+                        max_discharge_kw: 7.0,
+                        initial_soc: 0.4,
+                        battery_kwh: 50.0,
+                        soc_target: 0.8,
+                        default_charge_kw: 7.0,
+                        min_charge_kw: 1.4,
+                        response_delay_s: 0.0,
+                        v2g_capable: true,
+                    },
+                )),
+                AssetType::Ev,
+                "ev",
+            ),
+            (
+                Box::new(PvInverter::from_params(
+                    &crate::entities::asset_params::PvParams {
+                        id: "pv".into(),
+                        rated_kw: 10.0,
+                        inverter_max_kw: 8.5,
+                        co2_g_kwh: 40.0,
+                    },
+                )),
+                AssetType::Pv,
+                "pv",
+            ),
+            (
+                Box::new(BaseLoad::from_params(
+                    &crate::entities::asset_params::BaseLoadParams {
+                        id: "base_load".into(),
+                        baseline_kw: 0.6,
+                        spikes: vec![],
+                    },
+                )),
+                AssetType::GenericConsumer,
+                "base_load",
+            ),
+        ];
+
+        for (boxed, expected_type, expected_str) in cases {
+            assert_eq!(boxed.asset_type(), expected_type);
+            assert_eq!(boxed.asset_type_str(), expected_str);
+        }
+    }
+
+    #[test]
+    fn as_any_downcasts_to_the_correct_concrete_type() {
+        let boxed: Box<dyn Asset> = Box::new(PvInverter::from_params(
+            &crate::entities::asset_params::PvParams {
+                id: "pv".into(),
+                rated_kw: 10.0,
+                inverter_max_kw: 8.5,
+                co2_g_kwh: 40.0,
+            },
+        ));
+        assert!(boxed.as_any().downcast_ref::<PvInverter>().is_some());
+        assert!(boxed.as_any().downcast_ref::<Battery>().is_none());
+    }
+
+    #[test]
+    fn as_any_mut_allows_mutating_the_recovered_concrete_type() {
+        let mut boxed: Box<dyn Asset> = Box::new(PvInverter::from_params(
+            &crate::entities::asset_params::PvParams {
+                id: "pv".into(),
+                rated_kw: 10.0,
+                inverter_max_kw: 8.5,
+                co2_g_kwh: 40.0,
+            },
+        ));
+        let pv = boxed
+            .as_any_mut()
+            .downcast_mut::<PvInverter>()
+            .expect("must downcast to PvInverter");
+        pv.irradiance_offset = 0.3;
+        assert_eq!(
+            boxed
+                .as_any()
+                .downcast_ref::<PvInverter>()
+                .unwrap()
+                .irradiance_offset,
+            0.3
         );
     }
 }
