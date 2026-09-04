@@ -51,7 +51,7 @@ or failing piecemeal later.
 │  │  └──────────────────────────────────────────────────────────────────┘   │ │
 │  │          ▲                                           ▲                  │ │
 │  │  ┌───────┴────────┐                       ┌──────────┴──────────┐       │ │
-│  │  │  AssetConfig   │  ← physics models     │  MeasuredAsset      │       │ │
+│  │  │ Box<dyn Asset> │  ← physics models     │  MeasuredAsset      │       │ │
 │  │  │ PV · Battery   │    per asset type     │  (future: real HW,  │       │ │
 │  │  │ EV · Heater    │    (implemented)      │   not yet built)    │       │ │
 │  │  │ BaseLoad       │                       └─────────────────────┘       │ │
@@ -381,21 +381,37 @@ trait Asset: Send + Sync {
 }
 ```
 
-`AssetConfig` (`VEN/src/assets/mod.rs`) is the concrete enum-dispatch implementation —
-one variant per asset type (`Battery`, `Ev`, `Heater`, `Pv`, `BaseLoad`) — holding the
-physics parameters loaded from the profile. `AssetHandle` wraps a `(&AssetConfig,
+`SimState.asset_configs: Vec<Box<dyn Asset>>` (`VEN/src/simulator/mod.rs`) is the
+concrete implementation — one physics struct per asset type (`Battery`, `EvCharger`,
+`Heater`, `PvInverter`, `BaseLoad`, `VEN/src/assets/*.rs`), each implementing `Asset`
+as a trait object rather than a closed enum variant (R-23 precedent, generalized by
+the `asset-dispatch-trait-objects` refactor). `AssetHandle` wraps a `(&dyn Asset,
 &AssetEntry)` pair to implement the identity/history methods. Per-asset history is a
 ring buffer (`AssetHistoryBuffer`, 3600 points ≈ 1 h at 1 s tick) with LOCF lookups and
 time-weighted averaging.
 
+Beyond the 9 universal `Asset` methods shown above, each type additionally
+implements whichever of three optional capability traits actually applies to it —
+`MilpParticipant` (Battery/EV/Heater), `RequestResolvable` (Battery/EV),
+`Thermostat` (Heater only), plus a fourth, `TickOverridable` (Pv/Heater/BaseLoad/EV),
+for tick-time environment/manual overrides (irradiance, ambient temp, plugged-state).
+Each is reached via an `as_milp_participant()`/`as_request_resolvable()`/
+`as_thermostat()`/`as_tick_overridable()` accessor on `Asset` that defaults to
+`None` — a type simply doesn't implement a trait it has no real behavior for,
+rather than stubbing one out. Recovering a concrete type from `&dyn Asset` (needed
+by a handful of call sites — e.g. a PV-only sim-inject handler) goes through
+`as_any()`/`as_any_mut()` downcasting, kept deliberately narrow.
+
 | Implementation | Backend | Status |
 |---|---|---|
-| `AssetConfig` (Battery/Ev/Heater/Pv/BaseLoad variants) | Physics model (sin, SoC, thermal), `VEN/src/assets/` | ✅ implemented — all current VENs |
+| Battery/EvCharger/Heater/PvInverter/BaseLoad (`impl Asset`) | Physics model (sin, SoC, thermal), `VEN/src/assets/` | ✅ implemented — all current VENs |
 | `MeasuredAsset` | Real sensor / hardware API | Future — not yet built |
 
-From the controller's perspective a future `MeasuredAsset` would be identical to
-`AssetConfig`: swapping one for the other should require no changes outside that asset's
-module. This is a design intent for future real deployments, not a present capability.
+From the controller's perspective a future `MeasuredAsset` would be identical to any
+of today's physics types: swapping one for the other should require no changes
+outside that asset's module, since all of them are just another `impl Asset` behind
+the same `Box<dyn Asset>` storage. This is a design intent for future real
+deployments, not a present capability.
 
 **Simulation parameters** (irradiation curve, initial SOC, rated power, thermal constants)
 are only accessible through the `/sim` API endpoints. The controller never reads them.
