@@ -1470,3 +1470,56 @@ Rules that follow:
 - Where an equivalence test is the only option, deliberately vary the parameters that
   *distinguish* the implementations — not just the ones that exercise the common path.
   Ask: "which input would make these two diverge?" and pin a fixture on it.
+
+## A closed enum's dispatch macro hides real behavioral surface area until you classify every method (Spec A, 2026-09-04)
+
+Converting `AssetConfig` (a closed 5-variant enum dispatched through
+`delegate_asset!`/`delegate_asset_state!` macros) to `Box<dyn Asset>` trait objects
+required auditing all 18 of its methods one by one to decide which trait each
+belonged on. That audit — not looking at the type name in isolation — is what
+surfaced a real naming/design smell: `AssetConfig` wasn't just holding static
+per-asset configuration, it was the thing doing all of an asset's live dispatch
+(`step`, `forecast`, MILP context construction). The fix wasn't a rename; it was
+splitting the 18 methods into 9 universal `Asset` trait methods plus three optional
+capability traits (`MilpParticipant`, `RequestResolvable`, `Thermostat`) that only the
+asset kinds actually supporting them implement. A dispatch macro over a closed enum is
+convenient precisely because it hides this kind of surface-area question — every
+variant gets every method whether or not it's a good fit, and nothing forces you to
+ask "does this asset kind actually need this capability?" until something (a rename
+question, a new variant, a trait-object migration) forces the full method list into
+view.
+
+Trait-object conversions from a closed enum surface several genuine Rust limitations
+that are easy to design around but easy to miss up front — resolve them pragmatically,
+not by reaching for an extra crate:
+- **`Box<dyn Trait>` can't derive `Serialize`/`Deserialize`** (no variant tag without
+  something like `typetag`). Before adding a workaround, check whether the field is
+  actually round-tripped end-to-end — here, the code that reloaded it was *already*
+  unconditionally discarding the deserialized value and rebuilding from current params,
+  so `#[serde(skip, default)]` was not just a workaround, it made the field's real
+  contract explicit for the first time.
+- **`Clone` isn't object-safe** (`fn clone(&self) -> Self` can't be called through
+  `dyn Trait`). Standard fix: a `clone_box(&self) -> Box<dyn Trait>` method with no
+  default body, plus a manual `impl Clone for Box<dyn Trait>` that calls it.
+- **A trait method that defaults to touching `Self` by value forces `Self: Sized`**,
+  which makes that method uncallable through `dyn Trait` — so `as_any`/`as_any_mut`/
+  `clone_box` (and anything else that would coerce `self` to `Self` or a concrete
+  reference in a default body) must have *no* default body at all; every implementor
+  writes its own one-liner instead. A borrowed-reference wrapper type that can't
+  produce a real `'static` object for these methods (like this codebase's
+  `AssetHandle<'a>`) can legitimately implement them as `unimplemented!()` if the real
+  construction path never goes through it that way — but confirm that with a grep, not
+  an assumption.
+- **Recovering a concrete type from a trait object** (a handful of call sites needed
+  the literal `PvInverter`/`BaseLoad`/etc., not just trait behavior) is a legitimate use
+  for `Any`-based downcasting (`as_any().downcast_ref::<T>()`) — a narrow, explicit
+  escape hatch, not a sign the trait-object conversion was the wrong call. Surface this
+  choice to the user rather than deciding unilaterally if it wasn't anticipated in the
+  original design.
+- **A real inherent-vs-trait method name collision is worth confirming with an actual
+  compile error**, not just reasoning about Rust's method-resolution rules from memory.
+  Dot-syntax on a concrete type always picks the inherent method over a same-named trait
+  method of different arity; only fully-qualified syntax (`Trait::method(&mut x, ...)`)
+  reaches the trait impl. This stops mattering once callers only ever hold `&mut dyn
+  Trait` (which exposes only the trait's own methods) — but verify that's actually true
+  for every call site before assuming the ambiguity is moot.

@@ -11055,3 +11055,127 @@ to the guard. When two implementations must agree, prefer sharing the code over
 testing the agreement; where a test is the only option, deliberately vary the
 parameters that distinguish the implementations, not just the ones that exercise the
 happy path. See `KEY_LEARNINGS.md` for the durable version of this lesson.
+
+---
+
+## 2026-09-04 — Asset dispatch: closed enum to trait objects (Spec A of the asset-max-power-forecast master plan)
+
+**What.** Replaced `AssetConfig` — a closed 5-variant enum (Battery/Ev/Heater/Pv/
+BaseLoad) dispatched via `delegate_asset!`/`delegate_asset_state!` macros — with
+`Box<dyn Asset>` trait-object dispatch, matching the precedent `AssetMilpContext`
+already set (R-23). `SimState.asset_configs` now holds `Vec<Box<dyn Asset>>`.
+`AssetState` (the separate state-only enum) was explicitly out of scope and is
+untouched.
+
+**Why.** Spec A is the first of five dependent specs building toward an
+asset-max-power-forecast capability (`docs/plans/asset-max-power-forecast-master-plan.md`).
+A closed enum can't grow new asset kinds (e.g. a future shiftable-load asset) without
+touching every match arm across the codebase; a trait object can. This mirrors a
+decision already made and validated for `AssetMilpContext`.
+
+**Design: capability-trait split, not a rename.** Midway through drafting, a
+naming-smell question ("does `AssetConfig` really describe a class that does all the
+action of an asset?") led to redistributing its 18 methods rather than just renaming
+the enum: 9 truly universal methods landed on the `Asset` trait itself; the other 9
+split across three new optional capability traits — `MilpParticipant`
+(`build_milp_context`), `RequestResolvable` (`resolve_request_target`,
+`surplus_charge_kw`, `available_storage_kwh`), `Thermostat` (`plan_trajectory`,
+`thermostat_setpoint_kw`) — each asset type implementing only the ones it genuinely
+supports, exposed via `as_milp_participant()`/`as_request_resolvable()`/
+`as_thermostat()` accessors defaulting to `None`. A fifth trait, `TickOverridable`
+(`apply_tick_overrides`), was deliberately *not* designed upfront alongside the other
+three — checking `SimState::tick()`'s actual body revealed BaseLoad's smoothing
+resolution wasn't yet hoisted out of its match arm the way PV's already was, so its
+shape couldn't be responsibly predefined ahead of that prerequisite refactor. That
+hoist was done as its own preparatory step before `TickOverridable` was defined.
+
+**Migration was staged, not a single big-bang commit**, because `SimState.asset_configs`
+is one homogeneous collection whose element type can only change atomically, while
+everything upstream of that storage field could migrate incrementally:
+1. **Phase 0** — added the 9 universal methods and 3 capability traits to `Asset`,
+   with panicking default bodies (needed because `Grid` also implements `Asset`
+   outside `AssetConfig` and has no sim-inject/MILP/forecast concept).
+2. **Phase 1** — a temporary `AssetConfig::to_boxed_asset()` bridge, proving
+   trait-object dispatch reproduced enum dispatch bit-for-bit before touching storage.
+3. **Phase 2a** — one commit per asset type (Battery → EV → Heater → PV → BaseLoad),
+   each wiring that type's full trait surface and adding equivalence tests against
+   the still-live enum path.
+4. **Phase 2b** — the atomic cutover: retyped `asset_configs`, migrated every
+   remaining call site in the same commit, rewired `tick()`'s per-asset dispatch.
+5. **Phase 3** — deleted `AssetConfig`, its macros, and the Phase 1 bridge now that
+   nothing referenced them.
+
+**Trait-object limitations hit, none anticipated in the original design doc, all
+resolved pragmatically:**
+- `Box<dyn Asset>` can't derive `Serialize`/`Deserialize` (no variant tag without an
+  extra crate like `typetag`) — resolved with `#[serde(skip, default)]`, safe because
+  `persist.rs::load_with_params` was *already* unconditionally discarding the
+  deserialized value on every load (a pre-existing dead-weight field in persistence,
+  found while making this change, not introduced by it).
+- `Clone` isn't object-safe — added a `clone_box(&self) -> Box<dyn Asset>` trait
+  method plus a manual `impl Clone for Box<dyn Asset>`.
+- `SimState` could no longer derive `Debug` (no `Asset: Debug` supertrait, and adding
+  one would force the lifetime-bound `AssetHandle` to derive it too) — dropped,
+  confirmed via grep that nothing formats a whole `SimState` with `{:?}`.
+- `as_any`/`as_any_mut`/`clone_box` need no default trait bodies at all: a default
+  that does `self` → `&dyn Any`/`Self` requires `Self: Sized`, which would make the
+  method uncallable through `dyn Asset` — so every implementor (5 asset types +
+  `Grid` + `AssetHandle`) writes its own one-line body. `AssetHandle<'a>` borrows
+  rather than owning (`'a`, not `'static`), so it can't produce a real trait object
+  for these three — its bodies panic via `unimplemented!()`, never exercised in
+  practice since the real construction path always holds an owned concrete type.
+- Six call sites needed to recover a concrete type from `Box<dyn Asset>`
+  (`pv_preview.rs`, `base_load_preview.rs`, `forecast.rs`, `plan_context.rs`,
+  `routes/debug.rs`, `routes/hems/sessions.rs`) — resolved via `Any`-based
+  downcasting (`as_any().downcast_ref::<T>()`), an explicit choice put to the user
+  rather than decided unilaterally, over the alternative of reintroducing some form
+  of enum matching.
+
+**A real, confirmed (not just theoretical) Rust gotcha:** Heater's new
+`TickOverridable::apply_tick_overrides` trait method shares a name with its
+pre-existing inherent method of different arity. Dot-syntax on a concrete `Heater`
+always resolves to the inherent one — confirmed by a genuine compile error, not
+reasoned about in the abstract — so reaching the trait impl requires fully-qualified
+`TickOverridable::apply_tick_overrides(&mut x, ...)` syntax. This doesn't affect
+`tick()`'s own rewrite, which dispatches through `dyn TickOverridable` and only ever
+sees the trait's own method.
+
+**One real dedup win found in passing** (not the point of this refactor, but caught
+during the storage-cutover migration): `snapshot.rs::to_timeline_snapshot` held a
+*third* independent copy of the heater plan-trajectory logic, alongside
+`Heater::plan_trajectory` and the new `Thermostat::plan_trajectory` trait method —
+deleted in favor of `cfg.as_thermostat().and_then(|t| t.plan_trajectory(&entry.state))`.
+
+**Test philosophy shift.** Every `phase2a_*_tests` module in `assets/mod.rs` started
+as "assert `Box<dyn Asset>` output equals `AssetConfig` output" — meaningful during
+the migration, meaningless once only one implementation remained. All were rewritten
+to direct behavioral assertions (e.g. `state_values_exposes_soc`) once `AssetConfig`
+was deleted. That rewrite surfaced one real pre-existing test needing a fix, unrelated
+to the rewrite itself: a persistence round-trip test called bare `persist::load()`
+(never a real production path — only `load_with_params`, which always rebuilds
+`asset_configs` afterward, is called from `main.rs`) and then `find_asset()`, which
+now legitimately returns `None` for every asset once `asset_configs` is skipped from
+serde. Fixed by looking the entry up via `sim.assets` directly, matching what bare
+`load()`'s actual documented contract promises — not a regression, a test that hadn't
+caught up to a deliberate contract change.
+
+**Verification.** `wsl cargo test -j 2` (1236 passed, 0 failed, 3 ignored — up from
+1225 at the end of Phase 2a), `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -- -D warnings` (caught one real API smell:
+`find_asset`/`find_asset_mut`/`iter_assets` returning `&Box<dyn Asset>` instead of
+`&dyn Asset` — clippy's `borrowed_box` lint, correctly flagging that the box
+indirection was never part of the intended contract), `scripts/audit_file_sizes.py`,
+and this repo's `ven-architecture` invariant greps all clean.
+
+**Debt filed:** R-73 — `Battery::future_state_values`, `EvCharger::soc_trajectory`/
+`future_state_values_at`, `Heater::future_state_values` were found to be pre-existing
+dead code (unrelated to this refactor, confirmed via `git stash` before these changes)
+while auditing every method for a new trait-method home; `asset_port.rs` has separate,
+actually-called "Mirrors X" reimplementations. See `docs/reference/TECHNICAL_DEBTS.md`.
+
+**Key learning.** A closed enum's "one dispatch macro, N variants" pattern hides real
+behavioral surface area until you're forced to classify every method one by one for a
+trait split — that classification is where the naming/design smell (`AssetConfig`
+"config" doing live dispatch, not just holding static config) actually surfaced, not
+from looking at the type name in isolation. See `KEY_LEARNINGS.md` for the durable
+version of this lesson.
