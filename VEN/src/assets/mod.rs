@@ -23,7 +23,9 @@ pub mod pv;
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
 // #[allow(dead_code)]'d for before this file split.
 #[allow(unused_imports)]
-pub use asset_trait::{Asset, AssetHandle, Trajectory, TrajectoryPoint};
+pub use asset_trait::{
+    Asset, AssetHandle, MilpParticipant, RequestResolvable, Thermostat, Trajectory, TrajectoryPoint,
+};
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
 pub use ev::{EvCharger, EvState};
@@ -511,5 +513,180 @@ mod phase1_bridge_tests {
 
         assert_eq!(enum_floor.min_export_kw, boxed_floor.min_export_kw);
         assert_eq!(enum_floor.min_import_kw, boxed_floor.min_import_kw);
+    }
+}
+
+#[cfg(test)]
+mod phase2a_battery_tests {
+    //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.1): proves
+    //! Battery's newly-wired trait methods (9 universal + MilpParticipant +
+    //! RequestResolvable) produce identical results whether reached via
+    //! `AssetConfig`'s enum dispatch or `Box<dyn Asset>` (via the Phase 1
+    //! bridge). Only methods with real per-call unwrap/branch logic are
+    //! covered — the fully stateless delegations (`default_setpoint`,
+    //! `control_schema`, `update_config`, `default_comfort_rates`,
+    //! `default_completion_policy`, `default_post_deadline_comfort_bid`) are
+    //! already compiler-checked 1:1 forwards with no unwrap step that could
+    //! silently diverge.
+
+    use super::*;
+    use crate::controller::milp_planner::{AssetKind, AssetMilpParams};
+    use crate::entities::asset_params::BatteryParams;
+    use chrono::Duration;
+
+    fn cfg_and_state(initial_soc: f64) -> (AssetConfig, AssetState) {
+        let params = BatteryParams {
+            id: "battery".to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: None,
+        };
+        (
+            AssetConfig::Battery(Battery::from_params(&params)),
+            AssetState::Battery(Battery::initial_state(&params)),
+        )
+    }
+
+    #[test]
+    fn state_values_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state(0.5);
+        assert_eq!(
+            cfg.state_values(&state),
+            cfg.to_boxed_asset().state_values(&state)
+        );
+    }
+
+    #[test]
+    fn reset_boxed_matches_enum() {
+        let (cfg, _) = cfg_and_state(0.5);
+        let values = HashMap::from([("soc".to_string(), 0.8)]);
+
+        let mut enum_state = AssetState::Battery(BatteryState {
+            soc: 0.5,
+            actual_power_kw: 0.0,
+        });
+        cfg.reset(&mut enum_state, values.clone());
+
+        let mut boxed_state = AssetState::Battery(BatteryState {
+            soc: 0.5,
+            actual_power_kw: 0.0,
+        });
+        cfg.to_boxed_asset().reset(&mut boxed_state, values);
+
+        assert_eq!(enum_state.soc(), boxed_state.soc());
+    }
+
+    #[test]
+    fn forecast_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state(0.5);
+        let now = Utc::now();
+        let timespan = Duration::seconds(300);
+
+        let enum_series = cfg.forecast(&state, timespan, now);
+        let boxed_series = cfg.to_boxed_asset().forecast(&state, timespan, now);
+
+        assert_eq!(enum_series.samples, boxed_series.samples);
+    }
+
+    #[test]
+    fn resolve_request_target_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state(0.5);
+        let enum_result = cfg.resolve_request_target(&state, Some(0.9), None);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("Battery must implement RequestResolvable")
+            .resolve_request_target(&state, Some(0.9), None);
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn available_storage_kwh_boxed_matches_enum() {
+        let (cfg, state) = cfg_and_state(0.6);
+        let enum_result = cfg.available_storage_kwh(&state);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("Battery must implement RequestResolvable")
+            .available_storage_kwh(&state);
+        assert_eq!(enum_result, boxed_result);
+    }
+
+    #[test]
+    fn surplus_charge_kw_boxed_returns_none_matching_enum() {
+        let (cfg, state) = cfg_and_state(0.5);
+        let enum_result = cfg.surplus_charge_kw(&state, 2.0);
+        let boxed = cfg.to_boxed_asset();
+        let boxed_result = boxed
+            .as_request_resolvable()
+            .expect("Battery must implement RequestResolvable")
+            .surplus_charge_kw(&state, 2.0);
+        assert_eq!(enum_result, boxed_result);
+        assert_eq!(boxed_result, None, "Battery never absorbs surplus");
+    }
+
+    #[test]
+    fn build_milp_context_boxed_matches_enum_kind_and_scalars() {
+        let (cfg, state) = cfg_and_state(0.5);
+        let now = Utc::now();
+
+        let enum_ctx = cfg
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![],
+                0.0,
+            )
+            .expect("Battery must build a MILP context");
+        let boxed_ctx = cfg
+            .to_boxed_asset()
+            .as_milp_participant()
+            .expect("Battery must implement MilpParticipant")
+            .build_milp_context(
+                &state,
+                4,
+                &[300, 600, 900, 1200],
+                now,
+                None,
+                None,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.05,
+                vec![],
+                0.0,
+            );
+
+        assert_eq!(enum_ctx.asset_kind(), AssetKind::Battery);
+        assert_eq!(boxed_ctx.asset_kind(), AssetKind::Battery);
+
+        let AssetMilpParams::Battery(enum_scalars) = enum_ctx.milp_params(4, now) else {
+            panic!("expected Battery scalars");
+        };
+        let AssetMilpParams::Battery(boxed_scalars) = boxed_ctx.milp_params(4, now) else {
+            panic!("expected Battery scalars");
+        };
+        assert_eq!(enum_scalars.e_nom_kwh, boxed_scalars.e_nom_kwh);
+        assert_eq!(enum_scalars.e_init_kwh, boxed_scalars.e_init_kwh);
+        assert_eq!(enum_scalars.eff_ch, boxed_scalars.eff_ch);
+        assert_eq!(enum_scalars.eff_dis, boxed_scalars.eff_dis);
     }
 }
