@@ -2,7 +2,7 @@
 
 ## 1. Survey
 
-- [ ] 1.1 Re-run `grep -rlnE "\bAssetConfig\b" VEN/src --include="*.rs"` (the
+- [x] 1.1 Re-run `grep -rlnE "\bAssetConfig\b" VEN/src --include="*.rs"` (the
       broad bare-type pattern, not just `AssetConfig::` — the narrower pattern
       misses struct-field/signature usages like `SimState.asset_configs:
       Vec<AssetConfig>`, per design.md D3's correction) and confirm the file
@@ -31,30 +31,55 @@
 
 ## 2. Trait design (Phase 0 of design.md's Migration Plan)
 
-- [ ] 2.1 Add the 9 universal methods (`default_setpoint`, `control_schema`,
+- [x] 2.1 Add the 9 universal methods (`default_setpoint`, `control_schema`,
       `update_config`, `default_comfort_rates`, `default_completion_policy`,
       `default_post_deadline_comfort_bid`, `state_values`, `reset`, `forecast`)
-      to the `Asset` trait (`VEN/src/assets/asset_trait.rs`) with no default
-      bodies — every asset kind implements them for real, per design.md D4's
-      audit table (note the three `default_comfort_rates`/
-      `default_completion_policy`/`default_post_deadline_comfort_bid` methods
-      belong here, not on `MilpParticipant`, despite sounding MILP-specific —
-      see D4's correction note).
-- [ ] 2.2 Define the four optional capability traits: the three per D4
-      (`MilpParticipant` — `build_milp_context` only; `RequestResolvable` —
-      `resolve_request_target`, `surplus_charge_kw`, `available_storage_kwh`;
-      `Thermostat` — `plan_trajectory`, `thermostat_setpoint_kw`) plus
-      `TickOverridable` per D5 (`apply_tick_overrides(&mut self, overrides:
-      &TickOverrides)`, with `TickOverrides` bundling the override parameters
-      `SimState::tick()` currently takes as bare arguments). Place them in
+      to the `Asset` trait (`VEN/src/assets/asset_trait.rs`). **Correction
+      found during implementation:** "no default bodies" (this task's original
+      wording) doesn't compile — `Grid` also implements `Asset` outside
+      `AssetConfig` and has no sim-inject/MILP/forecast concept, so `Grid`'s
+      existing `impl Asset for Grid` would break. Gave all 9 the same
+      panicking-default pattern already used for `id`/`current_state`/
+      `history` instead (real bodies wired per-type in Phase 2a, section 4;
+      `Grid` inherits the default and is never called this way in practice).
+      The three `default_comfort_rates`/`default_completion_policy`/
+      `default_post_deadline_comfort_bid` methods belong here, not on
+      `MilpParticipant`, despite sounding MILP-specific — see D4's correction
+      note.
+- [x] 2.2 Define the three D4 capability traits (`MilpParticipant` —
+      `build_milp_context` only; `RequestResolvable` — `resolve_request_target`,
+      `surplus_charge_kw`, `available_storage_kwh`; `Thermostat` —
+      `plan_trajectory`, `thermostat_setpoint_kw`). Place them in
       `VEN/src/assets/asset_trait.rs` or a new sibling file (check the
       500-production-line budget via `scripts/audit_file_sizes.py` before
-      deciding).
-- [ ] 2.3 Add four `as_milp_participant`/`as_request_resolvable`/
-      `as_thermostat`/`as_tick_overridable` accessor methods to `Asset`, each
-      defaulting to `None`. Confirm this compiles standalone (no asset type
-      implements any override yet) — this task adds definitions only, no
-      behavior wiring.
+      deciding). **`TickOverridable` (D5) is deferred to task 5.3, not defined
+      here** — see the note below.
+- [x] 2.3 Add three `as_milp_participant`/`as_request_resolvable`/
+      `as_thermostat` accessor methods to `Asset`, each defaulting to `None`.
+      Confirmed compiles standalone (no asset type implements any override
+      yet), full test suite green (1196 passed), fmt/clippy clean, file-size
+      audit passes — zero behavior change, as expected (nothing calls the new
+      trait surface yet).
+
+**Why `TickOverridable` isn't defined in this phase (found during
+implementation, 2026-09-04):** D5 assumed each asset's tick-override handling
+is self-contained behind `apply_tick_overrides(&mut self, ...)`. Checking
+`SimState::tick()`'s actual body: PV's cross-cutting smoothing
+(`self.pv_smoothing.update(...)`) is *already* hoisted out of the per-asset
+loop, computed once, then copied onto `pv`'s own fields inside the match arm —
+so PV genuinely fits the self-contained shape once `TickOverrides` carries the
+pre-resolved `irradiance`/`offset`, not the raw override/alpha inputs.
+BaseLoad's `self.base_load_smoothing.update(...)` call is **not** yet
+hoisted — it still runs inside the match arm using the `BaseLoad` config's own
+fields (`baseline_kw_profile`, `appliance_noise_kw`) to compute
+`natural_base_kw`. Making `TickOverridable` self-contained for BaseLoad
+requires hoisting that resolution out of the loop the same way PV's already
+is — genuine design work entangled with rewriting `tick()`'s control flow, not
+a trait signature that can be responsibly predefined ahead of that rewrite.
+Per design.md R3's own stated mitigation ("fix the trait boundaries when real
+information arrives, rather than over-designing... now"), `TickOverridable`'s
+exact shape (including whatever `TickOverrides` needs to carry) is decided in
+task 5.3, where the `tick()` rewrite actually happens, not guessed at here.
 
 ## 3. Trait-object conversion (Phase 1 of design.md's Migration Plan)
 
@@ -77,31 +102,24 @@ whichever capability-trait override(s) design.md D4 assigns it, unit-tested for
 equivalence against the still-live `AssetConfig`-dispatched behavior.
 `SimState.asset_configs` itself is untouched in this section — see section 5.
 
+`TickOverridable` (D5) is out of scope for this section — deferred to task 5.3
+per the note in section 2.
+
 - [ ] 4.1 Battery: implements `MilpParticipant` + `RequestResolvable` (per D4's
-      table — no `Thermostat`, no `TickOverridable` per D5 — Battery has no
-      arm in `tick()`'s current match). Run full test suite; confirm no
-      behavior change.
-- [ ] 4.2 EV: implements `MilpParticipant` + `RequestResolvable` + (per D5)
-      `TickOverridable` (`ev_plugged_override`/`ev_soc_target_override`
-      handling). Same, including
-      `VEN/src/controller/milp_planner/tests/mod.rs` if it constructs
-      `AssetConfig::Ev(...)` fixtures.
+      table — no `Thermostat`). Run full test suite; confirm no behavior
+      change.
+- [ ] 4.2 EV: implements `MilpParticipant` + `RequestResolvable`. Same,
+      including `VEN/src/controller/milp_planner/tests/mod.rs` if it
+      constructs `AssetConfig::Ev(...)` fixtures.
 - [ ] 4.3 Heater: implements `MilpParticipant` + `Thermostat` (per D4's table —
-      no `RequestResolvable`) + (per D5) `TickOverridable`
-      (`apply_tick_overrides` wraps the existing `apply_tick_overrides` inherent
-      method already on `Heater` — check for a naming collision to resolve).
-      Same.
+      no `RequestResolvable`). Same.
 - [ ] 4.4 PV: implements none of D4's three capability traits (inherits all
-      three `as_*` `None` defaults) but does implement (per D5)
-      `TickOverridable` (irradiance/weather/curtailment override handling) —
-      universal `Asset` methods plus this one. Same, paying particular
-      attention to `VEN/src/simulator/pv_preview.rs` and
+      three `as_*` `None` defaults) — universal `Asset` methods only. Same,
+      paying particular attention to `VEN/src/simulator/pv_preview.rs` and
       `VEN/src/simulator/tests/peek_pv_kw_tests.rs`.
 - [ ] 4.5 BaseLoad: implements none of D4's three capability traits, same as
-      PV, but does implement (per D5) `TickOverridable` (measured-load/
-      heuristic override handling) — universal `Asset` methods plus this one.
-      Same, paying particular attention to
-      `VEN/src/simulator/base_load_preview.rs`.
+      PV — universal `Asset` methods only. Same, paying particular attention
+      to `VEN/src/simulator/base_load_preview.rs`.
 
 Run the full test suite (per `docs/guidelines/TESTING.md`) after each of 4.1–4.5
 — never leave two types' trait impls half-written.
@@ -129,10 +147,24 @@ commit, not incrementally per asset type.
 - [ ] 5.3 Confirmed dispatch site (design.md D5): rewrite `SimState::tick()`'s
       `match cfg { AssetConfig::Pv(pv) => ..., ... }`
       (`VEN/src/simulator/mod.rs:231-289`) as a `TickOverridable` capability
-      trait per D5 — define the trait + `TickOverrides` params struct in
-      section 2's trait-design step, implement it for Pv/Heater/BaseLoad/Ev in
-      section 4's per-type step (Battery declines), then replace the match here
-      with a loop over the `as_tick_overridable()` accessor.
+      trait. Both the trait definition and its implementations happen here
+      (not in sections 2/4 — see section 2's note on why this was deferred):
+      1. Hoist BaseLoad's `natural_base_kw`/`self.base_load_smoothing.update(...)`
+         resolution out of the match arm and before the per-asset loop,
+         mirroring how PV's `self.pv_smoothing.update(...)` is already hoisted
+         today — this is the prerequisite that makes BaseLoad's override
+         handling self-contained.
+      2. Define `TickOverridable::apply_tick_overrides(&mut self, overrides:
+         &TickOverrides)` and `TickOverrides`, carrying **pre-resolved**
+         values (PV's resolved `irradiance`/`offset`, BaseLoad's resolved
+         `baseline_kw`) rather than the raw override/alpha inputs `tick()`
+         takes as bare arguments — each asset's impl should only need to
+         assign fields, not recompute smoothing.
+      3. Implement it for Pv/Heater/BaseLoad/Ev (Battery declines — no arm in
+         `tick()`'s current match); add the `as_tick_overridable()` accessor
+         to `Asset` in the same commit as the other three (retroactively
+         completing task 2.3 for this fourth trait).
+      4. Replace the match with a loop over `as_tick_overridable()`.
 - [ ] 5.4 Update the three comment-only mentions of `AssetConfig` found by the
       broadened survey (`VEN/src/assets/grid.rs`,
       `VEN/src/controller/simulator_port.rs`, `VEN/src/profile/schema.rs`) —
