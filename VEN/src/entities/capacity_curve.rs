@@ -21,6 +21,31 @@ pub enum CommitmentDirection {
     Export,
 }
 
+/// Which ceiling an asset's "go all-in" extreme is measured against
+/// (`asset-max-power-primitive`). **Honest scope note:** only `PvInverter`
+/// has a real, distinct ceiling below `Physical` today (its
+/// `generation_limit_kw`, sourced from a VTN/plan capacity limit for
+/// `Contractual` or a manual sim-inject override for `UserSet`). Every other
+/// asset kind (Battery/EvCharger/Heater/BaseLoad/ShiftableLoadAsset) is
+/// tier-invariant — `Contractual` and `UserSet` currently return the same
+/// answer as `Physical` for those kinds, because no per-asset contractual or
+/// user-set ceiling concept exists for them yet. This is not a stub to be
+/// silently assumed complete; it reflects what the codebase actually has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitTier {
+    /// The asset's own physical ceiling — exactly what `Asset::capability()`
+    /// reports, for every asset kind.
+    Physical,
+    /// A ceiling imposed externally (today: PV's VTN/plan-sourced
+    /// `generation_limit_kw`). Falls back to `Physical` for every other kind.
+    Contractual,
+    /// A ceiling the user set manually (today: PV's manual sim-inject
+    /// `generation_limit_kw` override). Falls back to `Physical` for every
+    /// other kind.
+    UserSet,
+}
+
 /// One point where the achievable power changes (an asset saturates, a
 /// shiftable load is placed). `power_kw` holds from this step's `elapsed_s`
 /// until the next step (or the horizon end) — a step function, not an

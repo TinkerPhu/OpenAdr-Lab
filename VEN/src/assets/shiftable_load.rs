@@ -10,6 +10,7 @@ use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, ShiftableLoadMilpContext, ShiftableLoadScalars,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 
 /// Shiftable-load config: fixed power, non-interruptible once started, hard
@@ -301,6 +302,59 @@ impl Asset for ShiftableLoadAsset {
     fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
         Some(self)
     }
+
+    /// This asset's "extreme" isn't a constant power level — it's *when*
+    /// within its window it runs (`asset-max-power-primitive` D3): earliest
+    /// allowed start for `Import` (maximize remaining budget), latest
+    /// allowed start for `Export` (minimum forced import for as long as
+    /// possible before the window forces it). Once placed, the schedule just
+    /// holds `power_kw` constant from the chosen start through `t_end` —
+    /// `step_inner`'s own non-interruptible/finished physics (already
+    /// exercised via the fine-grained `simulate_forward` stepping every
+    /// other kind's default `max_effort_schedule` uses) correctly zeroes it
+    /// out once the run completes, so this doesn't need to compute that
+    /// itself. An already-`started` load has no placement left to decide —
+    /// it just keeps running, so the schedule starts at `t1` in that case.
+    /// `tier` has no effect: this asset has no contractual/user-set ceiling
+    /// concept, matching design.md D2's honest-scope table.
+    fn max_effort_schedule(
+        &self,
+        state: &AssetState,
+        direction: CommitmentDirection,
+        _tier: LimitTier,
+        t1: DateTime<Utc>,
+        t_end: DateTime<Utc>,
+    ) -> Vec<(DateTime<Utc>, f64)> {
+        let AssetState::ShiftableLoad(s) = state else {
+            unreachable!("ShiftableLoadAsset/state mismatch")
+        };
+        if t_end <= t1 {
+            return vec![(t1, 0.0), (t1, 0.0)];
+        }
+        let start = if s.started {
+            t1
+        } else {
+            match direction {
+                CommitmentDirection::Import => self.earliest_start.max(t1),
+                CommitmentDirection::Export => {
+                    let duration = Duration::minutes(self.duration_min as i64);
+                    (self.latest_end - duration).max(t1)
+                }
+            }
+        };
+        if start >= t_end {
+            // Can't even begin within the queried window.
+            return vec![(t1, 0.0), (t_end, 0.0)];
+        }
+        let mut schedule = Vec::new();
+        let mut t = t1;
+        while t < t_end {
+            schedule.push((t, if t < start { 0.0 } else { self.power_kw }));
+            t += Duration::seconds(60);
+        }
+        schedule.push((t_end, self.power_kw));
+        schedule
+    }
 }
 
 impl MilpParticipant for ShiftableLoadAsset {
@@ -582,5 +636,129 @@ mod tests {
         let (next, kw) = boxed.step(&state, 2.0, Duration::minutes(1));
         assert_eq!(kw, 2.0);
         assert_eq!(boxed.state_values(&next).get("started"), Some(&1.0));
+    }
+
+    // ── asset-max-power-primitive: max_effort_schedule placement ────────────
+
+    #[test]
+    fn import_places_the_run_at_earliest_allowed_start() {
+        let t1 = Utc::now();
+        let l = ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 30,
+            earliest_start: t1 + Duration::minutes(20),
+            latest_end: t1 + Duration::hours(2),
+        };
+        let pending = ShiftableLoadAsset::initial_state();
+        let state = AssetState::ShiftableLoad(pending);
+        let t_end = t1 + Duration::hours(1);
+        let schedule = l.max_effort_schedule(
+            &state,
+            CommitmentDirection::Import,
+            LimitTier::Physical,
+            t1,
+            t_end,
+        );
+        let trajectory = l.simulate_forward(&state, &schedule);
+        // Before earliest_start: 0 kW. During the run: 2.0 kW.
+        let before = trajectory
+            .points
+            .iter()
+            .find(|p| p.ts < l.earliest_start)
+            .expect("must have a point before earliest_start");
+        assert_eq!(before.power_kw, 0.0);
+        let during = trajectory
+            .points
+            .iter()
+            .find(|p| p.ts >= l.earliest_start && p.ts < l.earliest_start + Duration::minutes(30))
+            .expect("must have a point during the run");
+        assert_eq!(during.power_kw, 2.0);
+    }
+
+    #[test]
+    fn export_places_the_run_at_latest_allowed_start() {
+        let t1 = Utc::now();
+        let l = ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 30,
+            earliest_start: t1,
+            latest_end: t1 + Duration::hours(1),
+        };
+        let expected_start = l.latest_end - Duration::minutes(30); // t1 + 30min
+        let state = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        let t_end = t1 + Duration::hours(1);
+        let schedule = l.max_effort_schedule(
+            &state,
+            CommitmentDirection::Export,
+            LimitTier::Physical,
+            t1,
+            t_end,
+        );
+        let trajectory = l.simulate_forward(&state, &schedule);
+        let before = trajectory
+            .points
+            .iter()
+            .find(|p| p.ts < expected_start)
+            .expect("must have a point before the placed start");
+        assert_eq!(before.power_kw, 0.0);
+        let during = trajectory
+            .points
+            .iter()
+            .find(|p| p.ts >= expected_start && p.ts < l.latest_end)
+            .expect("must have a point during the run");
+        assert_eq!(during.power_kw, 2.0);
+    }
+
+    #[test]
+    fn already_started_load_keeps_running_from_t1_regardless_of_direction() {
+        let t1 = Utc::now();
+        let l = load(2.0, 60);
+        let (started, _) = l.step_inner(
+            &ShiftableLoadAsset::initial_state(),
+            2.0,
+            Duration::minutes(1),
+        );
+        let state = AssetState::ShiftableLoad(started);
+        for direction in [CommitmentDirection::Import, CommitmentDirection::Export] {
+            let schedule = l.max_effort_schedule(
+                &state,
+                direction,
+                LimitTier::Physical,
+                t1,
+                t1 + Duration::minutes(10),
+            );
+            assert_eq!(
+                schedule[0],
+                (t1, 2.0),
+                "an already-started load has no placement left to decide"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_the_run_cannot_even_begin_in_contributes_nothing() {
+        let t1 = Utc::now();
+        // Window only allows a start after t1+2h, but the query window ends
+        // at t1+1h -- the run can't even begin within [t1, t_end].
+        let l = ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 30,
+            earliest_start: t1 + Duration::hours(2),
+            latest_end: t1 + Duration::hours(3),
+        };
+        let state = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        let t_end = t1 + Duration::hours(1);
+        let schedule = l.max_effort_schedule(
+            &state,
+            CommitmentDirection::Import,
+            LimitTier::Physical,
+            t1,
+            t_end,
+        );
+        let trajectory = l.simulate_forward(&state, &schedule);
+        assert!(
+            trajectory.points.iter().all(|p| p.power_kw == 0.0),
+            "a run that can't start within the window must contribute nothing"
+        );
     }
 }

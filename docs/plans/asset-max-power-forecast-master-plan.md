@@ -1,8 +1,8 @@
 # Master Plan: Asset Max-Power Forecast & Unified Capacity/Envelope Engine
 
-> **Status:** Spec A and Spec B complete and merged to `main`
-> (`asset-dispatch-trait-objects`, `shiftable-load-as-asset`). Spec C, D, and E
-> not yet started. This is the sequencing document
+> **Status:** Spec A, Spec B, and Spec C complete and merged to `main`
+> (`asset-dispatch-trait-objects`, `shiftable-load-as-asset`,
+> `asset-max-power-primitive`). Spec D and E not yet started. This is the sequencing document
 > for turning `docs/plans/asset-max-power-forecast-spec.md` (the requirements — now
 > the leading source of truth for this area) into working code, across five
 > dependent specs. It supersedes `openspec/changes/capacity-envelope-unification/
@@ -181,6 +181,14 @@ existing `tests/planner.rs`/`tests/solver.rs` shiftable-load cases).
 ---
 
 ## Spec C — `assetMaxPower` primitive + `limitTier`
+
+**Status: complete** (`asset-max-power-primitive`, merged 2026-09-05). Builds
+and unit-tests the primitive only — does **not** wire it into
+`capacity_forecast.rs`/`envelope_forecast.rs`; that cutover, and the actual
+fix to the PV/heater bugs described below in the live Diagnostics/Controller
+charts, remains Spec E's job. Full design record in
+`docs/history/project_journal.md`'s 2026-09-05 entry — the openspec change
+directory itself was deleted per this repo's workflow convention.
 
 **Problem it solves:** this is the one genuinely new trait method the spec
 introduces. Everything else it needs (per-asset trajectory simulation) already
