@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use crate::assets::{Asset, AssetHandle};
+use crate::assets::{Asset, AssetHandle, AssetState, Trajectory};
 use crate::controller::simulator_port::{AssetForecastFrame, AssetForecastPoint};
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::{Plan, PlanTimeSlot};
@@ -111,18 +111,22 @@ pub fn build_forecast_frames(
     frames
 }
 
-/// Battery/EV/heater: re-simulate forward from the asset's REAL current state,
-/// driven by the plan's own `planned_kw_by_asset` schedule for this asset —
-/// one setpoint per remaining slot, giving one projected state per slot start
-/// (see `Asset::simulate_forward`'s doc comment: each `TrajectoryPoint` pairs
-/// the state BEFORE that slot's step with the setpoint driving it).
-fn insert_simulated_points(
-    frames: &mut [AssetForecastFrame],
+/// Re-simulate an asset forward from its REAL current state, driven by the
+/// plan's own `planned_kw_by_asset` schedule for this asset — one setpoint
+/// per remaining slot, giving one projected state per slot start (see
+/// `Asset::simulate_forward`'s doc comment: each `TrajectoryPoint` pairs the
+/// state BEFORE that slot's step with the setpoint driving it).
+///
+/// Shared by `insert_simulated_points` (below, capability-per-slot) and
+/// `resolve_plan_state_at` (state-at-a-single-`t1`) so there is exactly one
+/// place that runs this simulation — `planstate-t1-resolver`'s D1: two
+/// independent implementations of "the plan-driven forecast" is exactly what
+/// this master plan exists to remove.
+fn simulated_trajectory(
     entry: &super::AssetEntry,
     cfg: &dyn Asset,
     future_slots: &[&PlanTimeSlot],
-    include_at: impl Fn(&PlanTimeSlot) -> bool,
-) {
+) -> Trajectory {
     let handle = AssetHandle {
         config: cfg,
         id: &entry.id,
@@ -138,7 +142,25 @@ fn insert_simulated_points(
             )
         })
         .collect();
-    let traj = handle.simulate_forward(&entry.state, &schedule);
+    handle.simulate_forward(&entry.state, &schedule)
+}
+
+/// Battery/EV/heater: capability derived from `simulated_trajectory`'s
+/// per-slot state, one `AssetForecastPoint` per remaining slot.
+fn insert_simulated_points(
+    frames: &mut [AssetForecastFrame],
+    entry: &super::AssetEntry,
+    cfg: &dyn Asset,
+    future_slots: &[&PlanTimeSlot],
+    include_at: impl Fn(&PlanTimeSlot) -> bool,
+) {
+    let handle = AssetHandle {
+        config: cfg,
+        id: &entry.id,
+        state: &entry.state,
+        history: &entry.history,
+    };
+    let traj = simulated_trajectory(entry, cfg, future_slots);
 
     for (i, point) in traj.points.iter().enumerate() {
         let Some(slot) = future_slots.get(i) else {
@@ -151,7 +173,11 @@ fn insert_simulated_points(
         frames[i].assets.insert(
             entry.id.clone(),
             AssetForecastPoint {
-                planned_kw: schedule[i].1,
+                planned_kw: slot
+                    .planned_kw_by_asset
+                    .get(&entry.id)
+                    .copied()
+                    .unwrap_or(0.0),
                 cap_max_import_kw: cap.max_import_kw,
                 cap_max_export_kw: cap.max_export_kw,
             },
@@ -210,14 +236,87 @@ fn insert_pv_points(
     }
 }
 
+/// "If the active plan runs as intended until `t1`, what state is each asset
+/// in?" (`planstate-t1-resolver`, Spec D of the asset-max-power-forecast
+/// master plan). Feeds `assets::asset_max_power`'s (Spec C) starting state —
+/// built once here and reused by Spec E, not re-derived per caller.
+///
+/// `t1` at or before `now` returns every asset's live `SimState` value
+/// unchanged, with no simulation — the one point where ground truth exists
+/// must not carry forecast error. For a future `t1`, non-PV assets reuse
+/// `simulated_trajectory`'s per-slot state (the same computation
+/// `build_forecast_frames` already runs), picked at the latest remaining
+/// slot with `start <= t1` — `t1` landing between two slot boundaries snaps
+/// down to the earlier one (no interpolation); `t1` past the plan's last
+/// remaining slot returns that last slot's state rather than panicking or
+/// extrapolating.
+///
+/// PV is the one exception: it always returns its current live state,
+/// regardless of `t1`. `PvState::curtailment_source` reflects whatever
+/// external decision (manual command, plan, capacity limiter, arbiter,
+/// comms-loss) is active *right now* — no model anywhere in this codebase
+/// forecasts how it will change, and running it through `simulate_forward`
+/// would only replay today's frozen irradiance/weather inputs, not a real
+/// forecast. This is a documented scope limit, not an oversight — see
+/// `openspec/changes/planstate-t1-resolver/design.md`'s Risks section
+/// (deleted once this change lands; see `docs/history/project_journal.md`
+/// for the design record) before assuming this resolves more than it does.
+///
+/// Not yet called from production code -- this change (`planstate-t1-resolver`)
+/// only builds and unit-tests the resolver; wiring it (and Spec C's
+/// `asset_max_power`) into the unified capacity/envelope engine is Spec E's job.
+#[allow(dead_code)]
+pub fn resolve_plan_state_at(
+    sim: &SimState,
+    plan: &Plan,
+    t1: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> HashMap<String, AssetState> {
+    let live_snapshot = || {
+        sim.iter_assets()
+            .map(|(entry, _cfg)| (entry.id.clone(), entry.state.clone()))
+            .collect()
+    };
+
+    if t1 <= now {
+        return live_snapshot();
+    }
+
+    let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
+    if future_slots.is_empty() {
+        return live_snapshot();
+    }
+
+    sim.iter_assets()
+        .map(|(entry, cfg)| {
+            if cfg.asset_type_str() == "pv" {
+                return (entry.id.clone(), entry.state.clone());
+            }
+            let traj = simulated_trajectory(entry, cfg, &future_slots);
+            let idx = future_slots
+                .iter()
+                .rposition(|s| s.start <= t1)
+                .unwrap_or(0);
+            let state = traj
+                .points
+                .get(idx)
+                .map(|p| p.state.clone())
+                .unwrap_or_else(|| entry.state.clone());
+            (entry.id.clone(), state)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::entities::asset::PlanTrigger;
-    use crate::entities::asset_params::{AssetParams, BatteryParams, EvParams, PvParams};
+    use crate::entities::asset_params::{
+        AssetParams, BaseLoadParams, BatteryParams, EvParams, PvParams,
+    };
     use crate::entities::plan::{Plan, PlanTimeSlot, PlanZone, PlanningHorizon, SolveStatus};
     use crate::entities::planner_params::PlannerObjective;
-    use crate::ids::{ASSET_BATTERY, ASSET_EV};
+    use crate::ids::{ASSET_BASE_LOAD, ASSET_BATTERY, ASSET_EV};
     use chrono::{Duration, TimeZone, Timelike};
     use std::collections::HashMap as Map;
     use uuid::Uuid;
@@ -659,6 +758,236 @@ mod tests {
         assert!(
             frames.iter().all(|f| f.assets.contains_key(ASSET_EV)),
             "EV must contribute at every slot when there is no session to bound it"
+        );
+    }
+
+    // ── resolve_plan_state_at (planstate-t1-resolver, Spec D) ───────────────
+
+    fn battery_soc(state: &AssetState) -> f64 {
+        match state {
+            AssetState::Battery(s) => s.soc,
+            other => panic!("expected AssetState::Battery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t1_at_or_before_now_returns_live_state_unchanged() {
+        // A nonzero planned charge setpoint would move SoC if simulated --
+        // t1 <= now must skip simulation entirely and hand back the live
+        // value untouched.
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 1.0,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let mut plan = make_plan(900, 4, now);
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset
+                .insert(ASSET_BATTERY.to_string(), 5.0);
+        }
+
+        let at_now = resolve_plan_state_at(&sim, &plan, now, now);
+        let in_the_past = resolve_plan_state_at(&sim, &plan, now - Duration::seconds(60), now);
+
+        assert_eq!(battery_soc(&at_now[ASSET_BATTERY]), 0.5);
+        assert_eq!(battery_soc(&in_the_past[ASSET_BATTERY]), 0.5);
+    }
+
+    #[test]
+    fn battery_state_at_a_future_slot_matches_direct_simulate_forward() {
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 1.0,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let mut plan = make_plan(900, 4, now); // 4 x 15-min slots
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset
+                .insert(ASSET_BATTERY.to_string(), 5.0);
+        }
+        let t1 = plan.slots[2].start;
+
+        let resolved = resolve_plan_state_at(&sim, &plan, t1, now);
+
+        // Direct comparison: the same schedule build_forecast_frames itself
+        // uses, run by hand via simulate_forward.
+        let (entry, cfg) = sim.find_asset(ASSET_BATTERY).unwrap();
+        let handle = AssetHandle {
+            config: cfg,
+            id: &entry.id,
+            state: &entry.state,
+            history: &entry.history,
+        };
+        let schedule: Vec<(DateTime<Utc>, f64)> =
+            plan.slots.iter().map(|s| (s.start, 5.0)).collect();
+        let traj = handle.simulate_forward(&entry.state, &schedule);
+        let expected_soc = battery_soc(&traj.points[2].state);
+
+        assert_eq!(
+            battery_soc(&resolved[ASSET_BATTERY]),
+            expected_soc,
+            "resolver must reuse the same computation as a direct simulate_forward call, not a second implementation"
+        );
+    }
+
+    #[test]
+    fn base_load_is_included_even_though_build_forecast_frames_skips_it() {
+        // build_forecast_frames deliberately excludes base_load from
+        // capability frames (it never contributes flexibility) -- but
+        // resolve_plan_state_at answers "what state is asset X in", which is
+        // a well-defined question for base_load too (assetMaxPower's own
+        // roster includes it), so it must not be silently dropped here.
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::BaseLoad(BaseLoadParams {
+                baseline_kw: 0.7,
+                ..Default::default()
+            })],
+            now,
+        );
+        let plan = make_plan(900, 2, now);
+        let t1 = plan.slots[1].start;
+
+        let resolved = resolve_plan_state_at(&sim, &plan, t1, now);
+
+        assert!(
+            resolved.contains_key(ASSET_BASE_LOAD),
+            "base_load must be present in the resolved state map"
+        );
+    }
+
+    #[test]
+    fn pv_state_at_a_future_t1_equals_its_current_live_state() {
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Pv(PvParams {
+                id: ASSET_PV.to_string(),
+                rated_kw: 5.0,
+                inverter_max_kw: 5.0,
+                co2_g_kwh: 0.0,
+            })],
+            now,
+        );
+        let plan = make_plan(900, 4, now);
+        let t1 = plan.slots[3].start;
+
+        let resolved = resolve_plan_state_at(&sim, &plan, t1, now);
+
+        let (live_entry, _cfg) = sim.find_asset(ASSET_PV).unwrap();
+        let (live_power, live_source) = match &live_entry.state {
+            AssetState::Pv(s) => (s.actual_power_kw, s.curtailment_source),
+            other => panic!("expected AssetState::Pv, got {other:?}"),
+        };
+        let (resolved_power, resolved_source) = match &resolved[ASSET_PV] {
+            AssetState::Pv(s) => (s.actual_power_kw, s.curtailment_source),
+            other => panic!("expected AssetState::Pv, got {other:?}"),
+        };
+        assert_eq!(
+            resolved_power, live_power,
+            "PV's resolved state at a future t1 must equal its current live state"
+        );
+        assert_eq!(resolved_source, live_source);
+    }
+
+    #[test]
+    fn t1_past_the_last_slot_returns_the_last_available_state() {
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 1.0,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let mut plan = make_plan(900, 4, now);
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset
+                .insert(ASSET_BATTERY.to_string(), 5.0);
+        }
+        let last_slot_start = plan.slots.last().unwrap().start;
+        let far_future = last_slot_start + Duration::hours(10);
+
+        let at_last_slot = resolve_plan_state_at(&sim, &plan, last_slot_start, now);
+        let past_horizon = resolve_plan_state_at(&sim, &plan, far_future, now);
+
+        assert_eq!(
+            battery_soc(&at_last_slot[ASSET_BATTERY]),
+            battery_soc(&past_horizon[ASSET_BATTERY]),
+            "a t1 past the plan's horizon must return the same state as its last remaining slot, not panic or extrapolate"
+        );
+    }
+
+    /// R-69 visibility check (design.md's Risks section): the resolver
+    /// reuses `battery.rs`'s (asymmetric) efficiency model, same as
+    /// `build_forecast_frames` already does -- this does not create the
+    /// mismatch against `battery_milp.rs`'s symmetric model, but if R-69
+    /// (`openspec/changes/battery-efficiency-model-reconciliation/`) is
+    /// still open, the resolver's SoC will disagree with what the planner
+    /// itself believed when it produced `planned_state_by_asset` for a
+    /// partial (non-full-cycle) charge. This test records that disagreement
+    /// explicitly rather than silently accepting a loose tolerance.
+    #[test]
+    fn r69_partial_cycle_soc_disagrees_with_planned_state_by_asset_until_r69_lands() {
+        let now = Utc::now();
+        let round_trip_efficiency = 0.81; // sqrt(0.81) = 0.9
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.0,
+                round_trip_efficiency,
+                min_soc: 0.0,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let mut plan = make_plan(3600, 1, now); // one 1h slot, partial cycle (charge only)
+        plan.slots[0]
+            .planned_kw_by_asset
+            .insert(ASSET_BATTERY.to_string(), 5.0); // 5 kWh AC import over the slot
+        let t1 = plan.slots[0].end;
+
+        // What the planner believed (battery_milp.rs's symmetric sqrt(rte) split):
+        // stored = 5.0 * sqrt(0.81) = 4.5 kWh -> soc = 0.45.
+        let planner_believed_soc = 5.0 * round_trip_efficiency.sqrt() / 10.0;
+
+        // What the resolver (battery.rs's asymmetric, all-loss-on-charge model) reports:
+        // stored = 5.0 * 0.81 = 4.05 kWh -> soc = 0.405.
+        let resolved = resolve_plan_state_at(&sim, &plan, t1, now);
+        let resolver_soc = battery_soc(&resolved[ASSET_BATTERY]);
+
+        assert!(
+            (resolver_soc - planner_believed_soc).abs() > 1e-6,
+            "R-69 has apparently been resolved (battery.rs and battery_milp.rs now agree on \
+             partial-cycle SoC: resolver={resolver_soc}, planner-believed={planner_believed_soc}) \
+             -- if this assertion now fails, update this test to assert equality instead, and \
+             note the resolution in this change's journal entry"
         );
     }
 }
