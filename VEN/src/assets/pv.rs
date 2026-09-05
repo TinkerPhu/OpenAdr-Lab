@@ -9,6 +9,7 @@ use super::{
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
+use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 
 fn f64_infinity() -> f64 {
     f64::INFINITY
@@ -165,6 +166,18 @@ impl PvInverter {
     /// clipping entirely, overstating export by (rated_kw − inverter_max_kw)
     /// whenever DC potential exceeded the inverter's AC ceiling.
     pub fn resolve_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
+        let raw_kw = self.uncurtailed_power_kw(inputs);
+        self.generation_limit_kw
+            .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
+            .unwrap_or(raw_kw)
+    }
+
+    /// `resolve_power_kw` before any `generation_limit_kw` clamp — the true
+    /// panel/inverter physical ceiling for the given inputs
+    /// (`asset-max-power-primitive` D2: `LimitTier::Physical` for PV means
+    /// this, not whatever `capability()`/`actual_power_kw` currently reports,
+    /// since that's already post-curtailment whenever a limit is active).
+    pub fn uncurtailed_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
         let base_kw = inputs.measured_power_kw.or(inputs.weather_power_kw);
         let dc_potential_kw = if inputs.irradiance_forced {
             self.rated_kw * inputs.irradiance
@@ -176,10 +189,7 @@ impl PvInverter {
         };
         // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
         // see openspec/changes/pv-curtailment-history/.
-        let raw_kw = -dc_potential_kw.min(self.inverter_max_kw); // negative = export
-        self.generation_limit_kw
-            .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
-            .unwrap_or(raw_kw)
+        -dc_potential_kw.min(self.inverter_max_kw) // negative = export
     }
 
     /// Export-only: PV never imports, so `max_import_kw` is pinned to 0
@@ -452,6 +462,54 @@ impl Asset for PvInverter {
 
     fn clone_box(&self) -> Box<dyn Asset> {
         Box::new(self.clone())
+    }
+
+    /// PV never imports (`0.0` for `Import`, matching `capability()` — this
+    /// is the general-primitive fix for the confirmed PV-Import bug,
+    /// `asset-max-power-primitive` design.md's Context). For `Export`,
+    /// `Physical` is the true uncurtailed panel/inverter ceiling (NOT
+    /// `capability()`'s `actual_power_kw`, which is already post-curtailment
+    /// whenever a limit is active — see `uncurtailed_power_kw`'s doc
+    /// comment). `Contractual`/`UserSet` apply the live `generation_limit_kw`
+    /// only when the currently-active `curtailment_source` maps to the
+    /// requested tier; otherwise they answer the same as `Physical`, since no
+    /// limit of that kind is actually in effect right now.
+    fn max_effort_setpoint(
+        &self,
+        state: &AssetState,
+        direction: CommitmentDirection,
+        tier: LimitTier,
+    ) -> f64 {
+        if direction == CommitmentDirection::Import {
+            return 0.0;
+        }
+        let AssetState::Pv(s) = state else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        let inputs = PvPowerInputs {
+            measured_power_kw: self.measured_power_kw,
+            weather_power_kw: self.weather_power_kw,
+            irradiance: self.irradiance,
+            irradiance_offset: self.irradiance_offset,
+            irradiance_forced: self.irradiance_forced,
+        };
+        let uncurtailed_kw = self.uncurtailed_power_kw(&inputs);
+        if tier == LimitTier::Physical {
+            return uncurtailed_kw;
+        }
+        let active_tier = match s.curtailment_source {
+            PvCurtailmentSource::None => None,
+            PvCurtailmentSource::Manual => Some(LimitTier::UserSet),
+            PvCurtailmentSource::Plan
+            | PvCurtailmentSource::Capacity
+            | PvCurtailmentSource::Arbiter
+            | PvCurtailmentSource::CommsLoss => Some(LimitTier::Contractual),
+        };
+        if active_tier == Some(tier) {
+            self.resolve_power_kw(&inputs)
+        } else {
+            uncurtailed_kw
+        }
     }
 }
 
@@ -881,5 +939,90 @@ mod tests {
             .expect("PvState must deserialize from a payload missing the new curtailment fields");
         assert_eq!(state.generation_limit_kw, None);
         assert_eq!(state.curtailment_source, PvCurtailmentSource::None);
+    }
+
+    // ── asset-max-power-primitive: max_effort_setpoint tier clamping ────────
+
+    fn pv_with_curtailment(
+        rated_kw: f64,
+        irradiance: f64,
+        generation_limit_kw: f64,
+        source: PvCurtailmentSource,
+    ) -> (PvInverter, AssetState) {
+        let (mut pv, _) = make_pv(rated_kw);
+        pv.irradiance = irradiance;
+        pv.generation_limit_kw = Some(generation_limit_kw);
+        pv.curtailment_source = source;
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: pv.resolve_power_kw(&PvPowerInputs {
+                measured_power_kw: None,
+                weather_power_kw: None,
+                irradiance,
+                irradiance_offset: 0.0,
+                irradiance_forced: false,
+            }),
+            generation_limit_kw: Some(generation_limit_kw),
+            curtailment_source: source,
+        });
+        (pv, state)
+    }
+
+    #[test]
+    fn max_effort_setpoint_contractual_clamps_when_that_source_is_active() {
+        // rated=10kW, irradiance=1.0 -> uncurtailed = -10.0 kW. A Plan-sourced
+        // limit of -4.0 kW (Contractual) is active.
+        let (pv, state) = pv_with_curtailment(10.0, 1.0, -4.0, PvCurtailmentSource::Plan);
+        let uncurtailed = Asset::max_effort_setpoint(
+            &pv,
+            &state,
+            CommitmentDirection::Export,
+            LimitTier::Physical,
+        );
+        assert_eq!(uncurtailed, -10.0, "Physical must ignore the active limit");
+        assert_eq!(
+            Asset::max_effort_setpoint(
+                &pv,
+                &state,
+                CommitmentDirection::Export,
+                LimitTier::Contractual
+            ),
+            -4.0,
+            "Contractual must apply the active Plan-sourced limit"
+        );
+        assert_eq!(
+            Asset::max_effort_setpoint(
+                &pv,
+                &state,
+                CommitmentDirection::Export,
+                LimitTier::UserSet
+            ),
+            -10.0,
+            "UserSet must NOT apply a Contractual-sourced limit"
+        );
+    }
+
+    #[test]
+    fn max_effort_setpoint_user_set_clamps_when_manual_is_active() {
+        let (pv, state) = pv_with_curtailment(10.0, 1.0, -3.0, PvCurtailmentSource::Manual);
+        assert_eq!(
+            Asset::max_effort_setpoint(
+                &pv,
+                &state,
+                CommitmentDirection::Export,
+                LimitTier::UserSet
+            ),
+            -3.0,
+            "UserSet must apply the active Manual limit"
+        );
+        assert_eq!(
+            Asset::max_effort_setpoint(
+                &pv,
+                &state,
+                CommitmentDirection::Export,
+                LimitTier::Contractual
+            ),
+            -10.0,
+            "Contractual must NOT apply a Manual-sourced limit"
+        );
     }
 }

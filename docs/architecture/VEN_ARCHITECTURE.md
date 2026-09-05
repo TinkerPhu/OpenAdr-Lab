@@ -431,6 +431,54 @@ are only accessible through the `/sim` API endpoints. The controller never reads
 
 **Full trait contract:** [`docs/architecture/ven_asset_interface_spec.md`](ven_asset_interface_spec.md).
 
+### 3.0a Max-Effort Primitive & `LimitTier` (`asset-max-power-primitive`, Spec C)
+
+Two more universal `Asset` default methods, alongside the ones in §3.0:
+
+```rust
+fn max_effort_setpoint(&self, state: &AssetState, direction: CommitmentDirection, tier: LimitTier) -> f64;
+fn max_effort_schedule(&self, state: &AssetState, direction: CommitmentDirection, tier: LimitTier,
+    t1: DateTime<Utc>, t_end: DateTime<Utc>) -> Vec<(DateTime<Utc>, f64)>;
+```
+
+`max_effort_setpoint` answers "what's this asset's own physical extreme for
+`direction`?" Its default body is `capability(state).max_import_kw`/`max_export_kw`
+— which already reports the physically-correct `0.0` for the two cases that used to
+need bespoke handling elsewhere: PV's Import extreme (curtail to zero) and Heater's
+Export extreme (turn off, not "current draw"). No per-kind override is needed for
+Battery/EvCharger/Heater/BaseLoad; asking the asset itself was enough.
+
+`max_effort_schedule` turns that single setpoint into a `(ts, setpoint_kw)` schedule
+for `Asset::simulate_forward` to run. Its default body steps at 60-second resolution
+rather than emitting a flat two-point `[(t1, s), (t_end, s)]` schedule, because
+`step()` only checks exhaustion/ceiling conditions at the *start* of a `dt` window —
+a single coarse step silently over-reports both power and energy once the asset would
+have hit its ceiling partway through (the same convention `Battery::forecast()`/
+`ShiftableLoadAsset::forecast()` already used). `ShiftableLoadAsset` overrides this
+method instead of `max_effort_setpoint`, since its "extreme" is a placement decision,
+not a constant: Import places the run at `earliest_start` (maximize remaining
+budget), Export places it at `latest_end - duration` (minimum forced import for as
+long as the window allows).
+
+`LimitTier { Physical, Contractual, UserSet }` (`entities/capacity_curve.rs`) is
+deliberately scoped **honestly narrow**: only `PvInverter` has a real
+Contractual/UserSet ceiling today, via `generation_limit_kw` and
+`PvCurtailmentSource` (`Manual` → `UserSet`; `Plan`/`Capacity`/`Arbiter`/`CommsLoss`
+→ `Contractual`; `None` → no active limit, both tiers fall back to the physical
+ceiling). Every other asset kind is tier-invariant by design, not by omission — its
+`max_effort_setpoint` returns the same value regardless of `tier` until a real
+per-kind ceiling exists. `Physical` for PV means the true *uncurtailed* generation
+ceiling, not `capability()`'s already-curtailed value.
+
+`asset_max_power(asset, state, t1, t2, direction, tier) -> (power_kw, energy_kwh)`
+(`assets/max_power.rs`) is a thin composition over the two methods above plus
+`simulate_forward` — no new simulation logic. It is not yet called from production
+code: this change only builds and unit-tests the primitive (`#[allow(dead_code)]`,
+matching the staged-rollout precedent `ShiftableLoadAsset` used during Spec B).
+Wiring it into `capacity_forecast.rs`/`envelope_forecast.rs` — which is what will
+actually fix the PV/Heater bugs described above in the live Diagnostics/Controller
+charts — is Spec E's job (`docs/plans/asset-max-power-forecast-master-plan.md`).
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.

@@ -1560,3 +1560,31 @@ current instance happens to share a property (fixed id, singleton-per-site)
 the new one won't, and (c) whether test harnesses reach production code via
 the same generic path production itself uses, or a narrower parallel one that
 happens to produce the same result only by coincidence for today's cases.
+
+## Two bespoke reimplementations converged on the same wrong answer because neither asked the asset itself (asset-max-power-primitive, 2026-09-05)
+
+`capacity_forecast.rs`'s `pv_events` and `heater_events` each independently
+computed "this asset's own physical extreme for the opposite commitment
+direction" — PV's Import extreme and Heater's Export extreme — by hand,
+outside the asset's own physics module. Both landed on the same class of
+wrong answer: PV's Import extreme double-credited curtailment instead of
+reporting zero, and Heater's Export extreme credited its current draw instead
+of "turn off." Neither bug needed asset-specific insight to fix — `capability()`
+already returned the correct `0.0` ceiling in both directions, for both asset
+kinds, the whole time. The bespoke code simply never asked.
+
+This is a concrete instance of the `generic-over-bespoke` rule, but with a
+sharper edge than "write a shared helper": the fix here isn't a new helper at
+all, just a trait *default method* (`max_effort_setpoint`) whose default body
+is `capability(state).max_import_kw`/`max_export_kw`. Every existing type
+needed zero code changes to be correct under it — the two bugs were never
+about missing per-type physics, they were about two call sites re-deriving an
+answer the asset already exposed through its existing interface.
+
+**How to apply:** when a call site computes "this asset's extreme/limit/
+ceiling" by reading raw fields or re-deriving a formula instead of calling an
+existing capability method, treat that as a signal to check whether the
+capability method already has the right answer before writing new
+asset-specific logic — a second bespoke computation of the same fact is a
+likely source of the two computations quietly diverging, even when both were
+written by people who believed they were being appropriately kind-specific.

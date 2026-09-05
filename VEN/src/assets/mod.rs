@@ -12,6 +12,7 @@ mod heater_control_schema;
 mod heater_emergency;
 mod heater_milp;
 mod history;
+mod max_power;
 pub mod pv;
 pub mod shiftable_load;
 
@@ -29,6 +30,9 @@ pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
 pub use history::{AssetHistoryBuffer, HistoryPoint};
+#[allow(unused_imports)]
+// not yet called from production code -- see max_power.rs's own doc comment
+pub use max_power::asset_max_power;
 pub use pv::{PvInverter, PvPowerInputs, PvState};
 pub use shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};
 
@@ -287,6 +291,37 @@ mod phase2a_battery_tests {
         assert_eq!(scalars.e_nom_kwh, 10.0);
         assert!((scalars.e_init_kwh - 5.0).abs() < 1e-9, "0.5 soc * 10 kWh");
     }
+
+    #[test]
+    fn max_effort_setpoint_matches_capability_ceiling() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state(0.5);
+        let cap = boxed.capability(&state);
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Import, LimitTier::Physical),
+            cap.max_import_kw
+        );
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Physical),
+            cap.max_export_kw
+        );
+    }
+
+    #[test]
+    fn max_effort_setpoint_is_tier_invariant() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state(0.5);
+        let physical =
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Physical);
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Contractual),
+            physical
+        );
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::UserSet),
+            physical
+        );
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +452,29 @@ mod phase2a_ev_tests {
         };
         assert_eq!(scalars.p_max_kw, 7.0);
     }
+
+    #[test]
+    fn max_effort_setpoint_matches_capability_ceiling_and_is_tier_invariant() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        let cap = boxed.capability(&state);
+        for direction in [CommitmentDirection::Import, CommitmentDirection::Export] {
+            let physical = boxed.max_effort_setpoint(&state, direction, LimitTier::Physical);
+            let expected = match direction {
+                CommitmentDirection::Import => cap.max_import_kw,
+                CommitmentDirection::Export => cap.max_export_kw,
+            };
+            assert_eq!(physical, expected);
+            assert_eq!(
+                boxed.max_effort_setpoint(&state, direction, LimitTier::Contractual),
+                physical
+            );
+            assert_eq!(
+                boxed.max_effort_setpoint(&state, direction, LimitTier::UserSet),
+                physical
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -530,6 +588,39 @@ mod phase2a_heater_tests {
         };
         assert!((scalars.e_max_kwh - 10.0).abs() < 1e-9, "(23-18)*2 kWh/C");
     }
+
+    /// The confirmed `heater_events` bug this whole primitive exists to fix
+    /// by construction (asset-max-power-primitive design.md's Context): a
+    /// heater's Export extreme must be `0.0` (turn off), not its current
+    /// draw credited as achievable export.
+    #[test]
+    fn max_effort_setpoint_export_is_zero_not_current_draw() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Physical),
+            0.0,
+            "heater must never report a positive achievable-export extreme"
+        );
+    }
+
+    #[test]
+    fn max_effort_setpoint_import_matches_capability_and_is_tier_invariant() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        let cap = boxed.capability(&state);
+        let physical =
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Import, LimitTier::Physical);
+        assert_eq!(physical, cap.max_import_kw);
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Import, LimitTier::Contractual),
+            physical
+        );
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Import, LimitTier::UserSet),
+            physical
+        );
+    }
 }
 
 #[cfg(test)]
@@ -575,6 +666,39 @@ mod phase2a_pv_tests {
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
     }
+
+    /// The confirmed `pv_events` bug this whole primitive exists to fix by
+    /// construction (asset-max-power-primitive design.md's Context): PV's
+    /// Import extreme must be `0.0` (curtail to zero), not currently-planned
+    /// output credited as achievable import.
+    #[test]
+    fn max_effort_setpoint_import_is_zero_not_credited_curtailment() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Import, LimitTier::Physical),
+            0.0,
+            "PV must never report a positive achievable-import extreme"
+        );
+    }
+
+    #[test]
+    fn max_effort_setpoint_export_physical_is_tier_invariant_with_no_active_curtailment() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        let physical =
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Physical);
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::Contractual),
+            physical,
+            "no active curtailment must make Contractual answer the same as Physical"
+        );
+        assert_eq!(
+            boxed.max_effort_setpoint(&state, CommitmentDirection::Export, LimitTier::UserSet),
+            physical,
+            "no active curtailment must make UserSet answer the same as Physical"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -618,6 +742,29 @@ mod phase2a_base_load_tests {
         assert!(boxed.as_milp_participant().is_none());
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
+    }
+
+    #[test]
+    fn max_effort_setpoint_matches_capability_and_is_tier_invariant() {
+        use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+        let (boxed, state) = boxed_and_state();
+        let cap = boxed.capability(&state);
+        for direction in [CommitmentDirection::Import, CommitmentDirection::Export] {
+            let physical = boxed.max_effort_setpoint(&state, direction, LimitTier::Physical);
+            let expected = match direction {
+                CommitmentDirection::Import => cap.max_import_kw,
+                CommitmentDirection::Export => cap.max_export_kw,
+            };
+            assert_eq!(physical, expected);
+            assert_eq!(
+                boxed.max_effort_setpoint(&state, direction, LimitTier::Contractual),
+                physical
+            );
+            assert_eq!(
+                boxed.max_effort_setpoint(&state, direction, LimitTier::UserSet),
+                physical
+            );
+        }
     }
 }
 

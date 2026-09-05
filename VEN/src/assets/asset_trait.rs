@@ -9,28 +9,11 @@ use crate::assets::HistoryPoint;
 use crate::common::TimeSeries;
 use crate::entities::asset::{AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::PvCurtailmentSource;
+use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
 
-/// Trajectory produced by simulate_forward().
-pub struct Trajectory {
-    pub points: Vec<TrajectoryPoint>,
-}
-
-/// State is the state AFTER the step at `ts`.
-// `ts`/`power_kw` are read only by the tests that pin `simulate_forward`'s
-// contract — that each point pairs the state BEFORE its window's step with the
-// *actual* (possibly clamped) power achieved DURING it, at that window's own
-// start. `insert_simulated_points`, the sole production consumer, relies on
-// exactly that alignment while reading only `state`, so the fields document and
-// guard an invariant it depends on rather than being unused scaffolding.
-#[allow(dead_code)]
-pub struct TrajectoryPoint {
-    pub ts: DateTime<Utc>,
-    /// Signed: positive = import, negative = export.
-    pub power_kw: f64,
-    pub state: AssetState,
-}
+pub use super::max_power::{Trajectory, TrajectoryPoint};
 
 /// Full Asset trait. Combines the physics interface (Phase A) with the identity and
 /// history interface (Phase B/C) needed for `&dyn Asset` trait objects.
@@ -86,6 +69,72 @@ pub trait Asset: Send + Sync {
     /// generic post-step pass remove it with no per-kind branching.
     fn is_removable(&self, _state: &AssetState) -> bool {
         false
+    }
+
+    /// The constant setpoint representing "go all-in on `direction`" under
+    /// `tier` (`asset-max-power-primitive` D1) — e.g. charge/discharge at
+    /// max rate, curtail PV to zero, turn a heater off. Default body is
+    /// exactly `capability()`'s ceiling for `direction`, correct for every
+    /// continuous/reservoir asset kind (Battery/EvCharger/Heater/PvInverter/
+    /// BaseLoad) without a per-type override — this is what fixes PV's
+    /// Import extreme and Heater's Export extreme by construction, since
+    /// both already report the correct `0.0` ceiling via `capability()`.
+    /// `tier` beyond `Physical` only has distinct effect for kinds that
+    /// override this (today: `PvInverter` — see design.md D2's honest-scope
+    /// table). `ShiftableLoadAsset` cannot answer with a single constant
+    /// (its extreme is a start-time placement, not a power level) — see
+    /// `max_effort_schedule`.
+    fn max_effort_setpoint(
+        &self,
+        state: &AssetState,
+        direction: CommitmentDirection,
+        _tier: LimitTier,
+    ) -> f64 {
+        let cap = self.capability(state);
+        match direction {
+            CommitmentDirection::Import => cap.max_import_kw,
+            CommitmentDirection::Export => cap.max_export_kw,
+        }
+    }
+
+    /// The setpoint schedule representing a sustained `direction` commitment
+    /// held from `t1` to `t_end`, for `Asset::simulate_forward`
+    /// (`asset-max-power-primitive` D3). Default body calls through
+    /// `max_effort_setpoint` (not reimplementing it) for the constant
+    /// commitment value, but does **not** hand `simulate_forward` a flat
+    /// two-point schedule: `step()` reports its `actual_power_kw` for
+    /// whatever `dt` it's given without checking for exhaustion *within*
+    /// that step (confirmed against `Battery::step_inner` — a single
+    /// multi-hour `dt` past the SoC ceiling still reports the full
+    /// pre-clamp rate as "actual" for the whole window, only the resulting
+    /// SoC clamps). A single coarse step across a window that exhausts
+    /// partway through would silently over-report both power and energy.
+    /// So this builds a fine-grained schedule (60 s resolution, matching
+    /// `Battery::forecast()`/`ShiftableLoadAsset::forecast()`'s existing
+    /// per-tick convention) holding the same constant setpoint throughout —
+    /// small enough steps for `step()`'s own per-tick clamping to correctly
+    /// detect exhaustion and drop to `0` partway through, the same way
+    /// those `forecast()` methods already do.
+    fn max_effort_schedule(
+        &self,
+        state: &AssetState,
+        direction: CommitmentDirection,
+        tier: LimitTier,
+        t1: DateTime<Utc>,
+        t_end: DateTime<Utc>,
+    ) -> Vec<(DateTime<Utc>, f64)> {
+        let setpoint = self.max_effort_setpoint(state, direction, tier);
+        if t_end <= t1 {
+            return vec![(t1, setpoint), (t1, setpoint)];
+        }
+        let mut schedule = Vec::new();
+        let mut t = t1;
+        while t < t_end {
+            schedule.push((t, setpoint));
+            t += Duration::seconds(60);
+        }
+        schedule.push((t_end, setpoint));
+        schedule
     }
 
     // ── AssetConfig-scoped methods (Spec A D4) ──────────────────────────────

@@ -102,6 +102,7 @@ def step_poll_sim_until_asset_appears(context, asset_id):
 
 
 @then('the polled sim has asset "{asset_id}" with power_kw > 0')
+@given('the polled sim has asset "{asset_id}" with power_kw > 0')
 def step_assert_sim_asset_power(context, asset_id):
     sim = context.polled_sim
     assets = sim.get("assets", {})
