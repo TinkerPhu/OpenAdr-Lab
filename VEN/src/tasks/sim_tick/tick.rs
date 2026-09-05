@@ -183,7 +183,6 @@ pub(crate) async fn tick_once(
         tick_envelope,
         tick_forecast,
         tick_capacity_curves,
-        ctx.plan_snap.as_ref(),
         &state,
         &trigger_tx,
         &ctx.rates_snap,

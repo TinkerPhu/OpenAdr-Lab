@@ -196,6 +196,15 @@ pub async fn post_requests(
         };
         let power = body.power_kw.unwrap();
         let duration = body.duration_min.unwrap();
+        if latest - earliest < chrono::Duration::minutes(duration as i64) {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({
+                    "error": "the [earliest_start, latest_end] window is too short for duration_min"
+                })),
+            )
+                .into_response();
+        }
         let mode = body.mode.clone().unwrap_or_default();
         let load = ShiftableLoad {
             id: Uuid::new_v4(),
@@ -232,12 +241,37 @@ pub async fn post_requests(
             created_at: now,
             updated_at: now,
         };
-        if let Err(msg) = ctx.state.add_shiftable_load(load).await {
+        if let Err(msg) = ctx.state.add_shiftable_load(load.clone()).await {
             return (
                 StatusCode::CONFLICT,
                 Json(serde_json::json!({"error": msg})),
             )
                 .into_response();
+        }
+        // shiftable-load-as-asset design.md D1: the asset enters SimState at
+        // acceptance time (started = false), not deferred until the MILP
+        // picks a start slot — visible to forecasting/MILP for its whole life.
+        if let Err(msg) = ctx.sim.lock().await.add_asset(
+            crate::simulator::AssetEntry {
+                id: load.asset_id.clone(),
+                state: crate::assets::AssetState::ShiftableLoad(
+                    crate::assets::ShiftableLoadAsset::initial_state(),
+                ),
+                setpoint_kw: 0.0,
+                last_power_kw: 0.0,
+                energy: crate::simulator::energy::EnergyCounter::new(),
+                history: crate::assets::AssetHistoryBuffer::new(3600),
+            },
+            Box::new(crate::assets::ShiftableLoadAsset {
+                power_kw: load.power_kw,
+                duration_min: load.duration_min,
+                earliest_start: load.earliest_start,
+                latest_end: load.latest_end,
+            }),
+        ) {
+            // Should be unreachable: add_shiftable_load's own duplicate
+            // check above already rejects a reused asset_id.
+            warn!(asset_id = %load.asset_id, error = %msg, "add_asset failed after add_shiftable_load succeeded");
         }
         ctx.state.upsert_request(user_req.clone()).await;
         ctx.state
@@ -392,7 +426,8 @@ pub async fn post_requests(
 
 /// DELETE /user-requests/:id — cancel a user request and clear any linked device session.
 pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    match UserRequestService::cancel(id, &ctx.state).await {
+    let mut sim = ctx.sim.lock().await;
+    match UserRequestService::cancel(id, &ctx.state, &mut sim).await {
         Ok(req) => {
             ctx.state
                 .push_controller_event(

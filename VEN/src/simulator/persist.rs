@@ -39,17 +39,30 @@ pub async fn load_with_params(
         return fresh;
     };
 
+    // Reconcile against the FIXED (boot-fixed, `asset_params`-derived) roster
+    // only. A dynamic entry (e.g. a shiftable load — see
+    // `shiftable-load-as-asset` design.md D3) left over in the persisted file
+    // has no live request behind it after a restart (HemsState isn't
+    // persisted — D4), so it's dropped here rather than tripping a
+    // whole-state fallback that would also discard every fixed-roster
+    // asset's mutable state over unrelated dynamic-roster churn.
     let current_ids: Vec<&str> = fresh.assets.iter().map(|e| e.id.as_str()).collect();
-    let loaded_ids: Vec<&str> = loaded.assets.iter().map(|e| e.id.as_str()).collect();
-    if current_ids != loaded_ids {
-        warn!(
-            ?current_ids,
-            ?loaded_ids,
-            "asset list changed since last persist — starting fresh from params"
-        );
-        return fresh;
+    let mut reconciled = Vec::with_capacity(current_ids.len());
+    for &id in &current_ids {
+        match loaded.assets.iter().find(|e| e.id == id) {
+            Some(entry) => reconciled.push(entry.clone()),
+            None => {
+                let loaded_ids: Vec<&str> = loaded.assets.iter().map(|e| e.id.as_str()).collect();
+                warn!(
+                    ?current_ids,
+                    ?loaded_ids,
+                    "fixed-roster asset list changed since last persist — starting fresh from params"
+                );
+                return fresh;
+            }
+        }
     }
-
+    loaded.assets = reconciled;
     loaded.asset_configs = fresh.asset_configs;
     loaded
 }
@@ -264,6 +277,73 @@ mod tests {
             ),
             other => panic!("expected Battery state, got {other:?}"),
         }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// shiftable-load-as-asset design.md D3's reconciliation: a dynamic
+    /// (shiftable-load) entry left over from before a restart must be
+    /// dropped, not cause the whole persisted state -- including an unrelated
+    /// fixed-roster asset's mutable state -- to be discarded.
+    #[tokio::test]
+    async fn load_with_params_drops_a_stale_dynamic_asset_without_discarding_fixed_roster_state() {
+        let dir = temp_data_dir();
+        let data_dir = dir.to_str().unwrap();
+
+        let mut saved = SimState::from_params(&[battery_params("battery")], now());
+        let (entry, _) = saved.find_asset_mut("battery").unwrap();
+        entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
+            soc: 0.66,
+            actual_power_kw: 0.0,
+        });
+        // Simulate a shiftable load that was mid-run at the last persist but
+        // whose request no longer exists after the restart (HemsState isn't
+        // persisted -- D4).
+        saved
+            .add_asset(
+                crate::simulator::AssetEntry {
+                    id: "wm".to_string(),
+                    state: crate::assets::AssetState::ShiftableLoad(
+                        crate::assets::ShiftableLoadState {
+                            started: true,
+                            elapsed_min: 5.0,
+                            actual_power_kw: 2.0,
+                        },
+                    ),
+                    setpoint_kw: 2.0,
+                    last_power_kw: 2.0,
+                    energy: crate::simulator::energy::EnergyCounter::new(),
+                    history: crate::assets::AssetHistoryBuffer::new(3600),
+                },
+                Box::new(crate::assets::ShiftableLoadAsset {
+                    power_kw: 2.0,
+                    duration_min: 60,
+                    earliest_start: now(),
+                    latest_end: now() + chrono::Duration::hours(4),
+                }),
+            )
+            .unwrap();
+        save(&saved, data_dir).await.unwrap();
+
+        // Restart with only the fixed-roster battery in `asset_params` --
+        // "wm" is not a boot-fixed asset and has no live request behind it.
+        let asset_params = [battery_params("battery")];
+        let restarted = load_with_params(data_dir, &asset_params, now()).await;
+
+        let (entry, _) = restarted
+            .find_asset("battery")
+            .expect("fixed-roster battery must still be present");
+        match &entry.state {
+            crate::assets::AssetState::Battery(s) => assert!(
+                (s.soc - 0.66).abs() < 1e-9,
+                "battery's mutable state must survive despite unrelated dynamic-asset churn"
+            ),
+            other => panic!("expected Battery state, got {other:?}"),
+        }
+        assert!(
+            restarted.find_asset("wm").is_none(),
+            "stale dynamic asset must be dropped, not restored"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

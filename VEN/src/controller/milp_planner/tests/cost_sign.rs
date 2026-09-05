@@ -197,8 +197,10 @@ fn shiftable_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         created_at: now,
         updated_at: now,
     };
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        ctxs,
         &sim,
         &tariffs,
         &no_capacity(),

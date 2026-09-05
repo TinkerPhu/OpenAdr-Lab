@@ -12,6 +12,10 @@ pub enum AssetKind {
     Battery,
     Ev,
     Heater,
+    /// Unlike the other three (one per site, `Option`-shaped pool slot), a
+    /// site can have several shiftable loads at once — `MilpVarPool.shiftable`
+    /// stays a `Vec`, not a new `Option` slot (`shiftable-load-as-asset`).
+    ShiftableLoad,
 }
 
 /// MilpLoadMode: scheduling mode shared across EV and heater scalars.
@@ -74,12 +78,24 @@ pub struct HeaterScalars {
     pub c_terminal_eur_kwh: f64,
 }
 
+/// Pre-computed scalar parameters for one shiftable load in one planning
+/// cycle — the hard window already resolved to slot indices (`shiftable-load-
+/// as-asset`). `valid_start_slots == [0]` encodes an already-`started` load:
+/// the start decision is already made, not a MILP choice.
+#[derive(Debug, Clone)]
+pub struct ShiftableLoadScalars {
+    pub power_kw: f64,
+    pub duration_slots: usize,
+    pub valid_start_slots: Vec<usize>,
+}
+
 /// Unified asset MILP parameters — one variant per MILP-capable asset type.
 #[derive(Debug, Clone)]
 pub enum AssetMilpParams {
     Battery(BatteryScalars),
     Ev(EvScalars),
     Heater(HeaterScalars),
+    ShiftableLoad(ShiftableLoadScalars),
     Unknown,
 }
 

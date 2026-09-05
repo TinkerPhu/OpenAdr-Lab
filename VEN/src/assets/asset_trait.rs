@@ -77,6 +77,17 @@ pub trait Asset: Send + Sync {
     /// state its own answer explicitly rather than silently inherit a wrong one.
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
 
+    /// Whether this asset instance is done and should be dropped from
+    /// `SimState`'s dynamic roster (`shiftable-load-as-asset` design.md D3a).
+    /// Default `false`: every boot-fixed asset kind (Battery/EvCharger/
+    /// Heater/PvInverter/BaseLoad) lives for the sim's whole lifetime and is
+    /// never removed this way. `ShiftableLoadAsset` overrides this to report
+    /// `true` once its run has completed, letting `SimState::tick()`'s
+    /// generic post-step pass remove it with no per-kind branching.
+    fn is_removable(&self, _state: &AssetState) -> bool {
+        false
+    }
+
     // ── AssetConfig-scoped methods (Spec A D4) ──────────────────────────────
     //
     // "Universal" per D4's audit means universal across `AssetConfig`'s 5
@@ -288,9 +299,13 @@ pub trait MilpParticipant {
     /// state, reward weights) even though most parameters apply to only one
     /// or two asset kinds — see `AssetConfig::build_milp_context`'s existing
     /// doc history for why this wasn't split further.
-    #[allow(clippy::too_many_arguments)] // one entry point for 3 heterogeneous asset kinds' MILP setup — see trait doc
+    #[allow(clippy::too_many_arguments)] // one entry point for 4 heterogeneous asset kinds' MILP setup — see trait doc
     fn build_milp_context(
         &self,
+        // Needed only by ShiftableLoadAsset (shiftable-load-as-asset): unlike
+        // Battery/EV/Heater's compile-time-fixed ids, a shiftable load's id is
+        // per-instance and not otherwise available inside this method.
+        asset_id: &str,
         state: &AssetState,
         n: usize,
         cum_s: &[i64],

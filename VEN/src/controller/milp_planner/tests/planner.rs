@@ -960,7 +960,6 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
         profile.pv_config(),
         None,
         now,
-        &[],
         None,
         None,
         &std::collections::HashMap::new(),
@@ -1080,7 +1079,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
             _ => None,
         }),
         now,
-        &[],
         None,
         None,
         &std::collections::HashMap::new(),
@@ -1119,7 +1117,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         profile.pv_config(),
         None,
         now,
-        &[],
         None,
         None,
         &std::collections::HashMap::new(),
@@ -1222,8 +1219,10 @@ fn run_planner_shiftable_tie_breaks_to_earliest_start() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0); // flat → slots 0 and 1 cost-equal
                                                    // 30-min load, 65-min window → valid start slots {0, 1} on the 1800 s grid.
     let load = make_shiftable(now, 30, 65);
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        ctxs,
         &sim,
         &tariffs,
         &no_capacity(),
@@ -1270,8 +1269,10 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
         },
     ]);
     let load = make_shiftable(now, 30, 65);
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        ctxs,
         &sim,
         &tariffs,
         &no_capacity(),

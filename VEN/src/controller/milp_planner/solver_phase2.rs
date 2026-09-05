@@ -6,7 +6,7 @@ use good_lp::{
 
 use crate::controller::milp_interactions::{
     build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
-    GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+    GridMilpVars, MilpVarPool,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -161,31 +161,14 @@ pub(crate) fn solve_phase2(
         p_pv_used: p_pv_used.clone(),
     };
 
-    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
-        .shiftable_loads
-        .iter()
-        .map(|sl| {
-            let y_shift = sl
-                .valid_start_slots
-                .iter()
-                .map(|_| vars.add(variable().binary()))
-                .collect();
-            ShiftableLoadMilpVars {
-                asset_id: sl.asset_id.clone(),
-                power_kw: sl.power_kw,
-                duration_slots: sl.duration_slots,
-                valid_start_slots: sl.valid_start_slots.clone(),
-                y_shift,
-            }
-        })
-        .collect();
-
     let mut pool = MilpVarPool {
         grid: grid_vars,
         bat: None,
         ev: None,
         heater: None,
-        shiftable: shift_vars,
+        // Populated generically below by each ShiftableLoadMilpContext's own
+        // `declare_vars_into_pool` (shiftable-load-as-asset).
+        shiftable: Vec::new(),
     };
 
     // WP6.3 (BL-09): declared fresh here too — Phase 2 re-declares all variables,
@@ -215,6 +198,9 @@ pub(crate) fn solve_phase2(
                 );
             }
             AssetKind::Heater => {
+                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+            }
+            AssetKind::ShiftableLoad => {
                 ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
             }
         }
@@ -266,6 +252,9 @@ pub(crate) fn solve_phase2(
                 // m_low term: use Phase 1 convention (c_startup=0 → m_low in heater impl).
                 phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
+            AssetKind::ShiftableLoad => {
+                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
+            }
         }
     }
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
@@ -311,6 +300,9 @@ pub(crate) fn solve_phase2(
                 // self.lambda_sw_eur applied internally by HeaterMilpContext::objective.
                 friction_obj +=
                     ctx.objective(&pool, n, &inputs.dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
+            }
+            AssetKind::ShiftableLoad => {
+                friction_obj += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }
     }

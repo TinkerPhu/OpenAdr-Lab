@@ -205,7 +205,7 @@ pub(crate) struct MilpInputs {
 
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
     /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
-    pub(crate) shiftable_loads: Vec<ShiftableLoadMilp>,
+    pub(crate) shiftable_loads: Vec<ShiftableLoadMilpContext>,
 
     /// Live SoC of the EV at plan-build time [0.0..1.0].
     /// Used to integrate the planned EV charge power into a SoC trajectory for
@@ -213,16 +213,21 @@ pub(crate) struct MilpInputs {
     pub(crate) soc_ev_init: Option<f64>,
 }
 
-/// Internal MILP descriptor for one shiftable load block.
+/// Internal MILP descriptor for one shiftable load block. Implements
+/// `AssetMilpContext` (impl in `assets/shiftable_load.rs`, matching the
+/// Battery/EV/Heater cross-file convention) — `shiftable-load-as-asset`,
+/// replacing the pre-Spec-B bespoke `solver_phase1.rs`/`solver_phase2.rs`
+/// wiring that built this struct directly from `&[ShiftableLoad]`.
 #[derive(Debug, Clone)]
-pub(crate) struct ShiftableLoadMilp {
+pub(crate) struct ShiftableLoadMilpContext {
     /// Label for allocations (e.g. "wm")
     pub(crate) asset_id: String,
     /// Fixed power level while running [kW]
     pub(crate) power_kw: f64,
     /// Duration in planning slots (ceil)
     pub(crate) duration_slots: usize,
-    /// Valid start-slot indices within [0, n)
+    /// Valid start-slot indices within [0, n). `[0]` when the load has
+    /// already started — the decision is made, not a MILP choice.
     pub(crate) valid_start_slots: Vec<usize>,
 }
 

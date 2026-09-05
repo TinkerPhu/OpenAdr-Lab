@@ -4,7 +4,7 @@ use crate::assets::{
     battery::{Battery, BatteryState},
     ev::{EvCharger, EvState},
     heater::{Heater, HeaterState},
-    AssetState, MilpParticipant,
+    AssetState, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
 use crate::entities::asset_params::AssetParams;
@@ -527,6 +527,7 @@ fn build_asset_contexts(
                     .unwrap_or(avg_imp_eur_kwh * cfg.round_trip_efficiency);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
+                    "battery",
                     &state,
                     n,
                     &cum_s,
@@ -565,6 +566,7 @@ fn build_asset_contexts(
                 let ac = EvCharger::from_params(cfg);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
+                    "ev",
                     &state,
                     n,
                     &cum_s,
@@ -598,6 +600,7 @@ fn build_asset_contexts(
                     .unwrap_or(avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
+                    "heater",
                     &state,
                     n,
                     &cum_s,
@@ -698,6 +701,62 @@ fn contexts_from_inputs(
     v
 }
 
+/// Test-only equivalent of `plan_context.rs::build_asset_contexts`'s generic
+/// `sim_snap.iter_assets().filter_map(...)` pass, for shiftable loads only —
+/// this test module's own `build_asset_contexts` above builds contexts from
+/// `profile.assets` (static config), which shiftable loads were never part
+/// of (shiftable-load-as-asset D4). Appends one `ShiftableLoadMilpContext`
+/// per pending (not-yet-started) load onto an existing `ctxs` list.
+fn push_shiftable_load_contexts(
+    ctxs: &mut Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    loads: &[crate::entities::device_session::ShiftableLoad],
+    profile: &Profile,
+    now: DateTime<Utc>,
+) {
+    let n: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
+    let cum_s: Vec<i64> = {
+        let mut v = vec![0i64];
+        for zone in &profile.planner.plan_zones {
+            for _ in 0..zone.slots {
+                v.push(v.last().unwrap() + zone.step_s as i64);
+            }
+        }
+        v
+    };
+    for load in loads {
+        let asset = ShiftableLoadAsset {
+            power_kw: load.power_kw,
+            duration_min: load.duration_min,
+            earliest_start: load.earliest_start,
+            latest_end: load.latest_end,
+        };
+        let state = AssetState::ShiftableLoad(ShiftableLoadState {
+            started: false,
+            elapsed_min: 0.0,
+            actual_power_kw: 0.0,
+        });
+        ctxs.push(MilpParticipant::build_milp_context(
+            &asset,
+            &load.asset_id,
+            &state,
+            n,
+            &cum_s,
+            now,
+            None,
+            None,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            vec![],
+            0.0,
+        ));
+    }
+}
+
 fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase1Weights {
     super::build_phase1_weights(&profile.planner, objective)
 }
@@ -734,7 +793,10 @@ fn build_milp_inputs_with_override(
     cap: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
-    shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
+    // Superseded by `ctxs` (shiftable-load-as-asset) — kept as a parameter
+    // since callers still pass it positionally; see `mod.rs::run_planner`'s
+    // own `_shiftable_loads` for the same reasoning.
+    _shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
     baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
     pv_forecast_override: Option<f64>,
 ) -> MilpInputs {
@@ -754,7 +816,6 @@ fn build_milp_inputs_with_override(
             _ => None,
         }),
         now,
-        shiftable_loads,
         baseline_override,
         pv_forecast_override,
         &std::collections::HashMap::new(),

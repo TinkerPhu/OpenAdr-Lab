@@ -285,6 +285,10 @@ pub(crate) fn solve_marginal_costs(
             AssetKind::Heater => {
                 pool.heater = Some(declare_fixed_heater_vars(inputs, winning, n, &mut vars));
             }
+            // No-op: shiftable loads' fixed-value vars are declared unconditionally
+            // above (from `inputs.shiftable_loads`), not gated by this match —
+            // see that block's own comment.
+            AssetKind::ShiftableLoad => {}
         }
     }
 
@@ -328,6 +332,9 @@ pub(crate) fn solve_marginal_costs(
                 objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
             AssetKind::Heater => {
+                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
+            }
+            AssetKind::ShiftableLoad => {
                 objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }

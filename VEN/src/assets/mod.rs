@@ -13,6 +13,7 @@ mod heater_emergency;
 mod heater_milp;
 mod history;
 pub mod pv;
+pub mod shiftable_load;
 
 // AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
@@ -29,6 +30,7 @@ pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
 pub use history::{AssetHistoryBuffer, HistoryPoint};
 pub use pv::{PvInverter, PvPowerInputs, PvState};
+pub use shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};
 
 // ─── Input type for a runtime-controllable parameter ─────────────────────────
 
@@ -125,6 +127,7 @@ pub enum AssetState {
     Heater(HeaterState),
     Pv(PvState),
     BaseLoad(BaseLoadState),
+    ShiftableLoad(ShiftableLoadState),
     /// Virtual asset: derived from sum of all other assets + VTN capacity limits.
     Grid(GridState),
 }
@@ -138,6 +141,7 @@ impl AssetState {
             Self::Heater(s) => s.actual_power_kw,
             Self::Pv(s) => s.actual_power_kw,
             Self::BaseLoad(s) => s.actual_power_kw,
+            Self::ShiftableLoad(s) => s.actual_power_kw,
             Self::Grid(s) => s.net_power_kw,
         }
     }
@@ -258,6 +262,7 @@ mod phase2a_battery_tests {
             .as_milp_participant()
             .expect("Battery must implement MilpParticipant")
             .build_milp_context(
+                "battery",
                 &state,
                 4,
                 &[300, 600, 900, 1200],
@@ -389,6 +394,7 @@ mod phase2a_ev_tests {
             .as_milp_participant()
             .expect("EvCharger must implement MilpParticipant")
             .build_milp_context(
+                "ev",
                 &state,
                 4,
                 &[300, 600, 900, 1200],
@@ -501,6 +507,7 @@ mod phase2a_heater_tests {
             .as_milp_participant()
             .expect("Heater must implement MilpParticipant")
             .build_milp_context(
+                "heater",
                 &state,
                 4,
                 &[300, 600, 900, 1200],

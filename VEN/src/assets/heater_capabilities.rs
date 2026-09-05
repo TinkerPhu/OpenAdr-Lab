@@ -33,9 +33,10 @@ impl TickOverridable for Heater {
 }
 
 impl MilpParticipant for Heater {
-    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 3 heterogeneous asset kinds — see trait doc
+    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 4 heterogeneous asset kinds — see trait doc
     fn build_milp_context(
         &self,
+        _asset_id: &str,
         state: &AssetState,
         n: usize,
         cum_s: &[i64],

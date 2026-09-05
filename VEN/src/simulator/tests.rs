@@ -1,3 +1,176 @@
+/// `SimState::add_asset`/`remove_asset` (shiftable-load-as-asset design.md D3):
+/// the only dynamic (not boot-fixed) mutation of the asset roster.
+mod add_remove_asset_tests {
+    use super::super::*;
+    use crate::assets::{ShiftableLoadAsset, ShiftableLoadState};
+    use crate::simulator::energy::EnergyCounter;
+
+    fn shiftable_entry(id: &str) -> (AssetEntry, Box<dyn Asset>) {
+        let entry = AssetEntry {
+            id: id.to_string(),
+            state: AssetState::ShiftableLoad(ShiftableLoadState {
+                started: false,
+                elapsed_min: 0.0,
+                actual_power_kw: 0.0,
+            }),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: EnergyCounter::new(),
+            history: AssetHistoryBuffer::new(3600),
+        };
+        let config: Box<dyn Asset> = Box::new(ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 60,
+            earliest_start: Utc::now(),
+            latest_end: Utc::now() + chrono::Duration::hours(4),
+        });
+        (entry, config)
+    }
+
+    #[test]
+    fn add_asset_appends_to_both_parallel_vectors() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let (entry, config) = shiftable_entry("wm");
+        assert!(sim.add_asset(entry, config).is_ok());
+        assert_eq!(sim.assets.len(), 1);
+        assert_eq!(sim.asset_configs.len(), 1);
+        assert!(sim.find_asset("wm").is_some());
+    }
+
+    #[test]
+    fn add_asset_rejects_duplicate_id() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let (entry1, config1) = shiftable_entry("wm");
+        let (entry2, config2) = shiftable_entry("wm");
+        sim.add_asset(entry1, config1).unwrap();
+        let result = sim.add_asset(entry2, config2);
+        assert!(result.is_err(), "duplicate asset_id must be rejected");
+        assert_eq!(sim.assets.len(), 1, "the duplicate must not be appended");
+    }
+
+    #[test]
+    fn remove_asset_removes_from_both_parallel_vectors() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let (entry, config) = shiftable_entry("wm");
+        sim.add_asset(entry, config).unwrap();
+        assert!(sim.remove_asset("wm"));
+        assert!(sim.assets.is_empty());
+        assert!(sim.asset_configs.is_empty());
+    }
+
+    #[test]
+    fn remove_asset_is_a_no_op_when_id_not_present() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        assert!(!sim.remove_asset("does-not-exist"));
+    }
+
+    #[test]
+    fn add_then_remove_keeps_other_assets_untouched() {
+        let params = [crate::entities::asset_params::AssetParams::Battery(
+            crate::entities::asset_params::BatteryParams::default(),
+        )];
+        let mut sim = SimState::from_params(&params, Utc::now());
+        let (entry, config) = shiftable_entry("wm");
+        sim.add_asset(entry, config).unwrap();
+        assert_eq!(sim.assets.len(), 2);
+
+        sim.remove_asset("wm");
+        assert_eq!(sim.assets.len(), 1);
+        assert!(sim.find_asset(crate::ids::ASSET_BATTERY).is_some());
+    }
+}
+
+/// `SimState::tick()`'s generic post-step removal pass (design.md D3a of
+/// shiftable-load-as-asset): a finished asset must disappear from the roster
+/// with no per-kind branching in the removal pass itself.
+mod shiftable_load_removal_tests {
+    use super::super::*;
+    use crate::assets::{ShiftableLoadAsset, ShiftableLoadState};
+    use crate::entities::asset_params::PvCurtailmentSource;
+    use crate::simulator::energy::EnergyCounter;
+
+    fn shiftable_only(power_kw: f64, duration_min: u32) -> SimState {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_asset(
+            AssetEntry {
+                id: "wm".to_string(),
+                state: AssetState::ShiftableLoad(ShiftableLoadState {
+                    started: false,
+                    elapsed_min: 0.0,
+                    actual_power_kw: 0.0,
+                }),
+                setpoint_kw: 0.0,
+                last_power_kw: 0.0,
+                energy: EnergyCounter::new(),
+                history: AssetHistoryBuffer::new(3600),
+            },
+            Box::new(ShiftableLoadAsset {
+                power_kw,
+                duration_min,
+                earliest_start: Utc::now(),
+                latest_end: Utc::now() + chrono::Duration::hours(4),
+            }),
+        )
+        .unwrap();
+        sim
+    }
+
+    fn run_tick(sim: &mut SimState, dt_s: f64, setpoints: HashMap<String, f64>) {
+        sim.tick(
+            dt_s,
+            setpoints,
+            Utc::now(),
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            PvCurtailmentSource::None,
+            None,
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn finished_shiftable_load_is_removed_from_the_roster_the_same_tick() {
+        let mut sim = shiftable_only(2.0, 1); // 1-minute duration
+        run_tick(&mut sim, 60.0, HashMap::from([("wm".to_string(), 2.0)]));
+        assert!(
+            sim.find_asset("wm").is_none(),
+            "finished shiftable load must be removed the same tick it finishes"
+        );
+    }
+
+    #[test]
+    fn pending_shiftable_load_is_not_removed() {
+        let mut sim = shiftable_only(2.0, 60);
+        run_tick(&mut sim, 30.0, HashMap::new());
+        assert!(
+            sim.find_asset("wm").is_some(),
+            "a pending (not started) load must not be removed"
+        );
+    }
+
+    #[test]
+    fn running_but_not_yet_finished_shiftable_load_is_not_removed() {
+        let mut sim = shiftable_only(2.0, 60);
+        run_tick(&mut sim, 30.0, HashMap::from([("wm".to_string(), 2.0)]));
+        assert!(
+            sim.find_asset("wm").is_some(),
+            "a running, not-yet-finished load must not be removed"
+        );
+    }
+}
+
 mod port_tests {
     use super::super::*;
 

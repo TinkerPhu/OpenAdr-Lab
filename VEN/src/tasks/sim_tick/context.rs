@@ -60,7 +60,6 @@ pub(crate) struct TickContext {
     /// result.
     pub ev_session: Option<crate::entities::device_session::EvSession>,
     pub shiftable_loads: Vec<crate::entities::device_session::ShiftableLoad>,
-    pub shiftable_runtimes: Vec<crate::entities::device_session::ShiftableLoadRuntime>,
     pub comms_loss: Option<CommsLossState>,
 }
 
@@ -146,7 +145,6 @@ pub(crate) async fn resolve_tick_context(
         incumbent_lever: state.arbiter_active_lever().await,
         ev_session: state.ev_session().await,
         shiftable_loads: state.shiftable_loads().await,
-        shiftable_runtimes: state.shiftable_runtimes().await,
         comms_loss,
     }
 }

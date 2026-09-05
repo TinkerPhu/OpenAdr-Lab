@@ -282,7 +282,6 @@ fn bmi_with_weather(
         profile.pv_config(),
         None,
         now,
-        &[],
         None,
         pv_forecast_override,
         &std::collections::HashMap::new(),

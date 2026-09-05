@@ -9,8 +9,8 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::simulator_port::AssetForecastFrame;
-use crate::entities::device_session::{ShiftableLoad, ShiftableLoadRuntime};
+use crate::controller::simulator_port::{AssetForecastFrame, SimSnapshot};
+use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
 use crate::ids::ASSET_PV;
 
@@ -26,7 +26,7 @@ pub fn compute_headroom_forecast(
     frames: &[AssetForecastFrame],
     plan: &Plan,
     shiftable_loads: &[ShiftableLoad],
-    shiftable_runtimes: &[ShiftableLoadRuntime],
+    snapshot: &SimSnapshot,
 ) -> Vec<SiteFlexibilityForecastSlot> {
     frames
         .iter()
@@ -52,8 +52,8 @@ pub fn compute_headroom_forecast(
                 down_kw += (point.cap_max_import_kw - point.planned_kw).max(0.0);
             }
 
-            down_kw += shiftable_down_kw(plan, shiftable_loads, shiftable_runtimes, frame.ts);
-            up_kw += shiftable_up_kw(plan, shiftable_loads, shiftable_runtimes, frame.ts);
+            down_kw += shiftable_down_kw(plan, shiftable_loads, snapshot, frame.ts);
+            up_kw += shiftable_up_kw(plan, shiftable_loads, snapshot, frame.ts);
 
             SiteFlexibilityForecastSlot {
                 ts: frame.ts,
@@ -64,13 +64,18 @@ pub fn compute_headroom_forecast(
         .collect()
 }
 
-/// A runtime object existing for this load means the dispatcher already
-/// detected a plan allocation and started it in reality — fully committed
-/// (this model has no interrupt/early-stop mechanism), so it contributes no
-/// flexibility of either kind for the rest of its life, regardless of what
-/// any current or future plan says.
-pub(crate) fn already_run(load: &ShiftableLoad, runtimes: &[ShiftableLoadRuntime]) -> bool {
-    runtimes.iter().any(|r| r.load_id == load.id)
+/// A `started` shiftable-load asset means the load is already running in
+/// reality — fully committed (this model has no interrupt/early-stop
+/// mechanism), so it contributes no flexibility of either kind for the rest
+/// of its life, regardless of what any current or future plan says. Reads
+/// the live `SimSnapshot` (`ShiftableLoadAsset::state_values()`'s `"started"`
+/// flag) instead of a bolt-on `&[ShiftableLoadRuntime]` list.
+fn already_run(load: &ShiftableLoad, snapshot: &SimSnapshot) -> bool {
+    snapshot
+        .assets
+        .get(&load.asset_id)
+        .map(|a| a.values.get("started").copied().unwrap_or(0.0) > 0.5)
+        .unwrap_or(false)
 }
 
 /// First plan slot where this load's own planned power turns nonzero — i.e.
@@ -114,12 +119,12 @@ pub(crate) fn valid_start_exists_at(load: &ShiftableLoad, ts: DateTime<Utc>) -> 
 fn shiftable_down_kw(
     plan: &Plan,
     loads: &[ShiftableLoad],
-    runtimes: &[ShiftableLoadRuntime],
+    snapshot: &SimSnapshot,
     ts: DateTime<Utc>,
 ) -> f64 {
     loads
         .iter()
-        .filter(|l| !already_run(l, runtimes))
+        .filter(|l| !already_run(l, snapshot))
         .filter(|l| !is_planned_running_at(plan, l, ts))
         .filter(|l| valid_start_exists_at(l, ts))
         .map(|l| l.power_kw)
@@ -129,12 +134,12 @@ fn shiftable_down_kw(
 fn shiftable_up_kw(
     plan: &Plan,
     loads: &[ShiftableLoad],
-    runtimes: &[ShiftableLoadRuntime],
+    snapshot: &SimSnapshot,
     ts: DateTime<Utc>,
 ) -> f64 {
     loads
         .iter()
-        .filter(|l| !already_run(l, runtimes))
+        .filter(|l| !already_run(l, snapshot))
         .filter(|l| is_planned_running_at(plan, l, ts))
         .filter(|l| {
             planned_start(plan, l)
@@ -235,6 +240,42 @@ mod tests {
         }
     }
 
+    fn empty_sim_snapshot() -> SimSnapshot {
+        SimSnapshot {
+            ts: Utc::now(),
+            grid: crate::controller::simulator_port::GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+                import_limit_kw: f64::MAX,
+                export_limit_kw: -f64::MAX,
+            },
+            assets: HashMap::new(),
+        }
+    }
+
+    /// A snapshot with one `started` shiftable-load asset entry — mirrors
+    /// what `already_run` reads off `ShiftableLoadAsset::state_values()`.
+    fn started_snapshot(asset_id: &str) -> SimSnapshot {
+        let mut snap = empty_sim_snapshot();
+        snap.assets.insert(
+            asset_id.to_string(),
+            crate::controller::simulator_port::AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "shiftable_load".to_string(),
+                cap_max_import_kw: 0.0,
+                cap_max_export_kw: 0.0,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values: HashMap::from([("started".to_string(), 1.0)]),
+            },
+        );
+        snap
+    }
+
     // ── Generic battery/EV/heater-shaped asset ──────────────────────────────
 
     #[test]
@@ -252,7 +293,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert_eq!(out.len(), 1);
         assert!((out[0].up_kw - 5.0).abs() < 1e-9);
         assert!((out[0].down_kw - 5.0).abs() < 1e-9);
@@ -286,7 +327,7 @@ mod tests {
                 )]),
             },
         ];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert!((out[0].down_kw - 5.0).abs() < 1e-9);
         assert!((out[1].down_kw - 0.0).abs() < 1e-9);
     }
@@ -311,7 +352,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert!(
             (out[0].up_kw - 2.0).abs() < 1e-9,
             "expected 2.0 kW unused-generation margin as up_kw, got {}",
@@ -336,7 +377,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert!(
             (out[0].down_kw - 1.0).abs() < 1e-9,
             "expected 1.0 kW of curtailable current output as down_kw, got {}",
@@ -359,7 +400,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert_eq!(
             out[0].up_kw, 0.0,
             "no unused margin left toward the ceiling"
@@ -386,7 +427,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert_eq!(out[0].up_kw, 0.0);
         assert_eq!(out[0].down_kw, 0.0);
     }
@@ -408,7 +449,7 @@ mod tests {
                 },
             )]),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[], &empty_sim_snapshot());
         assert_eq!(out[0].up_kw, 0.0);
         assert_eq!(out[0].down_kw, 0.0);
     }
@@ -430,7 +471,7 @@ mod tests {
             ts: now,
             assets: HashMap::new(),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[load], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[load], &empty_sim_snapshot());
         assert!((out[0].down_kw - 2.0).abs() < 1e-9);
     }
 
@@ -449,7 +490,7 @@ mod tests {
             ts: now,
             assets: HashMap::new(),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[load], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[load], &empty_sim_snapshot());
         assert_eq!(out[0].down_kw, 0.0);
     }
 
@@ -458,18 +499,11 @@ mod tests {
         let now = Utc::now();
         let plan = make_plan(300, 1, now);
         let load = make_shiftable_load("wm", 2.0, 60, now, now + Duration::hours(4));
-        let runtime = ShiftableLoadRuntime {
-            load_id: load.id,
-            asset_id: "wm".to_string(),
-            power_kw: 2.0,
-            started_at: now - Duration::minutes(10),
-            ends_at: now + Duration::minutes(50),
-        };
         let frames = vec![AssetForecastFrame {
             ts: now,
             assets: HashMap::new(),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[load], &[runtime]);
+        let out = compute_headroom_forecast(&frames, &plan, &[load], &started_snapshot("wm"));
         assert_eq!(out[0].down_kw, 0.0);
         assert_eq!(out[0].up_kw, 0.0);
     }
@@ -490,7 +524,7 @@ mod tests {
             ts: now,
             assets: HashMap::new(),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[load], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[load], &empty_sim_snapshot());
         assert!(
             (out[0].up_kw - 2.0).abs() < 1e-9,
             "expected 2.0 kW up-flex (deferrable), got {}",
@@ -512,7 +546,7 @@ mod tests {
             ts: now,
             assets: HashMap::new(),
         }];
-        let out = compute_headroom_forecast(&frames, &plan, &[load], &[]);
+        let out = compute_headroom_forecast(&frames, &plan, &[load], &empty_sim_snapshot());
         assert_eq!(
             out[0].up_kw, 0.0,
             "a deadline-committed load at its last possible start must show zero up-flex"

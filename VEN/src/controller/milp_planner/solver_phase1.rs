@@ -7,7 +7,7 @@ use good_lp::{
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 use crate::controller::milp_interactions::{
     build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
-    GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+    GridMilpVars, MilpVarPool,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -57,31 +57,15 @@ pub(crate) fn solve_phase1(
         p_pv_used: p_pv_used.clone(),
     };
 
-    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
-        .shiftable_loads
-        .iter()
-        .map(|sl| {
-            let y_shift = sl
-                .valid_start_slots
-                .iter()
-                .map(|_| vars.add(variable().binary()))
-                .collect();
-            ShiftableLoadMilpVars {
-                asset_id: sl.asset_id.clone(),
-                power_kw: sl.power_kw,
-                duration_slots: sl.duration_slots,
-                valid_start_slots: sl.valid_start_slots.clone(),
-                y_shift,
-            }
-        })
-        .collect();
-
     let mut pool = MilpVarPool {
         grid: grid_vars,
         bat: None,
         ev: None,
         heater: None,
-        shiftable: shift_vars,
+        // Populated generically below by each ShiftableLoadMilpContext's own
+        // `declare_vars_into_pool` (shiftable-load-as-asset), same loop that
+        // already declares Battery/EV/Heater's vars.
+        shiftable: Vec::new(),
     };
 
     // WP6.3 (BL-09): one slack per window per active penalty rule. Empty
@@ -134,6 +118,10 @@ pub(crate) fn solve_phase1(
             }
             AssetKind::Heater => {
                 // c_startup=0.0 signals Phase 1 → m_low penalty, no tier/switching.
+                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
+            }
+            AssetKind::ShiftableLoad => {
+                // No economic term of its own — see ShiftableLoadMilpContext::objective's doc comment.
                 objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }
@@ -256,14 +244,6 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
         for c in ctx.constraints(pool, n, &global.dt_h) {
             model = model.with(c);
         }
-    }
-
-    for sv in &pool.shiftable {
-        let mut sum_y = Expression::from(0.0);
-        for &y in &sv.y_shift {
-            sum_y += y;
-        }
-        model = model.with(constraint!(sum_y == 1.0));
     }
 
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {

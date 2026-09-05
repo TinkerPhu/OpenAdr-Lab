@@ -252,7 +252,7 @@ pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
 // existing `asset_port::`/`milp_planner::` import path keeps working unchanged.
 pub use crate::controller::asset_milp_port::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
-    MilpLoadMode,
+    MilpLoadMode, ShiftableLoadScalars,
 };
 
 // ── Plan-result helper free functions ─────────────────────────────────────────
