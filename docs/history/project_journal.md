@@ -11435,11 +11435,19 @@ code touched — confirmed via `ui-transparency` reasoning: this primitive has
 no consumer yet, so there is no new backend capability or derived state to
 surface). E2E on Node2 initially failed on the pre-existing step-matcher bug
 above (reproduced twice against `main` before this branch's own changes were
-even in play); green after the fix, including the full suite re-run.
-Resilience on Node2: green. `cargo fmt`/`clippy -D warnings`, file-size
-audit, and `ven-architecture` invariant greps all clean throughout. No
-`docs/use-cases/*.md` update needed — confirmed, not silently skipped: no
-user-observable behavior changes yet.
+even in play); green after the fix (271 scenarios passed, 0 failed, main
+pass; 8/8 `@isolated` pass), confirmed by a second full re-run. One
+additional single-run failure
+(`reactive_correction_notifications.feature`'s arbiter notification
+scenario, a 180s notification-poll timeout) was investigated and confirmed
+to be Node2 resource-contention flakiness, not a regression from this
+change's diff (which touches only `assets/`, `entities/capacity_curve.rs`,
+and the shiftable-lifecycle BDD steps — nothing in the deviation-arbiter
+path): it passed cleanly (9/9 scenarios) when re-run in isolation.
+Resilience on Node2: green (6/6). `cargo fmt`/`clippy -D warnings`,
+file-size audit, and `ven-architecture` invariant greps all clean
+throughout. No `docs/use-cases/*.md` update needed — confirmed, not silently
+skipped: no user-observable behavior changes yet.
 
 **Key learning.** See `KEY_LEARNINGS.md`'s 2026-09-05 entry: two independent
 bespoke reimplementations of "this asset's own extreme" converged on the
