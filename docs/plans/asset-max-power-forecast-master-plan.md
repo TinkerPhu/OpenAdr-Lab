@@ -1,6 +1,8 @@
 # Master Plan: Asset Max-Power Forecast & Unified Capacity/Envelope Engine
 
-> **Status:** planning — no implementation started. This is the sequencing document
+> **Status:** Spec A and Spec B complete and merged to `main`
+> (`asset-dispatch-trait-objects`, `shiftable-load-as-asset`). Spec C, D, and E
+> not yet started. This is the sequencing document
 > for turning `docs/plans/asset-max-power-forecast-spec.md` (the requirements — now
 > the leading source of truth for this area) into working code, across five
 > dependent specs. It supersedes `openspec/changes/capacity-envelope-unification/
@@ -84,6 +86,8 @@ introduced there surfaces everywhere, not just in the new code paths.
 
 ## Spec A — Asset dispatch: closed enum → trait object
 
+**Status: complete** (`asset-dispatch-trait-objects`, merged 2026-09-04).
+
 **Problem it solves:** `AssetConfig`/`AssetState` (`VEN/src/assets/mod.rs`) are
 closed 5-variant enums (`Battery, Ev, Heater, Pv, BaseLoad`) dispatched through the
 `delegate_asset!`/`delegate_asset_state!` macros. Adding a 6th physics type means
@@ -120,6 +124,11 @@ for this spec specifically.
 ---
 
 ## Spec B — Shiftable load as a first-class Asset
+
+**Status: complete** (`shiftable-load-as-asset`, merged 2026-09-05). Full
+design record, findings, and verification results are in
+`docs/history/project_journal.md`'s 2026-09-05 entry — the openspec change
+directory itself was deleted per this repo's workflow convention.
 
 **Problem it solves:** shiftable loads are not `AssetConfig`/`AssetState` variants
 at all today. They're threaded as separate `&[ShiftableLoad]`/

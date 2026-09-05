@@ -34,6 +34,7 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
   Scenario: Shiftable load auto-completes and disappears from GET /sim
     Given I POST a shiftable load for asset "wm-3" at 2.0 kW for 1 minutes within 30 minutes
     And I poll the VEN /sim until asset "wm-3" appears
+    And the polled sim has asset "wm-3" with power_kw > 0
     When I poll the VEN /sim until asset "wm-3" disappears
     Then the polled sim does not have asset "wm-3"
 

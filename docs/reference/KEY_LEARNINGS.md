@@ -1523,3 +1523,40 @@ not by reaching for an extra crate:
   reaches the trait impl. This stops mattering once callers only ever hold `&mut dyn
   Trait` (which exposes only the trait's own methods) — but verify that's actually true
   for every call site before assuming the ambiguity is moot.
+
+## A "generic" dispatch mechanism can still carry unstated singleton assumptions (shiftable-load-as-asset, 2026-09-05)
+
+Adding a second, structurally different instance of an existing capability
+(shiftable loads joining Battery/EV/Heater as MILP-participating assets)
+surfaced several places where code that *looked* generic — a `Vec`-shaped
+pool field, a `for ctx in asset_contexts { ctx.some_trait_method(...) }` loop
+— actually carried an unstated assumption the original three instances never
+violated:
+- A `debug_assert!` explicitly checked "at most one context per kind" — true
+  for three singleton assets, silently wrong the moment a kind can have
+  multiple simultaneous instances (a site can have several shiftable loads).
+  The assert existed specifically to catch pool-slot collisions, so it was
+  *doing its job* — it just needed a per-kind exemption, not deletion.
+- A shared trait method's parameter list (`MilpParticipant::build_milp_context`)
+  had survived three implementors without needing the instance's own id,
+  because all three had compile-time-fixed ids. A fourth, dynamically-created
+  instance broke that silently-relied-upon property.
+- A hand-derived "this needs a decision" question (an objective term's
+  tie-break, assumed to need a per-instance-vs-aggregate design choice)
+  dissolved on closer reading — it was already per-instance, just called once
+  over a whole `Vec` rather than once per trait-object. Not every apparent
+  gap in a generic mechanism is real; re-read the actual code before deciding
+  a design question needs solving, not just the comment describing it.
+- The *test* harness's own "generic-looking" context-building helper was
+  actually keyed off a different, narrower data source (`profile.assets`,
+  static config) than production's real generic pass (`SimSnapshot.iter_assets()`,
+  live state) — invisible until a test assertion on real scheduled behavior
+  (not just "does it compile") caught the silent gap.
+
+**How to apply:** before assuming a new instance of an existing kind can slot
+into a "generic" mechanism unchanged, look specifically for (a) any
+`debug_assert!`/invariant check near that mechanism, (b) whether every
+current instance happens to share a property (fixed id, singleton-per-site)
+the new one won't, and (c) whether test harnesses reach production code via
+the same generic path production itself uses, or a narrower parallel one that
+happens to produce the same result only by coincidence for today's cases.

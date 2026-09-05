@@ -11179,3 +11179,132 @@ trait split — that classification is where the naming/design smell (`AssetConf
 "config" doing live dispatch, not just holding static config) actually surfaced, not
 from looking at the type name in isolation. See `KEY_LEARNINGS.md` for the durable
 version of this lesson.
+
+## 2026-09-05 — Shiftable load as a first-class Asset (Spec B of the asset-max-power-forecast master plan)
+
+**What.** Converted shiftable loads from three independent bolt-on
+implementations — `HemsState.shiftable_runtimes`'s hand-rolled countdown
+tracking, a bespoke `ShiftableLoadMilp` treatment wired directly into
+`solver_phase1.rs`/`solver_phase2.rs`, and duplicated window-logic helpers
+cross-imported between `capacity_forecast.rs`/`envelope_forecast.rs` — into a
+real `Box<dyn Asset>` trait-object asset (`ShiftableLoadAsset`), following the
+pattern Spec A (`asset-dispatch-trait-objects`) established. Named
+`ShiftableLoadAsset`, not `ShiftableLoad`, since that name was already the
+HEMS request struct's.
+
+**Why now.** The master plan sequences this before Spec C (`assetMaxPower` +
+`limitTier`) deliberately: Spec C's `max_effort_setpoint` primitive needs to be
+designed against the hardest case — a discrete, non-interruptible asset — from
+the start, and `Asset::simulate_forward` needs shiftable load to actually be a
+simulated asset to work on it at all.
+
+**Design decisions (full record in the now-deleted
+`openspec/changes/shiftable-load-as-asset/design.md` — see git history for
+this change if the full rationale is needed later):**
+- **D1** — the asset enters `SimState.asset_configs` at request-acceptance
+  time (`started: false`), not deferred until the MILP picks a start slot —
+  visible to forecasting/MILP for its whole life, which is what actually lets
+  the bolt-on forecast parameters be deleted.
+- **D2** — starting is driven by the *same* per-tick setpoint path every other
+  asset already uses (`ShiftableLoadAsset::step()` latches non-interruptible
+  on the plan's first nonzero commanded setpoint), not a bespoke
+  start-detector.
+- **D3** — `SimState` gained `add_asset`/`remove_asset`: the first *dynamic*
+  (not boot-fixed) roster mutation in the codebase, since a site can have an
+  arbitrary, changing number of shiftable loads, unlike the fixed
+  Battery/EvCharger/Heater/PvInverter/BaseLoad roster. Required partitioning
+  `persist::load_with_params`'s id-equality restart check into a fixed-roster
+  subset (exact match, unchanged) and a dynamic-roster subset (reconcile
+  per-id, don't discard the rest of the state on a mismatch).
+- **D3a** (found during implementation, not foreseen in the original design) —
+  nothing generic removes a *finished* asset from the roster; `step()` alone
+  only stops it drawing power. Added `Asset::is_removable(&self, state) ->
+  bool` (default `false`), overridden by `ShiftableLoadAsset`, with a generic
+  post-tick pass in `SimState::tick()` — no per-kind branching, matching this
+  repo's `declare-dont-branch` convention.
+- **D4** — a shiftable load's config (power/duration/window) is
+  request-sourced, not profile-file-sourced, so it can't follow Spec A's
+  "always rebuild from current params" persistence contract the same way. This
+  turned out not to need new persistence work: `HemsState` was already not
+  persisted across restarts (no `Serialize` derive), so a restart already lost
+  pending/running shiftable-load requests before this change — the same
+  restart now produces zero shiftable-load entries in the rebuilt roster for
+  the same underlying reason, not a new one.
+- **D5/D6** — MILP and cancel-semantics decisions; see the Findings below for
+  where implementation corrected the original design.
+
+**Findings during implementation that corrected the original design (recorded
+because they're the durable lesson, not just this change's own history):**
+1. `MilpParticipant::build_milp_context`'s shared signature was first assumed
+   to need no changes (Battery/EV/Heater's existing ignored-parameter pattern
+   seemed sufficient), then found to need one after all: a shiftable load's
+   `asset_id` is dynamic and per-instance, unlike Battery/EV/Heater's
+   compile-time-fixed ids, and nothing in the existing signature carried it.
+   Added a new `asset_id: &str` parameter; the three existing impls ignore it,
+   the one call site (`plan_context.rs`) passes `&entry.id`.
+2. `AssetKind` (MILP dispatch discriminant) needed a new variant and **7**
+   exhaustive-match arms fixed across `solver_phase1.rs`/`solver_phase2.rs`/
+   `solver_duals.rs` — not the 3 initially estimated from a first read of the
+   objective-loop code alone.
+3. `run_planner`'s `debug_assert!` enforced "at most one context per
+   `AssetKind`" — true for the three singleton kinds, false for shiftable
+   loads (a site can have several). Changed to a per-kind count check that
+   exempts `ShiftableLoad`.
+4. The deterministic earliest-start tie-break (`shiftable_tiebreak_expr`) was
+   assumed to need an aggregation-strategy decision (per-instance vs.
+   kind-filtered). Re-reading it showed it was already per-instance — it
+   needed no change at all, staying a separate call reading `pool.shiftable`
+   regardless of how that `Vec` gets populated.
+5. A genuine solver-parity regression surfaced by the test suite (not found by
+   inspection): the *test* harness's own `asset_contexts`-building helper
+   constructs contexts from `profile.assets` (static config), which shiftable
+   loads were never part of — so removing the old bolt-on `&[ShiftableLoad]`-
+   driven MILP path silently dropped shiftable-load scheduling in 3 existing
+   tests. Fixed with a small test-only helper mirroring the real
+   `plan_context.rs::build_asset_contexts`'s generic pass, for shiftable loads
+   specifically.
+
+**A design fork surfaced mid-implementation, resolved with the user:**
+`envelope_forecast.rs` reads per-slot `AssetForecastFrame`/`AssetForecastPoint`
+frames, which carry only `planned_kw`/`cap_max_import_kw`/`cap_max_export_kw`
+— no type tag, no values map — unlike the richer `AssetSnapshot` the live
+`capacity_forecast.rs` reads. Fully eliminating `envelope_forecast.rs`'s
+`&[ShiftableLoad]` parameter would have meant extending `AssetForecastPoint`
+itself, real scope growth into Spec D's (`planState(t1)`) territory. Resolved
+as **minimal**: kept `&[ShiftableLoad]` (static request data, not the
+duplicated-*state* problem this change targets), only replaced
+`&[ShiftableLoadRuntime]` with a live-snapshot `started`-flag check.
+`capacity_forecast.rs`, which already reads the live snapshot, dropped both
+bolt-on parameters entirely.
+
+**Verification.** Full Rust suite: 1254 passed, 0 failed, 3 ignored (up from
+1236 at the end of Spec A). UI unit suites: VEN 627/627, VTN 71/71. E2E on
+Node2: PASS (4 features, 8 scenarios, 49 steps, 0 failed) — including 5
+pre-existing shiftable-load lifecycle scenarios
+(`tests/features/ven_shiftable_lifecycle.feature`,
+`tests/features/isolated/shiftable_lifecycle.feature`), one of which was
+extended with an explicit `power_kw > 0` assertion at the "running" checkpoint
+to close a coverage gap (accept → observe running with nonzero power →
+observe natural completion, all in one scenario) found while auditing
+existing BDD coverage for this change. Resilience on Node2: PASS (6/6
+first-pass scenarios, `@isolated` pass green) — notably including an existing
+scenario that deletes a running shiftable load and confirms it disappears
+from `/sim`, exercising this change's new dynamic-roster removal path.
+`cargo fmt`/`clippy -D warnings`, file-size audit, and `ven-architecture`
+invariant greps all clean throughout.
+
+**Debt filed:** R-74 — `VEN/ui/src/pages/Dashboard.tsx`'s "Simulation" card
+has a hardcoded per-asset-id dispatch with no case (and no generic fallback)
+for `battery`, `base_load`, or the new `shiftable_load` — a pre-existing gap
+(Battery/BaseLoad were already invisible there) this change surfaced but
+didn't introduce or fix, since it's a UI-layer refactor unrelated to the
+backend work. See `docs/reference/TECHNICAL_DEBTS.md`.
+
+**Key learning.** Before assuming a new asset kind can slot into an existing
+generic dispatch mechanism unchanged, check whether that mechanism was ever
+exercised with more than one instance of the *same* kind, or with a
+dynamically-added instance — "generic-looking" code (a `Vec`-shaped pool
+field, a `for ctx in contexts` loop) can still carry unstated singleton
+assumptions elsewhere (a `debug_assert!`, an enum with no room for a new
+variant) that only surface once you actually add the second kind of thing
+that breaks the assumption. See `KEY_LEARNINGS.md` for the durable version.
