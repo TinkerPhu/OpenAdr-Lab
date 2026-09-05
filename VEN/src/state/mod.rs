@@ -8,9 +8,7 @@ use crate::entities::capacity::{
 };
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
-use crate::entities::device_session::{
-    BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
-};
+use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
@@ -111,7 +109,6 @@ pub struct HemsState {
     pub ev_session: Option<EvSession>,
     pub heater_target: Option<HeaterTarget>,
     pub shiftable_loads: Vec<ShiftableLoad>,
-    pub shiftable_runtimes: Vec<ShiftableLoadRuntime>,
     pub baseline_override: Option<BaselineOverride>,
     pub ev_settings: EvSettings,
     /// Deviation-arbiter rollout gate, default `false` (see `state::arbiter`).
@@ -425,7 +422,6 @@ impl AppState {
                 Some(SessionType::ShiftableLoad) => {
                     if let Some(sid) = session_id {
                         hems.shiftable_loads.retain(|l| l.id != sid);
-                        hems.shiftable_runtimes.retain(|r| r.load_id != sid);
                     }
                 }
                 _ => {
@@ -491,21 +487,15 @@ impl AppState {
         let mut w = self.hems.write().await;
         let before = w.shiftable_loads.len();
         w.shiftable_loads.retain(|l| l.id != id);
-        w.shiftable_runtimes.retain(|r| r.load_id != id);
         w.shiftable_loads.len() < before
     }
 
-    pub async fn shiftable_runtimes(&self) -> Vec<ShiftableLoadRuntime> {
-        self.hems.read().await.shiftable_runtimes.clone()
-    }
-
-    pub async fn start_shiftable(&self, runtime: ShiftableLoadRuntime) {
-        self.hems.write().await.shiftable_runtimes.push(runtime);
-    }
-
+    /// Close out a shiftable-load request once its asset has finished running
+    /// (detected by `tasks::sim_tick::publish` as its asset_id disappearing
+    /// from the live `SimSnapshot` — see `SimState::tick()`'s `is_removable`
+    /// pass, design.md D3a of `shiftable-load-as-asset`).
     pub async fn complete_shiftable(&self, load_id: uuid::Uuid) {
         let mut w = self.hems.write().await;
-        w.shiftable_runtimes.retain(|r| r.load_id != load_id);
         w.shiftable_loads.retain(|l| l.id != load_id);
         // Also mark linked UserRequest as Completed.
         if let Some(req) = w
@@ -569,7 +559,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::device_session::{ShiftableLoad, ShiftableLoadRuntime};
+    use crate::entities::device_session::ShiftableLoad;
     use chrono::{Duration, Utc};
     use uuid::Uuid;
 
@@ -588,42 +578,6 @@ mod tests {
         }
     }
 
-    fn make_runtime(load: &ShiftableLoad) -> ShiftableLoadRuntime {
-        let now = Utc::now();
-        ShiftableLoadRuntime {
-            load_id: load.id,
-            asset_id: load.asset_id.clone(),
-            power_kw: load.power_kw,
-            started_at: now,
-            ends_at: now + Duration::minutes(load.duration_min as i64),
-        }
-    }
-
-    #[test]
-    fn shiftable_runtime_is_running() {
-        let now = Utc::now();
-        let rt = ShiftableLoadRuntime {
-            load_id: Uuid::new_v4(),
-            asset_id: "wm-1".to_string(),
-            power_kw: 2.0,
-            started_at: now,
-            ends_at: now + Duration::minutes(60),
-        };
-        assert!(rt.is_running(now), "should be running at start");
-        assert!(
-            rt.is_running(now + Duration::minutes(30)),
-            "should be running mid-way"
-        );
-        assert!(
-            !rt.is_running(now + Duration::minutes(60)),
-            "half-open: not running at ends_at"
-        );
-        assert!(
-            !rt.is_running(now - Duration::seconds(1)),
-            "not running before start"
-        );
-    }
-
     #[tokio::test]
     async fn add_shiftable_load_rejects_duplicate() {
         let state = AppState::new();
@@ -640,53 +594,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_and_read_runtime() {
-        let state = AppState::new();
-        let load = make_load("wm-1");
-        state.add_shiftable_load(load.clone()).await.unwrap();
-
-        let rt = make_runtime(&load);
-        state.start_shiftable(rt.clone()).await;
-
-        let runtimes = state.shiftable_runtimes().await;
-        assert_eq!(runtimes.len(), 1);
-        assert_eq!(runtimes[0].load_id, load.id);
-        assert_eq!(runtimes[0].asset_id, "wm-1");
-    }
-
-    #[tokio::test]
-    async fn complete_removes_both_collections() {
+    async fn complete_shiftable_removes_the_load_and_completes_its_request() {
         let state = AppState::new();
         let load = make_load("wm-1");
         let load_id = load.id;
         state.add_shiftable_load(load.clone()).await.unwrap();
-        state.start_shiftable(make_runtime(&load)).await;
+        let req = make_request(Some(SessionType::ShiftableLoad), Some(load_id));
+        let req_id = req.id;
+        state.upsert_request(req).await;
 
         state.complete_shiftable(load_id).await;
 
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(
-            state.shiftable_runtimes().await.is_empty(),
-            "runtime removed"
+        let requests = state.active_requests().await;
+        assert_eq!(
+            requests.iter().find(|r| r.id == req_id).unwrap().status,
+            UserRequestStatus::Completed
         );
     }
 
     #[tokio::test]
-    async fn remove_load_removes_runtime() {
+    async fn remove_shiftable_load_removes_it() {
         let state = AppState::new();
         let load = make_load("wm-1");
         let load_id = load.id;
         state.add_shiftable_load(load.clone()).await.unwrap();
-        state.start_shiftable(make_runtime(&load)).await;
 
         let removed = state.remove_shiftable_load(load_id).await;
 
         assert!(removed, "remove should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(
-            state.shiftable_runtimes().await.is_empty(),
-            "runtime also removed"
-        );
     }
 
     fn make_request(
@@ -780,12 +717,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_request_shiftable_removes_load_and_runtime() {
+    async fn cancel_request_shiftable_removes_load() {
         let state = AppState::new();
         let load = make_load("wm-1");
         let load_id = load.id;
         state.add_shiftable_load(load.clone()).await.unwrap();
-        state.start_shiftable(make_runtime(&load)).await;
 
         let req = make_request(Some(SessionType::ShiftableLoad), Some(load_id));
         let req_id = req.id;
@@ -794,10 +730,6 @@ mod tests {
         let found = state.cancel_request(req_id).await;
         assert!(found, "cancel should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(
-            state.shiftable_runtimes().await.is_empty(),
-            "runtime removed"
-        );
         let requests = state.active_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }

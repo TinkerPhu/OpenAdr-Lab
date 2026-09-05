@@ -1,5 +1,9 @@
 // ── SimulatorPort trait and snapshot types ────────────────────────────────────
 pub mod simulator_port;
+// AssetSnapshot: only test code re-imports it via this path now that
+// tasks/sim_tick/publish.rs's manual shiftable-runtime augmentation (its only
+// non-test consumer) was deleted (shiftable-load-as-asset).
+#[allow(unused_imports)]
 pub use simulator_port::{AssetSnapshot, SimSnapshot, SimulatorPort};
 
 // ── VtnPort trait and typed OpenADR structs ───────────────────────────────────

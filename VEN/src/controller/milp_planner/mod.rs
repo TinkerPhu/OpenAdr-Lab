@@ -29,8 +29,9 @@ use self::asset_port::{
 
 pub use self::asset_port::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
-    MilpLoadMode,
+    MilpLoadMode, ShiftableLoadScalars,
 };
+pub(crate) use self::types::ShiftableLoadMilpContext;
 #[allow(unused_imports)]
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
@@ -130,6 +131,9 @@ pub fn run_planner(
     trigger: PlanTrigger,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    // No longer forwarded into `build_milp_inputs` (superseded there by
+    // `asset_contexts` — shiftable-load-as-asset), but still needed for
+    // `translate_to_plan`/`fallback_plan`'s own request-level bookkeeping.
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
     objective_override: Option<PlannerObjective>,
@@ -142,15 +146,22 @@ pub fn run_planner(
     diurnal_import_ref: Option<&crate::common::TimeSeries>,
     diurnal_co2_ref: Option<&crate::common::TimeSeries>,
 ) -> Plan {
-    // Guard: MilpVarPool has one named slot per kind; silently overwrites on duplicates.
+    // Guard: MilpVarPool has one named `Option` slot per singleton kind
+    // (Battery/EV/Heater — silently overwrites on duplicates); `ShiftableLoad`
+    // is exempt, since a site can have several shiftable loads at once,
+    // collected into `MilpVarPool.shiftable: Vec<_>` (shiftable-load-as-asset).
     debug_assert!(
         {
-            use std::collections::HashSet;
-            let kinds: Vec<_> = asset_contexts.iter().map(|c| c.asset_kind()).collect();
-            let unique: HashSet<_> = kinds.iter().collect();
-            kinds.len() == unique.len()
+            use std::collections::HashMap;
+            let mut counts: HashMap<AssetKind, usize> = HashMap::new();
+            for kind in asset_contexts.iter().map(|c| c.asset_kind()) {
+                *counts.entry(kind).or_insert(0) += 1;
+            }
+            counts
+                .into_iter()
+                .all(|(kind, n)| kind == AssetKind::ShiftableLoad || n <= 1)
         },
-        "run_planner: duplicate AssetKind in asset_contexts — each kind may appear at most once"
+        "run_planner: duplicate AssetKind for a singleton kind in asset_contexts"
     );
 
     let objective = objective_override.unwrap_or(planner.objective);
@@ -172,7 +183,6 @@ pub fn run_planner(
         pv,
         base_load,
         now,
-        shiftable_loads,
         baseline_override,
         pv_forecast_override,
         asset_heuristics,

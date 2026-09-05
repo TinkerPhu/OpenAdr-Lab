@@ -5,9 +5,10 @@ use uuid::Uuid;
 use crate::controller::user_request::{create_from_body, CreateUserRequestParams, RequestError};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
-use crate::entities::user_request::{UserRequest, UserRequestStatus};
+use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::DomainError;
 use crate::ids;
+use crate::simulator::SimState;
 use crate::state::AppState;
 
 pub struct UserRequestService;
@@ -151,14 +152,23 @@ impl UserRequestService {
     ///
     /// Returns the cancelled request on success, or:
     /// - `DomainError::NotFound` if no request with that id exists.
-    /// - `DomainError::SessionConflict` if the request is already in a terminal state.
-    pub async fn cancel(id: Uuid, state: &AppState) -> Result<UserRequest, DomainError> {
+    /// - `DomainError::SessionConflict` if the request is already in a terminal
+    ///   state, or (shiftable-load-as-asset design.md D6) if it is a shiftable
+    ///   load that has already started — physically non-interruptible once
+    ///   running, so cancelling it now is refused rather than silently
+    ///   desyncing the request from the asset still actually drawing power.
+    pub async fn cancel(
+        id: Uuid,
+        state: &AppState,
+        sim: &mut SimState,
+    ) -> Result<UserRequest, DomainError> {
         // Check existence and terminal state before calling the state method.
         let requests = state.active_requests().await;
         let req = requests
             .iter()
             .find(|r| r.id == id)
-            .ok_or(DomainError::NotFound { id })?;
+            .ok_or(DomainError::NotFound { id })?
+            .clone();
 
         if matches!(
             req.status,
@@ -167,6 +177,22 @@ impl UserRequestService {
             return Err(DomainError::SessionConflict(format!(
                 "user request '{id}' is already in a terminal state"
             )));
+        }
+
+        if req.session_type == Some(SessionType::ShiftableLoad) {
+            let started = matches!(
+                sim.asset(&req.asset_id).map(|e| &e.state),
+                Some(crate::assets::AssetState::ShiftableLoad(s)) if s.started
+            );
+            if started {
+                return Err(DomainError::SessionConflict(format!(
+                    "shiftable load '{}' has already started and cannot be cancelled",
+                    req.asset_id
+                )));
+            }
+            // Not yet started: drop the pending asset too, not just the
+            // HEMS-level request record `cancel_request` clears below.
+            sim.remove_asset(&req.asset_id);
         }
 
         // Delegate to AppState which handles session clearing atomically.
@@ -245,7 +271,8 @@ mod tests {
     async fn test_cancel_unknown_id_returns_err() {
         let state = AppState::new();
         let unknown = Uuid::new_v4();
-        let result = UserRequestService::cancel(unknown, &state).await;
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let result = UserRequestService::cancel(unknown, &state, &mut sim).await;
         assert!(matches!(result, Err(DomainError::NotFound { .. })));
     }
 
@@ -281,7 +308,8 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let result = UserRequestService::cancel(id, &state).await;
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let result = UserRequestService::cancel(id, &state, &mut sim).await;
         assert!(matches!(result, Err(DomainError::SessionConflict(_))));
     }
 
@@ -330,10 +358,150 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let cancelled = UserRequestService::cancel(id, &state).await.unwrap();
+        let mut sim = SimState::from_params(&[], Utc::now());
+        let cancelled = UserRequestService::cancel(id, &state, &mut sim)
+            .await
+            .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
         // EV session must be cleared.
         assert!(state.ev_session().await.is_none());
+    }
+
+    /// shiftable-load-as-asset design.md D6: a shiftable load that has
+    /// already started cannot be cancelled — the physics is non-interruptible,
+    /// so silently removing the asset would desync accounting from the power
+    /// it's still actually drawing.
+    #[tokio::test]
+    async fn test_cancel_rejects_a_started_shiftable_load() {
+        let state = AppState::new();
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_asset(
+            crate::simulator::AssetEntry {
+                id: "wm".to_string(),
+                state: crate::assets::AssetState::ShiftableLoad(
+                    crate::assets::ShiftableLoadState {
+                        started: true,
+                        elapsed_min: 5.0,
+                        actual_power_kw: 2.0,
+                    },
+                ),
+                setpoint_kw: 2.0,
+                last_power_kw: 2.0,
+                energy: crate::simulator::energy::EnergyCounter::new(),
+                history: crate::assets::AssetHistoryBuffer::new(3600),
+            },
+            Box::new(crate::assets::ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 60,
+                earliest_start: Utc::now(),
+                latest_end: Utc::now() + chrono::Duration::hours(4),
+            }),
+        )
+        .unwrap();
+
+        let req = UserRequest {
+            mode: Default::default(),
+            id: Uuid::new_v4(),
+            asset_id: "wm".to_string(),
+            status: UserRequestStatus::Active,
+            target_soc: None,
+            target_energy_kwh: 2.0,
+            desired_power_kw: 2.0,
+            deadlines: vec![],
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: Some(Uuid::new_v4()),
+            session_type: Some(SessionType::ShiftableLoad),
+            comfort_rates: vec![],
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let id = req.id;
+        state.upsert_request(req).await;
+
+        let result = UserRequestService::cancel(id, &state, &mut sim).await;
+        assert!(
+            matches!(result, Err(DomainError::SessionConflict(_))),
+            "cancelling a started shiftable load must be rejected"
+        );
+        assert!(
+            sim.find_asset("wm").is_some(),
+            "the running asset must not be removed"
+        );
+    }
+
+    /// A not-yet-started shiftable load can be cancelled; its pending asset
+    /// is removed from `SimState` along with the HEMS-level request.
+    #[tokio::test]
+    async fn test_cancel_removes_a_pending_shiftable_loads_asset() {
+        let state = AppState::new();
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_asset(
+            crate::simulator::AssetEntry {
+                id: "wm".to_string(),
+                state: crate::assets::AssetState::ShiftableLoad(
+                    crate::assets::ShiftableLoadState {
+                        started: false,
+                        elapsed_min: 0.0,
+                        actual_power_kw: 0.0,
+                    },
+                ),
+                setpoint_kw: 0.0,
+                last_power_kw: 0.0,
+                energy: crate::simulator::energy::EnergyCounter::new(),
+                history: crate::assets::AssetHistoryBuffer::new(3600),
+            },
+            Box::new(crate::assets::ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 60,
+                earliest_start: Utc::now(),
+                latest_end: Utc::now() + chrono::Duration::hours(4),
+            }),
+        )
+        .unwrap();
+
+        let req = UserRequest {
+            mode: Default::default(),
+            id: Uuid::new_v4(),
+            asset_id: "wm".to_string(),
+            status: UserRequestStatus::Active,
+            target_soc: None,
+            target_energy_kwh: 2.0,
+            desired_power_kw: 2.0,
+            deadlines: vec![],
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: Some(Uuid::new_v4()),
+            session_type: Some(SessionType::ShiftableLoad),
+            comfort_rates: vec![],
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let id = req.id;
+        state.upsert_request(req).await;
+
+        let cancelled = UserRequestService::cancel(id, &state, &mut sim)
+            .await
+            .unwrap();
+        assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
+        assert!(
+            sim.find_asset("wm").is_none(),
+            "the pending asset must be removed"
+        );
     }
 
     fn ev_slice(soc: f64) -> AssetRequestSlice {

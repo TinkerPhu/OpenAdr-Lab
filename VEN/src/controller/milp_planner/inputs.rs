@@ -9,7 +9,7 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::design_vocabulary::AssetHeuristics;
-use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::solar::{pv_ceiling_kw, PvCeilingParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -34,7 +34,6 @@ pub(crate) fn build_milp_inputs(
     pv_cfg: Option<&PvParams>,
     base_load: Option<&BaseLoadParams>,
     now: DateTime<Utc>,
-    shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
     pv_forecast_override: Option<f64>,
     asset_heuristics: &HashMap<String, AssetHeuristics>,
@@ -263,6 +262,8 @@ pub(crate) fn build_milp_inputs(
     let mut ev_budget_eur: Option<f64> = None;
     let mut soc_ev_init: Option<f64> = None;
 
+    let mut milp_loads: Vec<ShiftableLoadMilpContext> = Vec::new();
+
     let mut heater_mode = MilpLoadMode::MustNotRun;
     let mut t_heat_dead: Option<usize> = None;
     let mut p_step = 0.0_f64;
@@ -311,6 +312,14 @@ pub(crate) fn build_milp_inputs(
                 lambda_sw = h.lambda_sw_eur;
                 heat_iy = h.initial_y;
             }
+            AssetMilpParams::ShiftableLoad(s) => {
+                milp_loads.push(ShiftableLoadMilpContext {
+                    asset_id: ctx.asset_id().to_string(),
+                    power_kw: s.power_kw,
+                    duration_slots: s.duration_slots,
+                    valid_start_slots: s.valid_start_slots,
+                });
+            }
             AssetMilpParams::Unknown => {}
         }
     }
@@ -337,42 +346,9 @@ pub(crate) fn build_milp_inputs(
         }
     }
 
-    // ── Shiftable loads → ShiftableLoadMilp ──────────────────────────────────
-    let milp_loads: Vec<ShiftableLoadMilp> = shiftable_loads.iter().filter_map(|sl| {
-        let dur_s = (sl.duration_min as i64) * 60;
-        let duration_slots = (1..=n).find(|&k| cum_s[k] >= dur_s).unwrap_or(n);
-        if duration_slots == 0 { return None; }
-
-        let window_start_s = (sl.earliest_start - now).num_seconds().max(0);
-        let window_end_s = (sl.latest_end - now).num_seconds().max(0);
-
-        let first_slot = time_to_slot(window_start_s);
-        // Last valid start: load must finish before latest_end
-        let last_valid_s = window_end_s - dur_s;
-        if last_valid_s < 0 {
-            tracing::warn!(
-                asset_id = %sl.asset_id,
-                window_end_s,
-                dur_s,
-                "shiftable load window expired before planner ran — skipped"
-            );
-            return None;
-        }
-        let last_slot = time_to_slot(last_valid_s).min(n.saturating_sub(duration_slots));
-
-        let valid_start_slots: Vec<usize> = (first_slot..=last_slot).filter(|&s| s + duration_slots <= n).collect();
-        if valid_start_slots.is_empty() {
-            tracing::warn!(asset_id = %sl.asset_id, "shiftable load has no valid start slots in horizon — skipped");
-            return None;
-        }
-
-        Some(ShiftableLoadMilp {
-            asset_id: sl.asset_id.clone(),
-            power_kw: sl.power_kw,
-            duration_slots,
-            valid_start_slots,
-        })
-    }).collect();
+    // Shiftable loads: `milp_loads` is now populated generically above, from
+    // each ShiftableLoadMilpContext's own `milp_params()` (shiftable-load-as-asset),
+    // not from a bolt-on `&[ShiftableLoad]` parameter.
 
     // WP4.1-c: even at the cheapest slot rate the target energy (all "extra"
     // headroom in MAX_COST mode) exceeds the budget → charging will stop

@@ -12,7 +12,7 @@ use crate::controller::SimSnapshot;
 use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity_curve::CapacityCurve;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::SensorSnapshot;
 use crate::simulator::SimState;
@@ -21,11 +21,10 @@ use crate::state::AppState;
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_sim_tick_result(
     sensor: SensorSnapshot,
-    mut sim_snap: SimSnapshot,
+    sim_snap: SimSnapshot,
     envelope: SiteFlexibilityEnvelope,
     forecast: Vec<SiteFlexibilityForecastSlot>,
     capacity_curves: (CapacityCurve, CapacityCurve),
-    plan_snap: Option<&Plan>,
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
     rates_snap: &[TariffSnapshot],
@@ -36,79 +35,22 @@ pub(crate) async fn publish_sim_tick_result(
     // Update sensor snapshot (backward compat)
     state.update_sensor(sensor).await;
 
-    // Update sim in app state — augmented with shiftable runtimes
+    // Update sim in app state.
 
-    // ── Shiftable load runtime: start / complete / augment ──────
-
-    // Start: detect shiftable loads that the current plan slot wants
-    // to run but that have no runtime yet.
-    if let Some(plan) = plan_snap {
-        if let Some(slot) = plan.slots.iter().find(|s| s.start <= now && now < s.end) {
-            let runtimes = state.shiftable_runtimes().await;
-            let loads = state.shiftable_loads().await;
-            for alloc in &slot.allocations {
-                if sim_snap.assets.contains_key(alloc.asset_id.as_str()) {
-                    continue;
-                }
-                let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
-                if !already_running {
-                    if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
-                        let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
-                        state
-                            .start_shiftable(
-                                crate::entities::device_session::ShiftableLoadRuntime {
-                                    load_id: load.id,
-                                    asset_id: load.asset_id.clone(),
-                                    power_kw: load.power_kw,
-                                    started_at: now,
-                                    ends_at,
-                                },
-                            )
-                            .await;
-                        info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
-                    }
-                }
-            }
-        }
-    }
-
-    // Complete: remove expired runtimes and trigger replan.
+    // Shiftable-load completion: starting is now handled entirely by the
+    // ordinary per-tick setpoint path (`ShiftableLoadAsset::step()` latches
+    // non-interruptible on the plan's first nonzero setpoint), and a
+    // finished load is already removed from `SimState` by its generic
+    // `is_removable()` pass (design.md D3a) before `sim_snap` was built. This
+    // just detects that a still-open request's asset_id has disappeared from
+    // the live snapshot and closes out the request/ledger side of it.
     {
-        let runtimes = state.shiftable_runtimes().await;
-        for rt in &runtimes {
-            if now >= rt.ends_at {
-                info!(asset_id = %rt.asset_id, "shiftable load completed");
-                state.complete_shiftable(rt.load_id).await;
+        let loads = state.shiftable_loads().await;
+        for load in &loads {
+            if !sim_snap.assets.contains_key(load.asset_id.as_str()) {
+                info!(asset_id = %load.asset_id, "shiftable load completed");
+                state.complete_shiftable(load.id).await;
                 let _ = trigger_tx.send(PlanTrigger::UserRequest);
-            }
-        }
-    }
-
-    // Augment SimSnapshot with running shiftable runtimes so they
-    // appear in GET /sim and ledger accounting.
-    {
-        let runtimes = state.shiftable_runtimes().await;
-        for rt in &runtimes {
-            if rt.is_running(now) {
-                sim_snap.assets.insert(
-                    rt.asset_id.clone(),
-                    crate::controller::AssetSnapshot {
-                        power_kw: rt.power_kw,
-                        asset_type: "base_load".into(),
-                        cap_max_import_kw: rt.power_kw,
-                        cap_max_export_kw: 0.0,
-                        available_discharge_kwh: None,
-                        available_charge_kwh: None,
-                        default_setpoint_kw: rt.power_kw,
-                        setpoint_kw: rt.power_kw,
-                        values: {
-                            let mut m = std::collections::HashMap::new();
-                            m.insert("running".into(), 1.0);
-                            m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
-                            m
-                        },
-                    },
-                );
             }
         }
     }

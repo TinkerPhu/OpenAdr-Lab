@@ -28,10 +28,8 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::envelope_forecast::{already_run, valid_start_exists_at};
 use crate::controller::simulator_port::{AssetForecastFrame, AssetSnapshot, SimSnapshot};
 use crate::entities::capacity_curve::{CapacityCurve, CapacityCurveStep, CommitmentDirection};
-use crate::entities::device_session::{ShiftableLoad, ShiftableLoadRuntime};
 use crate::ids::ASSET_PV;
 
 /// One (elapsed_s, delta_kw) breakpoint. Multiple events at the same
@@ -52,8 +50,6 @@ pub fn compute_capacity_curve(
     start: DateTime<Utc>,
     snapshot: &SimSnapshot,
     pv_frames: &[AssetForecastFrame],
-    shiftable_loads: &[ShiftableLoad],
-    shiftable_runtimes: &[ShiftableLoadRuntime],
 ) -> CapacityCurve {
     let mut events: Vec<Event> = Vec::new();
 
@@ -68,7 +64,7 @@ pub fn compute_capacity_curve(
     }
     events.extend(pv_events(direction, start, pv_frames));
     if direction == CommitmentDirection::Import {
-        events.extend(shiftable_events(start, shiftable_loads, shiftable_runtimes));
+        events.extend(shiftable_events(start, snapshot));
     }
 
     let cap_kw = match direction {
@@ -224,24 +220,46 @@ fn pv_events(
 /// `duration_min`, placed at the earliest elapsed time its window allows,
 /// then is done — never on the export-commitment curve, since starting a
 /// load can only ever increase draw.
-fn shiftable_events(
-    start: DateTime<Utc>,
-    loads: &[ShiftableLoad],
-    runtimes: &[ShiftableLoadRuntime],
-) -> Vec<Event> {
+///
+/// Reads shiftable-load asset entries straight off the live `SimSnapshot`
+/// (`shiftable-load-as-asset` proposal.md scope) instead of a bolt-on
+/// `&[ShiftableLoad]`/`&[ShiftableLoadRuntime]` pair — window bounds are
+/// encoded as unix-seconds floats in `ShiftableLoadAsset::state_values()`
+/// since `AssetSnapshot.values` is a flat `HashMap<String, f64>`.
+fn shiftable_events(start: DateTime<Utc>, snapshot: &SimSnapshot) -> Vec<Event> {
     let mut events = Vec::new();
-    for load in loads {
-        if already_run(load, runtimes) {
+    for asset in snapshot.assets.values() {
+        if asset.asset_type != "shiftable_load" {
             continue;
         }
-        let candidate_ts = start.max(load.earliest_start);
-        if !valid_start_exists_at(load, candidate_ts) {
+        let v = &asset.values;
+        let started = v.get("started").copied().unwrap_or(0.0) > 0.5;
+        if started {
+            continue;
+        }
+        let (Some(&power_kw), Some(&duration_min), Some(&earliest_unix), Some(&latest_unix)) = (
+            v.get("power_kw"),
+            v.get("duration_min"),
+            v.get("earliest_start_unix"),
+            v.get("latest_end_unix"),
+        ) else {
+            continue;
+        };
+        let Some(earliest_start) = DateTime::<Utc>::from_timestamp(earliest_unix as i64, 0) else {
+            continue;
+        };
+        let Some(latest_end) = DateTime::<Utc>::from_timestamp(latest_unix as i64, 0) else {
+            continue;
+        };
+        let duration = chrono::Duration::minutes(duration_min as i64);
+        let candidate_ts = start.max(earliest_start);
+        if candidate_ts + duration > latest_end {
             continue;
         }
         let elapsed_start = (candidate_ts - start).num_seconds().max(0);
-        let elapsed_end = elapsed_start + i64::from(load.duration_min) * 60;
-        events.push((elapsed_start, load.power_kw));
-        events.push((elapsed_end, -load.power_kw));
+        let elapsed_end = elapsed_start + duration.num_seconds();
+        events.push((elapsed_start, power_kw));
+        events.push((elapsed_end, -power_kw));
     }
     events
 }
@@ -518,50 +536,55 @@ mod tests {
 
     // ── shiftable loads ──────────────────────────────────────────────────
 
-    fn make_load(
+    fn shiftable_snapshot(
         power_kw: f64,
         duration_min: u32,
         earliest_h: i64,
         latest_h: i64,
-    ) -> ShiftableLoad {
-        ShiftableLoad {
-            id: uuid::Uuid::new_v4(),
-            asset_id: "wm".to_string(),
-            power_kw,
-            duration_min,
-            earliest_start: t0() + chrono::Duration::hours(earliest_h),
-            latest_end: t0() + chrono::Duration::hours(latest_h),
-            mode: Default::default(),
-            created_at: t0(),
-            updated_at: t0(),
-        }
+        started: bool,
+    ) -> SimSnapshot {
+        let mut snap = empty_snapshot();
+        snap.assets.insert(
+            "wm".to_string(),
+            asset(
+                "shiftable_load",
+                0.0,
+                &[
+                    ("power_kw", power_kw),
+                    ("duration_min", duration_min as f64),
+                    (
+                        "earliest_start_unix",
+                        (t0() + chrono::Duration::hours(earliest_h)).timestamp() as f64,
+                    ),
+                    (
+                        "latest_end_unix",
+                        (t0() + chrono::Duration::hours(latest_h)).timestamp() as f64,
+                    ),
+                    ("started", if started { 1.0 } else { 0.0 }),
+                ],
+            ),
+        );
+        snap
     }
 
     #[test]
     fn shiftable_load_placed_once_bounded_duration() {
-        let load = make_load(2.0, 60, 0, 4);
-        let events = shiftable_events(t0(), &[load], &[]);
+        let snap = shiftable_snapshot(2.0, 60, 0, 4, false);
+        let events = shiftable_events(t0(), &snap);
         assert_eq!(events, vec![(0, 2.0), (3600, -2.0)]);
     }
 
     #[test]
     fn shiftable_load_already_run_contributes_nothing() {
-        let load = make_load(2.0, 60, 0, 4);
-        let runtime = ShiftableLoadRuntime {
-            load_id: load.id,
-            asset_id: "wm".to_string(),
-            power_kw: 2.0,
-            started_at: t0() - chrono::Duration::minutes(10),
-            ends_at: t0() + chrono::Duration::minutes(50),
-        };
-        assert!(shiftable_events(t0(), &[load], &[runtime]).is_empty());
+        let snap = shiftable_snapshot(2.0, 60, 0, 4, true);
+        assert!(shiftable_events(t0(), &snap).is_empty());
     }
 
     #[test]
     fn shiftable_load_no_valid_start_contributes_nothing() {
         // Window too short for a 60-min run.
-        let load = make_load(2.0, 60, 0, 0); // latest_end == earliest_start
-        assert!(shiftable_events(t0(), &[load], &[]).is_empty());
+        let snap = shiftable_snapshot(2.0, 60, 0, 0, false); // latest_end == earliest_start
+        assert!(shiftable_events(t0(), &snap).is_empty());
     }
 
     // ── merge ────────────────────────────────────────────────────────────
@@ -626,8 +649,7 @@ mod tests {
             .assets
             .insert("base_load".to_string(), asset("base_load", 0.5, &[]));
 
-        let curve =
-            compute_capacity_curve(CommitmentDirection::Export, t0(), &snapshot, &[], &[], &[]);
+        let curve = compute_capacity_curve(CommitmentDirection::Export, t0(), &snapshot, &[]);
         // 5.0 kW discharge - 0.5 kW base load = 4.5 kW at t=0, drops to
         // -0.5 clipped to 0.0 once the battery exhausts at 3600s.
         assert_eq!(
@@ -662,8 +684,7 @@ mod tests {
                 ],
             ),
         );
-        let curve =
-            compute_capacity_curve(CommitmentDirection::Import, t0(), &snapshot, &[], &[], &[]);
+        let curve = compute_capacity_curve(CommitmentDirection::Import, t0(), &snapshot, &[]);
         assert_eq!(curve.steps[0].power_kw, 3.0);
     }
 }

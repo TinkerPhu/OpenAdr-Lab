@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::controller::capacity_forecast::compute_capacity_curve;
 use crate::controller::envelope_forecast::compute_headroom_forecast;
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
-use crate::entities::device_session::{EvSession, ShiftableLoad, ShiftableLoadRuntime};
+use crate::entities::device_session::{EvSession, ShiftableLoad};
 use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
 use crate::simulator::forecast::build_forecast_frames;
 use crate::simulator::SimState;
@@ -28,7 +28,6 @@ pub(crate) fn compute_tick_forecasts(
     plan_snap: Option<&Plan>,
     ev_session: Option<&EvSession>,
     shiftable_loads: &[ShiftableLoad],
-    shiftable_runtimes: &[ShiftableLoadRuntime],
     weather_pv_kw_slots: Option<&[f64]>,
     pv_forecast_override: Option<f64>,
     now: DateTime<Utc>,
@@ -48,28 +47,18 @@ pub(crate) fn compute_tick_forecasts(
             )
         })
         .unwrap_or_default();
+    // Built once, ahead of both consumers below: `compute_headroom_forecast`
+    // needs it (shiftable-load `started` check, replacing the deleted
+    // `&[ShiftableLoadRuntime]`) and `compute_capacity_curve` already needed
+    // it for battery/EV/heater/base-load's live state.
+    let snapshot = sim.to_sim_snapshot();
     let forecast = plan_snap
-        .map(|plan| compute_headroom_forecast(&frames, plan, shiftable_loads, shiftable_runtimes))
+        .map(|plan| compute_headroom_forecast(&frames, plan, shiftable_loads, &snapshot))
         .unwrap_or_default();
 
-    let snapshot = sim.to_sim_snapshot();
     let curves = (
-        compute_capacity_curve(
-            CommitmentDirection::Import,
-            now,
-            &snapshot,
-            &frames,
-            shiftable_loads,
-            shiftable_runtimes,
-        ),
-        compute_capacity_curve(
-            CommitmentDirection::Export,
-            now,
-            &snapshot,
-            &frames,
-            shiftable_loads,
-            shiftable_runtimes,
-        ),
+        compute_capacity_curve(CommitmentDirection::Import, now, &snapshot, &frames),
+        compute_capacity_curve(CommitmentDirection::Export, now, &snapshot, &frames),
     );
     (forecast, curves)
 }

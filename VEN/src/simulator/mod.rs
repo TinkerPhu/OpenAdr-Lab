@@ -192,6 +192,30 @@ impl SimState {
             .zip(self.asset_configs.iter().map(|c| c.as_ref()))
     }
 
+    /// Add a new asset at runtime. Unlike the boot-fixed roster built by
+    /// `from_params` (Battery/EvCharger/Heater/PvInverter/BaseLoad never grow
+    /// or shrink), shiftable loads are added/removed while the sim is running
+    /// (`shiftable-load-as-asset` design.md D3). Rejects a duplicate
+    /// `asset_id`, mirroring the pre-existing HEMS-level duplicate check.
+    pub fn add_asset(&mut self, entry: AssetEntry, config: Box<dyn Asset>) -> Result<(), String> {
+        if self.assets.iter().any(|a| a.id == entry.id) {
+            return Err(format!("duplicate asset_id: {}", entry.id));
+        }
+        self.assets.push(entry);
+        self.asset_configs.push(config);
+        Ok(())
+    }
+
+    /// Remove an asset by id. No-op (returns `false`) if not present.
+    pub fn remove_asset(&mut self, id: &str) -> bool {
+        let Some(idx) = self.assets.iter().position(|a| a.id == id) else {
+            return false;
+        };
+        self.assets.remove(idx);
+        self.asset_configs.remove(idx);
+        true
+    }
+
     /// Initialize from domain asset parameters.
     pub fn from_params(params: &[AssetParams], now: DateTime<Utc>) -> Self {
         Self::from_params_seeded(params, now, StdRng::from_entropy())
@@ -360,6 +384,21 @@ impl SimState {
         }
 
         self.derive_grid_meter(total_kw, now, dt_s);
+
+        // Drop any asset reporting itself finished this tick (design.md D3a
+        // of shiftable-load-as-asset — currently only `ShiftableLoadAsset`).
+        // A separate pass, not interleaved with the loop above: removal
+        // shifts indices of the parallel `assets`/`asset_configs` vectors.
+        let finished_ids: Vec<String> = self
+            .assets
+            .iter()
+            .zip(self.asset_configs.iter())
+            .filter(|(entry, cfg)| cfg.is_removable(&entry.state))
+            .map(|(entry, _)| entry.id.clone())
+            .collect();
+        for id in finished_ids {
+            self.remove_asset(&id);
+        }
     }
 }
 

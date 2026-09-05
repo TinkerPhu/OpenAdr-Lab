@@ -93,6 +93,7 @@ pub fn build_asset_contexts(
                 _ => 0.0,
             };
             Some(cfg.as_milp_participant()?.build_milp_context(
+                &entry.id,
                 &entry.state,
                 n_slots,
                 cum_s,
