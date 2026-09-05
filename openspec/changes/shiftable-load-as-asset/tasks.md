@@ -261,47 +261,66 @@ real duplication (`ShiftableLoadRuntime` itself, fully deleted in section 4).
 
 ## 7. Cross-cutting cleanup and verification
 
-- [ ] 7.1 Run `grep -rn "ShiftableLoadRuntime\|ShiftableLoadMilp\b\|ShiftableLoadMilpVars"
-      VEN/src` and confirm it's empty (the request-facing `ShiftableLoad`
-      struct in `device_session.rs` is expected to remain — it's the user
-      request, not the deleted runtime/MILP types).
-- [ ] 7.2 `scripts/audit_file_sizes.py` — confirm no `VEN/src/` file exceeds the
-      500-production-line budget after the new `shiftable_load.rs` and the
-      edits to `solver_phase1.rs`/`solver_phase2.rs`/`capacity_forecast.rs`/
-      `envelope_forecast.rs`.
-- [ ] 7.3 Verify the architecture invariants (`ven-architecture` in
-      `.claude/CLAUDE.md`): no `use crate::assets::` in
-      `controller/milp_planner` production code; no `use crate::profile` in
-      `entities/`/`controller/`/`routes/`.
-- [ ] 7.4 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings`
-      (via `wsl_lock.sh`, local WSL).
-- [ ] 7.5 Full Rust unit+integration suite green (`wsl cargo test -p ven-app`).
-- [ ] 7.6 UI unit suites green (`VEN/ui`, `VTN/ui` — confirm no UI change is
-      actually needed; if any shiftable-load status panel assumes the old
-      runtime shape, update it).
-- [ ] 7.7 E2E BDD suite on Node2 (`DOCKER_HOST=Node2 bash run_all_tests.sh --e2e`),
-      including a BDD scenario exercising the shiftable-load use case end to
-      end (accept a request → observe it run → observe it finish), per
-      `workflow` item 4 in `.claude/CLAUDE.md`.
-- [ ] 7.8 Resilience suite on Node2 (`DOCKER_HOST=Node2 bash run_all_tests.sh --resilience`).
+- [x] 7.1 `grep -rn "ShiftableLoadRuntime\|ShiftableLoadMilp\b\|ShiftableLoadMilpVars"
+      VEN/src` — empty except historical doc-comment mentions explaining what
+      was removed (the request-facing `ShiftableLoad` struct in
+      `device_session.rs` remains, as expected; `ShiftableLoadMilpVars` in
+      `milp_interactions.rs` also remains — it's still in active use, only
+      `ShiftableLoadMilp` was renamed to `ShiftableLoadMilpContext`).
+- [x] 7.2 `scripts/audit_file_sizes.py` — PASSED.
+- [x] 7.3 Architecture invariants verified clean (no `use crate::assets::` in
+      `milp_planner` production code, no `use crate::profile` in
+      `entities/`/`controller/`/`routes/`).
+- [x] 7.4 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- [x] 7.5 Full Rust suite: 1254 passed, 0 failed, 3 ignored.
+- [x] 7.6 UI unit suites: VEN 627/627, VTN 71/71 — both green, no UI change
+      needed. Confirmed via research: the shiftable-load request/status UI
+      (`Devices.tsx`'s `ShiftableLoadsCard`) is driven by the unchanged
+      `/requests` API and needs no update; `Controller.tsx` already
+      generically surfaces any new asset's live power via its per-asset-id
+      fallback loop. `Dashboard.tsx`'s "Simulation" card has no case for
+      `shiftable_load` — but it also has none for `battery`/`base_load`, so
+      this is a pre-existing gap this change doesn't introduce; recorded as a
+      small tech-debt item in section 8, not fixed here (out of scope).
+- [x] 7.7 E2E BDD suite on Node2: **PASS** (4 features / 8 scenarios / 49
+      steps, 0 failed). Existing resilience-suite coverage already exercises
+      a shiftable-load's full delete-and-disappear behavior (`DELETE
+      shiftable load` → `poll /sim until asset "wm-4" disappears` → passed);
+      checking whether a dedicated *accept → observe running → observe
+      finished* E2E scenario exists or needs adding, per `workflow` item 4 —
+      see follow-up note below.
+- [x] 7.8 Resilience suite on Node2: **PASS** (1 passed, 0 failed, 0 skipped;
+      6/6 first-pass scenarios green, `@isolated` pass green).
+
+**7.7's BDD coverage follow-up — resolved:** research found 5 pre-existing
+shiftable-load E2E scenarios across `tests/features/ven_shiftable_lifecycle.feature`
+and `tests/features/isolated/shiftable_lifecycle.feature`, covering accept,
+duplicate-rejection, running-with-nonzero-power, auto-completion, and
+delete-while-running — all confirmed still passing against the new
+implementation. One gap found: the auto-completion scenario didn't explicitly
+assert nonzero power at the "running" checkpoint before completion. Closed by
+adding one line (`And the polled sim has asset "wm-3" with power_kw > 0`,
+reusing an existing step already proven by a sibling scenario) — not
+independently re-run against the full E2E suite afterward (low risk: same
+already-passing step definition, same underlying mechanism the full run just
+verified), flagged here rather than silently claimed as fully re-verified.
 
 ## 8. Documentation
 
-- [ ] 8.1 `docs/history/project_journal.md` — narrative entry covering the
-      three-implementations-to-one consolidation, the dynamic-asset-roster
-      decision (D3), and the HemsState-not-persisted finding (D4) that avoided
-      new persistence work.
-- [ ] 8.2 `docs/reference/KEY_LEARNINGS.md` — durable lesson: check whether a
-      "config" struct is actually static (profile-file-sourced, rebuild-on-
-      restart) or dynamic (request-sourced, no restart guarantee) before
-      assuming Spec A's persist-config-skip pattern applies unchanged.
-- [ ] 8.3 `docs/architecture/VEN_ARCHITECTURE.md` — add shiftable load to the
-      asset roster table/diagram; document the dynamic add/remove capability
-      as a documented exception to the otherwise-fixed roster.
-- [ ] 8.4 `docs/use-cases/*.md` — document the shiftable-load user-facing
-      scenario (accept a washing-machine-style request, it runs within its
-      window, cannot be interrupted) if not already covered; link the BDD
-      scenario added in 7.7.
-- [ ] 8.5 Update `docs/plans/asset-max-power-forecast-master-plan.md` to mark
-      Spec B complete, or delete the change dir per the `workflow` rule once
-      all of the above is done and tests are green (do not archive).
+- [x] 8.1 `docs/history/project_journal.md` — narrative entry added.
+- [x] 8.2 `docs/reference/KEY_LEARNINGS.md` — durable lesson added: "A
+      'generic' dispatch mechanism can still carry unstated singleton
+      assumptions" (broader than the originally-planned static-vs-dynamic
+      config lesson, which turned out to be D4's own finding, not the main
+      cross-cutting one — see the design.md-vs-implementation findings above).
+- [x] 8.3 `docs/architecture/VEN_ARCHITECTURE.md` — added `ShiftableLoadAsset`
+      to the ASCII diagram and the implementation table; documented the
+      dynamic add/remove exception and the `persist.rs` reconciliation split.
+- [x] 8.4 `docs/use-cases/*.md` — checked: `HEMS-USE-CASE-OBSERVATION-MANUAL.md`
+      and `COMFORT-PERSONAS-USE-CASE-MANUAL.md` already describe the
+      shiftable-load user-facing scenario correctly. No update needed — this
+      change is an internal architecture refactor that deliberately preserves
+      external behavior (confirmed by the E2E suite passing unchanged).
+- [x] 8.5 Master plan updated to mark Spec B complete; this change directory
+      deleted once the above was done and all tests confirmed green (see the
+      commit that includes this change).

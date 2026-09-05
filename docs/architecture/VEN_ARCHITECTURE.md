@@ -55,6 +55,7 @@ or failing piecemeal later.
 │  │  │ PV · Battery   │    per asset type     │  (future: real HW,  │       │ │
 │  │  │ EV · Heater    │    (implemented)      │   not yet built)    │       │ │
 │  │  │ BaseLoad       │                       └─────────────────────┘       │ │
+│  │  │ ShiftableLoad  │  ← dynamic roster                                   │ │
 │  │  └───────┬────────┘                                                     │ │
 │  │          │ UI only                                                      │ │
 │  │  ┌───────▼────────┐                                                     │ │
@@ -383,28 +384,40 @@ trait Asset: Send + Sync {
 
 `SimState.asset_configs: Vec<Box<dyn Asset>>` (`VEN/src/simulator/mod.rs`) is the
 concrete implementation — one physics struct per asset type (`Battery`, `EvCharger`,
-`Heater`, `PvInverter`, `BaseLoad`, `VEN/src/assets/*.rs`), each implementing `Asset`
-as a trait object rather than a closed enum variant (R-23 precedent, generalized by
-the `asset-dispatch-trait-objects` refactor). `AssetHandle` wraps a `(&dyn Asset,
-&AssetEntry)` pair to implement the identity/history methods. Per-asset history is a
-ring buffer (`AssetHistoryBuffer`, 3600 points ≈ 1 h at 1 s tick) with LOCF lookups and
-time-weighted averaging.
+`Heater`, `PvInverter`, `BaseLoad`, `ShiftableLoadAsset`, `VEN/src/assets/*.rs`), each
+implementing `Asset` as a trait object rather than a closed enum variant (R-23
+precedent, generalized by the `asset-dispatch-trait-objects` refactor). `AssetHandle`
+wraps a `(&dyn Asset, &AssetEntry)` pair to implement the identity/history methods.
+Per-asset history is a ring buffer (`AssetHistoryBuffer`, 3600 points ≈ 1 h at 1 s
+tick) with LOCF lookups and time-weighted averaging.
 
 Beyond the 9 universal `Asset` methods shown above, each type additionally
 implements whichever of three optional capability traits actually applies to it —
-`MilpParticipant` (Battery/EV/Heater), `RequestResolvable` (Battery/EV),
-`Thermostat` (Heater only), plus a fourth, `TickOverridable` (Pv/Heater/BaseLoad/EV),
-for tick-time environment/manual overrides (irradiance, ambient temp, plugged-state).
-Each is reached via an `as_milp_participant()`/`as_request_resolvable()`/
-`as_thermostat()`/`as_tick_overridable()` accessor on `Asset` that defaults to
-`None` — a type simply doesn't implement a trait it has no real behavior for,
-rather than stubbing one out. Recovering a concrete type from `&dyn Asset` (needed
-by a handful of call sites — e.g. a PV-only sim-inject handler) goes through
-`as_any()`/`as_any_mut()` downcasting, kept deliberately narrow.
+`MilpParticipant` (Battery/EV/Heater/ShiftableLoadAsset), `RequestResolvable`
+(Battery/EV), `Thermostat` (Heater only), plus a fourth, `TickOverridable`
+(Pv/Heater/BaseLoad/EV), for tick-time environment/manual overrides (irradiance,
+ambient temp, plugged-state). Each is reached via an `as_milp_participant()`/
+`as_request_resolvable()`/`as_thermostat()`/`as_tick_overridable()` accessor on
+`Asset` that defaults to `None` — a type simply doesn't implement a trait it has no
+real behavior for, rather than stubbing one out. Recovering a concrete type from
+`&dyn Asset` (needed by a handful of call sites — e.g. a PV-only sim-inject handler)
+goes through `as_any()`/`as_any_mut()` downcasting, kept deliberately narrow.
+
+`Battery`/`EvCharger`/`Heater`/`PvInverter`/`BaseLoad` form a **fixed roster**, built
+once at startup from the profile and never resized. `ShiftableLoadAsset`
+(`shiftable-load-as-asset`) is the one exception: a site can accept an arbitrary,
+changing number of shiftable-load requests at runtime, so `SimState::add_asset`/
+`remove_asset` support adding an instance when a request is accepted and removing one
+when it's cancelled (while still pending) or finishes (detected generically via
+`Asset::is_removable`, a tenth universal method defaulting to `false` — only
+`ShiftableLoadAsset` overrides it). `persist::load_with_params`'s restart-reconciliation
+check is split accordingly: an exact id-match requirement for the fixed roster, a
+per-id reconcile-without-discarding for the dynamic one.
 
 | Implementation | Backend | Status |
 |---|---|---|
 | Battery/EvCharger/Heater/PvInverter/BaseLoad (`impl Asset`) | Physics model (sin, SoC, thermal), `VEN/src/assets/` | ✅ implemented — all current VENs |
+| ShiftableLoadAsset (`impl Asset`, dynamic roster) | Fixed power, non-interruptible once started, hard `[earliest_start, latest_end]` window, `VEN/src/assets/shiftable_load.rs` | ✅ implemented |
 | `MeasuredAsset` | Real sensor / hardware API | Future — not yet built |
 
 From the controller's perspective a future `MeasuredAsset` would be identical to any
