@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::common::{Aggregation, Interpolation, TimeSeries};
 use crate::controller::reporter::{format_iso8601_duration, AssetReportSample};
 use crate::controller::vtn_port::{OadrIntervalPeriod, OadrReportInterval, OadrReportPayload};
-use crate::entities::capacity_curve::CapacityCurve;
+use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
 
@@ -67,6 +67,16 @@ pub(crate) fn build_forecast_intervals(
 /// unsigned magnitude `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER`
 /// payload types expect (direction is already conveyed by `payload_type`'s
 /// own name, not by the value's sign).
+///
+/// Not a bare `.abs()`: since `capacity_envelope.rs`'s `merge_events` allows
+/// a sustained-Export curve's signed total to swing positive (net importing
+/// — e.g. a non-interruptible load forced to keep drawing past its deadline,
+/// exceeding what's exportable), a bare `.abs()` would report that positive
+/// value as if it were genuine discharge capability. Floored per direction
+/// instead: for `Export`, only a negative (genuinely exporting) value
+/// contributes a nonzero `STORAGE_MAX_DISCHARGE_POWER`; a positive
+/// (net-importing) value correctly reports `0.0` discharge capability, not a
+/// magnitude of something the site isn't actually doing.
 pub(crate) fn build_capacity_forecast_intervals(
     curve: &CapacityCurve,
     payload_type: &str,
@@ -83,6 +93,10 @@ pub(crate) fn build_capacity_forecast_intervals(
                 }
                 None => "P9999Y".to_string(),
             };
+            let magnitude_kw = match curve.direction {
+                CommitmentDirection::Import => step.power_kw.max(0.0),
+                CommitmentDirection::Export => (-step.power_kw).max(0.0),
+            };
             OadrReportInterval {
                 id: i,
                 intervalPeriod: Some(OadrIntervalPeriod {
@@ -91,7 +105,7 @@ pub(crate) fn build_capacity_forecast_intervals(
                 }),
                 payloads: vec![OadrReportPayload {
                     r#type: payload_type.to_string(),
-                    values: vec![serde_json::Value::from(step.power_kw.abs() * 1000.0)],
+                    values: vec![serde_json::Value::from(magnitude_kw * 1000.0)],
                 }],
             }
         })

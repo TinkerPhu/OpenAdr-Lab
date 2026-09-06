@@ -75,6 +75,25 @@
       `SiteFlexibilityForecastSlot.up_kw`/`down_kw` are a genuinely
       different (two-separate-non-negative-fields) shape, unaffected by this
       change. See the journal entry for the full derivation.
+- [x] **Independent review pass (requested before continuing to Section 6),
+      found a real, reachable gap**: the "only base load can push a
+      sustained-Export total positive" claim in `merge_events`'/
+      `base_load_capacity_events`' doc comments was false —
+      `ShiftableLoadAsset::max_effort_schedule`'s Export branch reports its
+      own positive draw once running (it has no way to actually export,
+      unlike every other asset kind's `capability()`-backed
+      `max_effort_setpoint`), and `merge_events`' Export clamp had no upper
+      bound at all, meaning an unrealistically large forced draw could
+      report a value exceeding the site's real grid import hardware limit.
+      Fixed: `merge_events` now takes both `import_limit_kw` and
+      `export_limit_kw`, clamping Export to `[-export_limit_kw,
+      import_limit_kw]` (symmetric with Import's own ceiling). Also fixed a
+      related issue the same review surfaced in `report_intervals.rs`: a
+      bare `.abs()` would have reported a legitimately-positive
+      (net-importing) Export-curve value as if it were genuine discharge
+      capability — now floored per-direction instead. Two new tests pin
+      both fixes (`merge_export_ceiling_at_the_import_limit_when_non_exportable_contributions_overwhelm`,
+      `shiftable_load_forced_to_run_under_export_reports_its_own_positive_draw`).
 
 ## 5. `controller/capacity_envelope.rs` — Site Headroom half
 
