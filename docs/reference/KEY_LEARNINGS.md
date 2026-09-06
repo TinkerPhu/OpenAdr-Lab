@@ -1622,3 +1622,95 @@ to what the test claims to check will still pass, and can mask the real
 defect indefinitely (worked example: this session's R-69 test kept passing
 whether the intended computation ran or not, since "0.0" and "the untouched
 initial state" are unequal from *any* nonzero target for unrelated reasons).
+
+## Two producers that quietly disagree on sign convention: sum true signed values, don't perpetuate an ad hoc floor (unified-capacity-envelope-engine, 2026-09-06)
+
+Unifying `capacity_forecast.rs`'s sustained-commitment curve onto Spec C's
+`Asset::max_effort_setpoint` surfaced a mismatch: the trait method returns
+signed power (positive = import, negative = export, this codebase's
+dominant convention everywhere else), but the curve's own merge/clamp
+pipeline (`CapacityCurveStep`, inherited unchanged from the original
+hand-written module) expected an unsigned achievable-power *magnitude*. The
+first fix was a per-call-site `.abs()` — three independent places each
+deciding ad hoc how to reconcile the two conventions, which had already
+caused one real bug (a negative running total silently zeroed by a
+`[0, cap_kw]` clamp) before anyone asked whether that architecture was
+right.
+
+Asked to assess it critically, the better fix turned out to be: make the
+internal type genuinely signed (matching the dominant convention), and
+convert to the external unsigned convention only at the one place that's a
+real external boundary (here, the OpenADR report builder — confirmed the
+other apparent consumer, a UI chart, needed no conversion at all by reading
+its formatters directly rather than assuming). Once every contributor
+reported its own true signed value instead of a locally-massaged magnitude,
+a second effect fell out for free: an old floor at exactly `0.0` (a
+magnitude can't go negative, by definition) turned out to be discarding real
+information — a sustained-Export commitment whose net signed total goes
+positive (a non-interruptible load's forced draw exceeding what's
+exportable) is a genuine "still net-importing despite the commitment"
+answer, not "zero export capacity." The floor was an artifact of the
+representation, not a physical constraint, and only became visible once the
+representation stopped hiding it.
+
+**How to apply:** when two producers/consumers of "the same value" disagree
+on sign or unit convention, look for whether the mismatch is being
+reconciled ad hoc at every call site (a smell even if each site is
+individually correct today) versus at one disciplined boundary. Prefer
+pushing the boundary to wherever the *external* consumer's needs actually
+originate (a wire format, a UI's own rendering choice — verified by reading
+its code, not assumed) rather than wherever the mismatch happens to have
+first been noticed. And when fixing a convention mismatch changes a clamp or
+floor's meaning, ask what physical case that boundary was actually
+protecting against — it may have been silently discarding a real answer
+rather than preventing an invalid one.
+
+## A live E2E test asserting on an exact floating-point state boundary is a race, not a flaky test (unified-capacity-envelope-engine, 2026-09-06)
+
+A BDD scenario reset a battery's SoC to `1.0` via one HTTP call, then read a
+derived forecast via a second, separate HTTP call, expecting the forecast to
+reflect "battery is full." `Battery::capability_inner`'s ceiling check is an
+exact `soc >= 1.0` comparison, and the live dispatcher keeps ticking
+continuously (real cost-optimized dispatch can legitimately discharge the
+battery every tick) — confirmed via debug output that a single tick's drift
+(`soc: 0.9999607830680841`, a change of `0.00004`) was enough to flip the
+reported capability from `0.0` back to the full rated charge rate. Two
+sequential HTTP calls against a live, continuously-mutating system have no
+guaranteed atomicity between them; asserting on an exact boundary that a
+single tick can cross is a race whether or not it happens to pass on a given
+run, not an occasionally-flaky-but-basically-sound test.
+
+**How to apply:** before writing an E2E assertion that depends on a system
+being in an *exact* boundary state (a value at precisely its ceiling/floor,
+a counter at precisely zero) captured via multiple sequential calls against
+a live, ticking system, ask whether the invariant can instead be expressed
+as a relationship that holds regardless of the exact live value — e.g.,
+"this aggregate never exceeds the sum of what every contributor's own
+current state independently reports," read close together, rather than "this
+specific contributor is at exactly its extreme." The latter is inherently a
+race against whatever process keeps the system live; the former is robust to
+it by construction.
+
+## An E2E bound built from a hardcoded asset-name list silently misses dynamically-named assets (unified-capacity-envelope-engine, 2026-09-06)
+
+The same two BDD scenarios above computed their bound by summing
+`/capability/{battery,ev,heater,base_load}` — a fixed list matching this
+codebase's boot-fixed asset roster. A full-suite run failed by a
+reproducible, non-random amount (the same gap on repeated runs, ruling out
+timing noise): a `ShiftableLoadAsset` (`shiftable-load-as-asset`, Spec B's
+one *dynamic*-roster asset kind, added/removed at runtime with an
+id like `wm-2`, not a fixed name) left over from a preceding `@isolated`
+scenario in the same VEN instance was a real asset with real import
+capability that the hardcoded list — and the fixed-name-only
+`/capability/{name}` endpoint it queries — has no way to see at all.
+
+**How to apply:** an E2E bound meant to cover "every asset the site has"
+must be derived from a source that actually enumerates every asset present
+(here, `/sim`'s full asset map, which lists dynamic instances alongside
+fixed ones) rather than a list of names hardcoded from the *fixed* roster —
+even a list that's accurate for every fixed-roster kind can silently
+undercount once any asset kind is added that admits a dynamic, unbounded
+number of runtime instances. This is the same category of assumption
+Spec B's own `KEY_LEARNINGS.md` entry ("a 'generic' dispatch mechanism can
+still carry unstated singleton assumptions") already warned about in
+production code — this is the same trap surfacing in test code instead.

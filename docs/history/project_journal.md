@@ -11562,3 +11562,143 @@ file-size audit, and `ven-architecture` invariant greps all clean
 throughout. No `docs/use-cases/*.md` update needed — confirmed, not silently
 skipped: no user-observable behavior changes yet (the resolver has no
 production call site until Spec E).
+
+## 2026-09-06/07 — Unified capacity/envelope engine (Spec E, closing the asset-max-power-forecast master plan)
+
+**What.** `controller/capacity_envelope.rs` replaces `capacity_forecast.rs`
+(the sustained-commitment "Capacity Forecast" curve) and `envelope_forecast.rs`
+(the plan-driven "Site Headroom" trajectory) with one engine built on Spec C's
+`Asset::max_effort_setpoint`/`asset_max_power_series` and Spec D's
+`simulated_trajectory` — both existing UI consumers are now fixed-axis slices
+of the same `(t1, t2, direction, tier)` domain: Capacity Forecast fixes
+`t1 = now` and sweeps `t2` to the plan's own remaining horizon; Site Headroom
+fixes `t2 = 0` and sweeps `t1` across the plan's remaining slots. Wired into
+`tasks/sim_tick/forecast_wiring.rs`; both old modules deleted. This closes
+the master plan (`docs/plans/asset-max-power-forecast-master-plan.md`) — all
+five specs are now implemented and merged.
+
+**Why this was the biggest and riskiest of the five specs.** Unlike Specs
+C/D, this one has real production behavior change reachable from two live
+endpoints and a UI chart, and it's the one place where several
+already-independently-tested primitives had to compose correctly for the
+first time — every "found via review" item below is a genuine class of bug
+that unit tests on the individual primitives could never have caught, since
+each primitive was individually correct; only their composition was wrong.
+
+**Design decisions:**
+- **D1 — PV stays special, on purpose.** PV's Import contribution routes
+  through `max_effort_setpoint` like every other asset (a trivial, always-
+  correct `0.0`, fixing the PV-Import bug). PV's Export contribution keeps
+  using the existing weather-driven `pv_frames`/`pv_ceiling_kw` resolution
+  unchanged — Specs C/D never modeled PV's time-varying weather forecast
+  inside the `Asset` trait (a deliberate, documented scope limit in both), so
+  routing Export through the trait-based primitives would have flattened
+  PV's ceiling to a constant across the whole horizon, a real regression.
+  Corrected during implementation: the default `plan_horizon_h` is 48
+  (confirmed in `entities/planner_params.rs`), so `pv_frames` already spans
+  exactly the sweep range the master plan wanted — no new
+  `pv_ceiling_kw`-at-independent-`t2`-samples mechanism was needed at all,
+  simplifying the original design.
+- **D2 — `asset_max_power_series`** (Spec C's `asset_max_power` redefined in
+  terms of it): builds one fine-grained schedule out to `t1 + t2_max` and
+  returns every point, so a caller sweeping many `t2` samples for a capacity
+  curve doesn't re-walk the schedule from scratch per sample —
+  `O(t2_max / 60s)` total work, not `O(samples²)`. Measured: a 4-asset
+  48h/60s sweep, both directions, took ~205ms in an unoptimized debug build
+  — fine for a once-per-dispatcher-tick computation, no coarser step needed.
+- **D3 — dense compute, sparse output.** The site-level curve builder sums
+  every asset's series on the shared 60s grid, then deduplicates consecutive
+  equal values into sparse `CapacityCurveStep`s, matching that type's
+  existing "ordered by elapsed_s ascending" breakpoint contract without
+  needing exact analytic breakpoints.
+- **D4 — Site Headroom reuses the trajectory, doesn't repeat it.**
+  `simulated_trajectory` (Spec D) widened to `pub(crate)` so the headroom
+  half calls it once per asset and reads every slot's point off it, instead
+  of calling `resolve_plan_state_at` once per slot (which would redundantly
+  re-walk the same trajectory for every slot requested).
+- **D5 — `up_kw`/`down_kw` become absolute, not relative.**
+  `SiteFlexibilityForecastSlot`'s fields keep their names but change meaning:
+  each asset's own absolute `max_effort_setpoint`, summed — not a delta from
+  the plan's chosen dispatch. A real, documented behavior change.
+- **D6 — `SiteHeadroomChart` rendering**, confirmed with the user: a band
+  between the absolute limits (`-up_kw` to `down_kw`) alongside the existing
+  grid-power line, replacing the old relative-delta band
+  (`gridPowerKw ± up/down_kw`). `CapacityForecastChart` needed no change —
+  confirmed by reading its formatters and energy calc, not assumed.
+
+**Three genuine composition bugs, found via review or the user's own
+questioning, not by the four test suites running green:**
+
+1. **Sign convention.** `Asset::max_effort_setpoint`'s Export value is
+   signed negative (this codebase's dominant convention), but
+   `CapacityCurve`/`merge_events` (inherited from the deleted
+   `capacity_forecast.rs`) used an unsigned magnitude. First patched with a
+   `.abs()`-based `magnitude_kw` boundary function — the user then asked,
+   correctly, whether "internal signed, unsigned only at the true external
+   boundary" would be better. Checking `CapacityForecastChart.tsx` directly
+   (not assumed) showed its formatters already handle negative numbers
+   correctly, so `CapacityCurve` itself became genuinely signed, with the
+   unsigned conversion moved to the one real external boundary
+   (`report_intervals.rs`'s OpenADR payload builder). This in turn surfaced
+   a **deliberate behavior refinement**: `base_load_capacity_events` became
+   direction-independent (base load's own net-grid-power contribution
+   doesn't care what direction the site is committing to), and a sustained
+   Export commitment can now correctly report a *positive* (net-importing)
+   result when base load's draw exceeds what's exportable, instead of the
+   old unsigned-magnitude code's artificial floor at `0.0` — a real
+   information loss in the old code, not an arbitrary change.
+2. **Export's upper bound.** An independent review pass (requested before
+   continuing past this point) found that `merge_events`' Export clamp had
+   no upper bound at all, and the doc comments' claim that "only base load"
+   could push a sustained-Export total positive was false —
+   `ShiftableLoadAsset::max_effort_schedule`'s Export branch reports its own
+   positive draw once running (it has no way to actually export, unlike
+   every other kind's `capability()`-backed setpoint). Fixed: Export is now
+   bounded above by `import_limit_kw`, symmetric with Import's own ceiling.
+   The same review found a related issue in `report_intervals.rs`: a bare
+   `.abs()` would have reported that legitimately-positive value as genuine
+   OpenADR discharge capability — now floored per-direction instead.
+3. **EV departure exclusion.** Found before wiring into production:
+   `simulated_trajectory` alone doesn't exclude a plugged-in EV past its
+   live session's `departure_time` (`EvState::plugged` is never toggled by
+   `step()`), the same gap `build_forecast_frames`'s own `include_at`
+   closure exists to close for the capability-frame path.
+   `compute_site_headroom_forecast` gained an `ev_session` parameter and the
+   same exclusion. Confirmed `compute_site_capacity_curve` does NOT need the
+   equivalent — its sustained-commitment model never projected a future
+   departure either, matching the deleted module's own unchanged scope.
+
+**A BDD scenario design lesson, found while verifying section 8.** The
+originally-planned "reset a battery to full SoC, confirm headroom drops to
+zero" scenario turned out to be a genuine, frequent race against
+`Battery::capability_inner`'s exact `soc >= 1.0` floating-point boundary —
+the live dispatcher's continuous cost-optimized dispatch can discharge the
+battery by as little as 0.00004 soc between one HTTP call and the next,
+confirmed via debug output on Node2 flipping reported `max_import_kw` back
+to the full rated charge rate. Rather than paper over this with a looser
+tolerance, the scenario was redesigned to test the same absolute-vs-relative
+invariant in a way that's inherently robust to live state: the forecast's
+first slot can never exceed the sum of every asset's own live `/capability`
+reading, taken at the same moment — a plan-relative-delta model (or a
+double-counting bug) could violate this; the absolute model cannot, no
+matter what SoC the battery happens to be at when the test runs.
+
+**Verification.** Full Rust suite: 1264 passed, 0 failed (was 1295 at the
+end of Spec D; -33 deleted tests from the two removed modules, +2 new ones,
+exactly -31, confirmed no unexpected loss). VEN UI: 627/627. `cargo fmt`/
+`clippy -D warnings`, file-size audit, and `ven-architecture` invariant
+greps all clean throughout; `cargo check` compiled clean on the first try
+after wiring + deletion. Two new BDD scenarios
+(`tests/features/isolated/capacity_envelope_absolute_quantities.feature`)
+exercise the absolute-quantity behavior end-to-end — getting them reliably
+green took three iterations, each catching a real test-design flaw rather
+than an engine bug (see the two `KEY_LEARNINGS.md` entries and the BDD
+scenario design lesson above): an exact-SoC-boundary race, a
+separately-timed-reads race against `base_load`'s live noise, and a bound
+computed from a hardcoded asset-name list that silently missed a
+dynamically-named `ShiftableLoadAsset` left over from a preceding
+`@isolated` scenario in the same VEN instance. E2E on Node2: green (271
+main scenarios + 10 `@isolated`, 0 failed). Resilience on Node2: green
+(6/6). Both re-run clean after each fix, including once with the full
+`features/isolated/` set together to specifically re-exercise the
+asset-contamination scenario the last fix targets.
