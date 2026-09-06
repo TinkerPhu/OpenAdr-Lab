@@ -189,13 +189,31 @@
 
 ## 8. BDD coverage (workflow rule 4)
 
-- [ ] 8.1 Add or extend a scenario in `tests/features/` exercising the new
-      absolute-quantity Site Headroom behavior end-to-end (e.g. drive a
-      battery toward full, confirm the reported down_kw drops toward zero
-      via the live API, not just a unit test on the engine).
-- [ ] 8.2 Add or extend a scenario confirming the Capacity Forecast's
-      PV-Import-is-zero / Heater-Export-is-zero fixes are visible via the
-      live `GET /flexibility/capacity` endpoint.
+- [x] 8.1 New feature `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
+      **Deliberately adapted from the originally-suggested "drive a battery
+      to full" example**: `Battery::capability_inner`'s `soc >= 1.0` ceiling
+      is an EXACT floating-point boundary, and the live dispatcher's
+      continuous cost-optimized dispatch can discharge the battery by as
+      little as 0.00004 soc between one HTTP call and the next — confirmed
+      via debug output on Node2 that this flips reported `max_import_kw`
+      back to the full rated charge rate, making "reset to 1.0, then read
+      separately" a genuine, frequent race, not a flaky assertion. Adapted
+      to a design that's robust to live state and still proves the same
+      absolute-vs-relative invariant: the site headroom forecast's first
+      slot can never exceed the sum of every controllable asset's own live
+      `/capability` `max_import_kw` — a plan-relative-delta model (or a
+      double-counting bug) could violate this, the absolute
+      `max_effort_setpoint`-based model cannot.
+- [x] 8.2 Second scenario in the same feature: PV generation (forced via
+      `pv_irradiance` sim-inject) never inflates the sustained-Import
+      `GET /flexibility/capacity` curve beyond the site's non-PV
+      controllable assets' own import capability — directly exercises the
+      confirmed PV-Import bug fix live. Both scenarios pass consistently on
+      Node2 (verified via 3 separate runs while iterating on the first
+      scenario's design); the only other failure observed
+      (`shiftable_lifecycle.feature`'s pre-existing `@slow` scenario) was
+      confirmed a resource-contention flake, unrelated, by re-running it
+      alone.
 
 ## 9. Cross-cutting verification
 
