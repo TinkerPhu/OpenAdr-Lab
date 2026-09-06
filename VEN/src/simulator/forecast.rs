@@ -1,5 +1,7 @@
-//! Forward-looking per-asset forecast frames for the site headroom trajectory
-//! (`controller::envelope_forecast::compute_headroom_forecast`). Infra-side
+//! Forward-looking per-asset forecast frames, primarily for PV's weather-
+//! driven ceiling (`controller::capacity_envelope`'s Capacity Forecast and
+//! Site Headroom functions both still read PV frames from here — see that
+//! module's doc for why PV alone stays on this path). Infra-side
 //! (allowed to touch `Asset`/`AssetConfig`, unlike `controller/`): re-simulates
 //! battery/EV/heater forward from their REAL current state — never
 //! `Plan.planned_state_by_asset`, a stale solve-time-only snapshot — driven

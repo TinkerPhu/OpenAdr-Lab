@@ -40,10 +40,6 @@ pub struct TrajectoryPoint {
 /// `O(samples²)` (`unified-capacity-envelope-engine` D2). `asset_max_power`
 /// itself is defined in terms of this (reading the last point), so the two
 /// can never independently diverge.
-///
-/// Not yet called from production code -- `unified-capacity-envelope-engine`
-/// (Spec E) is what wires this into the Capacity Forecast's `t2` sweep.
-#[allow(dead_code)]
 pub fn asset_max_power_series(
     asset: &dyn Asset,
     state: &AssetState,

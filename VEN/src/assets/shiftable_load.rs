@@ -135,10 +135,12 @@ impl ShiftableLoadAsset {
         m.insert("duration_min".into(), self.duration_min as f64);
         m.insert("elapsed_min".into(), state.elapsed_min);
         m.insert("started".into(), if state.started { 1.0 } else { 0.0 });
-        // Encoded as unix seconds so capacity_forecast.rs can read a shiftable
-        // load's window straight off the live SimSnapshot instead of needing
-        // a separate `&[ShiftableLoad]` parameter (shiftable-load-as-asset
-        // proposal.md scope).
+        // Encoded as unix seconds so the live snapshot API (ui-transparency)
+        // exposes a shiftable load's window without needing a separate
+        // `&[ShiftableLoad]` parameter (shiftable-load-as-asset proposal.md
+        // scope) — the unified capacity/envelope engine
+        // (`unified-capacity-envelope-engine`, Spec E) reads the typed
+        // `AssetState::ShiftableLoad` directly instead of this flattened map.
         m.insert(
             "earliest_start_unix".into(),
             self.earliest_start.timestamp() as f64,

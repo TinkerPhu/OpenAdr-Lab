@@ -110,23 +110,57 @@
       `build_forecast_frames`'s own existing exclusion — zero flexibility,
       not the constant-offset treatment §4 needed for the *capacity*
       curve's different "net grid power" semantics).
-- [ ] 5.5 Update `SiteFlexibilityForecastSlot`'s doc comment (`entities/
-      plan.rs`) to state the new absolute-quantity meaning explicitly (D5)
-      — this is a real behavior change future readers must not miss.
+- [x] 5.5 Updated `SiteFlexibilityForecastSlot`'s doc comment (D5).
+- [x] **New finding, before wiring into production**: `simulated_trajectory`
+      alone doesn't exclude a plugged-in EV past its live session's
+      `departure_time` (`EvState::plugged` is never toggled by `step()`,
+      matching `build_forecast_frames`'s own documented reason for its
+      `include_at` closure) — without this, EV would keep contributing
+      headroom at slots after it's actually departed.
+      `compute_site_headroom_forecast` gained an `ev_session` parameter and
+      the same exclusion; pinned by a new test
+      (`ev_headroom_zeroes_out_past_the_live_sessions_departure`). Confirmed
+      `compute_site_capacity_curve` does NOT need the equivalent — its
+      sustained-commitment model never projected a future departure either,
+      matching the deleted `capacity_forecast.rs`'s own unchanged scope
+      (`EvCharger::capability_inner` already zeroes correctly for the LIVE
+      `plugged` state, which is all that model ever used).
 
 ## 6. Wiring and deletion
 
-- [ ] 6.1 Update `tasks/sim_tick/forecast_wiring.rs::compute_tick_forecasts`
-      to call the new module's two functions instead of
-      `capacity_forecast::compute_capacity_curve`/
-      `envelope_forecast::compute_headroom_forecast`.
-- [ ] 6.2 Delete `controller/capacity_forecast.rs` and
-      `controller/envelope_forecast.rs` — port any test coverage not already
-      re-verified in §4/§5 rather than dropping it silently.
-- [ ] 6.3 Update the route doc comments (`routes/hems/sessions.rs`'s
-      `get_flexibility_forecast`/`get_capacity_curves`) to describe the new
-      computation and (for the forecast route) the absolute-quantity meaning
-      change.
+- [x] 6.1 `tasks/sim_tick/forecast_wiring.rs::compute_tick_forecasts` now
+      calls `capacity_envelope::compute_site_capacity_curve`/
+      `compute_site_headroom_forecast`. `t2_max` for the capacity sweep is
+      the plan's own remaining horizon (`plan.horizon.end_time - now`,
+      falling back to 48h with no active plan) — matches `pv_frames`' own
+      range (design.md D1's correction). Dropped the now-unused
+      `shiftable_loads: &[ShiftableLoad]` parameter (shiftable loads are
+      read directly via `sim.iter_assets()` now) — traced through and
+      removed the now-dead `TickContext.shiftable_loads` field
+      (`tasks/sim_tick/context.rs`) and its one populate site too, since
+      nothing else read it.
+- [x] 6.2 Deleted `controller/capacity_forecast.rs` and
+      `controller/envelope_forecast.rs` (and their `pub mod` declarations).
+      Reviewed every test in both — all of `envelope_forecast.rs`'s tests
+      (PV up/down margin-to-ceiling, shiftable load plan-relative slack) test
+      the relative-delta semantics the master plan explicitly says are
+      overturned as incorrect (its own open point #2 resolution), so porting
+      them would mean asserting behavior this change deliberately replaces;
+      not ported, not silently dropped either — reviewed and recorded here.
+      `capacity_forecast.rs`'s worked-numeric-example tests were already
+      re-verified through the new engine in §4.
+- [x] 6.3 Updated route doc comments (`get_flexibility_forecast` /
+      `get_capacity_curves`) plus every other stale `capacity_forecast`/
+      `envelope_forecast` doc-comment reference found across the codebase
+      (`reporter.rs`, `assets/shiftable_load.rs`, `simulator/forecast.rs`,
+      `tasks/sim_tick/publish.rs`) — none were real imports, all were doc
+      mentions, confirmed via a full-codebase grep before deleting.
+- [x] Full suite re-verified post-wiring: 1264/1264 Rust tests (was 1295;
+      -33 deleted old-module tests +2 new ones = -31, confirmed exact, no
+      unexpected loss), `cargo fmt`/`clippy -D warnings`, file-size audit,
+      and `ven-architecture` invariant greps all clean. `cargo check`
+      compiled clean on the first try after wiring + deletion — no dangling
+      references.
 
 ## 7. UI: `SiteHeadroomChart` rework (D6)
 
@@ -134,12 +168,24 @@
       `down_kw`), alongside the existing grid-power line — same visual
       language as today's band, now anchored to absolute limits instead of
       the live grid-power line.
-- [ ] 7.2 Implement the agreed rendering in `SiteHeadroomChart.tsx`.
-- [ ] 7.3 Update `SiteHeadroomChart.test.tsx`/`GridHeadroomCell.test.tsx` for
-      the new rendering and data meaning.
-- [ ] 7.4 Confirm `CapacityForecastChart.tsx` needs no rendering change
-      (already an absolute step curve) — record this conclusion rather than
-      silently skipping it.
+- [x] 7.2 Implemented: band's `lower`/`upper` accessors changed from
+      `gridPowerKw ∓ up/down_kw` to `-up_kw`/`down_kw` directly — no longer
+      depends on `gridPowerKw` being present on the same row at all. Grid
+      power line itself unchanged.
+- [x] 7.3 `SiteHeadroomChart.test.tsx`: 3/4 tests passed unchanged (their
+      assertions only checked presence, not the old formula's specific
+      values); one test's hardcoded expected value
+      (`gridPowerKw - up_kw = 2.0-3.0`) updated to the new formula's
+      `-up_kw = -3.0`, plus a stale docstring on another test describing the
+      now-obsolete "needs gridPowerKw on the same row" premise. All 4 pass.
+      `GridHeadroomCell.test.tsx`: 7/7 pass unchanged (renders the live
+      instant `SiteFlexibilityEnvelope`, a separate, unaffected type).
+- [x] 7.4 Confirmed: `CapacityForecastChart.test.tsx` (3/3) passes unchanged
+      — its own mock data is independent of the backend, and its rendering
+      (two positive-scale lines by label/color) needs no change for a
+      signed `CapacityCurve`, as already established when designing the
+      sign-convention fix. Full VEN UI suite: 627/627. ESLint: 0 errors on
+      changed files.
 
 ## 8. BDD coverage (workflow rule 4)
 

@@ -473,7 +473,9 @@ pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResp
 /// GET /flexibility/forecast — forward-looking per-slot headroom trajectory,
 /// re-derived fresh every dispatcher tick from the active plan's own setpoint
 /// schedule plus each asset's real current state (see
-/// `SiteFlexibilityForecastSlot`'s doc comment) — distinct from both
+/// `SiteFlexibilityForecastSlot`'s doc comment — its `up_kw`/`down_kw` are
+/// ABSOLUTE achievable power now, not a delta from planned dispatch,
+/// `unified-capacity-envelope-engine` Spec E) — distinct from both
 /// `GET /flexibility` (instant-only) and `GET /flexibility/history` (the past
 /// ring). Always 200 — an empty array when there's no active plan.
 pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
@@ -481,12 +483,12 @@ pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoRes
 }
 
 /// GET /flexibility/capacity — sustained-commitment power/duration/energy
-/// capacity curves (both directions in one response — see
-/// `openspec/changes/flexibility-capacity-forecast/design.md` open question
-/// 2), re-derived fresh every dispatcher tick from the current asset state
-/// (see `controller::capacity_forecast`'s module doc for why this is a
-/// distinct computation from `GET /flexibility/forecast` above, not an
-/// extension of it). 204 before the first dispatcher tick.
+/// capacity curves (both directions in one response), re-derived fresh every
+/// dispatcher tick from the current asset state (see
+/// `controller::capacity_envelope`'s module doc for why this is a distinct
+/// computation from `GET /flexibility/forecast` above, not an extension of
+/// it — they're two fixed-axis slices of the same underlying
+/// `(t1, t2, direction, tier)` domain). 204 before the first dispatcher tick.
 pub async fn get_capacity_curves(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.capacity_curves().await {
         Some((import_curve, export_curve)) => Json(serde_json::json!({
