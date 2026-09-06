@@ -1,8 +1,9 @@
 # Master Plan: Asset Max-Power Forecast & Unified Capacity/Envelope Engine
 
-> **Status:** Spec A, Spec B, and Spec C complete and merged to `main`
-> (`asset-dispatch-trait-objects`, `shiftable-load-as-asset`,
-> `asset-max-power-primitive`). Spec D and E not yet started. This is the sequencing document
+> **Status:** Spec A, Spec B, Spec C, and Spec D complete and merged to
+> `main` (`asset-dispatch-trait-objects`, `shiftable-load-as-asset`,
+> `asset-max-power-primitive`, `planstate-t1-resolver`). Spec E not yet
+> started. This is the sequencing document
 > for turning `docs/plans/asset-max-power-forecast-spec.md` (the requirements — now
 > the leading source of truth for this area) into working code, across five
 > dependent specs. It supersedes `openspec/changes/capacity-envelope-unification/
@@ -236,6 +237,13 @@ asserted.
 ---
 
 ## Spec D — `planState(t1)` resolver
+
+**Status: complete** (`planstate-t1-resolver`, merged 2026-09-06). Builds and
+unit-tests the resolver only — does **not** wire it (or Spec C's
+`asset_max_power`) into `capacity_forecast.rs`/`envelope_forecast.rs`; that
+cutover remains Spec E's job. Full design record in
+`docs/history/project_journal.md`'s 2026-09-06 entry — the openspec change
+directory itself was deleted per this repo's workflow convention.
 
 **Problem it solves:** `assetMaxPower` needs a *starting* `AssetState` at an
 arbitrary future `t1`, forecasted along the plan's own schedule — "if the plan runs

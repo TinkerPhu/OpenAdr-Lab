@@ -11454,3 +11454,73 @@ bespoke reimplementations of "this asset's own extreme" converged on the
 same class of wrong answer because neither one asked the asset itself, even
 though the correct answer was already available through the existing
 `capability()` interface.
+
+## 2026-09-06 — `planState(t1)` resolver (Spec D of the asset-max-power-forecast master plan)
+
+**What.** `resolve_plan_state_at(sim, plan, t1, now) -> HashMap<String,
+AssetState>` (`VEN/src/simulator/forecast.rs`), answering "if the active
+plan holds, what state is each asset in at a future `t1`." Deliberately does
+**not** wire into `capacity_forecast.rs`/`envelope_forecast.rs` or call
+Spec C's `asset_max_power` — that cutover is Spec E's job.
+
+**Why now.** Spec D only needs Spec A's trait-object `Asset` interface, so
+per the master plan it could have run in parallel with Spec B/C in a
+separate worktree; it landed after both here since a single session was
+carrying all three sequentially. `assetMaxPower` (Spec C) needs exactly this
+resolver's output as its starting state — this was the last missing piece
+before Spec E can be attempted.
+
+**Design decisions:**
+- **D1** — extracted `simulated_trajectory(entry, cfg, future_slots) ->
+  Trajectory` out of `insert_simulated_points`'s inlined schedule-building +
+  `simulate_forward` call, and had both `insert_simulated_points` (existing,
+  capability-per-slot) and the new resolver (state-at-one-`t1`) call it.
+  This was the change's central guarantee, not incidental tidying: without
+  it, the resolver would have been a second implementation of the exact
+  forecast `build_forecast_frames` already computes — precisely the
+  "two-independently-implemented-curves" failure mode this whole master
+  plan exists to remove (see Spec C's own `KEY_LEARNINGS.md` entry for a
+  concrete instance of that failure mode already found once this session).
+- **D2** — confirmed against current code, not assumed: `PvState`'s
+  `curtailment_source` reflects whatever external decision is active right
+  now, and nothing anywhere in this codebase forecasts how it will change
+  over a horizon. Running PV through `simulate_forward` with today's frozen
+  config would produce a specific, wrong-looking answer (as if today's sun
+  angle never changed), not a real forecast. Resolved as an honest,
+  documented scope limit: PV's resolved state is always its current live
+  state, for every `t1` — not a gap to silently paper over with invented
+  precision.
+- **D3** — `t1` landing strictly between two plan slot boundaries snaps down
+  to the latest slot boundary at or before it (no interpolation); a `t1`
+  past the plan's last remaining slot returns that last slot's state rather
+  than panicking or extrapolating. Both are documented non-goals, not
+  discovered gaps.
+- `base_load` is included in the resolver's output even though
+  `build_forecast_frames` itself skips it (base load contributes no
+  flexibility to capability forecasts) — `assetMaxPower`'s own roster
+  includes base load, and the same generic `simulate_forward` path already
+  works for it (its `step_inner` ignores the setpoint entirely and just
+  returns `self.baseline_kw`), so there was no reason to special-case it out
+  of a resolver whose only job is "what state is asset X in."
+
+**R-69 visibility check (not a fix).** Per the master plan's explicit
+instruction, added a test comparing the resolver's forecasted battery SoC
+against what the MILP planner would have believed for the same partial
+charge, using the two models' actual formulas
+(`battery.rs`: `stored = kwh_in × round_trip_efficiency`;
+`battery_milp.rs`: `stored = kwh_in × sqrt(round_trip_efficiency)`). For the
+worked example (5 kWh import, `rte = 0.81`), the resolver reports SoC 0.405
+against the planner's believed 0.45 — confirmed the disagreement is real and
+currently unresolved (R-69,
+`openspec/changes/battery-efficiency-model-reconciliation/`, 0/8 tasks
+done). The test is written to fail loudly if R-69 is later resolved,
+prompting an update rather than silently passing under either model.
+
+**Verification.** Full Rust suite: 1277 passed, 0 failed (up from 1271 at
+the end of Spec C). VEN UI: 627/627, unaffected (no UI code touched). E2E on
+Node2: green (271 main scenarios + 8 `@isolated`, 0 failed, 0 flakes this
+run). Resilience on Node2: green (6/6). `cargo fmt`/`clippy -D warnings`,
+file-size audit, and `ven-architecture` invariant greps all clean
+throughout. No `docs/use-cases/*.md` update needed — confirmed, not silently
+skipped: no user-observable behavior changes yet (the resolver has no
+production call site until Spec E).
