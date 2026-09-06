@@ -45,6 +45,7 @@ pub mod rate_schedule;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod arbiter;
+pub mod capacity_envelope;
 pub mod capacity_forecast;
 pub mod dispatcher;
 pub mod envelope;

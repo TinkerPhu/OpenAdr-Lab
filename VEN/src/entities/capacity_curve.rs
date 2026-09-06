@@ -55,6 +55,14 @@ pub struct CapacityCurveStep {
     /// Seconds elapsed since `CapacityCurve::start`.
     pub elapsed_s: i64,
     /// Achievable net grid power at and after this elapsed time (kW).
+    /// SIGNED: positive = import, negative = export — the same convention
+    /// `Asset::max_effort_setpoint`/`capability()` use everywhere else
+    /// (`unified-capacity-envelope-engine`, Spec E). The unsigned-magnitude
+    /// convention this field originally used is now applied only at the
+    /// actual external boundary that needs it
+    /// (`controller::report_intervals::build_capacity_forecast_intervals`,
+    /// for OpenADR's direction-tagged-by-name report payloads) — see
+    /// `controller::capacity_envelope`'s module doc for the full reasoning.
     pub power_kw: f64,
 }
 

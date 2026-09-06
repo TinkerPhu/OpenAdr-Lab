@@ -224,13 +224,22 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 /// `Asset::simulate_forward`, driven by the active plan's own
 /// `planned_kw_by_asset` schedule, so this trajectory self-corrects for any
 /// drift between the plan's assumptions and reality on every tick — see
-/// `controller::envelope_forecast::compute_headroom_forecast`.
+/// `controller::capacity_envelope::compute_site_headroom_forecast`.
+///
+/// **`up_kw`/`down_kw` are ABSOLUTE achievable power, not a delta from the
+/// plan's own chosen dispatch** (`unified-capacity-envelope-engine`, Spec E
+/// of the asset-max-power-forecast master plan — this is a real behavior
+/// change from this type's original relative-delta meaning, not a
+/// clarification of unchanged numbers). `up_kw` = the site's absolute
+/// maximum achievable Export at this slot (each asset's own
+/// `Asset::max_effort_setpoint` at its plan-forecasted state, summed);
+/// `down_kw` = the absolute maximum achievable Import, same construction.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SiteFlexibilityForecastSlot {
     pub ts: DateTime<Utc>,
-    /// Consumption-reduction headroom at this future slot (kW). Always ≥ 0.
+    /// Absolute max achievable Export at this slot (kW). Always ≥ 0.
     pub up_kw: f64,
-    /// Consumption-increase headroom at this future slot (kW). Always ≥ 0.
+    /// Absolute max achievable Import at this slot (kW). Always ≥ 0.
     pub down_kw: f64,
 }
 
