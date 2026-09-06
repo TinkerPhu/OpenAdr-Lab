@@ -33,6 +33,7 @@ pub use history::{AssetHistoryBuffer, HistoryPoint};
 #[allow(unused_imports)]
 // not yet called from production code -- see max_power.rs's own doc comment
 pub use max_power::asset_max_power;
+pub use max_power::asset_max_power_series;
 pub use pv::{PvInverter, PvPowerInputs, PvState};
 pub use shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};
 

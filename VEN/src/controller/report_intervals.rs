@@ -60,6 +60,13 @@ pub(crate) fn build_forecast_intervals(
 /// `build_forecast_intervals` above. The final step's duration uses
 /// OpenADR's "P9999Y" infinity convention (`intervalPeriod.duration`, per
 /// spec) since the curve has no defined end.
+///
+/// This is the actual OpenADR boundary where `CapacityCurve`'s internal
+/// SIGNED convention (positive = import, negative = export — see
+/// `CapacityCurveStep::power_kw`'s doc comment) gets converted to the
+/// unsigned magnitude `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER`
+/// payload types expect (direction is already conveyed by `payload_type`'s
+/// own name, not by the value's sign).
 pub(crate) fn build_capacity_forecast_intervals(
     curve: &CapacityCurve,
     payload_type: &str,
@@ -84,7 +91,7 @@ pub(crate) fn build_capacity_forecast_intervals(
                 }),
                 payloads: vec![OadrReportPayload {
                     r#type: payload_type.to_string(),
-                    values: vec![serde_json::Value::from(step.power_kw * 1000.0)],
+                    values: vec![serde_json::Value::from(step.power_kw.abs() * 1000.0)],
                 }],
             }
         })
@@ -286,9 +293,13 @@ mod tests {
             direction: CommitmentDirection::Export,
             start,
             steps: vec![
+                // Export is signed negative in CapacityCurve's internal
+                // convention -- this test confirms build_capacity_forecast_intervals
+                // is exactly where that gets converted back to the unsigned
+                // magnitude OpenADR's STORAGE_MAX_DISCHARGE_POWER payload wants.
                 CapacityCurveStep {
                     elapsed_s: 0,
-                    power_kw: 5.0,
+                    power_kw: -5.0,
                 },
                 CapacityCurveStep {
                     elapsed_s: 3600,

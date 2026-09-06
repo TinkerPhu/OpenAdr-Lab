@@ -135,7 +135,13 @@ pub fn build_forecast_frames(
 /// needs exactly that "after the last slot completes" state; `future_slots`
 /// itself is bounds-checked by every existing caller, so this extra point
 /// is silently ignored where it isn't wanted).
-fn simulated_trajectory(
+///
+/// `pub(crate)` (not private) so `controller::capacity_envelope`
+/// (`unified-capacity-envelope-engine`, Spec E) can compute each asset's
+/// per-slot trajectory once and read every slot's point off it, rather than
+/// calling `resolve_plan_state_at` once per slot (which would redundantly
+/// recompute this same walk for every slot requested).
+pub(crate) fn simulated_trajectory(
     entry: &super::AssetEntry,
     cfg: &dyn Asset,
     future_slots: &[&PlanTimeSlot],
