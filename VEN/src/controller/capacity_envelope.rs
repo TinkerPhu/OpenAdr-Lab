@@ -100,16 +100,13 @@ pub fn compute_site_capacity_curve(
     }
     events.extend(pv_capacity_events(direction, now, pv_frames));
 
-    let cap_kw = match direction {
-        CommitmentDirection::Import => snapshot.grid.import_limit_kw,
-        CommitmentDirection::Export => -snapshot.grid.export_limit_kw,
-    }
-    .max(0.0);
+    let import_limit_kw = snapshot.grid.import_limit_kw.max(0.0);
+    let export_limit_kw = (-snapshot.grid.export_limit_kw).max(0.0);
 
     CapacityCurve {
         direction,
         start: now,
-        steps: merge_events(events, direction, cap_kw),
+        steps: merge_events(events, direction, import_limit_kw, export_limit_kw),
     }
 }
 
@@ -191,7 +188,9 @@ fn series_to_events(series: &[(i64, f64, f64)]) -> Vec<Event> {
 /// artifact of the old unsigned-magnitude representation (a magnitude can't
 /// go below zero by definition), not a real physical constraint — the site
 /// genuinely can still be net-importing even while every exportable asset is
-/// maxed out, and the old code was silently discarding that fact.
+/// maxed out, and the old code was silently discarding that fact. (Base load
+/// isn't the only contributor that can do this — see `merge_events`'s doc
+/// comment for `ShiftableLoadAsset`'s own version of the same effect.)
 fn base_load_capacity_events(state: &crate::assets::AssetState) -> Vec<Event> {
     let crate::assets::AssetState::BaseLoad(s) = state else {
         return Vec::new();
@@ -251,19 +250,27 @@ fn pv_capacity_events(
 ///
 /// The clamp shape is direction-dependent, not the old code's symmetric
 /// `[0, cap_kw]`: Import's floor at `0.0` is defensive/redundant (every
-/// Import-direction contributor is already `>= 0` by construction — battery/
-/// EV/heater/base-load/shiftable-load's own `max_effort_setpoint`/physical
-/// draw are never negative for Import), bounded above by the grid's
-/// hardware/contractual import limit. Export has NO ceiling at `0.0` — base
-/// load's constant positive draw can legitimately push the running total
-/// positive (net importing, despite every exportable asset being maxed out)
-/// — only a floor at `-cap_kw` (the grid's export hardware limit) applies.
-/// See `base_load_capacity_events`'s doc comment for why this is a
-/// deliberate correction, not an accidental behavior change.
+/// Import-direction contributor is already `>= 0` by construction), bounded
+/// above by the grid's own hardware/contractual import limit
+/// (`import_limit_kw`). Export's floor is `-export_limit_kw` (the grid's
+/// export hardware limit) — but Export ALSO needs an upper bound at
+/// `import_limit_kw`, not left unbounded: a sustained Export commitment's
+/// net total can legitimately swing positive (net importing) when
+/// non-exportable contributions exceed what's exportable — not just base
+/// load's constant draw (as an earlier version of this comment claimed), but
+/// also a non-interruptible `ShiftableLoadAsset` whose deadline forces it to
+/// keep drawing `power_kw` once started, regardless of the site's Export
+/// commitment (found via review: `ShiftableLoadAsset::max_effort_schedule`'s
+/// Export branch places the run as late as possible but still reports its
+/// own positive draw once running — it has no way to actually export). Since
+/// the site's real grid hardware still can't exceed `import_limit_kw` even
+/// while "trying" to export, that swing must be bounded by the same limit
+/// Import direction itself uses, not left to grow arbitrarily.
 fn merge_events(
     events: Vec<Event>,
     direction: CommitmentDirection,
-    cap_kw: f64,
+    import_limit_kw: f64,
+    export_limit_kw: f64,
 ) -> Vec<CapacityCurveStep> {
     let mut by_elapsed: BTreeMap<i64, f64> = BTreeMap::new();
     by_elapsed.insert(0, 0.0);
@@ -276,8 +283,8 @@ fn merge_events(
         .map(|(elapsed_s, delta_kw)| {
             running += delta_kw;
             let power_kw = match direction {
-                CommitmentDirection::Import => running.clamp(0.0, cap_kw),
-                CommitmentDirection::Export => running.max(-cap_kw),
+                CommitmentDirection::Import => running.clamp(0.0, import_limit_kw),
+                CommitmentDirection::Export => running.clamp(-export_limit_kw, import_limit_kw),
             };
             CapacityCurveStep {
                 elapsed_s,
@@ -456,9 +463,9 @@ mod tests {
     #[test]
     fn merge_clips_combined_total_to_cap() {
         // Import direction: two 6 kW positive contributors = 12 kW combined,
-        // clamped to the 10 kW grid limit.
+        // clamped to the 10 kW grid import limit.
         let events = vec![(0, 6.0), (0, 6.0)];
-        let steps = merge_events(events, CommitmentDirection::Import, 10.0);
+        let steps = merge_events(events, CommitmentDirection::Import, 10.0, 10.0);
         assert_eq!(
             steps,
             vec![CapacityCurveStep {
@@ -473,7 +480,7 @@ mod tests {
         // Every Import-direction contributor is >= 0 by construction, so this
         // floor is defensive/redundant in practice -- still verified directly.
         let events = vec![(0, 2.0), (0, -5.0)];
-        let steps = merge_events(events, CommitmentDirection::Import, 100.0);
+        let steps = merge_events(events, CommitmentDirection::Import, 100.0, 100.0);
         assert_eq!(
             steps,
             vec![CapacityCurveStep {
@@ -492,7 +499,7 @@ mod tests {
         // must report that positive (net-importing) value, not silently
         // floor it to "0 kW export capacity".
         let events = vec![(0, -2.0), (0, 5.0)]; // -2 kW export capacity + 5 kW base load draw
-        let steps = merge_events(events, CommitmentDirection::Export, 100.0);
+        let steps = merge_events(events, CommitmentDirection::Export, 100.0, 100.0);
         assert_eq!(
             steps,
             vec![CapacityCurveStep {
@@ -505,7 +512,7 @@ mod tests {
     #[test]
     fn merge_export_floors_at_the_negative_grid_limit() {
         let events = vec![(0, -15.0)]; // requests more export than the grid allows
-        let steps = merge_events(events, CommitmentDirection::Export, 10.0);
+        let steps = merge_events(events, CommitmentDirection::Export, 100.0, 10.0);
         assert_eq!(
             steps,
             vec![CapacityCurveStep {
@@ -516,8 +523,31 @@ mod tests {
     }
 
     #[test]
+    fn merge_export_ceiling_at_the_import_limit_when_non_exportable_contributions_overwhelm() {
+        // Found via review: base load isn't the only contributor that can
+        // push a sustained-Export total positive -- a non-interruptible
+        // ShiftableLoadAsset forced to keep drawing at its deadline can too
+        // (`ShiftableLoadAsset::max_effort_schedule`'s Export branch reports
+        // its own positive draw once running, since it has no way to
+        // actually export). Without an upper clamp, an unrealistically large
+        // forced draw could report a CapacityCurveStep exceeding the site's
+        // real grid import hardware limit. This pins the fix: Export is
+        // bounded above by import_limit_kw, exactly like Import direction's
+        // own ceiling.
+        let events = vec![(0, 50.0)]; // e.g. a large shiftable load forced to run, nothing exporting
+        let steps = merge_events(events, CommitmentDirection::Export, 25.0, 100.0);
+        assert_eq!(
+            steps,
+            vec![CapacityCurveStep {
+                elapsed_s: 0,
+                power_kw: 25.0
+            }]
+        );
+    }
+
+    #[test]
     fn merge_always_includes_an_elapsed_zero_step() {
-        let steps = merge_events(vec![], CommitmentDirection::Import, 100.0);
+        let steps = merge_events(vec![], CommitmentDirection::Import, 100.0, 100.0);
         assert_eq!(
             steps,
             vec![CapacityCurveStep {
@@ -816,6 +846,57 @@ mod tests {
             "an eligible-to-start shiftable load must contribute its power_kw \
              to the first slot's absolute import headroom, got {}",
             forecast[0].down_kw
+        );
+    }
+
+    #[test]
+    fn shiftable_load_forced_to_run_under_export_reports_its_own_positive_draw() {
+        // Found via review: unlike every other asset kind, ShiftableLoadAsset's
+        // max_effort_schedule Export branch reports its own POSITIVE draw once
+        // running (it has no way to actually export) -- confirms this real
+        // physics correctly flows through compute_site_capacity_curve's
+        // generic asset_max_power_series path, not just merge_events' own
+        // unit tests, closing the untested combination the review flagged.
+        use crate::assets::shiftable_load::ShiftableLoadAsset;
+        use crate::assets::AssetHistoryBuffer;
+        use crate::simulator::energy::EnergyCounter;
+        use crate::simulator::AssetEntry;
+
+        let now = t0();
+        let mut sim = SimState::from_params(&[], now);
+        let entry = AssetEntry {
+            id: "wm-1".to_string(),
+            state: AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: EnergyCounter::new(),
+            history: AssetHistoryBuffer::new(3600),
+        };
+        let config: Box<dyn crate::assets::Asset> = Box::new(ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 10,
+            earliest_start: now,
+            latest_end: now + Duration::minutes(30),
+        });
+        sim.add_asset(entry, config).unwrap();
+        let snapshot = sim.to_sim_snapshot();
+
+        // Export placement: start as late as possible = latest_end - duration
+        // = now+20min, running through now+30min.
+        let curve = compute_site_capacity_curve(
+            CommitmentDirection::Export,
+            now,
+            Duration::minutes(30),
+            &sim,
+            &[],
+            &snapshot,
+        );
+        assert!(
+            curve.steps.iter().any(|s| s.power_kw > 0.0),
+            "a non-interruptible shiftable load forced to run under a sustained \
+             Export commitment must produce a genuinely positive (net-importing) \
+             step, not silently 0.0 or negative, got {:?}",
+            curve.steps
         );
     }
 }
