@@ -11516,7 +11516,45 @@ currently unresolved (R-69,
 done). The test is written to fail loudly if R-69 is later resolved,
 prompting an update rather than silently passing under either model.
 
-**Verification.** Full Rust suite: 1277 passed, 0 failed (up from 1271 at
+**A real bug found by a separate review pass before merge, not a rubber
+stamp.** Requested by the user explicitly ("finish it with a separate
+review") — a fresh agent, with no memory of writing this code, reviewed the
+diff and found that `Asset::simulate_forward`'s default body (`asset_trait.rs`)
+only applies a real, non-zero-`dt` step for a `windows(2)` *pair* of
+setpoints; its lone trailing point is a zero-duration re-evaluation of
+whatever state came before. Consequence: the *last* remaining slot's own
+committed action was never reflected in any trajectory point, for any plan
+length — not a `t1`-past-horizon edge case, a gap in the underlying
+`simulate_forward` contract itself, present since Spec A/B (this change
+didn't introduce it, but was the first caller whose correctness actually
+depended on the terminal point being genuine). Confirmed independently
+before fixing: the R-69 test above, run before this fix, actually reported
+resolver SoC **0.0** (the untouched initial value), not the 0.405 this
+entry's own first draft claimed — the test's `!=` assertion still passed,
+but for the wrong reason, and would have kept passing forever even after
+R-69 was fixed, silently hiding both problems.
+
+**Fix:** `simulated_trajectory` now appends one trailing sentinel setpoint at
+the last remaining slot's own `end` (holding its `kw`), so `simulate_forward`
+gets a genuine `windows(2)` pair covering that slot's real duration.
+Proven not to disturb `insert_simulated_points`/`build_forecast_frames`:
+every point index `0..future_slots.len()-1` is byte-identical to before (the
+new step only adds one *extra* trailing point beyond `future_slots.len()`,
+which `insert_simulated_points`'s existing bounds check already skips); the
+existing `battery_capability_evolves_across_slots_not_flat_copied` test
+confirms this. `resolve_plan_state_at`'s boundary list gained a matching
+trailing entry (the last slot's `end`), so `t1` at or past the true horizon
+end now correctly resolves to the genuine post-plan state instead of the
+second-to-last (action-not-yet-committed) one.
+`t1_past_the_last_slot_returns_the_last_available_state`'s anchor moved from
+the last slot's `start` to its `end` (the earlier anchor was itself now
+provably wrong — comparing two `t1`s that both legitimately have *different*
+right answers, not the same one), and a new
+`t1_at_the_last_slots_end_reflects_that_slots_own_committed_action` test
+pins the fix directly (soc unchanged before the slot's action, correctly
+advanced after it).
+
+**Verification.** Full Rust suite: 1278 passed, 0 failed (up from 1271 at
 the end of Spec C). VEN UI: 627/627, unaffected (no UI code touched). E2E on
 Node2: green (271 main scenarios + 8 `@isolated`, 0 failed, 0 flakes this
 run). Resilience on Node2: green (6/6). `cargo fmt`/`clippy -D warnings`,

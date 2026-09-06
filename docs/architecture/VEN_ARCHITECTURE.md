@@ -492,14 +492,25 @@ forecast error. For a future `t1`, `resolve_plan_state_at` shares
 `build_forecast_frames`' own per-asset trajectory computation (extracted into
 `simulated_trajectory`, called by both) rather than re-deriving it — the same
 "never two independent implementations of the same forecast" principle this
-whole master plan exists to enforce. A `t1` landing between two plan slot
-boundaries snaps down to the latest boundary at or before it (no
-interpolation); a `t1` past the plan's last remaining slot returns that last
-slot's state rather than panicking or extrapolating. `base_load` is included
-here even though `build_forecast_frames` itself skips it (base load
-contributes no flexibility to capability forecasts) — `assetMaxPower`'s own
-roster needs base load's state too, and the same generic path already works
-for it.
+whole master plan exists to enforce. `simulated_trajectory` appends one
+trailing sentinel setpoint beyond `future_slots` itself, at the last
+remaining slot's own `end` — without it, `Asset::simulate_forward`'s default
+body never applies a real step for the *last* setpoint in any schedule (its
+lone trailing point is a zero-duration re-evaluation, see
+`KEY_LEARNINGS.md`'s 2026-09-06 entry), so the last slot's own committed
+action would otherwise never be reflected in any point at all, for any plan
+length. This extra point is invisible to `build_forecast_frames`'s existing
+callers (`insert_simulated_points` already bounds-checks against
+`future_slots`, so it silently skips it) — confirmed unchanged via the
+pre-existing `battery_capability_evolves_across_slots_not_flat_copied` test.
+A `t1` landing between two plan slot boundaries snaps down to the latest
+boundary at or before it (no interpolation); a `t1` at or past the plan's
+true horizon end (the last slot's own `end`, not its `start`) returns the
+genuine post-plan state from that sentinel point, held constant beyond it
+rather than panicking or extrapolating. `base_load` is included here even
+though `build_forecast_frames` itself skips it (base load contributes no
+flexibility to capability forecasts) — `assetMaxPower`'s own roster needs
+base load's state too, and the same generic path already works for it.
 
 **PV is the one exception, by design, not oversight:** it always returns its
 current live state regardless of `t1`. `PvState::curtailment_source` reflects
