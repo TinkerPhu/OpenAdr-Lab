@@ -840,6 +840,19 @@ under Diagnostics → Capacity Forecast.
 curl -s http://Node1:8211/flexibility/capacity | python3 -m json.tool
 ```
 
+### View the forward site headroom forecast
+
+Per remaining plan slot, each asset's own **absolute** achievable import/export power (not a
+delta from what the plan currently has it doing) — "if every controllable asset went all-in on
+import/export at this future slot, what could the site achieve." Also visible in the VEN UI under
+Controller/History → Site Headroom, as a band between the absolute limits alongside the live
+grid-power line. See `tests/features/isolated/capacity_envelope_absolute_quantities.feature` for
+the scenario proving this end-to-end.
+
+```bash
+curl -s http://Node1:8211/flexibility/forecast | python3 -m json.tool
+```
+
 ---
 
 ## Quick Reference: What Each UI Section Shows

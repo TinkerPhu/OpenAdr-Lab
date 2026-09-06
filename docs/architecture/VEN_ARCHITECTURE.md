@@ -471,13 +471,14 @@ per-kind ceiling exists. `Physical` for PV means the true *uncurtailed* generati
 ceiling, not `capability()`'s already-curtailed value.
 
 `asset_max_power(asset, state, t1, t2, direction, tier) -> (power_kw, energy_kwh)`
-(`assets/max_power.rs`) is a thin composition over the two methods above plus
-`simulate_forward` — no new simulation logic. It is not yet called from production
-code: this change only builds and unit-tests the primitive (`#[allow(dead_code)]`,
-matching the staged-rollout precedent `ShiftableLoadAsset` used during Spec B).
-Wiring it into `capacity_forecast.rs`/`envelope_forecast.rs` — which is what will
-actually fix the PV/Heater bugs described above in the live Diagnostics/Controller
-charts — is Spec E's job (`docs/plans/asset-max-power-forecast-master-plan.md`).
+and `asset_max_power_series(asset, state, t1, t2_max, direction, tier) ->
+Vec<(elapsed_s, power_kw, cumulative_energy_kwh)>` (`assets/max_power.rs`) are thin
+compositions over the two methods above plus `simulate_forward` — no new simulation
+logic. `asset_max_power` is defined in terms of the series (its last point), built
+specifically so a caller sweeping many `t2` samples for a capacity curve doesn't
+re-walk the schedule from scratch per sample. Wired into the unified capacity/
+envelope engine — §3.0c below — which is what actually fixes the PV/Heater bugs
+described above in the live Diagnostics/Controller charts.
 
 ### 3.0b `planState(t1)` Resolver (`planstate-t1-resolver`, Spec D)
 
@@ -522,9 +523,68 @@ replay today's numbers, not produce a real forecast. A future reader should
 not assume this resolver predicts PV curtailment — it doesn't, and that's
 documented rather than silently wrong.
 
-Not yet called from production code — this change only builds and
-unit-tests the resolver (`#[allow(dead_code)]`); wiring it (and §3.0a's
-`asset_max_power`) into the unified capacity/envelope engine is Spec E's job.
+`resolve_plan_state_at` itself is not called by the unified engine (§3.0c) —
+that engine reuses `simulated_trajectory` directly, once per asset for the whole
+remaining horizon, rather than calling this per-`t1` resolver in a loop (which
+would redundantly re-walk the same trajectory for every `t1` requested). The
+resolver remains available (`#[allow(dead_code)]`) for a future caller that
+genuinely needs a single arbitrary `t1`, not a sweep.
+
+### 3.0c Unified Capacity/Envelope Engine (`unified-capacity-envelope-engine`, Spec E)
+
+`controller/capacity_envelope.rs` replaces `capacity_forecast.rs`'s sustained-
+commitment curve and `envelope_forecast.rs`'s plan-driven headroom trajectory
+with one engine, built on §3.0a/§3.0b's primitives — both existing UI consumers
+are fixed-axis slices of the same `(t1, t2, direction, tier)` domain:
+
+- **Capacity Forecast** (Diagnostics page) — `compute_site_capacity_curve`:
+  `t1 = now` fixed, sweep `t2` to the plan's own remaining horizon (falls back
+  to 48h with no active plan). Per-asset `asset_max_power_series` calls summed
+  onto their shared 60s grid, deduplicated into sparse `CapacityCurveStep`s.
+- **Site Headroom** (Controller/History) — `compute_site_headroom_forecast`:
+  `t2 = 0` fixed, sweep `t1` across the plan's remaining slots.
+  `simulated_trajectory` called once per asset, `max_effort_setpoint` read at
+  every slot's point for both directions.
+
+**PV is asset-kind-and-direction-special in both, by design, not oversight:**
+Import goes through `max_effort_setpoint` like every other asset (a trivial,
+always-correct `0.0` — the PV-Import bug's fix). Export keeps using the
+existing weather-driven `pv_frames`/`pv_ceiling_kw` resolution unchanged —
+§3.0a/§3.0b never modeled PV's time-varying weather forecast inside the
+`Asset` trait, so routing Export through the trait-based primitives would
+flatten its ceiling to a constant across the whole horizon, a real
+regression, not a unification.
+
+**`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
+import, negative = export — the same convention `max_effort_setpoint`/
+`capability()` use everywhere else), not the unsigned magnitude the deleted
+`capacity_forecast.rs` originally used. The unsigned conversion happens only
+at the actual external boundary that needs it —
+`report_intervals.rs::build_capacity_forecast_intervals`, for OpenADR's
+`STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER` payloads, which are
+direction-tagged by name and want a magnitude, floored per-direction (not a
+bare `.abs()`) so a legitimately net-importing Export-curve value reports
+`0.0` discharge capability rather than a false-positive magnitude.
+`SiteFlexibilityForecastSlot::up_kw`/`down_kw` stay unsigned magnitudes (two
+separate always-non-negative fields, matching the pre-existing
+`SiteFlexibilityEnvelope` convention) — a genuinely different shape,
+unaffected by the `CapacityCurve` sign question. One consequence of the
+signed model: a sustained Export commitment can legitimately report a
+*positive* (net-importing) value when a non-exportable contribution (base
+load's constant draw, or a non-interruptible `ShiftableLoadAsset` forced to
+keep drawing past its deadline) exceeds what's exportable — bounded above by
+`import_limit_kw`, symmetric with Import's own ceiling, not left unbounded.
+
+**Site Headroom's `up_kw`/`down_kw` are ABSOLUTE, not relative** — each
+asset's own `max_effort_setpoint` at its plan-forecasted state, summed; not a
+delta from the plan's own chosen dispatch (a real, documented behavior
+change from this type's original meaning). `compute_site_headroom_forecast`
+excludes a plugged-in EV past its live session's `departure_time`
+(`EvState::plugged` is never toggled by `step()`), the same exclusion
+`build_forecast_frames`'s own `include_at` closure provides for the
+capability-frame path — `compute_site_capacity_curve` does not need the
+equivalent, since its sustained-commitment model never projected a future
+departure either.
 
 ### 3.1 Generic Asset Model
 
