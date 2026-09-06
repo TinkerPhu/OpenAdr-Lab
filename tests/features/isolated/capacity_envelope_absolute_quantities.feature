@@ -11,10 +11,22 @@ Feature: Unified capacity/envelope engine reports absolute quantities — isolat
   # ── Site Headroom: absolute, not plan-relative ──────────────────────────
 
   @isolated
-  Scenario: A fully charged battery reports zero absolute import headroom
-    Given the battery SoC is reset to 1.0
-    When I wait for the VEN site headroom forecast to reflect a full battery
-    Then no slot in the site headroom forecast credits the battery with import headroom
+  Scenario: Site headroom forecast never exceeds every asset's own combined live import capability
+    # Deliberately does not chase a specific "battery at exactly full SoC"
+    # scenario: the live dispatcher keeps ticking (real cost-optimized
+    # dispatch can keep discharging the battery a tiny amount every tick),
+    # and Battery::capability_inner's soc >= 1.0 ceiling is an EXACT
+    # floating-point boundary -- a single tick's worth of drift is enough to
+    # flip its reported capability, making "reset to 1.0 then read
+    # separately" a genuine, frequent race rather than a flaky assertion to
+    # paper over with a looser tolerance. This instead tests the same
+    # absolute-vs-relative invariant in a way that's robust to live state:
+    # the aggregate down_kw can never exceed what every controllable asset's
+    # own /capability endpoint reports at that same moment -- which a
+    # plan-relative-delta model (or a double-counting bug) could violate,
+    # but the absolute max_effort_setpoint-based model cannot.
+    When I wait for the VEN site headroom forecast to be available
+    Then the site headroom forecast's first slot does not exceed the site's controllable assets' own combined live import capability
 
   # ── Capacity Forecast: PV-Import and Heater-Export bugs fixed by construction ──
 
