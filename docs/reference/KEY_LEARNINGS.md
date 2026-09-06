@@ -1588,3 +1588,37 @@ capability method already has the right answer before writing new
 asset-specific logic — a second bespoke computation of the same fact is a
 likely source of the two computations quietly diverging, even when both were
 written by people who believed they were being appropriately kind-specific.
+
+## A `windows(2)`-style trajectory's trailing point can silently drop the last real action (planstate-t1-resolver, 2026-09-06)
+
+`Asset::simulate_forward`'s default body (`assets/asset_trait.rs`) steps
+across `setpoints.windows(2)` pairs, then appends one final point via a
+zero-duration re-evaluation of whatever state the loop left behind. That
+final point was never meant to represent a new action — it exists so
+`points.len() == setpoints.len()`, giving every setpoint a matching
+timestamped point. But a caller that reads `points.last()` expecting "the
+state after everything in this schedule happened" gets exactly the state
+*before* the last setpoint's own action, silently, for any schedule length
+(a 1-setpoint schedule especially — its only point is the untouched initial
+state). This wasn't a defect in `simulate_forward` itself (it does exactly
+what its own callers, `build_forecast_frames` included, actually needed —
+"pair a slot's start with the setpoint driving it"); it only became a defect
+once a new caller (`resolve_plan_state_at`, `planstate-t1-resolver`) needed a
+different question answered ("what's the state after the plan finishes") from
+the same primitive. Found by a fresh reviewer, not by the four test suites —
+the change's own R-69 tripwire test happened to still assert something true
+(`0.0 != 0.45`) for a completely wrong reason, so it passed without ever
+exercising the intended computation.
+
+**How to apply:** before reusing a `windows(2)`-shaped trajectory/stepping
+utility for a *new* question the original callers never asked, check what
+its trailing element actually represents — "one point per input" and "the
+state after every input has taken effect" are different guarantees, and a
+utility built for the first can silently fail the second. When adding a test
+that compares two computed values for inequality (`assert!(a != b)` or
+`.abs() > threshold`) as a placeholder for "this exercises a known gap," also
+verify *why* they're unequal — two values that differ for a reason unrelated
+to what the test claims to check will still pass, and can mask the real
+defect indefinitely (worked example: this session's R-69 test kept passing
+whether the intended computation ran or not, since "0.0" and "the untouched
+initial state" are unequal from *any* nonzero target for unrelated reasons).

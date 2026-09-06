@@ -122,6 +122,19 @@ pub fn build_forecast_frames(
 /// place that runs this simulation — `planstate-t1-resolver`'s D1: two
 /// independent implementations of "the plan-driven forecast" is exactly what
 /// this master plan exists to remove.
+///
+/// The schedule carries one extra trailing sentinel point beyond
+/// `future_slots` itself, holding the last slot's own setpoint for its own
+/// real duration (`last_slot.end`). Without it, `Asset::simulate_forward`'s
+/// default body never applies a real, non-zero-`dt` step for the *last*
+/// setpoint in any schedule — its trailing point is a zero-duration
+/// re-evaluation of whatever state came before, so the last remaining
+/// slot's own committed action would otherwise never be reflected in any
+/// returned point, for any caller, regardless of how many slots there are
+/// (confirmed via review while implementing `resolve_plan_state_at`, which
+/// needs exactly that "after the last slot completes" state; `future_slots`
+/// itself is bounds-checked by every existing caller, so this extra point
+/// is silently ignored where it isn't wanted).
 fn simulated_trajectory(
     entry: &super::AssetEntry,
     cfg: &dyn Asset,
@@ -133,7 +146,7 @@ fn simulated_trajectory(
         state: &entry.state,
         history: &entry.history,
     };
-    let schedule: Vec<(DateTime<Utc>, f64)> = future_slots
+    let mut schedule: Vec<(DateTime<Utc>, f64)> = future_slots
         .iter()
         .map(|s| {
             (
@@ -142,6 +155,9 @@ fn simulated_trajectory(
             )
         })
         .collect();
+    if let (Some(last_slot), Some(&(_, last_kw))) = (future_slots.last(), schedule.last()) {
+        schedule.push((last_slot.end, last_kw));
+    }
     handle.simulate_forward(&entry.state, &schedule)
 }
 
@@ -287,16 +303,27 @@ pub fn resolve_plan_state_at(
         return live_snapshot();
     }
 
+    // One boundary per `future_slots` entry (its `start`, matching
+    // `traj.points[i]`'s "state before this slot's own action" semantics)
+    // plus one trailing boundary at the last slot's own `end` — matching
+    // `simulated_trajectory`'s appended sentinel point, the one point that
+    // genuinely reflects the state AFTER the last remaining slot's action
+    // completes. Without this trailing boundary, `t1` at or past the plan's
+    // true horizon end would resolve to the second-to-last point instead
+    // (the last slot's own action still uncommitted), silently
+    // under-reporting the plan's real effect.
+    let boundaries: Vec<DateTime<Utc>> = future_slots
+        .iter()
+        .map(|s| s.start)
+        .chain(future_slots.last().map(|s| s.end))
+        .collect();
     sim.iter_assets()
         .map(|(entry, cfg)| {
             if cfg.asset_type_str() == "pv" {
                 return (entry.id.clone(), entry.state.clone());
             }
             let traj = simulated_trajectory(entry, cfg, &future_slots);
-            let idx = future_slots
-                .iter()
-                .rposition(|s| s.start <= t1)
-                .unwrap_or(0);
+            let idx = boundaries.iter().rposition(|&b| b <= t1).unwrap_or(0);
             let state = traj
                 .points
                 .get(idx)
@@ -872,6 +899,10 @@ mod tests {
             resolved.contains_key(ASSET_BASE_LOAD),
             "base_load must be present in the resolved state map"
         );
+        match &resolved[ASSET_BASE_LOAD] {
+            AssetState::BaseLoad(s) => assert_eq!(s.actual_power_kw, 0.7),
+            other => panic!("expected AssetState::BaseLoad, got {other:?}"),
+        }
     }
 
     #[test]
@@ -928,16 +959,65 @@ mod tests {
             slot.planned_kw_by_asset
                 .insert(ASSET_BATTERY.to_string(), 5.0);
         }
-        let last_slot_start = plan.slots.last().unwrap().start;
-        let far_future = last_slot_start + Duration::hours(10);
+        // The true horizon end is the last slot's own END, not its start --
+        // between those two timestamps there's a whole slot's worth of real,
+        // distinct information (the last slot's own committed action), so
+        // that's the earliest point "past the last slot" genuinely means.
+        let last_slot_end = plan.slots.last().unwrap().end;
+        let far_future = last_slot_end + Duration::hours(10);
 
-        let at_last_slot = resolve_plan_state_at(&sim, &plan, last_slot_start, now);
+        let at_horizon_end = resolve_plan_state_at(&sim, &plan, last_slot_end, now);
         let past_horizon = resolve_plan_state_at(&sim, &plan, far_future, now);
 
         assert_eq!(
-            battery_soc(&at_last_slot[ASSET_BATTERY]),
+            battery_soc(&at_horizon_end[ASSET_BATTERY]),
             battery_soc(&past_horizon[ASSET_BATTERY]),
-            "a t1 past the plan's horizon must return the same state as its last remaining slot, not panic or extrapolate"
+            "a t1 past the plan's true horizon end must return the same state as the horizon end itself, not panic or extrapolate"
+        );
+    }
+
+    #[test]
+    fn t1_at_the_last_slots_end_reflects_that_slots_own_committed_action() {
+        // Found during review: `Asset::simulate_forward`'s default body only
+        // applies a real step for a `windows(2)` PAIR of setpoints -- its
+        // lone trailing point is a zero-duration re-evaluation, so without
+        // `simulated_trajectory`'s appended sentinel, the LAST remaining
+        // slot's own action would never be reflected in any point at all,
+        // for any plan length. This pins the fix: a t1 at the last slot's
+        // start (action not yet committed) must differ from a t1 at that
+        // same slot's end (action committed), by exactly that slot's own
+        // effect -- not be silently identical.
+        let now = Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 1.0,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let mut plan = make_plan(900, 1, now); // single 15-min slot
+        plan.slots[0]
+            .planned_kw_by_asset
+            .insert(ASSET_BATTERY.to_string(), 5.0); // 5 kW * 0.25h = 1.25 kWh -> +0.125 soc
+
+        let at_start = resolve_plan_state_at(&sim, &plan, plan.slots[0].start, now);
+        let at_end = resolve_plan_state_at(&sim, &plan, plan.slots[0].end, now);
+
+        assert_eq!(
+            battery_soc(&at_start[ASSET_BATTERY]),
+            0.5,
+            "before the slot's own action, soc must still be the live initial value"
+        );
+        assert!(
+            (battery_soc(&at_end[ASSET_BATTERY]) - 0.625).abs() < 1e-9,
+            "after the slot's own action, soc must reflect its committed charge (0.5 + 0.125 = 0.625), got {}",
+            battery_soc(&at_end[ASSET_BATTERY])
         );
     }
 
