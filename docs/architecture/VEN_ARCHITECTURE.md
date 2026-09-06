@@ -479,6 +479,42 @@ Wiring it into `capacity_forecast.rs`/`envelope_forecast.rs` — which is what w
 actually fix the PV/Heater bugs described above in the live Diagnostics/Controller
 charts — is Spec E's job (`docs/plans/asset-max-power-forecast-master-plan.md`).
 
+### 3.0b `planState(t1)` Resolver (`planstate-t1-resolver`, Spec D)
+
+`resolve_plan_state_at(sim, plan, t1, now) -> HashMap<String, AssetState>`
+(`simulator/forecast.rs`) answers "if the active plan holds, what state is
+each asset in at a future `t1`?" — the starting state `asset_max_power` (§3.0a)
+needs to answer "what's this asset's own extreme, held from `t1` for `t2`."
+
+`t1` at or before `now` returns every asset's live `SimState` value exactly,
+with no simulation — the one point where ground truth exists must not carry
+forecast error. For a future `t1`, `resolve_plan_state_at` shares
+`build_forecast_frames`' own per-asset trajectory computation (extracted into
+`simulated_trajectory`, called by both) rather than re-deriving it — the same
+"never two independent implementations of the same forecast" principle this
+whole master plan exists to enforce. A `t1` landing between two plan slot
+boundaries snaps down to the latest boundary at or before it (no
+interpolation); a `t1` past the plan's last remaining slot returns that last
+slot's state rather than panicking or extrapolating. `base_load` is included
+here even though `build_forecast_frames` itself skips it (base load
+contributes no flexibility to capability forecasts) — `assetMaxPower`'s own
+roster needs base load's state too, and the same generic path already works
+for it.
+
+**PV is the one exception, by design, not oversight:** it always returns its
+current live state regardless of `t1`. `PvState::curtailment_source` reflects
+whatever external decision is active *right now* (manual command, plan,
+capacity limiter, arbiter, comms-loss) — no model anywhere in this codebase
+forecasts how it will change over a horizon, and running PV through
+`simulate_forward` with today's frozen irradiance/weather config would only
+replay today's numbers, not produce a real forecast. A future reader should
+not assume this resolver predicts PV curtailment — it doesn't, and that's
+documented rather than silently wrong.
+
+Not yet called from production code — this change only builds and
+unit-tests the resolver (`#[allow(dead_code)]`); wiring it (and §3.0a's
+`asset_max_power`) into the unified capacity/envelope engine is Spec E's job.
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.
