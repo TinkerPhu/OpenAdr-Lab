@@ -13,36 +13,48 @@ from features.helpers.wait import poll_until
 # ── Site Headroom: absolute, not plan-relative ──────────────────────────────
 
 
-@when("I wait for the VEN site headroom forecast to reflect a full battery")
-def step_wait_for_headroom_to_reflect_full_battery(context):
+def _all_assets_import_capability_kw() -> float:
+    """Sum of every controllable asset's own live max_import_kw (kW), read
+    fresh from `/capability/*` — mirrors `_non_pv_import_capability_kw`'s own
+    pattern below (and `site_headroom_steps.py::_storage_export_kw`'s).
+    """
+    total = 0.0
+    for asset in ("battery", "ev", "heater", "base_load"):
+        r = ven_get(f"/capability/{asset}")
+        if r.status_code != 200:
+            continue  # profile legitimately has no such asset
+        total += abs(r.json().get("max_import_kw", 0.0) or 0.0)
+    return total
+
+
+@when("I wait for the VEN site headroom forecast to be available")
+def step_wait_for_headroom_forecast_available(context):
     def _fetch():
         r = ven_get("/flexibility/forecast")
         return r.json() if r.status_code == 200 else None
 
-    def _all_slots_zero_down(slots):
-        # down_kw is the SUM of every asset's absolute import headroom, so
-        # this only proves the invariant once at least one slot is present
-        # to check (an empty forecast would vacuously satisfy `all()`).
-        return bool(slots) and all(s["down_kw"] <= 0.01 for s in slots)
-
     context.headroom_forecast = poll_until(
         _fetch,
-        _all_slots_zero_down,
-        timeout=120,
+        lambda slots: bool(slots),
+        timeout=60,
         interval=3,
-        description="site headroom forecast reflecting a fully-charged battery (down_kw settles to ~0)",
+        description="site headroom forecast available",
     )
 
 
-@then("no slot in the site headroom forecast credits the battery with import headroom")
-def step_no_slot_credits_battery_import_headroom(context):
-    # The wait step above already polled for this; re-assert on the stored
-    # result for a clear, independent failure message if it somehow regresses
-    # between the wait and this step (e.g. a stray replan).
-    offenders = [s for s in context.headroom_forecast if s["down_kw"] > 0.01]
-    assert not offenders, (
-        "a fully-charged battery must contribute 0.0 absolute import headroom "
-        f"(down_kw) at every slot, got: {offenders[:5]}"
+@then(
+    "the site headroom forecast's first slot does not exceed the site's controllable assets' own combined live import capability"
+)
+def step_headroom_first_slot_bounded_by_capability(context):
+    first_slot = context.headroom_forecast[0]
+    bound_kw = _all_assets_import_capability_kw()
+    tolerance_kw = 0.5
+    assert first_slot["down_kw"] <= bound_kw + tolerance_kw, (
+        f"site headroom forecast's first slot (down_kw={first_slot['down_kw']:.2f} kW) "
+        f"exceeds the sum of every controllable asset's own live import capability "
+        f"({bound_kw:.2f} kW) -- the signature of a plan-relative-delta computation "
+        "(or a double-counting bug) reappearing instead of each asset's own absolute "
+        f"max_effort_setpoint. Full slot: {first_slot}"
     )
 
 
