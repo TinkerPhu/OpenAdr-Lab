@@ -61,13 +61,20 @@ def step_wait_for_headroom_forecast(context):
 
 
 def _planned_sheddable_kw_by_ts() -> dict:
-    """Per-slot consumption the plan intends to draw, which shedding could free.
+    """Per-slot consumption the plan intends to draw (kW), read from `/plan` —
+    an endpoint independent of the headroom computation.
 
-    `up_kw` is the sum over assets of `planned_kw - cap_max_export_kw`, so
-    turning off a heater that the plan has running is genuine export-direction
-    headroom, exactly like discharging the battery. Read from `/plan` — an
-    endpoint independent of the headroom computation — so this stays a
-    cross-check rather than a restatement of the same arithmetic.
+    Historical note: before `unified-capacity-envelope-engine` (Spec E),
+    `up_kw` was `planned_kw - cap_max_export_kw` (a delta relative to the
+    plan's own chosen dispatch), so a heater the plan had running genuinely
+    added to `up_kw` if shed. Since Spec E, `up_kw` is each asset's own
+    ABSOLUTE `max_effort_setpoint(Export)` — heater's is always `0.0` (it
+    cannot export at all, one of the two bugs Spec C/E fixed by
+    construction), so it never contributes to `up_kw` regardless of what's
+    planned. This function's result is now a genuinely looser upper bound
+    than before (real `up_kw` can only be smaller, never larger, than it was
+    under the old model) — the invariant below still holds, just not as
+    tightly as its original design intended.
     """
     r = ven_get("/plan")
     if r.status_code != 200:
