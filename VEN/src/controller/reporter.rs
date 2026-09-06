@@ -248,10 +248,11 @@ pub fn build_measurement_reports_for_active_events(
 ///   - STORAGE_CHARGE_STATE / STORAGE_CHARGE_LEVEL → EV SoC point-in-time at interval end
 ///   - USAGE_FORECAST (WP3.6, §8.8) → planned net site power per future plan
 ///     slot, straight from the active plan (None if no plan adopted yet)
-///   - STORAGE_MAX_CHARGE_POWER / STORAGE_MAX_DISCHARGE_POWER
-///     (`openspec/changes/flexibility-capacity-forecast/`) → the sustained-commitment capacity
-///     curve (`controller::capacity_forecast`), one interval per curve step — deliberately NOT
-///     routed through the generic `!obligation.historical => build_forecast_intervals(active_plan,
+///   - STORAGE_MAX_CHARGE_POWER / STORAGE_MAX_DISCHARGE_POWER → the
+///     sustained-commitment capacity curve
+///     (`controller::capacity_envelope::compute_site_capacity_curve`), one
+///     interval per curve step — deliberately NOT routed through the generic
+///     `!obligation.historical => build_forecast_intervals(active_plan,
 ///     ..)` fallback below, since that reads plan slots, not this closed-form curve.
 ///
 /// Returns None if the obligation has no event_id or program_id.

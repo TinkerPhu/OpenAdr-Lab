@@ -1,12 +1,14 @@
 /**
- * SiteHeadroomChart — past-band LOCF fix
+ * SiteHeadroomChart — past-band LOCF continuity
  *
- * The dense (~1s cadence) flexibility history ring and the much sparser
- * resampled grid-timeline points almost never land on the same timestamp.
- * The band's lower/upper accessors require gridPowerKw AND upKw/downKw
- * non-null on the SAME row — if gridPowerKw isn't forward-filled the same
- * way upKw/downKw are, the band has essentially no row where both are
- * non-null, so it never renders anything for the past.
+ * The band's lower/upper accessors (`-up_kw`, `down_kw` — absolute achievable
+ * power, `unified-capacity-envelope-engine` Spec E) depend only on `upKw`/
+ * `downKw` being present on a row, not on `gridPowerKw` (unlike before Spec
+ * E, when the band was a delta relative to the grid-power line and needed
+ * both present on the same row). This test still confirms `upKw`/`downKw`
+ * are themselves forward-filled continuously across the dense flexibility
+ * history ring's timestamps, which almost never land exactly on a
+ * resampled grid-timeline point.
  */
 import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -176,9 +178,10 @@ describe("SiteHeadroomChart — forecast prop feeds the future band with real pe
     const futureRow2 = data.find((row) => row.ts === nowMs + 600_000);
     expect(futureRow1).toBeDefined();
     expect(futureRow2).toBeDefined();
-    // gridPowerKw is flat at 2.0 here, so lower = gridPowerKw - up_kw distinguishes the slots.
-    expect(band.lower(futureRow1!)).toBeCloseTo(2.0 - 3.0);
-    expect(band.lower(futureRow2!)).toBeCloseTo(2.0 - 5.0);
+    // lower = -up_kw (absolute max Export, negative-signed) -- independent of
+    // gridPowerKw now (unified-capacity-envelope-engine, Spec E).
+    expect(band.lower(futureRow1!)).toBeCloseTo(-3.0);
+    expect(band.lower(futureRow2!)).toBeCloseTo(-5.0);
     expect(band.lower(futureRow1!)).not.toBeCloseTo(band.lower(futureRow2!)!);
   });
 });

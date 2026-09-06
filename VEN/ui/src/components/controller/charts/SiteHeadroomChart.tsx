@@ -13,7 +13,7 @@ import {
   roundedTimeTicks,
   formatPowerTick,
 } from "../../charts/axisDomain";
-import { formatSignedPowerValue, formatPowerValue } from "../../charts/unitFormat";
+import { formatSignedPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
@@ -37,10 +37,16 @@ interface SiteHeadroomChartProps {
 }
 
 /**
- * BL-43: live site-level flexibility (`SiteFlexibilityEnvelope`, VEN-derived, valid only for
- * the current instant) plotted as a shaded band around the grid-power line — distinct from
- * `TariffEnvelopeChart`'s Dynamic Operating Envelope (`IMPORT/EXPORT_CAPACITY_LIMIT`), which
- * is a VTN-announced forward *schedule*, not a live headroom value.
+ * BL-43 / `unified-capacity-envelope-engine` (Spec E): live site-level flexibility
+ * plotted as a band alongside the grid-power line. `up_kw`/`down_kw` are now ABSOLUTE
+ * achievable power (each asset's own `max_effort_setpoint`, summed) rather than a delta
+ * from the currently-planned dispatch, so the band is anchored to those absolute limits
+ * directly — `-up_kw` (max achievable Export, negative-signed) to `down_kw` (max
+ * achievable Import, positive-signed) — not to the grid-power line the way it was before
+ * this change. The grid-power line itself is unchanged, still shown for reference.
+ * Distinct from `TariffEnvelopeChart`'s Dynamic Operating Envelope
+ * (`IMPORT/EXPORT_CAPACITY_LIMIT`), which is a VTN-announced forward *schedule*, not a
+ * live/forecast headroom value.
  */
 export function SiteHeadroomChart({
   gridTimeline,
@@ -62,6 +68,8 @@ export function SiteHeadroomChart({
     ts: p.ts,
     values: { gridPowerKw: p.values?.["power_kw"] ?? null },
   }));
+  // upKw/downKw hold the ABSOLUTE max-export/max-import limits directly now
+  // (design.md D5/D6) -- no longer combined with gridPowerKw to form the band.
   const upSamples: NamedSample[] = history.map((s) => ({
     ts: new Date(s.ts).getTime(),
     key: "upKw",
@@ -91,15 +99,11 @@ export function SiteHeadroomChart({
     ...forecastUpSamples,
     ...forecastDownSamples,
   ]);
-  // LOCF now only bridges minor timestamp misalignment between the headroom
-  // samples (history/forecast) and the coarser-resolution grid timeline —
-  // gridPowerKw itself must be filled too (not just upKw/downKw): the band's
-  // lower/upper accessors require gridPowerKw non-null on the SAME row as
-  // upKw/downKw, and since real grid rows are sparse relative to the dense
-  // history rows, leaving gridPowerKw real-only meant almost no row ever had
-  // both — the band rendered nothing. Consistent with the line's own default
-  // `type="stepAfter"` rendering: a forward-filled step value is exactly what
-  // that shape already implies.
+  // LOCF bridges minor timestamp misalignment between the headroom samples
+  // (history/forecast) and the coarser-resolution grid timeline. gridPowerKw
+  // is filled too so the line renders without gaps at the merged timestamps
+  // the headroom samples introduce -- the band itself no longer depends on
+  // gridPowerKw being present on the same row (it reads upKw/downKw alone).
   const filled = locfFillKeys(merged, ["upKw", "downKw", "gridPowerKw"]);
   const clipped = clipRowsToWindow(filled, tMin, tMax);
   const chartData = ensureNonEmptyRows(clipped, tMin, tMax);
@@ -107,12 +111,8 @@ export function SiteHeadroomChart({
   const domain = minSpanDomain(
     chartData.flatMap((row) => [
       row.values?.gridPowerKw,
-      row.values?.gridPowerKw != null && row.values?.upKw != null
-        ? row.values.gridPowerKw - row.values.upKw
-        : null,
-      row.values?.gridPowerKw != null && row.values?.downKw != null
-        ? row.values.gridPowerKw + row.values.downKw
-        : null,
+      row.values?.upKw != null ? -row.values.upKw : null,
+      row.values?.downKw ?? null,
     ]),
     MIN_POWER_SPAN_KW
   );
@@ -142,18 +142,13 @@ export function SiteHeadroomChart({
       series={series}
       bands={[
         {
-          key: "Headroom [kW]",
+          key: "Achievable range [kW]",
           axisId: "power",
-          lower: (row) =>
-            row.values?.["gridPowerKw"] != null && row.values?.["upKw"] != null
-              ? row.values["gridPowerKw"] - row.values["upKw"]
-              : null,
-          upper: (row) =>
-            row.values?.["gridPowerKw"] != null && row.values?.["downKw"] != null
-              ? row.values["gridPowerKw"] + row.values["downKw"]
-              : null,
+          lower: (row) => (row.values?.["upKw"] != null ? -row.values["upKw"] : null),
+          upper: (row) => row.values?.["downKw"] ?? null,
           color: "#8BC34A",
-          formatter: (lower, upper) => `${formatPowerValue(lower)} – ${formatPowerValue(upper)}`,
+          formatter: (lower, upper) =>
+            `${formatSignedPowerValue(lower)} – ${formatSignedPowerValue(upper)}`,
         },
       ]}
       nowMs={nowMs}

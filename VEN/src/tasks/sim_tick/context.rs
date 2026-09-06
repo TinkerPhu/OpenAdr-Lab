@@ -53,13 +53,14 @@ pub(crate) struct TickContext {
     pub overlay_enabled: bool,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
-    /// Live device-session state for the site-headroom forecast
-    /// (`simulator::forecast::build_forecast_frames`) — read fresh here
-    /// (pre-lock, async) rather than from the plan, since a shiftable
-    /// load's window/duration is a live scheduling fact, not a planning
-    /// result.
+    /// Live EV session state for the site-headroom forecast
+    /// (`controller::capacity_envelope::compute_site_headroom_forecast`) —
+    /// read fresh here (pre-lock, async) so a session's departure time is a
+    /// live scheduling fact, not a planning result. Shiftable loads no
+    /// longer need a separate field here (`shiftable-load-as-asset`,
+    /// Spec B): they're real `SimState` asset entries, read directly by the
+    /// forecast functions via `sim.iter_assets()`.
     pub ev_session: Option<crate::entities::device_session::EvSession>,
-    pub shiftable_loads: Vec<crate::entities::device_session::ShiftableLoad>,
     pub comms_loss: Option<CommsLossState>,
 }
 
@@ -144,7 +145,6 @@ pub(crate) async fn resolve_tick_context(
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
         ev_session: state.ev_session().await,
-        shiftable_loads: state.shiftable_loads().await,
         comms_loss,
     }
 }
