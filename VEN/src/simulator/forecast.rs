@@ -1,5 +1,5 @@
 //! Forward-looking per-asset forecast frames, primarily for PV's weather-
-//! driven ceiling (`controller::capacity_envelope`'s Capacity Forecast and
+//! driven ceiling (`controller::capacity_headroom`'s Capacity Forecast and
 //! Site Headroom functions both still read PV frames from here — see that
 //! module's doc for why PV alone stays on this path). Infra-side
 //! (allowed to touch `Asset`/`AssetConfig`, unlike `controller/`): re-simulates
@@ -138,7 +138,7 @@ pub fn build_forecast_frames(
 /// itself is bounds-checked by every existing caller, so this extra point
 /// is silently ignored where it isn't wanted).
 ///
-/// `pub(crate)` (not private) so `controller::capacity_envelope`
+/// `pub(crate)` (not private) so `controller::capacity_headroom`
 /// (`unified-capacity-envelope-engine`, Spec E) can compute each asset's
 /// per-slot trajectory once and read every slot's point off it, rather than
 /// calling `resolve_plan_state_at` once per slot (which would redundantly

@@ -1,17 +1,27 @@
-//! Unified capacity/envelope engine (`unified-capacity-envelope-engine`,
+//! Unified capacity/headroom engine (`unified-capacity-envelope-engine`,
 //! Spec E of the asset-max-power-forecast master plan). Replaces
 //! `capacity_forecast.rs`/`envelope_forecast.rs`'s two independent
 //! computations with one, built on Spec C's `Asset::max_effort_setpoint`/
 //! `assets::asset_max_power_series` and Spec D's
-//! `simulator::forecast::simulated_trajectory` — both existing UI consumers
-//! (Diagnostics Capacity Forecast, Controller/History Site Headroom) are
-//! fixed-axis slices of the same underlying `(t1, t2, direction, tier)`
-//! domain:
+//! `simulator::forecast::simulated_trajectory` — the *forecast* half of the
+//! Controller/History Site Headroom UI panel and the Diagnostics Capacity
+//! Forecast panel are fixed-axis slices of the same underlying
+//! `(t1, t2, direction, tier)` domain:
 //!
 //! - **Capacity Forecast** — `t1 = now` fixed, sweep `t2` from 0 to the
 //!   plan's own horizon (`compute_site_capacity_curve`).
-//! - **Site Headroom** — `t2 = 0` fixed, sweep `t1` across the plan's
-//!   remaining slots (`compute_site_headroom_forecast`).
+//! - **Site Headroom (forecast)** — `t2 = 0` fixed, sweep `t1` across the
+//!   plan's remaining slots (`compute_site_headroom_forecast`).
+//!
+//! A third fixed slice of the same domain — `t1 = now` only, `t2 = 0` — feeds
+//! the *history/live* half of the same Site Headroom UI panel:
+//! `controller::site_headroom::compute_site_headroom`. It was originally a
+//! separate, differently-named function (`compute_envelope`) left on a stale
+//! relative-delta model after this module's own Spec E rewrite — a real,
+//! user-reported bug (see that module's doc comment and
+//! `docs/reference/KEY_LEARNINGS.md`). Naming it in this domain's own family
+//! (not "envelope") is exactly what surfaced the gap; don't let a future
+//! addition to this same UI panel go unnoticed the same way again.
 //!
 //! **PV is asset-kind-and-direction-special, by design** (design.md D1, not
 //! an oversight): PV's Import contribution goes through
@@ -132,7 +142,10 @@ pub fn compute_site_capacity_curve(
 /// left of an earlier version of this function that also converted
 /// `CapacityCurve`'s own producers, after a failing test caught exactly this
 /// class of bug once already.
-fn magnitude_kw(power_kw: f64, direction: CommitmentDirection) -> f64 {
+///
+/// `pub(crate)`: also reused by `controller::site_headroom::compute_site_headroom`,
+/// the `t1 = now`-only sibling of `compute_site_headroom_forecast` below.
+pub(crate) fn magnitude_kw(power_kw: f64, direction: CommitmentDirection) -> f64 {
     debug_assert!(
         match direction {
             CommitmentDirection::Import => power_kw >= -1e-9,

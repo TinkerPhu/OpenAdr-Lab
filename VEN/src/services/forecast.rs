@@ -6,12 +6,11 @@ use chrono::{DateTime, Utc};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::controller::simulator_port::SimSnapshot;
 use crate::controller::{HistoryPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
 use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind, PlanHistorySample};
-use crate::entities::plan::Plan;
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
 
@@ -39,13 +38,19 @@ pub async fn finish_plan_cycle(
         &cycle.plan,
     )
     .await;
-    let sim_snap = sim.lock().await.to_sim_snapshot();
+    // Computed synchronously while the lock is held, then dropped immediately —
+    // never hold a SimState lock across an `.await` (publish_post_cycle_state
+    // below awaits on state/weather).
+    let site_headroom = {
+        let guard = sim.lock().await;
+        crate::controller::site_headroom::compute_site_headroom(&guard, wall_now)
+    };
     // Fetched once and shared: both publish_post_cycle_state and the forecast-accuracy
     // capture below need it, and it's an RwLock read + full HashMap clone.
     let heuristics = state.asset_heuristics().await;
     publish_post_cycle_state(
         state,
-        &sim_snap,
+        site_headroom,
         &cycle.plan,
         wall_now,
         weather,
@@ -167,15 +172,14 @@ pub fn record_forecast_accuracy_samples(
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_post_cycle_state(
     state: &AppState,
-    sim_snap: &SimSnapshot,
+    site_headroom: SiteFlexibilityEnvelope,
     adopted_plan: &Plan,
     wall_now: DateTime<Utc>,
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
     heuristics: &HashMap<String, AssetHeuristics>,
 ) {
-    let env = crate::controller::envelope::compute_envelope(sim_snap, wall_now);
-    state.set_site_envelope(env).await;
+    state.set_site_envelope(site_headroom).await;
 
     let mut forecasts = build_asset_forecasts(adopted_plan, wall_now);
     // WP5.2 (BL-14): add heuristic-sourced forecasts for assets that never

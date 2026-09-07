@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::controller::capacity_envelope::{
+use crate::controller::capacity_headroom::{
     compute_site_capacity_curve, compute_site_headroom_forecast,
 };
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
@@ -16,7 +16,7 @@ use crate::simulator::SimState;
 /// Both forward-looking signals for one tick, sharing a single
 /// `build_forecast_frames` call for PV's weather-driven frames (the one
 /// input both `compute_site_headroom_forecast` and `compute_site_capacity_curve`
-/// still need from it — see `controller::capacity_envelope`'s module doc for
+/// still need from it — see `controller::capacity_headroom`'s module doc for
 /// why PV stays on this path while every other asset kind goes through the
 /// shared `Asset::max_effort_setpoint`/`asset_max_power_series` primitives
 /// instead). No active plan → empty forecast and PV-frame-less capacity

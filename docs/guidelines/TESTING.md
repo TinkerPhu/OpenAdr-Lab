@@ -235,7 +235,7 @@ New test surface unlocked per refactoring phase:
 | Phase | Functions that become testable |
 |-------|-------------------------------|
 | 1 — `tasks/` split | `detect_event_changes()` as a pure function; each tick phase in isolation |
-| 2 — `SimulatorPort` | `dispatcher::build_setpoints()`, `apply_surplus_ev_overlay()`, `absorber::apply_deviation_absorption()`, `monitor::record_tick()`, `envelope::compute_envelope()` |
+| 2 — `SimulatorPort` | `dispatcher::build_setpoints()`, `apply_surplus_ev_overlay()`, `absorber::apply_deviation_absorption()`, `monitor::record_tick()` (`site_headroom::compute_site_headroom()` moved off this port in a 2026-09-07 follow-up — it needs `&SimState`/`Asset::max_effort_setpoint` directly, not the flattened snapshot) |
 | 3 — `AssetMilpContext` + `milp/` split | `build_milp_inputs()`, `translate_solution()`, per-phase constraint builders |
 | 4 — Profile decoupled | All domain tests stop loading YAML; `BatteryParams::default()` replaces profile fixture wiring |
 | 5 — Services | Full use case suite per service (`PlanningService`, `UserRequestService`, `ObligationService`, `HvacService`) |

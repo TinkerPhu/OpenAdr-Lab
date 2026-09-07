@@ -824,7 +824,12 @@ curl -s http://Node1:8211/user-requests | python3 -m json.tool
 curl -s http://Node1:8211/plan | python3 -m json.tool
 ```
 
-### View flexibility envelopes
+### View live site headroom
+
+Each controllable asset's own **absolute** achievable import/export power right now (not a delta
+from its current dispatch) — "if every controllable asset went all-in on import/export this
+instant, what could the site achieve." Also visible in the VEN UI under Controller/History → Site
+Headroom, as the current point of the live band alongside the grid-power line.
 
 ```bash
 curl -s http://Node1:8211/flexibility | python3 -m json.tool
@@ -833,7 +838,7 @@ curl -s http://Node1:8211/flexibility | python3 -m json.tool
 ### View sustained-commitment capacity forecast
 
 How long the site could sustain a maximum import or export commitment starting now, and how much
-energy is behind it — distinct from the instantaneous envelope above. Also visible in the VEN UI
+energy is behind it — distinct from the instantaneous headroom above. Also visible in the VEN UI
 under Diagnostics → Capacity Forecast.
 
 ```bash

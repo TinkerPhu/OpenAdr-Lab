@@ -54,7 +54,7 @@ pub(crate) struct TickContext {
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
     /// Live EV session state for the site-headroom forecast
-    /// (`controller::capacity_envelope::compute_site_headroom_forecast`) —
+    /// (`controller::capacity_headroom::compute_site_headroom_forecast`) —
     /// read fresh here (pre-lock, async) so a session's departure time is a
     /// live scheduling fact, not a planning result. Shiftable loads no
     /// longer need a separate field here (`shiftable-load-as-asset`,

@@ -21,7 +21,7 @@ VEN/src/
   controller/
     milp_planner.rs   ← run_planner(), MilpSolution
     dispatcher.rs     ← setpoint overlay, AssetLedger
-    envelope.rs       ← compute_envelope(), SiteFlexibilityEnvelope
+    site_headroom.rs  ← compute_site_headroom(), SiteFlexibilityEnvelope
     openadr_interface.rs ← parse_rate_snapshots(), parse_capacity_state()
     ...
   simulator/

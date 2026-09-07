@@ -1714,3 +1714,39 @@ number of runtime instances. This is the same category of assumption
 Spec B's own `KEY_LEARNINGS.md` entry ("a 'generic' dispatch mechanism can
 still carry unstated singleton assumptions") already warned about in
 production code — this is the same trap surfacing in test code instead.
+
+## Unifying N call sites is only complete when you've found all N, not just the ones named in the plan (site-headroom follow-up, 2026-09-07)
+
+`unified-capacity-envelope-engine`'s own module doc claimed its rewrite covered
+both UI consumers of the site-headroom/capacity concept ("Diagnostics Capacity
+Forecast, Controller/History Site Headroom"). It only covered the *forecast*
+half of Site Headroom (`compute_site_headroom_forecast`); the chart's other
+half — `GET /flexibility/history`, produced every tick by a third, separate
+function (then named `compute_envelope`, in `envelope.rs`) — was never touched,
+left on the pre-unification relative-delta-from-current-dispatch model the rest
+of the engine had just replaced with absolute achievable-power quantities.
+`SiteHeadroomChart.tsx`'s band renders both series with the same absolute-value
+math, so the untouched half rendered as if it were absolute — a visually
+"upside-down"/grid-power-hugging band a user caught by eye, not by any test
+(all four suites were green; each individual function was internally correct,
+only their combination on one chart was wrong — the same shape of gap as this
+same spec's two composition bugs found by review, described above).
+
+**Root cause behind the miss:** the leftover function shared the word
+"envelope" with genuine OpenADR-spec/reporting-boundary concepts (Dynamic
+Operating Envelope, `*_RESERVATION_CAPACITY` payloads) that legitimately keep
+different (relative/reservation-request) semantics — a name that didn't read
+as "the same Site Headroom concept, one more source" the way `compute_envelope`
+should have. Renamed to `compute_site_headroom` (matching the UI's own label
+and its sibling `compute_site_headroom_forecast`) as part of the fix; the
+underlying reserved-word rule is now recorded in `.claude/CLAUDE.md`
+(`naming-envelope-vs-headroom`).
+
+**How to apply:** when a "unify X" change's own scope doc lists the specific
+call sites it covers, treat that list as a claim to verify, not a given —
+grep for every producer/consumer of the *concept*, not just the files the plan
+named, especially when a sibling function serving the same UI element has a
+different name. A consistent naming family (all siblings of one concept using
+the same root word) makes the next reader's grep actually find every instance;
+a stray synonym is exactly the kind of thing that lets a real gap hide in
+plain sight through a full green test suite.

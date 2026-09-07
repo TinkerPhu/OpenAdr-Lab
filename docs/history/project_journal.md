@@ -11702,3 +11702,103 @@ main scenarios + 10 `@isolated`, 0 failed). Resilience on Node2: green
 (6/6). Both re-run clean after each fix, including once with the full
 `features/isolated/` set together to specifically re-exercise the
 asset-contamination scenario the last fix targets.
+
+## 2026-09-07 — Site Headroom's history band was still relative-delta; renamed and fixed the missed third source (`unified-capacity-envelope-engine` follow-up)
+
+After deploying Spec E to Node1 and Node2 and reviewing the whole master-plan
+session, the user inspected the Controller UI's Site Headroom chart directly
+and reported two visual anomalies: the green "achievable range" band looked
+anchored to the black grid-power line, and in the history portion it appeared
+to peak positive at the exact moment grid power peaked negative — "upside
+down." Asked to analyze root cause carefully before touching code, explicitly
+warning against guessing a sign flip.
+
+Root cause, confirmed by reading code and git history rather than guessed:
+`SiteHeadroomChart.tsx` draws its one band from two backend sources —
+`history` (`GET /flexibility/history`, produced every tick by
+`compute_envelope()` in `envelope.rs`) and `forecast` (`GET
+/flexibility/forecast`, produced by `compute_site_headroom_forecast()` in
+`capacity_envelope.rs`, rewritten by Spec E to report absolute achievable
+power). Spec E's UI commit (`5a7e7ab4`) changed the chart's band math
+*globally*, for both series at once, from a relative-to-grid-power rendering
+to an absolute one — correct for the now-absolute forecast series, but
+`compute_envelope` (the `history` producer) was never touched by Spec E; its
+own design.md never mentions `envelope.rs`. Its formula was still
+`up_kw = (last_power_kw − max_export_kw).max(0.0)` /
+`down_kw = (max_import_kw − last_power_kw).max(0.0)` — a genuine delta from
+current dispatch, not an absolute limit. Drawing that delta as if it were
+absolute explains both anomalies without any sign flip: the band tracks the
+grid-power line because it's mathematically defined as a distance *from* it,
+and it inverts at extremes because an asset near its own export limit has
+`up_kw → 0` (nothing more to give) while `down_kw` (distance back up to the
+import limit) balloons.
+
+Checked whether this delta semantics might be intentional (e.g. matching
+`reporter.rs`'s `IMPORT_RESERVATION_CAPACITY`/`EXPORT_RESERVATION_CAPACITY`
+VTN payloads, which also read this struct) before touching anything — the
+OpenADR 3.1 spec text itself (line 1367) defines those payload types as
+"amount of additional capacity **requested**," a different concept entirely,
+and the code's up/down mapping onto those two payload types looks backwards
+regardless (`up_kw`→Import, `down_kw`→Export) — filed as R-76, a separate,
+pre-existing, out-of-scope issue, not evidence the delta semantics were
+deliberate.
+
+**Naming, not just logic:** the user separately observed that `envelope.rs`
+shared its name with genuine OpenADR-spec concepts (Dynamic Operating
+Envelope, `*_RESERVATION_CAPACITY`), inviting exactly this kind of mix-up, and
+that `capacity_envelope.rs` smelled of the same issue — while its sibling
+`compute_site_headroom_forecast` already matched the UI's own "Site Headroom"
+label. Renamed `envelope.rs`→`site_headroom.rs` (`compute_envelope`→
+`compute_site_headroom`) and `capacity_envelope.rs`→`capacity_headroom.rs` as
+part of this fix, and recorded the rule permanently in `.claude/CLAUDE.md`
+(`naming-envelope-vs-headroom`): "envelope" reserved for genuine OpenADR-spec/
+reporting-boundary concepts; internal HEMS headroom concepts named after what
+the UI calls them. A full project-wide "envelope" audit (~48 files) is
+deferred and tracked as R-77 — this fix only renamed the two files it was
+already touching.
+
+**Why a naive formula swap would have been wrong:** `compute_envelope`
+operated on the flattened `SimSnapshot`/`AssetSnapshot`, reading
+`capability()`-sourced fields. For PV, `capability()` returns a *point*
+capability (both import/export fields set to current power) — the old delta
+formula's zero-for-PV result was an artifact of that point-capability trick,
+not a real limit. Naively substituting `up_kw = -cap_max_export_kw` into that
+same loop would have made PV contribute its own live power to *both*
+directions, violating the `down_kw ≥ 0` invariant. The correct absolute
+quantity is `Asset::max_effort_setpoint()` (Spec C/E's primitive, with PV's
+existing correct override) — this requires `&SimState`/`sim.iter_assets()`,
+exactly like `compute_site_capacity_curve`/`compute_site_headroom_forecast`
+already use, not the flattened snapshot. `compute_site_headroom` (the renamed
+function) now calls it directly with `t1 = now` only (`t2 = 0`, the same
+degenerate case `compute_site_headroom_forecast` already takes via
+`max_effort_setpoint` rather than the full `asset_max_power_series`), skipping
+`base_load` (zero controllable degrees of freedom, same reasoning as its
+sibling) — no `pv_frames`/trajectory needed since this is an instant "now"
+quantity, not a future forecast.
+
+Threaded `&SimState` through both call sites: `tasks/sim_tick/finalize.rs`
+already had `sim` (`&mut SimState`) in scope; `services/forecast.rs`'s
+`publish_post_cycle_state` changed from taking `sim_snap: &SimSnapshot` to
+taking an already-computed `SiteFlexibilityEnvelope` directly, computed in its
+caller `finish_plan_cycle` synchronously while the `SimState` mutex guard is
+held (dropped immediately after) — preserving the existing discipline of never
+holding that lock across an `.await`.
+
+Rewrote `site_headroom.rs`'s test suite from hand-built `AssetSnapshot`
+fixtures to `SimState::from_params(&[AssetParams::...], now)`, matching
+`capacity_headroom.rs`'s own established pattern. Two tests' expected values
+changed, each with an explanatory comment: a non-v2g EV charging at max now
+reports `up=0.0` (cannot export at all, absolute) instead of the old
+`up=7.0` (a statement about current dispatch); PV now reports its live
+curtailment magnitude as genuine `up_kw` instead of `0.0` — a real behavior
+improvement, previously invisible to this endpoint entirely. Added a test
+naming the fix's actual point explicitly (an asset dispatched away from its
+limits still reports its full physical ceiling) and one confirming
+`base_load`'s exclusion is preserved.
+
+Full suite: 1265/1265 Rust (was 1264; the old file's 8 hand-built-fixture
+tests were replaced with 9 `SimState::from_params`-based ones), `cargo fmt`/
+`clippy`/`audit_file_sizes.py` clean. No frontend changes —
+`SiteHeadroomChart.tsx` was already correct for absolute values on both
+series; this fix makes the `history` series actually absolute so it matches
+what the chart already assumed.
