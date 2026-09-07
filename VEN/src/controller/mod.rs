@@ -45,11 +45,11 @@ pub mod rate_schedule;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod arbiter;
-pub mod capacity_envelope;
+pub mod capacity_headroom;
 pub mod dispatcher;
-pub mod envelope;
 pub mod milp_interactions;
 pub mod milp_planner;
+pub mod site_headroom;
 pub mod timeline;
 
 // ── Monitoring & reporting ────────────────────────────────────────────────────

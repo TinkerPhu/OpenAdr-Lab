@@ -1,9 +1,12 @@
 /// SimulatorPort trait — the boundary between controller logic and the physics simulator.
 ///
-/// All 5 named controller functions (build_setpoints, apply_surplus_ev_overlay,
-/// apply_battery_correction_overlay, record_tick, compute_envelope) accept
+/// All 4 named controller functions (build_setpoints, apply_surplus_ev_overlay,
+/// apply_battery_correction_overlay, record_tick) accept
 /// `&SimSnapshot` or `&dyn SimulatorPort` rather than `&SimState`.
 /// This allows unit testing without a running simulator.
+/// (`controller::site_headroom::compute_site_headroom` is an exception: it needs
+/// `&SimState`/`Asset::max_effort_setpoint` directly — the flattened snapshot's
+/// `capability()`-based fields can't answer PV's achievable range correctly.)
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};

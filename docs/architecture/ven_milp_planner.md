@@ -95,7 +95,7 @@ Derived values that consumers observe:
 // tasks/planning.rs — after spawn_blocking returns:
 plan.created_at = wall_now;                          // real age for gate decay
 adopt_if_warranted(..., wall_now).await;             // gate uses wall time
-compute_envelope(&sim_snap, wall_now);               // envelope ts = real time
+compute_site_headroom(&sim_guard, wall_now);         // headroom ts = real time
 build_status_report(..., wall_now);                  // report ts = real time
 ```
 

@@ -82,7 +82,7 @@ pub(crate) async fn publish_sim_tick_result(
     state.set_site_headroom_forecast(forecast).await;
     // Sustained-commitment capacity curves — same "recompute fresh every
     // tick" reasoning as the headroom forecast above, see
-    // `controller::capacity_envelope`'s module doc for why this is a
+    // `controller::capacity_headroom`'s module doc for why this is a
     // separate computation, not derived from `forecast`.
     state.set_capacity_curves(capacity_curves).await;
 

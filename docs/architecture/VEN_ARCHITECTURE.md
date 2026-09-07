@@ -530,21 +530,33 @@ would redundantly re-walk the same trajectory for every `t1` requested). The
 resolver remains available (`#[allow(dead_code)]`) for a future caller that
 genuinely needs a single arbitrary `t1`, not a sweep.
 
-### 3.0c Unified Capacity/Envelope Engine (`unified-capacity-envelope-engine`, Spec E)
+### 3.0c Unified Capacity/Headroom Engine (`unified-capacity-envelope-engine`, Spec E)
 
-`controller/capacity_envelope.rs` replaces `capacity_forecast.rs`'s sustained-
+`controller/capacity_headroom.rs` (renamed from `capacity_envelope.rs` in a
+2026-09-07 follow-up — see below) replaces `capacity_forecast.rs`'s sustained-
 commitment curve and `envelope_forecast.rs`'s plan-driven headroom trajectory
-with one engine, built on §3.0a/§3.0b's primitives — both existing UI consumers
-are fixed-axis slices of the same `(t1, t2, direction, tier)` domain:
+with one engine, built on §3.0a/§3.0b's primitives — the *forecast* half of
+Site Headroom and Capacity Forecast are fixed-axis slices of the same
+`(t1, t2, direction, tier)` domain:
 
 - **Capacity Forecast** (Diagnostics page) — `compute_site_capacity_curve`:
   `t1 = now` fixed, sweep `t2` to the plan's own remaining horizon (falls back
   to 48h with no active plan). Per-asset `asset_max_power_series` calls summed
   onto their shared 60s grid, deduplicated into sparse `CapacityCurveStep`s.
-- **Site Headroom** (Controller/History) — `compute_site_headroom_forecast`:
+- **Site Headroom, forecast** (Controller/History) — `compute_site_headroom_forecast`:
   `t2 = 0` fixed, sweep `t1` across the plan's remaining slots.
   `simulated_trajectory` called once per asset, `max_effort_setpoint` read at
   every slot's point for both directions.
+- **Site Headroom, live/history** (same UI panel's other half, `GET
+  /flexibility`/`GET /flexibility/history`) — `controller/site_headroom.rs`'s
+  `compute_site_headroom`: `t1 = now` only, `t2 = 0` (the degenerate case of
+  the same domain, needed without an active plan). Originally a separate,
+  differently-named function (`compute_envelope`) left on the pre-Spec-E
+  relative-delta model after this module's own rewrite — a real, user-reported
+  bug fixed in the same 2026-09-07 follow-up that renamed both modules out of
+  the "envelope" name (reserved for genuine OpenADR-spec concepts, per
+  `.claude/CLAUDE.md`'s `naming-envelope-vs-headroom` rule) into this
+  "headroom" family, matching what the UI itself calls this panel.
 
 **PV is asset-kind-and-direction-special in both, by design, not oversight:**
 Import goes through `max_effort_setpoint` like every other asset (a trivial,

@@ -497,16 +497,20 @@ At any moment the VEN can report its site-level flexibility to the VTN:
 
 This is used by the VTN operator to understand available DR capacity across VENs.
 
-**How the flexibility envelope is calculated** (`controller/envelope.rs`, `compute_envelope()`):
+**How the site headroom is calculated** (`controller/site_headroom.rs`, `compute_site_headroom()`):
 
-For each controllable asset snapshot in `SimSnapshot`:
+For each controllable asset (via `SimState::iter_assets()`), `Asset::max_effort_setpoint()` at
+`LimitTier::Physical` gives the asset's own absolute achievable power in each direction —
+independent of what it's currently dispatched to do:
 ```
-up_kw   += max(asset.power_kw − asset.cap_max_export_kw, 0)
-down_kw += max(asset.cap_max_import_kw − asset.power_kw, 0)
+up_kw   += magnitude of asset.max_effort_setpoint(Export)
+down_kw += magnitude of asset.max_effort_setpoint(Import)
 ```
-- `up_kw` is how much current import can be *reduced* (asset has headroom to discharge / reduce draw).
-- `down_kw` is how much current import can be *increased* (asset has headroom to charge more).
-- PV and base load have a point-range capability (`cap_max_import_kw = cap_max_export_kw = current_power_kw`), so they contribute 0 to both directions.
+- `up_kw` is how much the asset could reduce import / increase export, at the extreme.
+- `down_kw` is how much the asset could increase import, at the extreme.
+- `base_load` is excluded entirely (zero controllable degrees of freedom). PV needs no special
+  handling — its own `max_effort_setpoint` override already returns `0.0` for Import and its true
+  achievable export magnitude (e.g. via curtailment) for Export.
 
 Duration estimates use stored energy:
 ```

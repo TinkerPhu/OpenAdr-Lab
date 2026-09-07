@@ -40,7 +40,7 @@
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()"]
               C_PORT_MILP["≪trait≫\nAssetMilpContext\nbuild_variables()\nextract_solution()"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
-              C_ENVELOPE["envelope.rs\ncompute_flexibility_envelope()"]
+              C_ENVELOPE["site_headroom.rs\ncompute_site_headroom()"]
               C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
               C_TIMELINE["timeline.rs\nbuild_asset_timeline()"]

@@ -173,11 +173,17 @@ pub struct FlexibilityEnvelope {
 
 /// Live site-level flexibility available to the grid right now (§9).
 ///
-/// Computed directly from current asset state — independent of the active plan.
-/// Always queryable without triggering a planning cycle.
+/// Computed by `controller::site_headroom::compute_site_headroom` — independent
+/// of the active plan. Always queryable without triggering a planning cycle.
 ///
-/// up_kw:   how much the VEN can reduce grid consumption right now (kW, ≥ 0).
-/// down_kw: how much the VEN can increase grid consumption right now (kW, ≥ 0).
+/// up_kw/down_kw are each controllable asset's own ABSOLUTE achievable power in
+/// that direction (`Asset::max_effort_setpoint`, `LimitTier::Physical`), summed —
+/// NOT a delta from current dispatch (fixed as part of the same follow-up to
+/// `unified-capacity-envelope-engine`, Spec E, that renamed this struct's producer
+/// from `compute_envelope` to `compute_site_headroom`; see
+/// `docs/reference/KEY_LEARNINGS.md`):
+/// up_kw:   how much the VEN could reduce grid consumption, at the extreme (kW, ≥ 0).
+/// down_kw: how much the VEN could increase grid consumption, at the extreme (kW, ≥ 0).
 ///
 /// Duration fields estimate how long the VEN can sustain the headroom based
 /// on available storage energy. None if no storage assets are present.
@@ -224,7 +230,7 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 /// `Asset::simulate_forward`, driven by the active plan's own
 /// `planned_kw_by_asset` schedule, so this trajectory self-corrects for any
 /// drift between the plan's assumptions and reality on every tick — see
-/// `controller::capacity_envelope::compute_site_headroom_forecast`.
+/// `controller::capacity_headroom::compute_site_headroom_forecast`.
 ///
 /// **`up_kw`/`down_kw` are ABSOLUTE achievable power, not a delta from the
 /// plan's own chosen dispatch** (`unified-capacity-envelope-engine`, Spec E

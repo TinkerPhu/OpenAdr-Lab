@@ -485,7 +485,7 @@ pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoRes
 /// GET /flexibility/capacity — sustained-commitment power/duration/energy
 /// capacity curves (both directions in one response), re-derived fresh every
 /// dispatcher tick from the current asset state (see
-/// `controller::capacity_envelope`'s module doc for why this is a distinct
+/// `controller::capacity_headroom`'s module doc for why this is a distinct
 /// computation from `GET /flexibility/forecast` above, not an extension of
 /// it — they're two fixed-axis slices of the same underlying
 /// `(t1, t2, direction, tier)` domain). 204 before the first dispatcher tick.
