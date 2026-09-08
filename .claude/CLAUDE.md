@@ -209,19 +209,13 @@ rules: docs/guidelines/ERROR_HANDLING.md.
 
 naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
 
-naming-envelope-vs-headroom: "envelope"/"Envelope" is reserved for concepts genuinely
-sourced from the OpenADR spec or its reporting boundary (Dynamic Operating Envelope,
-`*_RESERVATION_CAPACITY` payloads, anything in `reporter.rs`'s wire-facing code).
-Internal HEMS-domain concepts — the live/forecast achievable-power quantities this
-codebase computes for its own dispatch and UI — use "headroom" instead, and take the
-name of what the UI actually calls them (e.g. `compute_site_headroom`, matching the
-"Site Headroom" panel) rather than a generic internal term. Found via a real bug
-(`controller::envelope::compute_envelope` silently kept pre-unification relative-delta
-semantics after `unified-capacity-envelope-engine` renamed its sibling functions and
-concepts to "headroom"/absolute quantities — the leftover "envelope" name is exactly
-why the mismatch went unnoticed). A full project-wide "envelope" audit is tracked in
-`docs/reference/TECHNICAL_DEBTS.md` — apply this rule to new code now; migrate
-existing "envelope" names opportunistically, not as a required blanket rename.
+naming-transparency: naming is a transparency tool beyond just units — (a) use the same
+word for the same concept across a function family or module, don't let one file say
+`plan` while a sibling says `schedule` for the same thing; (b) when a concept is shown
+in the UI, reuse that UI label's wording in the backing code (routes, DTOs,
+function/variable names) so a reader can grep from a UI string straight to its
+implementation. When adding new code, check nearby code/sibling modules and the
+corresponding UI for existing wording before inventing a new term.
 
 generic-over-bespoke: when several call sites solve the same shape of problem with separate
 near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one boolean per
