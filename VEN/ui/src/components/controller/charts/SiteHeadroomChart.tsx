@@ -146,7 +146,8 @@ export function SiteHeadroomChart({
           axisId: "power",
           lower: (row) => (row.values?.["upKw"] != null ? -row.values["upKw"] : null),
           upper: (row) => row.values?.["downKw"] ?? null,
-          color: "#8BC34A",
+          color: "#4CAF50",
+          fillOpacity: 0.35,
           formatter: (lower, upper) =>
             `${formatSignedPowerValue(lower)} – ${formatSignedPowerValue(upper)}`,
         },
