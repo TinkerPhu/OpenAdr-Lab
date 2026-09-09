@@ -38,10 +38,12 @@ function energyKwhTotal(curve: CapacityCurve): number {
 /**
  * BL-flexibility-capacity-forecast: renders both sustained-commitment
  * capacity curves (power vs. elapsed time since commitment) as step lines,
- * with each direction's cumulative energy total shown alongside — distinct
- * from `SiteHeadroomChart`, which stays instantaneous-only. See
- * `openspec/changes/flexibility-capacity-forecast/design.md` for why this is
- * a separate chart rather than an extension of that one.
+ * with each direction's cumulative energy total shown alongside. This is the
+ * dedicated Diagnostics-page rendering of the same `GET /flexibility/capacity`
+ * data `SiteHeadroomChart` now also overlays (as dashed step-lines, alongside
+ * its own achievable-range band) on the Controller page — see that
+ * component's own doc comment for why the two curves and the band are
+ * distinct concepts even when shown together.
  */
 export function CapacityForecastChart({ curves, height }: CapacityForecastChartProps) {
   if (!curves) {

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema, useFlexibility, useFlexibilityHistory, useFlexibilityForecast } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema, useFlexibility, useFlexibilityHistory, useFlexibilityForecast, useCapacityCurves } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller/dataBuilders";
 import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
@@ -24,6 +24,7 @@ export function ControllerPage() {
   const { data: flexibility } = useFlexibility();
   const { data: flexibilityHistory = [] } = useFlexibilityHistory();
   const { data: flexibilityForecast = [] } = useFlexibilityForecast();
+  const { data: capacityCurves = null } = useCapacityCurves();
   const { mutate: setSimInject } = useSetSimInject();
   const { mutate: resetAssetSoc } = useResetAssetSoc();
   // Prefetch sim schema so controls are available instantly when right sections expand.
@@ -197,6 +198,7 @@ export function ControllerPage() {
           envelope={flexibility}
           history={flexibilityHistory}
           forecast={flexibilityForecast}
+          capacity={capacityCurves}
           gridTimeline={allTimelines["grid"] ?? []}
           nowMs={nowMs}
           extended={expanded}
@@ -296,6 +298,7 @@ export function ControllerPage() {
             envelope={flexibility}
             history={flexibilityHistory}
             forecast={flexibilityForecast}
+            capacity={capacityCurves}
             gridTimeline={allTimelines["grid"] ?? []}
             nowMs={nowMs}
             extended={expanded}

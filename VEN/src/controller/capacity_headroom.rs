@@ -47,6 +47,14 @@
 //! magnitudes (two separate always-non-negative fields by design, not one
 //! bidirectional field) — see `magnitude_kw`'s doc comment for the full
 //! reasoning on why these two types ended up with different conventions.
+//!
+//! The Controller's Site Headroom chart (`SiteHeadroomChart.tsx`) overlays
+//! both — the headroom band and the capacity curves — in one view. They
+//! answer different questions (per-instant snapshot along the plan's own
+//! trajectory vs. a single continuous full-effort commitment starting now),
+//! so the capacity curve legitimately sitting inside the band, or an Export
+//! curve swinging positive past the band's usual scale (this module's own
+//! `merge_events` doc, below), is expected — not a wiring bug.
 
 use std::collections::BTreeMap;
 

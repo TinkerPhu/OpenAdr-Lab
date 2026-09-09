@@ -31,6 +31,7 @@ vi.mock("../api/hooks", () => ({
   useFlexibility: () => ({ data: undefined }),
   useFlexibilityHistory: () => ({ data: [] }),
   useFlexibilityForecast: () => ({ data: [] }),
+  useCapacityCurves: () => ({ data: null }),
 }));
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

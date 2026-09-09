@@ -1,5 +1,9 @@
 import type { AssetTimelinePoint } from "../types";
-import type { SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../../../api/types";
+import type {
+  CapacityCurvesResponse,
+  SiteFlexibilitySample,
+  SiteFlexibilityForecastSlot,
+} from "../../../api/types";
 import type { NamedSample, TimestampedRow } from "../../charts/mergeSeries";
 import {
   mergeTimestampedSeries,
@@ -13,7 +17,7 @@ import {
   roundedTimeTicks,
   formatPowerTick,
 } from "../../charts/axisDomain";
-import { formatSignedPowerValue } from "../../charts/unitFormat";
+import { formatSignedPowerValue, formatPowerValue } from "../../charts/unitFormat";
 import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
@@ -27,6 +31,11 @@ interface SiteHeadroomChartProps {
   /** Forward-looking per-slot trajectory (`GET /flexibility/forecast`); optional so
    * this component still works wherever only the past ring is available. */
   forecast?: SiteFlexibilityForecastSlot[];
+  /** `GET /flexibility/capacity` — sustained-commitment curves, `null` before the first
+   * dispatcher tick or wherever unavailable; optional so this component still works
+   * without it. See this component's own doc comment for how these curves relate to
+   * the achievable-range band. */
+  capacity?: CapacityCurvesResponse | null;
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
@@ -47,11 +56,26 @@ interface SiteHeadroomChartProps {
  * Distinct from `TariffEnvelopeChart`'s Dynamic Operating Envelope
  * (`IMPORT/EXPORT_CAPACITY_LIMIT`), which is a VTN-announced forward *schedule*, not a
  * live/forecast headroom value.
+ *
+ * Also overlays the sustained-commitment capacity curves (`GET /flexibility/capacity`,
+ * `controller::capacity_headroom::compute_site_capacity_curve`) as dashed step-lines,
+ * starting exactly at `now` with no backward extension (that endpoint's `t1` is always
+ * "now" — there is no meaningful past value for it, unlike the band's own history).
+ * These curves answer a genuinely different question than the band: the band is a
+ * per-instant snapshot ("if the plan's own trajectory holds to this future moment, what
+ * could each asset do right then"), while the capacity curve is a single continuous
+ * full-effort commitment starting now (e.g. a battery discharging non-stop). Because of
+ * that, **the capacity curve legitimately sitting inside (narrower than) the band, or an
+ * Export curve swinging positive past the band's usual scale (a sustained Export
+ * commitment can be pushed net-importing by base load — see `capacity_headroom.rs`'s own
+ * `merge_events` doc), is normal, not a bug** — hence the distinct dashed styling here
+ * rather than drawing them with the same visual weight as the band.
  */
 export function SiteHeadroomChart({
   gridTimeline,
   history,
   forecast = [],
+  capacity = null,
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
@@ -92,19 +116,46 @@ export function SiteHeadroomChart({
     key: "downKw",
     value: s.down_kw,
   }));
+  // Sustained-commitment capacity curves -- same step-curve shape CapacityForecastChart
+  // itself builds, starting exactly at `now` (the endpoint's own `t1`), no samples before
+  // it, so LOCF naturally leaves every pre-`now` row without a value (see this
+  // component's own doc comment for why that's correct, not a gap to fill).
+  const capacityStartMs = capacity ? new Date(capacity.import.start).getTime() : null;
+  const importCapSamples: NamedSample[] = capacity
+    ? capacity.import.steps.map((s) => ({
+        ts: capacityStartMs! + s.elapsed_s * 1000,
+        key: "importCapKw",
+        value: s.power_kw,
+      }))
+    : [];
+  const exportCapSamples: NamedSample[] = capacity
+    ? capacity.export.steps.map((s) => ({
+        ts: capacityStartMs! + s.elapsed_s * 1000,
+        key: "exportCapKw",
+        value: s.power_kw,
+      }))
+    : [];
 
   const merged = mergeTimestampedSeries(gridRows, [
     ...upSamples,
     ...downSamples,
     ...forecastUpSamples,
     ...forecastDownSamples,
+    ...importCapSamples,
+    ...exportCapSamples,
   ]);
   // LOCF bridges minor timestamp misalignment between the headroom samples
   // (history/forecast) and the coarser-resolution grid timeline. gridPowerKw
   // is filled too so the line renders without gaps at the merged timestamps
   // the headroom samples introduce -- the band itself no longer depends on
   // gridPowerKw being present on the same row (it reads upKw/downKw alone).
-  const filled = locfFillKeys(merged, ["upKw", "downKw", "gridPowerKw"]);
+  const filled = locfFillKeys(merged, [
+    "upKw",
+    "downKw",
+    "gridPowerKw",
+    "importCapKw",
+    "exportCapKw",
+  ]);
   const clipped = clipRowsToWindow(filled, tMin, tMax);
   const chartData = ensureNonEmptyRows(clipped, tMin, tMax);
 
@@ -113,6 +164,8 @@ export function SiteHeadroomChart({
       row.values?.gridPowerKw,
       row.values?.upKw != null ? -row.values.upKw : null,
       row.values?.downKw ?? null,
+      row.values?.importCapKw,
+      row.values?.exportCapKw,
     ]),
     MIN_POWER_SPAN_KW
   );
@@ -125,6 +178,26 @@ export function SiteHeadroomChart({
       color: "#212121",
       connectNulls: true,
       formatter: formatSignedPowerValue,
+    },
+    {
+      key: "Import commitment [kW]",
+      axisId: "power",
+      dataKey: (row) => row.values?.["importCapKw"] ?? null,
+      color: "#D32F2F",
+      type: "stepAfter",
+      strokeDasharray: "4 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
+    },
+    {
+      key: "Export commitment [kW]",
+      axisId: "power",
+      dataKey: (row) => row.values?.["exportCapKw"] ?? null,
+      color: "#2E7D32",
+      type: "stepAfter",
+      strokeDasharray: "4 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
     },
   ];
 
