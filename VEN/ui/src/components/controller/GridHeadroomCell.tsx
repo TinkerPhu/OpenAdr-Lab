@@ -9,13 +9,19 @@ import {
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "../charts/chartLayout";
 import type { AssetTimelinePoint } from "./types";
-import type { SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../../api/types";
+import type {
+  CapacityCurvesResponse,
+  SiteFlexibilityEnvelope,
+  SiteFlexibilitySample,
+  SiteFlexibilityForecastSlot,
+} from "../../api/types";
 import { SiteHeadroomChart } from "./charts/SiteHeadroomChart";
 
 interface GridHeadroomCellProps {
   envelope: SiteFlexibilityEnvelope | null | undefined;
   history: SiteFlexibilitySample[];
   forecast: SiteFlexibilityForecastSlot[];
+  capacity?: CapacityCurvesResponse | null;
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
   extended: boolean;
@@ -42,6 +48,7 @@ export function GridHeadroomCell({
   envelope,
   history,
   forecast,
+  capacity = null,
   gridTimeline,
   nowMs,
   extended,
@@ -76,6 +83,7 @@ export function GridHeadroomCell({
           gridTimeline={gridTimeline}
           history={history}
           forecast={forecast}
+          capacity={capacity}
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
