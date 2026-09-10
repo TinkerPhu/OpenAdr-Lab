@@ -125,7 +125,7 @@ pub struct SimInjectState {
     pub base_load_kw_override: Option<f64>,
     pub ev_plugged_override: Option<bool>,
     pub ev_soc_target_override: Option<f64>,
-    pub pv_alpha: f64,
+    pub pv_tau_s: f64,
     pub base_load_alpha: f64,
 }
 

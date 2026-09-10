@@ -46,16 +46,6 @@ pub fn build_forecast_frames(
     if future_slots.is_empty() {
         return Vec::new();
     }
-    // `pv_alpha` decays per zone-A step, so the unit is the FINEST zone's
-    // width — not this slot's own width, which widens across the horizon.
-    let zone_a_step_s = plan
-        .horizon
-        .zones
-        .first()
-        .map(|z| z.step_s as i64)
-        .unwrap_or(plan.horizon.step_size_s as i64)
-        .max(1);
-
     let mut frames: Vec<AssetForecastFrame> = future_slots
         .iter()
         .map(|s| AssetForecastFrame {
@@ -81,7 +71,6 @@ pub fn build_forecast_frames(
                     &future_slots,
                     weather_pv_kw,
                     pv_forecast_override,
-                    zone_a_step_s,
                     now,
                 );
             }
@@ -225,15 +214,13 @@ fn insert_pv_points(
     future_slots: &[&PlanTimeSlot],
     weather_pv_kw: Option<&[f64]>,
     pv_forecast_override: Option<f64>,
-    zone_a_step_s: i64,
     now: DateTime<Utc>,
 ) {
     let params = PvCeilingParams {
         rated_kw: pv.rated_kw,
         inverter_max_kw: pv.inverter_max_kw,
         irradiance_offset: pv.irradiance_offset,
-        pv_alpha: pv.pv_alpha,
-        zone_a_step_s,
+        tau_s: pv.tau_s,
     };
 
     for (i, slot) in future_slots.iter().enumerate() {
@@ -687,8 +674,7 @@ mod tests {
             rated_kw: 14.4,
             inverter_max_kw: 12.5,
             irradiance_offset: 0.0,
-            pv_alpha: 0.1,
-            zone_a_step_s: 300,
+            tau_s: 2847.37,
         };
         for frame in &frames {
             let planner_kw = pv_ceiling_kw(

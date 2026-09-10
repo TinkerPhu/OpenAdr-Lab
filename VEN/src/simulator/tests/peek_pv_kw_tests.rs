@@ -40,7 +40,10 @@ fn noon() -> DateTime<Utc> {
 #[test]
 fn peek_pv_kw_returns_none_without_pv_asset() {
     let sim = SimState::from_params(&[], noon());
-    assert_eq!(sim.peek_pv_kw(noon(), 30.0, None, 0.1, None, None), None);
+    assert_eq!(
+        sim.peek_pv_kw(noon(), 30.0, None, 2847.37, None, None),
+        None
+    );
 }
 
 #[test]
@@ -52,10 +55,10 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
 
     let now = noon();
     let dt_s = 30.0;
-    let pv_alpha = 0.1;
+    let pv_tau_s = 2847.37;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, pv_alpha, None, None)
+        .peek_pv_kw(now, dt_s, None, pv_tau_s, None, None)
         .expect("PV asset is configured");
 
     sim.tick(
@@ -63,12 +66,13 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         HashMap::new(),
         now,
         None,
-        pv_alpha,
+        pv_tau_s,
         None,
         None,
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,
@@ -107,7 +111,7 @@ fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, 0.1, None, None)
+        .peek_pv_kw(now, dt_s, None, 2847.37, None, None)
         .expect("PV asset is configured");
 
     sim.tick(
@@ -115,12 +119,13 @@ fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
         HashMap::new(),
         now,
         None,
-        0.1,
+        2847.37,
         None,
         None,
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,
@@ -158,7 +163,7 @@ fn peek_pv_kw_override_bypasses_decay() {
     sim.pv_smoothing.irradiance_offset = 0.9;
 
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1, None, None)
+        .peek_pv_kw(noon(), 30.0, Some(0.5), 2847.37, None, None)
         .expect("PV asset is configured");
     assert!(
         (preview + 5.0).abs() < 1e-9,
@@ -180,7 +185,7 @@ fn peek_pv_kw_respects_generation_limit_kw() {
     }
 
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(1.0), 0.1, None, None)
+        .peek_pv_kw(noon(), 30.0, Some(1.0), 2847.37, None, None)
         .expect("PV asset is configured");
     assert!(
         (preview + 2.0).abs() < 1e-9,
@@ -192,7 +197,7 @@ fn peek_pv_kw_respects_generation_limit_kw() {
 fn peek_pv_kw_uses_weather_when_no_manual_override() {
     let sim = pv_state(10.0); // sin model at noon would be near-full irradiance
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, None, 0.1, Some(4.2), None)
+        .peek_pv_kw(noon(), 30.0, None, 2847.37, Some(4.2), None)
         .expect("PV asset is configured");
     assert!(
         (preview + 4.2).abs() < 1e-9,
@@ -204,7 +209,7 @@ fn peek_pv_kw_uses_weather_when_no_manual_override() {
 fn peek_pv_kw_manual_override_wins_over_weather() {
     let sim = pv_state(10.0);
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1, Some(4.2), None)
+        .peek_pv_kw(noon(), 30.0, Some(0.5), 2847.37, Some(4.2), None)
         .expect("PV asset is configured");
     assert!(
         (preview + 5.0).abs() < 1e-9,
@@ -219,8 +224,11 @@ fn peek_pv_kw_blends_decaying_offset_onto_weather_when_override_released() {
     // additively on top of it instead (see PvInverter::step_inner).
     let mut sim = pv_state(10.0);
     sim.pv_smoothing.irradiance_offset = -0.1; // still decaying from a released override
+                                               // tau_s=INFINITY: no decay, offset stays exact (the old encoding's "no decay" was
+                                               // pv_alpha=0.0; under tau = -T/ln(1-alpha), alpha->0 corresponds to tau->infinity,
+                                               // not tau=0 — pv-competence-consolidation D7).
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, None, 0.0, Some(4.2), None) // pv_alpha=0.0: no decay, offset stays exact
+        .peek_pv_kw(noon(), 30.0, None, f64::INFINITY, Some(4.2), None)
         .expect("PV asset is configured");
     assert!(
         (preview + 3.2).abs() < 1e-9,
@@ -235,7 +243,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, 0.1, Some(7.0), None)
+        .peek_pv_kw(now, dt_s, None, 2847.37, Some(7.0), None)
         .expect("PV asset is configured");
 
     sim.tick(
@@ -243,7 +251,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         HashMap::new(),
         now,
         None,
-        0.1,
+        2847.37,
         None,
         None,
         None,
@@ -252,6 +260,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         None,
         None,
         Some(7.0),
+        None,
         None,
         None,
         None,
@@ -297,7 +306,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         HashMap::new(),
         now,
         Some(0.9), // tick 1: override posted
-        0.1,
+        2847.37,
         None,
         None,
         None,
@@ -306,6 +315,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         None,
         None,
         Some(5.0), // a live weather value, ignored this tick (forced override wins)
+        None,
         None,
         None,
         None,
@@ -330,7 +340,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         HashMap::new(),
         now + chrono::Duration::seconds(1),
         None, // tick 2: caller already auto-cleared the one-shot override
-        0.1,
+        2847.37,
         None,
         None,
         None,
@@ -339,6 +349,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         None,
         None,
         Some(5.0),
+        None,
         None,
         None,
         None,
@@ -379,12 +390,13 @@ fn tick_applies_pv_generation_limit_override_to_asset() {
         HashMap::new(),
         now,
         None,
-        0.1,
+        2847.37,
         None,
         None,
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,
@@ -419,12 +431,13 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         HashMap::new(),
         now,
         None,
-        0.1,
+        2847.37,
         None,
         None,
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,
@@ -442,12 +455,13 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         HashMap::new(),
         now + chrono::Duration::seconds(1),
         None,
-        0.1,
+        2847.37,
         None,
         None,
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,

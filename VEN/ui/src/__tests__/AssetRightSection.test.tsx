@@ -83,7 +83,7 @@ const heaterSchema = [
 
 const pvSchema = [
   { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
-  { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
+  { key: "pv_tau_s", label: "Blend-back Time", kind: "slider" as const, min: 10, max: 3600, unit: "s", display_scale: undefined },
   { key: "pv_generation_limit_kw", label: "Generation Limit", kind: "slider" as const, min: 0, max: 8, unit: "kW", display_scale: undefined, nullable: true },
 ];
 
@@ -349,13 +349,13 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
-    // Drag blend-back speed to 0.5
+    // Drag blend-back time to 500s
     act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance_alpha"), { target: { value: "0.5" } });
+      fireEvent.change(getSchemaSliderInput("pv_tau_s"), { target: { value: "500" } });
     });
 
     // Label updates immediately
-    expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+    expect(screen.getByText(/Blend-back Time: 500\.00/)).toBeInTheDocument();
 
     // Not sent to server yet
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
@@ -477,31 +477,31 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
       />
     );
 
-    const input = getSchemaSliderInput("pv_irradiance_alpha");
+    const input = getSchemaSliderInput("pv_tau_s");
 
-    // User drags blend-back speed to 0.5 and commits
-    act(() => { fireEvent.change(input, { target: { value: "0.5" } }); });
-    expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+    // User drags blend-back time to 500s and commits
+    act(() => { fireEvent.change(input, { target: { value: "500" } }); });
+    expect(screen.getByText(/Blend-back Time: 500\.00/)).toBeInTheDocument();
 
     act(() => { fireEvent.mouseUp(input); });
-    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.5 });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_tau_s: 500 });
 
-    // Blend-back speed retains local value after commit (unlike pv_irradiance)
-    expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+    // Blend-back time retains local value after commit (unlike pv_irradiance)
+    expect(screen.getByText(/Blend-back Time: 500\.00/)).toBeInTheDocument();
 
-    // Server pushes back its default (0.1) via overrides prop update
+    // Server pushes back its default (2847.37) via overrides prop update
     rerender(
       <AssetRightSection
         assetId="pv"
         simSnapshot={simWithPv}
-        overrides={{ pv_irradiance_alpha: 0.1 }}
+        overrides={{ pv_tau_s: 2847.37 }}
         onOverrideChange={mockOnOverrideChange}
         onResetSoc={vi.fn()}
       />
     );
 
-    // Local value must win — no revert to 0.10
-    expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+    // Local value must win — no revert to 2847.37
+    expect(screen.getByText(/Blend-back Time: 500\.00/)).toBeInTheDocument();
   });
 
   it("irradiance: reverts to live sim value after commit (contrast with blend-back)", () => {
@@ -528,9 +528,9 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
-  it("alpha and irradiance commits are independent — no shared cancellation", () => {
+  it("tau and irradiance commits are independent — no shared cancellation", () => {
     // Regression test for the shared-timer bug: adjusting irradiance used to
-    // cancel a pending alpha POST within the 300ms debounce window.
+    // cancel a pending tau POST within the 300ms debounce window.
     // With per-event commits (onChangeCommitted), each control fires its own
     // POST independently on mouse-up.
     const mockOnOverrideChange = vi.fn();
@@ -545,11 +545,11 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
       />
     );
 
-    // Set alpha and commit
+    // Set tau and commit
     act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance_alpha"), { target: { value: "0.99" } });
+      fireEvent.change(getSchemaSliderInput("pv_tau_s"), { target: { value: "65" } });
     });
-    act(() => { fireEvent.mouseUp(getSchemaSliderInput("pv_irradiance_alpha")); });
+    act(() => { fireEvent.mouseUp(getSchemaSliderInput("pv_tau_s")); });
 
     // Set irradiance and commit
     act(() => {
@@ -559,7 +559,7 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
 
     // Both POSTs must have fired independently
     expect(mockOnOverrideChange).toHaveBeenCalledTimes(2);
-    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.99 });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_tau_s: 65 });
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
   });
 });

@@ -48,12 +48,12 @@
       "display_scale": 100.0
     },
     {
-      "key": "pv_irradiance_alpha",
-      "label": "Blend-back Speed",
+      "key": "pv_tau_s",
+      "label": "Blend-back Time",
       "kind": "slider",
-      "min": 0.01,
-      "max": 1.0,
-      "unit": ""
+      "min": 10.0,
+      "max": 3600.0,
+      "unit": "s"
     },
     {
       "key": "pv_generation_limit_kw",

@@ -116,15 +116,19 @@ pub(crate) async fn resolve_weather_pv_kw_for_tick(
     weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
     now: DateTime<Utc>,
     slot_starts: &[DateTime<Utc>],
-) -> (Option<f64>, Option<Vec<f64>>) {
+) -> (
+    Option<f64>,
+    Option<Vec<f64>>,
+    Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
+) {
     let Some(params) = weather_pv_params else {
-        return (None, None);
+        return (None, None, None);
     };
     let Some(forecast) = weather.latest().await else {
-        return (None, None);
+        return (None, None, None);
     };
     if !forecast.is_fresh(now, crate::services::planning::WEATHER_STALENESS_THRESHOLD) {
-        return (None, None);
+        return (None, None, None);
     }
     let series = crate::entities::solar::weather_pv_forecast_series(params, &forecast);
     let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
@@ -132,7 +136,11 @@ pub(crate) async fn resolve_weather_pv_kw_for_tick(
         .copied();
     let slots_kw = (!slot_starts.is_empty())
         .then(|| crate::entities::solar::weather_pv_kw_for_slots(&series, slot_starts));
-    (now_kw, slots_kw)
+    // pv-competence-consolidation: the raw series, threaded onto PvInverter each tick
+    // (TickOverrides.pv_weather_forecast) so PvInverter::max_effort_schedule/forecast()
+    // can sample it themselves at whatever future timestamps they need, rather than a
+    // site-level caller pre-sampling it onto plan-slot boundaries the asset doesn't own.
+    (now_kw, slots_kw, Some(series))
 }
 
 /// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt).

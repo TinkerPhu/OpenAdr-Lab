@@ -48,7 +48,7 @@ pub fn apply_pending_pv_inject(
         if let Some((_, cfg)) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
             if let Some(pv) = cfg.as_any_mut().downcast_mut::<PvInverter>() {
                 pv.irradiance_offset = forced - natural;
-                pv.pv_alpha = inject.pv_irradiance_alpha;
+                pv.tau_s = inject.pv_tau_s;
             }
         }
     }
@@ -149,7 +149,7 @@ mod tests {
         let mut sim_snap = SimState::from_params(&[AssetParams::Pv(PvParams::default())], now);
         let inject = SimInjectState {
             pv_irradiance: Some(0.9),
-            pv_irradiance_alpha: 0.25,
+            pv_tau_s: 1200.0,
             ..Default::default()
         };
 
@@ -165,7 +165,7 @@ mod tests {
             (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
             "offset must be forced-minus-natural irradiance"
         );
-        assert!((pv.pv_alpha - 0.25).abs() < 1e-9);
+        assert!((pv.tau_s - 1200.0).abs() < 1e-9);
     }
 
     fn cum_seconds(n: usize, step_s: i64) -> Vec<i64> {

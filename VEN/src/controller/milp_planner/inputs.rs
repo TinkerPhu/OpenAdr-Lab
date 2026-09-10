@@ -65,8 +65,6 @@ pub(crate) fn build_milp_inputs(
             cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
         }
     }
-    let zone_a_step_s = planner.plan_zones.first().map(|z| z.step_s).unwrap_or(300);
-
     // ── Per-step grid arrays ──────────────────────────────────────────────────
     // WP3.3 (§8.10): subscription + reservation form a contracted allowance
     // that binds when tighter than the event limit / physical bound and is
@@ -169,8 +167,8 @@ pub(crate) fn build_milp_inputs(
                 .unwrap_or(0.08),
         );
         // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
-        // slider) and pv_alpha (blend-back speed slider) both project into the
-        // forecast. Falls back to the static sin model if no "pv" asset exists.
+        // slider) and tau_s (blend-back speed, pv-competence-consolidation D7) both project
+        // into the forecast. Falls back to the static sin model if no "pv" asset exists.
         // pv_forecast_override pins all horizon slots to a fixed kW,
         // making plans deterministic regardless of time-of-day.
         // weather_pv_kw (R-50), when present, takes precedence over the
@@ -184,8 +182,7 @@ pub(crate) fn build_milp_inputs(
                         rated_kw,
                         inverter_max_kw: pv_snap.val("inverter_max_kw").unwrap_or(rated_kw),
                         irradiance_offset: pv_snap.val("irradiance_offset").unwrap_or(0.0),
-                        pv_alpha: pv_snap.val("pv_alpha").unwrap_or(0.1),
-                        zone_a_step_s: zone_a_step_s as i64,
+                        tau_s: pv_snap.val("tau_s").unwrap_or(2847.37),
                     },
                     slot_t,
                     slot_s,

@@ -294,7 +294,7 @@ fn make_snap_from_profile(profile: &Profile) -> SimSnapshot {
                 values.insert("irradiance".into(), 0.0);
                 values.insert("rated_kw".into(), cfg.rated_kw);
                 values.insert("irradiance_offset".into(), 0.0);
-                values.insert("pv_alpha".into(), 0.1);
+                values.insert("tau_s".into(), 2847.37);
                 assets.insert(
                     "pv".to_string(),
                     AssetSnapshot {

@@ -63,7 +63,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
     const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
-      result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);
+      result.current.mutate({ pv_tau_s: 500 } as never);
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -82,7 +82,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
     const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
-      result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);
+      result.current.mutate({ pv_tau_s: 500 } as never);
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -101,7 +101,7 @@ describe("useSetSimInject — onSuccess refetches forecast", () => {
     const { result } = renderHook(() => useSetSimInject(), { wrapper });
 
     act(() => {
-      result.current.mutate({ pv_irradiance_alpha: 0.5 } as never);
+      result.current.mutate({ pv_tau_s: 500 } as never);
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

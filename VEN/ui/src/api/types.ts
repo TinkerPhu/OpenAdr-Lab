@@ -132,7 +132,7 @@ export type SimInjectState = {
   heater_temp_c?: number | null;
   // Behaviour B: frozen + EMA blend-back on release
   pv_irradiance?: number | null;
-  pv_irradiance_alpha?: number;
+  pv_tau_s?: number;
   base_load_kw?: number | null;
   base_load_alpha?: number;
   // Behaviour C: frozen while active, snap to profile on release

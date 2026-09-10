@@ -43,7 +43,7 @@ pub struct PostSimInjectBody {
     #[serde(default, deserialize_with = "double_option")]
     pub pv_irradiance: Option<Option<f64>>,
     #[serde(default, deserialize_with = "double_option")]
-    pub pv_irradiance_alpha: Option<Option<f64>>,
+    pub pv_tau_s: Option<Option<f64>>,
     #[serde(default, deserialize_with = "double_option")]
     pub ev_plugged: Option<Option<bool>>,
     #[serde(default, deserialize_with = "double_option")]
@@ -87,8 +87,9 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     merge!(ev_soc);
     merge!(heater_temp_c);
     merge!(pv_irradiance);
-    if let Some(v) = body.pv_irradiance_alpha {
-        current.pv_irradiance_alpha = v.unwrap_or(0.1); // null resets to default
+    if let Some(v) = body.pv_tau_s {
+        current.pv_tau_s = v.unwrap_or(crate::entities::sim_inject::DEFAULT_PV_TAU_S);
+        // null resets to default
     }
     merge!(ev_plugged);
     merge!(ev_soc_target);
