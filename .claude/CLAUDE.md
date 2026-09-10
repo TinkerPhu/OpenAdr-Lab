@@ -217,6 +217,18 @@ function/variable names) so a reader can grep from a UI string straight to its
 implementation. When adding new code, check nearby code/sibling modules and the
 corresponding UI for existing wording before inventing a new term.
 
+asset-competence-assurance: infrastructure/data-acquisition (MQTT reception, weather APIs, a
+heuristics-learning store) may live outside an asset's own module, and may be shared across
+assets. But interpretation — "what is this asset's current state" or "what is this asset's
+forecast" — must have exactly one authority: the asset itself. No other module may
+independently compute or assume its own answer to that question for a live or future value.
+Raw external data flows into the asset as an injected parameter; everything downstream of
+receiving it is the asset's own business. The one exception is immutable history: an
+external recorder collecting the (unchangeable) past isn't a competing authority, since
+there's no divergence risk once a value can no longer change. See
+docs/plans/asset-competence-assurance-master-plan.md for the violation catalogue and
+remediation sequence (PV, base load, battery, heater, EV).
+
 generic-over-bespoke: when several call sites solve the same shape of problem with separate
 near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one boolean per
 case), stop and name the general pattern instead of writing another one-off. Prefer pushing
