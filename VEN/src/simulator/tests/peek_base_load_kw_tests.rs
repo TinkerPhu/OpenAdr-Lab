@@ -79,6 +79,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier() {
         None,
         None,
         None,
+        None,
         PvCurtailmentSource::None,
         None,               // pv_measured_kw
         None,               // base_load_measured_kw
@@ -124,6 +125,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
         None,
         None,
         base_load_alpha,
+        None,
         None,
         None,
         None,
@@ -202,6 +204,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,

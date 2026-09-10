@@ -317,14 +317,16 @@ pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
 pub struct PvCeilingParams {
     pub rated_kw: f64,
     pub inverter_max_kw: f64,
-    /// Live perturbation from a manual `pv_irradiance` inject, decaying at
-    /// `pv_alpha` per zone-A step.
+    /// Live perturbation from a manual `pv_irradiance` inject, decaying with
+    /// time constant `tau_s` (`pv-competence-consolidation` D7 — was a
+    /// `(pv_alpha, zone_a_step_s)` pair; `zone_a_step_s` read the *planner's*
+    /// zone-A step width as the decay's reference step, a real, previously-latent
+    /// divergence from the live decay's own hardcoded `300.0` in
+    /// `simulator::pv_smoothing::PvSmoothingState`, found designing this fix —
+    /// `tau_s` removes the redundant parameter entirely, not just this one
+    /// call site's instance of the divergence).
     pub irradiance_offset: f64,
-    pub pv_alpha: f64,
-    /// Width of zone A (the finest plan zone) — the unit `pv_alpha` decays
-    /// per. NOT the width of the slot being resolved: on a multi-zone
-    /// horizon those differ.
-    pub zone_a_step_s: i64,
+    pub tau_s: f64,
 }
 
 /// PV's generation ceiling (kW, positive magnitude) at one future slot.
@@ -354,8 +356,14 @@ pub fn pv_ceiling_kw(
     if let Some(weather) = weather_kw {
         return weather.max(0.0).min(params.inverter_max_kw);
     }
-    let steps_ahead = slot_s as f64 / params.zone_a_step_s.max(1) as f64;
-    let decayed_offset = params.irradiance_offset * (1.0 - params.pv_alpha).powf(steps_ahead);
+    // `slot_s` is already elapsed seconds from `now` (see this function's own
+    // doc comment) — exactly what `decayed_offset` needs, no reference-step
+    // normalization required now that the decay is parameterized by `tau_s`.
+    let decayed_offset = crate::simulator::pv_smoothing::decayed_offset(
+        params.irradiance_offset,
+        slot_s as f64,
+        params.tau_s,
+    );
     ((natural_irradiance_at(slot_t) + decayed_offset).clamp(0.0, 1.0) * params.rated_kw)
         .min(params.inverter_max_kw)
 }
@@ -779,13 +787,18 @@ mod tests {
 
     // ── pv_ceiling_kw ────────────────────────────────────────────────────────
 
+    // Equivalent to the old (pv_alpha=0.1, T=300s) encoding, computed exactly
+    // (not approximated) via tau = -T/ln(1-alpha) — pv-competence-consolidation D7.
+    fn tau_from_old_alpha_0_1() -> f64 {
+        -300.0_f64 / (1.0_f64 - 0.1).ln()
+    }
+
     fn ceiling_params() -> PvCeilingParams {
         PvCeilingParams {
             rated_kw: 14.4,
             inverter_max_kw: 12.5,
             irradiance_offset: 0.0,
-            pv_alpha: 0.1,
-            zone_a_step_s: 300,
+            tau_s: tau_from_old_alpha_0_1(),
         }
     }
 
@@ -829,22 +842,24 @@ mod tests {
     /// elapsed time, not by how many slots happen to have gone by.
     #[test]
     fn pv_ceiling_kw_offset_decays_by_elapsed_time_not_slot_index() {
+        let tau = tau_from_old_alpha_0_1();
         let p = PvCeilingParams {
             irradiance_offset: 0.5,
-            pv_alpha: 0.1,
             ..ceiling_params()
         };
         let night = Utc.with_ymd_and_hms(2026, 6, 21, 3, 0, 0).unwrap();
-        // 300s in = exactly one zone-A step -> offset x 0.9.
+        // 300s in = exactly one old zone-A step -> offset x e^(-300/tau), which
+        // by construction of `tau` equals the old formula's `x 0.9` exactly.
         let one_step = pv_ceiling_kw(&p, night, 300, None, None);
-        let expected = (0.5_f64 * 0.9_f64).clamp(0.0, 1.0) * 14.4;
+        let expected = (0.5_f64 * (-300.0_f64 / tau).exp()).clamp(0.0, 1.0) * 14.4;
         assert!(
             (one_step - expected).abs() < 1e-9,
             "expected {expected}, got {one_step}"
         );
-        // 900s in (one 15-min zone-C slot) is THREE zone-A steps, not one.
+        // 900s in (one 15-min zone-C slot) is three times as long as the case above --
+        // decay is now a continuous function of elapsed time, not discrete "steps".
         let three_steps = pv_ceiling_kw(&p, night, 900, None, None);
-        let expected3 = (0.5_f64 * 0.9_f64.powi(3)).clamp(0.0, 1.0) * 14.4;
+        let expected3 = (0.5_f64 * (-900.0_f64 / tau).exp()).clamp(0.0, 1.0) * 14.4;
         assert!(
             (three_steps - expected3).abs() < 1e-9,
             "expected {expected3}, got {three_steps}"

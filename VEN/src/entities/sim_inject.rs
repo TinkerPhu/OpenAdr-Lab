@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// Default manual-override decay time constant (seconds) — reproduces the
+/// pre-`pv-competence-consolidation` default exactly (old encoding: `pv_alpha=0.1`,
+/// reference step `300s`; `tau = -300 / ln(1 - 0.1) ≈ 2847.37`). Same value as
+/// `assets::pv::default_tau_s()` — duplicated as a literal rather than an inter-layer
+/// call (this is Domain, `assets::pv` is Infra; a `const fn` couldn't call `f64::ln`
+/// portably at the MSRV this crate targets), so both are pinned to worked examples in
+/// their own tests rather than trusted to silently agree.
+pub(crate) const DEFAULT_PV_TAU_S: f64 = 2847.37;
+
 /// Simulation injection state — set via POST /sim/inject.
 /// Three injection behaviours:
 /// - A (one-shot): applied once to physics state, then cleared automatically.
@@ -13,7 +22,10 @@ pub struct SimInjectState {
     pub heater_temp_c: Option<f64>,
     // Behaviour B — frozen + EMA return on release
     pub pv_irradiance: Option<f64>,
-    pub pv_irradiance_alpha: f64,  // default 0.1
+    /// Decay time constant (seconds) for the return to the natural model after release —
+    /// `pv-competence-consolidation` D7. Default `≈2847.4s` reproduces the pre-D7 default
+    /// behavior exactly (old encoding: `pv_alpha=0.1`, reference step `300s`).
+    pub pv_tau_s: f64,
     pub base_load_kw: Option<f64>, // one-shot: offset stored in smoothing state, then cleared
     pub base_load_alpha: f64,      // default 0.1
     // Behaviour C — frozen while active, snap to profile default on release
@@ -46,7 +58,7 @@ impl Default for SimInjectState {
             ev_soc: None,
             heater_temp_c: None,
             pv_irradiance: None,
-            pv_irradiance_alpha: 0.1,
+            pv_tau_s: DEFAULT_PV_TAU_S,
             base_load_kw: None,
             base_load_alpha: 0.1,
             ev_plugged: None,
@@ -62,5 +74,19 @@ impl Default for SimInjectState {
             pv_generation_limit_kw: None,
             pv_plan_kw: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_pv_tau_s_matches_the_worked_conversion_from_the_old_encoding() {
+        let exact = -300.0_f64 / (1.0_f64 - 0.1).ln();
+        assert!(
+            (DEFAULT_PV_TAU_S - exact).abs() < 0.01,
+            "DEFAULT_PV_TAU_S={DEFAULT_PV_TAU_S} must match -300/ln(0.9)={exact}"
+        );
     }
 }

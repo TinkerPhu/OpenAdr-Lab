@@ -65,11 +65,12 @@ def step_no_pv_measurement_published(context):
 
 @given("the VEN-1 pv irradiance offset is flushed to zero")
 def step_flush_pv_irradiance_offset(context):
-    # pv_irradiance_alpha=1.0 -> full decay in a single tick (see
-    # PvSmoothingState::update); a plain /sim/inject/reset alone only stops
-    # re-forcing the override, it does not accelerate the existing offset's
-    # decay, which at the default alpha=0.1 can linger for many minutes.
-    r = ven_post("/sim/inject", json={"pv_irradiance_alpha": 1.0})
+    # pv_tau_s=0.01 -> effectively instant decay in a single tick (see
+    # PvSmoothingState::decayed_offset_after); a plain /sim/inject/reset alone
+    # only stops re-forcing the override, it does not accelerate the existing
+    # offset's decay, which at the default tau_s=~2847s can linger for many
+    # minutes.
+    r = ven_post("/sim/inject", json={"pv_tau_s": 0.01})
     r.raise_for_status()
     time.sleep(3)  # >= a few ticks at the test profile's tick_s=1
     r = ven_post("/sim/inject/reset", json={})

@@ -14,6 +14,7 @@ mod heater_milp;
 mod history;
 mod max_power;
 pub mod pv;
+mod pv_schedule;
 pub mod shiftable_load;
 
 // AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
@@ -1013,10 +1014,11 @@ mod phase2b_tick_overridable_tests {
         TickOverrides {
             pv_irradiance: 0.0,
             pv_irradiance_offset: 0.0,
-            pv_alpha: 0.1,
+            pv_tau_s: 0.1,
             pv_generation_limit_kw: None,
             pv_curtailment_source: PvCurtailmentSource::None,
             pv_weather_power_kw: None,
+            pv_weather_forecast: None,
             pv_measured_power_kw: None,
             pv_irradiance_forced: false,
             heater_ambient_temp_c_override: None,
@@ -1048,7 +1050,7 @@ mod phase2b_tick_overridable_tests {
         let overrides = TickOverrides {
             pv_irradiance: 0.75,
             pv_irradiance_offset: 0.05,
-            pv_alpha: 0.2,
+            pv_tau_s: 0.2,
             // No generation_limit_kw here deliberately: with one set, a
             // clamped result can't distinguish "irradiance_forced won" from
             // "some other override won and got clamped to the same value."

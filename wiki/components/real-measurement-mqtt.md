@@ -111,13 +111,13 @@ shared, long-lived VEN-1 instance across dozens of unrelated scenarios in the sa
    cross-file ordering risk).
 2. **Lingering manual-override offset bleeds in.** Earlier `phase_a_physics.feature`
    scenarios force `pv_irradiance` overrides; the resulting `irradiance_offset` decays very
-   slowly in real time (the per-tick factor is computed against a 300 s plan-step, so at the
-   default `pv_alpha=0.1` it barely moves within tens of real seconds) and — correctly, by
+   slowly in real time (an exponential decay with time constant `tau_s`, default `~2847s`,
+   so it barely moves within tens of real seconds) and — correctly, by
    the blend design above — additively rides on top of whatever base wins next, including a
    freshly-measured reading. `/sim/inject/reset` (the existing, already-used-elsewhere reset
    step) only stops *re-forcing* the override; it doesn't accelerate the existing offset's
    decay. Fixed with a new step that flushes the offset to exactly zero first
-   (`pv_irradiance_alpha=1.0` forces full decay within one tick, then reset again) —
+   (`pv_tau_s=0.01` forces effectively-instant decay within one tick, then reset again) —
    `tests/features/steps/real_measurement_mqtt_steps.py`.
 
 Both point at the same underlying fact worth remembering for any future scenario touching

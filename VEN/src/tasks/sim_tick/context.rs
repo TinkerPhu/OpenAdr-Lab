@@ -37,6 +37,12 @@ pub(crate) struct TickContext {
     /// when there is no plan, no weather config, or the feed is stale — the
     /// forecast then falls back to the sin model, exactly as the planner does.
     pub weather_pv_kw_slots: Option<Vec<f64>>,
+    /// The raw weather-forecast series behind `weather_pv_kw_now`/`weather_pv_kw_slots`
+    /// (`pv-competence-consolidation`) — threaded onto `PvInverter` each tick
+    /// (`TickOverrides.pv_weather_forecast`) so the asset's own
+    /// `max_effort_schedule`/`forecast()` can sample it at whatever future timestamps
+    /// they need, rather than a site-level caller pre-sampling it.
+    pub weather_pv_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
     pub pv_measured_kw_now: Option<f64>,
     pub base_load_measured_kw_now: Option<f64>,
     /// BL-40: the site's learned base-load heuristic, sampled at this tick's
@@ -104,7 +110,7 @@ pub(crate) async fn resolve_tick_context(
                 .collect()
         })
         .unwrap_or_default();
-    let (weather_pv_kw_now, weather_pv_kw_slots) =
+    let (weather_pv_kw_now, weather_pv_kw_slots, weather_pv_forecast) =
         super::arbiter_glue::resolve_weather_pv_kw_for_tick(
             weather,
             weather_pv_params,
@@ -133,6 +139,7 @@ pub(crate) async fn resolve_tick_context(
         base_clear,
         weather_pv_kw_now,
         weather_pv_kw_slots,
+        weather_pv_forecast,
         pv_measured_kw_now,
         base_load_measured_kw_now,
         base_load_heuristic_kw_now,

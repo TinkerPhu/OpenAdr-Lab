@@ -57,7 +57,7 @@ pub fn tick(
     setpoints: HashMap<String, f64>,
     now: DateTime<Utc>,
     pv_irradiance_override: Option<f64>,
-    pv_alpha: f64,
+    pv_tau_s: f64,
     ambient_temp_c_override: Option<f64>,
     heater_temp_min_override: Option<f64>,
     heater_temp_max_override: Option<f64>,
@@ -352,7 +352,10 @@ tracks a `PvSmoothingState { irradiance_offset }`:
 
 The slider UI always reflects the live simulated irradiance (`natural + offset`), making it a
 read-write control: reading shows the current value, writing adds a perturbation on top of the
-baseline. `pv_alpha` controls the half-life of the perturbation after release.
+baseline. `pv_tau_s` is the exponential decay time constant (seconds) of the perturbation
+after release — a single time constant rather than a separate rate/reference-step pair, so
+there is no second knob that can silently drift out of sync with it (see
+`asset-competence-assurance`).
 
 ### Profile Parameters (YAML)
 
@@ -366,7 +369,7 @@ baseline. `pv_alpha` controls the half-life of the perturbation after release.
 | Field | Behaviour | Effect |
 |---|---|---|
 | `pv_irradiance` | B — perturbation overlay | Set irradiance [0–1]; offset above/below sin model decays to zero on release |
-| `pv_irradiance_alpha` | Parameter | Decay speed (default 0.1 per tick); higher = faster return to sin model |
+| `pv_tau_s` | Parameter | Decay time constant in seconds (default ≈2847s); lower = faster return to sin model |
 
 ### External Influences
 
@@ -458,7 +461,7 @@ None. Output is entirely determined by profile / active inject.
 | `ev_soc` | f64 [0,1] | A | EV | Physics-driven from injected value |
 | `heater_temp_c` | f64 | A | Heater | Thermal model from injected value |
 | `pv_irradiance` | f64 [0,1] | B | PV | Perturbation overlay; offset decays to zero on release |
-| `pv_irradiance_alpha` | f64 | — | PV | Perturbation decay speed per tick (default 0.1) |
+| `pv_tau_s` | f64 | — | PV | Perturbation decay time constant in seconds (default ≈2847) |
 | `ev_plugged` | bool | C | EV | Snaps to `true` (plugged) |
 | `ev_departure_min` | f64 | C | EV | No snap-back — stays until cleared |
 | `ev_soc_target` | f64 [0,1] | C | EV | Snaps to `soc_target_profile` |

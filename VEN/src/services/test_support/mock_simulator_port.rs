@@ -118,7 +118,7 @@ mod tests {
             base_load_kw_override: None,
             ev_plugged_override: None,
             ev_soc_target_override: None,
-            pv_alpha: 0.1,
+            pv_tau_s: 2847.37,
             base_load_alpha: 0.1,
         });
         let calls = port.injected_calls();
@@ -143,7 +143,7 @@ mod tests {
                     base_load_kw_override: None,
                     ev_plugged_override: None,
                     ev_soc_target_override: None,
-                    pv_alpha: 0.1,
+                    pv_tau_s: 2847.37,
                     base_load_alpha: 0.1,
                 });
             }));

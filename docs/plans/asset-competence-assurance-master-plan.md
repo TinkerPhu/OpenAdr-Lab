@@ -1,6 +1,8 @@
 # Master Plan: Asset Competence Assurance
 
-> **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phases 1–5 open. This
+> **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) partially
+> complete (`pv-competence-consolidation`, 2026-09-10) — see that phase's own section below
+> for what landed vs. what's still open. Phases 2–5 open. This
 > document sequences and motivates the work; it deliberately contains no
 > implementation-level detail. Each phase's actual work happens as its own openspec change
 > (`openspec new change ...`), proposed and reviewed carefully when that phase's turn comes
@@ -111,6 +113,31 @@ methods actually authoritative.
 **Risk:** mostly forecast-surface (low risk); one call site
 (`milp_planner/inputs.rs`, feeding live planning input) needs careful before/after
 comparison since it affects real planning decisions, not just reporting.
+
+**Status: partially complete** (`pv-competence-consolidation`, 2026-09-10; change directory
+kept open, not deleted — see its `tasks.md` for the exact per-task breakdown). Landed:
+`Pv`'s own `Asset` trait methods (`forecast()`, `max_effort_schedule`) now take weather as an
+injected `TickOverrides` parameter and are weather/decay-aware; the decaying-offset formula
+was reparametrized from a two-knob `(pv_alpha, T)` encoding to a single time constant `τ_s`
+(`PvSmoothingState::decayed_offset_after`/`pv_smoothing::decayed_offset`), which also fixed a
+real bug this consolidation set out to find — `pv_ceiling_kw`'s reference step
+(`PLAN_STEP_S=300`, hardcoded) and the MILP planner's own reference step
+(`zone_a_step_s`, configurable) only coincided by default-value accident; there is now exactly
+one decay formula, used by both the live/forecast asset methods and `pv_ceiling_kw` itself.
+**Not landed:** `pv_ceiling_kw`'s two call sites (`milp_planner/inputs.rs`,
+`simulator/forecast.rs::insert_pv_points`) still call `pv_ceiling_kw` rather than `PvInverter`'s
+own methods, and `capacity_headroom.rs`'s PV special-casing (`pv_frames`) is untouched — both
+blocked on the same gap: `milp_planner/inputs.rs` and `capacity_headroom.rs`'s generic
+per-asset loops only see `&SimSnapshot` (flattened port-boundary data), not a live
+`PvInverter`. Every other asset kind that needs MILP-specific values resolves them earlier, in
+`plan_context.rs::build_asset_contexts` (which has live `&SimState` access) via
+`MilpParticipant::build_milp_context`; PV has no such participant yet. Closing this out is a
+right-sized follow-up (a `PvMilpContext`/participant mechanism, or an equivalent live-access
+thread into `capacity_headroom.rs`) — deliberately not rushed into this session, since it's a
+live-planning-input change, not a forecast-surface one. `Pv::forecast()` was also upgraded to
+use the same weather/decay-aware path (was previously sin-model-only, the fourth
+implementation named in the Problem section above) — closing that divergence fully, even
+though `pv_ceiling_kw`'s callers are unchanged.
 
 ## Phase 2 — Base load consolidation
 

@@ -6,7 +6,7 @@ pub mod persist;
 pub mod plan_context;
 pub mod power_model;
 mod pv_preview;
-mod pv_smoothing;
+pub(crate) mod pv_smoothing;
 mod snapshot;
 
 use chrono::{DateTime, Utc};
@@ -256,7 +256,8 @@ impl SimState {
     /// Inject parameters implement Behaviour B (pv_irradiance + EMA smoothing) and
     /// Behaviour C (frozen env/state while active, snap-back on release):
     /// - `pv_irradiance_override`: if Some, freeze PV irradiance; if None and was active,
-    ///   EMA-blend back to natural model at rate `pv_alpha` (0.0–1.0; default 0.1).
+    ///   decay back to the natural model with time constant `pv_tau_s` (seconds;
+    ///   default `≈2847.4s`, `pv-competence-consolidation` D7).
     /// - `ambient_temp_c_override`: if Some, override heater ambient temp; else use 10.0°C.
     /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
@@ -269,6 +270,10 @@ impl SimState {
     /// - `heater_emergency_curtail/absorb_override`: Behaviour C, see `Heater::apply_tick_overrides`.
     /// - `pv_measured_kw`/`base_load_measured_kw`: real-measurement MQTT feeds;
     ///   PV outranks `weather_pv_kw`, BaseLoad replaces the natural profile+noise base.
+    /// - `weather_pv_forecast`: the full weather-forecast series behind `weather_pv_kw`
+    ///   (`pv-competence-consolidation`) — threaded onto `PvInverter` each tick so
+    ///   `max_effort_schedule`/`forecast()` can answer for points beyond `now` without a
+    ///   site-level caller supplying weather data directly.
     /// - `base_load_heuristic_kw`: BL-40's 3rd fallback tier — the site's learned
     ///   base-load heuristic (`AssetHeuristics::sample_kw`), used for `natural_base_kw`
     ///   only when `base_load_measured_kw` is absent; the synthetic spike model
@@ -282,7 +287,7 @@ impl SimState {
         setpoints: HashMap<String, f64>,
         now: DateTime<Utc>,
         pv_irradiance_override: Option<f64>,
-        pv_alpha: f64,
+        pv_tau_s: f64,
         ambient_temp_c_override: Option<f64>,
         heater_temp_min_override: Option<f64>,
         heater_temp_max_override: Option<f64>,
@@ -291,6 +296,7 @@ impl SimState {
         ev_plugged_override: Option<bool>,
         ev_soc_target_override: Option<f64>,
         weather_pv_kw: Option<f64>,
+        weather_pv_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
         heater_emergency_curtail_override: Option<bool>,
         heater_emergency_absorb_override: Option<bool>,
         pv_generation_limit_override: Option<f64>,
@@ -304,7 +310,7 @@ impl SimState {
         // Behaviour B — PV perturbation overlay.
         let irradiance =
             self.pv_smoothing
-                .update(pv_irradiance_override, natural_irradiance, dt_s, pv_alpha);
+                .update(pv_irradiance_override, natural_irradiance, dt_s, pv_tau_s);
 
         // Behaviour B — base load perturbation overlay. Hoisted out of the
         // per-asset loop below (Spec A Phase 2b prerequisite for
@@ -340,7 +346,7 @@ impl SimState {
         let tick_overrides = TickOverrides {
             pv_irradiance: irradiance,
             pv_irradiance_offset: self.pv_smoothing.irradiance_offset,
-            pv_alpha,
+            pv_tau_s,
             pv_generation_limit_kw: pv_generation_limit_override,
             pv_curtailment_source,
             // Weather is never nulled by a manual override anymore — a
@@ -348,6 +354,7 @@ impl SimState {
             // additively on top of it instead (see `PvInverter::step_inner`).
             // Only a forced override (this exact tick) takes exclusive control.
             pv_weather_power_kw: weather_pv_kw,
+            pv_weather_forecast: weather_pv_forecast,
             pv_measured_power_kw: pv_measured_kw,
             pv_irradiance_forced: pv_irradiance_override.is_some(),
             heater_ambient_temp_c_override: ambient_temp_c_override,

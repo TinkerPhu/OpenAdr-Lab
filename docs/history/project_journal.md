@@ -11845,3 +11845,89 @@ stays a separate investigation: it's a site-level aggregate-interpretation quest
 single owning asset, not a fit for this master plan's per-asset phases.
 
 Docs-only change, no tests to run. Phases 1–5 remain open, to be proposed individually.
+
+## 2026-09-10 — Asset Competence Assurance Phase 1, PV consolidation (`pv-competence-consolidation`, partial)
+
+Followed Phase 0's plan into Phase 1: designate `PvInverter`'s own `Asset` trait methods as
+sole authority for PV's forecast/state, replacing the direct `pv_ceiling_kw`/`pv_frames`
+formulas other modules had been computing independently. Landed most of the mechanism; the
+two live-data-consuming call sites remain, explained below — this phase is not being closed
+out, `openspec/changes/pv-competence-consolidation/` stays open with its `tasks.md` marking
+exactly what's done vs. not.
+
+Before touching the consolidation itself, a side question surfaced the phase's real bug: is
+the exponential-decay curve `(1-alpha)^(t/T)` actually different from a capacitor-discharge
+`A·e^(-t/τ)`? They're the same curve family (`τ = -T / ln(1-alpha)`), which meant the old
+two-parameter `(pv_alpha, T)` encoding had a latent divergence risk built in — and it had
+already diverged. `PvSmoothingState`'s live per-tick decay hardcoded `T=300.0`
+(`PLAN_STEP_S`), while `entities::solar::pv_ceiling_kw`'s forward-projection used
+`zone_a_step_s`, a separately-configurable planner value — they only produced the same answer
+because the fallback default (300) happened to match the hardcoded constant. Fixed the root
+cause, not the symptom: reparametrized to a single `tau_s: f64` everywhere (`PvInverter`,
+`TickOverrides`, `PvCeilingParams`, the `/sim/inject` field, the `state_values`/schema key),
+backed by one shared function (`PvSmoothingState::decayed_offset_after`/
+`simulator::pv_smoothing::decayed_offset`) that both the live tick and any forward-projecting
+forecast call — the same "one function, not two agreeing-by-accident implementations" pattern
+`asset_max_power`/`asset_max_power_series` already established elsewhere in this codebase.
+Verified numerically equivalent to the old encoding at the old default (`alpha=0.1, T=300` →
+`τ≈2847.37s`), not just structurally similar, via an exact-tau precision test. Renamed
+`pv_irradiance_alpha` → `pv_tau_s` end-to-end (Rust: ~20 files; UI: `types.ts` + 3 test files;
+the `GET /sim/schema` golden fixture; a live BDD step that posts the inject field by name; two
+architecture docs) — found the full call-site list by grepping for the old key after the
+backend rename rather than trusting the design-time list, which was how the UI's
+`control_schema` key and the BDD step were caught. Re-modeled the "Blend-back Speed" slider
+(0.01-1.0 alpha fraction, inverted and unitless) to "Blend-back Time" (10s-3600s, τ directly,
+lower = faster) per explicit instruction — this technically extended task 2.4/2.5 beyond the
+original tasks.md wording, but leaving the UI sending the retired `pv_irradiance_alpha` key
+while the backend silently ignored it (serde default-ignores unknown fields) would have been a
+dead control, not deferred polish, so it was folded into this same piece of work rather than
+left for later.
+
+With the decay math unified, gave `PvInverter` weather-aware forward projection:
+`weather_forecast: Option<Vec<WeatherPvForecastSlot>>` injected each tick via `TickOverrides`
+(infra still polls MQTT and resolves the series; the asset decides how to blend it — the
+"raw data in, interpretation is the asset's business" half of the rule), and
+`uncurtailed_power_kw_at(ts, elapsed_s)` / `max_effort_schedule` (a new `Asset` trait
+override) sampling that series when present, falling back to the sin model plus the
+projected-forward offset when not. `Pv::forecast()` — previously sin-model-only, the fourth
+independent implementation the Phase 0 audit named — now goes through the same path, closing
+that divergence too.
+
+What did **not** land: `pv_ceiling_kw`'s two real call sites (`milp_planner/inputs.rs` feeding
+live MILP planning input, `simulator/forecast.rs::insert_pv_points` feeding `pv_frames`) still
+call `pv_ceiling_kw` rather than `PvInverter`'s own methods, and `capacity_headroom.rs`'s PV
+special-casing is untouched. Found the actual blocker only by trying to remove it:
+`milp_planner/inputs.rs::build_milp_inputs` receives `&SimSnapshot` — the flattened
+port-boundary data — not a live `PvInverter`, unlike `simulator::forecast::build_forecast_frames`
+which has `&SimState`. Every other asset kind that needs MILP-specific values sidesteps this by
+resolving them *earlier*, in `plan_context.rs::build_asset_contexts` (which does have live
+access), via `MilpParticipant::build_milp_context` — producing an `AssetMilpContext` passed
+downstream. PV has no such participant. Threading an equivalent mechanism through is a
+right-sized follow-up, not a rushed one-line swap under an overnight time budget, given it
+touches live planning input rather than just a forecast-reporting surface — made this scope
+call explicitly rather than either rushing it or silently dropping it from the task list.
+`pv_ceiling_kw`/`PvCeilingParams` therefore still exist in `entities/solar.rs`, now internally
+correct (single decay formula) but not yet the sole authority the phase's principle calls for.
+
+Also fixed a file-size cap violation along the way: `pv.rs` grew past 610 lines once the new
+methods landed (cap 500). Extracted the new forward-projection logic
+(`uncurtailed_power_kw_at`, `max_effort_schedule`'s body) and the pre-existing
+`resolve_power_kw`/`uncurtailed_power_kw` pair into a new sibling file `pv_schedule.rs` — the
+same split-by-sibling-file pattern `pv_preview.rs`/`pv_smoothing.rs` already used for the same
+reason.
+
+Verification: `wsl cargo test -j 2` 1270/1270, `cargo fmt --check`/`clippy --all-targets
+--all-features -- -D warnings` clean, `scripts/audit_file_sizes.py` clean, `cd VEN/ui && npm
+test` 629/629 (53 files). E2E/resilience not run this session — deferred to when sections
+4/5 (the live-planning-input and capacity-curve call sites) actually change, since the
+Rust+UI unit suites already cover the trait-method/rename work directly and those two suites
+are what would actually exercise the still-untouched call sites.
+
+Key learning: a "the same formula, called from two places" audit finding is not fully closed
+by making the two places agree by construction — if both places still *exist* independently
+(one still reading raw snapshot values, one now calling the asset), the next person who adds
+a third caller has no structural reason to pick the asset's method over the raw one. This
+phase closed the numeric bug (real, now fixed) but not the structural one the master plan's
+principle actually targets — worth remembering when picking up section 4/5, since "tests pass
+and the numbers agree" was true after the τ fix alone and could look like completion without
+the second read this session's own remaining-work review caught.

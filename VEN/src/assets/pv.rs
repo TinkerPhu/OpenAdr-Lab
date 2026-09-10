@@ -15,6 +15,14 @@ fn f64_infinity() -> f64 {
     f64::INFINITY
 }
 
+/// Default manual-override decay time constant (seconds) — chosen to reproduce the
+/// pre-`pv-competence-consolidation` default behavior exactly (old encoding:
+/// `pv_alpha=0.1`, reference step `300s`; `tau = -300 / ln(1 - 0.1)`), so existing
+/// profiles/sessions see no behavior change from this default alone.
+fn default_tau_s() -> f64 {
+    -300.0 / (1.0_f64 - 0.1).ln()
+}
+
 /// The per-tick inputs `PvInverter::resolve_power_kw` needs, passed explicitly
 /// so the live tick (which reads them off the config it just wrote) and
 /// `SimState::peek_pv_kw` (which holds them as not-yet-written parameters) can
@@ -58,11 +66,18 @@ pub struct PvInverter {
     /// [0.0, 1.0]; set each tick by sim (natural + offset, clamped). NOT from YAML.
     pub irradiance: f64,
     /// Current perturbation offset above/below the natural sin model. Decays toward zero
-    /// each tick at rate `pv_alpha`. Set each tick from PvSmoothingState. NOT from YAML.
+    /// with time constant `tau_s`. Set each tick from PvSmoothingState. NOT from YAML.
     pub irradiance_offset: f64,
-    /// Per-tick decay factor for irradiance_offset (0–1). Set from pv_irradiance_alpha inject.
-    /// NOT from YAML.
-    pub pv_alpha: f64,
+    /// Time constant (seconds) governing how fast `irradiance_offset` decays toward
+    /// zero — `offset(t) = offset_now * e^(-t/tau_s)` (`PvSmoothingState::decayed_offset_after`).
+    /// Set from the `pv_tau_s` inject. NOT from YAML. `#[serde(default)]`: renamed from
+    /// `pv_alpha` (`pv-competence-consolidation`, D7) — an old persisted `sim_state.json`
+    /// has the old key, not this one; like `inverter_max_kw`'s own precedent above, the
+    /// deserialized value here is never actually used (`simulator::persist::load_with_params`
+    /// always overwrites `asset_configs` from fresh profile params right after a successful
+    /// load), so a default-on-missing is correct, not just expedient.
+    #[serde(default = "default_tau_s")]
+    pub tau_s: f64,
     /// Weather-sourced actual power for this tick (kW, generation-positive),
     /// via `entities::solar::resolve_weather_pv_kw` — the same translation
     /// the planner's own PV input uses (R-50), reused here rather than
@@ -70,6 +85,17 @@ pub struct PvInverter {
     /// cached forecast has gone stale. Set each tick by the sim loop. NOT
     /// from YAML.
     pub weather_power_kw: Option<f64>,
+    /// The full weather-forecast series (`entities::solar::weather_pv_forecast_series`'s
+    /// output) — `pv-competence-consolidation`: this is the one thing
+    /// `max_effort_schedule`/`forecast()` need to answer for a point beyond `t1` that
+    /// `weather_power_kw` (a single "now" value) can't. Same source, same per-tick
+    /// resolution as `weather_power_kw` (`resolve_weather_pv_kw_for_tick`); `None` under
+    /// the same conditions `weather_power_kw` is `None` for (no feed configured, or
+    /// stale). Set each tick by the sim loop. NOT from YAML. Not persisted
+    /// (`#[serde(skip)]`): a `Vec` of forecast samples has no business surviving a
+    /// save/reload — it's refreshed every tick from the live weather feed regardless.
+    #[serde(skip)]
+    pub weather_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
     /// True only on the exact tick a manual `pv_irradiance` inject is posted
     /// (Behaviour C: full override, weather ignored entirely that tick).
     /// False while the resulting offset is merely decaying — during that
@@ -114,8 +140,9 @@ impl PvInverter {
             curtailment_source: PvCurtailmentSource::None,
             irradiance: 0.0,
             irradiance_offset: 0.0,
-            pv_alpha: 0.1,
+            tau_s: default_tau_s(),
             weather_power_kw: None,
+            weather_forecast: None,
             irradiance_forced: false,
             measured_power_kw: None,
         }
@@ -153,43 +180,6 @@ impl PvInverter {
             },
             actual_kw,
         )
-    }
-
-    /// The precedence + clipping rules `step_inner` applies, as a pure function
-    /// of explicitly-passed inputs rather than of `self`'s live fields.
-    ///
-    /// `SimState::peek_pv_kw` previews a tick *before* `tick()` writes this
-    /// tick's weather/measurement/override values onto the config, so it holds
-    /// those values as parameters and cannot go through `step_inner`. Both call
-    /// this instead. Keeping one implementation is what stops the two from
-    /// drifting — they already had: the preview was missing `inverter_max_kw`
-    /// clipping entirely, overstating export by (rated_kw − inverter_max_kw)
-    /// whenever DC potential exceeded the inverter's AC ceiling.
-    pub fn resolve_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
-        let raw_kw = self.uncurtailed_power_kw(inputs);
-        self.generation_limit_kw
-            .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
-            .unwrap_or(raw_kw)
-    }
-
-    /// `resolve_power_kw` before any `generation_limit_kw` clamp — the true
-    /// panel/inverter physical ceiling for the given inputs
-    /// (`asset-max-power-primitive` D2: `LimitTier::Physical` for PV means
-    /// this, not whatever `capability()`/`actual_power_kw` currently reports,
-    /// since that's already post-curtailment whenever a limit is active).
-    pub fn uncurtailed_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
-        let base_kw = inputs.measured_power_kw.or(inputs.weather_power_kw);
-        let dc_potential_kw = if inputs.irradiance_forced {
-            self.rated_kw * inputs.irradiance
-        } else {
-            match base_kw {
-                Some(kw) => (kw.max(0.0) + inputs.irradiance_offset * self.rated_kw).max(0.0),
-                None => self.rated_kw * inputs.irradiance,
-            }
-        };
-        // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
-        // see openspec/changes/pv-curtailment-history/.
-        -dc_potential_kw.min(self.inverter_max_kw) // negative = export
     }
 
     /// Export-only: PV never imports, so `max_import_kw` is pinned to 0
@@ -231,7 +221,7 @@ impl PvInverter {
         m.insert("rated_kw".into(), self.rated_kw);
         m.insert("inverter_max_kw".into(), self.inverter_max_kw);
         m.insert("irradiance_offset".into(), self.irradiance_offset);
-        m.insert("pv_alpha".into(), self.pv_alpha);
+        m.insert("tau_s".into(), self.tau_s);
         // Read from `state`, not `self`: for a historical point (e.g. from the in-memory
         // AssetHistoryBuffer), `state` is the snapshot taken at that past tick, while `self` is
         // the live/current PvInverter — reading `self` here would report the current limit on
@@ -259,12 +249,14 @@ impl PvInverter {
                 nullable: false,
             },
             ControlDescriptor {
-                key: "pv_irradiance_alpha".into(),
-                label: "Blend-back Speed".into(),
+                // Decay time constant in seconds — lower = faster blend-back
+                // (opposite direction from the old alpha-fraction encoding).
+                key: "pv_tau_s".into(),
+                label: "Blend-back Time".into(),
                 kind: ControlKind::Slider,
-                min: Some(0.01),
-                max: Some(1.0),
-                unit: "".into(),
+                min: Some(10.0),
+                max: Some(3600.0),
+                unit: "s".into(),
                 display_scale: None,
                 nullable: false,
             },
@@ -294,25 +286,39 @@ impl PvInverter {
         }
     }
 
+    /// `pv-competence-consolidation` D5: samples the same weather/decay-aware
+    /// `uncurtailed_power_kw_at` path `max_effort_schedule` uses, rather than the
+    /// bare sin model — this and `max_effort_schedule` are both `PvInverter`'s own
+    /// methods and must agree with each other, not just with external callers.
+    /// Still applies the currently-active `generation_limit_kw` on top (this
+    /// forecast represents expected actual output, curtailment included — unlike
+    /// `max_effort_schedule`'s `Physical` tier, which is deliberately uncurtailed).
     pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
         }
         let end = now + timespan;
+        let curtailed = |uncurtailed_kw: f64| -> f64 {
+            self.generation_limit_kw
+                .map(|lim| uncurtailed_kw.max(lim))
+                .unwrap_or(uncurtailed_kw)
+        };
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
         let mut t = now;
         while t < end {
-            samples.push((t, self.irradiance_at(t)));
+            let elapsed_s = (t - now).num_seconds() as f64;
+            samples.push((t, curtailed(self.uncurtailed_power_kw_at(t, elapsed_s))));
             t += Duration::seconds(60);
         }
-        samples.push((end, self.irradiance_at(end)));
+        let elapsed_s = (end - now).num_seconds() as f64;
+        samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
 
         if samples.len() >= 2 {
             let n = samples.len();
             if (samples[n - 2].0 - samples[n - 1].0).num_seconds().abs() < 1 {
                 samples.truncate(n - 1);
-                samples.push((end, self.irradiance_at(end)));
+                samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
             }
         }
 
@@ -329,17 +335,9 @@ impl PvInverter {
         crate::entities::solar::natural_irradiance_at(ts)
     }
 
-    /// Power output from the sin model at `ts` (kW, negative = export).
-    /// Used by `forecast()`. Does NOT include the live irradiance_offset.
-    fn irradiance_at(&self, ts: DateTime<Utc>) -> f64 {
-        let natural_kw =
-            (self.rated_kw * Self::natural_irradiance_at(ts)).min(self.inverter_max_kw);
-        let limited_kw = match self.generation_limit_kw {
-            Some(limit) => natural_kw.min(limit.abs()),
-            None => natural_kw,
-        };
-        -limited_kw
-    }
+    // `uncurtailed_power_kw_at`/`max_effort_schedule_inner` moved to
+    // `pv_schedule.rs` (file-size cap) — see that file for the weather/decay
+    // forward-projection logic `max_effort_schedule` below delegates to.
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
         vec![
@@ -511,6 +509,20 @@ impl Asset for PvInverter {
             uncurtailed_kw
         }
     }
+
+    /// `pv-competence-consolidation`: PV's own weather/decay-aware projection —
+    /// see `pv_schedule.rs::max_effort_schedule_inner` (file-size cap moved the
+    /// body there) for why this replaces the trait default.
+    fn max_effort_schedule(
+        &self,
+        state: &AssetState,
+        direction: CommitmentDirection,
+        tier: LimitTier,
+        t1: DateTime<Utc>,
+        t_end: DateTime<Utc>,
+    ) -> Vec<(DateTime<Utc>, f64)> {
+        self.max_effort_schedule_inner(state, direction, tier, t1, t_end)
+    }
 }
 
 impl TickOverridable for PvInverter {
@@ -520,7 +532,7 @@ impl TickOverridable for PvInverter {
     fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
         self.irradiance = overrides.pv_irradiance;
         self.irradiance_offset = overrides.pv_irradiance_offset;
-        self.pv_alpha = overrides.pv_alpha;
+        self.tau_s = overrides.pv_tau_s;
         self.generation_limit_kw = overrides.pv_generation_limit_kw;
         self.curtailment_source = overrides.pv_curtailment_source;
         // Weather is never nulled by a manual override anymore — a
@@ -528,6 +540,7 @@ impl TickOverridable for PvInverter {
         // additively on top of it instead (see `PvInverter::step_inner`).
         // Only a forced override (this exact tick) takes exclusive control.
         self.weather_power_kw = overrides.pv_weather_power_kw;
+        self.weather_forecast = overrides.pv_weather_forecast.clone();
         self.measured_power_kw = overrides.pv_measured_power_kw;
         self.irradiance_forced = overrides.pv_irradiance_forced;
     }
@@ -544,11 +557,12 @@ mod tests {
                 rated_kw,
                 irradiance: 0.0,
                 irradiance_offset: 0.0,
-                pv_alpha: 0.1,
+                tau_s: default_tau_s(),
                 inverter_max_kw: rated_kw,
                 generation_limit_kw: None,
                 curtailment_source: PvCurtailmentSource::None,
                 weather_power_kw: None,
+                weather_forecast: None,
                 irradiance_forced: false,
                 measured_power_kw: None,
             },
@@ -917,6 +931,11 @@ mod tests {
         // SimState in one shot and only discards/rebuilds asset_configs afterward —
         // a missing-field error here fails that entire deserialize, losing unrelated
         // persisted runtime state (SoC, temperature) that had nothing to do with PV.
+        //
+        // This JSON deliberately still carries the OLD `pv_alpha` key (pre-D7,
+        // pv-competence-consolidation): it's unrecognized now, ignored by serde, and
+        // `tau_s` (also absent from this old-format payload) must fall back to
+        // `default_tau_s()` rather than fail the whole deserialize.
         let json = r#"{
             "rated_kw": 5.0,
             "generation_limit_kw": null,
@@ -926,10 +945,15 @@ mod tests {
             "weather_power_kw": null
         }"#;
         let pv: PvInverter = serde_json::from_str(json).expect(
-            "PvInverter must deserialize from a payload missing inverter_max_kw/curtailment_source",
+            "PvInverter must deserialize from a payload missing inverter_max_kw/curtailment_source/tau_s",
         );
         assert_eq!(pv.inverter_max_kw, f64::INFINITY);
         assert_eq!(pv.curtailment_source, PvCurtailmentSource::None);
+        assert!(
+            (pv.tau_s - default_tau_s()).abs() < 1e-9,
+            "tau_s must default when the old pv_alpha-keyed payload lacks it, got {}",
+            pv.tau_s
+        );
     }
 
     #[test]

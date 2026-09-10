@@ -133,6 +133,7 @@ mod shiftable_load_removal_tests {
             None,
             None,
             None,
+            None,
             PvCurtailmentSource::None,
             None,
             None,
@@ -221,6 +222,7 @@ mod clock_and_rng_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
             None,
@@ -402,6 +404,7 @@ mod grid_meter_tests {
             None,
             None,
             None,
+            None,
             PvCurtailmentSource::None,
             None, // pv_measured_kw
             None, // base_load_measured_kw
@@ -463,6 +466,7 @@ mod pv_weather_blend_tests {
             None,
             None,
             weather_pv_kw,
+            None,
             None,
             None,
             None,

@@ -45,10 +45,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Restore alpha to default so the running sim is not left in a test state.
+  // Restore tau to default so the running sim is not left in a test state.
   if (venReachable) {
     try {
-      await api.postSimInject({ pv_irradiance_alpha: 0.1 } as never);
+      await api.postSimInject({ pv_tau_s: 2847.37 } as never);
     } catch { /* best-effort */ }
   }
 });
@@ -68,8 +68,8 @@ describe("PV irradiance one-shot inject", () => {
       const simBefore = await api.sim();
       const naturalIrradiance: number = (simBefore.assets as Record<string, { irradiance?: number }>).pv?.irradiance ?? 0;
 
-      // 2. Inject an irradiance value with high alpha so decay is fast.
-      //    alpha=0.99 → tau_s = -300/ln(0.01) ≈ 65 s → ~12% drop per 8 s.
+      // 2. Inject an irradiance value with a short tau so decay is fast
+      //    (≈65 s → ~12% drop per 8 s, matching the old alpha=0.99 behavior).
       //    Irradiance is clamped to [0, 1] server-side, so a fixed offset
       //    (up or down) can run out of headroom depending on time of day
       //    (e.g. natural ≈ 1.0 at solar noon leaves no room above). Inject
@@ -78,7 +78,7 @@ describe("PV irradiance one-shot inject", () => {
       const injectIrradiance = injectingUp
         ? Math.min(naturalIrradiance + 0.3, 1.0)
         : Math.max(naturalIrradiance - 0.3, 0.0);
-      await api.postSimInject({ pv_irradiance: injectIrradiance, pv_irradiance_alpha: 0.99 } as never);
+      await api.postSimInject({ pv_irradiance: injectIrradiance, pv_tau_s: 65 } as never);
 
       // 3. Wait ≥ 1 sim tick (tick period = 1 s) so the backend processes the inject.
       await sleep(1_500);

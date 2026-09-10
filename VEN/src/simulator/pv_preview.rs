@@ -26,7 +26,7 @@ impl SimState {
         now: DateTime<Utc>,
         dt_s: f64,
         pv_irradiance_override: Option<f64>,
-        pv_alpha: f64,
+        pv_tau_s: f64,
         weather_pv_kw: Option<f64>,
         pv_measured_kw: Option<f64>,
     ) -> Option<f64> {
@@ -42,7 +42,7 @@ impl SimState {
             pv_irradiance_override,
             natural_irradiance,
             dt_s,
-            pv_alpha,
+            pv_tau_s,
         );
         Some(pv_cfg.resolve_power_kw(&PvPowerInputs {
             measured_power_kw: pv_measured_kw,

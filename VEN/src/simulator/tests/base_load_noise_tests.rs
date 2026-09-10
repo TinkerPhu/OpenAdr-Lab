@@ -61,6 +61,7 @@ fn tick_applies_appliance_noise_to_base_load_power() {
         None,
         None,
         None,
+        None,
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
@@ -105,6 +106,7 @@ fn tick_base_load_kw_override_lands_exactly_regardless_of_appliance_noise() {
         None,
         None,
         None,
+        None,
         PvCurtailmentSource::None,
         None, // pv_measured_kw
         None, // base_load_measured_kw
@@ -139,6 +141,7 @@ fn tick_at_quiet_hour_stays_close_to_static_baseline() {
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,
@@ -188,6 +191,7 @@ fn tick_uses_heuristic_tier_when_measurement_absent_but_heuristic_present() {
         None,
         None,
         None,
+        None,
         PvCurtailmentSource::None,
         None,               // pv_measured_kw
         None,               // base_load_measured_kw
@@ -223,6 +227,7 @@ fn tick_falls_back_to_synthetic_when_neither_measurement_nor_heuristic_present()
         None,
         None,
         0.1,
+        None,
         None,
         None,
         None,

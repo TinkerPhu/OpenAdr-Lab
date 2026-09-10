@@ -1,6 +1,7 @@
 use super::*;
 
-// ── PV forecast reflects live irradiance_offset and pv_alpha ─────────────
+// ── PV forecast reflects live irradiance_offset and tau_s (decay time
+// constant, `pv-competence-consolidation` D7 — was `pv_alpha`) ─────────────
 
 /// Return midnight so natural_irradiance_at() = 0, isolating the offset term.
 fn fixed_midnight() -> DateTime<Utc> {
@@ -8,22 +9,22 @@ fn fixed_midnight() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap()
 }
 
-/// Set irradiance_offset and pv_alpha on the PV asset in an existing SimSnapshot.
-fn set_pv_inject(sim: &mut SimSnapshot, offset: f64, alpha: f64) {
+/// Set irradiance_offset and tau_s on the PV asset in an existing SimSnapshot.
+fn set_pv_inject(sim: &mut SimSnapshot, offset: f64, tau_s: f64) {
     let snap = sim.assets.get_mut("pv").expect("no pv asset in sim");
     snap.values.insert("irradiance_offset".to_string(), offset);
-    snap.values.insert("pv_alpha".to_string(), alpha);
+    snap.values.insert("tau_s".to_string(), tau_s);
 }
 
 #[test]
 fn pv_irradiance_offset_in_forecast() {
     // Regression: irradiance_offset must project into p_pv_kw.
-    // At midnight, natural irradiance = 0. With offset=0.5 and very slow
-    // alpha (≈no decay over the horizon), slot 0 must be ≈ 0.5 × rated_kw.
+    // At midnight, natural irradiance = 0. With offset=0.5 and a very large
+    // tau (≈no decay over the horizon), slot 0 must be ≈ 0.5 × rated_kw.
     let now = fixed_midnight();
     let profile = make_profile(); // rated_kw=5.0
     let mut sim = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim, 0.5, 0.001); // slow alpha → offset barely decays
+    set_pv_inject(&mut sim, 0.5, 1_000_000.0); // huge tau -> offset barely decays
 
     let inp = bmi(
         &profile,
@@ -35,7 +36,7 @@ fn pv_irradiance_offset_in_forecast() {
         None,
     );
 
-    // slot 0: seconds_ahead=0 → decayed_offset = 0.5×(0.999)^0 = 0.5
+    // slot 0: elapsed_s=0 -> decayed_offset = 0.5 * e^0 = 0.5
     // p_pv[0] = (0.0 + 0.5).clamp(0,1) × 5.0 = 2.5 kW
     assert!(
         inp.p_pv_kw[0] > 1.0,
@@ -45,15 +46,16 @@ fn pv_irradiance_offset_in_forecast() {
 }
 
 #[test]
-fn pv_irradiance_offset_decays_per_step_not_per_second() {
-    // Regression guard: with alpha=0.1 (typical), the decay exponent must be
-    // the plan-step count (t), NOT raw seconds (t * 300).
-    // Buggy formula: 0.9^(1×300) ≈ 5e-14  → slot 1 ≈ 0 kW  (WRONG)
-    // Correct formula: 0.9^1 = 0.9         → slot 1 ≈ 2.25 kW (RIGHT)
+fn pv_irradiance_offset_decays_by_elapsed_seconds() {
+    // Regression guard: the decay exponent must be real elapsed seconds
+    // (`e^(-elapsed_s/tau_s)`), producing a smooth, monotonic fade — not a
+    // per-plan-step count that could jump discontinuously across a
+    // multi-zone horizon (the shape of bug this reparametrization removes).
     let now = fixed_midnight(); // natural=0, isolates offset
     let profile = make_profile(); // rated_kw=5.0, step_s=300
     let mut sim = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim, 0.5, 0.1); // typical alpha=0.1
+    let tau = -300.0_f64 / (1.0_f64 - 0.1).ln(); // equivalent to the old "typical alpha=0.1"
+    set_pv_inject(&mut sim, 0.5, tau);
 
     let inp = bmi(
         &profile,
@@ -65,14 +67,14 @@ fn pv_irradiance_offset_decays_per_step_not_per_second() {
         None,
     );
 
-    // slot 0: 0.5 × 0.9^0 × 5.0 = 2.5 kW
-    // slot 1: 0.5 × 0.9^1 × 5.0 = 2.25 kW (must be clearly non-zero)
+    // slot 0 (elapsed_s=0): 0.5 × e^0 × 5.0 = 2.5 kW
+    // slot 1 (elapsed_s=300): 0.5 × e^(-300/tau) × 5.0 -- must remain clearly non-zero.
     assert!(
         inp.p_pv_kw[1] > 1.0,
-        "slot 1 must retain offset with alpha=0.1 (decay per step, not per second), got {:.6}",
+        "slot 1 must retain most of the offset after one 300s step, got {:.6}",
         inp.p_pv_kw[1]
     );
-    // slot 5: 0.5 × 0.9^5 × 5.0 ≈ 1.476 kW
+    // slot 5 (elapsed_s=1500): still a meaningful fraction of the original offset.
     assert!(
         inp.p_pv_kw[5] > 0.5,
         "slot 5 must still show partial offset, got {:.6}",
@@ -86,18 +88,18 @@ fn pv_irradiance_offset_decays_per_step_not_per_second() {
 }
 
 #[test]
-fn pv_alpha_faster_decay_in_forecast() {
-    // Regression: higher pv_alpha (blend-back speed) must produce lower p_pv_kw
-    // at later forecast slots because the offset decays faster.
+fn pv_shorter_tau_decays_faster_in_forecast() {
+    // Regression: a shorter tau_s (faster blend-back) must produce lower
+    // p_pv_kw at later forecast slots because the offset decays faster.
     // At midnight natural=0, so all forecast power comes from the decaying offset.
     let now = fixed_midnight();
     let profile = make_profile(); // rated_kw=5.0, step_s=300s, 24 slots
 
     let mut sim_slow = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim_slow, 0.5, 0.001); // slow: 0.1 % per second
+    set_pv_inject(&mut sim_slow, 0.5, 1_000_000.0); // huge tau: barely decays
 
     let mut sim_fast = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim_fast, 0.5, 0.05); // fast: 5 % per second
+    set_pv_inject(&mut sim_fast, 0.5, 20.0); // tiny tau: decays almost immediately
 
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     let inp_slow = build_milp_inputs(
@@ -121,13 +123,13 @@ fn pv_alpha_faster_decay_in_forecast() {
         None,
     );
 
-    // At slot 3 (900 s ahead at midnight, natural=0):
-    //   slow: 0.5 × (0.999)^900 ≈ 0.5 × 0.41 ≈ 2.0 kW
-    //   fast: 0.5 × (0.95)^900  ≈ 0.5 × ~0   ≈ 0.0 kW
+    // At slot 3 (900s ahead at midnight, natural=0):
+    //   slow (tau=1e6): 0.5 × e^(-900/1e6)  ≈ 0.5 × 0.9991 ≈ 2.50 kW
+    //   fast (tau=20):  0.5 × e^(-900/20)   ≈ 0.5 × ~0     ≈ 0.00 kW
     let t = 3;
     assert!(
         inp_fast.p_pv_kw[t] < inp_slow.p_pv_kw[t],
-        "higher alpha should produce lower p_pv_kw at later slots: \
+        "a shorter tau_s should produce lower p_pv_kw at later slots: \
              fast={:.4} >= slow={:.4}",
         inp_fast.p_pv_kw[t],
         inp_slow.p_pv_kw[t]
@@ -141,7 +143,7 @@ fn pv_zero_offset_matches_sin_model() {
     let now = fixed_now(); // 06:00 → natural = 0 at slot 0
     let profile = make_profile(); // rated_kw=5.0, step_s=300s
 
-    // from_profile initialises irradiance_offset=0, pv_alpha=0.1
+    // from_profile initialises irradiance_offset=0 (tau_s irrelevant when offset=0)
     let sim = make_snap_from_profile(&profile);
 
     let inp = bmi(

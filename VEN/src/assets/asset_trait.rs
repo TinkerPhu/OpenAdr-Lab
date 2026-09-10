@@ -518,10 +518,13 @@ pub struct TickOverrides {
     // PV
     pub pv_irradiance: f64,
     pub pv_irradiance_offset: f64,
-    pub pv_alpha: f64,
+    pub pv_tau_s: f64,
     pub pv_generation_limit_kw: Option<f64>,
     pub pv_curtailment_source: PvCurtailmentSource,
     pub pv_weather_power_kw: Option<f64>,
+    /// Full weather-forecast series (`pv-competence-consolidation`) — see
+    /// `PvInverter.weather_forecast`'s own doc comment.
+    pub pv_weather_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
     pub pv_measured_power_kw: Option<f64>,
     pub pv_irradiance_forced: bool,
 
