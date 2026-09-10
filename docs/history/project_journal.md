@@ -11802,3 +11802,46 @@ tests were replaced with 9 `SimState::from_params`-based ones), `cargo fmt`/
 `SiteHeadroomChart.tsx` was already correct for absolute values on both
 series; this fix makes the `history` series actually absolute so it matches
 what the chart already assumed.
+
+## 2026-09-10 — Asset Competence Assurance master plan, Phase 0 (`asset-competence-audit`)
+
+A separate investigation (prompted by a question about whether the Site Headroom band and
+the capacity-curve overlay should start at the exact same point) surfaced a recurring
+pattern across this codebase: modules outside an asset's own implementation independently
+computing or assuming answers to "what is this asset's current state/forecast" — the same
+failure shape behind the already-fixed PV-Import and Heater-Export bugs
+(`unified-capacity-envelope-engine`), the site-headroom/capacity-curve seam divergence found
+afterward, and the already-tracked R-69 (battery efficiency modeled two ways). Named this
+`asset-competence-assurance` and wrote `docs/plans/asset-competence-assurance-master-plan.md`
+— six phases (0: formalize + audit; 1: PV; 2: base load; 3: battery/R-69; 4: heater; 5: EV
+departure, deliberately last since it's the only phase touching live dispatch physics; 6:
+close out), each becoming its own openspec change when its turn comes, per the user's
+explicit instruction that this master plan's own "execution" is the careful creation of one
+openspec change per phase, not a bundled implementation.
+
+Research pass (before Phase 0's own openspec change) found PV has *four* independent
+"achievable power" implementations — `Pv::forecast()` (sin-model only), `step_inner`/
+`capability_inner` (live, with the decaying `irradiance_offset`/`pv_alpha` blend already
+built), `entities::solar::pv_ceiling_kw` (a third formula, called from
+`milp_planner/inputs.rs` directly on raw snapshot values, not through any of `Pv`'s own
+methods), and `pv_frames`/weather-MQTT (used by `capacity_headroom.rs`, confirmed to never
+call `Pv::forecast()` at all). Base load has two (`BaseLoad::forecast()` returns a flat
+constant, ignoring the learned heuristic that `context.rs` and `milp_planner/inputs.rs` both
+call directly instead). EV departure has three inconsistent mechanisms (MILP planning
+receives `EvSession`/`departure_time` properly as a trait parameter; the site-headroom
+forecast works around it separately; live `step()` has no departure-awareness at all —
+`EvState::plugged` confirmed never toggled by `step()`).
+
+Phase 0 itself (`openspec/changes/asset-competence-audit/`, deleted after this entry per the
+no-lingering-plans rule): recorded the rule verbatim in `.claude/CLAUDE.md` and
+`VEN_ARCHITECTURE.md` §3.0d, and closed the two audit items the research pass left
+unverified — compared `assets/ev_milp.rs` against `assets/ev.rs`'s own SoC arithmetic (both
+100% efficient, no loss term anywhere, confirmed by reading the actual multiplication in
+both files, not assumed from R-69's superficial resemblance) and `assets/shiftable_load.rs`'s
+single-file MILP-context-vs-`max_effort_schedule` (same config fields, matching semantics,
+no separate file to drift). Both came back clean — no new debt entries. Also decided R-76
+(`reporter.rs`'s `IMPORT_RESERVATION_CAPACITY`/`EXPORT_RESERVATION_CAPACITY` field mapping)
+stays a separate investigation: it's a site-level aggregate-interpretation question with no
+single owning asset, not a fit for this master plan's per-asset phases.
+
+Docs-only change, no tests to run. Phases 1–5 remain open, to be proposed individually.

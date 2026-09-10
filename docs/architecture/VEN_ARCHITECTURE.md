@@ -598,6 +598,27 @@ capability-frame path — `compute_site_capacity_curve` does not need the
 equivalent, since its sustained-commitment model never projected a future
 departure either.
 
+### 3.0d Asset Competence Assurance
+
+Named architectural rule (`asset-competence-assurance`, `.claude/CLAUDE.md`): infrastructure
+and data-acquisition (MQTT reception, weather APIs, a heuristics-learning store) may live
+outside an asset's own module, and may be shared across assets — e.g. a future heater
+needing the same weather-temperature feed PV already needs. But interpretation — "what is
+this asset's current state" or "what is this asset's forecast" — must have exactly one
+authority: the asset itself. No other module may independently compute or assume its own
+answer to that question for a live or future value. Raw external data flows into the asset
+as an injected parameter; everything downstream of receiving it is the asset's own business.
+The one exception is immutable history: an external recorder collecting the (unchangeable)
+past isn't a competing authority, since there's no divergence risk once a value can no
+longer change.
+
+This is the recurring shape behind several bugs already fixed in this codebase — the
+PV-Import and Heater-Export bugs §3.0c's engine fixed by construction, and the
+site-headroom/capacity-curve seam divergence found afterward — and one still-open debt item
+(R-69, battery round-trip efficiency modeled two different ways). A confirmed violation
+catalogue and phased remediation sequence (PV, base load, battery, heater, EV) is tracked in
+`docs/plans/asset-competence-assurance-master-plan.md`.
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.
