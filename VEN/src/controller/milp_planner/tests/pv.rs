@@ -16,6 +16,62 @@ fn set_pv_inject(sim: &mut SimSnapshot, offset: f64, tau_s: f64) {
     snap.values.insert("tau_s".to_string(), tau_s);
 }
 
+/// `pv-competence-consolidation` section 4: build p_pv_kw the way production
+/// now does — a live `SimState` with irradiance_offset/tau_s injected on its
+/// `PvInverter`, resolved via `resolve_pv_forecast_kw` (the same helper
+/// `tasks::planning::cycle::run_plan_cycle` calls) and threaded into
+/// `build_milp_inputs` as `pv_live_forecast_kw`. Supersedes `set_pv_inject`'s
+/// raw-SimSnapshot mutation for tests exercising the live-PV precedence path
+/// specifically (`set_pv_inject`/`bmi` still cover the no-live-PV fallback).
+fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f64) -> MilpInputs {
+    use crate::simulator::plan_context::resolve_pv_forecast_kw;
+    use crate::simulator::SimState;
+
+    let mut sim_state = SimState::from_params(&profile.assets, now);
+    {
+        let (_, cfg) = sim_state.find_asset_mut("pv").expect("no pv asset in sim");
+        let pv = cfg
+            .as_any_mut()
+            .downcast_mut::<crate::assets::PvInverter>()
+            .expect("expected PvInverter");
+        pv.irradiance_offset = offset;
+        pv.tau_s = tau_s;
+    }
+    let n_slots: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
+    let mut cum_s: Vec<i64> = Vec::with_capacity(n_slots + 1);
+    cum_s.push(0);
+    for zone in &profile.planner.plan_zones {
+        for _ in 0..zone.slots {
+            cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
+        }
+    }
+    let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_state, n_slots, &cum_s, now);
+
+    let sim_snap = sim_state.to_sim_snapshot();
+    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+    super::super::inputs::build_milp_inputs(
+        &ctxs,
+        &sim_snap,
+        &TariffTimeSeries::from_snapshots(&[]),
+        &no_capacity(),
+        &[],
+        &[],
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        profile.pv_config(),
+        None,
+        now,
+        None,
+        None,
+        pv_live_forecast_kw.as_deref(),
+        &std::collections::HashMap::new(),
+        None,
+        None,
+        None,
+    )
+}
+
 #[test]
 fn pv_irradiance_offset_in_forecast() {
     // Regression: irradiance_offset must project into p_pv_kw.
@@ -23,18 +79,7 @@ fn pv_irradiance_offset_in_forecast() {
     // tau (≈no decay over the horizon), slot 0 must be ≈ 0.5 × rated_kw.
     let now = fixed_midnight();
     let profile = make_profile(); // rated_kw=5.0
-    let mut sim = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim, 0.5, 1_000_000.0); // huge tau -> offset barely decays
-
-    let inp = bmi(
-        &profile,
-        &sim,
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        now,
-        None,
-        None,
-    );
+    let inp = bmi_with_live_pv(&profile, now, 0.5, 1_000_000.0); // huge tau -> offset barely decays
 
     // slot 0: elapsed_s=0 -> decayed_offset = 0.5 * e^0 = 0.5
     // p_pv[0] = (0.0 + 0.5).clamp(0,1) × 5.0 = 2.5 kW
@@ -53,19 +98,8 @@ fn pv_irradiance_offset_decays_by_elapsed_seconds() {
     // multi-zone horizon (the shape of bug this reparametrization removes).
     let now = fixed_midnight(); // natural=0, isolates offset
     let profile = make_profile(); // rated_kw=5.0, step_s=300
-    let mut sim = make_snap_from_profile(&profile);
     let tau = -300.0_f64 / (1.0_f64 - 0.1).ln(); // equivalent to the old "typical alpha=0.1"
-    set_pv_inject(&mut sim, 0.5, tau);
-
-    let inp = bmi(
-        &profile,
-        &sim,
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        now,
-        None,
-        None,
-    );
+    let inp = bmi_with_live_pv(&profile, now, 0.5, tau);
 
     // slot 0 (elapsed_s=0): 0.5 × e^0 × 5.0 = 2.5 kW
     // slot 1 (elapsed_s=300): 0.5 × e^(-300/tau) × 5.0 -- must remain clearly non-zero.
@@ -95,33 +129,8 @@ fn pv_shorter_tau_decays_faster_in_forecast() {
     let now = fixed_midnight();
     let profile = make_profile(); // rated_kw=5.0, step_s=300s, 24 slots
 
-    let mut sim_slow = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim_slow, 0.5, 1_000_000.0); // huge tau: barely decays
-
-    let mut sim_fast = make_snap_from_profile(&profile);
-    set_pv_inject(&mut sim_fast, 0.5, 20.0); // tiny tau: decays almost immediately
-
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
-    let inp_slow = build_milp_inputs(
-        &ctxs,
-        &sim_slow,
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &profile,
-        now,
-        &[],
-        None,
-    );
-    let inp_fast = build_milp_inputs(
-        &ctxs,
-        &sim_fast,
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &profile,
-        now,
-        &[],
-        None,
-    );
+    let inp_slow = bmi_with_live_pv(&profile, now, 0.5, 1_000_000.0); // huge tau: barely decays
+    let inp_fast = bmi_with_live_pv(&profile, now, 0.5, 20.0); // tiny tau: decays almost immediately
 
     // At slot 3 (900s ahead at midnight, natural=0):
     //   slow (tau=1e6): 0.5 × e^(-900/1e6)  ≈ 0.5 × 0.9991 ≈ 2.50 kW
@@ -286,6 +295,7 @@ fn bmi_with_weather(
         now,
         None,
         pv_forecast_override,
+        None,
         &std::collections::HashMap::new(),
         weather_pv_kw,
         None,

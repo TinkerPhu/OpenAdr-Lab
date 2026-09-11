@@ -23,15 +23,18 @@
 //! (not "envelope") is exactly what surfaced the gap; don't let a future
 //! addition to this same UI panel go unnoticed the same way again.
 //!
-//! **PV is asset-kind-and-direction-special, by design** (design.md D1, not
-//! an oversight): PV's Import contribution goes through
-//! `max_effort_setpoint` like every other asset (a trivial, always-correct
-//! `0.0`). PV's Export contribution keeps using the existing weather-driven
-//! `pv_frames`/`pv_ceiling_kw` resolution unchanged from today — Spec C/D
-//! never modeled PV's time-varying weather forecast inside the `Asset`
-//! trait (a deliberate, documented scope limit in both), so routing PV's
-//! Export through the trait-based primitives would flatten its ceiling to a
-//! constant across the whole horizon, a real regression, not a unification.
+//! **PV special-casing retired** (`pv-competence-consolidation` section 5).
+//! Both `compute_site_capacity_curve` and `compute_site_headroom_forecast`
+//! now flow PV through the same primitives every other asset kind uses —
+//! `asset_max_power_series`/`simulated_trajectory`, backed by `PvInverter`'s
+//! own weather/decay-aware `max_effort_schedule`/`simulate_forward`
+//! overrides (sections 1-3, 5b). `compute_site_headroom_forecast` keeps one
+//! small PV-specific branch reading `TrajectoryPoint::power_kw` directly
+//! instead of calling `max_effort_setpoint` again per point — PV's own
+//! `max_effort_setpoint` deliberately ignores `state` for the Physical tier
+//! (see that method's doc comment), so it can't answer a future point's own
+//! question the way a SoC-based asset's `state` naturally can. See
+//! design.md D6 for the full history.
 //!
 //! **`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
 //! import, negative = export — the same convention `Asset::max_effort_setpoint`/
@@ -61,12 +64,13 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::assets::asset_max_power_series;
-use crate::controller::simulator_port::{AssetForecastFrame, SimSnapshot};
+use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity_curve::{
     CapacityCurve, CapacityCurveStep, CommitmentDirection, LimitTier,
 };
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::{Plan, PlanTimeSlot, SiteFlexibilityForecastSlot};
+#[cfg(test)]
 use crate::ids::ASSET_PV;
 use crate::simulator::forecast::simulated_trajectory;
 use crate::simulator::SimState;
@@ -88,19 +92,19 @@ pub fn compute_site_capacity_curve(
     now: DateTime<Utc>,
     t2_max: Duration,
     sim: &SimState,
-    pv_frames: &[AssetForecastFrame],
     snapshot: &SimSnapshot,
 ) -> CapacityCurve {
     let mut events: Vec<Event> = Vec::new();
 
     for (entry, cfg) in sim.iter_assets() {
-        match cfg.asset_type_str() {
-            "pv" => continue, // handled separately below (design.md D1).
-            "base_load" => {
-                events.extend(base_load_capacity_events(&entry.state));
-                continue;
-            }
-            _ => {}
+        // pv-competence-consolidation section 5a: PV is no longer special-
+        // cased here — asset_max_power_series already calls PvInverter's own
+        // max_effort_schedule (weather/decay-aware), which is now
+        // authoritative for this the same way it is for every other asset
+        // kind (see this module's own doc comment, revised).
+        if cfg.asset_type_str() == "base_load" {
+            events.extend(base_load_capacity_events(&entry.state));
+            continue;
         }
         let series = asset_max_power_series(
             cfg,
@@ -112,7 +116,6 @@ pub fn compute_site_capacity_curve(
         );
         events.extend(series_to_events(&series));
     }
-    events.extend(pv_capacity_events(direction, now, pv_frames));
 
     let import_limit_kw = snapshot.grid.import_limit_kw.max(0.0);
     let export_limit_kw = (-snapshot.grid.export_limit_kw).max(0.0);
@@ -218,47 +221,6 @@ fn base_load_capacity_events(state: &crate::assets::AssetState) -> Vec<Event> {
     vec![(0, s.actual_power_kw)]
 }
 
-/// PV's Capacity Forecast contribution (design.md D1): Import is the
-/// trivial constant `0.0` (no event needed at all — `max_effort_setpoint`
-/// already establishes this is correct, so there's nothing to emit).
-/// Export reuses `pv_frames` verbatim, via the same per-frame delta
-/// extraction the deleted `capacity_forecast.rs::pv_events`'s Export branch
-/// used — PV's ceiling is weather-driven, not something this engine's
-/// trait-based primitives can forecast (see module doc). Uses
-/// `cap_max_export_kw` directly (already negative, the correct sign for
-/// `CapacityCurve`'s now-signed convention) — `magnitude_kw` is called only
-/// for its `debug_assert!` (a validation guard), with the result discarded
-/// rather than substituted, since no conversion is needed.
-fn pv_capacity_events(
-    direction: CommitmentDirection,
-    start: DateTime<Utc>,
-    pv_frames: &[AssetForecastFrame],
-) -> Vec<Event> {
-    if direction == CommitmentDirection::Import {
-        return Vec::new();
-    }
-    let mut events = Vec::new();
-    let mut prev_value = 0.0_f64;
-    for frame in pv_frames {
-        let Some(point) = frame.assets.get(ASSET_PV) else {
-            continue;
-        };
-        let _ = magnitude_kw(point.cap_max_export_kw, CommitmentDirection::Export); // sign-validates, result unused
-        let value = point.cap_max_export_kw;
-        let elapsed_s = (frame.ts - start).num_seconds();
-        if elapsed_s < 0 {
-            prev_value = value;
-            continue;
-        }
-        let delta = value - prev_value;
-        if delta != 0.0 {
-            events.push((elapsed_s, delta));
-        }
-        prev_value = value;
-    }
-    events
-}
-
 /// Sweep-line merge of piecewise-constant contributions: sum deltas at each
 /// distinct elapsed time, accumulate a running SIGNED total (positive =
 /// import, negative = export — `CapacityCurve`'s internal convention).
@@ -335,7 +297,6 @@ pub fn compute_site_headroom_forecast(
     sim: &SimState,
     plan: &Plan,
     ev_session: Option<&EvSession>,
-    pv_frames: &[AssetForecastFrame],
     now: DateTime<Utc>,
 ) -> Vec<SiteFlexibilityForecastSlot> {
     let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
@@ -348,17 +309,14 @@ pub fn compute_site_headroom_forecast(
 
     for (entry, cfg) in sim.iter_assets() {
         let asset_kind = cfg.asset_type_str();
-        match asset_kind {
-            "pv" => continue, // handled separately below (design.md D1).
-            // Base load has zero controllable degrees of freedom
-            // (`PowerAdjustability::None`) -- it contributes no *flexibility*
-            // of either kind, matching `build_forecast_frames`'s own existing
-            // exclusion of base_load from capability frames. Its live draw
-            // is a real number, but "how much MORE could this asset do" is
-            // always zero for it, unlike `max_effort_setpoint`'s Import
-            // answer (its current draw) would naively suggest.
-            "base_load" => continue,
-            _ => {}
+        // Base load has zero controllable degrees of freedom
+        // (`PowerAdjustability::None`) -- it contributes no *flexibility* of
+        // either kind. Its live draw is a real number, but "how much MORE
+        // could this asset do" is always zero for it, unlike
+        // `max_effort_setpoint`'s Import answer (its current draw) would
+        // naively suggest.
+        if asset_kind == "base_load" {
+            continue;
         }
         // Computed once per asset (design.md D4) -- NOT once per slot, which
         // would redundantly re-walk this same trajectory for every slot
@@ -376,6 +334,21 @@ pub fn compute_site_headroom_forecast(
                     }
                 }
             }
+            if asset_kind == "pv" {
+                // pv-competence-consolidation section 5b: unlike every other
+                // asset kind, PvInverter::max_effort_setpoint's Physical tier
+                // deliberately ignores `state` (see that method's own doc
+                // comment) -- it answers "what's the panel/inverter's true
+                // ceiling right now" from `self`'s own live fields, not from
+                // a hypothetical future state, so calling it again per point
+                // here would flatten PV back to a constant. `point.power_kw`
+                // (built by PvInverter::simulate_forward directly from this
+                // point's own timestamp) is already the correct time-varying
+                // Physical/Export answer -- use it directly. Import stays the
+                // well-established constant 0.0, no call needed.
+                up_kw[i] += magnitude_kw(point.power_kw, CommitmentDirection::Export);
+                continue;
+            }
             let export_kw = cfg.max_effort_setpoint(
                 &point.state,
                 CommitmentDirection::Export,
@@ -389,18 +362,6 @@ pub fn compute_site_headroom_forecast(
             up_kw[i] += magnitude_kw(export_kw, CommitmentDirection::Export);
             down_kw[i] += magnitude_kw(import_kw, CommitmentDirection::Import);
         }
-    }
-
-    for (i, slot) in future_slots.iter().enumerate() {
-        let Some(pv_point) = pv_frames
-            .iter()
-            .find(|f| f.ts == slot.start)
-            .and_then(|f| f.assets.get(ASSET_PV))
-        else {
-            continue;
-        };
-        // Import: PV's max_effort_setpoint is always 0.0 -- nothing to add.
-        up_kw[i] += magnitude_kw(pv_point.cap_max_export_kw, CommitmentDirection::Export);
     }
 
     future_slots
@@ -621,7 +582,6 @@ mod tests {
             now,
             Duration::hours(2),
             &sim,
-            &[],
             &snapshot,
         );
         assert_eq!(
@@ -655,7 +615,6 @@ mod tests {
             now,
             Duration::hours(1),
             &sim,
-            &[],
             &snapshot,
         );
         let export_curve = compute_site_capacity_curve(
@@ -663,7 +622,6 @@ mod tests {
             now,
             Duration::hours(1),
             &sim,
-            &[],
             &snapshot,
         );
         assert_eq!(import_curve.steps[0].power_kw, 0.5);
@@ -682,9 +640,12 @@ mod tests {
     #[test]
     fn pv_contributes_zero_to_a_sustained_import_commitment() {
         // The confirmed PV-Import bug (design.md Context): PV must never
-        // credit its own current generation as import headroom.
+        // credit its own current generation as import headroom. Section 5a:
+        // now routed through asset_max_power_series/max_effort_setpoint like
+        // every other asset, so the live PvInverter config itself (not a
+        // constructed AssetForecastFrame) drives this.
         let now = t0();
-        let sim = SimState::from_params(
+        let mut sim = SimState::from_params(
             &[AssetParams::Pv(PvParams {
                 id: ASSET_PV.to_string(),
                 rated_kw: 5.0,
@@ -693,33 +654,13 @@ mod tests {
             })],
             now,
         );
-        // Force PV to be actively generating right now.
-        let (entry, cfg) = sim.find_asset(ASSET_PV).unwrap();
-        let pv = cfg
-            .as_any()
-            .downcast_ref::<crate::assets::PvInverter>()
-            .unwrap();
-        let inputs = crate::assets::PvPowerInputs {
-            measured_power_kw: None,
-            weather_power_kw: Some(4.0), // positive generation magnitude input
-            irradiance: 0.0,
-            irradiance_offset: 0.0,
-            irradiance_forced: false,
+        // Force PV to be actively generating right now (capability_inner
+        // reads the state's own actual_power_kw, not a live recompute).
+        let (entry, _) = sim.find_asset_mut(ASSET_PV).unwrap();
+        let AssetState::Pv(s) = &mut entry.state else {
+            panic!("expected Pv state")
         };
-        let generating_kw = pv.resolve_power_kw(&inputs);
-        assert!(generating_kw < 0.0, "fixture must actually be generating");
-        let frames = vec![AssetForecastFrame {
-            ts: now,
-            assets: Map::from([(
-                ASSET_PV.to_string(),
-                crate::controller::simulator_port::AssetForecastPoint {
-                    planned_kw: generating_kw,
-                    cap_max_import_kw: 0.0,
-                    cap_max_export_kw: generating_kw,
-                },
-            )]),
-        }];
-        let _ = entry; // silence unused warning if downcast path changes later
+        s.actual_power_kw = -4.0;
 
         let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
@@ -727,7 +668,6 @@ mod tests {
             now,
             Duration::hours(1),
             &sim,
-            &frames,
             &snapshot,
         );
         assert!(
@@ -757,7 +697,6 @@ mod tests {
             now,
             Duration::hours(1),
             &sim,
-            &[],
             &snapshot,
         );
         assert!(
@@ -769,10 +708,12 @@ mod tests {
 
     #[test]
     fn pv_export_contribution_still_varies_with_the_weather_forecast() {
-        // PV's Export contribution must keep reflecting pv_frames (design.md
-        // D1) -- not flatten to a constant across the horizon.
+        // Section 5a: PV's Export contribution now flows through
+        // asset_max_power_series -> PvInverter::max_effort_schedule, which
+        // samples the live PvInverter's own weather_forecast field -- must
+        // still genuinely vary across the horizon, not flatten to a constant.
         let now = t0();
-        let sim = SimState::from_params(
+        let mut sim = SimState::from_params(
             &[AssetParams::Pv(PvParams {
                 id: ASSET_PV.to_string(),
                 rated_kw: 5.0,
@@ -781,37 +722,31 @@ mod tests {
             })],
             now,
         );
-        let frames = vec![
-            AssetForecastFrame {
-                ts: now,
-                assets: Map::from([(
-                    ASSET_PV.to_string(),
-                    crate::controller::simulator_port::AssetForecastPoint {
-                        planned_kw: -4.0,
-                        cap_max_import_kw: 0.0,
-                        cap_max_export_kw: -4.0,
-                    },
-                )]),
-            },
-            AssetForecastFrame {
-                ts: now + Duration::seconds(3600),
-                assets: Map::from([(
-                    ASSET_PV.to_string(),
-                    crate::controller::simulator_port::AssetForecastPoint {
-                        planned_kw: 0.0,
-                        cap_max_import_kw: 0.0,
-                        cap_max_export_kw: 0.0, // night -- ceiling drops to 0
-                    },
-                )]),
-            },
-        ];
+        {
+            let (_, cfg) = sim.find_asset_mut(ASSET_PV).unwrap();
+            let pv = cfg
+                .as_any_mut()
+                .downcast_mut::<crate::assets::PvInverter>()
+                .unwrap();
+            pv.weather_forecast = Some(vec![
+                crate::entities::solar::WeatherPvForecastSlot {
+                    valid_at: now,
+                    forecast_ac_kw: 4.0,
+                    snow_covered: false,
+                },
+                crate::entities::solar::WeatherPvForecastSlot {
+                    valid_at: now + Duration::seconds(3600),
+                    forecast_ac_kw: 0.0, // night -- ceiling drops to 0
+                    snow_covered: false,
+                },
+            ]);
+        }
         let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
             CommitmentDirection::Export,
             now,
             Duration::hours(2),
             &sim,
-            &frames,
             &snapshot,
         );
         assert_eq!(curve.steps[0].power_kw, -4.0); // Export is signed negative now.
@@ -841,7 +776,7 @@ mod tests {
             now,
         );
         let plan = make_plan(900, 2, now);
-        let forecast = compute_site_headroom_forecast(&sim, &plan, None, &[], now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
         assert!(
             forecast.iter().all(|s| s.down_kw == 0.0),
             "a fully-charged battery must report 0.0 absolute import headroom at every slot"
@@ -874,7 +809,7 @@ mod tests {
         });
         sim.add_asset(entry, config).unwrap();
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, None, &[], now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
         assert!(
             forecast[0].down_kw >= 2.0,
             "an eligible-to-start shiftable load must contribute its power_kw \
@@ -925,7 +860,7 @@ mod tests {
             updated_at: now,
         };
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, Some(&session), &[], now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, Some(&session), now);
 
         assert!(
             forecast[0].down_kw > 0.0,
@@ -940,6 +875,35 @@ mod tests {
             "EV must not contribute past its live session's departure_time"
         );
         assert_eq!(forecast[3].down_kw, 0.0);
+    }
+
+    #[test]
+    fn pv_site_headroom_forecast_varies_across_future_slots() {
+        // Section 5b regression: PV's up_kw contribution must genuinely vary
+        // with each slot's own time-of-day, not flatten to a constant (the
+        // bug simulate_forward's override exists to fix).
+        let now = t0(); // noon UTC
+        let sim = SimState::from_params(
+            &[AssetParams::Pv(PvParams {
+                id: ASSET_PV.to_string(),
+                rated_kw: 5.0,
+                inverter_max_kw: 5.0,
+                co2_g_kwh: 0.0,
+            })],
+            now,
+        );
+        let plan = make_plan(12 * 3600, 2, now); // noon slot, then midnight slot
+        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
+        assert!(
+            forecast[0].up_kw > 0.0,
+            "noon slot must show real PV headroom, got {}",
+            forecast[0].up_kw
+        );
+        assert_eq!(
+            forecast[1].up_kw, 0.0,
+            "midnight slot must show zero PV headroom, got {}",
+            forecast[1].up_kw
+        );
     }
 
     #[test]
@@ -981,7 +945,6 @@ mod tests {
             now,
             Duration::minutes(30),
             &sim,
-            &[],
             &snapshot,
         );
         assert!(

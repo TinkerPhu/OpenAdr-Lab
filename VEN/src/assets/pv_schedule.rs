@@ -6,8 +6,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::pv::{PvInverter, PvPowerInputs};
-use super::{Asset, AssetState};
+use super::pv::{PvInverter, PvPowerInputs, PvState};
+use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 
 impl PvInverter {
@@ -68,7 +68,7 @@ impl PvInverter {
     /// Absent weather, falls back to the sin model plus the offset projected
     /// forward by `elapsed_s` — the same graceful degradation
     /// `pv_ceiling_kw`/`forecast()` already had.
-    pub(super) fn uncurtailed_power_kw_at(&self, ts: DateTime<Utc>, elapsed_s: f64) -> f64 {
+    pub(crate) fn uncurtailed_power_kw_at(&self, ts: DateTime<Utc>, elapsed_s: f64) -> f64 {
         let dc_potential_kw = match &self.weather_forecast {
             Some(series) if !series.is_empty() => {
                 crate::entities::solar::weather_pv_kw_for_slots(series, &[ts])
@@ -78,13 +78,19 @@ impl PvInverter {
                     .max(0.0)
             }
             _ => {
-                let natural = Self::natural_irradiance_at(ts) * self.rated_kw;
+                let natural = Self::natural_irradiance_at(ts);
                 let decayed = crate::simulator::pv_smoothing::decayed_offset(
                     self.irradiance_offset,
                     elapsed_s,
                     self.tau_s,
                 );
-                (natural + decayed * self.rated_kw).max(0.0)
+                // Clamp the irradiance FRACTION to [0,1] before scaling by rated_kw —
+                // matches pv_ceiling_kw's and step_inner's PvPowerInputs.irradiance
+                // contract. Scaling natural/decayed separately (as this used to) lets an
+                // inject offset push the fraction above 1.0 uncapped whenever
+                // inverter_max_kw > rated_kw, diverging from both of those (found via
+                // pv-competence-consolidation's section 4 numeric-equivalence test).
+                (natural + decayed).clamp(0.0, 1.0) * self.rated_kw
             }
         };
         -dc_potential_kw.min(self.inverter_max_kw)
@@ -144,5 +150,53 @@ impl PvInverter {
         let elapsed_s = (t_end - t1).num_seconds() as f64;
         schedule.push((t_end, self.uncurtailed_power_kw_at(t_end, elapsed_s)));
         schedule
+    }
+
+    /// `pv-competence-consolidation` section 5b: one `TrajectoryPoint` per
+    /// `setpoints` entry, each built directly from that entry's own
+    /// timestamp via `uncurtailed_power_kw_at` — bypassing `Asset::step`'s
+    /// no-timestamp default entirely (see `simulate_forward`'s doc comment
+    /// in `pv.rs` for why that default silently flattens PV's ceiling).
+    /// Deliberately UNCURTAILED (no `generation_limit_kw` clamp), matching
+    /// `max_effort_schedule_inner`'s own Physical/Export convention — both of
+    /// this method's callers (`asset_max_power_series`, `simulated_trajectory`)
+    /// ask a Physical-tier "what's the true ceiling" question, not "what
+    /// would actually happen under today's active limit" (that's what
+    /// `PvInverter::max_effort_setpoint`'s Contractual/UserSet tiers are for,
+    /// and they deliberately do NOT project forward — a separate, already-
+    /// documented non-goal). `setpoints`' own `f64` field is ignored for the
+    /// same reason: PV has no commandable setpoint the way battery/EV/heater
+    /// do, so there is nothing meaningful to read from it.
+    /// `elapsed_s` is measured from `setpoints[0].0`, matching every caller's
+    /// own convention (`asset_max_power_series`/`simulated_trajectory` both
+    /// build `setpoints` starting at their own commitment/forecast origin).
+    pub(super) fn simulate_forward_inner(
+        &self,
+        initial: &AssetState,
+        setpoints: &[(DateTime<Utc>, f64)],
+    ) -> Trajectory {
+        let AssetState::Pv(_) = initial else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        let Some(&(t0, _)) = setpoints.first() else {
+            return Trajectory { points: vec![] };
+        };
+        let points = setpoints
+            .iter()
+            .map(|&(ts, _)| {
+                let elapsed_s = (ts - t0).num_seconds() as f64;
+                let power_kw = self.uncurtailed_power_kw_at(ts, elapsed_s);
+                TrajectoryPoint {
+                    ts,
+                    power_kw,
+                    state: AssetState::Pv(PvState {
+                        actual_power_kw: power_kw,
+                        generation_limit_kw: self.generation_limit_kw,
+                        curtailment_source: self.curtailment_source,
+                    }),
+                }
+            })
+            .collect();
+        Trajectory { points }
     }
 }

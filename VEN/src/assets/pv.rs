@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    TickOverridable, TickOverrides,
+    TickOverridable, TickOverrides, Trajectory,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -86,14 +86,11 @@ pub struct PvInverter {
     /// from YAML.
     pub weather_power_kw: Option<f64>,
     /// The full weather-forecast series (`entities::solar::weather_pv_forecast_series`'s
-    /// output) — `pv-competence-consolidation`: this is the one thing
-    /// `max_effort_schedule`/`forecast()` need to answer for a point beyond `t1` that
-    /// `weather_power_kw` (a single "now" value) can't. Same source, same per-tick
-    /// resolution as `weather_power_kw` (`resolve_weather_pv_kw_for_tick`); `None` under
-    /// the same conditions `weather_power_kw` is `None` for (no feed configured, or
-    /// stale). Set each tick by the sim loop. NOT from YAML. Not persisted
-    /// (`#[serde(skip)]`): a `Vec` of forecast samples has no business surviving a
-    /// save/reload — it's refreshed every tick from the live weather feed regardless.
+    /// output) — what `max_effort_schedule`/`forecast()`/`simulate_forward` sample for a
+    /// point beyond `t1` that `weather_power_kw` (a single "now" value) can't answer. Same
+    /// source/resolution as `weather_power_kw`; `None` under the same conditions. Set each
+    /// tick by the sim loop, NOT from YAML, not persisted (`#[serde(skip)]`) — refreshed
+    /// every tick from the live feed regardless.
     #[serde(skip)]
     pub weather_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
     /// True only on the exact tick a manual `pv_irradiance` inject is posted
@@ -286,13 +283,11 @@ impl PvInverter {
         }
     }
 
-    /// `pv-competence-consolidation` D5: samples the same weather/decay-aware
-    /// `uncurtailed_power_kw_at` path `max_effort_schedule` uses, rather than the
-    /// bare sin model — this and `max_effort_schedule` are both `PvInverter`'s own
-    /// methods and must agree with each other, not just with external callers.
-    /// Still applies the currently-active `generation_limit_kw` on top (this
-    /// forecast represents expected actual output, curtailment included — unlike
-    /// `max_effort_schedule`'s `Physical` tier, which is deliberately uncurtailed).
+    /// D5: samples the same weather/decay-aware `uncurtailed_power_kw_at` path
+    /// `max_effort_schedule` uses, rather than the bare sin model. Still applies the
+    /// currently-active `generation_limit_kw` (this represents expected actual output,
+    /// curtailment included — unlike `max_effort_schedule`'s deliberately-uncurtailed
+    /// `Physical` tier).
     pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
@@ -335,9 +330,7 @@ impl PvInverter {
         crate::entities::solar::natural_irradiance_at(ts)
     }
 
-    // `uncurtailed_power_kw_at`/`max_effort_schedule_inner` moved to
-    // `pv_schedule.rs` (file-size cap) — see that file for the weather/decay
-    // forward-projection logic `max_effort_schedule` below delegates to.
+    // Forward-projection logic moved to `pv_schedule.rs` (file-size cap).
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
         vec![
@@ -466,12 +459,11 @@ impl Asset for PvInverter {
     /// is the general-primitive fix for the confirmed PV-Import bug,
     /// `asset-max-power-primitive` design.md's Context). For `Export`,
     /// `Physical` is the true uncurtailed panel/inverter ceiling (NOT
-    /// `capability()`'s `actual_power_kw`, which is already post-curtailment
-    /// whenever a limit is active — see `uncurtailed_power_kw`'s doc
-    /// comment). `Contractual`/`UserSet` apply the live `generation_limit_kw`
-    /// only when the currently-active `curtailment_source` maps to the
-    /// requested tier; otherwise they answer the same as `Physical`, since no
-    /// limit of that kind is actually in effect right now.
+    /// `capability()`'s `actual_power_kw`, already post-curtailment whenever
+    /// a limit is active — see `uncurtailed_power_kw`'s doc comment).
+    /// `Contractual`/`UserSet` apply `generation_limit_kw` only when the
+    /// active `curtailment_source` maps to the requested tier; otherwise
+    /// they answer the same as `Physical` (no limit of that kind is active).
     fn max_effort_setpoint(
         &self,
         state: &AssetState,
@@ -510,9 +502,8 @@ impl Asset for PvInverter {
         }
     }
 
-    /// `pv-competence-consolidation`: PV's own weather/decay-aware projection —
-    /// see `pv_schedule.rs::max_effort_schedule_inner` (file-size cap moved the
-    /// body there) for why this replaces the trait default.
+    /// See `pv_schedule.rs::max_effort_schedule_inner` for why this replaces
+    /// the trait default (file-size cap moved the body there).
     fn max_effort_schedule(
         &self,
         state: &AssetState,
@@ -522,6 +513,16 @@ impl Asset for PvInverter {
         t_end: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, f64)> {
         self.max_effort_schedule_inner(state, direction, tier, t1, t_end)
+    }
+
+    /// See `pv_schedule.rs::simulate_forward_inner` -- replaces the trait
+    /// default's `step()`-based loop (`step()` carries no timestamp).
+    fn simulate_forward(
+        &self,
+        initial: &AssetState,
+        setpoints: &[(DateTime<Utc>, f64)],
+    ) -> Trajectory {
+        self.simulate_forward_inner(initial, setpoints)
     }
 }
 
@@ -808,6 +809,78 @@ mod tests {
         for (_, v) in &series.samples {
             assert_eq!(*v, 0.0, "Zero-rated PV must produce all-zero series");
         }
+    }
+
+    // ── uncurtailed_power_kw_at: [0,1] fraction clamp (4.0a) ─────────────────
+
+    #[test]
+    fn uncurtailed_power_kw_at_clamps_fraction_before_scaling_when_inverter_exceeds_rated() {
+        // Regression for the found pv_ceiling_kw/uncurtailed_power_kw_at divergence:
+        // natural(1.0 at noon) + offset(0.5) = 1.5 must clamp to 1.0 BEFORE scaling
+        // by rated_kw, matching pv_ceiling_kw's and step_inner's PvPowerInputs.irradiance
+        // contract. Only observable when inverter_max_kw > rated_kw — otherwise the
+        // inverter's own clip masks the bug.
+        let (mut pv, _) = make_pv(10.0);
+        pv.inverter_max_kw = 20.0;
+        pv.irradiance_offset = 0.5;
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let power_kw = pv.uncurtailed_power_kw_at(noon, 0.0);
+        assert!(
+            (power_kw + 10.0).abs() < 1e-9,
+            "expected clamp-before-scale: (1.0+0.5).clamp(0,1)*10.0 = -10.0 kW, got {power_kw}"
+        );
+    }
+
+    // ── simulate_forward (5b) ─────────────────────────────────────────────
+
+    #[test]
+    fn simulate_forward_varies_across_future_setpoints_by_their_own_timestamp() {
+        // Regression for the bug the override exists to fix: without it, the
+        // trait default's step()-based loop would flatten every point to
+        // whatever self's fixed fields say for "now" (self ignores the
+        // setpoint value it's handed). A solar-noon point and a midnight
+        // point must genuinely differ.
+        let (pv, state) = make_pv(5.0);
+        let state = AssetState::Pv(state);
+        let midnight = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let setpoints = [(midnight, -999.0), (noon, -999.0)]; // setpoint value must be ignored
+        let traj = pv.simulate_forward(&state, &setpoints);
+        assert_eq!(traj.points.len(), 2);
+        assert_eq!(traj.points[0].ts, midnight);
+        assert_eq!(traj.points[1].ts, noon);
+        assert_eq!(traj.points[0].power_kw, 0.0, "midnight must be 0 kW");
+        assert!(
+            traj.points[1].power_kw < 0.0,
+            "noon must be genuinely exporting, got {}",
+            traj.points[1].power_kw
+        );
+    }
+
+    #[test]
+    fn simulate_forward_is_uncurtailed_ignoring_generation_limit_kw() {
+        // Physical tier is deliberately uncurtailed (matches
+        // max_effort_schedule_inner's own convention) -- an active
+        // generation_limit_kw must NOT clamp simulate_forward's output, since
+        // both callers (asset_max_power_series, simulated_trajectory) ask a
+        // "true ceiling" question, not "what would happen under today's
+        // active limit right now" (that's a separate, non-projected concern).
+        let (mut pv, state) = make_pv(10.0); // natural sin-model irradiance = 1.0 at solar noon
+        pv.generation_limit_kw = Some(-3.0);
+        let state = AssetState::Pv(state);
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let traj = pv.simulate_forward(&state, &[(noon, 0.0)]);
+        assert_eq!(
+            traj.points[0].power_kw, -10.0,
+            "generation_limit_kw must NOT clamp the uncurtailed Physical-tier ceiling"
+        );
+    }
+
+    #[test]
+    fn simulate_forward_empty_setpoints_returns_empty_trajectory() {
+        let (pv, state) = make_pv(5.0);
+        let traj = pv.simulate_forward(&AssetState::Pv(state), &[]);
+        assert!(traj.points.is_empty());
     }
 
     #[test]

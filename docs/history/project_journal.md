@@ -11931,3 +11931,91 @@ phase closed the numeric bug (real, now fixed) but not the structural one the ma
 principle actually targets — worth remembering when picking up section 4/5, since "tests pass
 and the numbers agree" was true after the τ fix alone and could look like completion without
 the second read this session's own remaining-work review caught.
+
+## 2026-09-11 — Asset Competence Assurance Phase 1, sections 4/5 close-out (`pv-competence-consolidation`, complete)
+
+Follow-up to the 2026-09-10 entry above, which landed sections 1-3 (the τ reparametrization
+and PV's own weather-aware `forecast()`/`max_effort_schedule`) but deferred sections 4/5 —
+retiring `pv_ceiling_kw`'s two real call sites and `capacity_headroom.rs`'s `pv_frames`
+special-casing — as a structural follow-up, not a rushed one-line swap. This session designed
+that follow-up (a separate design-only pass, committed as `23bbff49`) and then implemented it.
+
+**Section 4.** The prior session's assumption — "PV needs a `MilpParticipant`/`PvMilpContext`
+mechanism, since `build_milp_inputs` only sees `&SimSnapshot`" — turned out to be solvable more
+simply: the live `SimState` `tasks/planning/cycle.rs::run_plan_cycle` already holds (before
+flattening to `SimSnapshot` for the solve request) was already in scope one call frame up from
+`build_milp_inputs`. A new `simulator::plan_context::resolve_pv_forecast_kw` reads it there,
+producing one `PvInverter::uncurtailed_power_kw_at`-derived value per plan slot, threaded down
+as `SolveRequest.pv_live_forecast_kw` through `build_solve_request` → `MilpSolver::solve` →
+`run_planner` → `build_milp_inputs`, collapsing that function's PV precedence to
+`pv_forecast_override` → `pv_live_forecast_kw[i]` → `weather_pv_kw`/static-curve fallback.
+`pv_ceiling_kw`/`PvCeilingParams` (`entities/solar.rs`) were then deleted outright, not kept as
+an internal implementation detail — both real call sites were gone, and the numeric-equivalence
+tests that existed to prove the swap safe had already served their purpose. Along the way,
+fixed a genuine correctness gap the equivalence tests exist to catch: `uncurtailed_power_kw_at`'s
+no-weather fallback branch was missing the `[0,1]` irradiance-fraction clamp `pv_ceiling_kw`
+and the live `step_inner` path both apply before scaling by `rated_kw` — diverging whenever a
+manual-inject offset pushed the fraction above 1.0 and `inverter_max_kw > rated_kw`.
+
+**Section 5.** The design pass's own "5a has no remaining blocker, only 5b needs a new
+`simulate_forward` override" claim was **half wrong** — found only once implementing it.
+`compute_site_capacity_curve` (5a) was rewired to remove its PV exclusion and delete
+`pv_capacity_events`, but its own new weather-variation test failed: `0.0` at every slot
+instead of a genuine noon→night falloff. Root cause: `asset_max_power_series` (5a's own
+primitive, not just 5b's `simulated_trajectory`) calls `Asset::simulate_forward` directly —
+without PV's own override, it fell through to the trait default's `step()`-based loop, which
+derives output from `self`'s fixed "now" fields regardless of the setpoint/timestamp it's
+handed, flattening every point to a constant. So `PvInverter::simulate_forward`
+(`pv_schedule.rs::simulate_forward_inner`) was needed by *both* halves, not just 5b — it builds
+each `TrajectoryPoint` directly from that point's own timestamp via `uncurtailed_power_kw_at`,
+deliberately uncurtailed (no `generation_limit_kw` clamp), matching
+`max_effort_schedule_inner`'s own Physical/Export convention.
+
+A second, unrelated gap surfaced implementing this override: `AssetHandle`'s own `Asset` impl
+was not delegating `simulate_forward` to `self.config` — every other method it implements
+(`step`, `capability`, `flexibility_floor`) does, but `simulate_forward` had a code comment
+reading "default impl inherited from Asset," apparently never revisited once every asset kind
+that existed so far happened to get the same answer either way (battery/EV/heater's own
+`step()` genuinely doesn't need a timestamp, so the inherited default was never actually wrong
+for them). The first asset kind to need its own `simulate_forward` override exposed this — a
+real, structural gap in `AssetHandle`'s delegation completeness, not a PV-specific concern; any
+future asset overriding `simulate_forward` would have hit the identical silent bug.
+
+With both fixes in place, `compute_site_headroom_forecast` (5b) still couldn't drop its PV
+exclusion as cleanly as 5a did: unlike every other asset kind, `PvInverter::max_effort_setpoint`
+deliberately ignores `state` for the Physical tier (a real, pre-existing, unrelated design
+decision from `asset-max-power-primitive` — it answers "what's the true panel ceiling right
+now" from `self`'s own live fields, not from whatever `AssetState` it's handed, since the live
+state's `actual_power_kw` is already post-curtailment). Calling `max_effort_setpoint` again per
+trajectory point — the pattern every other asset kind uses — would have flattened PV right back
+to a constant even with the `simulate_forward` fix in place. Kept one small PV-specific branch
+in `compute_site_headroom_forecast` instead, reading the trajectory's own `power_kw` directly
+for PV (still built from that point's own timestamp) rather than re-deriving it — smaller than
+the old separate `pv_frames` second pass, but not literally zero special-casing; documented in
+that function's own comment and the module doc, not silently left implicit.
+
+Once both halves landed, the whole `pv_frames` apparatus feeding them became fully dead code —
+confirmed via grep, not assumed — and was deleted: `simulator::forecast::build_forecast_frames`/
+`insert_pv_points`/`insert_simulated_points`, `controller::simulator_port::AssetForecastFrame`/
+`AssetForecastPoint`, and `resolve_weather_pv_kw_for_tick`'s `slots_kw` return value plus the
+`TickContext.weather_pv_kw_slots`/`slot_starts` plumbing that fed it. This also completed
+section 4's task 4.5 (`insert_pv_points` was one of `pv_ceiling_kw`'s two real call sites,
+deliberately left for section 5 to retire per D4/D6, since it depended on `pv_frames` going
+away first).
+
+Verification: `wsl cargo test -j 2` 1264/1264 passed (up from 1263 pre-session; net new tests
+minus the deleted `pv_ceiling_kw`-equivalence/`build_forecast_frames` tests), `cargo fmt --check`/
+`clippy --all-targets --all-features -- -D warnings` clean, `scripts/audit_file_sizes.py` clean
+(trimmed comments in `pv.rs`/`asset_trait.rs`/`tasks/planning/cycle.rs` to stay under cap after
+the new logic). VEN UI unaffected (no UI files touched — this phase's remaining work was
+entirely backend). E2E/resilience (Node2) and manual UI verification (Controller Site Headroom
+chart, Diagnostics Capacity Forecast panel) were **not run** this session — flagged as follow-up
+verification for Phase 1, not blocking its completion, per the master plan's own risk framing
+(lowest-risk phase; later battery/heater/EV phases should not skip this step).
+
+Key learning, reinforcing the prior entry's own: a design pass's "independently-blocked, no
+remaining blocker here" claim is a hypothesis until a real test exercises it — 5a's own claim
+of being unblocked was wrong, caught only by writing a test that actually asserted time
+variation rather than just "doesn't panic" or "matches the old behavior." Test-first isn't just
+insurance against implementation bugs; it's what surfaces wrong design assumptions before they
+compound into a second (or third) discovery mid-implementation.

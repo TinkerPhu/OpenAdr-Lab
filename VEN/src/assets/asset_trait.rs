@@ -463,7 +463,18 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.step(state, setpoint_kw, dt)
     }
 
-    // simulate_forward: default impl inherited from Asset
+    /// Delegates to `self.config` rather than inheriting `Asset::simulate_forward`'s
+    /// step()-based default — battery/EV/heater see no difference (that default already
+    /// reaches `config.step()` via this impl's own `step` above), but `PvInverter`'s own
+    /// `simulate_forward` override (weather/decay-aware, bypassing `step()` entirely)
+    /// would be invisible through `AssetHandle`/`simulated_trajectory` without this.
+    fn simulate_forward(
+        &self,
+        initial: &AssetState,
+        setpoints: &[(DateTime<Utc>, f64)],
+    ) -> Trajectory {
+        self.config.simulate_forward(initial, setpoints)
+    }
 
     /// `AssetHandle<'a>` isn't `'static` (it borrows), so it can never
     /// actually be represented as `dyn Any` — downcast the concrete

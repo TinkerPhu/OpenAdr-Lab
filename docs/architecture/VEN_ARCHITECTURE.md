@@ -490,38 +490,43 @@ needs to answer "what's this asset's own extreme, held from `t1` for `t2`."
 `t1` at or before `now` returns every asset's live `SimState` value exactly,
 with no simulation — the one point where ground truth exists must not carry
 forecast error. For a future `t1`, `resolve_plan_state_at` shares
-`build_forecast_frames`' own per-asset trajectory computation (extracted into
-`simulated_trajectory`, called by both) rather than re-deriving it — the same
-"never two independent implementations of the same forecast" principle this
-whole master plan exists to enforce. `simulated_trajectory` appends one
+`compute_site_headroom_forecast`'s own per-asset trajectory computation
+(`simulated_trajectory`, called by both) rather than re-deriving it — the
+same "never two independent implementations of the same forecast" principle
+this whole master plan exists to enforce. `simulated_trajectory` appends one
 trailing sentinel setpoint beyond `future_slots` itself, at the last
 remaining slot's own `end` — without it, `Asset::simulate_forward`'s default
 body never applies a real step for the *last* setpoint in any schedule (its
 lone trailing point is a zero-duration re-evaluation, see
 `KEY_LEARNINGS.md`'s 2026-09-06 entry), so the last slot's own committed
 action would otherwise never be reflected in any point at all, for any plan
-length. This extra point is invisible to `build_forecast_frames`'s existing
-callers (`insert_simulated_points` already bounds-checks against
-`future_slots`, so it silently skips it) — confirmed unchanged via the
-pre-existing `battery_capability_evolves_across_slots_not_flat_copied` test.
+length. This extra point is invisible to `compute_site_headroom_forecast`'s
+own bounds-check against `future_slots` (it silently skips it) — confirmed
+unchanged via the pre-existing
+`battery_capability_evolves_across_slots_not_flat_copied` test.
 A `t1` landing between two plan slot boundaries snaps down to the latest
 boundary at or before it (no interpolation); a `t1` at or past the plan's
 true horizon end (the last slot's own `end`, not its `start`) returns the
 genuine post-plan state from that sentinel point, held constant beyond it
 rather than panicking or extrapolating. `base_load` is included here even
-though `build_forecast_frames` itself skips it (base load contributes no
+though the unified engine (§3.0c) itself skips it (base load contributes no
 flexibility to capability forecasts) — `assetMaxPower`'s own roster needs
 base load's state too, and the same generic path already works for it.
 
-**PV is the one exception, by design, not oversight:** it always returns its
-current live state regardless of `t1`. `PvState::curtailment_source` reflects
-whatever external decision is active *right now* (manual command, plan,
-capacity limiter, arbiter, comms-loss) — no model anywhere in this codebase
-forecasts how it will change over a horizon, and running PV through
-`simulate_forward` with today's frozen irradiance/weather config would only
-replay today's numbers, not produce a real forecast. A future reader should
-not assume this resolver predicts PV curtailment — it doesn't, and that's
-documented rather than silently wrong.
+**PV is the one exception here, by design, not oversight** (this resolver
+only, not §3.0c's engine — see the PV note under 3.0c below, which retired
+PV's special-casing in the unified engine itself): `resolve_plan_state_at`
+always returns PV's current live state regardless of `t1`.
+`PvState::curtailment_source` reflects whatever external decision is active
+*right now* (manual command, plan, capacity limiter, arbiter, comms-loss) —
+no model anywhere in this codebase forecasts how *that decision* will change
+over a horizon (distinct from PV's *physical* ceiling, which `simulate_forward`
+does now correctly project via weather/decay — see 3.0c), so running PV
+through this resolver would conflate "what will the panel physically produce"
+with "will today's curtailment decision still be active," the latter of
+which is out of scope. A future reader should not assume this resolver
+predicts PV curtailment — it doesn't, and that's documented rather than
+silently wrong.
 
 `resolve_plan_state_at` itself is not called by the unified engine (§3.0c) —
 that engine reuses `simulated_trajectory` directly, once per asset for the whole
@@ -558,14 +563,18 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   `.claude/CLAUDE.md`'s `naming-envelope-vs-headroom` rule) into this
   "headroom" family, matching what the UI itself calls this panel.
 
-**PV is asset-kind-and-direction-special in both, by design, not oversight:**
-Import goes through `max_effort_setpoint` like every other asset (a trivial,
-always-correct `0.0` — the PV-Import bug's fix). Export keeps using the
-existing weather-driven `pv_frames`/`pv_ceiling_kw` resolution unchanged —
-§3.0a/§3.0b never modeled PV's time-varying weather forecast inside the
-`Asset` trait, so routing Export through the trait-based primitives would
-flatten its ceiling to a constant across the whole horizon, a real
-regression, not a unification.
+**PV's special-casing is retired** (`pv-competence-consolidation`): Import
+goes through `max_effort_setpoint` like every other asset (a trivial,
+always-correct `0.0` — the PV-Import bug's fix). Export flows through the
+same `asset_max_power_series`/`simulated_trajectory` primitives every other
+asset kind uses, backed by `PvInverter`'s own weather/decay-aware
+`max_effort_schedule`/`simulate_forward` overrides — PV's own module is now
+the sole authority for its forecast, per the `asset-competence-assurance`
+rule. `compute_site_headroom_forecast` keeps one small PV-specific branch
+reading the trajectory's own `power_kw` directly instead of calling
+`max_effort_setpoint` again per point, since `PvInverter::max_effort_setpoint`
+deliberately ignores `state` for the Physical tier (unlike a SoC-based
+asset's `state`, which a future trajectory point naturally varies).
 
 **`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
 import, negative = export — the same convention `max_effort_setpoint`/
@@ -592,11 +601,9 @@ asset's own `max_effort_setpoint` at its plan-forecasted state, summed; not a
 delta from the plan's own chosen dispatch (a real, documented behavior
 change from this type's original meaning). `compute_site_headroom_forecast`
 excludes a plugged-in EV past its live session's `departure_time`
-(`EvState::plugged` is never toggled by `step()`), the same exclusion
-`build_forecast_frames`'s own `include_at` closure provides for the
-capability-frame path — `compute_site_capacity_curve` does not need the
-equivalent, since its sustained-commitment model never projected a future
-departure either.
+(`EvState::plugged` is never toggled by `step()`) — `compute_site_capacity_curve`
+does not need the equivalent, since its sustained-commitment model never
+projected a future departure either.
 
 ### 3.0d Asset Competence Assurance
 
@@ -899,8 +906,8 @@ point-in-time counterfactuals under the active plan's own schedule — integrati
 double-counts (the same battery kWh headroom would appear at every slot it remains available).
 The capacity curve instead reads each asset's live state directly: battery/EV/heater-import are
 SoC- or thermal-reservoir-bounded (a constant rated power until the energy budget is exhausted,
-then a step to zero); PV is forecast-bound, not a reservoir (tracks
-`simulator::forecast::build_forecast_frames`' ceiling, never "runs out"); shiftable loads
+then a step to zero); PV is forecast-bound, not a reservoir (tracks its own
+`PvInverter::max_effort_schedule`, never "runs out"); shiftable loads
 contribute a single time-bounded step to the import direction only (starting a load can only
 increase draw); base load and heater's current draw are constant net-grid-power terms on both
 curves (additive on import, subtractive on export) despite contributing no flexibility. All
@@ -911,20 +918,29 @@ types (`controller::reporter`, `controller::report_intervals::build_capacity_for
 and to the VEN UI via a dedicated Diagnostics "Capacity Forecast" chart, distinct from the
 Dashboard's instantaneous Site Headroom chart.
 
-**PV's forward ceiling — one definition for the plan and the forecasts.** Every
-forward-looking PV value resolves through `entities::solar::pv_ceiling_kw`: the planner's
-`p_pv_kw` solver input (`controller::milp_planner::inputs`) and the per-slot forecast frames
-(`simulator::forecast::build_forecast_frames`) that feed both the site-headroom forecast and
-the capacity curves above. Precedence is deterministic pin → weather forecast
-(`resolve_weather_pv_kw`, R-50, same staleness gate) → live sin-model snapshot with the
-decaying manual-inject offset, clipped to `inverter_max_kw`. Two properties matter and are
-regression-tested:
+**PV's forward ceiling — `PvInverter`'s own methods are the sole authority**
+(`pv-competence-consolidation`, `asset-competence-assurance`). Every
+forward-looking PV value — the planner's `p_pv_kw` solver input
+(`simulator::plan_context::resolve_pv_forecast_kw`, threaded into
+`controller::milp_planner::inputs::build_milp_inputs` as `pv_live_forecast_kw`)
+and the site-headroom/capacity forecasts above (`asset_max_power_series`/
+`simulated_trajectory`) — resolves through `PvInverter::uncurtailed_power_kw_at`,
+the one method `max_effort_schedule`/`forecast()`/`simulate_forward` all build
+on. Precedence: deterministic pin (`pv_forecast_override`, always wins) →
+`PvInverter`'s own weather-aware projection (its `weather_forecast` field,
+populated each tick from the same weather feed R-50 always used) → sin-model
+snapshot with the decaying manual-inject offset, clipped to `inverter_max_kw`.
+The static `weather_pv_kw`/`pv_cfg` fallback chain in `build_milp_inputs`
+only applies when no live `"pv"` asset exists at all (a site described, not
+simulated). Two properties matter and are regression-tested:
 
-- **Each slot is evaluated at its own timestamp**, using cumulative elapsed seconds — never a
-  slot index times a nominal step. The planning horizon is multi-zone (`plan_zones`, widening
-  `step_s` per zone), so index and wall-clock time diverge past the first zone.
-- **The plan and the headroom drawn against it read the same number**, because they call the
-  same function rather than each keeping their own sin-model copy.
+- **Each slot/future point is evaluated at its own timestamp**, using
+  cumulative elapsed seconds — never a slot index times a nominal step. The
+  planning horizon is multi-zone (`plan_zones`, widening `step_s` per zone),
+  so index and wall-clock time diverge past the first zone.
+- **The plan and the headroom drawn against it read the same number**,
+  because both ultimately call the same `PvInverter` method rather than each
+  keeping their own copy of the formula.
 
 The forecast never reads `Plan.pv_forecast_kw` (a solve-time value that may be minutes stale);
 it re-resolves against the live weather feed every tick.
