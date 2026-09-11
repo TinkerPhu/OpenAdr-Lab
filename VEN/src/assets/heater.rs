@@ -253,7 +253,11 @@ impl Heater {
     /// Returns `{"temp_c": <temperature>}`.
     #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::heater_future_state is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
     pub fn future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64> {
-        let temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c;
+        let temp_c = crate::entities::asset_params::heater_temp_c_from_energy(
+            e_tank_kwh,
+            self.temp_min_c,
+            self.thermal_mass_kwh_per_c,
+        );
         HashMap::from([("temp_c".into(), temp_c)])
     }
 
@@ -264,9 +268,18 @@ impl Heater {
         live_state: &super::AssetState,
     ) -> Option<HeaterPlanTrajectory> {
         if let super::AssetState::Heater(s) = live_state {
-            let e_max_kwh = (cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
-            let e_kwh = ((s.temperature_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
-                .clamp(0.0, e_max_kwh);
+            use crate::entities::asset_params::heater_energy_above_min_kwh;
+            let e_max_kwh = heater_energy_above_min_kwh(
+                cfg.temp_max_c,
+                cfg.temp_min_c,
+                cfg.thermal_mass_kwh_per_c,
+            );
+            let e_kwh = heater_energy_above_min_kwh(
+                s.temperature_c,
+                cfg.temp_min_c,
+                cfg.thermal_mass_kwh_per_c,
+            )
+            .clamp(0.0, e_max_kwh);
             Some(HeaterPlanTrajectory {
                 e_kwh,
                 temp_min_c: cfg.temp_min_c,

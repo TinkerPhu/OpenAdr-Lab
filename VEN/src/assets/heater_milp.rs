@@ -245,8 +245,17 @@ impl HeaterMilpContext {
             (cfg.temp_min_c + cfg.temp_max_c) / 2.0
         };
         let p_step_kw = cfg.p_step_kw();
-        let e_init = (current_temp - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
-        let e_max = ((cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).max(0.0);
+        let e_init = crate::entities::asset_params::heater_energy_above_min_kwh(
+            current_temp,
+            cfg.temp_min_c,
+            cfg.thermal_mass_kwh_per_c,
+        );
+        let e_max = crate::entities::asset_params::heater_energy_above_min_kwh(
+            cfg.temp_max_c,
+            cfg.temp_min_c,
+            cfg.thermal_mass_kwh_per_c,
+        )
+        .max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
         // Initial mode detection from last observed hardware tier.
         let actual_kw = if let super::AssetState::Heater(s) = state {
@@ -266,8 +275,12 @@ impl HeaterMilpContext {
                 }
             });
         if let Some(target) = heater_target {
-            let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
-                .clamp(0.0, e_max);
+            let e_target = crate::entities::asset_params::heater_energy_above_min_kwh(
+                target.target_temp_c,
+                cfg.temp_min_c,
+                cfg.thermal_mass_kwh_per_c,
+            )
+            .clamp(0.0, e_max);
             let secs = (target.ready_by - now).num_seconds();
             let t_dead = if secs <= 0 {
                 0
@@ -1186,5 +1199,58 @@ mod milp_context_trait_tests {
         assert_eq!(ctx.comfort_full_reward_eur_kwh, 0.0);
         assert_eq!(ctx.comfort_full_co2_reward_eur_kwh, 0.0);
         assert_eq!(ctx.mode, HeaterMilpMode::MayRun);
+    }
+
+    /// heater-thermal-conversion-consolidation (Phase 4): `from_state`'s
+    /// `e_init_kwh`/`e_max_kwh`, `Heater::plan_trajectory`'s `e_kwh`/`e_max_kwh`, and
+    /// `controller::milp_planner::asset_port::heater_future_state`'s inverse must all
+    /// agree for the same inputs, since all three now call the same domain-owned
+    /// conversion — this pins that as a regression guard, not just "tests still pass."
+    #[test]
+    fn from_state_e_init_and_e_max_agree_with_plan_trajectory_and_heater_future_state() {
+        let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        });
+        let state = super::super::AssetState::Heater(super::super::HeaterState {
+            temperature_c: 20.5,
+            actual_power_kw: 0.0,
+        });
+        let now = chrono::Utc::now();
+        let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
+        let ctx = HeaterMilpContext::from_state(
+            &state,
+            &cfg,
+            12,
+            &cum_s,
+            now,
+            None,
+            0.0,
+            0.0,
+            vec![],
+            0.5,
+        );
+
+        let traj = super::Heater::plan_trajectory(&cfg, &state)
+            .expect("plan_trajectory must succeed for a Heater state");
+        assert!((ctx.e_init_kwh - traj.e_kwh).abs() < 1e-9);
+        assert!((ctx.e_max_kwh - traj.e_max_kwh).abs() < 1e-9);
+
+        let future = crate::controller::milp_planner::asset_port::heater_future_state(
+            ctx.e_init_kwh,
+            cfg.temp_min_c,
+            cfg.thermal_mass_kwh_per_c,
+        );
+        assert!((future["temp_c"] - 20.5).abs() < 1e-9);
     }
 }
