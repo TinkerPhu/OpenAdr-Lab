@@ -15,8 +15,8 @@ Feature: Unified capacity/envelope engine reports absolute quantities — isolat
     # Deliberately does not chase a specific "battery at exactly full SoC"
     # scenario: the live dispatcher keeps ticking (real cost-optimized
     # dispatch can keep discharging the battery a tiny amount every tick),
-    # and Battery::capability_inner's soc >= 1.0 ceiling is an EXACT
-    # floating-point boundary -- a single tick's worth of drift is enough to
+    # and Battery::capability_inner's full/empty edge (60 s of max-rate room)
+    # is still a sharp boundary -- a few ticks' worth of drift is enough to
     # flip its reported capability, making "reset to 1.0 then read
     # separately" a genuine, frequent race rather than a flaky assertion to
     # paper over with a looser tolerance. This instead tests the same

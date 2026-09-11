@@ -231,9 +231,15 @@ pub struct BatteryState {
 
 `Battery.capability(state)`:
 ```
-max_export_kw = if soc_pct <= min_soc { 0.0 } else { -max_discharge_kw }
-max_import_kw = if soc_pct >= 1.0    { 0.0 } else {  max_charge_kw }
+// A direction is available only if its max rate can be sustained for 60 s
+// (SUSTAINED_POWER_MIN_S); eff = sqrt(round_trip_efficiency).
+max_export_kw = if (soc - min_soc)·capacity > max_discharge_kw/eff·60s { -max_discharge_kw } else { 0.0 }
+max_import_kw = if (1 - soc)·capacity      > max_charge_kw·eff·60s    {  max_charge_kw   } else { 0.0 }
 ```
+Energy physics (`step`, forecast, the MILP's energy balance) stay exact: they
+can still top up the last fraction at low power. Only the power *promise*
+needs the margin — a battery parked at 99.95 % has seconds of room, not 5 kW.
+Consumers (arbiter, headroom) read this capability instead of SoC.
 
 #### EvState
 
