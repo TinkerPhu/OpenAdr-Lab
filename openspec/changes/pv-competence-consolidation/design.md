@@ -76,18 +76,63 @@ call sites, not one — confirmed by grep, correcting the proposal's original co
 `milp_planner/inputs.rs:178-193` (MILP's `p_pv_kw` input), `simulator/forecast.rs:220-240`
 (`insert_pv_points`, part of `build_forecast_frames` — i.e. `pv_frames`'s own construction
 already goes through `pv_ceiling_kw` internally), and `simulator/forecast.rs`'s own test
-module. Once `PvInverter::max_effort_schedule` exists, both real call sites are replaced by
-calls into `PvInverter`'s own method (directly, or via `asset_max_power_series`) — and since
-D6 already retires `pv_frames`/`build_forecast_frames`'s PV handling entirely,
-`insert_pv_points`'s PV-specific code (not just its `pv_ceiling_kw` call) is deleted
-outright, not migrated. After both real sites are gone, compare `pv_ceiling_kw`'s remaining
-logic (weather-precedence, inverter-clamp, forced-override, and now the τ-based decay from
-D7) against `PvInverter`'s own precedence in `uncurtailed_power_kw`; once equivalent,
-delete `pv_ceiling_kw`/`PvCeilingParams` from `entities/solar.rs` entirely — that file keeps
-only `natural_irradiance_at`/`weather_pv_kw_for_slots`/`weather_pv_forecast_series`,
-genuinely-shared low-level math, not an asset-shaped ceiling function. If a real behavioral
-difference is found beyond the τ question already resolved by D7, fold it into `PvInverter`
-rather than leaving two formulas — do not defer.
+module.
+
+> **Status update (follow-up design pass, sections 1-3 already merged):** the paragraph
+> below was written before sections 1-3 landed and assumed "call into `PvInverter`'s own
+> method" was a simple swap once `max_effort_schedule` existed. Implementation found the real
+> blocker: `milp_planner/inputs.rs::build_milp_inputs` receives `assets: &SimSnapshot` — the
+> flattened port-boundary data — with no live `PvInverter` in scope to call
+> `uncurtailed_power_kw_at` on. The mechanism below replaces the vague "directly, or via
+> `asset_max_power_series`" with the actual fix.
+>
+> The caller one level up, `VEN/src/tasks/planning/cycle.rs::run_plan_cycle`, does have live
+> access: `sim_snap: SimState` (the live clone) exists there, and is only flattened to
+> `SimSnapshot` (`sim_snap.to_sim_snapshot()`) to build the value eventually passed into
+> `build_milp_inputs`. `n_slots`/`cum_s`/`now` are already resolved before that flattening
+> point too — the same place `build_asset_contexts` already runs against this same live
+> `sim_snap`.
+>
+> **Mechanism:**
+> 1. New helper in `simulator/plan_context.rs` (which already does the equivalent live
+>    downcast for `apply_pending_pv_inject`): `resolve_pv_forecast_kw(sim_snap: &SimState,
+>    n_slots: usize, cum_s: &[i64], now: DateTime<Utc>) -> Option<Vec<f64>>` — `None` when no
+>    live `"pv"` asset exists (preserves today's fallback-to-`pv_cfg`-static-curve branch
+>    untouched), `Some(vec)` of one `uncurtailed_power_kw_at(now + cum_s[i], cum_s[i] as f64)`
+>    per slot otherwise.
+> 2. Call it from `run_plan_cycle`, right alongside `build_asset_contexts` (same live
+>    `sim_snap`, same `n_slots`/`cum_s`/`now` already in scope there), and thread the result
+>    down through `services::planning::build_solve_request` → `build_milp_inputs` as a new
+>    parameter (`pv_live_forecast_kw: Option<&[f64]>`), replacing the per-slot `pv_ceiling_kw`
+>    reconstruction in `inputs.rs`'s loop. Precedence collapses to: `pv_forecast_override`
+>    (unchanged, always wins) → `pv_live_forecast_kw[i]` (replaces the live-snapshot
+>    `pv_ceiling_kw` branch — already weather-aware internally via
+>    `PvInverter.weather_forecast`, so no separate `weather_pv_kw` fold-in is needed for this
+>    branch) → the existing static-curve fallback when `None`.
+> 3. **Fix a found correctness discrepancy before/while swapping the call site**:
+>    `pv_ceiling_kw` clamps the irradiance *fraction* to `[0, 1]` before scaling by
+>    `rated_kw` (`(natural + decayed_offset).clamp(0.0, 1.0) * rated_kw`), matching
+>    `PvPowerInputs.irradiance`'s doc'd contract that the live `step_inner` path already
+>    honors. `uncurtailed_power_kw_at`'s no-weather fallback branch (`pv_schedule.rs`, added
+>    in sections 1-3) does not — it scales `natural` and `decayed_offset` separately by
+>    `rated_kw` and only floors at `0.0`, with no upper clamp before the `inverter_max_kw`
+>    clip. These diverge whenever `decayed_offset` pushes the fraction above `1.0` and
+>    `inverter_max_kw > rated_kw` (an uncommon config, not an impossible one). Task 4.1's
+>    numeric-equivalence test would very likely surface this regardless — fix it as part of
+>    this same task rather than let the test find it cold.
+> 4. **Open question, not resolved here**: once `pv_live_forecast_kw` covers the "has live
+>    PV" case, is `weather_pv_kw`'s separate threading into `build_milp_inputs` still needed
+>    at all, or only for the "no live PV asset" fallback branch? Decide during implementation,
+>    not here — collapsing it is a nice simplification but not required for this task's own
+>    correctness.
+>
+> `insert_pv_points`'s PV-specific code is deleted outright once section 5's `pv_frames`
+> retirement lands (D6, below) — unchanged by this update. After both real call sites are
+> gone, compare `pv_ceiling_kw`'s remaining logic against `PvInverter`'s own precedence;
+> once equivalent (with the `[0,1]`-clamp fix above, it should be), delete
+> `pv_ceiling_kw`/`PvCeilingParams` from `entities/solar.rs` entirely — that file keeps only
+> `natural_irradiance_at`/`weather_pv_kw_for_slots`/`weather_pv_forecast_series`,
+> genuinely-shared low-level math, not an asset-shaped ceiling function.
 
 **D7 — Replace the `(pv_alpha, T)` two-knob decay encoding with a single time constant
 `τ` (seconds), fixing the root cause, not just today's symptom.** `(1 − alpha)^(t/T)` and
@@ -138,13 +183,47 @@ this phase exists to prevent. Upgrade `forecast()` to sample the same
 (falling back to `irradiance_at` under the same absent/stale conditions), so all of PV's own
 methods agree with each other, not just with external callers.
 
-**D6 — Removing `pv_frames`'s PV special-casing.** Once `PvInverter::max_effort_schedule`
-is real, `capacity_headroom.rs`'s `match cfg.asset_type_str() { "pv" => continue, ... }`
-exclusions (in both `compute_site_headroom_forecast` and the shared capacity-curve
-aggregator) are deleted — PV flows through the same `asset_max_power_series`/
-`simulated_trajectory` calls every other asset already uses. `pv_capacity_events`
-(the function that read `pv_frames` directly) is deleted entirely. Confirm no other
-consumer of `pv_frames`/`build_forecast_frames`'s PV-specific output exists before deleting
+**D6 — Removing `pv_frames`'s PV special-casing.**
+
+> **Status update (follow-up design pass): this decision's original premise was wrong.** It
+> assumed `PvInverter::max_effort_schedule` alone would unblock *both*
+> `capacity_headroom.rs` call sites once it existed. Re-reading both functions in detail
+> found they call two genuinely different mechanisms, so this splits into two independent
+> sub-tasks, 5a and 5b, with different blockers.
+
+**5a — `compute_site_capacity_curve`'s `"pv" => continue"`.** This function already takes
+`sim: &SimState` (live), and for every non-PV asset calls `assets::asset_max_power_series(cfg,
+&entry.state, now, t2_max, direction, LimitTier::Physical)`, which calls
+`cfg.max_effort_schedule(...)` directly — exactly the method `PvInverter` now implements
+(sections 1-3, weather-aware, does not go through `step()`). **No remaining blocker.** Remove
+the exclusion and the `pv_capacity_events` call (and its `pv_frames` parameter, if nothing
+else in the function still needs it); verify PV now produces a correct, weather-aware curve.
+
+**5b — `compute_site_headroom_forecast`'s `"pv" => continue"`.** This function also takes
+`sim: &SimState` (live), but calls a *different* path: `simulator::forecast::
+simulated_trajectory(entry, cfg, future_slots)`, which drives `Asset::simulate_forward`
+using the plan's own committed `planned_kw_by_asset` schedule. `simulate_forward`'s default
+body calls `self.step(&state, setpoint_kw, dt)` in a loop, and **`Asset::step`'s signature
+carries no timestamp at all** (`fn step(&self, state: &AssetState, setpoint_kw: f64, dt:
+Duration) -> (AssetState, f64)`, `asset_trait.rs:53`). This is 5b's actual blocker, and it is
+not a live-access problem: even with a live `PvInverter` in hand, `step()` has no way to know
+which future calendar instant a given step represents, so PV's sun-position-dependent
+physics cannot vary across a simulated trajectory through this path — exactly the
+"ceiling flattens to a constant" regression this decision already worried about, just for a
+different structural reason than originally stated (`max_effort_schedule` doesn't help here;
+this path never calls it).
+
+Fix: give `PvInverter` its own `simulate_forward` override — the same "override where PV's
+physics genuinely differs" pattern already used for `max_effort_schedule` — building each
+`TrajectoryPoint` directly from the real timestamps `future_slots` already carries
+(`PlanTimeSlot.start`), via `uncurtailed_power_kw_at(slot.start, elapsed_s)`, bypassing
+`step()`'s dt-only interface for PV specifically. This does **not** require changing
+`Asset::step`'s signature for any other asset kind (battery/EV/heater's `step()` genuinely is
+setpoint+duration-driven, no timestamp needed) — a scoped, PV-only override.
+
+5a and 5b are separable tasks, not one atomic step — 5a has no remaining blocker, 5b does; do
+not gate 5a on 5b's extra work. Once both land, confirm no other consumer of
+`pv_frames`/`build_forecast_frames`'s PV-specific output exists before deleting
 `resolve_weather_pv_kw_for_tick`'s `slots_kw` return value or `build_forecast_frames`'s PV
 handling — if `pv_frames` is used for anything beyond feeding `pv_capacity_events` and
 `compute_site_headroom_forecast`'s PV branch, that other use needs its own migration path,
