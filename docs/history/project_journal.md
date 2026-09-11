@@ -12284,3 +12284,61 @@ them would have produced a worse, more scope-creeping, or subtly-wrong implement
 as ground truth without re-verification. "Confirm, don't assume" (this master plan's own
 recurring instruction to itself) is not a formality — it found a real, load-bearing correction
 in one hundred percent of the phases that used it.
+
+## 2026-09-11 — Site Headroom and Capacity Forecast unified onto one function (`site-capacity-seam-unification`)
+
+A user question about `SiteHeadroomChart.tsx` — "do the band and the capacity-curve overlay
+touch at exactly `t = now`?" — traced back to the exact failure shape the `asset-max-power-
+forecast` master plan existed to eliminate, one layer up. `unified-capacity-envelope-engine`
+(Spec E)'s own module doc already claimed `compute_site_headroom`, `compute_site_headroom_forecast`,
+and `compute_site_capacity_curve` were three fixed-axis slices of one `(t1, t2, direction, tier)`
+domain — but they were actually three independent implementations that mostly agreed, not one
+function evaluated at different domain points.
+
+Re-reading the current code (not the stale mental model from earlier in the session) found the
+`asset-competence-assurance` master plan — five phases, merged the same day this investigation
+started — had already resolved two of the three original divergence sources: PV's weather-frame
+special-casing was retired entirely (`PvInverter` is now the sole forecast authority via its own
+`simulate_forward`), and EV departure is now enforced inside `EvCharger::simulate_forward` itself
+rather than via a site-level `ev_session` parameter. Only two real divergences remained: base
+load (excluded from both headroom functions, included-but-held-flat in the capacity curve) and
+the site-wide clamp (`snapshot.grid.import_limit_kw`/`export_limit_kw` — the VTN's current
+directive, R-72 — used only by the capacity curve).
+
+Three decisions made with the user, each with a real trade-off surfaced and accepted explicitly:
+1. **Base load included everywhere**, using `BaseLoad::forecast_kw_at`'s real learned-heuristic
+   forecast — already shipped by `base-load-competence-consolidation`, just not wired to this
+   call site — instead of a flat "now" snapshot held constant across the whole sweep.
+2. **The clamp becomes the genuine physical/interconnection rating**
+   (`profile.grid.max_import_kw`/`max_export_kw`, already resolved elsewhere for the MILP
+   planner under the names `phys_imp`/`phys_exp`) instead of the VTN's directive — closing R-72
+   properly (clamp to the right thing) rather than the originally-proposed shortcut (remove the
+   clamp entirely, which the user correctly rejected as a step away from realism, not toward it).
+   The VTN-restricted tier is deferred to a future change; per-asset exogenous scheduling
+   constraints (e.g. whether a shiftable load's `earliest_start` always faithfully reflects
+   "hasn't been loaded yet") are deferred to a future master plan, not solved here — spot-checked
+   `ShiftableLoadAsset::max_effort_schedule` first to confirm no regression, not just deferred by
+   assumption.
+3. **`up_kw`/`down_kw` are signed now**, matching `CapacityCurveStep::power_kw`'s convention —
+   required, not optional, once base load was included: a sustained Export commitment can now
+   legitimately go net-importing (the same signal `CapacityCurve`'s Export curve already carried
+   via `merge_events`'s no-floor clamp), and an unsigned always-≥0 field can't represent that.
+
+`compute_site_headroom` is now a thin wrapper that calls `compute_site_capacity_curve` at
+`t2 = Duration::zero()` and reads back its first step, for both directions — not a second,
+independently-written sum. This is what actually guarantees the seam: the two now touch at
+`t = now` by construction, not by two hand-written formulas happening to agree. `magnitude_kw`
+(zero remaining callers once both headroom functions emit signed output directly) was deleted
+rather than left dormant. `reporter.rs`'s `IMPORT`/`EXPORT_RESERVATION_CAPACITY` payloads gained
+the signed→magnitude conversion at the actual OpenADR boundary, mirroring the pattern already
+established for `CapacityCurve` in `report_intervals.rs`. `SiteHeadroomChart.tsx`'s band reads
+`up_kw` directly now, no negation — matching its own capacity-curve overlay series exactly, which
+is what makes the two visually touch at the seam the user originally asked about.
+
+Key learning: **a "we already share this domain" claim in a module doc is a claim to verify, not
+a given** — the same lesson the `asset-competence-assurance` master plan's own throughline names,
+surfacing one more time at a different layer (site aggregation, not per-asset state/forecast).
+Also: when re-analyzing before continuing a plan after being told "the code changed, re-analyze
+first," the changes can *shrink* a plan's scope as easily as expand it — two of three suspected
+fixes here turned out to already be done, and assuming otherwise would have meant redoing
+already-correct work or, worse, reverting it.

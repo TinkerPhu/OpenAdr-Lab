@@ -508,10 +508,11 @@ A `t1` landing between two plan slot boundaries snaps down to the latest
 boundary at or before it (no interpolation); a `t1` at or past the plan's
 true horizon end (the last slot's own `end`, not its `start`) returns the
 genuine post-plan state from that sentinel point, held constant beyond it
-rather than panicking or extrapolating. `base_load` is included here even
-though the unified engine (§3.0c) itself skips it (base load contributes no
-flexibility to capability forecasts) — `assetMaxPower`'s own roster needs
-base load's state too, and the same generic path already works for it.
+rather than panicking or extrapolating. `base_load` is included here for the
+same reason `assetMaxPower`'s own roster needs its state — the same generic
+path already works for it (the §3.0c engine also includes base load now,
+`site-capacity-seam-unification`, via its own forecast-aware path, not this
+resolver — see 3.0c below).
 
 **PV is the one exception here, by design, not oversight** (this resolver
 only, not §3.0c's engine — see the PV note under 3.0c below, which retired
@@ -558,10 +559,17 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   the same domain, needed without an active plan). Originally a separate,
   differently-named function (`compute_envelope`) left on the pre-Spec-E
   relative-delta model after this module's own rewrite — a real, user-reported
-  bug fixed in the same 2026-09-07 follow-up that renamed both modules out of
+  bug fixed in a 2026-09-07 follow-up that renamed both modules out of
   the "envelope" name (reserved for genuine OpenADR-spec concepts, per
   `.claude/CLAUDE.md`'s `naming-envelope-vs-headroom` rule) into this
   "headroom" family, matching what the UI itself calls this panel.
+  `site-capacity-seam-unification` (2026-09-11) went further: `compute_site_headroom`
+  no longer has its own per-asset sum at all — it calls `compute_site_capacity_curve`
+  directly with `t2 = Duration::zero()` and reads back the first step, for both
+  directions. This is what actually guarantees the domain-unification claim
+  above: the two touch at exactly `t = now` by construction, not because two
+  independently-written formulas happen to agree (which they didn't, until
+  this fix — see the 2026-09-11 journal entry).
 
 **PV's special-casing is retired** (`pv-competence-consolidation`): Import
 goes through `max_effort_setpoint` like every other asset (a trivial,
@@ -586,18 +594,39 @@ at the actual external boundary that needs it —
 direction-tagged by name and want a magnitude, floored per-direction (not a
 bare `.abs()`) so a legitimately net-importing Export-curve value reports
 `0.0` discharge capability rather than a false-positive magnitude.
-`SiteFlexibilityForecastSlot::up_kw`/`down_kw` stay unsigned magnitudes (two
-separate always-non-negative fields, matching the pre-existing
-`SiteFlexibilityEnvelope` convention) — a genuinely different shape,
-unaffected by the `CapacityCurve` sign question. One consequence of the
-signed model: a sustained Export commitment can legitimately report a
-*positive* (net-importing) value when a non-exportable contribution (base
-load's constant draw, or a non-interruptible `ShiftableLoadAsset` forced to
-keep drawing past its deadline) exceeds what's exportable — bounded above by
-`import_limit_kw`, symmetric with Import's own ceiling, not left unbounded.
+**`SiteFlexibilityEnvelope`/`SiteFlexibilityForecastSlot`'s `up_kw`/`down_kw`
+are SIGNED too now** (`site-capacity-seam-unification`, 2026-09-11 — previously
+unsigned magnitudes, a genuinely different shape from `CapacityCurve`). This
+followed directly from including base load (below): a sustained Export
+commitment can legitimately report a *positive* (net-importing) value when a
+non-exportable contribution (base load's draw, or a non-interruptible
+`ShiftableLoadAsset` forced to keep drawing past its deadline) exceeds what's
+exportable, and an unsigned always-≥0 field can't represent that. Bounded
+above by `phys_imp_kw`, symmetric with Import's own ceiling, not left
+unbounded — see the clamp paragraph below.
 
-**Site Headroom's `up_kw`/`down_kw` are ABSOLUTE, not relative** — each
-asset's own `max_effort_setpoint` at its plan-forecasted state, summed; not a
+**Base load is included in all three functions now** (`site-capacity-seam-
+unification`) — previously excluded from both headroom functions and
+included-but-flat (a single live snapshot held constant across the whole
+sweep) in the capacity curve. All three now use `BaseLoad::forecast_kw_at`'s
+real learned-heuristic forecast (`base-load-competence-consolidation`),
+sampled hourly (the heuristic's own bucket resolution).
+
+**The site-wide clamp is the genuine physical/interconnection rating, not
+any VTN directive** (`site-capacity-seam-unification` closed R-72): `phys_imp_kw`/
+`phys_exp_kw`, sourced from `profile.grid.max_import_kw`/`max_export_kw` —
+the same value already used by the MILP planner (`build_milp_inputs`'s
+`phys_imp`/`phys_exp` parameters) — threaded through the tick pipeline
+(`AppState`'s profile → `TickContext` → `finalize_tick_outputs`). Previously
+the capacity curve alone clamped to `snapshot.grid.import_limit_kw`/
+`export_limit_kw` (the VTN's *currently active, revocable* capacity-limit
+directive), which both headroom functions never had, and which created a
+self-referential report-to-the-VTN problem (R-72: the VTN reading its own
+restriction back as newly-observed VEN capability). A VTN-restricted tier
+layered on top of this physical/safety tier is deferred to a future change,
+not part of this fix.
+
+**Site Headroom's `up_kw`/`down_kw` are ABSOLUTE, not relative** — not a
 delta from the plan's own chosen dispatch (a real, documented behavior
 change from this type's original meaning). EV departure is handled by the
 asset itself (`ev-departure-consolidation`): `EvCharger::simulate_forward`
