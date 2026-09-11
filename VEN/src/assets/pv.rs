@@ -145,6 +145,17 @@ impl PvInverter {
         }
     }
 
+    /// This tick's inputs as already written onto `self` by `apply_tick_overrides`.
+    pub fn live_power_inputs(&self) -> PvPowerInputs {
+        PvPowerInputs {
+            measured_power_kw: self.measured_power_kw,
+            weather_power_kw: self.weather_power_kw,
+            irradiance: self.irradiance,
+            irradiance_offset: self.irradiance_offset,
+            irradiance_forced: self.irradiance_forced,
+        }
+    }
+
     pub fn initial_state(_cfg: &PvParams) -> PvState {
         PvState {
             actual_power_kw: 0.0,
@@ -162,13 +173,7 @@ impl PvInverter {
     /// from any recently-released manual override blended additively on top
     /// of whichever base wins.
     pub fn step_inner(&self, _state: &PvState, _setpoint_kw: f64, _dt: Duration) -> (PvState, f64) {
-        let actual_kw = self.resolve_power_kw(&PvPowerInputs {
-            measured_power_kw: self.measured_power_kw,
-            weather_power_kw: self.weather_power_kw,
-            irradiance: self.irradiance,
-            irradiance_offset: self.irradiance_offset,
-            irradiance_forced: self.irradiance_forced,
-        });
+        let actual_kw = self.resolve_power_kw(&self.live_power_inputs());
         (
             PvState {
                 actual_power_kw: actual_kw,
@@ -476,13 +481,7 @@ impl Asset for PvInverter {
         let AssetState::Pv(s) = state else {
             unreachable!("PvInverter/state mismatch")
         };
-        let inputs = PvPowerInputs {
-            measured_power_kw: self.measured_power_kw,
-            weather_power_kw: self.weather_power_kw,
-            irradiance: self.irradiance,
-            irradiance_offset: self.irradiance_offset,
-            irradiance_forced: self.irradiance_forced,
-        };
+        let inputs = self.live_power_inputs();
         let uncurtailed_kw = self.uncurtailed_power_kw(&inputs);
         if tier == LimitTier::Physical {
             return uncurtailed_kw;
@@ -844,7 +843,7 @@ mod tests {
         let state = AssetState::Pv(state);
         let midnight = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
-        let setpoints = [(midnight, -999.0), (noon, -999.0)]; // setpoint value must be ignored
+        let setpoints = [(midnight, -999.0), (noon, -999.0)]; // cap far above generation
         let traj = pv.simulate_forward(&state, &setpoints);
         assert_eq!(traj.points.len(), 2);
         assert_eq!(traj.points[0].ts, midnight);
@@ -869,7 +868,9 @@ mod tests {
         pv.generation_limit_kw = Some(-3.0);
         let state = AssetState::Pv(state);
         let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
-        let traj = pv.simulate_forward(&state, &[(noon, 0.0)]);
+        // Uncapped setpoint: the point here is generation_limit_kw, not the
+        // setpoint's own export cap (covered by the tests below).
+        let traj = pv.simulate_forward(&state, &[(noon, pv.default_setpoint())]);
         assert_eq!(
             traj.points[0].power_kw, -10.0,
             "generation_limit_kw must NOT clamp the uncurtailed Physical-tier ceiling"
@@ -881,6 +882,68 @@ mod tests {
         let (pv, state) = make_pv(5.0);
         let traj = pv.simulate_forward(&AssetState::Pv(state), &[]);
         assert!(traj.points.is_empty());
+    }
+
+    #[test]
+    fn simulate_forward_setpoint_zero_curtails_to_zero() {
+        // Import commitment's max_effort_setpoint is 0.0 -- PV curtailed to 0
+        // must contribute nothing, not its own generation.
+        let (pv, state) = make_pv(10.0);
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let traj = pv.simulate_forward(&AssetState::Pv(state), &[(noon, 0.0)]);
+        assert_eq!(traj.points[0].power_kw, 0.0);
+    }
+
+    #[test]
+    fn simulate_forward_default_setpoint_is_uncapped() {
+        let (pv, state) = make_pv(10.0);
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let traj = pv.simulate_forward(&AssetState::Pv(state), &[(noon, pv.default_setpoint())]);
+        assert_eq!(traj.points[0].power_kw, -10.0);
+    }
+
+    #[test]
+    fn simulate_forward_setpoint_caps_export_magnitude() {
+        let (pv, state) = make_pv(10.0);
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let traj = pv.simulate_forward(&AssetState::Pv(state), &[(noon, -2.0)]);
+        assert_eq!(traj.points[0].power_kw, -2.0);
+    }
+
+    #[test]
+    fn max_power_series_at_t1_uses_measurement_like_max_effort_setpoint() {
+        // Weather says 0 kW right now, the real meter says 1.9 kW: the t=now
+        // point of the Physical/Export series must agree with PV's own
+        // max_effort_setpoint (measured outranks weather), not the forecast.
+        let (mut pv, state) = make_pv(10.0);
+        let now = Utc.with_ymd_and_hms(2026, 9, 11, 17, 3, 0).unwrap();
+        pv.weather_forecast = Some(vec![crate::entities::solar::WeatherPvForecastSlot {
+            valid_at: now,
+            forecast_ac_kw: 0.0,
+            snow_covered: false,
+        }]);
+        pv.measured_power_kw = Some(1.9);
+        let state = AssetState::Pv(state);
+        let setpoint_kw = Asset::max_effort_setpoint(
+            &pv,
+            &state,
+            CommitmentDirection::Export,
+            LimitTier::Physical,
+        );
+        let series = crate::assets::asset_max_power_series(
+            &pv,
+            &state,
+            now,
+            Duration::zero(),
+            CommitmentDirection::Export,
+            LimitTier::Physical,
+        );
+        assert!((setpoint_kw + 1.9).abs() < 1e-9, "got {setpoint_kw}");
+        assert!(
+            (series[0].1 + 1.9).abs() < 1e-9,
+            "t=now series point must use the measurement, got {}",
+            series[0].1
+        );
     }
 
     #[test]

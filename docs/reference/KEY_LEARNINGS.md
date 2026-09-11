@@ -1817,3 +1817,21 @@ computation, just evaluated differently," treat that as a testable claim — wri
 directly asserts the values agree at the point where they should coincide, not just tests of each
 piece in isolation. If the codebase is under active parallel development, re-verify that claim
 against current code before trusting a summary from earlier in the same session, even your own.
+
+## A floor clamp can hide a sign bug from every single-asset test (PV import leak, 2026-09-11)
+
+PV's `simulate_forward` ignored the setpoint it was handed and always returned its generation, so
+the Import capacity curve, and with it the live Site Headroom `down_kw` recorded as history, got
+PV generation *subtracted* ("PV can't be curtailed") on every sunny tick. The PV-only unit tests
+and the matching BDD scenario all stayed green: `merge_events` floors Import at `0.0`, so PV's
+`-5 kW` next to nothing else clamped to exactly the `0.0` the tests expected, and the BDD
+scenario only bounded the value from above ("never inflates"), the direction the *previous* bug
+had lived in. The leak only showed up in live data, as `down_kw − up_kw` being exactly the
+battery's `±5 kW` span across all 3600 history samples, meaning every other asset was entering
+both directions identically.
+
+**How to apply:** when an aggregation clamps (floor/ceiling), a test with one contributor can't
+see that contributor's sign errors, so test it next to a contributor that keeps the total off
+the clamp (e.g. battery + PV). Assert equality, or bound from both sides, rather than a
+one-sided bound shaped after the last bug. And an asset method that ignores one of its inputs
+("setpoint unused") is a contract gap for every generic caller that relies on that input.

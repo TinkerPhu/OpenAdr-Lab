@@ -12342,3 +12342,38 @@ Also: when re-analyzing before continuing a plan after being told "the code chan
 first," the changes can *shrink* a plan's scope as easily as expand it — two of three suspected
 fixes here turned out to already be done, and assuming otherwise would have meant redoing
 already-correct work or, worse, reverting it.
+
+## 2026-09-11 — PV import leak in Site Headroom "now"/history and the Import capacity curve
+
+The user noticed the Site Headroom band left of the "now" line (the in-memory
+`/flexibility/history` ring, which just records `compute_site_headroom` every tick) rising in the
+evening as PV faded, while the forecast right of "now" didn't. Live VEN1 data settled it:
+`down_kw − up_kw` was exactly `10.0` across all 3600 history samples, i.e. only the battery's
+±5 kW differed by direction, so PV (and base load) entered both directions identically. The
+shared PV term followed the weather forecast (3.77 kW at 18:00 CEST interpolated to 0 at 19:00),
+not the PV meter (still 1.9 kW at 19:03).
+
+Three fixes, made test-first directly on `main`:
+1. **Import leak.** `asset_max_power_series` builds a schedule from `max_effort_schedule` and
+   replays it through `simulate_forward`. PV's Import schedule was correctly `0.0`, but
+   `PvInverter::simulate_forward` ignored setpoints and returned generation, so PV generation was
+   subtracted from Import in "now"/history and in the Import capacity curve. The setpoint is now
+   PV's allowed export magnitude (`|setpoint|` kW): `0.0` curtails to 0, `f64::MAX` (PV's
+   `default_setpoint`) is uncapped, and a Physical Export schedule (setpoint = the uncurtailed
+   value itself) is unchanged.
+2. **Generic fallback.** `simulated_trajectory` used `unwrap_or(0.0)` for assets missing from
+   `planned_kw_by_asset`. PV is never allocated by the MILP, so with fix 1 alone it would have
+   vanished from the forecast (confirmed red by stashing fix 2). It now uses `cfg.default_setpoint()`,
+   the same fallback the live tick uses.
+3. **Export seam at t=now.** `uncurtailed_power_kw_at` never read `measured_power_kw`, so the t=now
+   export point used weather while PV's own Physical answer (`uncurtailed_power_kw`) is
+   `measured.or(weather)`. A present measurement now wins at `elapsed_s == 0`. That's limited to
+   the measurement case: the weather/sin fallbacks were already time-indexed, and unit fixtures
+   that set `weather_forecast` without `weather_power_kw` rely on them.
+
+The PV branch in `compute_site_headroom_forecast` stays: the generic per-point path would call
+PV's `max_effort_setpoint`, which reads live fields and would flatten export across the horizon.
+Existing test changed: `simulate_forward_is_uncurtailed_ignoring_generation_limit_kw` passed
+setpoint `0.0` incidentally, which now means "curtail to 0"; it passes `default_setpoint()` instead
+(intent unchanged: `generation_limit_kw` must not clamp). Why none of the existing tests caught the
+leak is recorded in KEY_LEARNINGS ("A floor clamp can hide a sign bug from every single-asset test").

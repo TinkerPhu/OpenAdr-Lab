@@ -691,6 +691,43 @@ mod tests {
     }
 
     #[test]
+    fn pv_generation_leaves_the_import_curve_equal_to_the_battery_only_curve() {
+        // PV-only tests are blind here (merge_events floors Import at 0.0); next
+        // to a battery, any PV leak would shave the battery's own import steps.
+        let battery = AssetParams::Battery(BatteryParams {
+            id: ASSET_BATTERY.to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 1.0,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: Some(0.0),
+        });
+        let pv = AssetParams::Pv(PvParams {
+            id: ASSET_PV.to_string(),
+            rated_kw: 5.0,
+            inverter_max_kw: 5.0,
+            co2_g_kwh: 0.0,
+        });
+        let now = t0(); // noon: sin-model PV fully generating
+        let import_curve = |params: &[AssetParams]| {
+            compute_site_capacity_curve(
+                CommitmentDirection::Import,
+                now,
+                Duration::hours(2),
+                &SimState::from_params(params, now),
+                1_000.0,
+                1_000.0,
+            )
+        };
+        assert_eq!(
+            import_curve(&[battery.clone(), pv]).steps,
+            import_curve(&[battery]).steps
+        );
+    }
+
+    #[test]
     fn heater_contributes_zero_to_a_sustained_export_commitment() {
         // The confirmed Heater-Export bug (design.md Context): a heater
         // cannot export at all, so its current draw must not be credited.

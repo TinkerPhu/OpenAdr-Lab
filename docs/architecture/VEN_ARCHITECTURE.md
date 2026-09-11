@@ -571,18 +571,30 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   independently-written formulas happen to agree (which they didn't, until
   this fix — see the 2026-09-11 journal entry).
 
-**PV's special-casing is retired** (`pv-competence-consolidation`): Import
-goes through `max_effort_setpoint` like every other asset (a trivial,
-always-correct `0.0` — the PV-Import bug's fix). Export flows through the
-same `asset_max_power_series`/`simulated_trajectory` primitives every other
-asset kind uses, backed by `PvInverter`'s own weather/decay-aware
-`max_effort_schedule`/`simulate_forward` overrides — PV's own module is now
-the sole authority for its forecast, per the `asset-competence-assurance`
-rule. `compute_site_headroom_forecast` keeps one small PV-specific branch
-reading the trajectory's own `power_kw` directly instead of calling
-`max_effort_setpoint` again per point, since `PvInverter::max_effort_setpoint`
-deliberately ignores `state` for the Physical tier (unlike a SoC-based
-asset's `state`, which a future trajectory point naturally varies).
+**PV's special-casing is retired** (`pv-competence-consolidation`): both
+directions flow through the same `asset_max_power_series`/`simulated_trajectory`
+primitives every other asset kind uses, backed by `PvInverter`'s own
+weather/decay-aware `max_effort_schedule`/`simulate_forward` overrides — PV's
+own module is the sole authority for its forecast, per the
+`asset-competence-assurance` rule. **PV contributes nothing to Import in all
+three slices**: PV can always be curtailed to 0, so the Import commitment's
+`max_effort_setpoint` is `0.0`, and `PvInverter::simulate_forward` treats each
+setpoint as PV's allowed export magnitude (`|setpoint|` kW — `0.0` curtails to
+0, `default_setpoint()`'s `f64::MAX` leaves generation uncapped). Export at
+`t = now` uses the live measurement when present (`measured.or(weather)`,
+exactly `max_effort_setpoint`'s Physical answer); later points use the weather
+forecast (or the sin model). Guarded by mixed battery+PV tests
+(`site_headroom.rs`, `capacity_headroom.rs`) and the "PV generation never
+reduces the live Site Headroom import side" scenario in
+`tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
+`simulated_trajectory` runs an asset the plan doesn't allocate (PV is never in
+the MILP allocations) at its own `default_setpoint()` — the same fallback the
+live tick uses (`SimState::tick`). `compute_site_headroom_forecast` keeps one
+small PV-specific branch reading the trajectory's own `power_kw` directly
+instead of calling `max_effort_setpoint` again per point, since
+`PvInverter::max_effort_setpoint` deliberately ignores `state` for the
+Physical tier (unlike a SoC-based asset's `state`, which a future trajectory
+point naturally varies).
 
 **`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
 import, negative = export — the same convention `max_effort_setpoint`/

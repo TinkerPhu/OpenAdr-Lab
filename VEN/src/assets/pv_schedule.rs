@@ -68,7 +68,14 @@ impl PvInverter {
     /// Absent weather, falls back to the sin model plus the offset projected
     /// forward by `elapsed_s` — the same graceful degradation
     /// `pv_ceiling_kw`/`forecast()` already had.
+    ///
+    /// A live measurement only exists for "now": at `elapsed_s == 0` it
+    /// outranks the forecast exactly as in `uncurtailed_power_kw`, so the
+    /// t=now point equals `max_effort_setpoint`'s Physical answer.
     pub(crate) fn uncurtailed_power_kw_at(&self, ts: DateTime<Utc>, elapsed_s: f64) -> f64 {
+        if elapsed_s == 0.0 && self.measured_power_kw.is_some() {
+            return self.uncurtailed_power_kw(&self.live_power_inputs());
+        }
         let dc_potential_kw = match &self.weather_forecast {
             Some(series) if !series.is_empty() => {
                 crate::entities::solar::weather_pv_kw_for_slots(series, &[ts])
@@ -131,11 +138,10 @@ impl PvInverter {
             schedule.push((t_end, setpoint));
             return schedule;
         }
-        // t1 itself: identical to max_effort_setpoint's answer by construction
-        // (elapsed_s=0 -> decayed_offset_after returns the offset unchanged;
-        // weather_forecast, when present, is sampled at t1 the same way
-        // weather_power_kw already is for "now") — the seam this phase exists
-        // to guarantee matches, not just happens to match.
+        // t1 itself: identical to max_effort_setpoint's answer — a live
+        // measurement wins at elapsed_s=0 (see uncurtailed_power_kw_at),
+        // otherwise weather_forecast is sampled at t1 the same way
+        // weather_power_kw already is for "now".
         if t_end <= t1 {
             let v = self.uncurtailed_power_kw_at(t1, 0.0);
             return vec![(t1, v), (t1, v)];
@@ -164,9 +170,11 @@ impl PvInverter {
     /// would actually happen under today's active limit" (that's what
     /// `PvInverter::max_effort_setpoint`'s Contractual/UserSet tiers are for,
     /// and they deliberately do NOT project forward — a separate, already-
-    /// documented non-goal). `setpoints`' own `f64` field is ignored for the
-    /// same reason: PV has no commandable setpoint the way battery/EV/heater
-    /// do, so there is nothing meaningful to read from it.
+    /// documented non-goal). Each setpoint is PV's allowed export magnitude
+    /// (`|setpoint|` kW, the same positive-magnitude sense as the UI's
+    /// generation-limit slider): `0.0` — the Import commitment's
+    /// `max_effort_setpoint` — curtails to 0, and `default_setpoint()`
+    /// (`f64::MAX`) leaves generation uncapped.
     /// `elapsed_s` is measured from `setpoints[0].0`, matching every caller's
     /// own convention (`asset_max_power_series`/`simulated_trajectory` both
     /// build `setpoints` starting at their own commitment/forecast origin).
@@ -183,9 +191,11 @@ impl PvInverter {
         };
         let points = setpoints
             .iter()
-            .map(|&(ts, _)| {
+            .map(|&(ts, setpoint_kw)| {
                 let elapsed_s = (ts - t0).num_seconds() as f64;
-                let power_kw = self.uncurtailed_power_kw_at(ts, elapsed_s);
+                let power_kw = self
+                    .uncurtailed_power_kw_at(ts, elapsed_s)
+                    .max(-setpoint_kw.abs());
                 TrajectoryPoint {
                     ts,
                     power_kw,

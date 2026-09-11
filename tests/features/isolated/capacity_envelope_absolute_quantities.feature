@@ -35,3 +35,16 @@ Feature: Unified capacity/envelope engine reports absolute quantities — isolat
     Given I inject pv irradiance 1.0 via sim inject
     When I wait for the VEN capacity forecast to reflect the injected irradiance
     Then the import capacity curve's first step does not exceed the site's non-PV controllable assets' own import capability
+
+  # ── Site Headroom "now": PV must not reduce the import side either ─────────
+  # The scenario above only bounds from above; PV generation subtracted from
+  # import (curtailing PV to 0 ignored) passed it unnoticed. This one bounds
+  # from both sides, on the live value the Site Headroom history records.
+
+  @isolated
+  Scenario: PV generation never reduces the live Site Headroom import side
+    Given the battery SoC is reset to 0.5
+    And I inject pv irradiance 1.0 via sim inject
+    When I wait for PV to generate and capture the live site headroom with the live asset snapshot
+    Then the live site headroom's import side equals the site's non-PV controllable assets' own import capability
+    And the captured import capacity curve's first step equals the site's non-PV controllable assets' own import capability

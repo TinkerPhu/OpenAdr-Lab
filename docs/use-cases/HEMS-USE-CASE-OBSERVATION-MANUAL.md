@@ -829,7 +829,10 @@ curl -s http://Node1:8211/plan | python3 -m json.tool
 Each controllable asset's own **absolute** achievable import/export power right now (not a delta
 from its current dispatch) — "if every controllable asset went all-in on import/export this
 instant, what could the site achieve." Also visible in the VEN UI under Controller/History → Site
-Headroom, as the current point of the live band alongside the grid-power line.
+Headroom, as the current point of the live band alongside the grid-power line; the band left of
+"now" is the last hour of these live values. PV never lowers the import side (it can always be
+curtailed to 0), and its export share at "now" uses the live PV measurement when one is fed in.
+See `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
 
 ```bash
 curl -s http://Node1:8211/flexibility | python3 -m json.tool
