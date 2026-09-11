@@ -147,6 +147,7 @@ pub(crate) async fn tick_once(
             ctx.pv_measured_kw_now,
             ctx.base_load_measured_kw_now,
             ctx.base_load_heuristic_kw_now,
+            ctx.base_load_heuristic.clone(),
         );
 
         let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =

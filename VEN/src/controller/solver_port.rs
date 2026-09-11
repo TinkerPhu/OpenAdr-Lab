@@ -2,8 +2,6 @@
 // MILP solver. Mirrors SimulatorPort/VtnPort: the trait and its request type
 // are domain-level; the implementation (`MilpSolver`) lives in
 // `controller::milp_planner`, which remains reachable only through this port.
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 
 use crate::common::TimeSeries;
@@ -12,7 +10,6 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
-use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -52,10 +49,11 @@ pub struct SolveRequest {
     /// weather internally via `PvInverter.weather_forecast`), but not over
     /// `pv_forecast_override`. `None` when no live `"pv"` asset exists.
     pub pv_live_forecast_kw: Option<Vec<f64>>,
-    /// WP5.2 (BL-14): learned per-asset heuristics, keyed by asset_id —
-    /// resolved from `AppState` once per cycle, same as `ev_session`/
-    /// `heater_target` above.
-    pub asset_heuristics: HashMap<String, AssetHeuristics>,
+    /// `base-load-competence-consolidation`: live `BaseLoad`-derived forecast
+    /// per slot, resolved by the caller from the same live `SimState`
+    /// (`simulator::plan_context::resolve_base_load_forecast_kw`). `None`
+    /// when no live `"base_load"` asset exists.
+    pub base_load_live_forecast_kw: Option<Vec<f64>>,
     /// Weather-sourced PV forecast (R-50), already aligned to this cycle's
     /// slot grid. `None` when no weather feed is configured, no
     /// `weather_pv` profile section exists, or the cached forecast has

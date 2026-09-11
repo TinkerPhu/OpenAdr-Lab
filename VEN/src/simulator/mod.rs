@@ -304,6 +304,7 @@ impl SimState {
         pv_measured_kw: Option<f64>,
         base_load_measured_kw: Option<f64>,
         base_load_heuristic_kw: Option<f64>,
+        base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
     ) {
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
@@ -364,6 +365,7 @@ impl SimState {
             heater_emergency_absorb_override,
             base_load_measured_kw,
             base_load_baseline_kw,
+            base_load_heuristic,
             ev_plugged_override,
             ev_soc_target_override,
         };

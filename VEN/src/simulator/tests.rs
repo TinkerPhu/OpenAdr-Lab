@@ -138,6 +138,7 @@ mod shiftable_load_removal_tests {
             None,
             None,
             None,
+            None,
         );
     }
 
@@ -233,6 +234,7 @@ mod clock_and_rng_tests {
             None, // pv_measured_kw
             None, // base_load_measured_kw
             None, // base_load_heuristic_kw
+            None, // base_load_heuristic
         );
     }
 
@@ -409,6 +411,7 @@ mod grid_meter_tests {
             None, // pv_measured_kw
             None, // base_load_measured_kw
             None, // base_load_heuristic_kw
+            None, // base_load_heuristic
         );
     }
 
@@ -474,6 +477,7 @@ mod pv_weather_blend_tests {
             None, // pv_measured_kw
             None, // base_load_measured_kw
             None, // base_load_heuristic_kw
+            None, // base_load_heuristic
         );
     }
 

@@ -465,8 +465,7 @@ impl<'a> Asset for AssetHandle<'a> {
 
     /// Delegates to `self.config` rather than inheriting `Asset::simulate_forward`'s
     /// step()-based default — battery/EV/heater see no difference (that default already
-    /// reaches `config.step()` via this impl's own `step` above), but `PvInverter`'s own
-    /// `simulate_forward` override (weather/decay-aware, bypassing `step()` entirely)
+    /// reaches `config.step()` via `step` above), but `PvInverter`'s own override
     /// would be invisible through `AssetHandle`/`simulated_trajectory` without this.
     fn simulate_forward(
         &self,
@@ -551,6 +550,8 @@ pub struct TickOverrides {
     // asset is configured (see `SimState::tick()`).
     pub base_load_measured_kw: Option<f64>,
     pub base_load_baseline_kw: Option<f64>,
+    /// See `BaseLoad.heuristic`'s doc comment.
+    pub base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
 
     // EV
     pub ev_plugged_override: Option<bool>,

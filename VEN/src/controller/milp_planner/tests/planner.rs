@@ -177,23 +177,12 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
 
-    // daytime_profile_kw[h] = h as f64 kW — slots at 06:00/06:30/07:00/07:30
-    // UTC sample hours 6,6,7,7, so the expected per-slot baseline is
-    // 6.0, 6.0, 7.0, 7.0 kW: not constant, and traceable to a known formula.
-    // Same curve in every day-of-week bucket — this test only cares about
-    // hour-of-day variation, not the day-of-week split itself.
-    let profile_by_hour: Vec<f64> = (0..24).map(|h| h as f64).collect();
-    let mut heuristics = std::collections::HashMap::new();
-    heuristics.insert(
-        "base_load".to_string(),
-        crate::entities::design_vocabulary::AssetHeuristics {
-            asset_id: "base_load".to_string(),
-            daytime_profile_kw: std::array::from_fn(|_| profile_by_hour.clone()),
-            seasonal_factor: 1.0,
-            last_updated: Some(now),
-            recent_mean_abs_error_kw: None,
-        },
-    );
+    // Slots at 06:00/06:30/07:00/07:30 UTC sample hours 6,6,7,7, so the
+    // expected per-slot baseline is 6.0, 6.0, 7.0, 7.0 kW: not constant, and
+    // traceable to a known formula (mirrors what a live BaseLoad's own
+    // forecast_kw_at would produce for a `daytime_profile_kw[h] = h as f64`
+    // heuristic, resolved by the caller via resolve_base_load_forecast_kw).
+    let base_load_live_forecast_kw: Vec<f64> = vec![6.0, 6.0, 7.0, 7.0];
 
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
@@ -215,7 +204,7 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
         None,
         None,
         None,
-        &heuristics,
+        Some(&base_load_live_forecast_kw),
         None,
         None,
         None,
@@ -283,20 +272,17 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             weekend_profile.clone()
         }
     });
-    let mut heuristics = std::collections::HashMap::new();
-    heuristics.insert(
-        "base_load".to_string(),
-        crate::entities::design_vocabulary::AssetHeuristics {
-            asset_id: "base_load".to_string(),
-            daytime_profile_kw,
-            seasonal_factor: 1.0,
-            last_updated: Some(tuesday),
-            recent_mean_abs_error_kw: None,
-        },
-    );
+    let heuristic = crate::entities::design_vocabulary::AssetHeuristics {
+        asset_id: "base_load".to_string(),
+        daytime_profile_kw,
+        seasonal_factor: 1.0,
+        last_updated: Some(tuesday),
+        recent_mean_abs_error_kw: None,
+    };
 
     let baseline_kw_for = |now: DateTime<Utc>| {
         let sim = make_snap_from_profile(&profile);
+        let base_load_live_forecast_kw = vec![heuristic.sample_kw(now)];
         let tariffs = TariffTimeSeries::from_snapshots(&[TariffSnapshot {
             interval_start: now - Duration::hours(1),
             interval_end: now + Duration::hours(25),
@@ -324,7 +310,7 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             None,
             None,
             None,
-            &heuristics,
+            Some(&base_load_live_forecast_kw),
             None,
             None,
             None,
@@ -965,7 +951,7 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
         None,
         None,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,
@@ -1022,7 +1008,7 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         None,
         None,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,
@@ -1086,7 +1072,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         None,
         None,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,
@@ -1125,7 +1111,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         None,
         None,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,

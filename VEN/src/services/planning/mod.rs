@@ -11,7 +11,6 @@ use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
-use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
@@ -158,7 +157,10 @@ pub async fn build_solve_request(
     // a live SimState it holds before flattening to SimSnapshot. None when no
     // live "pv" asset exists in this cycle's snapshot.
     pv_live_forecast_kw: Option<Vec<f64>>,
-    asset_heuristics: std::collections::HashMap<String, AssetHeuristics>,
+    // base-load-competence-consolidation: live BaseLoad-derived forecast per
+    // slot, resolved by the caller the same way. None when no live
+    // "base_load" asset exists in this cycle's snapshot.
+    base_load_live_forecast_kw: Option<Vec<f64>>,
     weather: &Arc<dyn crate::controller::WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
     wall_now: DateTime<Utc>,
@@ -191,7 +193,7 @@ pub async fn build_solve_request(
         objective_override,
         pv_forecast_override,
         pv_live_forecast_kw,
-        asset_heuristics,
+        base_load_live_forecast_kw,
         weather_pv_kw,
         diurnal_import_eur_kwh,
         diurnal_co2_g_kwh,
@@ -542,7 +544,7 @@ mod tests {
             objective_override: None,
             pv_forecast_override: None,
             pv_live_forecast_kw: None,
-            asset_heuristics: Default::default(),
+            base_load_live_forecast_kw: None,
             weather_pv_kw: None,
             diurnal_import_eur_kwh: None,
             diurnal_co2_g_kwh: None,

@@ -15,7 +15,8 @@ use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::services::planning::PlanCycleInputs;
 use crate::simulator::plan_context::{
-    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot, resolve_pv_forecast_kw,
+    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot,
+    resolve_base_load_forecast_kw, resolve_pv_forecast_kw,
 };
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -57,9 +58,6 @@ pub(super) async fn run_plan_cycle(
     let heat_tgt = state.heater_target().await;
     let shift_loads = state.shiftable_loads().await;
     let bl_override = state.baseline_override().await;
-    // WP5.2 (BL-14): resolved here (async) and threaded down as a
-    // plain owned value — build_milp_inputs et al. are sync/pure.
-    let asset_heuristics = state.asset_heuristics().await;
     let obj = *active_objective.read().await;
     // Read inject state BEFORE cloning the sim: the one-shot pv_irradiance
     // inject is cleared by the sim tick after applying it — reading after the
@@ -129,6 +127,8 @@ pub(super) async fn run_plan_cycle(
 
     // Live PvInverter's own weather/decay-aware forecast; None with no live "pv" asset.
     let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_snap, n_slots, &cum_s, now);
+    // Live BaseLoad's own heuristic-aware forecast; None with no live "base_load" asset.
+    let base_load_live_forecast_kw = resolve_base_load_forecast_kw(&sim_snap, n_slots, &cum_s, now);
 
     // R-50: build_solve_request resolves the weather-sourced PV forecast internally.
     let solve_req = crate::services::planning::build_solve_request(
@@ -151,7 +151,7 @@ pub(super) async fn run_plan_cycle(
         Some(obj),
         pv_forecast_override,
         pv_live_forecast_kw,
-        asset_heuristics,
+        base_load_live_forecast_kw,
         weather,
         weather_pv_params,
         wall_now,

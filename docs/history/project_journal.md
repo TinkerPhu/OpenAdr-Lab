@@ -12019,3 +12019,59 @@ of being unblocked was wrong, caught only by writing a test that actually assert
 variation rather than just "doesn't panic" or "matches the old behavior." Test-first isn't just
 insurance against implementation bugs; it's what surfaces wrong design assumptions before they
 compound into a second (or third) discovery mid-implementation.
+
+## 2026-09-11 — Asset Competence Assurance Phase 2, base load consolidation (`base-load-competence-consolidation`, complete)
+
+Same shape as Phase 1 (PV), one tier smaller, per the master plan's own Phase 2 section.
+`BaseLoad::forecast()` returned a flat repeat of the live, tick-mutated `baseline_kw` field
+across its whole timespan, never consulting the site's learned base-load heuristic
+(`AssetHeuristics::sample_kw`) that `controller::milp_planner::inputs::build_milp_inputs`
+already read directly (bypassing the asset entirely) to compute the MILP planner's `p_base_kw`
+input. Investigation before implementing found the initial problem statement in the master plan
+was half-inaccurate, worth correcting rather than blindly implementing against: `tasks/sim_tick/
+context.rs`'s `base_load_heuristic_kw_now` is a *different*, already-correct mechanism — it
+flows into the live tick's own `natural_base_kw` precedence (`measured > heuristic >
+baseline_kw_profile + noise`) via `TickOverrides.base_load_baseline_kw`, exactly the
+"infra resolves it, asset interprets it" pattern this whole master plan wants everywhere. Only
+`build_milp_inputs`'s direct HashMap read, and `BaseLoad::forecast()`'s own flat-line bug (which
+makes `GET /assets/{id}/forecast` show stale data for any VEN with a learned heuristic), were
+real violations. Scoped the change to just those two.
+
+`BaseLoad` gained a `heuristic: Option<AssetHeuristics>` field (mirrors `PvInverter.weather_forecast`
+from Phase 1), populated each tick via a new `TickOverrides.base_load_heuristic`, threaded
+through the same `SimState::tick()` parameter list PV's `weather_forecast` already established
+the pattern for. `BaseLoad::forecast()` now samples a new `forecast_kw_at` helper on an hourly
+grid (matching `AssetHeuristics::sample_kw`'s own hourly bucket resolution) instead of repeating
+one flat value forever — falling back to the static `baseline_kw_profile` (deliberately not the
+live-mutated `baseline_kw`, to avoid reintroducing the exact "flat repeat of whatever now
+resolved to" bug this phase exists to fix) when no heuristic has been learned yet.
+
+`build_milp_inputs`'s per-slot base-load resolution was replaced with a live-`BaseLoad`-derived
+forecast, resolved the same way Phase 1's PV forecast was: a new `simulator::plan_context::
+resolve_base_load_forecast_kw`, reading the live `SimState` `tasks/planning/cycle.rs` already
+holds before flattening to `SimSnapshot`, threaded through `SolveRequest.base_load_live_forecast_kw`.
+Since base_load turned out to be the *only* consumer of the `asset_heuristics: HashMap`
+parameter anywhere in `build_milp_inputs`/`run_planner`/`SolveRequest`/`build_solve_request`
+(confirmed via grep before acting, not assumed), that whole parameter was dropped from the
+chain entirely — a bigger, but clean, deletion rather than leaving a now-redundant parameter
+threaded through for appearance's sake. Updated roughly a dozen test call sites across
+`controller/milp_planner/tests/` accordingly (some by removing the argument outright, two by
+replacing a `HashMap` construction with a directly-computed `Vec<f64>` matching what a live
+`BaseLoad`'s own `forecast_kw_at` would now produce for the same inputs) plus a new numeric-
+equivalence test (`controller/milp_planner/tests/base_load.rs`) proving `build_milp_inputs`'s
+`p_base_kw` output matches `forecast_kw_at` directly, not just "tests still pass."
+
+Verification: `wsl cargo test -j 2` 1270/1270 passed, `cargo fmt --check`/`clippy --all-targets
+--all-features -- -D warnings` clean, `scripts/audit_file_sizes.py` clean (trimmed comments in
+`asset_trait.rs` to stay under its 500-line cap after the new `TickOverrides` field). No UI
+files touched — base load has no UI-facing controls beyond the existing "Base Load Override"/
+"Blend-back Speed" sliders, unaffected by this change. E2E/resilience and manual UI verification
+were not run this session — same accepted, explicitly-flagged gap as Phase 1, matching this
+phase's own low-risk assessment.
+
+Key learning: re-verifying a master plan's own Problem-section claim against the actual code
+before implementing against it (rather than treating a planning document as ground truth once
+written) caught a real inaccuracy here — `base_load_heuristic_kw_now` was never a violation.
+Same lesson Phase 1's section 5 investigation already taught with the "5a has no remaining
+blocker" claim: a plan is a hypothesis about the code, not a substitute for reading it again
+at implementation time.
