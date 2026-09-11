@@ -270,10 +270,12 @@ pub struct HeaterState {
 
 `Heater.capability(state)`:
 ```
-if temperature_c >= comfort_max_c → max_import_kw = 0.0         (overheat — forced off)
-if temperature_c <= comfort_min_c → max_import_kw = min_power_kw (forced on, non-zero floor)
-otherwise                         → max_export_kw = 0.0, max_import_kw = max_power_kw
-// Heaters never export: max_export_kw = 0.0 always.
+if temperature_c >= forced-off ceiling → max_import_kw = 0.0     (comfort_max_c; safety max in Absorb mode)
+if emergency (≤ comfort_min_c, or running at full power within +3 °C hysteresis, not Curtail)
+                                     → max_import_kw = max_power_kw, floor = max_power_kw (forced on)
+otherwise                            → max_import_kw = max_power_kw
+// Heaters never export: max_export_kw = 0.0 always. Same rule as step()
+// (Heater::thermostat_forced_kw), so capability never disagrees with physics.
 ```
 
 #### PvState

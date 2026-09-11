@@ -194,6 +194,30 @@ def step_live_headroom_import_matches_non_pv_capability(context):
     )
 
 
+@then("the live site headroom's import side includes the EV's own live import capability")
+def step_live_headroom_import_includes_ev_capability(context):
+    def _capture():
+        r = ven_get("/flexibility")
+        return (r.json(), _live_assets()) if r.status_code == 200 else None
+
+    headroom, assets = poll_until(
+        _capture,
+        lambda result: result is not None,
+        timeout=30,
+        interval=2,
+        description="live site headroom and asset snapshot captured together",
+    )
+    ev_cap_kw = assets.get("ev", {}).get("cap_max_import_kw", 0.0)
+    assert ev_cap_kw > 0.0, (
+        f"precondition: the scheduled EV session should leave the EV able to charge "
+        f"(plugged, below target), but its import capability is {ev_cap_kw:.2f} kW: {assets.get('ev')}"
+    )
+    assert headroom["down_kw"] >= ev_cap_kw - 0.5, (
+        f"site headroom down_kw ({headroom['down_kw']:.2f} kW) is below the EV's own "
+        f"import capability ({ev_cap_kw:.2f} kW) -- the EV's charge ceiling is missing."
+    )
+
+
 @then(
     "the captured import capacity curve's first step equals the site's non-PV controllable assets' own import capability"
 )

@@ -71,13 +71,10 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 201
     And the response JSON field "max_total_cost_eur" is greater than 0.0
 
-  Scenario: Interruptible scheduled EV session contributes to up_kw in flexibility envelope
-    # up_kw is signed (site-capacity-seam-unification, positive = import,
-    # negative = export) -- a genuinely available Export-direction
-    # contribution (an interruptible EV session that could be shed) shows as
-    # NEGATIVE, not positive; this is the same convention CapacityCurve's own
-    # Export curve already uses.
+  Scenario: Interruptible scheduled EV session shows up in the site headroom import side
+    # Site headroom is absolute, not a delta from current dispatch: a non-V2G
+    # EV can't export, so it adds nothing to up_kw however it is charging.
+    # What it does add is its own charge ceiling to down_kw while plugged in
+    # below its target.
     Given the VEN has a scheduled interruptible EV session
-    When I GET /flexibility from the VEN
-    Then the response status is 200
-    And the response JSON field "up_kw" is less than 0.0
+    Then the live site headroom's import side includes the EV's own live import capability
