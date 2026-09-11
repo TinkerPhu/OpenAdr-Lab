@@ -79,21 +79,14 @@ pub(super) fn apply_battery_lever(
     if objective == PlannerObjective::MaxRevenue && assigned_kw > 0.0 {
         return 0.0;
     }
-    let soc = snap.val("soc").unwrap_or(0.0);
-    let min_soc = snap.val("min_soc").unwrap_or(0.0);
+    // The battery's own capability already reports 0 in a direction it can't
+    // sustain (near full/empty) — no SoC re-interpretation here.
     let max_discharge_kw = snap.cap_max_export_kw.abs();
     let max_charge_kw = snap.cap_max_import_kw;
     let current_sp = snap.setpoint_kw;
 
     let raw_target = current_sp - assigned_kw;
     let clamped = raw_target.clamp(-max_discharge_kw, max_charge_kw);
-    let clamped = if clamped < 0.0 && soc <= min_soc + 0.01 {
-        current_sp.max(0.0)
-    } else if clamped > 0.0 && soc >= 1.0 - 0.01 {
-        current_sp.min(0.0)
-    } else {
-        clamped
-    };
 
     let delta = clamped - current_sp;
     if delta.abs() < 1e-6 {

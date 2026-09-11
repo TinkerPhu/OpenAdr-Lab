@@ -6,18 +6,35 @@ use super::*;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
 use std::collections::HashMap as StdHashMap;
 
+/// Capability and storage come from the real `Battery` asset, not hand-set
+/// numbers, so the fixture can't disagree with the asset about full/empty.
 fn battery_snap(setpoint_kw: f64, soc: f64) -> AssetSnapshot {
-    let mut values = StdHashMap::new();
-    values.insert("soc".into(), soc);
-    values.insert("min_soc".into(), 0.1);
-    const CAPACITY_KWH: f64 = 8.0;
+    use crate::assets::battery::{Battery, BatteryState};
+    use crate::assets::{Asset, AssetState};
+    let battery = Battery {
+        capacity_kwh: 8.0,
+        max_charge_kw: 5.0,
+        max_discharge_kw: 5.0,
+        round_trip_efficiency: 1.0,
+        min_soc: 0.1,
+    };
+    let state = AssetState::Battery(BatteryState {
+        soc,
+        actual_power_kw: setpoint_kw,
+    });
+    let cap = battery.capability(&state);
+    let (available_discharge_kwh, available_charge_kwh) = battery
+        .as_request_resolvable()
+        .and_then(|r| r.available_storage_kwh(&state))
+        .expect("battery reports storage");
+    let values = Asset::state_values(&battery, &state).into_iter().collect();
     AssetSnapshot {
         power_kw: setpoint_kw,
         asset_type: "battery".into(),
-        cap_max_import_kw: 5.0,
-        cap_max_export_kw: 5.0,
-        available_discharge_kwh: Some((soc * CAPACITY_KWH).max(0.0)),
-        available_charge_kwh: Some(((1.0 - soc) * CAPACITY_KWH).max(0.0)),
+        cap_max_import_kw: cap.max_import_kw,
+        cap_max_export_kw: cap.max_export_kw,
+        available_discharge_kwh: Some(available_discharge_kwh),
+        available_charge_kwh: Some(available_charge_kwh),
         default_setpoint_kw: 0.0,
         setpoint_kw,
         values,

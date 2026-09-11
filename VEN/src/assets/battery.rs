@@ -11,6 +11,10 @@ use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::BatteryParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 
+/// Minimum time a direction's max rate must be sustainable to be reported as
+/// available power (see `Battery::capability_inner`).
+const SUSTAINED_POWER_MIN_S: f64 = 60.0;
+
 /// Battery storage config. Bidirectional.
 /// Positive setpoint = charge (import), negative = discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,18 +95,25 @@ impl Battery {
         )
     }
 
-    /// Point-in-time feasible power range.
+    /// Point-in-time feasible power range. A direction only counts as available
+    /// if its max rate can be sustained for `SUSTAINED_POWER_MIN_S`: a battery
+    /// parked at 99.95 % has seconds of room, not 5 kW of import capability.
+    /// Energy physics (`step_inner`, the MILP's energy balance) stay exact.
     pub fn capability_inner(&self, state: &BatteryState) -> AssetCapability {
+        let eff = self.round_trip_efficiency.sqrt();
+        let window_h = SUSTAINED_POWER_MIN_S / 3600.0;
+        let charge_room_kwh = (1.0 - state.soc) * self.capacity_kwh;
+        let discharge_room_kwh = (state.soc - self.min_soc) * self.capacity_kwh;
         AssetCapability {
-            max_export_kw: if state.soc <= self.min_soc {
-                0.0
-            } else {
+            max_export_kw: if discharge_room_kwh > self.max_discharge_kw / eff * window_h {
                 -self.max_discharge_kw
-            },
-            max_import_kw: if state.soc >= 1.0 {
-                0.0
             } else {
+                0.0
+            },
+            max_import_kw: if charge_room_kwh > self.max_charge_kw * eff * window_h {
                 self.max_charge_kw
+            } else {
+                0.0
             },
             adjustability: PowerAdjustability::Stepless,
             power_steps_kw: vec![],
@@ -449,6 +460,36 @@ mod tests {
         let cap = bat.capability_inner(&state);
         assert_eq!(cap.adjustability, PowerAdjustability::Stepless);
         assert!(cap.power_steps_kw.is_empty());
+    }
+
+    #[test]
+    fn capability_reports_no_import_when_the_room_cannot_sustain_max_charge_for_60s() {
+        // 10 kWh, 5 kW, eff 0.95: 60 s at max charge stores ~0.081 kWh (~0.81 %).
+        // VEN1 parked at 99.955 % and kept reporting the full 5 kW for ~3 s of room.
+        let (bat, mut state) = make_battery_cfg(0.99955);
+        assert_eq!(bat.capability_inner(&state).max_import_kw, 0.0);
+        state.soc = 0.995;
+        assert_eq!(bat.capability_inner(&state).max_import_kw, 0.0);
+        state.soc = 0.99; // 0.1 kWh room: more than 60 s at 5 kW
+        assert_eq!(bat.capability_inner(&state).max_import_kw, 5.0);
+    }
+
+    #[test]
+    fn capability_reports_no_export_when_the_energy_cannot_sustain_max_discharge_for_60s() {
+        let (bat, mut state) = make_battery_cfg(0.105); // min_soc 0.1: 0.05 kWh left
+        assert_eq!(bat.capability_inner(&state).max_export_kw, 0.0);
+        state.soc = 0.11;
+        assert_eq!(bat.capability_inner(&state).max_export_kw, -5.0);
+    }
+
+    #[test]
+    fn step_still_tops_up_the_last_percent_exactly() {
+        // The 60 s rule is about what power can be promised, not energy physics:
+        // step (and the MILP's energy balance) still fill up to exactly 100 %.
+        let (bat, state) = make_battery_cfg(0.995);
+        let (next, kw) = bat.step_inner(&state, 5.0, Duration::seconds(1));
+        assert_eq!(kw, 5.0);
+        assert!(next.soc > 0.995);
     }
 
     #[test]
