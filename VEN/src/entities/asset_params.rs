@@ -116,6 +116,29 @@ impl Default for HeaterParams {
     }
 }
 
+/// Thermal energy stored above `temp_min_c` (kWh) — the single temp↔energy
+/// conversion `assets::heater::Heater` (live simulator), `assets::heater_milp`
+/// (MILP planning), and `controller::milp_planner::asset_port::heater_future_state`
+/// (MILP-result-to-state mapping) all previously reimplemented independently
+/// (heater-thermal-conversion-consolidation, Phase 4 of
+/// `docs/plans/asset-competence-assurance-master-plan.md`) — domain-owned here
+/// so a future fourth call site has a function to call instead of a formula to
+/// copy. Deliberately does NOT clamp to `[0, e_max]`: callers that need bounds
+/// (e.g. `Heater::plan_trajectory`) apply them explicitly, since `e_max` itself
+/// depends on `temp_max_c`, a third parameter this function has no reason to take.
+pub fn heater_energy_above_min_kwh(
+    temp_c: f64,
+    temp_min_c: f64,
+    thermal_mass_kwh_per_c: f64,
+) -> f64 {
+    (temp_c - temp_min_c) * thermal_mass_kwh_per_c
+}
+
+/// Inverse of `heater_energy_above_min_kwh`: temperature from stored energy.
+pub fn heater_temp_c_from_energy(e_kwh: f64, temp_min_c: f64, thermal_mass_kwh_per_c: f64) -> f64 {
+    temp_min_c + e_kwh / thermal_mass_kwh_per_c
+}
+
 // ── PV ───────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -336,5 +359,28 @@ impl AssetRequestSlice {
             return None;
         }
         Some((kwh, desired_power_kw.or(self.max_charge_kw).unwrap_or(1.0)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heater_energy_above_min_kwh_zero_at_temp_min() {
+        assert_eq!(heater_energy_above_min_kwh(18.0, 18.0, 2.0), 0.0);
+    }
+
+    #[test]
+    fn heater_energy_above_min_kwh_scales_by_thermal_mass() {
+        // 3C above min, 2 kWh/C -> 6 kWh stored.
+        assert_eq!(heater_energy_above_min_kwh(21.0, 18.0, 2.0), 6.0);
+    }
+
+    #[test]
+    fn heater_temp_c_from_energy_is_the_exact_inverse() {
+        let (temp_c, temp_min_c, mass) = (23.5, 18.0, 2.5);
+        let e_kwh = heater_energy_above_min_kwh(temp_c, temp_min_c, mass);
+        assert!((heater_temp_c_from_energy(e_kwh, temp_min_c, mass) - temp_c).abs() < 1e-9);
     }
 }

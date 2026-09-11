@@ -298,6 +298,10 @@ pub fn heater_future_state(
     temp_min_c: f64,
     thermal_mass_kwh_per_c: f64,
 ) -> HashMap<String, f64> {
-    let temp_c = temp_min_c + e_tank_kwh / thermal_mass_kwh_per_c;
+    let temp_c = crate::entities::asset_params::heater_temp_c_from_energy(
+        e_tank_kwh,
+        temp_min_c,
+        thermal_mass_kwh_per_c,
+    );
     HashMap::from([("temp_c".into(), temp_c)])
 }

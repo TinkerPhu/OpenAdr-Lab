@@ -12144,3 +12144,64 @@ recommendation while documenting the choice inline is more useful than leaving a
 indefinitely on a synchronous check-in that may not come soon. The reasoning must actually be
 present and sound for this to apply — this is not license to treat every open decision as
 pre-answered.
+
+## 2026-09-11 — Asset Competence Assurance Phase 4, heater thermal-conversion consolidation (`heater-thermal-conversion-consolidation`, complete)
+
+`assets/heater.rs` and `assets/heater_milp.rs` both implement the same temperature↔thermal-
+energy conversion (`(temp - temp_min) * thermal_mass_kwh_per_c`) independently — currently
+consistent, same formula, same config field, but exactly the duplication shape that let R-69
+silently diverge before anyone noticed (Phase 3, this same master plan). Investigated rather
+than assumed how many places actually compute this, per the phase's own scope.
+
+Found three live call sites, not the two named in the master plan's Problem statement:
+`Heater::plan_trajectory` and `Heater::future_state_values` (`heater.rs`),
+`HeaterMilpContext::from_state` (`heater_milp.rs`), and
+`controller::milp_planner::asset_port::heater_future_state` — the third one a documented,
+deliberate "Mirrors X()" reimplementation (pre-existing debt R-73) that exists specifically
+because `controller::milp_planner` is architecturally forbidden from importing `assets::`
+directly (the ven-architecture invariant `grep -r "use crate::assets::" .../milp_planner` must
+stay empty). Placing the two new shared conversion functions in `entities::asset_params`
+(Domain layer, not `assets::`) — matching PV's Phase 1 precedent of domain-owning shared
+formulas in `entities::solar` — resolved all three at once: `entities::` imports are already
+normal practice inside `controller::milp_planner` (confirmed via existing imports in
+`inputs.rs`), so `asset_port.rs` could consolidate too without touching the architecture rule
+at all.
+
+Also investigated, not assumed, whether heater's other live-vs-MILP surface had drifted the
+way battery's efficiency model had: `Heater::forecast_demand_kw` (used for `q_dem_kw` by both
+`plan_trajectory` and `HeaterMilpContext::from_state`) turned out to already be a single
+shared method — not a second R-69-shaped divergence. The live tick's own instantaneous Newton-
+cooling loss term (`step_inner`/`forecast`'s `loss_kw = k_loss_kw_per_c * (temp - ambient)`,
+varying continuously with the live temperature) is a deliberately coarser, constant-average
+approximation in the MILP (`forecast_demand_kw` evaluates the loss once, at the midpoint
+temperature) — but that's a standard, structurally-necessary LP-linearization choice (the MILP
+cannot make a loss term depend on temperature, itself a decision variable, without becoming
+nonlinear), not an oversight with no reason for the two models to disagree. R-69 had no such
+structural excuse; this does. Left it alone, documented the distinction in the master plan
+rather than silently treating "found a second live-vs-MILP difference" as automatically the
+same bug shape.
+
+Implementation: two new pure functions, `entities::asset_params::heater_energy_above_min_kwh`/
+`heater_temp_c_from_energy`, each with direct unit tests (zero-at-temp-min, scales-by-mass,
+exact round-trip inverse). All three real call sites now call them instead of recomputing the
+formula inline. Added a cross-file numeric-equivalence test
+(`heater_milp.rs::from_state_e_init_and_e_max_agree_with_plan_trajectory_and_heater_future_state`)
+asserting `HeaterMilpContext::from_state`'s `e_init_kwh`/`e_max_kwh`, `Heater::plan_trajectory`'s
+`e_kwh`/`e_max_kwh`, and `asset_port::heater_future_state`'s inverse all agree for the same
+inputs — not just "tests still pass," matching the equivalence-test pattern every prior phase
+of this master plan has used.
+
+Verification: heater-scoped `cargo test` subset 129/129 green, full suite 1275 passed (up from
+1271 pre-session), `cargo fmt --check`/`clippy --all-targets --all-features -- -D warnings`/
+`scripts/audit_file_sizes.py` all clean. No UI files touched.
+E2E/resilience and manual UI verification not run this session — same accepted, flagged gap as
+prior phases.
+
+Key learning: "confirm, don't assume" (this phase's own explicit scope, borrowed from the
+master plan's own language) found a real discrepancy between the plan's stated Problem (two
+files) and the actual code (three call sites, one of them a documented R-73 workaround) —
+worth the extra grep before implementing against the plan's literal wording. It also correctly
+distinguished a genuine third-party physics approximation (the MILP's constant-average heat
+loss) from an R-69-shaped bug, rather than treating every live-vs-MILP numeric difference as
+automatically the same failure pattern — the discriminator is whether there's a structural
+reason (LP linearity) for the difference to exist, not just whether two numbers differ.

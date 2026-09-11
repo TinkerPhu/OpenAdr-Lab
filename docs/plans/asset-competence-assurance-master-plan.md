@@ -3,11 +3,11 @@
 > **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) complete
 > (`pv-competence-consolidation`, 2026-09-10/2026-09-11). Phase 2 (base load) complete
 > (`base-load-competence-consolidation`, 2026-09-11). Phase 3 (battery efficiency, R-69)
-> complete (`battery-efficiency-model-reconciliation`, 2026-09-11). All three
-> unit/integration-tested and locally verified (fmt/clippy/file-size audit green);
-> E2E/resilience and manual UI verification not yet run for any — see each phase's own section
-> for the exact gap. Phases 4-5 open. This document sequences and motivates the work; it
-> deliberately contains no
+> complete (`battery-efficiency-model-reconciliation`, 2026-09-11). Phase 4 (heater) complete
+> (`heater-thermal-conversion-consolidation`, 2026-09-11). All four unit/integration-tested and
+> locally verified (fmt/clippy/file-size audit green); E2E/resilience and manual UI verification
+> not yet run for any — see each phase's own section for the exact gap. Phase 5 open. This
+> document sequences and motivates the work; it deliberately contains no
 > implementation-level detail. Each phase's actual work happens as its own openspec change
 > (`openspec new change ...`), proposed and reviewed carefully when that phase's turn comes
 > — not as one bundled change, and not from this document directly.
@@ -241,6 +241,36 @@ has already diverged the way battery's did; consolidate the conversion into one 
 implementation regardless, to remove the standing risk even if nothing has drifted yet.
 
 **Risk:** moderate — same dual live/planning surface as battery, smaller in scope.
+
+**Status: complete** (`heater-thermal-conversion-consolidation`, 2026-09-11). Confirmed via
+investigation (not assumed) that the temp↔energy conversion was actually duplicated at
+**three** live call sites, not two: `assets/heater.rs::Heater::plan_trajectory` and
+`::future_state_values`, `assets/heater_milp.rs::HeaterMilpContext::from_state`, and
+`controller/milp_planner/asset_port.rs::heater_future_state` — the last one a deliberate
+"Mirrors X()" reimplementation (documented, pre-existing R-73) that exists specifically to
+avoid `controller::milp_planner` importing `assets::` directly. All three now call two new
+domain-owned functions, `entities::asset_params::heater_energy_above_min_kwh`/
+`heater_temp_c_from_energy` — placing them in `entities/` (Domain) rather than `assets/`
+(Infra) is what let `asset_port.rs` consolidate too without violating the
+`controller::milp_planner` must-not-import-`assets::` architecture rule (confirmed
+`entities::` imports are already normal practice there, unlike `assets::`).
+
+Also confirmed, via reading rather than assuming, that heater's OTHER live-vs-MILP surface —
+the demand/loss model (`Heater::forecast_demand_kw`, used by both `plan_trajectory` and
+`HeaterMilpContext::from_state` for `q_dem_kw`) — was **already** a single shared method, not
+a second divergence; the live tick's own instantaneous Newton-cooling loss
+(`step_inner`/`forecast`'s `loss_kw = k_loss_kw_per_c * (temp - ambient)`) is a deliberately
+different, finer-grained physics model than the MILP's constant-average `q_dem` approximation
+(a standard LP-linearization choice, not an oversight — the MILP can't have loss depend on a
+decision variable like temperature without going nonlinear), so it was left alone; not the
+same shape as R-69, which had no structural reason for its two models to disagree.
+
+Added a numeric-equivalence test (`heater_milp.rs::from_state_e_init_and_e_max_agree_with_plan_trajectory_and_heater_future_state`)
+proving all three call sites' outputs agree for the same inputs, plus direct unit tests for the
+two new conversion functions. Unit/integration-tested: 129/129 heater-scoped tests, full suite
+1275 passed (up from 1271), `cargo fmt`/`clippy -D warnings`/`scripts/audit_file_sizes.py` all
+green. No UI files touched.
+E2E/resilience and manual UI verification not run — same accepted gap as prior phases.
 
 ## Phase 5 — EV departure consolidation (deliberately last)
 
