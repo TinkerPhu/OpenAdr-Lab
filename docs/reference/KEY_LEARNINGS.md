@@ -1790,3 +1790,30 @@ not as a nice-to-have — in this master plan it was cheap (minutes of reading) 
 scope errors every time it was actually done. A plan is a snapshot of understanding at write
 time; code moves, and even code that hasn't moved is sometimes misread on a first pass under
 time pressure during the original audit.
+
+## A "these are the same domain, evaluated at different points" doc comment is a claim to verify, not a design guarantee (`site-capacity-seam-unification`, 2026-09-11)
+
+`unified-capacity-envelope-engine`'s own module doc stated, confidently and specifically, that
+`compute_site_headroom`, `compute_site_headroom_forecast`, and `compute_site_capacity_curve` were
+three fixed-axis slices of one `(t1, t2, direction, tier)` domain. They were not — they were three
+independently-written implementations that mostly agreed, only caught because a user asked a
+simple visual question ("do these two things touch at `t = now`?") rather than because any test
+failed. All four suites had been green the whole time; each function was individually correct,
+the composition wasn't. This is the same failure shape `asset-max-power-primitive` (Spec C) and
+Spec E's own PV-Import/Heater-Export bugs already demonstrated at the per-asset layer — it just
+took this long to show up one layer higher, at site-level aggregation, because nobody had asked
+the seam-equality question directly until a user's eye caught it.
+
+Re-analysis before continuing (prompted by "the code changed, re-analyze first") found the
+picture had shifted further than expected in a good direction: a separate, same-day master plan
+(`asset-competence-assurance`) had already closed two of the three suspected divergences (PV,
+EV departure) as a side effect of unrelated per-asset work. Assuming the original investigation's
+findings were still current — rather than re-reading the actual code first — would have meant
+redoing already-correct work, or worse, reintroducing a special-case the other master plan had
+just removed for good reason.
+
+**How to apply:** when a module doc (or any comment) asserts "these N things are really the same
+computation, just evaluated differently," treat that as a testable claim — write the test that
+directly asserts the values agree at the point where they should coincide, not just tests of each
+piece in isolation. If the codebase is under active parallel development, re-verify that claim
+against current code before trusting a summary from earlier in the same session, even your own.

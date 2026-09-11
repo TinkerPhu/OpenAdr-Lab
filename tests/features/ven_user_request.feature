@@ -72,7 +72,12 @@ Feature: VEN User Request Manager — Stage 5
     And the response JSON field "max_total_cost_eur" is greater than 0.0
 
   Scenario: Interruptible scheduled EV session contributes to up_kw in flexibility envelope
+    # up_kw is signed (site-capacity-seam-unification, positive = import,
+    # negative = export) -- a genuinely available Export-direction
+    # contribution (an interruptible EV session that could be shed) shows as
+    # NEGATIVE, not positive; this is the same convention CapacityCurve's own
+    # Export curve already uses.
     Given the VEN has a scheduled interruptible EV session
     When I GET /flexibility from the VEN
     Then the response status is 200
-    And the response JSON field "up_kw" is greater than 0.0
+    And the response JSON field "up_kw" is less than 0.0

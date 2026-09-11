@@ -163,6 +163,18 @@ def step_response_json_field_greater_than(context, field_path, threshold):
     )
 
 
+@then('the response JSON field "{field_path}" is less than {threshold:f}')
+def step_response_json_field_less_than(context, field_path, threshold):
+    data = context.last_response_json
+    val = _resolve_nested(data, field_path)
+    assert isinstance(val, (int, float)), (
+        f"Field '{field_path}' is not a number: {val!r}"
+    )
+    assert val < threshold, (
+        f"Field '{field_path}' = {val} is not < {threshold}"
+    )
+
+
 @then('the response JSON field "{field_path}" equals {expected:f}')
 def step_response_json_field_equals(context, field_path, expected):
     data = context.last_response_json
