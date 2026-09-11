@@ -5,6 +5,7 @@ mod battery_milp;
 pub mod ev;
 mod ev_comfort;
 mod ev_milp;
+mod ev_schedule;
 pub mod grid;
 pub mod heater;
 mod heater_capabilities;
@@ -1031,6 +1032,7 @@ mod phase2b_tick_overridable_tests {
             base_load_heuristic: None,
             ev_plugged_override: None,
             ev_soc_target_override: None,
+            ev_departure_time: None,
         }
     }
 

@@ -305,6 +305,7 @@ impl SimState {
         base_load_measured_kw: Option<f64>,
         base_load_heuristic_kw: Option<f64>,
         base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+        ev_departure_time: Option<DateTime<Utc>>,
     ) {
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
@@ -368,6 +369,7 @@ impl SimState {
             base_load_heuristic,
             ev_plugged_override,
             ev_soc_target_override,
+            ev_departure_time,
         };
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);

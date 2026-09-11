@@ -84,6 +84,7 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let pv_entry = sim
@@ -138,6 +139,7 @@ fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let pv_entry = sim
@@ -271,6 +273,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let pv_entry = sim
@@ -327,6 +330,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
     let pv_after_tick1 = sim
         .assets
@@ -362,6 +366,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
     let pv_after_tick2 = sim
         .assets
@@ -413,6 +418,7 @@ fn tick_applies_pv_generation_limit_override_to_asset() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
     let pv_power = sim
         .assets
@@ -455,6 +461,7 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
     // Tick 2: no active limit — PV must return to unclamped output.
     sim.tick(
@@ -480,6 +487,7 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
     let pv_power = sim
         .assets

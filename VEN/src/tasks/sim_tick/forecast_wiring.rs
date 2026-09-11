@@ -8,7 +8,6 @@ use crate::controller::capacity_headroom::{
     compute_site_capacity_curve, compute_site_headroom_forecast,
 };
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
-use crate::entities::device_session::EvSession;
 use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
 use crate::simulator::SimState;
 
@@ -25,14 +24,13 @@ use crate::simulator::SimState;
 pub(crate) fn compute_tick_forecasts(
     sim: &SimState,
     plan_snap: Option<&Plan>,
-    ev_session: Option<&EvSession>,
     now: DateTime<Utc>,
 ) -> (
     Vec<SiteFlexibilityForecastSlot>,
     (CapacityCurve, CapacityCurve),
 ) {
     let forecast = plan_snap
-        .map(|plan| compute_site_headroom_forecast(sim, plan, ev_session, now))
+        .map(|plan| compute_site_headroom_forecast(sim, plan, now))
         .unwrap_or_default();
 
     // t2_max sweeps to the plan's own remaining horizon -- falls back to 48h

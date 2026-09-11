@@ -67,6 +67,7 @@ fn tick_applies_appliance_noise_to_base_load_power() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let entry = sim
@@ -113,6 +114,7 @@ fn tick_base_load_kw_override_lands_exactly_regardless_of_appliance_noise() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let entry = sim
@@ -155,6 +157,7 @@ fn tick_at_quiet_hour_stays_close_to_static_baseline() {
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let entry = sim
@@ -200,6 +203,7 @@ fn tick_uses_heuristic_tier_when_measurement_absent_but_heuristic_present() {
         None,               // base_load_measured_kw
         Some(heuristic_kw), // base_load_heuristic_kw
         None,               // base_load_heuristic
+        None,               // ev_departure_time
     );
 
     let entry = sim
@@ -243,6 +247,7 @@ fn tick_falls_back_to_synthetic_when_neither_measurement_nor_heuristic_present()
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
         None, // base_load_heuristic
+        None, // ev_departure_time
     );
 
     let entry = sim
