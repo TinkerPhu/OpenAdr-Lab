@@ -55,8 +55,10 @@ mod tests {
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             crate::services::notify::Notifier::new(None),
-            None, // history
-            None, // comms_loss_config
+            None,  // history
+            None,  // comms_loss_config
+            100.0, // grid_max_import_kw
+            100.0, // grid_max_export_kw
         )
         .await;
         // passes if no panic
@@ -208,8 +210,10 @@ mod tests {
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             crate::services::notify::Notifier::new(None),
-            None, // history
-            None, // comms_loss_config
+            None,  // history
+            None,  // comms_loss_config
+            100.0, // grid_max_import_kw
+            100.0, // grid_max_export_kw
         )
         .await;
 

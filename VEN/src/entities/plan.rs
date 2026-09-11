@@ -176,23 +176,29 @@ pub struct FlexibilityEnvelope {
 /// Computed by `controller::site_headroom::compute_site_headroom` — independent
 /// of the active plan. Always queryable without triggering a planning cycle.
 ///
-/// up_kw/down_kw are each controllable asset's own ABSOLUTE achievable power in
-/// that direction (`Asset::max_effort_setpoint`, `LimitTier::Physical`), summed —
-/// NOT a delta from current dispatch (fixed as part of the same follow-up to
-/// `unified-capacity-envelope-engine`, Spec E, that renamed this struct's producer
-/// from `compute_envelope` to `compute_site_headroom`; see
-/// `docs/reference/KEY_LEARNINGS.md`):
-/// up_kw:   how much the VEN could reduce grid consumption, at the extreme (kW, ≥ 0).
-/// down_kw: how much the VEN could increase grid consumption, at the extreme (kW, ≥ 0).
+/// `up_kw`/`down_kw` are SIGNED now (`site-capacity-seam-unification`,
+/// matching `CapacityCurveStep::power_kw`'s convention: positive = import,
+/// negative = export) — literally the `t2 = 0` point of
+/// `controller::capacity_headroom::compute_site_capacity_curve`, called once
+/// per direction, not an independent sum. `up_kw` = the site's net signed
+/// power under a sustained Export commitment (negative when genuinely
+/// exportable; can swing positive/net-importing when non-exportable
+/// contributions like base load's draw exceed what's exportable — see
+/// `merge_events`'s doc comment); `down_kw` = the net signed power under a
+/// sustained Import commitment (positive in the normal case). Both are
+/// clamped to the site's genuine physical/interconnection rating, not any
+/// VTN directive (R-72).
 ///
 /// Duration fields estimate how long the VEN can sustain the headroom based
 /// on available storage energy. None if no storage assets are present.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SiteFlexibilityEnvelope {
     pub ts: DateTime<Utc>,
-    /// Consumption-reduction headroom available right now (kW). Always ≥ 0.
+    /// Net signed power (kW) under a sustained Export commitment. See this
+    /// struct's own doc comment for the sign convention.
     pub up_kw: f64,
-    /// Consumption-increase headroom available right now (kW). Always ≥ 0.
+    /// Net signed power (kW) under a sustained Import commitment. See this
+    /// struct's own doc comment for the sign convention.
     pub down_kw: f64,
     /// Estimated duration up_kw can be sustained, in seconds. None = no storage.
     pub up_duration_s: Option<u64>,
@@ -232,14 +238,12 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 /// drift between the plan's assumptions and reality on every tick — see
 /// `controller::capacity_headroom::compute_site_headroom_forecast`.
 ///
-/// **`up_kw`/`down_kw` are ABSOLUTE achievable power, not a delta from the
-/// plan's own chosen dispatch** (`unified-capacity-envelope-engine`, Spec E
-/// of the asset-max-power-forecast master plan — this is a real behavior
-/// change from this type's original relative-delta meaning, not a
-/// clarification of unchanged numbers). `up_kw` = the site's absolute
-/// maximum achievable Export at this slot (each asset's own
-/// `Asset::max_effort_setpoint` at its plan-forecasted state, summed);
-/// `down_kw` = the absolute maximum achievable Import, same construction.
+/// **`up_kw`/`down_kw` are ABSOLUTE, not a delta from the plan's own chosen
+/// dispatch** (`unified-capacity-envelope-engine`, Spec E). **Signed now**
+/// too (`site-capacity-seam-unification`), matching `SiteFlexibilityEnvelope`/
+/// `CapacityCurveStep::power_kw`'s convention — see `SiteFlexibilityEnvelope`'s
+/// own doc comment for the sign convention and why base load (now included)
+/// can push `up_kw` positive.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SiteFlexibilityForecastSlot {
     pub ts: DateTime<Utc>,

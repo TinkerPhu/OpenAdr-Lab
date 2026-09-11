@@ -298,7 +298,14 @@ pub fn build_measurement_report_for_obligation(
         // correctly keeps the other string for that reason — verified during
         // GB-21 implementation, not conflated here.
         "IMPORT_RESERVATION_CAPACITY" => {
-            let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
+            // up_kw is signed now (site-capacity-seam-unification) -- convert
+            // to magnitude at this OpenADR reporting boundary, mirroring
+            // report_intervals.rs::build_capacity_forecast_intervals's own
+            // signed->magnitude conversion for CapacityCurve. (R-76: whether
+            // this arm reads the right field for this payload type at all is
+            // a separate, still-open question -- only the sign bug is fixed
+            // here.)
+            let up_w = site_envelope.map(|e| e.up_kw.abs() * 1000.0).unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,
@@ -315,7 +322,10 @@ pub fn build_measurement_report_for_obligation(
             }]
         }
         "EXPORT_RESERVATION_CAPACITY" => {
-            let down_w = site_envelope.map(|e| e.down_kw * 1000.0).unwrap_or(0.0);
+            // down_kw is signed now too -- same magnitude conversion as above.
+            let down_w = site_envelope
+                .map(|e| e.down_kw.abs() * 1000.0)
+                .unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,

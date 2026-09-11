@@ -555,7 +555,9 @@ export type BaselineOverride = {
 export type CreateBaselineOverrideBody = { slots: BaselineSlot[] };
 
 /** BL-43: live site-level headroom, `GET /flexibility` — instant-only, no forward
- * schedule (distinct from the per-device `FlexibilityEnvelope` below). */
+ * schedule (distinct from the per-device `FlexibilityEnvelope` below). `up_kw`/
+ * `down_kw` are SIGNED (`site-capacity-seam-unification`, positive = import,
+ * negative = export) — see `SiteHeadroomChart.tsx`'s own doc comment. */
 export type SiteFlexibilityEnvelope = {
   ts: string;
   up_kw: number;

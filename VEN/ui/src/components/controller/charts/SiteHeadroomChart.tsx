@@ -47,29 +47,30 @@ interface SiteHeadroomChartProps {
 
 /**
  * BL-43 / `unified-capacity-envelope-engine` (Spec E): live site-level flexibility
- * plotted as a band alongside the grid-power line. `up_kw`/`down_kw` are now ABSOLUTE
- * achievable power (each asset's own `max_effort_setpoint`, summed) rather than a delta
- * from the currently-planned dispatch, so the band is anchored to those absolute limits
- * directly — `-up_kw` (max achievable Export, negative-signed) to `down_kw` (max
- * achievable Import, positive-signed) — not to the grid-power line the way it was before
- * this change. The grid-power line itself is unchanged, still shown for reference.
- * Distinct from `TariffEnvelopeChart`'s Dynamic Operating Envelope
- * (`IMPORT/EXPORT_CAPACITY_LIMIT`), which is a VTN-announced forward *schedule*, not a
- * live/forecast headroom value.
+ * plotted as a band alongside the grid-power line. `up_kw`/`down_kw` are SIGNED now
+ * (`site-capacity-seam-unification`, matching `CapacityCurveStep.power_kw`'s convention
+ * — positive = import, negative = export) — the band is anchored directly at `up_kw`
+ * (lower bound, negative when genuinely exportable) to `down_kw` (upper bound), with NO
+ * negation, exactly like the capacity-curve overlay's own series below. The grid-power
+ * line itself is unchanged, still shown for reference. Distinct from
+ * `TariffEnvelopeChart`'s Dynamic Operating Envelope (`IMPORT/EXPORT_CAPACITY_LIMIT`),
+ * which is a VTN-announced forward *schedule*, not a live/forecast headroom value.
  *
  * Also overlays the sustained-commitment capacity curves (`GET /flexibility/capacity`,
  * `controller::capacity_headroom::compute_site_capacity_curve`) as dashed step-lines,
  * starting exactly at `now` with no backward extension (that endpoint's `t1` is always
  * "now" — there is no meaningful past value for it, unlike the band's own history).
- * These curves answer a genuinely different question than the band: the band is a
- * per-instant snapshot ("if the plan's own trajectory holds to this future moment, what
- * could each asset do right then"), while the capacity curve is a single continuous
- * full-effort commitment starting now (e.g. a battery discharging non-stop). Because of
- * that, **the capacity curve legitimately sitting inside (narrower than) the band, or an
- * Export curve swinging positive past the band's usual scale (a sustained Export
- * commitment can be pushed net-importing by base load — see `capacity_headroom.rs`'s own
- * `merge_events` doc), is normal, not a bug** — hence the distinct dashed styling here
- * rather than drawing them with the same visual weight as the band.
+ * Since `up_kw`/`down_kw` are now literally `compute_site_capacity_curve`'s own `t2 = 0`
+ * point (`site-capacity-seam-unification`), the band and these dashed lines touch exactly
+ * at `t = now` for both directions — no longer two independent computations that merely
+ * happened to agree. For `t > now` they still answer genuinely different questions (the
+ * band is a per-instant snapshot along the plan's own trajectory; the capacity curve is a
+ * single continuous full-effort commitment starting now), so **the capacity curve sitting
+ * inside the band past the seam, or an Export curve swinging positive past the band's
+ * usual scale (a sustained Export commitment can be pushed net-importing by base load —
+ * see `capacity_headroom.rs`'s own `merge_events` doc), is still normal past `t = now`,
+ * not a bug** — hence the distinct dashed styling here rather than the same visual weight
+ * as the band.
  */
 export function SiteHeadroomChart({
   gridTimeline,
@@ -92,8 +93,9 @@ export function SiteHeadroomChart({
     ts: p.ts,
     values: { gridPowerKw: p.values?.["power_kw"] ?? null },
   }));
-  // upKw/downKw hold the ABSOLUTE max-export/max-import limits directly now
-  // (design.md D5/D6) -- no longer combined with gridPowerKw to form the band.
+  // upKw/downKw are SIGNED now (site-capacity-seam-unification), read
+  // directly with no negation -- no longer combined with gridPowerKw to
+  // form the band.
   const upSamples: NamedSample[] = history.map((s) => ({
     ts: new Date(s.ts).getTime(),
     key: "upKw",
@@ -162,7 +164,7 @@ export function SiteHeadroomChart({
   const domain = minSpanDomain(
     chartData.flatMap((row) => [
       row.values?.gridPowerKw,
-      row.values?.upKw != null ? -row.values.upKw : null,
+      row.values?.upKw ?? null,
       row.values?.downKw ?? null,
       row.values?.importCapKw,
       row.values?.exportCapKw,
@@ -217,7 +219,10 @@ export function SiteHeadroomChart({
         {
           key: "Achievable range [kW]",
           axisId: "power",
-          lower: (row) => (row.values?.["upKw"] != null ? -row.values["upKw"] : null),
+          // upKw is signed now (site-capacity-seam-unification) -- read
+          // directly, no negation, matching the capacity-curve overlay's own
+          // Export series just below.
+          lower: (row) => row.values?.["upKw"] ?? null,
           upper: (row) => row.values?.["downKw"] ?? null,
           color: "#4CAF50",
           fillOpacity: 0.35,

@@ -1,8 +1,8 @@
 /**
  * SiteHeadroomChart — past-band LOCF continuity
  *
- * The band's lower/upper accessors (`-up_kw`, `down_kw` — absolute achievable
- * power, `unified-capacity-envelope-engine` Spec E) depend only on `upKw`/
+ * The band's lower/upper accessors (`up_kw`, `down_kw` — SIGNED,
+ * `site-capacity-seam-unification`, no negation) depend only on `upKw`/
  * `downKw` being present on a row, not on `gridPowerKw` (unlike before Spec
  * E, when the band was a delta relative to the grid-power line and needed
  * both present on the same row). This test still confirms `upKw`/`downKw`
@@ -182,10 +182,11 @@ describe("SiteHeadroomChart — forecast prop feeds the future band with real pe
     const futureRow2 = data.find((row) => row.ts === nowMs + 600_000);
     expect(futureRow1).toBeDefined();
     expect(futureRow2).toBeDefined();
-    // lower = -up_kw (absolute max Export, negative-signed) -- independent of
-    // gridPowerKw now (unified-capacity-envelope-engine, Spec E).
-    expect(band.lower(futureRow1!)).toBeCloseTo(-3.0);
-    expect(band.lower(futureRow2!)).toBeCloseTo(-5.0);
+    // lower = up_kw directly, no negation (site-capacity-seam-unification:
+    // up_kw is signed now, matching CapacityCurveStep.power_kw) --
+    // independent of gridPowerKw.
+    expect(band.lower(futureRow1!)).toBeCloseTo(3.0);
+    expect(band.lower(futureRow2!)).toBeCloseTo(5.0);
     expect(band.lower(futureRow1!)).not.toBeCloseTo(band.lower(futureRow2!)!);
   });
 });
