@@ -620,11 +620,11 @@ past isn't a competing authority, since there's no divergence risk once a value 
 longer change.
 
 This is the recurring shape behind several bugs already fixed in this codebase — the
-PV-Import and Heater-Export bugs §3.0c's engine fixed by construction, and the
-site-headroom/capacity-curve seam divergence found afterward — and one still-open debt item
-(R-69, battery round-trip efficiency modeled two different ways). A confirmed violation
-catalogue and phased remediation sequence (PV, base load, battery, heater, EV) is tracked in
-`docs/plans/asset-competence-assurance-master-plan.md`.
+PV-Import and Heater-Export bugs §3.0c's engine fixed by construction, the
+site-headroom/capacity-curve seam divergence found afterward, and R-69 (battery round-trip
+efficiency modeled two different ways, resolved as Phase 3 of the remediation below). A
+confirmed violation catalogue and phased remediation sequence (PV, base load, battery, heater,
+EV) is tracked in `docs/plans/asset-competence-assurance-master-plan.md`.
 
 ### 3.1 Generic Asset Model
 

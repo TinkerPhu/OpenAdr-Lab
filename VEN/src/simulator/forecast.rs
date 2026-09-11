@@ -460,17 +460,21 @@ mod tests {
         );
     }
 
-    /// R-69 visibility check (design.md's Risks section): the resolver
-    /// reuses `battery.rs`'s (asymmetric) efficiency model, same as
-    /// `simulated_trajectory` already does -- this does not create the
-    /// mismatch against `battery_milp.rs`'s symmetric model, but if R-69
-    /// (`openspec/changes/battery-efficiency-model-reconciliation/`) is
-    /// still open, the resolver's SoC will disagree with what the planner
-    /// itself believed when it produced `planned_state_by_asset` for a
-    /// partial (non-full-cycle) charge. This test records that disagreement
-    /// explicitly rather than silently accepting a loose tolerance.
+    /// R-69 visibility check, now a resolution check (resolved 2026-09-11, D-A —
+    /// see `docs/history/project_journal.md`'s Phase 3 entry): the resolver reuses
+    /// `battery.rs`'s efficiency model, same as `simulated_trajectory` already does,
+    /// and both now use the same symmetric `sqrt(round_trip_efficiency)` split
+    /// `battery_milp.rs` always did, so the resolver's SoC must agree with what the
+    /// planner believed when it produced `planned_state_by_asset`, including for a
+    /// partial (non-full-cycle) charge.
     #[test]
-    fn r69_partial_cycle_soc_disagrees_with_planned_state_by_asset_until_r69_lands() {
+    fn r69_partial_cycle_soc_agrees_with_planned_state_by_asset_now_that_r69_has_landed() {
+        // R-69 (battery-efficiency-model-reconciliation, resolved 2026-09-11, D-A): this test
+        // used to pin the *disagreement* between battery.rs's asymmetric model and
+        // battery_milp.rs's symmetric one -- see docs/history/project_journal.md's Phase 3
+        // entry for the resolution. battery.rs now also splits loss symmetrically via
+        // sqrt(round_trip_efficiency) on both legs, so the resolver and the planner's own
+        // belief must agree on partial-cycle SoC too, not just full-cycle totals.
         let now = Utc::now();
         let round_trip_efficiency = 0.81; // sqrt(0.81) = 0.9
         let sim = SimState::from_params(
@@ -492,21 +496,19 @@ mod tests {
             .insert(ASSET_BATTERY.to_string(), 5.0); // 5 kWh AC import over the slot
         let t1 = plan.slots[0].end;
 
-        // What the planner believed (battery_milp.rs's symmetric sqrt(rte) split):
+        // What the planner believes (battery_milp.rs's symmetric sqrt(rte) split):
         // stored = 5.0 * sqrt(0.81) = 4.5 kWh -> soc = 0.45.
         let planner_believed_soc = 5.0 * round_trip_efficiency.sqrt() / 10.0;
 
-        // What the resolver (battery.rs's asymmetric, all-loss-on-charge model) reports:
-        // stored = 5.0 * 0.81 = 4.05 kWh -> soc = 0.405.
+        // What the resolver (battery.rs, now also symmetric) reports: same 4.5 kWh -> soc = 0.45.
         let resolved = resolve_plan_state_at(&sim, &plan, t1, now);
         let resolver_soc = battery_soc(&resolved[ASSET_BATTERY]);
 
         assert!(
-            (resolver_soc - planner_believed_soc).abs() > 1e-6,
-            "R-69 has apparently been resolved (battery.rs and battery_milp.rs now agree on \
-             partial-cycle SoC: resolver={resolver_soc}, planner-believed={planner_believed_soc}) \
-             -- if this assertion now fails, update this test to assert equality instead, and \
-             note the resolution in this change's journal entry"
+            (resolver_soc - planner_believed_soc).abs() < 1e-9,
+            "resolver={resolver_soc}, planner-believed={planner_believed_soc} -- \
+             battery.rs and battery_milp.rs must agree on partial-cycle SoC now that both \
+             use the symmetric sqrt(round_trip_efficiency) split"
         );
     }
 }
