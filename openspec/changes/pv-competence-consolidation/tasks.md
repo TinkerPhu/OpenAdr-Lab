@@ -10,25 +10,29 @@ Section 4 is **partially** done: `pv_ceiling_kw`'s internal decay math now calls
 `pv_smoothing::decayed_offset` function PV's own live/forecast methods use (closing the real
 `PLAN_STEP_S`/`zone_a_step_s` divergence bug this phase set out to fix), but its two call
 sites (`milp_planner/inputs.rs`, `simulator/forecast.rs::insert_pv_points`) still call it —
-they were **not** replaced with calls into `PvInverter`'s own methods. Reason: `MilpInputs`
-is built from `&SimSnapshot` (the flattened port-boundary data), not a live `PvInverter` — no
-other asset kind resolves this from inside `milp_planner/inputs.rs` either; battery/EV/heater
-instead pre-resolve their MILP-specific values earlier, in `plan_context.rs::build_asset_contexts`
-(which does have live `&SimState` access), via `MilpParticipant::build_milp_context`, producing
-an `AssetMilpContext` passed downstream. PV has no such participant today. Retiring these two
-call sites for real needs that same threading (a `PvMilpContext`-shaped mechanism, or a live
-reference threaded through `plan_context.rs`) — a second phase of work, not a quick follow-up
-inside this session's remaining budget. Tracked as remaining work below (was tasks 4.2-4.4).
+they were **not** replaced with calls into `PvInverter`'s own methods. Reason: `build_milp_inputs`
+is built from `&SimSnapshot` (the flattened port-boundary data), not a live `PvInverter`.
+Section 4's checklist below now has a concrete design for closing this (see design.md D4's
+"Status update"), found in a dedicated follow-up design pass — not yet implemented.
 
-Section 5 (`capacity_headroom.rs`'s PV special-casing) is **not started** — blocked on the
-same live-access gap, since the generic per-asset loop it would join also only sees
-`&SimSnapshot`.
+Section 5 (`capacity_headroom.rs`'s PV special-casing) is **not started**. A follow-up design
+pass (design.md D6's "Status update") found the original "blocked on the same live-access
+gap" framing above was **only half right** — `capacity_headroom.rs`'s two functions already
+take live `sim: &SimState`, not a flattened snapshot. Re-reading both in detail found they
+split into two independently-blocked halves: 5a (`compute_site_capacity_curve`) has **no
+remaining blocker** at all — it already calls `max_effort_schedule` via
+`asset_max_power_series`, which PV now implements; 5b (`compute_site_headroom_forecast`)
+calls `simulate_forward`/`step()` instead, whose signature carries no timestamp, so PV's
+time-of-day physics can't flow through it regardless of live access — needs a new
+`PvInverter::simulate_forward` override, not more threading. See the checklist below.
 
 Net effect: the actual bug from the master plan's "why" section (two independently-computed
 decay reference steps that only coincided by default-value accident) is fixed — one shared
 formula now backs all three of PV's forecast surfaces. What remains is structural: giving
-`pv_ceiling_kw`'s two callers and `capacity_headroom.rs` a live `PvInverter` to call into
-instead of raw snapshot values, so `PvInverter`'s own methods become the *only* formula, not
+`pv_ceiling_kw`'s two callers a live `PvInverter`-derived forecast to read instead of raw
+snapshot values (section 4), and giving `PvInverter` a `simulate_forward` override so its
+time-of-day physics survives the plan-driven trajectory walk `compute_site_headroom_forecast`
+uses (section 5b) — so `PvInverter`'s own methods become the *only* formula everywhere, not
 just a *consistent* one. `pv_ceiling_kw`/`PvCeilingParams` therefore still exist in
 `entities/solar.rs` — not deleted.
 
@@ -117,41 +121,89 @@ Done first, mechanically, fully verified on its own — before any new forecast 
 ## 4. Retire `pv_ceiling_kw`'s two real call sites — PARTIAL
 
 `milp_planner/inputs.rs` and `simulator/forecast.rs::insert_pv_points`. Only the decay-math
-fix (4.0 below, not in the original task list) landed; 4.1-4.4 remain, blocked as described
-in Status above.
+fix (4.0 below, not in the original task list) landed; 4.0a-4.7 remain, with a concrete
+design now in place (see below and design.md D4's "Status update").
 
 - [x] 4.0 (not originally scoped, done instead) `pv_ceiling_kw`'s own decay computation now
       calls `pv_smoothing::decayed_offset` directly (`entities/solar.rs`), the same function
       `PvInverter`'s live/forecast paths use — closes the actual `PLAN_STEP_S`/
       `zone_a_step_s` divergence bug, even though the call sites themselves still call
       `pv_ceiling_kw` rather than `PvInverter`.
-- [ ] 4.1 Write the numeric-equivalence test first: same state/weather inputs, old
-      `pv_ceiling_kw`-derived `p_pv_kw` vs. new `PvInverter`-derived value — **not done**,
-      moot until 4.2 gives `PvInverter`-derived values a call site to compare against.
-- [ ] 4.2 Replace `milp_planner/inputs.rs`'s `pv_ceiling_kw` call with a call into
-      `PvInverter`'s own method — **blocked**: `build_milp_inputs` only receives
-      `&SimSnapshot` (flattened), not a live `PvInverter`. Needs a `PvMilpContext`/
-      `MilpParticipant` mechanism analogous to battery/EV/heater's, resolved earlier in
-      `plan_context.rs::build_asset_contexts` (which has live `&SimState` access) and passed
-      downstream — a right-sized follow-up change, not a one-line swap.
-- [ ] 4.3 `simulator/forecast.rs::insert_pv_points`'s PV-specific code — **not done**, same
-      blocker; still calls `pv_ceiling_kw` directly.
-- [ ] 4.4 Delete `pv_ceiling_kw`/`PvCeilingParams` from `entities/solar.rs` — **not done**,
-      both real call sites (4.2, 4.3) still exist.
+
+Design for the mechanism below: design.md D4's "Status update" (found in a dedicated
+follow-up design pass, not yet implemented).
+
+- [ ] 4.0a Fix the found `[0,1]`-irradiance-fraction-clamp discrepancy: `pv_ceiling_kw`
+      clamps `(natural + decayed_offset)` to `[0,1]` before scaling by `rated_kw`;
+      `uncurtailed_power_kw_at`'s no-weather branch (`pv_schedule.rs`) doesn't — it scales
+      `natural`/`decayed_offset` separately and only floors at `0.0`. Fix
+      `uncurtailed_power_kw_at` to match `pv_ceiling_kw`'s (and `step_inner`'s) clamp-before-
+      scale contract, with its own test pinning the divergent case (`inverter_max_kw >
+      rated_kw`, offset pushing the fraction above 1.0).
+- [ ] 4.1 Write the numeric-equivalence test: same state/weather inputs, today's
+      `pv_ceiling_kw`-derived `p_pv_kw` vs. `PvInverter::uncurtailed_power_kw_at`-derived
+      value, across curtailed/uncurtailed/override/no-weather cases — should pass once 4.0a
+      lands (that's the discrepancy this test exists to catch).
+- [ ] 4.2 Add `resolve_pv_forecast_kw(sim_snap: &SimState, n_slots: usize, cum_s: &[i64], now:
+      DateTime<Utc>) -> Option<Vec<f64>>` to `simulator/plan_context.rs` (same live-downcast
+      pattern as `apply_pending_pv_inject` in the same file) — `None` when no live `"pv"`
+      asset exists, `Some(vec)` of one `uncurtailed_power_kw_at(now + cum_s[i], cum_s[i] as
+      f64)` per slot otherwise. Own unit tests: live-PV-present, no-PV-present.
+- [ ] 4.3 Call `resolve_pv_forecast_kw` from `tasks/planning/cycle.rs::run_plan_cycle`
+      alongside `build_asset_contexts` (same live `sim_snap`/`n_slots`/`cum_s`/`now` already
+      in scope there); thread the result through `services::planning::build_solve_request` →
+      `build_milp_inputs` as a new `pv_live_forecast_kw: Option<&[f64]>` parameter.
+- [ ] 4.4 In `build_milp_inputs`, replace the per-slot `pv_ceiling_kw` reconstruction with the
+      collapsed precedence: `pv_forecast_override` → `pv_live_forecast_kw[i]` →
+      existing static-curve (`pv_cfg`) fallback when `None`.
+- [ ] 4.5 `simulator/forecast.rs::insert_pv_points`'s PV-specific code — delete once section 5
+      lands (depends on 5's `pv_frames` retirement, per D4/D6 — do not migrate it).
+- [ ] 4.6 Delete `pv_ceiling_kw`/`PvCeilingParams` from `entities/solar.rs` once both real
+      call sites (4.4, 4.5) are gone.
+- [ ] 4.7 Open question to resolve during this work, not before: does `weather_pv_kw`'s
+      separate threading into `build_milp_inputs` become redundant once `pv_live_forecast_kw`
+      covers the "has live PV" case, or is it still needed for the "no live PV asset"
+      fallback? Decide against the actual code, not abstractly.
 
 ## 5. Retire `pv_frames`'s PV special-casing (`capacity_headroom.rs`) — NOT STARTED
 
-Blocked on the same live-`PvInverter`-access gap as section 4 — the generic per-asset
-`asset_max_power_series`/`simulated_trajectory` loops this would join also only see
-`&SimSnapshot`, not live assets.
+Splits into two independently-blocked halves — see design.md D6's "Status update" (found in
+a dedicated follow-up design pass; the original "same blocker as section 4" framing was only
+half right, corrected here).
 
-- [ ] 5.1 Remove the `"pv" => continue` exclusion in the shared capacity-curve aggregator
-      (`capacity_headroom.rs:98`).
-- [ ] 5.2 Remove the equivalent exclusion in `compute_site_headroom_forecast`
-      (`capacity_headroom.rs:352`).
-- [ ] 5.3 Delete `pv_capacity_events` and its call site (`capacity_headroom.rs:115`).
-- [ ] 5.4 Delete `pv_frames`'s now-unused plumbing if confirmed to have no other consumer.
-- [ ] 5.5 Update `capacity_headroom.rs`'s module doc (the D1/PV-is-special paragraph).
+**5a — `compute_site_capacity_curve` (no remaining blocker):**
+
+- [ ] 5a.1 Remove the `"pv" => continue` exclusion in the shared capacity-curve aggregator
+      (`capacity_headroom.rs:98`) — `asset_max_power_series` already calls
+      `max_effort_schedule`, which PV now implements (sections 1-3).
+- [ ] 5a.2 Delete `pv_capacity_events` and its call site (`capacity_headroom.rs:115`); remove
+      its `pv_frames` parameter from `compute_site_capacity_curve`'s signature if nothing else
+      in the function still needs it.
+- [ ] 5a.3 Verify: PV's capacity curve now shows genuine weather/time-of-day variation, not a
+      flat repeat — test with a solar-noon vs. a night `now`.
+
+**5b — `compute_site_headroom_forecast` (blocked on `Asset::step`'s missing timestamp, not
+live access):**
+
+- [ ] 5b.1 Add a `PvInverter::simulate_forward` override (`Asset` trait) — bypasses the
+      generic `step()`-based default entirely; builds each `TrajectoryPoint` directly from the
+      setpoints' own timestamps (which for this call path are `future_slots`' real
+      `PlanTimeSlot.start` values) via `uncurtailed_power_kw_at(ts, elapsed_s)`. Test-first: a
+      trajectory point at a future slot must reflect that slot's own time-of-day irradiance
+      (e.g. solar-noon slot vs. night slot produce different ceilings), not a flat repeat of
+      `now`'s.
+- [ ] 5b.2 Remove the `"pv" => continue` exclusion in `compute_site_headroom_forecast`
+      (`capacity_headroom.rs:352`) — only after 5b.1 lands; removing it before would silently
+      regress to the flat-ceiling bug this section exists to fix.
+- [ ] 5b.3 Verify: the Site Headroom forecast's PV contribution varies across future slots.
+
+**Once both 5a and 5b land:**
+
+- [ ] 5.4 Delete `pv_frames`'s now-unused plumbing (`resolve_weather_pv_kw_for_tick`'s
+      `slots_kw` output, `build_forecast_frames`'s PV handling) — only if confirmed to have no
+      other consumer beyond `pv_capacity_events`/`compute_site_headroom_forecast`'s PV branch.
+- [ ] 5.5 Update `capacity_headroom.rs`'s module doc (the "PV is asset-kind-and-direction-
+      special, by design" paragraph) to reflect that PV is no longer special-cased.
 
 ## 6. Full verification
 
