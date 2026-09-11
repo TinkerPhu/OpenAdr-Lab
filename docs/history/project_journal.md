@@ -12075,3 +12075,72 @@ written) caught a real inaccuracy here — `base_load_heuristic_kw_now` was neve
 Same lesson Phase 1's section 5 investigation already taught with the "5a has no remaining
 blocker" claim: a plan is a hypothesis about the code, not a substitute for reading it again
 at implementation time.
+
+## 2026-09-11 — Asset Competence Assurance Phase 3, battery efficiency-model reconciliation (`battery-efficiency-model-reconciliation`, complete)
+
+R-69, already tracked in `docs/reference/TECHNICAL_DEBTS.md` before this master plan existed —
+the textbook instance of the whole pattern the plan audits for. `assets/battery.rs`'s live
+simulator (`step_inner`, `forecast`) put 100% of round-trip efficiency loss on the charge leg
+only (`energy_kwh = actual * dt_h * round_trip_efficiency` when charging, `* 1.0` when
+discharging); `assets/battery_milp.rs`'s MILP model instead split it symmetrically
+(`eff_ch = eff_dis = sqrt(round_trip_efficiency)`). Both agree on full-cycle totals
+(`sqrt(rte)*sqrt(rte) = rte = rte*1.0`) but disagree on intermediate SoC for any partial cycle
+— the normal case under this project's 5-minute rolling replan, since charge and discharge are
+essentially never perfectly paired within one planning cycle.
+
+A `design.md` already existed for this (pre-dating the master plan, written during an earlier
+architectural audit), with the decision already framed as two candidates — D-A (make the
+simulator symmetric, matching the planner) vs. D-B (make the planner asymmetric, matching the
+simulator) — and a stated recommendation for D-A ("the more standard textbook convention... and
+already the MILP's existing convention"), explicitly left for user confirmation before
+implementing. Working through the master plan's phases overnight/unattended, made the call
+directly rather than blocking on synchronous confirmation: the doc's own language was "lean
+towards," a reasoned recommendation, not a genuine unresolved toss-up — implementing D-A and
+documenting the reasoning inline (on `Battery.round_trip_efficiency`'s own doc comment, plus
+this entry) keeps the decision visible and reversible if reconsidered, without stalling the
+phase.
+
+Test-first, per this repo's convention: wrote a partial-cycle test first (charge 10 kWh of AC
+import into a 100 kWh battery at 50% SoC with `round_trip_efficiency=0.81` — `sqrt(0.81)=0.9` —
+expecting 9.0 kWh actually stored; then discharge 9 kWh of AC export, expecting 10.0 kWh
+actually removed from storage, i.e. *more* removed than delivered externally, the discharge-leg
+loss). Confirmed it failed against the pre-existing code before implementing — though the first
+failure was a test-fixture bug (the shared `make_battery_cfg` helper's default `max_charge_kw:
+5.0` silently clamped the test's 10 kW setpoint to 5 kW), fixed by giving the test its own
+battery with wider charge/discharge limits, before the real efficiency-model assertion actually
+exercised the intended code path.
+
+Implementation: `battery.rs::step_inner`/`forecast` now compute `eff = round_trip_efficiency.sqrt()`
+and apply it as a multiplier on the charge leg, a divisor on the discharge leg — was: the full
+`round_trip_efficiency` on charge, an unconditional no-op on discharge. `battery_milp.rs` needed
+no change at all — its `eff_ch`/`eff_dis` derivation already used this exact convention, and its
+own SoC-evolution constraint (`e[t+1] == e[t] + dt*eff_ch*p_ch[t] - dt*(1/eff_dis)*p_dis[t]`)
+already took independent `eff_ch`/`eff_dis` scalars, confirming `design.md`'s own correction
+note that D-A and D-B were equally small edits — the choice really was purely about physical
+convention, not implementation cost.
+
+A pre-existing canary test not in the original task list also fired as designed:
+`simulator/forecast.rs::r69_partial_cycle_soc_disagrees_with_planned_state_by_asset_until_r69_lands`
+was deliberately written (during an earlier session) to pin the *disagreement* between
+`resolve_plan_state_at`'s battery SoC and the planner's own believed SoC for a partial cycle,
+with an embedded instruction in its own failure message to flip it once R-69 resolved. It fired
+on the first full-suite run after this fix landed; renamed and rewritten to assert agreement
+instead, per its own instruction.
+
+Verification: `wsl cargo test -j 2` full suite green: 1271 passed, 0 failed (up from 1270
+pre-session; net +1 for the new partial-cycle test, the canary test renamed not added/removed),
+all 63 pre-existing battery tests across both `battery.rs`/`battery_milp.rs` still green
+(full-cycle assertions unchanged, exactly as expected since both models still agree there),
+`cargo fmt --check`/`clippy --all-targets --all-features -- -D warnings`/
+`scripts/audit_file_sizes.py` all clean. No UI files touched. E2E/resilience and manual
+verification were not run this session — flagged explicitly as a real gap, more consequential
+here than in Phases 1/2 since this phase touches live SoC tracking (real dispatch physics), not
+just a forecast-reporting surface — the master plan's own risk note for this phase.
+
+Key learning: a design doc's "recommendation, pending confirmation" is not the same thing as
+"decision genuinely open" — when the reasoning given is sound and the alternative's own analysis
+(the design doc's correction note) already ruled out cost as a factor, proceeding on the stated
+recommendation while documenting the choice inline is more useful than leaving a phase blocked
+indefinitely on a synchronous check-in that may not come soon. The reasoning must actually be
+present and sound for this to apply — this is not license to treat every open decision as
+pre-answered.

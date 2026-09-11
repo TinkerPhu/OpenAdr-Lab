@@ -2,10 +2,12 @@
 
 > **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) complete
 > (`pv-competence-consolidation`, 2026-09-10/2026-09-11). Phase 2 (base load) complete
-> (`base-load-competence-consolidation`, 2026-09-11). Both unit/integration-tested and locally
-> verified (fmt/clippy/file-size audit green); E2E/resilience and manual UI verification not
-> yet run for either — see each phase's own section for the exact gap. Phases 3-5 open. This
-> document sequences and motivates the work; it deliberately contains no
+> (`base-load-competence-consolidation`, 2026-09-11). Phase 3 (battery efficiency, R-69)
+> complete (`battery-efficiency-model-reconciliation`, 2026-09-11). All three
+> unit/integration-tested and locally verified (fmt/clippy/file-size audit green);
+> E2E/resilience and manual UI verification not yet run for any — see each phase's own section
+> for the exact gap. Phases 4-5 open. This document sequences and motivates the work; it
+> deliberately contains no
 > implementation-level detail. Each phase's actual work happens as its own openspec change
 > (`openspec new change ...`), proposed and reviewed carefully when that phase's turn comes
 > — not as one bundled change, and not from this document directly.
@@ -207,6 +209,25 @@ already identified there rather than re-deriving them.
 test R-69 itself already calls for (a `KEY_LEARNINGS.md` entry from this codebase's own
 history warns that such a test is "only as strong as its parameter coverage" — don't let
 this phase repeat that mistake).
+
+**Status: complete** (`battery-efficiency-model-reconciliation`, 2026-09-11). Resolved the
+open D-A vs. D-B decision as D-A: `battery.rs::step_inner`/`forecast` now split round-trip
+loss symmetrically via `sqrt(round_trip_efficiency)` on both the charge and discharge legs,
+matching `battery_milp.rs::build_milp_context`'s `eff_ch`/`eff_dis` (already symmetric, so
+`battery_milp.rs` itself needed no change) — was previously all-loss-on-charge. Chosen over
+D-B (making the planner asymmetric to match the simulator) per the design doc's own
+recommendation: `sqrt`-split is the more standard textbook convention for a single combined
+efficiency figure, and was already the MILP's existing convention; made this call directly
+rather than blocking on synchronous user confirmation, since the design doc had already framed
+it as a reasoned recommendation, not an open toss-up. A partial-cycle test (charge 10 kWh,
+then discharge 9 kWh, assert the resulting SoC reflects loss on *both* legs, not just one) was
+written first and confirmed to fail against the pre-existing asymmetric code before
+implementing the fix. Unit/integration-tested (`cargo test`: 1271 passed — all 63 pre-existing
+battery tests green, including `battery_milp.rs`'s, which needed no changes since it already
+used the now-shared convention), `cargo fmt`/`clippy -D warnings`/`scripts/audit_file_sizes.py`
+all green. No UI files touched. E2E/resilience and manual UI verification not run — this phase
+touches live SoC tracking, a higher-risk surface than Phases 1/2's forecast-only changes, so
+this gap matters more here; flagged explicitly, not silently carried forward.
 
 ## Phase 4 — Heater duplication audit and consolidation
 

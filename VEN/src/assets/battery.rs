@@ -18,6 +18,15 @@ pub struct Battery {
     pub capacity_kwh: f64,
     pub max_charge_kw: f64,
     pub max_discharge_kw: f64,
+    /// R-69 (battery-efficiency-model-reconciliation): loss is split symmetrically as
+    /// `sqrt(round_trip_efficiency)` on both the charge and discharge legs (`step_inner`/
+    /// `forecast`) — matching `battery_milp.rs::build_milp_context`'s `eff_ch`/`eff_dis`
+    /// derivation, which already used this convention. Was previously asymmetric here (all
+    /// loss on charge, none on discharge) — both models agreed on full-cycle totals but
+    /// diverged on intermediate SoC for any partial cycle, the normal case under this
+    /// project's 5-minute rolling replan. Keep these two files' efficiency math in sync if
+    /// either changes; see `docs/history/project_journal.md`'s R-69 entry for the worked
+    /// example.
     pub round_trip_efficiency: f64,
     pub min_soc: f64,
 }
@@ -67,13 +76,11 @@ impl Battery {
         } else {
             clamped
         };
-        let energy_kwh = actual
-            * dt_h
-            * if actual > 0.0 {
-                self.round_trip_efficiency
-            } else {
-                1.0
-            };
+        // R-69: symmetric sqrt(round_trip_efficiency) split on both legs,
+        // matching battery_milp.rs's own convention (D-A, resolved in
+        // battery-efficiency-model-reconciliation) -- was all-loss-on-charge.
+        let eff = self.round_trip_efficiency.sqrt();
+        let energy_kwh = actual * dt_h * if actual > 0.0 { eff } else { 1.0 / eff };
         let new_soc = (state.soc + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
         (
             BatteryState {
@@ -180,10 +187,12 @@ impl Battery {
             samples.push((t, kw));
 
             let dt_h = 1.0 / 60.0;
+            // R-69: same symmetric sqrt(round_trip_efficiency) split as step_inner.
+            let eff = self.round_trip_efficiency.sqrt();
             if kw > 0.0 {
-                soc += (kw * dt_h * self.round_trip_efficiency) / self.capacity_kwh;
+                soc += (kw * dt_h * eff) / self.capacity_kwh;
             } else {
-                soc += (kw * dt_h) / self.capacity_kwh;
+                soc += (kw * dt_h / eff) / self.capacity_kwh;
             }
             soc = soc.clamp(0.0, 1.0);
             t += Duration::seconds(60);
@@ -485,6 +494,46 @@ mod tests {
             last_ts,
             now + timespan,
             "boundary point must be exactly now+timespan, not merely close to wall-clock"
+        );
+    }
+
+    #[test]
+    fn step_inner_applies_symmetric_sqrt_efficiency_split_on_both_legs() {
+        // R-69 (battery-efficiency-model-reconciliation): battery.rs previously put
+        // all round-trip loss on the charge leg only; battery_milp.rs already split
+        // it symmetrically via sqrt(round_trip_efficiency) on both legs. Both agree
+        // on full-cycle totals, but the intermediate SoC after a partial cycle
+        // diverges -- this pins the now-shared (D-A: symmetric) convention.
+        //
+        // rte=0.81 -> eff=sqrt(0.81)=0.9. capacity=100kWh (large, to isolate the
+        // efficiency math from the min_soc/full-SoC clamps), initial_soc=0.5 (50 kWh).
+        let mut bat = make_battery_cfg(0.5).0;
+        bat.capacity_kwh = 100.0;
+        bat.max_charge_kw = 20.0;
+        bat.max_discharge_kw = 20.0;
+        bat.round_trip_efficiency = 0.81;
+        let state = BatteryState {
+            soc: 0.5,
+            actual_power_kw: 0.0,
+        };
+
+        // Charge 10 kWh of AC import (10 kW for 1h) -> 9.0 kWh actually stored.
+        let (state, actual) = bat.step_inner(&state, 10.0, Duration::hours(1));
+        assert_eq!(actual, 10.0);
+        assert!(
+            (state.soc - 0.59).abs() < 1e-9,
+            "expected soc=0.59 (50 + 10*0.9 = 59 kWh / 100), got {}",
+            state.soc
+        );
+
+        // Discharge 9 kWh of AC export (9 kW for 1h) -> 10.0 kWh actually removed
+        // from storage (more removed than delivered -- the discharge-leg loss).
+        let (state, actual) = bat.step_inner(&state, -9.0, Duration::hours(1));
+        assert_eq!(actual, -9.0);
+        assert!(
+            (state.soc - 0.49).abs() < 1e-9,
+            "expected soc=0.49 (59 - 9/0.9 = 49 kWh / 100), got {}",
+            state.soc
         );
     }
 
