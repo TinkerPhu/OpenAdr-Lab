@@ -12391,3 +12391,13 @@ contributes to up_kw". Under the absolute headroom model a non-V2G EV adds nothi
 the scenario only passed when the battery or PV happened to be exportable (it failed at night
 with the battery at `min_soc`). With the user's agreement it now asserts what the EV really adds:
 its own charge ceiling in `down_kw`.
+
+Second follow-up: with the heater fixed, the scenario's live `down_kw` check passed, but the
+Import capacity curve's first step was still 7 kW short, exactly the test EV's charge rate.
+`EvCharger::step_inner` models the BL-12 response delay as "apply the previous step's command".
+Live that's one 1 s tick. `simulate_forward` reuses the same step over 60 s (capacity curve) and
+5-15 min (plan slots) windows, so an idle EV's first window applied the stale 0 kW command and
+every later command landed one window late. The headroom forecast's EV SoC therefore ran a slot
+behind the plan. The t2=0 "now" value only included the EV by accident: its duplicated t1
+schedule point saw the staged command. `EvCharger::simulate_forward` now stages each window's
+command with a zero-length step before integrating it. The live tick keeps its one-tick delay.
