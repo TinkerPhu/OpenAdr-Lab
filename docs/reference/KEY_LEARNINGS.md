@@ -1835,3 +1835,14 @@ see that contributor's sign errors, so test it next to a contributor that keeps 
 the clamp (e.g. battery + PV). Assert equality, or bound from both sides, rather than a
 one-sided bound shaped after the last bug. And an asset method that ignores one of its inputs
 ("setpoint unused") is a contract gap for every generic caller that relies on that input.
+
+## A per-tick lag inside `step()` becomes a per-window lag in every projection (EV response delay, 2026-09-11)
+
+`EvCharger::step_inner` delays each command by one step, which is right for the 1 s live tick.
+`simulate_forward` walks the same `step()` over 60 s to 15 min windows, so the same code delayed
+every EV command by a whole projection window, and nothing flagged it: each window's energy was
+still plausible, just shifted. The duplicated-timestamp t2=0 schedule even hid it at "now".
+
+**How to apply:** when a projection reuses a live per-tick `step()` with a coarser `dt`, check any
+state carried *between* steps (lags, hysteresis, integrators) for tick-count semantics. Either
+express it in seconds or neutralize it in the projection (here: stage the window's command first).

@@ -602,6 +602,47 @@ mod tests {
     }
 
     #[test]
+    fn simulate_forward_applies_each_window_command_from_its_start() {
+        // A projection window (60 s .. 15 min) is far longer than the one-tick
+        // response delay: an idle EV commanded 7.4 kW for the first slot must
+        // charge during that slot, not one slot late.
+        let (ev, state) = make_ev(true, 0.5, 0.0); // idle, nothing staged
+        let t0 = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let setpoints = [
+            (t0, 7.4),
+            (t0 + Duration::minutes(15), 0.0),
+            (t0 + Duration::minutes(30), 0.0),
+        ];
+        let traj = ev.simulate_forward(&AssetState::Ev(state), &setpoints);
+        assert_eq!(traj.points[0].power_kw, 7.4);
+        assert_eq!(traj.points[1].power_kw, 0.0);
+        let AssetState::Ev(s) = &traj.points[1].state else {
+            panic!("expected Ev state")
+        };
+        let expected_soc = 0.5 + 7.4 * 0.25 / 40.0;
+        assert!(
+            (s.soc - expected_soc).abs() < 1e-9,
+            "slot 1 must start at the SoC slot 0's charge reached, got {}",
+            s.soc
+        );
+    }
+
+    #[test]
+    fn max_power_series_import_includes_the_charge_ceiling_from_t0() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        let t0 = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let series = crate::assets::asset_max_power_series(
+            &ev,
+            &AssetState::Ev(state),
+            t0,
+            Duration::hours(1),
+            crate::entities::capacity_curve::CommitmentDirection::Import,
+            crate::entities::capacity_curve::LimitTier::Physical,
+        );
+        assert_eq!(series[0].1, 7.4, "sustained import starts at full rate");
+    }
+
+    #[test]
     fn simulate_forward_with_no_departure_time_never_unplugs() {
         let (ev, state) = make_ev(true, 0.5, 0.0); // departure_time: None
         let t0 = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();

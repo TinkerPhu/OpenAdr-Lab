@@ -19,6 +19,11 @@ impl EvCharger {
     /// unplugged EV, so no other asset-specific branch is needed anywhere
     /// downstream (unlike PV, whose own `max_effort_setpoint` ignores `state`
     /// entirely — see that method's doc comment).
+    ///
+    /// `step_inner`'s BL-12 response delay applies the *previous* step's
+    /// command. That is one 1 s tick live, but a projection window is 60 s to
+    /// 15 min, so each window's command is staged (a zero-length step) before
+    /// it is integrated; otherwise every command would land one window late.
     pub(super) fn simulate_forward_inner(
         &self,
         initial: &AssetState,
@@ -36,11 +41,12 @@ impl EvCharger {
                 }
             }
         };
+        let stage = |state: &AssetState, sp: f64| self.step(state, sp, Duration::zero()).0;
         for window in setpoints.windows(2) {
             let (ts, sp) = window[0];
             let dt = window[1].0 - ts;
             force_unplugged(&mut state, ts);
-            let (next, actual_kw) = self.step(&state, sp, dt);
+            let (next, actual_kw) = self.step(&stage(&state, sp), sp, dt);
             points.push(TrajectoryPoint {
                 ts,
                 power_kw: actual_kw,
@@ -50,7 +56,7 @@ impl EvCharger {
         }
         if let Some(&(ts, sp)) = setpoints.last() {
             force_unplugged(&mut state, ts);
-            let (_, actual_kw) = self.step(&state, sp, Duration::seconds(0));
+            let (_, actual_kw) = self.step(&stage(&state, sp), sp, Duration::zero());
             points.push(TrajectoryPoint {
                 ts,
                 power_kw: actual_kw,

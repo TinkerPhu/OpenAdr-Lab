@@ -646,7 +646,12 @@ forces `plugged=false` for any trajectory point at or after the live
 `departure_time`, so `compute_site_headroom_forecast` needs no site-level
 exclusion any more, and `compute_site_capacity_curve` gets the same
 correctness automatically via the same primitive — was previously a
-site-level `ev_session` parameter re-deriving the fact independently.
+site-level `ev_session` parameter re-deriving the fact independently. The
+same override stages each window's command before integrating it, because
+`step_inner`'s BL-12 response delay is a one-*step* lag: 1 s live, but a whole
+60 s–15 min window in a projection, which would otherwise shift every EV
+command one window late (covered by `ev.rs`'s
+`simulate_forward_applies_each_window_command_from_its_start`).
 
 ### 3.0d Asset Competence Assurance
 
