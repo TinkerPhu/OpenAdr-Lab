@@ -66,8 +66,6 @@ pub(crate) fn finalize_tick_outputs(
         sim,
         ctx.plan_snap.as_ref(),
         ctx.ev_session.as_ref(),
-        ctx.weather_pv_kw_slots.as_deref(),
-        ctx.inject.pv_plan_kw,
         now,
     );
 

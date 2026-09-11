@@ -11,7 +11,6 @@ use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
-use crate::entities::solar::{pv_ceiling_kw, PvCeilingParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 
 use super::types::*;
@@ -36,14 +35,20 @@ pub(crate) fn build_milp_inputs(
     now: DateTime<Utc>,
     baseline_override: Option<&BaselineOverride>,
     pv_forecast_override: Option<f64>,
+    // pv-competence-consolidation section 4: live PvInverter-derived export
+    // ceiling per slot (simulator::plan_context::resolve_pv_forecast_kw).
+    // None when no live "pv" asset exists this cycle.
+    pv_live_forecast_kw: Option<&[f64]>,
     asset_heuristics: &HashMap<String, AssetHeuristics>,
     // Weather-sourced PV forecast (R-50), pre-aligned to this call's own
     // slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
-    // None when no weather feed is configured or the cached forecast has
-    // gone stale — falls back to the live-snapshot/sin-model behavior
-    // below, unchanged from before this parameter existed. Takes
-    // precedence over that fallback but not over pv_forecast_override
-    // (deterministic-testing pin always wins).
+    // Only consulted when pv_live_forecast_kw is None (no live "pv" asset
+    // this cycle) — when a live asset exists, its own weather_forecast field
+    // already factors weather in (pv-competence-consolidation section 4), so
+    // this and pv_live_forecast_kw are never both meaningfully in play for
+    // the same slot. Falls back further to the static pv_cfg sin-model curve
+    // when this is also None. Never wins over pv_forecast_override
+    // (deterministic-testing pin always wins over everything).
     weather_pv_kw: Option<&[f64]>,
     // GB-42: history-store-backed diurnal reference series for
     // HEURISTIC_FORECAST's 168h-back (day-type-mismatch) lookback, resolved
@@ -166,38 +171,22 @@ pub(crate) fn build_milp_inputs(
                 .or_else(|| tariffs.export_eur_kwh.interpolate_at(slot_t))
                 .unwrap_or(0.08),
         );
-        // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
-        // slider) and tau_s (blend-back speed, pv-competence-consolidation D7) both project
-        // into the forecast. Falls back to the static sin model if no "pv" asset exists.
-        // pv_forecast_override pins all horizon slots to a fixed kW,
-        // making plans deterministic regardless of time-of-day.
-        // weather_pv_kw (R-50), when present, takes precedence over the
-        // sin-model/live-snapshot fallback but never over pv_forecast_override
-        // — the deterministic-testing pin always wins.
-        let pv_kw = match assets.assets.get("pv") {
-            Some(pv_snap) => {
-                let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
-                pv_ceiling_kw(
-                    &PvCeilingParams {
-                        rated_kw,
-                        inverter_max_kw: pv_snap.val("inverter_max_kw").unwrap_or(rated_kw),
-                        irradiance_offset: pv_snap.val("irradiance_offset").unwrap_or(0.0),
-                        tau_s: pv_snap.val("tau_s").unwrap_or(2847.37),
-                    },
-                    slot_t,
-                    slot_s,
-                    weather_pv_kw.and_then(|v| v.get(i)).copied(),
-                    pv_forecast_override,
-                )
-            }
-            // No live PV asset at all: the pin and the weather series still
-            // apply (a site can be told what PV will do without simulating
-            // one), otherwise fall back to the static profile curve.
-            None => pv_forecast_override
-                .map(|kw| kw.max(0.0))
-                .or_else(|| weather_pv_kw.and_then(|v| v.get(i)).map(|kw| kw.max(0.0)))
-                .unwrap_or_else(|| pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)),
-        };
+        // pv-competence-consolidation section 4: `pv_live_forecast_kw`
+        // (resolved by the caller from a live `PvInverter` via
+        // `uncurtailed_power_kw_at` — the same weather/decay-aware method
+        // `max_effort_schedule`/`forecast()` use) is now PV's own authority
+        // for this slot, superseding the raw-snapshot `pv_ceiling_kw`
+        // reconstruction this used to do here. `pv_forecast_override` (the
+        // deterministic-testing pin) always wins over it; `weather_pv_kw`
+        // (R-50) and the static `pv_cfg` sin-model curve are the fallback
+        // chain for when no live "pv" asset exists at all (site described,
+        // not simulated) — `pv_live_forecast_kw` is `None` in exactly that
+        // case, since it's derived from the same live snapshot.
+        let pv_kw = pv_forecast_override
+            .map(|kw| kw.max(0.0))
+            .or_else(|| pv_live_forecast_kw.and_then(|v| v.get(i)).copied())
+            .or_else(|| weather_pv_kw.and_then(|v| v.get(i)).map(|kw| kw.max(0.0)))
+            .unwrap_or_else(|| pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0));
         p_pv.push(pv_kw);
         let base_kw_t = base_heuristic
             .map(|h| h.sample_kw(slot_t))

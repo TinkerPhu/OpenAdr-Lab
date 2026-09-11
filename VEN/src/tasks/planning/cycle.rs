@@ -15,7 +15,7 @@ use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::services::planning::PlanCycleInputs;
 use crate::simulator::plan_context::{
-    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot,
+    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot, resolve_pv_forecast_kw,
 };
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -127,9 +127,10 @@ pub(super) async fn run_plan_cycle(
         &heater_anchor,
     );
 
-    // R-50: services::planning::build_solve_request resolves the
-    // weather-sourced PV forecast internally (staleness/config gate in
-    // entities::solar::resolve_weather_pv_kw).
+    // Live PvInverter's own weather/decay-aware forecast; None with no live "pv" asset.
+    let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_snap, n_slots, &cum_s, now);
+
+    // R-50: build_solve_request resolves the weather-sourced PV forecast internally.
     let solve_req = crate::services::planning::build_solve_request(
         asset_contexts,
         snap,
@@ -149,6 +150,7 @@ pub(super) async fn run_plan_cycle(
         bl_override,
         Some(obj),
         pv_forecast_override,
+        pv_live_forecast_kw,
         asset_heuristics,
         weather,
         weather_pv_params,

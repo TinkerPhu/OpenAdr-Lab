@@ -1,9 +1,10 @@
 # Master Plan: Asset Competence Assurance
 
-> **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) partially
-> complete (`pv-competence-consolidation`, 2026-09-10) — see that phase's own section below
-> for what landed vs. what's still open. Phases 2–5 open. This
-> document sequences and motivates the work; it deliberately contains no
+> **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) complete
+> (`pv-competence-consolidation`, 2026-09-10/2026-09-11) — see that phase's own section below;
+> unit/integration-tested and locally verified (fmt/clippy/file-size audit green), E2E/resilience
+> and manual UI verification not yet run — see that phase's own section for the exact gap.
+> Phases 2–5 open. This document sequences and motivates the work; it deliberately contains no
 > implementation-level detail. Each phase's actual work happens as its own openspec change
 > (`openspec new change ...`), proposed and reviewed carefully when that phase's turn comes
 > — not as one bundled change, and not from this document directly.
@@ -114,30 +115,41 @@ methods actually authoritative.
 (`milp_planner/inputs.rs`, feeding live planning input) needs careful before/after
 comparison since it affects real planning decisions, not just reporting.
 
-**Status: partially complete** (`pv-competence-consolidation`, 2026-09-10; change directory
-kept open, not deleted — see its `tasks.md` for the exact per-task breakdown). Landed:
-`Pv`'s own `Asset` trait methods (`forecast()`, `max_effort_schedule`) now take weather as an
-injected `TickOverrides` parameter and are weather/decay-aware; the decaying-offset formula
-was reparametrized from a two-knob `(pv_alpha, T)` encoding to a single time constant `τ_s`
-(`PvSmoothingState::decayed_offset_after`/`pv_smoothing::decayed_offset`), which also fixed a
-real bug this consolidation set out to find — `pv_ceiling_kw`'s reference step
-(`PLAN_STEP_S=300`, hardcoded) and the MILP planner's own reference step
-(`zone_a_step_s`, configurable) only coincided by default-value accident; there is now exactly
-one decay formula, used by both the live/forecast asset methods and `pv_ceiling_kw` itself.
-**Not landed:** `pv_ceiling_kw`'s two call sites (`milp_planner/inputs.rs`,
-`simulator/forecast.rs::insert_pv_points`) still call `pv_ceiling_kw` rather than `PvInverter`'s
-own methods, and `capacity_headroom.rs`'s PV special-casing (`pv_frames`) is untouched — both
-blocked on the same gap: `milp_planner/inputs.rs` and `capacity_headroom.rs`'s generic
-per-asset loops only see `&SimSnapshot` (flattened port-boundary data), not a live
-`PvInverter`. Every other asset kind that needs MILP-specific values resolves them earlier, in
-`plan_context.rs::build_asset_contexts` (which has live `&SimState` access) via
-`MilpParticipant::build_milp_context`; PV has no such participant yet. Closing this out is a
-right-sized follow-up (a `PvMilpContext`/participant mechanism, or an equivalent live-access
-thread into `capacity_headroom.rs`) — deliberately not rushed into this session, since it's a
-live-planning-input change, not a forecast-surface one. `Pv::forecast()` was also upgraded to
-use the same weather/decay-aware path (was previously sin-model-only, the fourth
-implementation named in the Problem section above) — closing that divergence fully, even
-though `pv_ceiling_kw`'s callers are unchanged.
+**Status: complete** (`pv-competence-consolidation`, 2026-09-10 sections 1-3, 2026-09-11
+sections 4-5; change directory deleted once merged — this section is now the durable record).
+`PvInverter`'s own `Asset` trait methods (`forecast()`, `max_effort_schedule`, and the new
+`simulate_forward`) are the sole authority for PV's achievable power everywhere, closing all
+four implementations named in the Problem section above:
+
+- The decaying-offset formula was reparametrized from a two-knob `(pv_alpha, T)` encoding to a
+  single time constant `τ_s` (`PvSmoothingState::decayed_offset_after`/`pv_smoothing::decayed_offset`)
+  — fixing a real bug this consolidation set out to find: the old `pv_ceiling_kw`'s reference step
+  (`PLAN_STEP_S=300`, hardcoded) and the MILP planner's own reference step (`zone_a_step_s`,
+  configurable) only coincided by default-value accident.
+- `entities::solar::pv_ceiling_kw`/`PvCeilingParams` were deleted outright, not migrated. The
+  MILP planner's `p_pv_kw` input now reads a live `PvInverter`-derived forecast
+  (`simulator::plan_context::resolve_pv_forecast_kw`, resolved from the live `SimState`
+  `tasks/planning/cycle.rs` already holds before flattening to `SimSnapshot` — no new
+  `MilpParticipant`/`PvMilpContext` mechanism was needed after all, contrary to this section's
+  earlier assessment; the live-`SimState` access already existed one call frame up).
+- `capacity_headroom.rs`'s `pv_frames`-based special-casing (and the whole
+  `build_forecast_frames`/`insert_pv_points`/`insert_simulated_points` apparatus feeding it) was
+  deleted. PV now flows through the same `asset_max_power_series`/`simulated_trajectory`
+  primitives every other asset kind uses. This required two structural fixes not foreseen when
+  Phase 1 started: `PvInverter` needed its own `Asset::simulate_forward` override (since
+  `asset_max_power_series` calls it directly, not just the site-headroom forecast path), and
+  `AssetHandle`'s own `Asset` impl needed to delegate `simulate_forward` to `self.config` (it
+  was the one method not already delegating, which would have made any asset's override
+  invisible through `AssetHandle`/`simulated_trajectory` — found implementing this phase, not a
+  PV-specific gap).
+
+**Verification status:** unit/integration-tested (`cargo test`: 1264 passed), `cargo fmt`/
+`clippy -D warnings`/`scripts/audit_file_sizes.py` all green. E2E/resilience (Node2) and manual
+UI verification (Controller Site Headroom chart, Diagnostics Capacity Forecast panel, the
+re-modeled "Blend-back Time" slider) were **not run** as part of landing this — flagged as
+follow-up verification, not blocking the phase's completion, matching this master plan's own
+risk assessment (this phase is the lowest-risk one; battery/heater/EV phases below should not
+skip this step).
 
 ## Phase 2 — Base load consolidation
 

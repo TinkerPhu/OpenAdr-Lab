@@ -44,6 +44,14 @@ pub struct SolveRequest {
     pub baseline_override: Option<BaselineOverride>,
     pub objective_override: Option<PlannerObjective>,
     pub pv_forecast_override: Option<f64>,
+    /// `pv-competence-consolidation` section 4: live `PvInverter`-derived export
+    /// ceiling per slot, resolved by the caller from a live `SimState` it still
+    /// holds before flattening to `SimSnapshot` (`simulator::plan_context::
+    /// resolve_pv_forecast_kw`). Takes precedence over `weather_pv_kw`/the
+    /// static-curve fallback in `build_milp_inputs` (it already reflects
+    /// weather internally via `PvInverter.weather_forecast`), but not over
+    /// `pv_forecast_override`. `None` when no live `"pv"` asset exists.
+    pub pv_live_forecast_kw: Option<Vec<f64>>,
     /// WP5.2 (BL-14): learned per-asset heuristics, keyed by asset_id —
     /// resolved from `AppState` once per cycle, same as `ev_session`/
     /// `heater_target` above.

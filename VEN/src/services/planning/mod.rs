@@ -153,6 +153,11 @@ pub async fn build_solve_request(
     baseline_override: Option<BaselineOverride>,
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
+    // pv-competence-consolidation section 4: live PvInverter-derived export
+    // ceiling per slot, resolved by the caller (tasks::planning::cycle) from
+    // a live SimState it holds before flattening to SimSnapshot. None when no
+    // live "pv" asset exists in this cycle's snapshot.
+    pv_live_forecast_kw: Option<Vec<f64>>,
     asset_heuristics: std::collections::HashMap<String, AssetHeuristics>,
     weather: &Arc<dyn crate::controller::WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
@@ -185,6 +190,7 @@ pub async fn build_solve_request(
         baseline_override,
         objective_override,
         pv_forecast_override,
+        pv_live_forecast_kw,
         asset_heuristics,
         weather_pv_kw,
         diurnal_import_eur_kwh,
@@ -535,6 +541,7 @@ mod tests {
             baseline_override: None,
             objective_override: None,
             pv_forecast_override: None,
+            pv_live_forecast_kw: None,
             asset_heuristics: Default::default(),
             weather_pv_kw: None,
             diurnal_import_eur_kwh: None,

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use tracing::{debug, warn};
 
 use crate::assets::PvInverter;
@@ -52,6 +52,31 @@ pub fn apply_pending_pv_inject(
             }
         }
     }
+}
+
+/// `pv-competence-consolidation` section 4: resolve one live, `PvInverter`-authoritative
+/// export-ceiling value per plan slot, using the same `uncurtailed_power_kw_at` path
+/// `max_effort_schedule`/`forecast()` already use — replacing the raw-snapshot
+/// `pv_ceiling_kw` reconstruction `build_milp_inputs` used to do on its own. `None` when
+/// no live `"pv"` asset exists in this snapshot (the caller falls back to the existing
+/// static-curve path unchanged); `Some(vec)` of one value per `cum_s` entry otherwise,
+/// each the *magnitude* (kW, positive) of the export ceiling at `now + cum_s[i]`, matching
+/// `pv_ceiling_kw`'s own sign convention (`uncurtailed_power_kw_at` itself returns a
+/// negative export value).
+pub fn resolve_pv_forecast_kw(
+    sim_snap: &SimState,
+    n_slots: usize,
+    cum_s: &[i64],
+    now: DateTime<Utc>,
+) -> Option<Vec<f64>> {
+    let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV)?;
+    let pv = cfg.as_any().downcast_ref::<PvInverter>()?;
+    Some(
+        cum_s[0..n_slots]
+            .iter()
+            .map(|&s| -pv.uncurtailed_power_kw_at(now + Duration::seconds(s), s as f64))
+            .collect(),
+    )
 }
 
 /// Build per-asset MILP contexts from live simulator state, for the current plan cycle.
@@ -122,6 +147,7 @@ pub fn build_asset_contexts(
 mod tests {
     use super::*;
     use crate::controller::milp_planner::asset_port::{AssetKind, AssetMilpParams};
+    use chrono::TimeZone;
 
     #[test]
     fn apply_pending_pv_inject_noop_when_no_pv_asset() {
@@ -170,6 +196,49 @@ mod tests {
 
     fn cum_seconds(n: usize, step_s: i64) -> Vec<i64> {
         (0..=n as i64).map(|i| i * step_s).collect()
+    }
+
+    #[test]
+    fn resolve_pv_forecast_kw_none_when_no_live_pv_asset() {
+        let now = Utc::now();
+        let sim_snap = SimState::from_params(&[], now);
+        let cum_s = cum_seconds(4, 600);
+        assert_eq!(resolve_pv_forecast_kw(&sim_snap, 4, &cum_s, now), None);
+    }
+
+    #[test]
+    fn resolve_pv_forecast_kw_returns_one_value_per_slot_matching_uncurtailed_power_kw_at() {
+        use crate::entities::asset_params::{AssetParams, PvParams};
+
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap(); // sunrise-ish, varies over horizon
+        let params = vec![AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            ..Default::default()
+        })];
+        let sim_snap = SimState::from_params(&params, now);
+        let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV).unwrap();
+        let pv = cfg.as_any().downcast_ref::<PvInverter>().unwrap().clone();
+        let n_slots = 4;
+        let cum_s = cum_seconds(n_slots, 3600); // hourly steps, spans sunrise to noon
+
+        let got = resolve_pv_forecast_kw(&sim_snap, n_slots, &cum_s, now)
+            .expect("live pv asset must produce Some");
+        assert_eq!(got.len(), n_slots);
+        for (i, &kw) in got.iter().enumerate() {
+            let s = cum_s[i];
+            let expected = -pv.uncurtailed_power_kw_at(now + Duration::seconds(s), s as f64);
+            assert!(
+                (kw - expected).abs() < 1e-9,
+                "slot {i}: got {kw}, expected {expected}"
+            );
+        }
+        // Sanity: the horizon crosses sunrise->noon, so it must not be a flat series —
+        // otherwise this test wouldn't actually be exercising uncurtailed_power_kw_at's
+        // time-varying behavior.
+        assert!(
+            got.iter().any(|&v| (v - got[0]).abs() > 1e-6),
+            "expected genuine time-of-day variation across the horizon, got {got:?}"
+        );
     }
 
     #[test]

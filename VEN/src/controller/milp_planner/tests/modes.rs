@@ -270,6 +270,7 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
         None,
         None,
         Some(2.5), // pv_forecast_override: 2.5 kW PV, 0.5 kW base → 2.0 kW surplus cap
+        None,
         &std::collections::HashMap::new(),
         None,
         None,

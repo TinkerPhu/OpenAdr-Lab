@@ -30,14 +30,7 @@ pub(crate) struct TickContext {
     pub pv_clear: bool,
     pub base_clear: bool,
     pub weather_pv_kw_now: Option<f64>,
-    /// Weather-sourced PV ceiling for each REMAINING plan slot, aligned to
-    /// `plan_snap`'s own future-slot start times (not a uniform grid — the
-    /// horizon is multi-zone). Feeds the site-headroom / capacity forecast
-    /// through the same resolution the planner uses for `p_pv_kw`. `None`
-    /// when there is no plan, no weather config, or the feed is stale — the
-    /// forecast then falls back to the sin model, exactly as the planner does.
-    pub weather_pv_kw_slots: Option<Vec<f64>>,
-    /// The raw weather-forecast series behind `weather_pv_kw_now`/`weather_pv_kw_slots`
+    /// The raw weather-forecast series behind `weather_pv_kw_now`
     /// (`pv-competence-consolidation`) — threaded onto `PvInverter` each tick
     /// (`TickOverrides.pv_weather_forecast`) so the asset's own
     /// `max_effort_schedule`/`forecast()` can sample it at whatever future timestamps
@@ -97,27 +90,8 @@ pub(crate) async fn resolve_tick_context(
     };
 
     let plan_snap = state.active_plan().await;
-    // Resolved pre-lock (the port fetch is async) against the plan's own
-    // remaining slot starts, so `build_forecast_frames` can stay sync inside
-    // the lock and still see per-slot weather. One fetch + one series
-    // evaluation serves both the instant and the slot grid.
-    let slot_starts: Vec<_> = plan_snap
-        .as_ref()
-        .map(|plan| {
-            plan.all_slots()
-                .filter(|s| s.start >= now)
-                .map(|s| s.start)
-                .collect()
-        })
-        .unwrap_or_default();
-    let (weather_pv_kw_now, weather_pv_kw_slots, weather_pv_forecast) =
-        super::arbiter_glue::resolve_weather_pv_kw_for_tick(
-            weather,
-            weather_pv_params,
-            now,
-            &slot_starts,
-        )
-        .await;
+    let (weather_pv_kw_now, weather_pv_forecast) =
+        super::arbiter_glue::resolve_weather_pv_kw_for_tick(weather, weather_pv_params, now).await;
     let (pv_measured_kw_now, base_load_measured_kw_now) =
         super::arbiter_glue::resolve_measurements_now(
             pv_measurement,
@@ -138,7 +112,6 @@ pub(crate) async fn resolve_tick_context(
         pv_clear,
         base_clear,
         weather_pv_kw_now,
-        weather_pv_kw_slots,
         weather_pv_forecast,
         pv_measured_kw_now,
         base_load_measured_kw_now,
