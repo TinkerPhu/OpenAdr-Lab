@@ -570,6 +570,7 @@ mod milp_context_trait_tests {
             min_soc: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
+            departure_time: None,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
             soc: 0.2,
@@ -648,6 +649,7 @@ mod milp_context_trait_tests {
             min_soc: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
+            departure_time: None,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
             soc: 0.2,

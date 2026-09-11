@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    MilpParticipant, RequestResolvable, TickOverridable, TickOverrides,
+    MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
@@ -50,6 +50,18 @@ pub struct EvCharger {
     /// Expected controller response delay (s). Simulated as a single-tick command
     /// lag: the setpoint accepted this tick is applied on the *next* tick.
     pub response_delay_s: f64,
+    /// Live `EvSession.departure_time` (`ev-departure-consolidation`) — the one
+    /// thing `simulate_forward` needs to answer "will this asset still be
+    /// plugged in at a given future point" that the trait's default,
+    /// timestamp-less `step()`-based walk can't. `None` when no session is
+    /// active (mirrors `EvSession` itself: `tasks/sim_tick/arbiter_glue.rs`
+    /// already clears an expired session before this is populated for the
+    /// tick, so a departure that's already passed reads as "no session," not
+    /// a stale future timestamp). Set each tick by the sim loop. NOT from
+    /// YAML, not persisted (`#[serde(skip)]`) — refreshed every tick from the
+    /// live session regardless.
+    #[serde(skip)]
+    pub departure_time: Option<DateTime<Utc>>,
 }
 
 /// EV mutable state.
@@ -86,6 +98,7 @@ impl EvCharger {
             min_soc: 0.0,
             min_charge_kw: cfg.min_charge_kw,
             response_delay_s: cfg.response_delay_s,
+            departure_time: None,
         }
     }
 
@@ -330,6 +343,16 @@ impl Asset for EvCharger {
         self.capability_inner(s)
     }
 
+    /// See `ev_schedule.rs::simulate_forward_inner` (file-size cap moved the
+    /// body there) — makes EV's own trajectory departure-aware.
+    fn simulate_forward(
+        &self,
+        initial: &AssetState,
+        setpoints: &[(DateTime<Utc>, f64)],
+    ) -> Trajectory {
+        self.simulate_forward_inner(initial, setpoints)
+    }
+
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
         let AssetState::Ev(s) = state else {
             unreachable!()
@@ -431,6 +454,7 @@ impl TickOverridable for EvCharger {
         self.soc_target = overrides
             .ev_soc_target_override
             .unwrap_or(self.soc_target_profile);
+        self.departure_time = overrides.ev_departure_time;
     }
 }
 
@@ -534,6 +558,7 @@ mod tests {
             min_soc: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
+            departure_time: None,
         };
         let state = EvState {
             soc,
@@ -542,6 +567,55 @@ mod tests {
             pending_command_kw: actual_power_kw,
         };
         (cfg, state)
+    }
+
+    // ── simulate_forward (ev-departure-consolidation) ───────────────────────
+
+    #[test]
+    fn simulate_forward_forces_unplugged_at_and_after_departure_time() {
+        let (mut ev, state) = make_ev(true, 0.5, 0.0);
+        let t0 = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        ev.departure_time = Some(t0 + Duration::minutes(15));
+        let setpoints = [
+            (t0, 7.4),                         // before departure -- still plugged
+            (t0 + Duration::minutes(10), 7.4), // still before departure
+            (t0 + Duration::minutes(15), 7.4), // exactly at departure -- unplugged
+            (t0 + Duration::minutes(20), 7.4), // after departure -- unplugged
+        ];
+        let state = AssetState::Ev(state);
+        let traj = ev.simulate_forward(&state, &setpoints);
+        assert_eq!(traj.points.len(), 4);
+        for (i, point) in traj.points.iter().enumerate() {
+            let AssetState::Ev(s) = &point.state else {
+                panic!("expected Ev state")
+            };
+            let expect_plugged = i < 2;
+            assert_eq!(
+                s.plugged, expect_plugged,
+                "point {i} (ts={}): expected plugged={expect_plugged}",
+                setpoints[i].0
+            );
+            if !expect_plugged {
+                assert_eq!(point.power_kw, 0.0, "point {i}: unplugged must draw 0 kW");
+            }
+        }
+    }
+
+    #[test]
+    fn simulate_forward_with_no_departure_time_never_unplugs() {
+        let (ev, state) = make_ev(true, 0.5, 0.0); // departure_time: None
+        let t0 = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let setpoints = [(t0, 7.4), (t0 + Duration::hours(10), 7.4)];
+        let traj = ev.simulate_forward(&AssetState::Ev(state), &setpoints);
+        for point in &traj.points {
+            let AssetState::Ev(s) = &point.state else {
+                panic!("expected Ev state")
+            };
+            assert!(
+                s.plugged,
+                "no departure_time set -- must never force unplugged"
+            );
+        }
     }
 
     #[test]
@@ -666,6 +740,7 @@ mod tests {
             min_soc: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
+            departure_time: None,
         };
         let mut state = EvState {
             soc: 0.01,

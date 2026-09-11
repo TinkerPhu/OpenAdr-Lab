@@ -1750,3 +1750,43 @@ different name. A consistent naming family (all siblings of one concept using
 the same root word) makes the next reader's grep actually find every instance;
 a stray synonym is exactly the kind of thing that lets a real gap hide in
 plain sight through a full green test suite.
+
+## A phased plan's own Problem statement is a hypothesis, not ground truth — every phase needs its own re-read (asset-competence-assurance, 2026-09-10/11)
+
+A five-phase master plan (PV, base load, battery, heater, EV) audited this codebase for one
+recurring shape: a module other than an asset's own reimplementing that asset's forecast/state
+interpretation independently, risking silent divergence (the pattern R-69, battery's
+asymmetric-vs-symmetric efficiency split, already exemplified). Each phase's Problem statement
+was written once, during the Phase 0 audit, then treated as a starting hypothesis to re-verify
+at implementation time — not skipped as already-settled. It found a real, load-bearing
+correction in every single phase that did this:
+
+- Phase 1 (PV): the design pass's own "section 5a has no remaining blocker" claim was wrong —
+  `asset_max_power_series` (5a's own primitive) called `Asset::simulate_forward` directly, so
+  5a needed the same new override 5b did, not a separate, smaller fix.
+- Phase 2 (base load): the named violation `tasks/sim_tick/context.rs::base_load_heuristic_kw_now`
+  turned out to already be the correct mechanism (flows into the live tick via the asset's own
+  precedence) — not a violation at all; the real gap was narrower (just `build_milp_inputs`'s
+  direct HashMap read and the asset's own flat `forecast()`).
+- Phase 4 (heater): found three live call sites duplicating the temp↔energy conversion, not the
+  two named in the Problem statement — a third, documented "Mirrors X()" reimplementation
+  existed specifically to satisfy an unrelated architecture rule (`controller::milp_planner`
+  must not import `assets::`).
+- Phase 5 (EV): "`Asset::step()`... no departure-awareness at all" was accurate as a statement
+  about the code, but not about the actual live-dispatch risk — a separate mechanism
+  (`resolve_overlay_enabled`) already cleared an expired session before the live tick path ever
+  saw it, so `step()` itself needed no change; only `simulate_forward` (the forecast/trajectory
+  path) had the real gap.
+
+None of these corrections were large, and none required abandoning a phase's scope — each
+phase still landed fully, on schedule, in one session. But every one of them would have produced
+a worse implementation (over-scoped, under-scoped, or subtly wrong) if the plan's own wording
+had been trusted without a fresh read of the actual code.
+
+**How to apply:** when picking up a phase/task from a plan written earlier (by you or someone
+else), re-derive the claim from the code before writing the fix, even when the plan sounds
+confident and specific. Budget time for this "confirm, don't assume" pass as part of the work,
+not as a nice-to-have — in this master plan it was cheap (minutes of reading) and caught real
+scope errors every time it was actually done. A plan is a snapshot of understanding at write
+time; code moves, and even code that hasn't moved is sometimes misread on a first pass under
+time pressure during the original audit.

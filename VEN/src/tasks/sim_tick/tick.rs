@@ -148,6 +148,7 @@ pub(crate) async fn tick_once(
             ctx.base_load_measured_kw_now,
             ctx.base_load_heuristic_kw_now,
             ctx.base_load_heuristic.clone(),
+            ctx.ev_session.as_ref().map(|s| s.departure_time),
         );
 
         let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =

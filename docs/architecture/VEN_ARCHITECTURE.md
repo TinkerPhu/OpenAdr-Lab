@@ -599,11 +599,13 @@ keep drawing past its deadline) exceeds what's exportable — bounded above by
 **Site Headroom's `up_kw`/`down_kw` are ABSOLUTE, not relative** — each
 asset's own `max_effort_setpoint` at its plan-forecasted state, summed; not a
 delta from the plan's own chosen dispatch (a real, documented behavior
-change from this type's original meaning). `compute_site_headroom_forecast`
-excludes a plugged-in EV past its live session's `departure_time`
-(`EvState::plugged` is never toggled by `step()`) — `compute_site_capacity_curve`
-does not need the equivalent, since its sustained-commitment model never
-projected a future departure either.
+change from this type's original meaning). EV departure is handled by the
+asset itself (`ev-departure-consolidation`): `EvCharger::simulate_forward`
+forces `plugged=false` for any trajectory point at or after the live
+`departure_time`, so `compute_site_headroom_forecast` needs no site-level
+exclusion any more, and `compute_site_capacity_curve` gets the same
+correctness automatically via the same primitive — was previously a
+site-level `ev_session` parameter re-deriving the fact independently.
 
 ### 3.0d Asset Competence Assurance
 
@@ -622,9 +624,11 @@ longer change.
 This is the recurring shape behind several bugs already fixed in this codebase — the
 PV-Import and Heater-Export bugs §3.0c's engine fixed by construction, the
 site-headroom/capacity-curve seam divergence found afterward, and R-69 (battery round-trip
-efficiency modeled two different ways, resolved as Phase 3 of the remediation below). A
-confirmed violation catalogue and phased remediation sequence (PV, base load, battery, heater,
-EV) is tracked in `docs/plans/asset-competence-assurance-master-plan.md`.
+efficiency modeled two different ways). A confirmed violation catalogue across every asset kind
+(PV, base load, battery, heater, EV) was audited and remediated in five phases, 2026-09-10/11 —
+see `docs/history/project_journal.md`'s "Asset Competence Assurance" entries for the full
+record of what each phase found and fixed (the phased plan document itself is deleted once
+its work lands, per this repo's own no-lingering-plans rule).
 
 ### 3.1 Generic Asset Model
 

@@ -62,12 +62,8 @@ pub(crate) fn finalize_tick_outputs(
     // which the snapshot's `AssetSnapshot`/`capability()` shape can't answer
     // correctly for PV — see `site_headroom.rs`'s module doc).
     let tick_envelope = controller::site_headroom::compute_site_headroom(sim, now);
-    let (tick_forecast, tick_capacity_curves) = super::forecast_wiring::compute_tick_forecasts(
-        sim,
-        ctx.plan_snap.as_ref(),
-        ctx.ev_session.as_ref(),
-        now,
-    );
+    let (tick_forecast, tick_capacity_curves) =
+        super::forecast_wiring::compute_tick_forecasts(sim, ctx.plan_snap.as_ref(), now);
 
     (
         tick_sensor,

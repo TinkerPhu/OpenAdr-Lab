@@ -68,7 +68,6 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity_curve::{
     CapacityCurve, CapacityCurveStep, CommitmentDirection, LimitTier,
 };
-use crate::entities::device_session::EvSession;
 use crate::entities::plan::{Plan, PlanTimeSlot, SiteFlexibilityForecastSlot};
 #[cfg(test)]
 use crate::ids::ASSET_PV;
@@ -282,21 +281,17 @@ fn merge_events(
 /// export achievable at this slot; `down_kw` = absolute max import
 /// achievable at this slot (same direction mapping `CapacityCurve` uses).
 ///
-/// `ev_session` is used the same way `build_forecast_frames` used it: found
-/// via review before wiring this into production that `simulated_trajectory`
-/// alone doesn't exclude a plugged-in EV past its live session's
-/// `departure_time` — `EvState::plugged` is never toggled by `step()` (the
-/// physics model doesn't know a car left), so without this exclusion the EV
-/// would keep contributing headroom at slots after it's actually gone,
-/// exactly the gap `build_forecast_frames`'s own `include_at` closure exists
-/// to close for the capability-frame path. `compute_site_capacity_curve`
-/// does NOT need the equivalent — its sustained-commitment model never
-/// projected a future departure either, matching the deleted
-/// `capacity_forecast.rs`'s own (unchanged) scope.
+/// `ev-departure-consolidation`: `EvCharger` now has its own `simulate_forward`
+/// override that forces `plugged=false` for any trajectory point at or after
+/// the live session's `departure_time` (injected each tick via
+/// `TickOverrides.ev_departure_time`, mirroring PV's `weather_forecast`/base
+/// load's `heuristic` pattern), so `capability_inner`/`max_effort_setpoint`
+/// already correctly report zero for those points — no site-level exclusion
+/// needed here any more (was: a manual `ev_session` parameter re-deriving the
+/// same fact this function has no business computing on the asset's behalf).
 pub fn compute_site_headroom_forecast(
     sim: &SimState,
     plan: &Plan,
-    ev_session: Option<&EvSession>,
     now: DateTime<Utc>,
 ) -> Vec<SiteFlexibilityForecastSlot> {
     let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
@@ -326,13 +321,6 @@ pub fn compute_site_headroom_forecast(
         for (i, point) in traj.points.iter().enumerate() {
             if i >= future_slots.len() {
                 break; // the trailing sentinel point (Spec D) — no matching slot.
-            }
-            if asset_kind == "ev" {
-                if let Some(session) = ev_session {
-                    if future_slots[i].start >= session.departure_time {
-                        continue; // EV has departed by this slot -- exclude.
-                    }
-                }
             }
             if asset_kind == "pv" {
                 // pv-competence-consolidation section 5b: unlike every other
@@ -776,7 +764,7 @@ mod tests {
             now,
         );
         let plan = make_plan(900, 2, now);
-        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
         assert!(
             forecast.iter().all(|s| s.down_kw == 0.0),
             "a fully-charged battery must report 0.0 absolute import headroom at every slot"
@@ -809,7 +797,7 @@ mod tests {
         });
         sim.add_asset(entry, config).unwrap();
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
         assert!(
             forecast[0].down_kw >= 2.0,
             "an eligible-to-start shiftable load must contribute its power_kw \
@@ -820,19 +808,19 @@ mod tests {
 
     #[test]
     fn ev_headroom_zeroes_out_past_the_live_sessions_departure() {
-        // Found before wiring into production: EvState::plugged is never
-        // toggled by step() (the physics model doesn't know a car left), so
-        // without this exclusion the EV would keep contributing headroom at
-        // slots after it's actually departed -- the same gap
-        // build_forecast_frames' own `include_at` closure exists to close
-        // for the capability-frame path (simulator/forecast.rs's
-        // ev_zeroes_out_past_the_live_sessions_departure test).
+        // ev-departure-consolidation: EvCharger::simulate_forward now forces
+        // plugged=false for any trajectory point at/after the live
+        // departure_time, so capability_inner correctly zeroes out headroom
+        // past it -- no site-level exclusion needed any more (this test used
+        // to pass an EvSession parameter to compute_site_headroom_forecast
+        // directly; that parameter is gone, the live EvCharger's own
+        // departure_time now carries the same fact).
+        use crate::assets::EvCharger;
         use crate::entities::asset_params::EvParams;
         use crate::ids::ASSET_EV;
-        use uuid::Uuid;
 
         let now = t0();
-        let sim = SimState::from_params(
+        let mut sim = SimState::from_params(
             &[AssetParams::Ev(EvParams {
                 id: ASSET_EV.to_string(),
                 max_charge_kw: 7.0,
@@ -847,20 +835,14 @@ mod tests {
             })],
             now,
         );
+        {
+            let (_, cfg) = sim.find_asset_mut(ASSET_EV).unwrap();
+            let ev = cfg.as_any_mut().downcast_mut::<EvCharger>().unwrap();
+            ev.departure_time = Some(now + Duration::minutes(30)); // departs after slot 1
+        }
         let plan = make_plan(900, 4, now); // 4 x 15-min slots
-        let session = EvSession {
-            id: Uuid::new_v4(),
-            target_soc: 0.8,
-            departure_time: now + Duration::minutes(30), // departs after slot 1
-            soft_deadline: false,
-            mode: Default::default(),
-            budget_eur: None,
-            comfort_rates: vec![],
-            created_at: now,
-            updated_at: now,
-        };
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, Some(&session), now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
 
         assert!(
             forecast[0].down_kw > 0.0,
@@ -893,7 +875,7 @@ mod tests {
             now,
         );
         let plan = make_plan(12 * 3600, 2, now); // noon slot, then midnight slot
-        let forecast = compute_site_headroom_forecast(&sim, &plan, None, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
         assert!(
             forecast[0].up_kw > 0.0,
             "noon slot must show real PV headroom, got {}",

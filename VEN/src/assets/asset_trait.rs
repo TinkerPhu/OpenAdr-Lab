@@ -464,9 +464,8 @@ impl<'a> Asset for AssetHandle<'a> {
     }
 
     /// Delegates to `self.config` rather than inheriting `Asset::simulate_forward`'s
-    /// step()-based default — battery/EV/heater see no difference (that default already
-    /// reaches `config.step()` via `step` above), but `PvInverter`'s own override
-    /// would be invisible through `AssetHandle`/`simulated_trajectory` without this.
+    /// step()-based default — without this, `PvInverter`'s and `EvCharger`'s own
+    /// overrides would be invisible through `AssetHandle`/`simulated_trajectory`.
     fn simulate_forward(
         &self,
         initial: &AssetState,
@@ -556,6 +555,7 @@ pub struct TickOverrides {
     // EV
     pub ev_plugged_override: Option<bool>,
     pub ev_soc_target_override: Option<f64>,
+    pub ev_departure_time: Option<DateTime<Utc>>, // see EvCharger.departure_time
 }
 
 #[cfg(test)]

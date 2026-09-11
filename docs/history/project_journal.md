@@ -12205,3 +12205,82 @@ distinguished a genuine third-party physics approximation (the MILP's constant-a
 loss) from an R-69-shaped bug, rather than treating every live-vs-MILP numeric difference as
 automatically the same failure pattern — the discriminator is whether there's a structural
 reason (LP linearity) for the difference to exist, not just whether two numbers differ.
+
+## 2026-09-11 — Asset Competence Assurance Phase 5, EV departure consolidation (`ev-departure-consolidation`, complete — master plan closed)
+
+The last, highest-risk phase of this master plan: the only one touching live, tick-by-tick
+dispatch physics rather than just a forecast-reporting surface, deliberately ordered last so
+the pattern was proven on four lower-risk phases first. Given that framing, investigated with
+extra care before writing any code — and found the Problem statement's own third bullet
+("`Asset::step()`/`simulate_forward()`... no departure-awareness at all") was slightly
+overbroad in a way that mattered: `step()` itself turned out not to need any change.
+
+Tracing the actual tick path: `tasks/sim_tick/arbiter_glue.rs::resolve_overlay_enabled` already
+clears an `EvSession` once its `departure_time` passes — and does so *before* `TickContext.ev_session`
+is read for that same tick (confirmed by reading the struct-literal field order in
+`context.rs`, where Rust evaluates top-to-bottom). So the live dispatch path never actually
+sees an expired session; nothing was ever at risk of commanding charge past a known departure
+in practice. `EvState.plugged` (whether the car is physically connected) is also a genuinely
+separate concept from `EvSession` (a user's charging request) — conflating "session ended" with
+"car unplugged" inside `step()` itself would have been a real, not-asked-for behavior change to
+live dispatch, not the confirmed gap. The actual, narrower gap: `Asset::simulate_forward`
+(used by both `compute_site_headroom_forecast`'s trajectory walk and, via
+`asset_max_power_series`, `compute_site_capacity_curve`) had no way to know a currently-active
+session would end partway through the walk it performs — exactly mirroring the shape PV's
+Phase 1 section 5b already solved for weather.
+
+Implementation: `EvCharger` gained a `departure_time: Option<DateTime<Utc>>` field, following
+the exact pattern `PvInverter.weather_forecast`/`BaseLoad.heuristic` already established —
+populated each tick via a new `TickOverrides.ev_departure_time`, sourced from the
+already-expiry-cleared `TickContext.ev_session`, threaded through as one new trailing parameter
+on `SimState::tick()`. `EvCharger::simulate_forward` (split into a new sibling file
+`ev_schedule.rs` for the file-size cap, mirroring `pv_schedule.rs`'s precedent) forces
+`plugged=false` for any trajectory point at or after `departure_time`, then delegates to the
+ordinary `step()` physics unchanged — genuinely simpler than PV's own override, since EV's
+`step()` is authentically setpoint+duration-driven with no timestamp dependency of its own
+(only the "is the car still here" question needed a timestamp). Unlike PV, no other
+asset-specific branch was needed downstream in `capacity_headroom.rs`: EV's own
+`max_effort_setpoint`/`capability_inner` already correctly derive their answer from `state`
+(PV's own `max_effort_setpoint` is the one asset whose implementation ignores `state` for the
+Physical tier — a pre-existing, documented, unrelated design choice, not a pattern EV shares).
+`compute_site_headroom_forecast`'s site-level `ev_session` parameter and its manual per-slot
+`future_slots[i].start >= session.departure_time` exclusion were deleted outright — the asset's
+own trajectory now answers the question. `compute_site_capacity_curve` needed no code change at
+all, but automatically gained the same correctness for free, since it flows through the same
+`simulate_forward` via `asset_max_power_series` — the same "fixed once, benefits everywhere"
+shape every prior phase of this master plan has shown.
+
+Test-first: two new `EvCharger::simulate_forward` unit tests pinning the departure-aware
+behavior (forces unplugged at/after departure; never unplugs without one), plus the existing
+`capacity_headroom.rs::ev_headroom_zeroes_out_past_the_live_sessions_departure` test rewritten
+to drive the live `EvCharger.departure_time` field directly rather than passing the now-removed
+`EvSession` parameter to `compute_site_headroom_forecast`.
+
+Verification: 26/26 EV-scoped tests, 177/177 broader ev-tagged tests, full suite 1277 passed (up
+from 1275), `cargo fmt --check`/`clippy --all-targets --all-features -- -D warnings`/
+`scripts/audit_file_sizes.py` all clean. No UI files touched. E2E/resilience and manual
+verification not run this session — flagged as the most consequential instance of this
+recurring gap across all five phases, given this one touches live dispatch; recommended as the
+first phase to re-verify against a real E2E/manual run before further work builds on it.
+
+With this phase complete, all five phases of the asset-competence-assurance master plan
+(PV, base load, battery, heater, EV) are implemented, tested, and merged to main. Per the
+master plan's own Phase 6 (close-out): this entry, together with the four preceding Phase
+entries in this journal, is the durable record of what changed and why; `docs/reference/
+TECHNICAL_DEBTS.md`'s R-69 was already removed when Phase 3 landed;
+`docs/architecture/VEN_ARCHITECTURE.md` was updated incrementally as each phase landed (PV's
+§3.0b/§3.0c rewrite, the R-69 status note in §3.0d) rather than deferred to one final pass. The
+master plan document itself (`docs/plans/asset-competence-assurance-master-plan.md`) is deleted
+in this same piece of work, per this repo's own no-lingering-plans workflow rule.
+
+Key learning, the throughline across all five phases: every single phase's initial Problem
+statement — written during Phase 0's audit, before deep implementation-time investigation —
+turned out to be at least slightly inaccurate once actually read against the code again: Phase 1
+found section 5 split into an unblocked half and a differently-blocked half; Phase 2 found
+`base_load_heuristic_kw_now` was never actually a violation; Phase 4 found three real call
+sites instead of the stated two; Phase 5 found `step()` itself didn't need to change. None of
+these inaccuracies were large, and none required abandoning a phase's scope — but every one of
+them would have produced a worse, more scope-creeping, or subtly-wrong implementation if taken
+as ground truth without re-verification. "Confirm, don't assume" (this master plan's own
+recurring instruction to itself) is not a formality — it found a real, load-bearing correction
+in one hundred percent of the phases that used it.
