@@ -335,6 +335,46 @@ mod tests {
     }
 
     #[test]
+    fn pv_generation_does_not_reduce_import_headroom_next_to_a_battery() {
+        // PV can be curtailed to 0, so the site's max import is the battery's
+        // own 5 kW regardless of how much PV generates. A PV-only test can't
+        // see this: merge_events floors Import at 0.0, hiding PV's negative.
+        let noon: DateTime<Utc> = "2026-07-20T12:00:00Z".parse().unwrap();
+        let sim = SimState::from_params(
+            &[
+                crate::entities::asset_params::AssetParams::Battery(BatteryParams {
+                    id: "battery".to_string(),
+                    capacity_kwh: 10.0,
+                    max_charge_kw: 5.0,
+                    max_discharge_kw: 5.0,
+                    initial_soc: 0.5,
+                    round_trip_efficiency: 1.0,
+                    min_soc: 0.1,
+                    c_terminal_eur_kwh: Some(0.0),
+                }),
+                crate::entities::asset_params::AssetParams::Pv(PvParams {
+                    id: "pv".to_string(),
+                    rated_kw: 5.0,
+                    inverter_max_kw: 5.0,
+                    co2_g_kwh: 0.0,
+                }),
+            ],
+            noon,
+        );
+        let env = headroom(&sim, noon);
+        assert!(
+            (env.down_kw - 5.0).abs() < 1e-6,
+            "down_kw must be the battery's 5.0 kW, untouched by PV generation, got {}",
+            env.down_kw
+        );
+        assert!(
+            env.up_kw < -5.0,
+            "up_kw must still add PV's export on top of the battery's -5.0, got {}",
+            env.up_kw
+        );
+    }
+
+    #[test]
     fn duration_from_battery_soc() {
         let sim = SimState::from_params(
             &[crate::entities::asset_params::AssetParams::Battery(

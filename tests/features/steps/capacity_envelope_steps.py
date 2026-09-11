@@ -146,3 +146,60 @@ def step_import_curve_bounded_by_non_pv_capability(context):
         "signature of the confirmed PV-Import bug (crediting PV's own "
         "generation as import headroom) reappearing."
     )
+
+
+# ── Site Headroom "now": PV neither inflates nor reduces the import side ────
+
+# PV-induced error would be ~5 kW (test profile PV rated 5 kW at irradiance
+# 1.0); 1 kW absorbs base load's live jitter between the paired reads.
+_TWO_SIDED_TOLERANCE_KW = 1.0
+
+
+@when("I wait for PV to generate and capture the live site headroom with the live asset snapshot")
+def step_capture_live_headroom_while_pv_generates(context):
+    def _capture():
+        assets = _live_assets()
+        pv = assets.get("pv")
+        if not pv or pv.get("power_kw", 0.0) > -0.5:
+            return None
+        headroom = ven_get("/flexibility")
+        curves = ven_get("/flexibility/capacity")
+        if headroom.status_code != 200 or curves.status_code != 200 or not curves.json():
+            return None
+        return headroom.json(), curves.json(), _live_assets()
+
+    context.live_headroom, context.capacity_curves, context.capacity_live_assets = poll_until(
+        _capture,
+        lambda result: result is not None,
+        timeout=30,
+        interval=2,
+        description="live site headroom, capacity curves and asset snapshot captured while PV generates",
+    )
+
+
+def _assert_matches_non_pv_import_capability(actual_kw: float, what: str, context):
+    expected_kw = _import_capability_kw(context.capacity_live_assets, exclude_types={"pv"})
+    assert abs(actual_kw - expected_kw) <= _TWO_SIDED_TOLERANCE_KW, (
+        f"{what} ({actual_kw:.2f} kW) differs from the site's non-PV controllable "
+        f"assets' own import capability ({expected_kw:.2f} kW) while PV generates "
+        f"{context.capacity_live_assets['pv']['power_kw']:.2f} kW -- PV can be "
+        "curtailed to 0, so it must neither add to nor subtract from max import."
+    )
+
+
+@then("the live site headroom's import side equals the site's non-PV controllable assets' own import capability")
+def step_live_headroom_import_matches_non_pv_capability(context):
+    _assert_matches_non_pv_import_capability(
+        context.live_headroom["down_kw"], "live site headroom down_kw", context
+    )
+
+
+@then(
+    "the captured import capacity curve's first step equals the site's non-PV controllable assets' own import capability"
+)
+def step_import_curve_first_step_matches_non_pv_capability(context):
+    _assert_matches_non_pv_import_capability(
+        context.capacity_curves["import"]["steps"][0]["power_kw"],
+        "import capacity curve's first step",
+        context,
+    )

@@ -59,12 +59,17 @@ pub(crate) fn simulated_trajectory(
         state: &entry.state,
         history: &entry.history,
     };
+    // Same fallback as the live tick (`SimState::tick`): an asset the plan
+    // doesn't allocate runs at its own default setpoint, not a hard 0.0.
     let mut schedule: Vec<(DateTime<Utc>, f64)> = future_slots
         .iter()
         .map(|s| {
             (
                 s.start,
-                s.planned_kw_by_asset.get(&entry.id).copied().unwrap_or(0.0),
+                s.planned_kw_by_asset
+                    .get(&entry.id)
+                    .copied()
+                    .unwrap_or_else(|| cfg.default_setpoint()),
             )
         })
         .collect();
