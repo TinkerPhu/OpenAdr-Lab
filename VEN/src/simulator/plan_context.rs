@@ -79,6 +79,27 @@ pub fn resolve_pv_forecast_kw(
     )
 }
 
+/// `base-load-competence-consolidation`: resolve one live, `BaseLoad`-authoritative forecast
+/// value per plan slot, using the same `forecast_kw_at` path `forecast()` uses — replacing
+/// `build_milp_inputs`'s own direct `asset_heuristics.get(ASSET_BASE_LOAD)` read. `None` when
+/// no live `"base_load"` asset exists in this snapshot (the caller falls back to the existing
+/// static-baseline path unchanged).
+pub fn resolve_base_load_forecast_kw(
+    sim_snap: &SimState,
+    n_slots: usize,
+    cum_s: &[i64],
+    now: DateTime<Utc>,
+) -> Option<Vec<f64>> {
+    let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_BASE_LOAD)?;
+    let bl = cfg.as_any().downcast_ref::<crate::assets::BaseLoad>()?;
+    Some(
+        cum_s[0..n_slots]
+            .iter()
+            .map(|&s| bl.forecast_kw_at(now + Duration::seconds(s)))
+            .collect(),
+    )
+}
+
 /// Build per-asset MILP contexts from live simulator state, for the current plan cycle.
 ///
 /// Must run before the blocking solve so asset states are captured at this instant, not
@@ -239,6 +260,62 @@ mod tests {
             got.iter().any(|&v| (v - got[0]).abs() > 1e-6),
             "expected genuine time-of-day variation across the horizon, got {got:?}"
         );
+    }
+
+    #[test]
+    fn resolve_base_load_forecast_kw_none_when_no_live_base_load_asset() {
+        let now = Utc::now();
+        let sim_snap = SimState::from_params(&[], now);
+        let cum_s = cum_seconds(4, 600);
+        assert_eq!(
+            resolve_base_load_forecast_kw(&sim_snap, 4, &cum_s, now),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_base_load_forecast_kw_returns_one_value_per_slot_matching_forecast_kw_at() {
+        use crate::assets::BaseLoad;
+        use crate::entities::asset_params::{AssetParams, BaseLoadParams};
+        use crate::entities::design_vocabulary::AssetHeuristics;
+
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap(); // Monday 08:00
+        let params = vec![AssetParams::BaseLoad(BaseLoadParams {
+            id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            baseline_kw: 0.5,
+            spikes: vec![],
+        })];
+        let mut sim_snap = SimState::from_params(&params, now);
+        let mut monday = vec![0.0; 24];
+        monday[8] = 1.0;
+        monday[9] = 3.0;
+        let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|i| {
+            if i == 0 {
+                monday.clone()
+            } else {
+                vec![0.0; 24]
+            }
+        });
+        let heuristic = AssetHeuristics {
+            asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            daytime_profile_kw,
+            seasonal_factor: 1.0,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        };
+        {
+            let (_, cfg) = sim_snap
+                .find_asset_mut(crate::ids::ASSET_BASE_LOAD)
+                .unwrap();
+            let bl = cfg.as_any_mut().downcast_mut::<BaseLoad>().unwrap();
+            bl.heuristic = Some(heuristic.clone());
+        }
+        let n_slots = 2;
+        let cum_s = cum_seconds(n_slots, 3600); // hour 8, then hour 9
+
+        let got = resolve_base_load_forecast_kw(&sim_snap, n_slots, &cum_s, now)
+            .expect("live base_load asset must produce Some");
+        assert_eq!(got, vec![1.0, 3.0]);
     }
 
     #[test]

@@ -93,6 +93,14 @@ pub struct BaseLoad {
     /// from YAML.
     #[serde(default)]
     pub measured_load_kw: Option<f64>,
+    /// Learned base-load heuristic (BL-40), the same one `natural_base_kw`'s
+    /// live tier already reads — `base-load-competence-consolidation`: gives
+    /// `forecast()` the one thing it needs to answer for a point beyond
+    /// `now` that a flat `baseline_kw_profile` can't. Set each tick by the
+    /// sim loop. NOT from YAML. Not persisted (`#[serde(skip)]`): refreshed
+    /// every tick from the live heuristics store regardless.
+    #[serde(skip)]
+    pub heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
 }
 
 /// BaseLoad mutable state.
@@ -114,6 +122,7 @@ impl BaseLoad {
                 .map(|(i, s)| AppliancePattern::from_params(i, s))
                 .collect(),
             measured_load_kw: None,
+            heuristic: None,
         }
     }
 
@@ -265,6 +274,18 @@ impl BaseLoad {
         }
     }
 
+    /// `base-load-competence-consolidation`: the learned heuristic when
+    /// present, else the static configured baseline (`baseline_kw_profile`,
+    /// NOT the live-mutated `baseline_kw` — using the live field would hold
+    /// whatever the current tick resolved to flat forever, the exact bug
+    /// this method exists to fix).
+    pub(crate) fn forecast_kw_at(&self, ts: DateTime<Utc>) -> f64 {
+        self.heuristic
+            .as_ref()
+            .map(|h| h.sample_kw(ts))
+            .unwrap_or(self.baseline_kw_profile)
+    }
+
     pub fn forecast(
         &self,
         _state: &BaseLoadState,
@@ -274,8 +295,16 @@ impl BaseLoad {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Step);
         }
+        let end = now + timespan;
+        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
+        let mut t = now;
+        while t < end {
+            samples.push((t, self.forecast_kw_at(t)));
+            t += Duration::seconds(3600);
+        }
+        samples.push((end, self.forecast_kw_at(end)));
         TimeSeries {
-            samples: vec![(now, self.baseline_kw), (now + timespan, self.baseline_kw)],
+            samples,
             interpolation: Interpolation::Step,
         }
     }
@@ -415,6 +444,7 @@ impl TickOverridable for BaseLoad {
         if let Some(baseline_kw) = overrides.base_load_baseline_kw {
             self.baseline_kw = baseline_kw;
         }
+        self.heuristic = overrides.base_load_heuristic.clone();
     }
 }
 
@@ -469,6 +499,62 @@ mod tests {
         assert_eq!(series.samples.len(), 2);
         assert_eq!(series.samples[0].0, now);
         assert_eq!(series.samples[1].0, now + timespan);
+    }
+
+    #[test]
+    fn forecast_kw_at_uses_heuristic_when_present() {
+        let mut bl = base_load_with_spikes(vec![]);
+        let mut daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|_| vec![0.0; 24]);
+        daytime_profile_kw[0][8] = 4.0; // Monday 08:00 -> 4.0 kW
+        bl.heuristic = Some(crate::entities::design_vocabulary::AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw,
+            seasonal_factor: 1.0,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        });
+        let monday_8am = Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap(); // a Monday
+        assert_eq!(bl.forecast_kw_at(monday_8am), 4.0);
+    }
+
+    #[test]
+    fn forecast_kw_at_falls_back_to_baseline_kw_profile_without_heuristic() {
+        let bl = base_load_with_spikes(vec![]); // baseline_kw_profile = 0.3, no heuristic
+        let ts = Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap();
+        assert_eq!(bl.forecast_kw_at(ts), 0.3);
+    }
+
+    #[test]
+    fn forecast_varies_by_hour_when_heuristic_present() {
+        let mut bl = base_load_with_spikes(vec![]);
+        let mut monday = vec![0.0; 24];
+        monday[9] = 1.0;
+        monday[10] = 5.0;
+        let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|i| {
+            if i == 0 {
+                monday.clone()
+            } else {
+                vec![0.0; 24]
+            }
+        });
+        bl.heuristic = Some(crate::entities::design_vocabulary::AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw,
+            seasonal_factor: 1.0,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        });
+        let state = BaseLoadState {
+            actual_power_kw: 0.3,
+        };
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap(); // Monday 09:00
+        let series = bl.forecast(&state, Duration::hours(2), now);
+        assert!(
+            series.samples.iter().any(|&(_, v)| v == 1.0)
+                && series.samples.iter().any(|&(_, v)| v == 5.0),
+            "expected both hour-9 (1.0) and hour-10 (5.0) values in the series, got {:?}",
+            series.samples
+        );
     }
 
     #[test]

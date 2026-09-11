@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
@@ -8,7 +6,6 @@ use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
-use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -39,7 +36,10 @@ pub(crate) fn build_milp_inputs(
     // ceiling per slot (simulator::plan_context::resolve_pv_forecast_kw).
     // None when no live "pv" asset exists this cycle.
     pv_live_forecast_kw: Option<&[f64]>,
-    asset_heuristics: &HashMap<String, AssetHeuristics>,
+    // base-load-competence-consolidation: live BaseLoad-derived forecast per
+    // slot (simulator::plan_context::resolve_base_load_forecast_kw). None
+    // when no live "base_load" asset exists this cycle.
+    base_load_live_forecast_kw: Option<&[f64]>,
     // Weather-sourced PV forecast (R-50), pre-aligned to this call's own
     // slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
     // Only consulted when pv_live_forecast_kw is None (no live "pv" asset
@@ -95,18 +95,9 @@ pub(crate) fn build_milp_inputs(
         .export_limit_kw
         .unwrap_or(phys_exp)
         .min(exp_allowance);
-    // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no
-    // learned heuristic exists yet for the asset (cold-start, or a VEN that
-    // has never had `POST /debug/heuristics/preload` run / accumulated
-    // enough history) — see the per-slot loop below for the heuristic path.
+    // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no live
+    // "base_load" asset exists this cycle — see the per-slot loop below.
     let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
-    // WP5.2 (BL-14): when a learned heuristic exists, the planner samples a
-    // per-slot value (`daytime_profile_kw[day_of_week_bucket][hour] ×
-    // seasonal_factor`) instead of repeating a flat scalar across the whole
-    // horizon — this is what makes the Controller tab's future-horizon line
-    // for base_load show real daily structure instead of a flat line once
-    // history has been seeded.
-    let base_heuristic = asset_heuristics.get(crate::ids::ASSET_BASE_LOAD);
 
     // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
     // slots use the time-weighted mean over the slot (R-16), slots beyond
@@ -188,8 +179,15 @@ pub(crate) fn build_milp_inputs(
             .or_else(|| weather_pv_kw.and_then(|v| v.get(i)).map(|kw| kw.max(0.0)))
             .unwrap_or_else(|| pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0));
         p_pv.push(pv_kw);
-        let base_kw_t = base_heuristic
-            .map(|h| h.sample_kw(slot_t))
+        // base-load-competence-consolidation: `base_load_live_forecast_kw`
+        // (resolved by the caller from the live `BaseLoad`'s own
+        // `forecast_kw_at`, the same heuristic-aware method `forecast()`
+        // uses) supersedes the direct `asset_heuristics` HashMap read this
+        // used to do here. `flat_base_kw` (the static profile) is the
+        // fallback for when no live "base_load" asset exists at all.
+        let base_kw_t = base_load_live_forecast_kw
+            .and_then(|v| v.get(i))
+            .copied()
             .unwrap_or(flat_base_kw);
         p_base.push(base_kw_t);
         p_imp_phys.push(phys_imp);

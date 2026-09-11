@@ -819,7 +819,7 @@ fn build_milp_inputs_with_override(
         baseline_override,
         pv_forecast_override,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,
@@ -861,7 +861,7 @@ fn run_planner(
         objective_override,
         None,
         None,
-        &std::collections::HashMap::new(),
+        None,
         None,
         None,
         None,
@@ -881,6 +881,7 @@ fn bmi(
     build_milp_inputs(&ctxs, sim, tariffs, cap, profile, now, &[], None)
 }
 
+mod base_load;
 mod basic;
 mod cost_sign;
 mod heater;

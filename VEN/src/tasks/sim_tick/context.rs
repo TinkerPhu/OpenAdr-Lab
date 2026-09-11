@@ -44,6 +44,12 @@ pub(crate) struct TickContext {
     /// `peek_base_load_kw` (pre-lock) and `SimState::tick` (in-lock) receive
     /// the identical value — see design.md D1.
     pub base_load_heuristic_kw_now: Option<f64>,
+    /// The full learned heuristic behind `base_load_heuristic_kw_now`
+    /// (`base-load-competence-consolidation`) — threaded onto `BaseLoad` each
+    /// tick (`TickOverrides.base_load_heuristic`) so the asset's own
+    /// `forecast()` can sample it at whatever future timestamps it needs,
+    /// rather than a site-level caller pre-sampling it.
+    pub base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
     pub plan_snap: Option<crate::entities::plan::Plan>,
     pub capacity_snap: crate::entities::capacity::OadrCapacityState,
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
@@ -101,11 +107,12 @@ pub(crate) async fn resolve_tick_context(
             now,
         )
         .await;
-    let base_load_heuristic_kw_now = state
+    let base_load_heuristic = state
         .asset_heuristics()
         .await
         .get(crate::ids::ASSET_BASE_LOAD)
-        .map(|h| h.sample_kw(now));
+        .cloned();
+    let base_load_heuristic_kw_now = base_load_heuristic.as_ref().map(|h| h.sample_kw(now));
 
     TickContext {
         inject,
@@ -116,6 +123,7 @@ pub(crate) async fn resolve_tick_context(
         pv_measured_kw_now,
         base_load_measured_kw_now,
         base_load_heuristic_kw_now,
+        base_load_heuristic,
         plan_snap,
         capacity_snap: state.capacity_state().await,
         dispatch_windows: state.dispatch_windows().await,

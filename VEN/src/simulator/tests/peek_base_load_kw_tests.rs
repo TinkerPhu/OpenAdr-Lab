@@ -84,6 +84,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier() {
         None,               // pv_measured_kw
         None,               // base_load_measured_kw
         Some(heuristic_kw), // base_load_heuristic_kw
+        None,               // base_load_heuristic
     );
 
     let bl_entry = sim
@@ -136,6 +137,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
         None, // pv_measured_kw
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
+        None, // base_load_heuristic
     );
 
     let bl_entry = sim
@@ -215,6 +217,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
         None, // pv_measured_kw
         None, // base_load_measured_kw
         None, // base_load_heuristic_kw
+        None, // base_load_heuristic
     );
 
     let bl_entry = sim

@@ -1,10 +1,11 @@
 # Master Plan: Asset Competence Assurance
 
 > **Status:** Phase 0 complete (`asset-competence-audit`, 2026-09-10). Phase 1 (PV) complete
-> (`pv-competence-consolidation`, 2026-09-10/2026-09-11) — see that phase's own section below;
-> unit/integration-tested and locally verified (fmt/clippy/file-size audit green), E2E/resilience
-> and manual UI verification not yet run — see that phase's own section for the exact gap.
-> Phases 2–5 open. This document sequences and motivates the work; it deliberately contains no
+> (`pv-competence-consolidation`, 2026-09-10/2026-09-11). Phase 2 (base load) complete
+> (`base-load-competence-consolidation`, 2026-09-11). Both unit/integration-tested and locally
+> verified (fmt/clippy/file-size audit green); E2E/resilience and manual UI verification not
+> yet run for either — see each phase's own section for the exact gap. Phases 3-5 open. This
+> document sequences and motivates the work; it deliberately contains no
 > implementation-level detail. Each phase's actual work happens as its own openspec change
 > (`openspec new change ...`), proposed and reviewed carefully when that phase's turn comes
 > — not as one bundled change, and not from this document directly.
@@ -155,17 +156,39 @@ skip this step).
 
 **Problem:** `BaseLoad::forecast()` (`VEN/src/assets/base_load.rs`) returns a flat constant
 `baseline_kw` for its whole span, ignoring the learned heuristic
-(`AssetHeuristics::sample_kw`) that both `VEN/src/tasks/sim_tick/context.rs` and
-`VEN/src/controller/milp_planner/inputs.rs` call *directly*, bypassing the asset's own
-method entirely — the same shape as Phase 1, one tier smaller.
+(`AssetHeuristics::sample_kw`) that `VEN/src/controller/milp_planner/inputs.rs` calls
+*directly*, bypassing the asset's own method entirely — the same shape as Phase 1, one tier
+smaller. Confirmed during implementation: `tasks/sim_tick/context.rs`'s
+`base_load_heuristic_kw_now` is a *different*, already-correct mechanism (it flows through
+`BaseLoad`'s own live tick precedence, `natural_base_kw`) — not a violation, and not touched by
+this phase.
 
 **Scope:** upgrade `BaseLoad::forecast()` to accept and use the heuristic as an injected
 parameter (same "infra resolves it, asset interprets it" pattern as Phase 1); retire the
-direct `sample_kw` call sites in favor of calling the asset's own method.
+direct `sample_kw` call site in `build_milp_inputs` in favor of calling the asset's own method.
 
-**Non-goals:** no change to how the heuristic itself is learned/updated.
+**Non-goals:** no change to how the heuristic itself is learned/updated; no change to the live
+tick's already-correct `natural_base_kw` precedence; not touching
+`services::forecast::build_heuristic_forecasts`/`record_forecast_accuracy_samples` or
+`report_intervals.rs` — generic multi-asset infra reading raw heuristics output for
+cross-asset reporting, not base_load-specific duplication of the asset's own forecast formula.
 
 **Risk:** low — forecast-surface only; base load has no live dispatch setpoint to get wrong.
+
+**Status: complete** (`base-load-competence-consolidation`, 2026-09-11). `BaseLoad` gained a
+`heuristic: Option<AssetHeuristics>` field (mirrors `PvInverter.weather_forecast`), populated
+each tick via `TickOverrides.base_load_heuristic`. `BaseLoad::forecast()` now samples it
+per-hour via a new `forecast_kw_at` helper, falling back to the static `baseline_kw_profile`
+when no heuristic exists yet (cold start). `build_milp_inputs`'s direct
+`asset_heuristics.get(ASSET_BASE_LOAD)` read was replaced by a live-`BaseLoad`-derived forecast
+(`simulator::plan_context::resolve_base_load_forecast_kw`, same pattern as Phase 1's
+`resolve_pv_forecast_kw`) — and since base_load was the *only* consumer of the
+`asset_heuristics: HashMap` parameter anywhere in that call chain (confirmed via grep before
+removing it, not assumed), the parameter was dropped entirely from `build_milp_inputs`,
+`run_planner`, `SolveRequest`, and `build_solve_request`, rather than left unused.
+Unit/integration-tested (`cargo test`: 1270 passed), `cargo fmt`/`clippy -D warnings`/
+`scripts/audit_file_sizes.py` all green. No UI files touched. E2E/resilience and manual UI
+verification not run — same accepted, flagged gap as Phase 1.
 
 ## Phase 3 — Battery efficiency-model reconciliation (R-69)
 
