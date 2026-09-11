@@ -25,8 +25,6 @@ pub struct Heater {
     /// `max_kw / 2.0` mid-level fallback.
     #[serde(default = "default_power_stages_sim")]
     pub power_stages: u8,
-    /// Forced-on floor power at temp_min_c (0.0 if none).
-    pub min_power_kw: f64,
     /// Tank hysteresis lower bound. Overridable at runtime via SimInjectState.
     pub temp_min_c: f64,
     /// Tank hysteresis upper bound. Overridable at runtime via SimInjectState.
@@ -79,7 +77,6 @@ impl Heater {
         Self {
             max_kw: cfg.max_kw,
             power_stages: cfg.power_stages.max(1),
-            min_power_kw: 0.0,
             temp_min_c: cfg.temp_min_c,
             temp_max_c: cfg.temp_max_c,
             temp_min_c_profile: cfg.temp_min_c,
@@ -141,31 +138,7 @@ impl Heater {
         } else {
             0.0
         };
-        // Thermostat overrides with hysteresis: once emergency fires at T_min,
-        // keep running until T_min + 3 °C to prevent rapid relay cycling.
-        // actual_power_kw from the previous tick is the implicit thermostat state.
-        // Curtail mode suppresses this: an emergency-curtailment directive means
-        // drifting toward ambient below temp_min_c is the desired response, not a
-        // fault to fight (§2 — no physical floor on this side).
-        const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-        let emergency_active = self.emergency_mode != HeaterEmergencyMode::Curtail
-            && (state.temperature_c <= self.temp_min_c
-                || (state.actual_power_kw >= self.max_kw
-                    && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C));
-        // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true safety
-        // ceiling temp_safety_max_c (§2); temp_min_c-side behaviour is unaffected.
-        let safety_ceiling_c = if self.emergency_mode == HeaterEmergencyMode::Absorb {
-            self.temp_safety_max_c
-        } else {
-            self.temp_max_c
-        };
-        let actual = if state.temperature_c >= safety_ceiling_c {
-            0.0
-        } else if emergency_active {
-            self.max_kw
-        } else {
-            tier
-        };
+        let actual = self.thermostat_forced_kw(state).unwrap_or(tier);
         // Thermal model: Newton cooling + simulated draw
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
         let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
@@ -179,15 +152,39 @@ impl Heater {
         )
     }
 
+    /// The power the thermostat forces regardless of setpoint, if any: off at
+    /// the forced-off ceiling, full power in an emergency. The single rule
+    /// `step_inner`, `capability_inner` and `flexibility_floor_inner` all read.
+    fn thermostat_forced_kw(&self, state: &HeaterState) -> Option<f64> {
+        // Emergency with hysteresis: once it fires at T_min, keep running until
+        // T_min + 3 °C to prevent rapid relay cycling. actual_power_kw from the
+        // previous tick is the implicit thermostat state. Curtail mode suppresses
+        // this: drifting toward ambient below temp_min_c is then the desired
+        // response, not a fault to fight (§2 — no physical floor on this side).
+        const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
+        let emergency_active = self.emergency_mode != HeaterEmergencyMode::Curtail
+            && (state.temperature_c <= self.temp_min_c
+                || (state.actual_power_kw >= self.max_kw
+                    && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C));
+        // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true
+        // safety ceiling temp_safety_max_c (§2).
+        let safety_ceiling_c = if self.emergency_mode == HeaterEmergencyMode::Absorb {
+            self.temp_safety_max_c
+        } else {
+            self.temp_max_c
+        };
+        if state.temperature_c >= safety_ceiling_c {
+            Some(0.0)
+        } else if emergency_active {
+            Some(self.max_kw)
+        } else {
+            None
+        }
+    }
+
     /// Point-in-time feasible power range.
     pub fn capability_inner(&self, state: &HeaterState) -> AssetCapability {
-        let max_import_kw = if state.temperature_c >= self.temp_max_c {
-            0.0 // overheat — forced off
-        } else if state.temperature_c <= self.temp_min_c {
-            self.min_power_kw // too cold — forced on at minimum power
-        } else {
-            self.max_kw
-        };
+        let max_import_kw = self.thermostat_forced_kw(state).unwrap_or(self.max_kw);
         AssetCapability {
             max_export_kw: 0.0,
             max_import_kw,
@@ -204,18 +201,12 @@ impl Heater {
     /// Smallest nonzero achievable commitment. Hardware is a staged relay
     /// (0, p_step, … — see `step_inner`'s quantization), so unlike a
     /// continuously-controllable asset the floor while running is one stage,
-    /// not 0. In the overheat/too-cold branches, `capability_inner` already
-    /// collapses `max_import_kw` to a single value (0 or `min_power_kw`) —
-    /// mirror that here so min == max in those branches too, same as it does
-    /// there.
+    /// not 0. While the thermostat forces a value (off, or full-power
+    /// emergency), min == max == that value, same as `capability_inner`.
     pub fn flexibility_floor_inner(&self, state: &HeaterState) -> AssetFlexibilityFloor {
-        let min_import_kw = if state.temperature_c >= self.temp_max_c {
-            0.0 // overheat — forced off, same as capability_inner's ceiling
-        } else if state.temperature_c <= self.temp_min_c {
-            self.min_power_kw // too cold — forced on, same as capability_inner's ceiling
-        } else {
-            self.p_step_kw()
-        };
+        let min_import_kw = self
+            .thermostat_forced_kw(state)
+            .unwrap_or_else(|| self.p_step_kw());
         AssetFlexibilityFloor {
             min_export_kw: 0.0,
             min_import_kw,
@@ -500,7 +491,6 @@ mod tests {
         Heater {
             max_kw: 2.5,
             power_stages: 2,
-            min_power_kw: 0.0,
             temp_min_c: 20.0,
             temp_max_c: 23.0,
             temp_min_c_profile: 20.0,
@@ -521,7 +511,6 @@ mod tests {
         Heater {
             max_kw: 6.0,
             power_stages: 2,
-            min_power_kw: 0.0,
             temp_min_c: 40.0,
             temp_max_c: 80.0,
             temp_min_c_profile: 40.0,
@@ -569,7 +558,7 @@ mod tests {
         assert_eq!(overheated.power_steps_kw, vec![0.0, 1.25, 2.5]);
 
         let too_cold = heater.capability_inner(&state_at(19.0, 0.0));
-        assert_eq!(too_cold.max_import_kw, heater.min_power_kw);
+        assert_eq!(too_cold.max_import_kw, heater.max_kw);
         assert_eq!(too_cold.power_steps_kw, vec![0.0, 1.25, 2.5]);
     }
 
@@ -586,6 +575,53 @@ mod tests {
         heater.power_stages = 1;
         let cap = heater.capability_inner(&state_at(21.5, 0.0));
         assert_eq!(cap.power_steps_kw, vec![0.0, 2.5]);
+    }
+
+    /// What `step_inner` actually draws when asked for full power right now.
+    fn stepped_kw(heater: &Heater, state: &HeaterState) -> f64 {
+        heater.step_inner(state, heater.max_kw, Duration::zero()).1
+    }
+
+    #[test]
+    fn capability_and_floor_match_step_when_too_cold() {
+        // Emergency thermostat forces full power at temp_min_c; capability must
+        // report that, not a "forced on at 0 kW" ceiling.
+        let heater = default_heater(); // temp_min_c=20, max_kw=2.5
+        let state = state_at(19.0, 0.0);
+        let cap = heater.capability_inner(&state);
+        let floor = heater.flexibility_floor_inner(&state);
+        assert_eq!(cap.max_import_kw, stepped_kw(&heater, &state));
+        assert_eq!(cap.max_import_kw, heater.max_kw);
+        assert_eq!(floor.min_import_kw, heater.max_kw);
+    }
+
+    #[test]
+    fn capability_and_floor_match_step_during_emergency_hysteresis() {
+        // Above temp_min_c but still within the 3 °C hysteresis while running at
+        // full power: step keeps it forced on, so min == max == max_kw.
+        let heater = default_heater();
+        let state = state_at(21.0, heater.max_kw);
+        assert_eq!(
+            heater.capability_inner(&state).max_import_kw,
+            stepped_kw(&heater, &state)
+        );
+        assert_eq!(
+            heater.flexibility_floor_inner(&state).min_import_kw,
+            heater.max_kw
+        );
+    }
+
+    #[test]
+    fn capability_uses_the_safety_ceiling_in_absorb_mode() {
+        // Absorb relaxes the forced-off ceiling from temp_max_c to temp_safety_max_c.
+        let mut heater = hot_water_heater(); // temp_max_c=80, temp_safety_max_c=90
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let state = state_at(85.0, 0.0);
+        assert_eq!(heater.capability_inner(&state).max_import_kw, heater.max_kw);
+        assert_eq!(
+            heater.capability_inner(&state).max_import_kw,
+            stepped_kw(&heater, &state)
+        );
     }
 
     // ── flexibility_floor ─────────────────────────────────────────────────────
@@ -620,12 +656,12 @@ mod tests {
     }
 
     #[test]
-    fn flexibility_floor_matches_min_power_kw_when_too_cold() {
-        let heater = default_heater(); // temp_min_c=20, min_power_kw=0.0
+    fn flexibility_floor_is_full_power_when_too_cold() {
+        let heater = default_heater(); // temp_min_c=20
         let floor = heater.flexibility_floor_inner(&state_at(20.0, 0.0));
         assert_eq!(
-            floor.min_import_kw, heater.min_power_kw,
-            "must match capability_inner's forced-on ceiling, not one stage"
+            floor.min_import_kw, heater.max_kw,
+            "must match capability_inner's forced-on (emergency) ceiling, not one stage"
         );
     }
 

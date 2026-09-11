@@ -12377,3 +12377,17 @@ Existing test changed: `simulate_forward_is_uncurtailed_ignoring_generation_limi
 setpoint `0.0` incidentally, which now means "curtail to 0"; it passes `default_setpoint()` instead
 (intent unchanged: `generation_limit_kw` must not clamp). Why none of the existing tests caught the
 leak is recorded in KEY_LEARNINGS ("A floor clamp can hide a sign bug from every single-asset test").
+
+Follow-up, same day: the new two-sided BDD scenario (live `down_kw` must equal the non-PV assets'
+own import capability) failed on Node2 by exactly +3 kW, the test heater's `max_kw`. That was a
+separate, older inconsistency inside the heater: `capability_inner` said "too cold → forced on at
+`min_power_kw`" (hardcoded `0.0`), and it ignored both the emergency hysteresis and Absorb mode's
+safety ceiling, while `step_inner`'s thermostat actually runs full `max_kw`. Live headroom goes
+through `step`, `/sim` through `capability`, so the two disagreed. All three heater methods now
+read one rule, `Heater::thermostat_forced_kw`. The dead `min_power_kw` field is gone, and the two
+tests that asserted the old too-cold value now expect `max_kw` (matching what the step does).
+The same run also failed `ven_user_request.feature`'s "Interruptible scheduled EV session
+contributes to up_kw". Under the absolute headroom model a non-V2G EV adds nothing to `up_kw`, so
+the scenario only passed when the battery or PV happened to be exportable (it failed at night
+with the battery at `min_soc`). With the user's agreement it now asserts what the EV really adds:
+its own charge ceiling in `down_kw`.

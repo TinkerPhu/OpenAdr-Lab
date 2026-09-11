@@ -247,9 +247,10 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
   ΔT          = net_heating × dt_hours
   ```
 - Thermostat hard overrides (priority over dispatcher setpoint):
-  - `temp_c ≥ temp_max_c` → force off (0.0 kW)
-  - `temp_c ≤ temp_min_c` → force on at `min_power_kw`
-  - Otherwise → clamp setpoint to `[0.0, max_kw]`
+  - `temp_c ≥ temp_max_c` (`temp_safety_max_c` in Absorb mode) → force off (0.0 kW)
+  - `temp_c ≤ temp_min_c` (and, while still running at full power, until
+    `temp_min_c + 3 °C`; not in Curtail mode) → force on at `max_kw`
+  - Otherwise → quantize setpoint to the nearest stage in `[0.0, max_kw]`
 
 ### Hardcoded Constants
 
@@ -291,8 +292,9 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 
 ### Capability (for planner)
 
-- `max_import_kw = 0.0` if `temp_c ≥ temp_max_c` (forced off)
-- `max_import_kw = min_power_kw` if `temp_c ≤ temp_min_c` (forced on)
+- Reads the same thermostat rule as the step (`Heater::thermostat_forced_kw`):
+  forced off → `max_import_kw = 0.0`; forced on (emergency) → `max_import_kw =
+  max_kw` with the floor also at `max_kw`
 - Otherwise: `max_import_kw = max_kw`
 - `max_export_kw = 0.0` always
 
