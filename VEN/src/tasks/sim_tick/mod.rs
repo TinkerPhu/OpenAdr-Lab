@@ -44,6 +44,13 @@ pub(crate) fn spawn_sim_tick(
     notifier: crate::services::notify::Notifier,
     history: Option<Arc<dyn HistoryPort>>,
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
+    // site-capacity-seam-unification / R-72: the site's genuine physical/
+    // interconnection rating (profile.grid.max_import_kw/max_export_kw) --
+    // same values already threaded to the planning task, now also reaching
+    // compute_site_headroom/compute_site_capacity_curve. Bundled as a tuple
+    // (not two params) purely to keep the main.rs call site's line count
+    // down -- no semantic reason to keep them paired beyond that.
+    (grid_max_import_kw, grid_max_export_kw): (f64, f64),
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -88,6 +95,8 @@ pub(crate) fn spawn_sim_tick(
                 notifier.clone(),
                 history.clone(),
                 comms_loss_config,
+                grid_max_import_kw,
+                grid_max_export_kw,
             )
             .await;
 

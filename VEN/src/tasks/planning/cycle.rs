@@ -26,9 +26,8 @@ use crate::tasks::progress_ticker::spawn_progress_ticker;
 
 /// Run exactly one plan cycle: gather live state, build the solve request
 /// (including R-50's weather-sourced PV forecast, resolved inside
-/// `services::planning::build_solve_request`), solve, adopt if warranted,
-/// and publish post-cycle outputs. No return value — callers only need the
-/// side effects (state updates, notifications, forecasts).
+/// `services::planning::build_solve_request`), solve, adopt if warranted, and
+/// publish post-cycle outputs. No return value — callers only need the side effects.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_plan_cycle(
     state: &AppState,
@@ -205,6 +204,7 @@ pub(super) async fn run_plan_cycle(
         weather,
         weather_pv_params,
         history,
+        (grid_max_import_kw, grid_max_export_kw),
     )
     .await;
 

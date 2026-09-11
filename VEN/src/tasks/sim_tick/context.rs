@@ -50,6 +50,13 @@ pub(crate) struct TickContext {
     /// `forecast()` can sample it at whatever future timestamps it needs,
     /// rather than a site-level caller pre-sampling it.
     pub base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+    /// site-capacity-seam-unification / R-72: the site's genuine physical/
+    /// interconnection rating (`profile.grid.max_import_kw`/`max_export_kw`),
+    /// resolved once at startup and threaded down alongside every other
+    /// tick input — same value the planning path already receives, now also
+    /// reaching `compute_site_headroom`/`compute_site_capacity_curve`.
+    pub grid_max_import_kw: f64,
+    pub grid_max_export_kw: f64,
     pub plan_snap: Option<crate::entities::plan::Plan>,
     pub capacity_snap: crate::entities::capacity::OadrCapacityState,
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
@@ -80,6 +87,8 @@ pub(crate) async fn resolve_tick_context(
     base_load_measurement: &dyn MeasurementPort,
     base_load_measurement_enabled: bool,
     comms_loss_config: Option<CommsLossConfig>,
+    grid_max_import_kw: f64,
+    grid_max_export_kw: f64,
 ) -> TickContext {
     let inject = state.inject_state().await;
     let pv_clear = inject.pv_irradiance.is_some();
@@ -124,6 +133,8 @@ pub(crate) async fn resolve_tick_context(
         base_load_measured_kw_now,
         base_load_heuristic_kw_now,
         base_load_heuristic,
+        grid_max_import_kw,
+        grid_max_export_kw,
         plan_snap,
         capacity_snap: state.capacity_state().await,
         dispatch_windows: state.dispatch_windows().await,
@@ -159,6 +170,8 @@ mod tests {
             &crate::controller::NoopMeasurementPort,
             false,
             None,
+            100.0,
+            100.0,
         )
         .await
     }
@@ -187,6 +200,8 @@ mod tests {
             &crate::controller::NoopMeasurementPort,
             false,
             Some(cfg),
+            100.0,
+            100.0,
         )
         .await;
         let cl = ctx
@@ -222,6 +237,8 @@ mod tests {
             &crate::controller::NoopMeasurementPort,
             false,
             Some(cfg),
+            100.0,
+            100.0,
         )
         .await;
         let cl = ctx

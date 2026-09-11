@@ -28,6 +28,10 @@ pub async fn finish_plan_cycle(
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
     history: Option<Arc<dyn HistoryPort>>,
+    // site-capacity-seam-unification: bundled as a tuple purely to keep
+    // call sites' line count down -- no semantic reason to keep them paired
+    // beyond that.
+    (grid_max_import_kw, grid_max_export_kw): (f64, f64),
 ) {
     crate::services::notify::notify_new_plan_warnings(
         notifier,
@@ -43,7 +47,12 @@ pub async fn finish_plan_cycle(
     // below awaits on state/weather).
     let site_headroom = {
         let guard = sim.lock().await;
-        crate::controller::site_headroom::compute_site_headroom(&guard, wall_now)
+        crate::controller::site_headroom::compute_site_headroom(
+            &guard,
+            wall_now,
+            grid_max_import_kw,
+            grid_max_export_kw,
+        )
     };
     // Fetched once and shared: both publish_post_cycle_state and the forecast-accuracy
     // capture below need it, and it's an RwLock read + full HashMap clone.

@@ -25,12 +25,16 @@ pub(crate) fn compute_tick_forecasts(
     sim: &SimState,
     plan_snap: Option<&Plan>,
     now: DateTime<Utc>,
+    grid_max_import_kw: f64,
+    grid_max_export_kw: f64,
 ) -> (
     Vec<SiteFlexibilityForecastSlot>,
     (CapacityCurve, CapacityCurve),
 ) {
     let forecast = plan_snap
-        .map(|plan| compute_site_headroom_forecast(sim, plan, now))
+        .map(|plan| {
+            compute_site_headroom_forecast(sim, plan, now, grid_max_import_kw, grid_max_export_kw)
+        })
         .unwrap_or_default();
 
     // t2_max sweeps to the plan's own remaining horizon -- falls back to 48h
@@ -41,10 +45,23 @@ pub(crate) fn compute_tick_forecasts(
         .map(|plan| (plan.horizon.end_time - now).max(Duration::zero()))
         .unwrap_or_else(|| Duration::hours(48));
 
-    let snapshot = sim.to_sim_snapshot();
     let curves = (
-        compute_site_capacity_curve(CommitmentDirection::Import, now, t2_max, sim, &snapshot),
-        compute_site_capacity_curve(CommitmentDirection::Export, now, t2_max, sim, &snapshot),
+        compute_site_capacity_curve(
+            CommitmentDirection::Import,
+            now,
+            t2_max,
+            sim,
+            grid_max_import_kw,
+            grid_max_export_kw,
+        ),
+        compute_site_capacity_curve(
+            CommitmentDirection::Export,
+            now,
+            t2_max,
+            sim,
+            grid_max_import_kw,
+            grid_max_export_kw,
+        ),
     );
     (forecast, curves)
 }

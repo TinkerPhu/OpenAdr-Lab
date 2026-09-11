@@ -36,6 +36,8 @@ pub(crate) async fn tick_once(
     notifier: crate::services::notify::Notifier,
     history: Option<Arc<dyn HistoryPort>>,
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
+    grid_max_import_kw: f64,
+    grid_max_export_kw: f64,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -51,6 +53,8 @@ pub(crate) async fn tick_once(
         base_load_measurement.as_ref(),
         base_load_measurement_enabled,
         comms_loss_config,
+        grid_max_import_kw,
+        grid_max_export_kw,
     )
     .await;
 

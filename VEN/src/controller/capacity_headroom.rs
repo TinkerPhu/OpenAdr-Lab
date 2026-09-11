@@ -41,30 +41,34 @@
 //! `capability()` use everywhere else), not the unsigned magnitude the
 //! deleted `capacity_forecast.rs` originally used. The unsigned convention
 //! is external — it applies only where an actual external consumer needs it
-//! (OpenADR's `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER`
-//! report payloads are direction-tagged by name and want a magnitude — see
-//! `report_intervals.rs::build_capacity_forecast_intervals`); the UI
-//! (`CapacityForecastChart.tsx`) needed no such conversion, confirmed by
-//! reading its formatters and energy calc rather than assumed.
-//! `SiteFlexibilityForecastSlot::up_kw`/`down_kw`, by contrast, stay unsigned
-//! magnitudes (two separate always-non-negative fields by design, not one
-//! bidirectional field) — see `magnitude_kw`'s doc comment for the full
-//! reasoning on why these two types ended up with different conventions.
+//! (OpenADR's `STORAGE_MAX_CHARGE_POWER`/`STORAGE_MAX_DISCHARGE_POWER`/
+//! `*_RESERVATION_CAPACITY` report payloads are direction-tagged by name and
+//! want a magnitude — see `report_intervals.rs::build_capacity_forecast_intervals`
+//! and `reporter.rs`'s `IMPORT`/`EXPORT_RESERVATION_CAPACITY` arms); the UI
+//! (`CapacityForecastChart.tsx`, `SiteHeadroomChart.tsx`) needs no such
+//! conversion, confirmed by reading its formatters and energy calc rather
+//! than assumed. **`SiteFlexibilityEnvelope`/`SiteFlexibilityForecastSlot`'s
+//! `up_kw`/`down_kw` are signed too now** (`site-capacity-seam-unification`)
+//! — they're literally this module's own `t2 = 0` point / `t1`-sweep, not a
+//! separately-converted magnitude (see those structs' own doc comments in
+//! `entities/plan.rs`).
 //!
 //! The Controller's Site Headroom chart (`SiteHeadroomChart.tsx`) overlays
-//! both — the headroom band and the capacity curves — in one view. They
-//! answer different questions (per-instant snapshot along the plan's own
-//! trajectory vs. a single continuous full-effort commitment starting now),
-//! so the capacity curve legitimately sitting inside the band, or an Export
-//! curve swinging positive past the band's usual scale (this module's own
-//! `merge_events` doc, below), is expected — not a wiring bug.
+//! both — the headroom band and the capacity curves — in one view, and now
+//! touch at exactly `t = now` for both directions (they're the same
+//! function's `t2 = 0` point, not two independent computations that happen
+//! to agree). For `t > now` they still legitimately diverge — different
+//! questions (per-instant snapshot along the plan's own trajectory vs. a
+//! single continuous full-effort commitment starting now) — so the capacity
+//! curve sitting inside the band there, or an Export curve swinging positive
+//! past the band's usual scale (this module's own `merge_events` doc,
+//! below), is still expected past the seam.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
 
 use crate::assets::asset_max_power_series;
-use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity_curve::{
     CapacityCurve, CapacityCurveStep, CommitmentDirection, LimitTier,
 };
@@ -91,7 +95,8 @@ pub fn compute_site_capacity_curve(
     now: DateTime<Utc>,
     t2_max: Duration,
     sim: &SimState,
-    snapshot: &SimSnapshot,
+    phys_imp_kw: f64,
+    phys_exp_kw: f64,
 ) -> CapacityCurve {
     let mut events: Vec<Event> = Vec::new();
 
@@ -102,7 +107,6 @@ pub fn compute_site_capacity_curve(
         // authoritative for this the same way it is for every other asset
         // kind (see this module's own doc comment, revised).
         if cfg.asset_type_str() == "base_load" {
-            events.extend(base_load_capacity_events(&entry.state));
             continue;
         }
         let series = asset_max_power_series(
@@ -115,63 +119,22 @@ pub fn compute_site_capacity_curve(
         );
         events.extend(series_to_events(&series));
     }
-
-    let import_limit_kw = snapshot.grid.import_limit_kw.max(0.0);
-    let export_limit_kw = (-snapshot.grid.export_limit_kw).max(0.0);
+    events.extend(base_load_capacity_events(sim, now, t2_max));
 
     CapacityCurve {
         direction,
         start: now,
-        steps: merge_events(events, direction, import_limit_kw, export_limit_kw),
+        steps: merge_events(events, direction, phys_imp_kw, phys_exp_kw),
     }
-}
-
-/// Converts one `Asset`-convention signed power reading (positive = import,
-/// negative = export — the convention `TrajectoryPoint`/`AssetCapability`/
-/// `max_effort_setpoint` all use) into `SiteFlexibilityForecastSlot`'s
-/// unsigned achievable-power *magnitude* convention — `up_kw`/`down_kw` are
-/// two separate always-non-negative fields by design (matching the
-/// pre-existing `SiteFlexibilityEnvelope` convention), not a single
-/// bidirectional signed field, so they still need this conversion.
-///
-/// `CapacityCurve`/`CapacityCurveStep::power_kw`, by contrast, is now signed
-/// (matching the internal `Asset`-trait convention throughout) — the
-/// external, unsigned-magnitude convention there applies only at the actual
-/// OpenADR reporting boundary (`report_intervals.rs::build_capacity_forecast_intervals`),
-/// per this session's design discussion: `CapacityCurve`'s two consumers
-/// (the OpenADR reporter and `CapacityForecastChart.tsx`) turned out to need
-/// this conversion at genuinely different points — the reporter needs it
-/// because OpenADR's own payload types are direction-tagged by name and want
-/// a magnitude; the UI chart needs no conversion at all (its formatters and
-/// energy calc already handle negative values correctly, confirmed by
-/// reading the code rather than assumed).
-///
-/// Asserts the sign actually matches `direction` rather than silently
-/// trusting it, so a genuine convention violation panics in dev/test builds
-/// instead of producing a silently wrong number — this assertion is what's
-/// left of an earlier version of this function that also converted
-/// `CapacityCurve`'s own producers, after a failing test caught exactly this
-/// class of bug once already.
-///
-/// `pub(crate)`: also reused by `controller::site_headroom::compute_site_headroom`,
-/// the `t1 = now`-only sibling of `compute_site_headroom_forecast` below.
-pub(crate) fn magnitude_kw(power_kw: f64, direction: CommitmentDirection) -> f64 {
-    debug_assert!(
-        match direction {
-            CommitmentDirection::Import => power_kw >= -1e-9,
-            CommitmentDirection::Export => power_kw <= 1e-9,
-        },
-        "power_kw {power_kw} violates {direction:?}'s signed-power convention"
-    );
-    power_kw.abs()
 }
 
 /// Converts a dense `asset_max_power_series` output into sparse delta events
 /// (design.md D3: dense compute, sparse output) — one event per point where
 /// power actually changes, matching `CapacityCurveStep`'s existing
 /// "ordered by elapsed_s ascending" breakpoint contract. Uses the series'
-/// own raw signed `power_kw` directly — `CapacityCurve` is signed now (see
-/// `magnitude_kw`'s doc comment), so no conversion happens here.
+/// own raw signed `power_kw` directly — `CapacityCurve` is signed (positive =
+/// import, negative = export, the same convention `Asset::max_effort_setpoint`
+/// uses), so no conversion happens here.
 fn series_to_events(series: &[(i64, f64, f64)]) -> Vec<Event> {
     let mut events = Vec::new();
     let mut prev_power = 0.0_f64;
@@ -190,34 +153,58 @@ fn series_to_events(series: &[(i64, f64, f64)]) -> Vec<Event> {
 /// documented here rather than silently patched): base load has
 /// `PowerAdjustability::None` — it cannot be committed to any extreme at
 /// all, so `max_effort_setpoint`/`asset_max_power_series` are the wrong
-/// question to ask it. Its current draw is a constant NET-GRID-POWER
-/// offset instead, exactly as `capacity_forecast.rs`'s own module doc
-/// explained.
+/// question to ask it. Its contribution is a NET-GRID-POWER offset instead,
+/// exactly as `capacity_forecast.rs`'s own module doc explained — but that
+/// offset is time-varying, not a flat snapshot: `site-capacity-seam-
+/// unification` swapped the old single `actual_power_kw` read (held constant
+/// across the whole `t2_max` sweep — a known-crude approximation once
+/// `BaseLoad::forecast_kw_at` existed) for `BaseLoad`'s own learned-heuristic
+/// forecast (`base-load-competence-consolidation`), sampled hourly — the
+/// heuristic's own bucket resolution (weekday × hour, `AssetHeuristics::
+/// sample_kw`), so finer sampling would only repeat the same value. `None`
+/// live `"base_load"` asset → no contribution, matching every other producer
+/// here's "absent asset contributes nothing" convention.
 ///
 /// **Direction-independent**, unlike the deleted `capacity_forecast.rs`'s
 /// own `base_load_events` (which negated for Export): base load's physical
 /// contribution to net grid power doesn't care what direction the SITE is
-/// committing to — it always draws `+actual_power_kw` (positive, the
-/// universal signed convention every other producer here now also uses
-/// directly). Summed together with an exporting asset's own negative
-/// contribution, this correctly and automatically produces a *smaller*
-/// magnitude net export (the old behavior) — and, if base load's draw
-/// exceeds what's exportable, a genuinely positive (net-importing) result
-/// instead of the old code's artificial floor at `0.0`. That floor was an
-/// artifact of the old unsigned-magnitude representation (a magnitude can't
-/// go below zero by definition), not a real physical constraint — the site
-/// genuinely can still be net-importing even while every exportable asset is
-/// maxed out, and the old code was silently discarding that fact. (Base load
-/// isn't the only contributor that can do this — see `merge_events`'s doc
-/// comment for `ShiftableLoadAsset`'s own version of the same effect.)
-fn base_load_capacity_events(state: &crate::assets::AssetState) -> Vec<Event> {
-    let crate::assets::AssetState::BaseLoad(s) = state else {
+/// committing to — it always draws `+forecast_kw` (positive, the universal
+/// signed convention every other producer here now also uses directly).
+/// Summed together with an exporting asset's own negative contribution, this
+/// correctly and automatically produces a *smaller* magnitude net export
+/// (the old behavior) — and, if base load's draw exceeds what's exportable,
+/// a genuinely positive (net-importing) result instead of the old code's
+/// artificial floor at `0.0`. That floor was an artifact of the old
+/// unsigned-magnitude representation (a magnitude can't go below zero by
+/// definition), not a real physical constraint — the site genuinely can
+/// still be net-importing even while every exportable asset is maxed out,
+/// and the old code was silently discarding that fact. (Base load isn't the
+/// only contributor that can do this — see `merge_events`'s doc comment for
+/// `ShiftableLoadAsset`'s own version of the same effect.)
+fn base_load_capacity_events(sim: &SimState, t1: DateTime<Utc>, t2_max: Duration) -> Vec<Event> {
+    let Some((_, cfg)) = sim.find_asset(crate::ids::ASSET_BASE_LOAD) else {
         return Vec::new();
     };
-    if s.actual_power_kw <= 0.0 {
+    let Some(bl) = cfg.as_any().downcast_ref::<crate::assets::BaseLoad>() else {
         return Vec::new();
+    };
+    let t2_max_s = t2_max.num_seconds().max(0);
+    let mut events = Vec::new();
+    let mut prev_kw = 0.0_f64;
+    let mut elapsed_s = 0_i64;
+    loop {
+        let forecast_kw = bl.forecast_kw_at(t1 + Duration::seconds(elapsed_s));
+        let delta = forecast_kw - prev_kw;
+        if delta != 0.0 {
+            events.push((elapsed_s, delta));
+        }
+        prev_kw = forecast_kw;
+        if elapsed_s >= t2_max_s {
+            break;
+        }
+        elapsed_s = (elapsed_s + 3600).min(t2_max_s);
     }
-    vec![(0, s.actual_power_kw)]
+    events
 }
 
 /// Sweep-line merge of piecewise-constant contributions: sum deltas at each
@@ -229,26 +216,30 @@ fn base_load_capacity_events(state: &crate::assets::AssetState) -> Vec<Event> {
 /// The clamp shape is direction-dependent, not the old code's symmetric
 /// `[0, cap_kw]`: Import's floor at `0.0` is defensive/redundant (every
 /// Import-direction contributor is already `>= 0` by construction), bounded
-/// above by the grid's own hardware/contractual import limit
-/// (`import_limit_kw`). Export's floor is `-export_limit_kw` (the grid's
-/// export hardware limit) — but Export ALSO needs an upper bound at
-/// `import_limit_kw`, not left unbounded: a sustained Export commitment's
-/// net total can legitimately swing positive (net importing) when
-/// non-exportable contributions exceed what's exportable — not just base
-/// load's constant draw (as an earlier version of this comment claimed), but
-/// also a non-interruptible `ShiftableLoadAsset` whose deadline forces it to
-/// keep drawing `power_kw` once started, regardless of the site's Export
-/// commitment (found via review: `ShiftableLoadAsset::max_effort_schedule`'s
-/// Export branch places the run as late as possible but still reports its
-/// own positive draw once running — it has no way to actually export). Since
-/// the site's real grid hardware still can't exceed `import_limit_kw` even
-/// while "trying" to export, that swing must be bounded by the same limit
-/// Import direction itself uses, not left to grow arbitrarily.
+/// above by `phys_imp_kw` — the site's genuine physical/interconnection
+/// import rating (`profile.grid.max_import_kw`), not any VTN-imposed
+/// directive (R-72: `site-capacity-seam-unification` replaced the old
+/// `snapshot.grid.import_limit_kw`/`export_limit_kw` — the VTN's *current,
+/// revocable* capacity-limit event — with this genuine physical ceiling; a
+/// VTN-restricted tier layered on top is deferred to a future change).
+/// Export's floor is `-phys_exp_kw` (the site's physical export rating) —
+/// but Export ALSO needs an upper bound at `phys_imp_kw`, not left unbounded:
+/// a sustained Export commitment's net total can legitimately swing positive
+/// (net importing) when non-exportable contributions exceed what's
+/// exportable — not just base load's draw, but also a non-interruptible
+/// `ShiftableLoadAsset` whose deadline forces it to keep drawing `power_kw`
+/// once started, regardless of the site's Export commitment (found via
+/// review: `ShiftableLoadAsset::max_effort_schedule`'s Export branch places
+/// the run as late as possible but still reports its own positive draw once
+/// running — it has no way to actually export). Since the site's real grid
+/// hardware still can't exceed `phys_imp_kw` even while "trying" to export,
+/// that swing must be bounded by the same limit Import direction itself
+/// uses, not left to grow arbitrarily.
 fn merge_events(
     events: Vec<Event>,
     direction: CommitmentDirection,
-    import_limit_kw: f64,
-    export_limit_kw: f64,
+    phys_imp_kw: f64,
+    phys_exp_kw: f64,
 ) -> Vec<CapacityCurveStep> {
     let mut by_elapsed: BTreeMap<i64, f64> = BTreeMap::new();
     by_elapsed.insert(0, 0.0);
@@ -261,8 +252,8 @@ fn merge_events(
         .map(|(elapsed_s, delta_kw)| {
             running += delta_kw;
             let power_kw = match direction {
-                CommitmentDirection::Import => running.clamp(0.0, import_limit_kw),
-                CommitmentDirection::Export => running.clamp(-export_limit_kw, import_limit_kw),
+                CommitmentDirection::Import => running.clamp(0.0, phys_imp_kw),
+                CommitmentDirection::Export => running.clamp(-phys_exp_kw, phys_imp_kw),
             };
             CapacityCurveStep {
                 elapsed_s,
@@ -293,23 +284,28 @@ pub fn compute_site_headroom_forecast(
     sim: &SimState,
     plan: &Plan,
     now: DateTime<Utc>,
+    phys_imp_kw: f64,
+    phys_exp_kw: f64,
 ) -> Vec<SiteFlexibilityForecastSlot> {
     let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
     if future_slots.is_empty() {
         return Vec::new();
     }
 
+    // Signed net site power per slot (CapacityCurve's convention: positive =
+    // import, negative = export) — up_kw holds the Export-direction total,
+    // down_kw the Import-direction total, matching `compute_site_capacity_curve`'s
+    // own per-direction shape (site-capacity-seam-unification).
     let mut up_kw = vec![0.0_f64; future_slots.len()];
     let mut down_kw = vec![0.0_f64; future_slots.len()];
 
     for (entry, cfg) in sim.iter_assets() {
         let asset_kind = cfg.asset_type_str();
-        // Base load has zero controllable degrees of freedom
-        // (`PowerAdjustability::None`) -- it contributes no *flexibility* of
-        // either kind. Its live draw is a real number, but "how much MORE
-        // could this asset do" is always zero for it, unlike
-        // `max_effort_setpoint`'s Import answer (its current draw) would
-        // naively suggest.
+        // base-load-competence-consolidation: base load's forecasted draw is
+        // handled once, below (site-capacity-seam-unification), via
+        // `resolve_base_load_forecast_kw` — the same BaseLoad-authoritative
+        // per-slot forecast `build_milp_inputs` uses, not a second
+        // hand-rolled read of this asset's own state here.
         if asset_kind == "base_load" {
             continue;
         }
@@ -332,9 +328,10 @@ pub fn compute_site_headroom_forecast(
                 // here would flatten PV back to a constant. `point.power_kw`
                 // (built by PvInverter::simulate_forward directly from this
                 // point's own timestamp) is already the correct time-varying
-                // Physical/Export answer -- use it directly. Import stays the
-                // well-established constant 0.0, no call needed.
-                up_kw[i] += magnitude_kw(point.power_kw, CommitmentDirection::Export);
+                // Physical/Export answer -- use it directly (already signed
+                // negative when generating). Import stays the well-established
+                // constant 0.0, no call needed.
+                up_kw[i] += point.power_kw;
                 continue;
             }
             let export_kw = cfg.max_effort_setpoint(
@@ -347,18 +344,45 @@ pub fn compute_site_headroom_forecast(
                 CommitmentDirection::Import,
                 LimitTier::Physical,
             );
-            up_kw[i] += magnitude_kw(export_kw, CommitmentDirection::Export);
-            down_kw[i] += magnitude_kw(import_kw, CommitmentDirection::Import);
+            up_kw[i] += export_kw;
+            down_kw[i] += import_kw;
         }
     }
 
+    // base-load-competence-consolidation: base load's own forecasted draw,
+    // direction-independent (matches `base_load_capacity_events`'s reasoning
+    // in `compute_site_capacity_curve` — always `+forecast_kw`, added to
+    // both directions' signed totals the same way).
+    let cum_s: Vec<i64> = future_slots
+        .iter()
+        .map(|s| (s.start - now).num_seconds())
+        .collect();
+    if let Some(base_load_kw) = crate::simulator::plan_context::resolve_base_load_forecast_kw(
+        sim,
+        future_slots.len(),
+        &cum_s,
+        now,
+    ) {
+        for (i, &kw) in base_load_kw.iter().enumerate() {
+            up_kw[i] += kw;
+            down_kw[i] += kw;
+        }
+    }
+
+    // Physical/safety site clamp (R-72, site-capacity-seam-unification) --
+    // same shape `merge_events` applies to the capacity curve, not
+    // reimplemented independently: Import floors at 0.0 (defensive,
+    // redundant -- every Import contributor is already >= 0) and ceilings at
+    // phys_imp_kw; Export floors at -phys_exp_kw and ceilings at phys_imp_kw
+    // (a sustained-Export slot can legitimately swing net-importing, same
+    // reasoning as `merge_events`'s own doc comment).
     future_slots
         .iter()
         .enumerate()
         .map(|(i, slot)| SiteFlexibilityForecastSlot {
             ts: slot.start,
-            up_kw: up_kw[i],
-            down_kw: down_kw[i],
+            up_kw: up_kw[i].clamp(-phys_exp_kw, phys_imp_kw),
+            down_kw: down_kw[i].clamp(0.0, phys_imp_kw),
         })
         .collect()
 }
@@ -564,13 +588,13 @@ mod tests {
             })],
             now,
         );
-        let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
             CommitmentDirection::Export,
             now,
             Duration::hours(2),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert_eq!(
             curve.steps,
@@ -597,20 +621,21 @@ mod tests {
             })],
             now,
         );
-        let snapshot = sim.to_sim_snapshot();
         let import_curve = compute_site_capacity_curve(
             CommitmentDirection::Import,
             now,
             Duration::hours(1),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         let export_curve = compute_site_capacity_curve(
             CommitmentDirection::Export,
             now,
             Duration::hours(1),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert_eq!(import_curve.steps[0].power_kw, 0.5);
         // Deliberate behavior refinement (base_load_capacity_events' doc
@@ -650,13 +675,13 @@ mod tests {
         };
         s.actual_power_kw = -4.0;
 
-        let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
             CommitmentDirection::Import,
             now,
             Duration::hours(1),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert!(
             curve.steps.iter().all(|s| s.power_kw == 0.0),
@@ -679,13 +704,13 @@ mod tests {
             })],
             now,
         );
-        let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
             CommitmentDirection::Export,
             now,
             Duration::hours(1),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert!(
             curve.steps.iter().all(|s| s.power_kw == 0.0),
@@ -729,13 +754,13 @@ mod tests {
                 },
             ]);
         }
-        let snapshot = sim.to_sim_snapshot();
         let curve = compute_site_capacity_curve(
             CommitmentDirection::Export,
             now,
             Duration::hours(2),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert_eq!(curve.steps[0].power_kw, -4.0); // Export is signed negative now.
         assert_eq!(
@@ -764,7 +789,7 @@ mod tests {
             now,
         );
         let plan = make_plan(900, 2, now);
-        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
         assert!(
             forecast.iter().all(|s| s.down_kw == 0.0),
             "a fully-charged battery must report 0.0 absolute import headroom at every slot"
@@ -797,7 +822,7 @@ mod tests {
         });
         sim.add_asset(entry, config).unwrap();
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
         assert!(
             forecast[0].down_kw >= 2.0,
             "an eligible-to-start shiftable load must contribute its power_kw \
@@ -842,7 +867,7 @@ mod tests {
         }
         let plan = make_plan(900, 4, now); // 4 x 15-min slots
 
-        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
 
         assert!(
             forecast[0].down_kw > 0.0,
@@ -875,9 +900,11 @@ mod tests {
             now,
         );
         let plan = make_plan(12 * 3600, 2, now); // noon slot, then midnight slot
-        let forecast = compute_site_headroom_forecast(&sim, &plan, now);
+        let forecast = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
+        // up_kw is signed now (site-capacity-seam-unification): negative
+        // while genuinely generating/exportable, not positive.
         assert!(
-            forecast[0].up_kw > 0.0,
+            forecast[0].up_kw < 0.0,
             "noon slot must show real PV headroom, got {}",
             forecast[0].up_kw
         );
@@ -918,7 +945,6 @@ mod tests {
             latest_end: now + Duration::minutes(30),
         });
         sim.add_asset(entry, config).unwrap();
-        let snapshot = sim.to_sim_snapshot();
 
         // Export placement: start as late as possible = latest_end - duration
         // = now+20min, running through now+30min.
@@ -927,7 +953,8 @@ mod tests {
             now,
             Duration::minutes(30),
             &sim,
-            &snapshot,
+            1_000.0,
+            1_000.0,
         );
         assert!(
             curve.steps.iter().any(|s| s.power_kw > 0.0),
@@ -935,6 +962,100 @@ mod tests {
              Export commitment must produce a genuinely positive (net-importing) \
              step, not silently 0.0 or negative, got {:?}",
             curve.steps
+        );
+    }
+
+    #[test]
+    fn base_load_contribution_varies_hourly_not_held_flat_across_the_sweep() {
+        // site-capacity-seam-unification: base_load_capacity_events used to
+        // read a single actual_power_kw snapshot and hold it constant across
+        // the whole t2_max sweep. With a learned heuristic now driving it
+        // (base-load-competence-consolidation), two hours 12h apart with very
+        // different learned values must produce genuinely different steps.
+        use crate::entities::design_vocabulary::AssetHeuristics;
+        let now = Utc.with_ymd_and_hms(2026, 9, 6, 0, 0, 0).unwrap(); // midnight
+        let mut sim = SimState::from_params(
+            &[AssetParams::BaseLoad(BaseLoadParams {
+                baseline_kw: 0.3,
+                ..Default::default()
+            })],
+            now,
+        );
+        {
+            let (_, cfg) = sim.find_asset_mut(crate::ids::ASSET_BASE_LOAD).unwrap();
+            let bl = cfg
+                .as_any_mut()
+                .downcast_mut::<crate::assets::BaseLoad>()
+                .unwrap();
+            let mut daytime_profile_kw: [Vec<f64>; 7] = Default::default();
+            for day in daytime_profile_kw.iter_mut() {
+                *day = vec![0.2; 24]; // low overnight
+                day[12] = 3.0; // spike at noon
+            }
+            bl.heuristic = Some(AssetHeuristics {
+                asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
+                daytime_profile_kw,
+                seasonal_factor: 1.0,
+                last_updated: None,
+                recent_mean_abs_error_kw: None,
+            });
+        }
+        let curve = compute_site_capacity_curve(
+            CommitmentDirection::Import,
+            now,
+            Duration::hours(13),
+            &sim,
+            1_000.0,
+            1_000.0,
+        );
+        let midnight_kw = curve.steps[0].power_kw;
+        let noon_kw = curve
+            .steps
+            .iter()
+            .find(|s| s.elapsed_s == 12 * 3600)
+            .expect("a breakpoint at elapsed_s=12h")
+            .power_kw;
+        assert!(
+            (midnight_kw - 0.2).abs() < 1e-6,
+            "midnight step should be 0.2, got {midnight_kw}"
+        );
+        assert!(
+            (noon_kw - 3.0).abs() < 1e-6,
+            "noon step should be 3.0, got {noon_kw}"
+        );
+    }
+
+    #[test]
+    fn physical_clamp_bounds_the_capacity_curve_below_summed_asset_capability() {
+        // R-72 / site-capacity-seam-unification: phys_imp_kw/phys_exp_kw are
+        // the site's genuine physical/interconnection rating, independent of
+        // any VTN directive -- a tighter value than the summed asset
+        // capability must still win.
+        let now = t0();
+        let sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: ASSET_BATTERY.to_string(),
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+                max_discharge_kw: 5.0,
+                initial_soc: 0.5,
+                round_trip_efficiency: 1.0,
+                min_soc: 0.1,
+                c_terminal_eur_kwh: Some(0.0),
+            })],
+            now,
+        );
+        let curve = compute_site_capacity_curve(
+            CommitmentDirection::Import,
+            now,
+            Duration::zero(),
+            &sim,
+            2.0,
+            1_000.0,
+        );
+        assert_eq!(
+            curve.steps[0].power_kw, 2.0,
+            "import curve must be clamped to phys_imp_kw=2.0, not the battery's own 5.0 kW ceiling"
         );
     }
 }
