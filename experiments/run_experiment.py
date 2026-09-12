@@ -256,12 +256,15 @@ def scenario_price_at(price_action, now):
 
 
 def tariff_matches(tariffs, now, price_eur_kwh):
-    """Does the VEN's resolved tariff (GET /tariffs) covering `now` equal the price?"""
-    for s in tariffs:
-        if _parse_iso(s["interval_start"]) <= now < _parse_iso(s["interval_end"]):
-            v = s.get("import_tariff_eur_kwh")
-            return v is not None and abs(v - price_eur_kwh) < 1e-6
-    return False
+    """Does the VEN's resolved tariff (GET /tariffs) in force at `now` equal the price?
+    /tariffs exposes each resolved segment's start only, read forward-fill like the VEN
+    UI does: the last snapshot starting at or before `now`."""
+    current = None
+    for s in sorted(tariffs, key=lambda r: _parse_iso(r["interval_start"])):
+        if _parse_iso(s["interval_start"]) > now:
+            break
+        current = s.get("import_tariff_eur_kwh")
+    return current is not None and abs(current - price_eur_kwh) < 1e-6
 
 
 def plan_record_if_new(plan, last_id):
@@ -1433,9 +1436,10 @@ def _self_check_gb46_harness():
     at = datetime(2026, 9, 12, 12, 12, tzinfo=timezone.utc)
     assert scenario_price_at(price, at) == 0.45
     assert scenario_price_at(price, datetime(2026, 9, 12, 12, 31, tzinfo=timezone.utc)) is None
-    tariffs = [
-        {"interval_start": "2026-09-12T12:00:00Z", "interval_end": "2026-09-12T12:10:00Z", "import_tariff_eur_kwh": 0.10},
-        {"interval_start": "2026-09-12T12:10:00Z", "interval_end": "2026-09-12T12:20:00Z", "import_tariff_eur_kwh": 0.45},
+    tariffs = [  # /tariffs shape: segment starts only
+        {"interval_start": "2026-09-12T12:10:00Z", "import_tariff_eur_kwh": 0.45},
+        {"interval_start": "2026-09-12T12:00:00Z", "import_tariff_eur_kwh": 0.10},
+        {"interval_start": "2026-09-12T12:20:00Z", "import_tariff_eur_kwh": 0.10},
     ]
     assert tariff_matches(tariffs, at, 0.45) is True
     assert tariff_matches(tariffs, at, 0.09) is False
