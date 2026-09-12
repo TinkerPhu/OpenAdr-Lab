@@ -287,6 +287,7 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
         let state = AssetState::Heater(HeaterState {
             temperature_c: temp_c,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
         refresh_from_asset(h, &heater, state);
     }
@@ -498,6 +499,7 @@ fn build_asset_contexts(
                 let state = AssetState::Heater(HeaterState {
                     temperature_c: temp_c,
                     actual_power_kw,
+                    emergency_latched: false,
                 });
                 let ac = Heater::from_params(cfg);
                 let c_terminal = cfg

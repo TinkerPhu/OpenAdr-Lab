@@ -44,7 +44,7 @@ const baseSim: SimSnapshot = {
 
 function makeAssetSummary(
   assetId: "ev",
-  specs: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh">> = {}
+  specs: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh" | "forcedPowerKw">> = {}
 ): AssetSummary {
   return {
     assetId,
@@ -60,6 +60,7 @@ function makeAssetSummary(
     maxImportKw: null,
     maxExportKw: null,
     capacityKwh: null,
+    forcedPowerKw: null,
     ...specs,
   };
 }
@@ -70,7 +71,7 @@ function makeQC() {
 
 function renderCell(
   timePoints: AssetTimelinePoint[],
-  specs?: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh">>
+  specs?: Partial<Pick<AssetSummary, "maxImportKw" | "maxExportKw" | "capacityKwh" | "forcedPowerKw">>
 ) {
   return render(
     <QueryClientProvider client={makeQC()}>
@@ -128,5 +129,20 @@ describe("AssetCell — rendering", () => {
     // across asset cells, breaking diagram alignment.
     renderCell([], { maxImportKw: 7.4, capacityKwh: 60 });
     expect(screen.queryByTestId("asset-specs-ev")).toBeNull();
+  });
+
+  it("marks forced power inline on the power line, not as an extra line", () => {
+    // GB-44: when the asset overrides its setpoint (e.g. a heater's thermostat),
+    // the operator must see it — inline, so the left section's height stays fixed.
+    renderCell([], { forcedPowerKw: 3.5 });
+    const marker = screen.getByTestId("asset-forced-ev");
+    expect(screen.getByTestId("asset-power-ev").contains(marker)).toBe(true);
+    expect(marker.textContent).toContain("forced");
+    expect(marker.getAttribute("title")).toContain("3.50 kW");
+  });
+
+  it("shows no forced marker while the asset follows its setpoint", () => {
+    renderCell([]);
+    expect(screen.queryByTestId("asset-forced-ev")).toBeNull();
   });
 });

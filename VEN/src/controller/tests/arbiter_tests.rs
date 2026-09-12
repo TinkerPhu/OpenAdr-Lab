@@ -70,15 +70,18 @@ fn heater_snap(
         (temp_min_c, temp_max_c, temp_safety_max_c),
         HeaterEmergencyMode::Normal,
         0.0,
+        false,
     )
 }
 
-/// `band` = (temp_min_c, temp_max_c, temp_safety_max_c); `last_kw` = last tick's draw.
+/// `band` = (temp_min_c, temp_max_c, temp_safety_max_c); `last_kw` = last tick's draw;
+/// `emergency_latched` = a thermostat emergency already fired and is inside its hysteresis.
 fn heater_snap_in(
     temp_c: f64,
     band: (f64, f64, f64),
     emergency_mode: crate::assets::heater::HeaterEmergencyMode,
     last_kw: f64,
+    emergency_latched: bool,
 ) -> AssetSnapshot {
     use crate::assets::heater::{Heater, HeaterState};
     let (temp_min_c, temp_max_c, temp_safety_max_c) = band;
@@ -99,6 +102,7 @@ fn heater_snap_in(
     let state = crate::assets::AssetState::Heater(HeaterState {
         temperature_c: temp_c,
         actual_power_kw: last_kw,
+        emergency_latched,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &heater, state, "heater", last_kw, 0.0,
@@ -293,10 +297,17 @@ fn heater_emergency_offered_once_obligation_penalty_exceeds_threshold() {
 
 #[test]
 fn heater_emergency_offered_while_the_heater_is_held_on_by_its_own_hysteresis() {
-    // 19 °C is above temp_min_c (18) but the heater ran at full power last tick,
-    // so its thermostat keeps it forced on until 21 °C: Curtail would free 3 kW.
+    // 19 °C is above temp_min_c (18) but an emergency that already fired is still
+    // inside its hysteresis, so the thermostat keeps it forced on until 21 °C:
+    // Curtail would free 3 kW.
     use crate::assets::heater::HeaterEmergencyMode;
-    let heater = heater_snap_in(19.0, (18.0, 23.0, 23.0), HeaterEmergencyMode::Normal, 3.0);
+    let heater = heater_snap_in(
+        19.0,
+        (18.0, 23.0, 23.0),
+        HeaterEmergencyMode::Normal,
+        3.0,
+        true,
+    );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
     let lever = heater_emergency_lever(&sim, &slot, 1.0, false);
@@ -308,7 +319,13 @@ fn heater_emergency_stays_offered_while_its_own_curtail_is_active() {
     // Curtail suppresses the forced heat; the lever must still see the heat it
     // is holding back, or it would drop out and re-fire the next tick.
     use crate::assets::heater::HeaterEmergencyMode;
-    let heater = heater_snap_in(17.0, (18.0, 23.0, 23.0), HeaterEmergencyMode::Curtail, 0.0);
+    let heater = heater_snap_in(
+        17.0,
+        (18.0, 23.0, 23.0),
+        HeaterEmergencyMode::Curtail,
+        0.0,
+        false,
+    );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
     assert!(heater_emergency_lever(&sim, &slot, 1.0, true).is_some());
