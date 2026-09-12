@@ -1484,3 +1484,374 @@ scheduled for the next Zurich local midnight — held back from tonight because
 this batch didn't finish before then. The `TIME_LIMIT` fleet-scale finding
 above needs a decision on backlog placement. GB-36 and GB-31/GB-24 remain
 open as before.
+
+---
+
+## 409-logging fix + S-1..S-8/S-10 re-run against the 20-VEN fleet (2026-08-30/31)
+
+**The fix.** `upsert_report`'s 409-Conflict branch (`VEN/src/vtn.rs`) logged at
+`tracing::error!` on every 409, including the expected, steady-state case where
+a report's stable per-event/obligation name (R-42) causes every submission
+after the first to 409 and recover via a name-based `PUT` — meaning a healthy
+fleet was constantly emitting ERROR-level noise for behavior that was working
+exactly as designed. Fixed by adding a non-logging `describe_problem()` parser
+(RFC 7807 title/detail, or raw body) used speculatively before the branch knows
+whether recovery will succeed; the by-name upsert now logs at `debug!` on
+success and only escalates to `error!` if the upsert itself fails, carrying the
+VTN's problem detail either way (the pre-existing `http_error()` logging path
+is unchanged and still used for genuine terminal failures). Test-first:
+`upsert_report_409_recovered_by_name_does_not_log_at_error_level` spawns a
+VTN stand-in that 409s once then serves the upsert, captures `tracing` output
+into an in-memory buffer, and asserts no `ERROR` line appears. Committed
+`e9fdbc74`, rebased and fast-forward merged to `main`, deployed to both Node1
+and Node2 via full `docker compose build` + `up -d` (Rust source change, not a
+config bind-mount) with zero disruption to Node1's ~25 unrelated production
+containers.
+
+**Pre-run cleanup: 9 contaminating standing VTN events found.** Before
+launching S-1, a routine check (`GET /events?active=true` via the VTN's own
+`client_credentials` grant) turned up 9 active events left over from prior
+ad-hoc testing, three of them clear test/debug artifacts rather than
+intentional demo content: `test-g-debug` (event `73036581-...`),
+`test-rd-check` (`0db8a6ba-...`), `test-uc4-targeting` (`3c491d20-...`) —
+all `PRICE`/GHG payloads that would have confounded every scenario's fleet
+response. Deleted those three events plus their programs. Left untouched, as
+intentional demo content the user confirmed should stay: `HVAC Optimization`,
+`EV Managed Charging`, `Summer Peak DR`, and the `manual-uc4/5/6-*` events.
+**Accepted residual confound**: three of the surviving events —
+`manual-battery-dispatch`, `tou-export-pricing-day-ahead`,
+`tou-pricing-day-ahead` — are untargeted/broadcast and affect every VEN in
+every scenario below; all S-1..S-10 results in this and later entries should
+be read with that in mind.
+
+**Results — fleet totals across 20 VENs** (`kpi.py`'s per-VEN JSON summed;
+"Max VEN peak" is the highest single VEN's `peak_import_kw`, *not* a
+fleet-coincident peak — every capacity/alert event in the catalog is a
+per-VEN limit, so that is the comparison that matters; "Warnings" are
+planner-predicted plan warnings, not measured violations — see the
+"Scenario catalog" section below for measured compliance; cost and shift are
+priced/compared against tariffs that were overridden by a broadcast demo
+event in S-1/S-2 — see GB-45 in that section):
+
+| Scenario | Import (kWh) | Export (kWh) | Cost (EUR) | Max VEN peak (kW) | Shift vs baseline (kWh) | Warnings | TIME_LIMIT share |
+|---|---|---|---|---|---|---|---|
+| S-1 flat (baseline) | 5.410 | 0.000 | 0.325 | 8.381 | 11.916 | 576 | 28/168 (17%) |
+| S-2 price_spike | 6.209 | 0.007 | 0.558 | 4.881 | 2.819 | 576 | 37/168 (22%) |
+| S-3 capacity_limit | 3.454 | 0.325 | 0.432 | 2.100 | 1.954 | 578 | 35/176 (20%) |
+| S-4 alert | 2.532 | 3.341 | 0.155 | 0.881 | 0.437 | 679 | 40/184 (22%) |
+| S-5 dispatch | 3.804 | 4.329 | 0.110 | 1.500 | -0.932 | 864 | 46/209 (22%) |
+| S-6 combined | 4.060 | 3.530 | 0.355 | 4.993 | -1.266 | 776 | 41/204 (20%) |
+| S-7 stress | 5.061 | 3.886 | 0.774 | 4.307 | -0.894 | 605 | 39/176 (22%) |
+| S-8 budget | 3.502 | 2.169 | 0.299 | 1.957 | 2.332 | 580 | 33/166 (20%) |
+| S-10 overexport | 12.695 | 2.830 | 1.466 | 3.600 | -1.989 | 870 | 39/219 (18%) |
+
+Same qualitative fleet behavior as the 2026-08-23/24 20-VEN run (capacity/alert
+scenarios reduce import, S-8's budget-shortfall path fires as designed). The
+fleet-wide `TIME_LIMIT` share sits at 17-22% here, noticeably lower than that
+run's reported 30-50% — not investigated further this round (different
+scenario mix, different time-of-day CPU/thermal conditions, and this run's
+9-event cleanup removes some solver load the earlier run carried); noted for
+whoever next revisits GB-40's fleet-scale framing.
+
+**Not done / left open**: S-9 deferred to the next Zurich local midnight,
+same as the prior run. What happened to that attempt is its own entry below.
+
+---
+
+## S-9 relaunch attempt corrupted by laptop suspend (2026-09-01)
+
+The orchestrating Python process (`run_experiment.py`, still running on this
+Windows laptop at the time — see the SSH-trust fix below for why that changed)
+computes its `--start-at` wait as a single `time.sleep(seconds)` call at
+launch. The laptop suspended (lid/power button) at 2026-08-31T19:54:10Z and
+woke at 2026-09-01T05:10:14Z (~9h16m later, confirmed via `Get-WinEvent
+-FilterHashtable @{LogName='System'; Id=1,42,107,506,507}` — "Sleep Reason:
+Button or Lid" / "Wake Source: Power Button"). A wall-clock `sleep()` simply
+freezes during OS suspend and fires ~9h16m late on resume, which for a script
+whose entire purpose is aligning a 24h diurnal price/PV scenario to real solar
+position is exactly the corruption `s9_diurnal.yaml`'s own header comment
+warns about.
+
+**Cleanup, fully verified clean.** The 9 EV-roster sessions had already been
+created (`ACTIVE`) before the process suspended; queried each roster VEN's own
+`GET /user-requests` directly (via `urllib.request`, since `python3` isn't on
+this workstation's PATH — `python` is) and deleted all 9 via `DELETE
+/user-requests/{id}` (all 204). `GET /programs` confirmed no VTN program/event
+had been created yet — the crash occurred before that stage — so no VTN-side
+state needed cleanup.
+
+**Root architectural gap, and the actual fix.** `run_experiment.py`'s own
+GB-29 comment says multi-host fleet runs must execute off-host (this laptop)
+"because Node1 has no configured ssh trust to Node2" — a documented gap that
+had simply never been acted on, and the reason this laptop was a single point
+of failure for every fleet run at all. Investigated and fixed directly:
+Node1 already had Python 3.13.5, `requests`/`yaml`, and a full checkout with
+`experiments/` present, so nothing else was blocking it. Node1's existing
+`~/.ssh/id_rsa.pub` turned out to be someone else's public key copied there
+for reference, with no matching private key on the host — so Node1 could not
+have authenticated outbound anywhere, including to itself, even if the trust
+existed. Generated a fresh dedicated keypair
+(`~/.ssh/id_ed25519_fleettest`) on Node1, trusted it in both Node1's own
+`authorized_keys` (needed because `fleet_map.json` addresses ven-1/2/3 via the
+literal `Node1` alias even when the script runs on Node1 itself) and Node2's,
+and wrote a `~/.ssh/config` on Node1 with `Node1`/`Node2` aliases. Verified
+end-to-end: self-ssh, ssh-to-Node2, real `scp` pulls of `history.sqlite` from
+both, and a local `docker exec` against the VTN's Postgres container all
+succeeded from Node1. This removes the laptop as a dependency for any future
+fleet run — the orchestrator can now run detached (`nohup ... & disown`) on an
+always-on host immune to lid/sleep behavior.
+
+---
+
+## S-9 re-run #4: first fully off-laptop run, succeeds cleanly (2026-09-07/09)
+
+First fleet run launched entirely from Node1 using the new SSH trust, with the
+laptop free to be shut down immediately after launch confirmation.
+
+**Pre-launch: both hosts synced and rebuilt.** Node1 and Node2 had drifted to
+different commits (`b97fa012` and `081158c5` respectively) against
+`origin/main`'s `492d2a90` (all three commits were UI/controller fixes, not
+behavior-relevant to the fleet scenarios, but synced for consistency before a
+24h run). Both `git pull`ed cleanly to `492d2a90` under the docker host locks.
+**Rebuild mistake, caught before deploy**: the first Node2 rebuild ran
+`docker compose build` from `VEN/` — Node1's 3-VEN compose file — producing
+`ven-ven-1/2/3` images that Node2 doesn't even run, rather than the actual
+17-VEN fleet at `VEN/scale_out/node2/docker-compose.yml`. Caught by checking
+the build log's own `Image ... Built` lines against the expected 17 service
+names before deploying; re-ran the build against the correct compose file
+(17/17 images built) and only then ran `docker compose up -d` on both hosts.
+All containers came up healthy (Node1: ven-1/2/3 + ui; Node2: all 17 VENs).
+
+**Launch**: `run_experiment.py --scenario s9_diurnal.yaml` for all 20 VENs,
+`--pg-host local` (running on the VTN's own host now), `--ev-session-mode
+BY_DEADLINE`, `--ev-roster fleet_ev_roster.json`, `--no-paired-baseline`,
+`--start-at 2026-09-08T22:00:00Z` (next Zurich local midnight), detached via
+`nohup ... & disown`. Ran to completion with no exceptions in the log; the
+laptop was shut down within the hour and played no further part. Snapshot
+written to `experiments/results/20260908-2005-s9_diurnal`, pulled to the
+workstation afterward, `kpi.py` run against it (`--baseline` set explicitly to
+the S-1 flat run above, since `--no-paired-baseline` means no auto-paired dir
+exists).
+
+**Verification against the three things this run was meant to check:**
+
+1. **R-42/GB-fix (409 logging) — confirmed clean.** Zero ERROR-level 409 log
+   lines fleet-wide across all 20 VEN containers on both hosts, checked
+   against the actual log message strings the fix produces (`"409 on POST
+   /reports and ... failed"` / `"... without reportName"`), not a bare `409`
+   substring search — an initial loose grep gave false positives from
+   unrelated MILP solver fields (`NoSolutionFound`, `c_star`, timestamps
+   incidentally containing the digits).
+2. **GB-41 (4 EV VENs never charging) — reproduced again, unchanged.**
+   `EV_CORE_ENERGY_UNMET` warning counts over the 24h window: ven-11/12/16/18
+   at 1395-1401 (essentially every plan cycle), against 0-406 for the other
+   five roster VENs (ven-1, ven-3, ven-5, ven-7, ven-19). Same four VENs as
+   the 2026-08-26 run. This is the diagnostic GB-41 asked future occurrences
+   to check first (`plan_history.warning_kinds`) — confirmed to fire exactly
+   as that entry predicted, but does not yet explain *why*.
+3. **GB-40 (heater TIME_LIMIT rate) — reproduces: 63% with a heater vs. 3%
+   without.** Counted over distinct persisted plans (`*-plan-history.json`),
+   with each VEN classified by the `assets:` list in its profile: heater VENs
+   1512/2409 `TIME_LIMIT` (63%), no-heater VENs 152/5399 (3%; 6% excluding
+   ven-1, whose 2879 plans at a much shorter replan cadence dilute the
+   denominator). Same ~9-10× split as the 2026-08-26 run's 70%/8%. Within the
+   heater group the spread is wide and real — ven-15/ven-3 100%, ven-5 89%,
+   ven-18 87%, ven-10 80%, ven-17 66%, ven-12 58%, ven-14 48%, ven-20 15%,
+   ven-2 8% — and does **not** track time spent in the heater's emergency
+   latch (GB-44, below): ven-15/ven-3 time out on every plan with 0% latch
+   time.
+
+   > **Retracted the same day — the first version of this item was wrong.** It
+   > claimed the 70%/8% split "does not hold", reporting 0-98% across "18
+   > heater-equipped VENs", mean ~38%. That list came from `grep -l heater
+   > VEN/profiles/*.yaml`, which also matches the word "heater" in profile
+   > *comments* (e.g. ven-4's header "PV + Battery, no EV/heater") — eight of
+   > the eighteen had no heater at all, and they are exactly the 0% rows that
+   > made the split look broken. It also counted per-minute
+   > `plan-diagnostics.jsonl` rows (which re-report the same plan until the
+   > next solve) instead of distinct plans. Lesson: classify VENs from the
+   > parsed `assets:` list, never from a text grep of the profile; count
+   > distinct solves from `plan_history`, not diagnostic rows.
+
+**Methodology, two incidents during this run:**
+
+1. **Detached-process false "killed" notifications.** The Bash tool's own
+   background-task tracking twice reported a `nohup ... & disown` remote
+   launch (once for a docker build, once for the `run_experiment.py` launch
+   itself) as "killed" or "stopped" — in both cases the actual remote process
+   (verified via `pgrep -af` on the target host) was unaffected and kept
+   running. This is the same class of false-positive as the 2026-08-25 run's
+   tool-tracking false-kill, now confirmed twice more: never trust the local
+   tool's own background-task status for a `disown`ed remote process — check
+   the remote host directly.
+2. **`grep`-based log verification needs the real message, not a keyword.**
+   The first fleet-wide 409 check (`grep -c "ERROR.*409\|error.*409"`) found
+   21 "hits" that turned out to be entirely coincidental digit matches in
+   unrelated `WARN`-level solver messages. Fixed by grepping the fix's actual
+   emitted string. General lesson for any future log-based verification on
+   this fleet: grep the specific message text the code emits, not a loose
+   keyword/status-code pattern.
+
+---
+
+## Scenario catalog: purpose vs. observed result
+
+Source data: the 2026-08-31 S-1..S-8/S-10 run and the 2026-09-08/09 S-9 re-run
+#4 above. **All ten scenarios ran against all 20 VENs** (every `kpis.json`
+carries 20 entries). Compliance is judged from **measured** per-minute meter
+data (`grid_samples.import_kw`/`export_kw` against the `import_limit_kw`/
+`export_limit_kw` each VEN itself recorded as in force) and per-asset traces
+(`tick_samples`), not from `kpi.py`'s fleet sums or from `CAPACITY_VIOLATION`
+counts — those are *planner-predicted* plan warnings, and they diverge from
+what actually happened in both directions (S-3's 2 warnings: 0 measured
+over-limit minutes; S-7's ven-2/ven-18 warned while importing 0 kW).
+`PEAK_PENALTY_EXCEEDED` is ignored throughout (ven-9's deliberate 0.3 kW
+`penalty_rules` threshold, fires in every scenario by design).
+
+> This table was first written the same day from fleet-aggregate KPIs and
+> planner warning counts, and three verdicts (S-2, S-4, S-7) plus the S-9
+> GB-40 claim were wrong or mis-attributed. The per-minute re-analysis below
+> replaced it; the corrections are called out in each row.
+
+| Scenario | Purpose | Measured result | Goal reached? |
+|---|---|---|---|
+| S-1 flat | Baseline: flat 0.25 €/kWh, no signals — the reference for every other scenario's `energy_shifted_kwh` | VENs *recorded* a **0.06 €/kWh** import tariff for the whole window, not 0.25: the broadcast `tou-pricing-day-ahead` demo event's 03:00-04:00 interval won the tick-time lookup (GB-45). The planner's own tariff series resolves overlaps the opposite way (later start wins), so it most likely planned against 0.25 | **No (invalid)** — cost KPIs were priced at the wrong tariff and the planner and the meter disagreed on the price; the baseline needs a re-run before anything is compared against it |
+| S-2 price_spike | Tariff-driven shifting: 0.10 → 0.45 → 0.10 €/kWh | Recorded tariff a flat **0.09 €/kWh** all 30 min (GB-45), yet loads visibly shifted out of the spike window (ven-14 4.8 → 0 kW mid-window): consistent with the planner having seen the scenario prices while the monitor/history sampler recorded the demo price | **No (invalid)** — *corrected from "Partial"*: the fleet probably did respond, but the recorded tariff, costs and `tariff_response` are measured against the wrong price, so the size of the response is unknown |
+| S-3 capacity_limit | Hard 3 kW import cap, 10 min | Cap recorded on all 20 VENs; **0 measured over-limit minutes** fleet-wide | **Yes** — clean |
+| S-4 alert | 5-min `ALERT_GRID_EMERGENCY`, target import ≈ 0 | Battery VENs without PV shed to ≈0 (ven-13 0.47→0.06, ven-14 0.88→0.09, ven-16 0.88→0.01 kW); PV VENs were already at 0 kW in daylight (nothing to shed); ven-9/10/11/12/20 (no storage, no PV) stayed at their uncontrollable base load (0.47-0.88 kW), heaters already off | **Yes** — every VEN that *could* shed did; the residual is the physical floor (base load with nothing to cover it), not a control failure. The "≈0" target is unreachable for 5 of 20 VENs by construction |
+| S-5 dispatch | SIMPLE level 2, then 1.5 kW `DISPATCH_SETPOINT` | The 9 VENs with a battery or EV land **exactly on 1.5 kW** import; the rest (no controllable storage) stay at base load. No meter limit is recorded for a dispatch setpoint, so this is inferred from import levels, not a limit comparison | **Yes** |
+| S-6 combined | Price spike + 3 kW *reservation* (soft) + 4-min alert, overlapping — relaxation order, alert should win | No `import_limit_kw` is recorded for either a reservation or an alert, so compliance isn't directly measurable. Heater traces show the heater VENs off through the alert (ven-12 0 kW min 14-18); the 8 warnings sit on VENs with no storage (ven-9/11) or with heaters already off (ven-3/20) — i.e. predicted unavoidable base load during a 0-kW alert. Price leg subject to GB-45 | **Inconclusive** — nothing observed contradicts "alert wins", but the tooling cannot prove it: needs the effective per-slot limit and binding constraint logged |
+| S-7 stress | 1.5 kW cap for 20 min + 10-min alert inside it | 1.5 kW cap recorded on all 20 VENs. **18/20 fully compliant.** ven-10: over for all 20 min (heater latched at 3.5 kW, 0.895 kWh excess — 90% of the fleet's total) — heater emergency-latch misfire (GB-44). ven-12: over for 6 min (3.6 → 2.1 → 1.0 kW, response latency + an unexplained 1.5 kW stage choice) | **Mostly** — *corrected from "No"*: the "4.3 kW peak" was one VEN, root-caused to a thermostat bug, not solver contention or controller logic. ven-14 is the reference behavior: ramps to exactly 1.5 kW, 0 kW through the alert on battery, back to 1.5 kW |
+| S-8 budget | Under-budgeted EV `MAX_COST` request on ven-11 → `BudgetShortfall` | `BUDGET_SHORTFALL: 4`, separable from other warning kinds | **Yes** |
+| S-9 diurnal | 24h duck-curve price + 4 kW evening import cap (240 min) + 6 kW midday export cap (300 min); also the GB-40/41/409 verification run | Ran clean end to end (first off-laptop run); 409 fix verified. Caps recorded on all 20 VENs but **never came within ~2.5 kW of binding** (max import 1.4 kW, max export 1.4 kW in the capped windows) — 0 measured violations proves nothing. GB-41 reproduced (ven-11/12/16/18: 0 charging minutes); **new**: ven-1 charged only 30 → 36.9% (was 30 → 80% on 2026-08-26). GB-40 reproduced (63% vs 3%) | **Partial** — the run worked, the caps tested nothing (September levels ≪ cap values), and two EV defects are open |
+| S-10 overexport | 1.0 kW export cap in the real west-facing PV peak | Cap recorded on all 20 VENs for 25 min; VENs exporting 2.0-2.4 kW outside the window (ven-2/4/6) held to ≤1.0 kW inside it; **0 measured over-limit minutes** | **Yes** — the strongest pass in the catalog: a binding cap, real curtailment, zero exceedance |
+
+**Net**: of the ten, **5 clean passes** (S-3, S-4, S-5, S-8, S-10), **1
+mostly** (S-7, one root-caused bug), **1 inconclusive** (S-6, tooling), **1
+partial** (S-9, vacuous caps + open EV defects), and **2 invalid** (S-1, S-2 —
+wrong price applied). None of the four non-passes is a controller that
+received a command and misjudged it; they are one thermostat bug, one
+tariff-merge bug, one scenario-calibration problem, and missing
+instrumentation.
+
+### Why the non-passes failed, and what to do about each
+
+Classified by the question asked of every non-pass: *was a physical limit
+reached, was the command not interpreted/followed, or was the expectation
+itself wrong?*
+
+**1. Command received and planned correctly, but not physically executed —
+heater emergency-latch misfire (GB-44, S-7 ven-10).** `Heater::thermostat_forced_kw_in`
+(`VEN/src/assets/heater.rs`) keeps an emergency running until `temp_min_c +
+3 °C` and infers "emergency is running" from `actual_power_kw >= max_kw`. It
+cannot tell a real cold-room emergency from the planner legitimately
+commanding the top stage. For a space heater (`temp_min_c: 18`) the latch band
+18-21 °C *is* the normal comfort range, so any full-stage command below 21 °C
+latches the heater on and every later setpoint is ignored until the room hits
+21 °C. ven-10 (room 19.8-20.4 °C, 3.5 kW = `max_kw` since before the cap) was
+latched; ven-12 (room 21.3-21.4 °C) was not, and followed its plan. The plan
+side was right: ven-10's cap-aware plans carry the same ~135k € violation
+cost as ven-12's (proportional to kWh over the cap, so a plan that kept 3.5 kW
+running would have cost ~10× more) — the planner turned the heater off, the
+thermostat overrode it. Scale: over S-9, the space-heater VENs sat at full
+power inside the latch band 11% (ven-10), 16% (ven-12) and 5% (ven-18) of the
+day — up to ~4 h/day of the planner not controlling the heater. It is *not*
+the GB-40 driver (ven-3/ven-15 time out on 100% of plans with 0% latch time).
+- **Fix**: carry an explicit `emergency_latched` flag in `HeaterState`, set
+  only when `temperature_c <= temp_min_c` and cleared at `temp_min_c + 3`,
+  instead of inferring it from `actual_power_kw`. Test first: plan commands
+  full stage at 20 °C, next tick commands 0 → heater must go to 0.
+- **Visibility**: emit a plan/tick warning (e.g. `HEATER_THERMOSTAT_OVERRIDE`)
+  whenever `thermostat_forced_kw` differs from the commanded setpoint, and
+  surface it in the VEN UI (ui-transparency) — this bug was invisible in
+  every KPI and warning count and was only found by reading per-minute asset
+  traces.
+
+**2. Command never became the applied value — overlapping PRICE intervals
+(GB-45, S-1/S-2, also S-6/S-7's price legs).** The BL-02 priority merge
+(`VEN/src/controller/rate_schedule.rs`) resolves conflicts only between
+intervals with *identical* `(start, end)` keys; overlapping intervals with
+different boundaries all survive, sorted by start. The tick-time lookup
+(`VEN/src/controller/monitor.rs`, `.find(|r| r.interval_start <= now && now <
+r.interval_end)`) then takes the *first* match, so the earliest-starting
+interval wins regardless of priority or creation time. The broadcast
+`tou-pricing-day-ahead` demo event's hourly intervals start on the hour, the
+scenario's start at the launch minute: S-1 (03:27) and S-2 (05:29) lay
+entirely inside one TOU hour, so the demo price won for the whole window
+(0.06 / 0.09 €/kWh). S-7 (10:49) shows the mixture this rule predicts — TOU
+0.15 until the scenario's spike interval (starting 10:59, before the TOU's
+11:00 hour) took over at 0.45, then TOU 0.14 again. So this is not a harness
+quirk: a real VTN sending a day-ahead TOU event plus an intra-hour price
+event hits the same thing. Worse, the consumers disagree with each other: the
+planner's `TariffTimeSeries::from_snapshots` builds a step series keyed by
+interval start, so there the *latest*-starting interval wins (and its value
+leaks forward until the next start). In S-2 the planner most likely priced
+the scenario's spike correctly — which fits the visible load shift — while the
+monitor and history sampler recorded and billed the demo price. A unit test
+written for the fix reproduces exactly that: at 05:25 the planner series says
+0.45, the tick lookup 0.09.
+- **Fix**: make interval resolution priority-aware across partial overlaps
+  (split into atomic segments at every boundary, then pick per segment by
+  priority → `createdDateTime`), at the source, so every consumer reads one
+  non-overlapping schedule. Test first: hourly low-priority event + 10-min
+  high-priority event starting mid-hour → the 10-min value must apply inside
+  its window, for the planner and the tick lookup alike.
+- **Experiment hygiene regardless of the fix**: delete or suspend the
+  broadcast demo events for the duration of a run (they are an accepted
+  confound only until they demonstrably decide the result, which they now
+  have), and add a harness pre-flight that aborts if, one minute after the
+  first `price_series` action, a VEN's recorded `import_tariff_eur_kwh`
+  doesn't equal the scenario's value. Then re-run S-1 and S-2 — every
+  `energy_shifted_kwh` in this catalog is computed against the invalid S-1.
+
+**3. Expectation too high or test vacuous — scenario calibration (S-4, S-6,
+S-9).** A 0-kW alert target is physically unreachable for a VEN with
+uncontrollable base load and neither storage nor PV (5 of 20 VENs); the
+planner correctly predicts the violation, and counting it as a failure
+misreads designed behavior. Conversely, S-9's 4 kW import / 6 kW export caps
+never approached binding in September (max 1.4 kW each way), and S-4's PV
+VENs had nothing to shed in daylight. Both make a pass meaningless.
+- Normalize compliance against each VEN's **achievable floor** (base load
+  minus max storage discharge minus PV at that minute) and report "shed as
+  far as physically possible" separately from "limit met".
+- Calibrate caps per VEN from its own observed level in the same window
+  (e.g. 50-70% of its evening peak for S-9's import cap), or target a cap only
+  at VENs where it binds; re-derive them per season, since PV and heating
+  load both shift.
+
+**4. Command followed, but late — response latency (S-7 ven-12).** The cap
+started at 10:53:56; the heater stepped down at ~10:55 and import fell under
+1.5 kW only at ~10:59 (the alert). The first cap-aware plan landed at
+10:54:24 after a ~56 s solve, and then chose the 1.5 kW stage (import 2.1 kW
+= over the cap) rather than 0 — unexplained from retained data.
+- Log per-slot planned power per asset for each adopted plan during
+  experiment windows (today only aggregates survive in `plan_history`), so a
+  plan-vs-actual comparison is possible after the fact.
+- Consider a dispatcher-level fast path that clamps controllable loads to a
+  newly received hard import limit immediately, instead of waiting for the
+  replan; the deviation arbiter already has the mechanism but ships disabled.
+
+**5. Planner decides not to act — GB-41 (S-9, unchanged).** ven-11 solves
+`OPTIMAL` on all 290 plans and raises `EV_CORE_ENERGY_UNMET` on essentially
+every one: the optimum *deliberately* doesn't charge, so this is an objective
+valuation question, not solver cost. **ven-11 and ven-19 have identical EV
+parameters** (7.4 kW, 50 kWh, 30% start, 0.8 target) and differ only in site
+assets (ven-11: EV only; ven-19: EV + PV + battery) — the cleanest controlled
+pair in the fleet. Next: (a) dump both VENs' `EvMilpContext` inputs and
+per-slot plans at the same instant; (b) re-run ven-11 alone with
+`soft_deadline: false` — if it then charges, the soft-deadline core-energy
+value is priced below grid import and only PV-surplus sites ever find
+charging worth it (ven-18, PV + heater, would then be explained by the
+heater competing for the surplus); (c) check whether GB-45's price merge
+fed the EV planner a different price curve than the scenario intended. The
+new ven-1 shortfall (30 → 36.9%, no warning) needs its own look: pull its
+`/user-requests` and plan history, since ven-1 is the only Node1 roster VEN
+and replans at a much shorter cadence (2879 plans vs ~250).
+
+**Instrumentation gaps these runs exposed (candidate `kpi.py`/VEN work):**
+measured over-limit minutes and time-to-comply per VEN in `kpi.py` (not plan
+warnings); an effective-limit column in `grid_samples` that includes alerts
+and reservations, so S-4/S-6 compliance is measurable directly; the tariff's
+source event id next to `import_tariff_eur_kwh`, so GB-45-style overrides are
+visible in the data; per-slot plan allocations retained for experiment
+windows; and a thermostat-override counter (GB-44).

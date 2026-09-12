@@ -1846,3 +1846,32 @@ still plausible, just shifted. The duplicated-timestamp t2=0 schedule even hid i
 **How to apply:** when a projection reuses a live per-tick `step()` with a coarser `dt`, check any
 state carried *between* steps (lags, hysteresis, integrators) for tick-count semantics. Either
 express it in seconds or neutralize it in the projection (here: stage the window's command first).
+
+## Judge a fleet scenario from measured meter data, never from plan warnings or fleet sums (fleet run, 2026-09-12)
+
+The first pass over the 2026-08-31/09-08 fleet campaign got three of ten scenario verdicts wrong,
+all from the same two shortcuts. `CAPACITY_VIOLATION` is a *planner-predicted* plan warning: S-3's
+2 warnings had 0 measured over-limit minutes, and S-7 flagged VENs importing 0 kW. And a fleet
+"peak" of 4.3 kW over a 1.5 kW cap read as a fleet-wide failure when it was one VEN out of 20, whose
+cause turned out to be a thermostat latch (GB-44) that was invisible in every KPI and warning. The
+per-minute data showed things the aggregates couldn't: the scenario price never became the applied
+tariff in S-1/S-2 (GB-45), and S-9's caps never came within 2.5 kW of binding, so its "0
+violations" proved nothing.
+
+**How to apply:** for each VEN, compare `grid_samples` import/export against the limit the VEN
+*itself* recorded as in force, and check that the scenario's signal actually reached that column
+(recorded tariff = scenario price). Before calling a pass, check the limit bound at all. Before
+calling a fail, check it against what that VEN could physically achieve (base load with no
+storage can't reach a 0-kW alert). Only then aggregate.
+
+## Classify fleet VENs from their parsed asset list, never from a text grep of the profile (fleet run, 2026-09-12)
+
+`grep -l heater VEN/profiles/*.yaml` returned 18 "heater VENs" when the fleet has 10. It also
+matched the word in profile comments ("PV + Battery, no EV/heater"). The eight false positives
+were exactly the 0%-`TIME_LIMIT` VENs, so a well-established 63%-vs-3% split (GB-40) got reported as
+"doesn't reproduce, 0-98%". A related trap: `plan-diagnostics.jsonl` writes one row per minute
+re-reporting the current plan, so counting its rows counts minutes, not solves.
+
+**How to apply:** load the profile YAML and select on `assets[].type`. Count solves from
+`plan_history` (one row per persisted plan). When a result contradicts a previously solid finding,
+first re-check how the groups were formed and what is being counted.
