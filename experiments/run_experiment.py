@@ -48,6 +48,7 @@ import argparse
 import json
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -209,6 +210,152 @@ def build_event(program_id, action, start, report_descriptors=None):
     if report_descriptors:
         body["reportDescriptors"] = report_descriptors
     return body
+
+
+# ── GB-46: run isolation, pre-flight, plan retention, suspend-safe waits ─────
+
+# Fields the VTN assigns on creation; a restored event must not carry them.
+_SERVER_EVENT_FIELDS = ("id", "createdDateTime", "modificationDateTime", "objectType")
+
+
+def strip_server_fields(event):
+    """A copy of `event` that can be POSTed again (restore after the run)."""
+    return {k: v for k, v in event.items() if k not in _SERVER_EVENT_FIELDS}
+
+
+def select_background_events(events, created_ids):
+    """Every VTN event this invocation didn't create itself."""
+    return [e for e in events if e.get("id") not in created_ids]
+
+
+def sleep_until(target, now_fn=None, sleep_fn=None, chunk_s=60):
+    """Wait until wall-clock `target` in chunks of at most `chunk_s`, re-reading the
+    clock each time. A single long sleep freezes across host suspend and fires late
+    by the whole suspended duration (the 2026-09-01 S-9 corruption); this returns
+    within one chunk of the process resuming."""
+    now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+    sleep_fn = sleep_fn or time.sleep
+    while True:
+        remaining = (target - now_fn()).total_seconds()
+        if remaining <= 0:
+            return
+        sleep_fn(min(chunk_s, remaining))
+
+
+def _parse_iso(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def scenario_price_at(price_action, now):
+    """The import price a `price_series` action defines for `now`, or None outside it."""
+    step_s = 60 * int(price_action["interval_minutes"])
+    offset_s = (now - _parse_iso(price_action["started_at"])).total_seconds()
+    idx = int(offset_s // step_s)
+    values = price_action["values_eur_kwh"]
+    return values[idx] if 0 <= idx < len(values) else None
+
+
+def tariff_matches(tariffs, now, price_eur_kwh):
+    """Does the VEN's resolved tariff (GET /tariffs) covering `now` equal the price?"""
+    for s in tariffs:
+        if _parse_iso(s["interval_start"]) <= now < _parse_iso(s["interval_end"]):
+            v = s.get("import_tariff_eur_kwh")
+            return v is not None and abs(v - price_eur_kwh) < 1e-6
+    return False
+
+
+def plan_record_if_new(plan, last_id):
+    """(compact record, new last id) when `plan` (GET /plan) is a plan not seen yet,
+    else (None, last_id). Keeps what plan-vs-actual analysis needs — per-slot
+    allocations and prices — without the full plan's envelopes and diagnostics."""
+    if not plan or plan.get("id") == last_id:
+        return None, last_id
+    record = {
+        "id": plan.get("id"),
+        "created_at": plan.get("created_at"),
+        "trigger": plan.get("trigger"),
+        "solve_status": plan.get("solve_status"),
+        "slots": [
+            {
+                "start": s.get("start"),
+                "end": s.get("end"),
+                "import_tariff_eur_kwh": s.get("import_tariff_eur_kwh"),
+                "allocations": [
+                    {"asset_id": a.get("asset_id"), "power_kw": a.get("power_kw")}
+                    for a in s.get("allocations", [])
+                ],
+            }
+            for s in plan.get("slots", [])
+        ],
+    }
+    return record, plan.get("id")
+
+
+def list_vtn_events(base, token, page=50):
+    """Every event on the VTN visible to `token` (GET /events is paginated)."""
+    out, skip = [], 0
+    while True:
+        r = requests.get(f"{base}/events", headers=auth(token), params={"skip": skip, "limit": page}, timeout=10)
+        r.raise_for_status()
+        batch = r.json()
+        out.extend(batch)
+        if len(batch) < page:
+            return out
+        skip += page
+
+
+def suspend_background_events(base, snapshot_path):
+    """Save every existing VTN event to `snapshot_path`, then delete it for the run.
+    The file is written before anything is deleted, so a hard kill can always be
+    recovered with --restore-background-events."""
+    token = get_token(base, "any-business", "any-business")
+    events = select_background_events(list_vtn_events(base, token), created_ids=set())
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(events, indent=2), encoding="utf-8")
+    for e in events:
+        requests.delete(f"{base}/events/{e['id']}", headers=auth(token), timeout=10).raise_for_status()
+    print(f"  suspended {len(events)} background VTN event(s) -> {snapshot_path}")
+    print(f"  (recovery if killed: python3 experiments/run_experiment.py "
+          f"--vtn-url {base} --restore-background-events {snapshot_path})")
+    return events
+
+
+def restore_background_events(base, snapshot_path):
+    """Re-create every event saved by suspend_background_events (new ids)."""
+    events = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+    token = get_token(base, "any-business", "any-business")
+    for e in events:
+        post_event(base, token, strip_server_fields(e))
+    print(f"  restored {len(events)} background VTN event(s) from {snapshot_path}")
+
+
+class PreflightError(RuntimeError):
+    """The scenario's price did not become the tariff every VEN resolved."""
+
+
+def preflight_scenario_price(fleet_map, vens, price_action, timeout_s=180, poll_s=10):
+    """GB-46: after the first price_series action, every VEN's resolved tariff
+    (GET /tariffs) covering now must equal the scenario's price; otherwise the run's
+    data would be measuring a different signal (GB-45's overridden S-1/S-2)."""
+    pending = {v for v in vens if (fleet_map or {}).get(v, {}).get("port") is not None}
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_s)
+    while pending and datetime.now(timezone.utc) < deadline:
+        now = datetime.now(timezone.utc)
+        price = scenario_price_at(price_action, now)
+        if price is None:
+            break
+        for ven in sorted(pending):
+            try:
+                r = requests.get(f"{_ven_base_url(fleet_map[ven])}/tariffs", timeout=10)
+                if r.ok and tariff_matches(r.json(), now, price):
+                    pending.discard(ven)
+            except requests.RequestException:
+                pass
+        if pending:
+            time.sleep(poll_s)
+    if pending:
+        raise PreflightError(f"scenario price not applied within {timeout_s}s on: {', '.join(sorted(pending))}")
+    print("  pre-flight OK: every VEN resolves the scenario price")
 
 
 def post_user_request(base_url, body):
@@ -401,6 +548,10 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
     come from.
     """
     handles = {ven: open(out_dir / f"{ven}-plan-diagnostics.jsonl", "a", encoding="utf-8") for ven in vens}
+    # GB-46: each newly adopted plan's per-slot allocations, for plan-vs-actual analysis
+    # after the fact (GB-41: did the plan ever schedule the EV? S-7: what did ven-12 plan?).
+    plan_handles = {ven: open(out_dir / f"{ven}-plans.jsonl", "a", encoding="utf-8") for ven in vens}
+    last_plan_id = {}
     try:
         while not stop_event.is_set():
             for ven in vens:
@@ -423,6 +574,10 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
                         handles[ven].write(json.dumps(record) + "\n")
                         handles[ven].flush()
                         continue
+                    plan_rec, last_plan_id[ven] = plan_record_if_new(plan, last_plan_id.get(ven))
+                    if plan_rec is not None:
+                        plan_handles[ven].write(json.dumps(plan_rec) + "\n")
+                        plan_handles[ven].flush()
                     record = {
                         "ts": iso(datetime.now(timezone.utc)),
                         "ven": ven,
@@ -437,7 +592,7 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
                 handles[ven].flush()
             stop_event.wait(interval_s)
     finally:
-        for f in handles.values():
+        for f in list(handles.values()) + list(plan_handles.values()):
             f.close()
 
 
@@ -718,11 +873,9 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
             eid = post_event(args.vtn_url, token, body)
             created_events.append(eid)
             print(f"  +  0 min  report-only (SIMPLE level=0)  event={eid}")
+        preflight_done = False
         for i, action in enumerate(pending):
-            target = t0 + timedelta(minutes=action["at_minute"])
-            wait_s = (target - datetime.now(timezone.utc)).total_seconds()
-            if wait_s > 0:
-                time.sleep(wait_s)
+            sleep_until(t0 + timedelta(minutes=action["at_minute"]))
 
             if action["type"] == "budget_shortfall":
                 # Bypasses the VTN entirely — direct POST to the target VEN's
@@ -753,10 +906,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
                 }
                 rid = post_user_request(base, body)
                 created_requests.append((base, rid))
-                actions_log.append({
-                    "at_minute": action["at_minute"], "type": action["type"],
-                    "started_at": iso(now_a),
-                })
+                actions_log.append({**action, "started_at": iso(now_a)})
                 print(f"  +{action['at_minute']:>3} min  budget_shortfall  ven={target_ven}  request={rid}")
                 continue
 
@@ -765,17 +915,20 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
             body = build_event(program_id, action, started_at, descriptors)
             eid = post_event(args.vtn_url, token, body)
             created_events.append(eid)
-            actions_log.append({
-                "at_minute": action["at_minute"], "type": action["type"],
-                "started_at": iso(started_at),
-            })
+            # GB-46: the full action (limits, durations, prices) is what kpi.py's
+            # measured compliance and signal-integrity KPIs derive their windows from.
+            logged = {**action, "started_at": iso(started_at)}
+            actions_log.append(logged)
             print(f"  +{action['at_minute']:>3} min  {action['type']}  event={eid}")
+            if action["type"] == "price_series" and not preflight_done and fleet_map and not args.skip_preflight:
+                preflight_scenario_price(fleet_map, ven_names, logged)
+                preflight_done = True
 
         end = t0 + timedelta(minutes=duration_min)
         wait_s = (end - datetime.now(timezone.utc)).total_seconds()
         if wait_s > 0:
             print(f"  waiting out the window ({int(wait_s)}s remaining) ...")
-            time.sleep(wait_s)
+            sleep_until(end)
     finally:
         # Deletion == cancellation in OpenADR 3; always clean up.
         token = get_token(args.vtn_url, "any-business", "any-business")
@@ -815,7 +968,25 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)
 
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--scenario", required=True)
+    p.add_argument("--scenario", help="scenario YAML (required unless --restore-background-events)")
+    p.add_argument(
+        "--keep-background-events", action="store_true",
+        help="GB-46: leave events that already exist on the VTN (e.g. seeded demo events) "
+             "active during the run. Default: save them to <run>/background-events.json, "
+             "delete them for the run, and re-create them afterwards -- a broadcast demo "
+             "TOU price otherwise competes with the scenario's own signal (GB-45).",
+    )
+    p.add_argument(
+        "--restore-background-events", metavar="FILE",
+        help="GB-46 recovery: re-create the events saved in FILE (a run's "
+             "background-events.json) and exit. For a run killed before it could restore them.",
+    )
+    p.add_argument(
+        "--skip-preflight", action="store_true",
+        help="GB-46: don't abort when a VEN's resolved tariff doesn't match the scenario's "
+             "first price within 180 s. Debugging only -- the run's price KPIs are then "
+             "unverified.",
+    )
     p.add_argument("--vtn-url", default="http://localhost:8200")
     p.add_argument("--vens", default="ven-1,ven-2,ven-3", help="comma-separated VEN data dirs to snapshot")
     p.add_argument("--ven-data-root", default=str(REPO_ROOT / "VEN" / "data"))
@@ -921,6 +1092,12 @@ def main():
     )
     args = p.parse_args()
 
+    if args.restore_background_events:
+        restore_background_events(args.vtn_url, args.restore_background_events)
+        return
+    if not args.scenario:
+        p.error("--scenario is required")
+
     if args.ev_session_mode and not args.fleet_map:
         p.error(
             "--ev-session-mode requires --fleet-map (setup_ev_roster_sessions needs each "
@@ -955,6 +1132,29 @@ def main():
     else:
         ven_names = args.vens.split(",")
 
+    # GB-46: a plain `kill` (SIGTERM) must still run the finally blocks below, which
+    # delete this run's events and restore the VTN's background events.
+    def _terminate(signum, _frame):
+        raise SystemExit(f"terminated by signal {signum}")
+
+    signal.signal(signal.SIGTERM, _terminate)
+
+    background_snapshot = None
+    if not args.keep_background_events:
+        background_snapshot = run_dir / "background-events.json"
+        suspend_background_events(args.vtn_url, background_snapshot)
+    try:
+        run_scenario(args, scenario, name, duration_min, run_dir, ven_names, fleet_map,
+                     start_at, report_descriptors)
+    finally:
+        if background_snapshot is not None:
+            restore_background_events(args.vtn_url, background_snapshot)
+
+
+def run_scenario(args, scenario, name, duration_min, run_dir, ven_names, fleet_map,
+                 start_at, report_descriptors):
+    """Everything between suspending and restoring the VTN's background events:
+    sessions, optional paired baseline, the scenario window, teardown."""
     persona_teardown = None
     if args.personas:
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
@@ -998,7 +1198,7 @@ def main():
             wait_s = (start_at - datetime.now(timezone.utc)).total_seconds()
             if wait_s > 0:
                 print(f"  waiting for --start-at {args.start_at} ({int(wait_s)}s) ...")
-                time.sleep(wait_s)
+                sleep_until(start_at)
 
         # Re-reset after the paired baseline so the scenario window starts
         # from the same SoC the baseline did -- otherwise the two windows
@@ -1200,6 +1400,61 @@ def _self_check_with_retry():
     print("_self_check_with_retry OK")
 
 
+def _self_check_gb46_harness():
+    # Background events: everything the run did not create, restorable without server fields.
+    events = [
+        {"id": "e1", "programID": "p", "eventName": "tou", "createdDateTime": "x", "objectType": "EVENT", "intervals": []},
+        {"id": "e2", "programID": "p", "eventName": "scn", "intervals": []},
+    ]
+    bg = select_background_events(events, created_ids={"e2"})
+    assert [e["id"] for e in bg] == ["e1"], bg
+    body = strip_server_fields(bg[0])
+    assert set(body) == {"programID", "eventName", "intervals"}, body
+    assert "id" in bg[0], "strip_server_fields must not mutate its input"
+
+    # sleep_until: chunked against the wall clock, survives a clock jump (suspend).
+    t = [datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)]
+    slept = []
+
+    def fake_sleep(s):
+        slept.append(s)
+        t[0] += timedelta(seconds=s)
+        if len(slept) == 2:  # host suspended mid-wait: wall clock jumps past the target
+            t[0] += timedelta(hours=9)
+
+    sleep_until(t[0] + timedelta(minutes=10), now_fn=lambda: t[0], sleep_fn=fake_sleep)
+    assert slept[:2] == [60, 60] and len(slept) == 2, slept
+    slept.clear()
+    sleep_until(t[0] - timedelta(seconds=1), now_fn=lambda: t[0], sleep_fn=fake_sleep)
+    assert slept == [], "a past target returns immediately"
+
+    # Pre-flight: the scenario's price for the interval covering now, and the VEN's resolved one.
+    price = {"started_at": "2026-09-12T12:00:00Z", "values_eur_kwh": [0.10, 0.45, 0.10], "interval_minutes": 10}
+    at = datetime(2026, 9, 12, 12, 12, tzinfo=timezone.utc)
+    assert scenario_price_at(price, at) == 0.45
+    assert scenario_price_at(price, datetime(2026, 9, 12, 12, 31, tzinfo=timezone.utc)) is None
+    tariffs = [
+        {"interval_start": "2026-09-12T12:00:00Z", "interval_end": "2026-09-12T12:10:00Z", "import_tariff_eur_kwh": 0.10},
+        {"interval_start": "2026-09-12T12:10:00Z", "interval_end": "2026-09-12T12:20:00Z", "import_tariff_eur_kwh": 0.45},
+    ]
+    assert tariff_matches(tariffs, at, 0.45) is True
+    assert tariff_matches(tariffs, at, 0.09) is False
+    assert tariff_matches([], at, 0.45) is False
+
+    # Plan retention: one compact record per new plan id, none for a repeat.
+    plan = {"id": "p1", "created_at": "c", "trigger": "PERIODIC", "solve_status": "OPTIMAL", "warnings": [],
+            "slots": [{"slot_index": 0, "start": "s", "end": "e", "import_tariff_eur_kwh": 0.1,
+                       "allocations": [{"asset_id": "ev", "power_kw": 7.4, "marginal_value": 1.0}]}]}
+    rec, last = plan_record_if_new(plan, None)
+    assert last == "p1" and rec["slots"] == [{"start": "s", "end": "e", "import_tariff_eur_kwh": 0.1,
+                                              "allocations": [{"asset_id": "ev", "power_kw": 7.4}]}], rec
+    assert rec["solve_status"] == "OPTIMAL" and rec["trigger"] == "PERIODIC"
+    rec, last = plan_record_if_new(plan, "p1")
+    assert rec is None and last == "p1"
+    assert plan_record_if_new(None, "p1") == (None, "p1")
+    print("_self_check_gb46_harness OK")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
         _self_check_ev_roster_sessions()
@@ -1207,5 +1462,6 @@ if __name__ == "__main__":
         _self_check_scenario_ev_mode_guard()
         _self_check_resolve_start_at()
         _self_check_with_retry()
+        _self_check_gb46_harness()
     else:
         main()
