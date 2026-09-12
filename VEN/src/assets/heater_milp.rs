@@ -1048,6 +1048,7 @@ mod milp_context_trait_tests {
         let state = super::super::AssetState::Heater(super::super::HeaterState {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
         let now = Utc::now();
         let target = HeaterTarget {
@@ -1117,6 +1118,7 @@ mod milp_context_trait_tests {
         let state = super::super::AssetState::Heater(super::super::HeaterState {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
         let now = Utc::now();
         let target = HeaterTarget {
@@ -1181,6 +1183,7 @@ mod milp_context_trait_tests {
         let state = super::super::AssetState::Heater(super::super::HeaterState {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
@@ -1225,6 +1228,7 @@ mod milp_context_trait_tests {
         let state = super::super::AssetState::Heater(super::super::HeaterState {
             temperature_c: 20.5,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();

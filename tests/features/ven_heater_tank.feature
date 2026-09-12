@@ -32,6 +32,17 @@ Feature: Heater tank MILP trajectory model
     When I wait for the VEN /plan to have a heater allocation in slots
     Then at least one of the first 36 plan slots has a heater allocation
 
+  # --- Thermostat override: visible while it runs, gone once the tank recovers ---
+
+  Scenario: The thermostat's emergency override is visible and ends above T_min plus hysteresis
+    # test profile: T_min=18°C, T_max=23°C, max_kw=3.0 → emergency hysteresis band 18–21°C.
+    # The Controller page marks the heater "forced" from /sim's forced_power_kw (GB-44);
+    # the override must only exist while a real emergency runs, never persist after it.
+    Given I inject heater_temp_c 17.5 via sim inject
+    Then the VEN /sim heater reports a forced power equal to its max_kw within 15 seconds
+    Given I inject heater_temp_c 22.0 via sim inject
+    Then the VEN /sim heater reports no forced power within 15 seconds
+
   # --- Tariff attraction: cheap PRICE event pulls heater into cheap window ---
 
   Scenario: Cheap PRICE event attracts heater into cheap tariff window

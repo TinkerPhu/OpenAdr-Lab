@@ -1106,6 +1106,7 @@ mod phase2b_tick_overridable_tests {
         let mut state = AssetState::Heater(HeaterState {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         });
 
         let overrides = TickOverrides {

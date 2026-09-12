@@ -119,6 +119,9 @@ export function deriveAssetSummaries(
 
     const activeRequest = findActiveRequest(userRequests, assetId, nowMs);
 
+    const forced = sim.assets[assetId]?.["forced_power_kw"];
+    const forcedPowerKw = typeof forced === "number" ? forced : null;
+
     return {
       assetId,
       label,
@@ -128,6 +131,7 @@ export function deriveAssetSummaries(
       co2RateGH,
       socPct,
       tempC,
+      forcedPowerKw,
       forecastEnergyKwh,
       activeRequest,
       maxImportKw,

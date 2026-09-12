@@ -4,6 +4,39 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from behave import given, then
 from features.helpers.api_client import ven_get, vtn_post
+from features.helpers.wait import poll_until
+
+
+def _sim_heater():
+    resp = ven_get("/sim")
+    if not resp.ok:
+        return None
+    return (resp.json().get("assets") or {}).get("heater")
+
+
+@then("the VEN /sim heater reports a forced power equal to its max_kw within {timeout:d} seconds")
+def step_heater_forced_at_max(context, timeout):
+    heater = poll_until(
+        _sim_heater,
+        lambda h: h is not None and h.get("forced_power_kw") is not None,
+        timeout=timeout,
+        interval=0.5,
+        description="sim heater reports forced_power_kw",
+    )
+    assert heater["forced_power_kw"] == heater["max_kw"], (
+        f"expected emergency heat at max_kw={heater['max_kw']}, got {heater['forced_power_kw']}"
+    )
+
+
+@then("the VEN /sim heater reports no forced power within {timeout:d} seconds")
+def step_heater_not_forced(context, timeout):
+    poll_until(
+        _sim_heater,
+        lambda h: h is not None and h.get("forced_power_kw") is None,
+        timeout=timeout,
+        interval=0.5,
+        description="sim heater stops reporting forced_power_kw",
+    )
 
 
 # ---------------------------------------------------------------------------

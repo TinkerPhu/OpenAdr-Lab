@@ -58,6 +58,12 @@ pub struct HeaterState {
     pub temperature_c: f64,
     /// Actual power last tick. Always ≥ 0 (heaters only consume).
     pub actual_power_kw: f64,
+    /// The thermostat's emergency fired (temperature reached `temp_min_c`) and is
+    /// still running its hysteresis toward `temp_min_c + 3 °C`. Kept explicitly
+    /// rather than inferred from `actual_power_kw`, which cannot tell an emergency
+    /// from the planner commanding the top stage (GB-44).
+    #[serde(default)]
+    pub emergency_latched: bool,
 }
 
 /// Serde default for `Heater::power_stages` — see the field's doc comment.
@@ -115,6 +121,7 @@ impl Heater {
         HeaterState {
             temperature_c: cfg.temp_initial_c,
             actual_power_kw: 0.0,
+            emergency_latched: false,
         }
     }
 
@@ -143,13 +150,31 @@ impl Heater {
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
         let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
         let new_temp = state.temperature_c + delta_c;
+        let emergency_latched = self.emergency_active_in(state, self.emergency_mode)
+            && new_temp < self.temp_min_c + Self::EMERGENCY_HYSTERESIS_C;
         (
             HeaterState {
                 temperature_c: new_temp,
                 actual_power_kw: actual,
+                emergency_latched,
             },
             actual,
         )
+    }
+
+    /// Once the emergency fires at `temp_min_c`, it keeps running until this far above
+    /// it, to prevent rapid relay cycling.
+    const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
+
+    /// Is the thermostat's emergency heat running under `mode`: at/below `temp_min_c`,
+    /// or still inside the hysteresis band of an emergency that already fired. Curtail
+    /// suppresses it: drifting toward ambient below `temp_min_c` is then the desired
+    /// response, not a fault to fight (§2 — no physical floor on this side).
+    fn emergency_active_in(&self, state: &HeaterState, mode: HeaterEmergencyMode) -> bool {
+        mode != HeaterEmergencyMode::Curtail
+            && (state.temperature_c <= self.temp_min_c
+                || (state.emergency_latched
+                    && state.temperature_c < self.temp_min_c + Self::EMERGENCY_HYSTERESIS_C))
     }
 
     /// The power the thermostat forces regardless of setpoint, if any: off at
@@ -166,16 +191,7 @@ impl Heater {
         state: &HeaterState,
         mode: HeaterEmergencyMode,
     ) -> Option<f64> {
-        // Emergency with hysteresis: once it fires at T_min, keep running until
-        // T_min + 3 °C to prevent rapid relay cycling. actual_power_kw from the
-        // previous tick is the implicit thermostat state. Curtail mode suppresses
-        // this: drifting toward ambient below temp_min_c is then the desired
-        // response, not a fault to fight (§2 — no physical floor on this side).
-        const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-        let emergency_active = mode != HeaterEmergencyMode::Curtail
-            && (state.temperature_c <= self.temp_min_c
-                || (state.actual_power_kw >= self.max_kw
-                    && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C));
+        let emergency_active = self.emergency_active_in(state, mode);
         // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true
         // safety ceiling temp_safety_max_c (§2).
         let safety_ceiling_c = if mode == HeaterEmergencyMode::Absorb {
@@ -328,37 +344,23 @@ impl Heater {
             return TimeSeries::empty(Interpolation::Linear);
         }
         let end = now + timespan;
-        // Simulate uncontrolled thermostat operation (no plan overlay, setpoint = 0).
-        // The thermostat emergency fires when temp ≤ T_min, so the forecast still
-        // captures long-run thermal cycling rather than a flat-zero line.
+        // Simulate uncontrolled thermostat operation (no plan overlay, setpoint = 0)
+        // through the same step the live tick uses, so the forecast's thermostat is
+        // the real one (emergency at T_min, its hysteresis, cutoff at T_max) rather
+        // than a second copy of the rule.
         let setpoint = self.default_setpoint();
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
         let mut t = now;
-        let mut temp = state.temperature_c;
+        let mut s = state.clone();
 
         while t < end {
-            let dt_h = 1.0 / 60.0;
-            let loss_kw = (temp - self.ambient_temp_c) * self.k_loss_kw_per_c;
-            let kw = if temp < self.temp_min_c {
-                self.max_kw
-            } else if temp > self.temp_max_c {
-                0.0
-            } else {
-                setpoint
-            };
+            let (next, kw) = self.step_inner(&s, setpoint, Duration::seconds(60));
             samples.push((t, kw));
-            let net_kwh = (kw - loss_kw - self.draw_kw) * dt_h;
-            temp += net_kwh / self.thermal_mass_kwh_per_c;
+            s = next;
             t += Duration::seconds(60);
         }
-        let end_kw = if temp < self.temp_min_c {
-            self.max_kw
-        } else if temp > self.temp_max_c {
-            0.0
-        } else {
-            setpoint
-        };
+        let end_kw = self.step_inner(&s, setpoint, Duration::zero()).1;
         samples.push((end, end_kw));
 
         TimeSeries {
@@ -555,7 +557,81 @@ mod tests {
         HeaterState {
             temperature_c,
             actual_power_kw,
+            emergency_latched: false,
         }
+    }
+
+    /// A heater whose thermostat emergency fired earlier and is still inside
+    /// its hysteresis band, running at full power.
+    fn latched_state_at(heater: &Heater, temperature_c: f64) -> HeaterState {
+        HeaterState {
+            temperature_c,
+            actual_power_kw: heater.max_kw,
+            emergency_latched: true,
+        }
+    }
+
+    // ── GB-44: emergency latch vs a planner-commanded top stage ─────────────
+
+    #[test]
+    fn step_inner_full_stage_commanded_in_comfort_band_does_not_latch() {
+        // ven-10 in the 2026-08-31 S-7 run: the planner ran the heater at full
+        // power at 19.8-20.4 °C (floor 18 °C), then turned it off for a capacity
+        // limit — the thermostat must not treat "was at full power" as an
+        // emergency and keep it on.
+        let heater = hot_water_heater(); // temp_min 40, max 6.0, hysteresis band 40-43
+        let (running, kw) =
+            heater.step_inner(&state_at(41.0, 0.0), heater.max_kw, Duration::seconds(1));
+        assert_eq!(kw, heater.max_kw);
+        assert!(
+            !running.emergency_latched,
+            "a commanded top stage is not an emergency"
+        );
+
+        let (_off, kw) = heater.step_inner(&running, 0.0, Duration::seconds(1));
+        assert_eq!(kw, 0.0, "the next plan setpoint must be followed");
+    }
+
+    #[test]
+    fn step_inner_emergency_latches_until_min_plus_hysteresis() {
+        let heater = hot_water_heater(); // temp_min 40, band 40-43
+        let (fired, kw) = heater.step_inner(&state_at(39.9, 0.0), 0.0, Duration::seconds(1));
+        assert_eq!(kw, heater.max_kw, "at/below temp_min the emergency fires");
+        assert!(fired.emergency_latched);
+
+        let (held, kw) =
+            heater.step_inner(&latched_state_at(&heater, 42.0), 0.0, Duration::seconds(1));
+        assert_eq!(
+            kw, heater.max_kw,
+            "inside the band a fired emergency keeps running"
+        );
+        assert!(held.emergency_latched);
+
+        let (released, kw) =
+            heater.step_inner(&latched_state_at(&heater, 43.0), 0.0, Duration::seconds(1));
+        assert_eq!(kw, 0.0, "at temp_min + 3 °C the setpoint takes over again");
+        assert!(!released.emergency_latched);
+    }
+
+    #[test]
+    fn step_inner_curtail_clears_the_latch() {
+        let mut heater = hot_water_heater();
+        heater.emergency_mode = HeaterEmergencyMode::Curtail;
+        let (next, kw) =
+            heater.step_inner(&latched_state_at(&heater, 41.0), 0.0, Duration::seconds(1));
+        assert_eq!(kw, 0.0);
+        assert!(
+            !next.emergency_latched,
+            "a curtailed emergency is no longer running"
+        );
+    }
+
+    #[test]
+    fn heater_state_without_latch_field_deserialises_unlatched() {
+        // sim_state.json persisted before GB-44 has no emergency_latched field.
+        let state: HeaterState =
+            serde_json::from_str(r#"{"temperature_c":41.0,"actual_power_kw":6.0}"#).unwrap();
+        assert!(!state.emergency_latched);
     }
 
     #[test]
@@ -624,10 +700,10 @@ mod tests {
 
     #[test]
     fn capability_and_floor_match_step_during_emergency_hysteresis() {
-        // Above temp_min_c but still within the 3 °C hysteresis while running at
-        // full power: step keeps it forced on, so min == max == max_kw.
+        // Above temp_min_c but still within the 3 °C hysteresis of an emergency
+        // that already fired: step keeps it forced on, so min == max == max_kw.
         let heater = default_heater();
-        let state = state_at(21.0, heater.max_kw);
+        let state = latched_state_at(&heater, 21.0);
         assert_eq!(
             heater.capability_inner(&state).max_import_kw,
             stepped_kw(&heater, &state)
@@ -644,8 +720,21 @@ mod tests {
         let forced = |temp_c, last_kw| {
             Asset::forced_power_kw(&heater, &AssetState::Heater(state_at(temp_c, last_kw)))
         };
+        let latched = Asset::forced_power_kw(
+            &heater,
+            &AssetState::Heater(latched_state_at(&heater, 21.0)),
+        );
         assert_eq!(forced(19.0, 0.0), Some(2.5), "too cold: emergency heat");
-        assert_eq!(forced(21.0, 2.5), Some(2.5), "still within hysteresis");
+        assert_eq!(
+            latched,
+            Some(2.5),
+            "fired emergency still within hysteresis"
+        );
+        assert_eq!(
+            forced(21.0, 2.5),
+            None,
+            "full power the planner commanded is not an emergency (GB-44)"
+        );
         assert_eq!(forced(21.5, 0.0), None, "normal band follows the setpoint");
         assert_eq!(forced(23.5, 0.0), Some(0.0), "overheated: forced off");
     }

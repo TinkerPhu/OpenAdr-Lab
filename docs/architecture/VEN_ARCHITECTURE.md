@@ -811,6 +811,19 @@ dT/dt = (P_heater × efficiency − ambient_loss_rate × (T_room − T_ambient))
 `ambient_loss_rate` default: 0.1 kW/°C. Thermostat override at `T_min` / `T_max` bounds.
 Power levels: discrete `[0, 3, 6]` kW (STEPPED adjustability).
 
+**Thermostat emergency and its latch** (`Heater::thermostat_forced_kw_in`): at or below
+`temp_min_c` the thermostat forces full power and keeps it on until `temp_min_c + 3 °C`
+(hysteresis against relay chatter). That "still running" state is carried explicitly as
+`HeaterState::emergency_latched`, set only when the emergency fires and cleared at the end of the
+band or under `Curtail` (GB-44). It used to be inferred from `actual_power_kw >= max_kw`, which
+could not tell an emergency from the planner commanding the top stage: a space heater
+(`temp_min_c` 18 °C) the planner ran at full power anywhere in 18–21 °C then ignored every
+later setpoint, including capacity limits and alerts. `forecast()` steps through the same rule.
+Whenever the thermostat forces a value, `/sim` carries it as `forced_power_kw` and the Controller
+page marks that asset's power "· forced" (tooltip shows the forced kW). Tests: `heater.rs`
+`step_inner_*latch*`, `forced_power_kw_reports_what_the_thermostat_forces`; BDD
+`ven_heater_tank.feature` "The thermostat's emergency override is visible…".
+
 **Comfort band vs. safety envelope** (`VEN/src/assets/heater.rs`, `87d6037`): `temp_min_c`/
 `temp_max_c` are a comfort/service band, not the asset's true physical limits — the low side has
 no physical harm (the tank just drifts toward ambient), while the high side sits well inside a

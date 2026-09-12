@@ -93,6 +93,9 @@ export type AssetSummary = {
   socPct: number | null;
   /** Tank temperature [°C], null for non-thermal assets */
   tempC: number | null;
+  /** Power the asset draws regardless of its setpoint (`/sim` forced_power_kw, e.g. a
+   *  heater thermostat emergency) [kW]; null while it follows its setpoint */
+  forcedPowerKw: number | null;
   /** Sum of plan allocations for visible window [kWh], null if no plan */
   forecastEnergyKwh: number | null;
   /** Closest active user request, null if none */

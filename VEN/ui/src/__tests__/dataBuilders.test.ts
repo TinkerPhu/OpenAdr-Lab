@@ -269,6 +269,36 @@ describe("computeForecastEnergy via deriveAssetSummaries", () => {
   });
 });
 
+// ─── deriveAssetSummaries — forced power (GB-44) ──────────────────────────────
+
+describe("deriveAssetSummaries — forced power", () => {
+  const forcedSim: SimSnapshot = {
+    ts: new Date(NOW).toISOString(),
+    grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+    assets: {
+      heater: { power_kw: 3.5, temp_c: 19.9, forced_power_kw: 3.5 },
+      ev: { power_kw: 0, soc: 0.5 },
+      base_load: { power_kw: 0.4 },
+      wm: { power_kw: 0, forced_power_kw: 2.0 },
+    },
+  };
+  const summaries = deriveAssetSummaries(forcedSim, [], [], {}, NOW);
+  const find = (id: string) => summaries.find((s) => s.assetId === id)!;
+
+  it("carries the asset's own forced_power_kw", () => {
+    expect(find("heater").forcedPowerKw).toBe(3.5);
+  });
+
+  it("is null when the asset follows its setpoint", () => {
+    expect(find("ev").forcedPowerKw).toBeNull();
+    expect(find("base_load").forcedPowerKw).toBeNull();
+  });
+
+  it("applies to every asset, not just the heater", () => {
+    expect(find("wm").forcedPowerKw).toBe(2.0);
+  });
+});
+
 // ─── deriveAssetSummaries — static nameplate specs ────────────────────────────
 
 describe("deriveAssetSummaries — static specs", () => {

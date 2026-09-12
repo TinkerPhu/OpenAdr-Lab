@@ -14,6 +14,7 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
     co2RateGH,
     socPct,
     tempC,
+    forcedPowerKw,
     forecastEnergyKwh,
     activeRequest,
   } = summary;
@@ -31,6 +32,18 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
       <Typography variant="caption" color="text.secondary" data-testid={`asset-power-${assetId}`}>
         {sign(powerKw)}
         {powerKw.toFixed(2)} kW
+        {/* Inline, not its own line: a conditional line would desync this section's
+            height from the chart beside it (see AssetCell.test.tsx). */}
+        {forcedPowerKw !== null && (
+          <Box
+            component="span"
+            data-testid={`asset-forced-${assetId}`}
+            title={`Overrides its setpoint: forced ${forcedPowerKw.toFixed(2)} kW (e.g. heater thermostat emergency)`}
+            sx={{ color: "warning.main", ml: 0.5 }}
+          >
+            · forced
+          </Box>
+        )}
       </Typography>
       <Typography variant="caption" color="text.secondary" data-testid={`asset-cost-rate-${assetId}`}>
         {sign(costRateEurH)}
