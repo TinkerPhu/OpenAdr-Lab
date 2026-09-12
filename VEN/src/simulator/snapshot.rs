@@ -94,6 +94,7 @@ impl SimState {
                     cap_max_export_kw: cap.max_export_kw,
                     available_discharge_kwh,
                     available_charge_kwh,
+                    forced_power_kw: cfg.forced_power_kw(&entry.state),
                     default_setpoint_kw: cfg.default_setpoint(),
                     setpoint_kw: entry.setpoint_kw,
                     values,
@@ -182,5 +183,30 @@ impl SimState {
             grid_history,
             grid_current_kw,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::entities::asset_params::{AssetParams, HeaterParams};
+    use crate::simulator::SimState;
+
+    #[test]
+    fn sim_snapshot_carries_the_assets_own_forced_power() {
+        // Controllers read the heater's thermostat override from the snapshot
+        // instead of re-deriving it from temperatures.
+        let now = chrono::Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Heater(HeaterParams {
+                id: crate::ids::ASSET_HEATER.to_string(),
+                temp_initial_c: 10.0, // far below temp_min_c: emergency heat
+                ..Default::default()
+            })],
+            now,
+        );
+        let snap = sim.to_sim_snapshot();
+        let heater = &snap.assets[crate::ids::ASSET_HEATER];
+        let max_kw = heater.val("max_kw").unwrap();
+        assert_eq!(heater.forced_power_kw, Some(max_kw));
     }
 }

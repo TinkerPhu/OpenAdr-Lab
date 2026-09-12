@@ -12401,3 +12401,34 @@ every later command landed one window late. The headroom forecast's EV SoC there
 behind the plan. The t2=0 "now" value only included the EV by accident: its duplicated t1
 schedule point saw the staged command. `EvCharger::simulate_forward` now stages each window's
 command with a zero-length step before integrating it. The live tick keeps its one-tick delay.
+
+## 2026-09-12 — Battery "sustainable power" rule and an asset-competence sweep
+
+The user suspected the forecast and history kept showing 5 kW battery import while the battery
+was "at 100 %". VEN1's recorded data confirmed it: the battery sat at 99.955 % SoC, idle, for
+over 20 minutes, and every history sample counted it as ±5 kW (`down − up` exactly 10.0).
+`Battery::capability_inner` gated on `soc >= 1.0` exactly, so ~0.005 kWh of room (about 3 s at
+5 kW) still reported the full rate. A direction now counts as available only if its max rate can
+be sustained for 60 s (`SUSTAINED_POWER_MIN_S`); for VEN1's 10 kWh / 5 kW battery that's about
+99.2 % / min_soc + 0.8 %. The user proposed a flat 99 %; 60 s scales with capacity and rate
+instead (1 % of 100 kWh would be 12 minutes). Energy physics (`step_inner`, `forecast`, the
+MILP's energy balance) deliberately stay exact: narrowing the MILP's `e_max` would make the solve
+infeasible whenever the live SoC sits inside the band (`e_bat[0] = e_init` plus the terminal
+`e_bat[n] ≥ e_init`), and topping up the last fraction at low power is physically fine.
+
+The user asked whether one place (the asset) should decide this. Yes: the arbiter had its own
+`soc ≥ 1.0 − 0.01` / `soc ≤ min_soc + 0.01` re-derivation, which is gone now; it reads the
+battery's capability. The user then asked that every such finding triggers a sweep of the other
+assets and their surroundings (now a rule in `.claude/CLAUDE.md`). The sweep found and fixed:
+- the dispatcher's `predict_heater_forced_kw`, a full copy of the heater thermostat used by the
+  dispatcher, arbiter and dispatch override. It's replaced by `Asset::forced_power_kw` (heater:
+  `thermostat_forced_kw`), carried in `AssetSnapshot::forced_power_kw`, and honoured generically
+  for any asset;
+- three EV "can charge?" checks (`plugged && soc < soc_target`) in the arbiter and dispatcher,
+  now reading the EV's own `cap_max_import_kw`;
+- test fixtures that hand-rolled battery/EV/heater capability (the arbiter's hid the change until
+  the arbiter's tolerance was removed), now built from the real assets via
+  `services/test_support/asset_snapshots.rs`.
+Recorded, not fixed: R-78 (dispatcher's heater comfort-target thermostat), R-79 (arbiter heater
+emergency lever's hypothetical-mode checks), R-80 (MILP test mocks, EV `soc_ev_init`).
+`AssetHandle` moved to `assets/asset_handle.rs` to keep `asset_trait.rs` under the size cap.

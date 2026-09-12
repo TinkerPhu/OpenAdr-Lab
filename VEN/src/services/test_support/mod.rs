@@ -1,3 +1,4 @@
+pub mod asset_snapshots;
 pub mod milp_mocks;
 pub mod mock_history_port;
 pub mod mock_simulator_port;

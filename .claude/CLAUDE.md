@@ -226,8 +226,16 @@ Raw external data flows into the asset as an injected parameter; everything down
 receiving it is the asset's own business. The one exception is immutable history: an
 external recorder collecting the (unchangeable) past isn't a competing authority, since
 there's no divergence risk once a value can no longer change. See
-docs/plans/asset-competence-assurance-master-plan.md for the violation catalogue and
-remediation sequence (PV, base load, battery, heater, EV).
+docs/architecture/VEN_ARCHITECTURE.md §3.0d and the "Asset Competence Assurance" entries in
+docs/history/project_journal.md for the remediated violations (PV, base load, battery, heater, EV).
+Sweep rule: whenever you find one violation, do not fix just that spot. Check every other
+asset kind for the same shape, and check the surroundings (controller, arbiter, dispatcher,
+planner inputs, routes, test fixtures) for code that reads raw asset values (`snap.val("soc")`,
+temperatures, `plugged`, targets) and decides on its own what the asset can or will do, instead
+of asking the asset (capability, flexibility floor, forced power, forecast). Fix the ones in
+reach in the same piece of work; record the rest in docs/reference/TECHNICAL_DEBTS.md. Test
+fixtures that hand-build an asset's capability are the same violation: build them from the real
+asset.
 
 generic-over-bespoke: when several call sites solve the same shape of problem with separate
 near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one boolean per

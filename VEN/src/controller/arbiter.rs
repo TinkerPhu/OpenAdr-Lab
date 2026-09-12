@@ -19,7 +19,6 @@ use std::collections::HashMap;
 
 mod arbiter_levers;
 
-use crate::controller::dispatcher::predict_heater_forced_kw;
 use crate::controller::SimSnapshot;
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
@@ -109,10 +108,8 @@ pub fn projected_net_kw(
                     return bl_kw;
                 }
             }
-            if id.as_str() == crate::ids::ASSET_HEATER {
-                if let Some(forced_kw) = predict_heater_forced_kw(snap) {
-                    return forced_kw;
-                }
+            if let Some(forced_kw) = snap.forced_power_kw {
+                return forced_kw;
             }
             if id.as_str() == crate::ids::ASSET_BATTERY || id.as_str() == crate::ids::ASSET_EV {
                 return snap.setpoint_kw;

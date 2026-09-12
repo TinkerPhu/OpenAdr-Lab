@@ -1,3 +1,4 @@
+mod asset_handle;
 mod asset_trait;
 pub mod base_load;
 pub mod battery;
@@ -22,9 +23,11 @@ pub mod shiftable_load;
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
 // #[allow(dead_code)]'d for before this file split.
 #[allow(unused_imports)]
+pub use asset_handle::AssetHandle;
+#[allow(unused_imports)]
 pub use asset_trait::{
-    Asset, AssetHandle, MilpParticipant, RequestResolvable, Thermostat, TickOverridable,
-    TickOverrides, Trajectory, TrajectoryPoint,
+    Asset, MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
+    Trajectory, TrajectoryPoint,
 };
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
