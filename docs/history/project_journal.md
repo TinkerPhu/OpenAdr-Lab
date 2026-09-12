@@ -12503,3 +12503,32 @@ and gone once the tank is above the band.
 
 Learning: state that a rule depends on ("has this emergency fired?") must be stored where the
 rule lives, not reconstructed from an output (power level) that other actors can also produce.
+
+## 2026-09-12 — Fleet experiments: run isolation, signal verification, measured compliance (GB-46)
+
+What: `experiments/run_experiment.py` now suspends every VTN event it didn't create for the
+duration of a run (saved to `<run>/background-events.json`, re-created afterwards, also on
+exceptions and SIGTERM; `--restore-background-events` for recovery), checks right after the first
+price action that every VEN resolves the scenario price (aborts otherwise), logs each action's
+parameters, keeps each adopted plan's per-slot allocations (`<ven>-plans.jsonl`), and waits in
+wall-clock-checked chunks. New `experiments/compliance.py`, reported by `kpi.py`: per VEN and per
+hard-limit window, pass = limit or physical floor reached within 5 minutes and held (user-agreed
+bar), plus `engaged`, signal integrity and the fleet's coincident peak. S-9's caps recalibrated
+(1.0 kW import, 0.5 kW export) from the previous run's per-VEN levels. Rules in
+`docs/guidelines/FLEET_EXPERIMENT_DESIGN.md`.
+
+Why: the 2026-08-31/09-08 campaign's first-pass verdicts were wrong for three of ten scenarios.
+They came from planner-predicted warnings and fleet sums, from demo events silently overriding
+the scenario price, and from caps that never bound.
+
+Verified: self-checks for every new function; replaying the old S-7 data reproduced the manual
+per-VEN verdict (ven-10/ven-12 fail the cap, only ven-10 the alert); a live 8-minute smoke run on
+the 20-VEN fleet after deploying GB-44/45. That run suspended and restored 12 demo events, the
+pre-flight passed on all 20 VENs, signal integrity was OK (the recorded tariff now equals the
+scenario price, which is GB-45 working live), and compliance ran. The one smoke failure, ven-3, is
+a real finding recorded under GB-40: its cap-aware plan timed out and scheduled the heater inside
+the cap.
+
+Operational lessons from the same day are in KEY_LEARNINGS ("Killing the process behind
+`docker compose run` does not stop the run container", "Worktrees must not share a cargo target
+dir").
