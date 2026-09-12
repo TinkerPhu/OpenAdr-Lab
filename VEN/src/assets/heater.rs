@@ -156,19 +156,29 @@ impl Heater {
     /// the forced-off ceiling, full power in an emergency. The single rule
     /// `step_inner`, `capability_inner` and `flexibility_floor_inner` all read.
     fn thermostat_forced_kw(&self, state: &HeaterState) -> Option<f64> {
+        self.thermostat_forced_kw_in(state, self.emergency_mode)
+    }
+
+    /// Same rule, evaluated as if `mode` were active — answers the arbiter's
+    /// what-if questions ("heat forced without Curtail?", "room under Absorb?").
+    fn thermostat_forced_kw_in(
+        &self,
+        state: &HeaterState,
+        mode: HeaterEmergencyMode,
+    ) -> Option<f64> {
         // Emergency with hysteresis: once it fires at T_min, keep running until
         // T_min + 3 °C to prevent rapid relay cycling. actual_power_kw from the
         // previous tick is the implicit thermostat state. Curtail mode suppresses
         // this: drifting toward ambient below temp_min_c is then the desired
         // response, not a fault to fight (§2 — no physical floor on this side).
         const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-        let emergency_active = self.emergency_mode != HeaterEmergencyMode::Curtail
+        let emergency_active = mode != HeaterEmergencyMode::Curtail
             && (state.temperature_c <= self.temp_min_c
                 || (state.actual_power_kw >= self.max_kw
                     && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C));
         // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true
         // safety ceiling temp_safety_max_c (§2).
-        let safety_ceiling_c = if self.emergency_mode == HeaterEmergencyMode::Absorb {
+        let safety_ceiling_c = if mode == HeaterEmergencyMode::Absorb {
             self.temp_safety_max_c
         } else {
             self.temp_max_c
@@ -236,6 +246,16 @@ impl Heater {
             "emergency_absorb".into(),
             (self.emergency_mode == HeaterEmergencyMode::Absorb) as u8 as f64,
         );
+        // The heater's own answers to the arbiter's emergency-mode what-ifs:
+        // heat its thermostat forces unless curtailed, and room under Absorb.
+        let emergency_heat_kw = self
+            .thermostat_forced_kw_in(state, HeaterEmergencyMode::Normal)
+            .unwrap_or(0.0);
+        m.insert("emergency_heat_kw".into(), emergency_heat_kw);
+        let absorb_headroom_kw = self
+            .thermostat_forced_kw_in(state, HeaterEmergencyMode::Absorb)
+            .unwrap_or(self.max_kw);
+        m.insert("absorb_headroom_kw".into(), absorb_headroom_kw);
         m
     }
 
@@ -628,6 +648,22 @@ mod tests {
         assert_eq!(forced(21.0, 2.5), Some(2.5), "still within hysteresis");
         assert_eq!(forced(21.5, 0.0), None, "normal band follows the setpoint");
         assert_eq!(forced(23.5, 0.0), Some(0.0), "overheated: forced off");
+    }
+
+    #[test]
+    fn state_values_answer_the_emergency_mode_what_ifs() {
+        // The arbiter's emergency lever asks: how much emergency heat would run
+        // without Curtail, and how much could Absorb take? Both are answered here,
+        // including while Curtail itself is active (the lever must stay offered).
+        let mut heater = default_heater(); // temp_min 20, temp_max 23, safety 23, max 2.5
+        heater.emergency_mode = HeaterEmergencyMode::Curtail;
+        let cold = heater.state_values(&state_at(19.0, 0.0));
+        assert_eq!(cold.get("emergency_heat_kw"), Some(&2.5));
+        let mid = heater.state_values(&state_at(21.5, 0.0));
+        assert_eq!(mid.get("emergency_heat_kw"), Some(&0.0));
+        assert_eq!(mid.get("absorb_headroom_kw"), Some(&2.5));
+        let hot = heater.state_values(&state_at(23.0, 0.0));
+        assert_eq!(hot.get("absorb_headroom_kw"), Some(&0.0));
     }
 
     #[test]

@@ -56,7 +56,6 @@ fn solve_with_session(
 ) -> crate::entities::plan::Plan {
     run_planner(
         build_asset_contexts(profile, sim, now, Some(session), None, tariffs),
-        sim,
         tariffs,
         &no_capacity(),
         profile,
@@ -253,7 +252,6 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
     let opp = ev_session_with_mode(now, UserRequestMode::Opportunistic);
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&opp), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &[],
@@ -305,16 +303,7 @@ fn test_mode_opportunistic_has_no_deadline_constraint() {
 
     let tariffs = make_tariffs(0.30, 0.08, 300.0);
     let ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);
-    let inp = build_milp_inputs(
-        &ctxs,
-        &sim,
-        &tariffs,
-        &no_capacity(),
-        &profile,
-        now,
-        &[],
-        None,
-    );
+    let inp = build_milp_inputs(&ctxs, &tariffs, &no_capacity(), &profile, now, &[], None);
     assert!(
         inp.a_ev.iter().all(|&v| v),
         "OPPORTUNISTIC ignores the departure deadline, mask {:?}",

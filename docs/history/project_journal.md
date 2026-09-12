@@ -12432,3 +12432,21 @@ assets and their surroundings (now a rule in `.claude/CLAUDE.md`). The sweep fou
 Recorded, not fixed: R-78 (dispatcher's heater comfort-target thermostat), R-79 (arbiter heater
 emergency lever's hypothetical-mode checks), R-80 (MILP test mocks, EV `soc_ev_init`).
 `AssetHandle` moved to `assets/asset_handle.rs` to keep `asset_trait.rs` under the size cap.
+
+Follow-up, same day (R-78..R-80 fixed):
+- R-78: the dispatcher decided the heater's on/off for a user comfort target itself. The tick now
+  asks each `Thermostat` asset (`SimState::thermostat_setpoints_kw` → `thermostat_setpoint_kw`,
+  previously only called by tests) while it holds the simulator, and `build_setpoints` applies
+  those answers wherever the plan has no allocation, for any thermostat asset, not just "heater".
+- R-79: the arbiter's heater emergency lever read raw temperatures and ignored the heater's own
+  hysteresis. The heater now evaluates its thermostat rule under a given mode
+  (`thermostat_forced_kw_in`) and publishes `emergency_heat_kw` (Normal) and `absorb_headroom_kw`
+  (Absorb). The lever reads those, so it's offered during hysteresis (the heat really is forced)
+  and stays offered while its own Curtail suppresses the heat, which avoids flip-flopping.
+- R-80: the planner read the EV's raw `soc` from the snapshot to seed the plan's EV SoC forecast.
+  The EV's MILP context now carries `soc_init`. That was the planner's last use of the snapshot,
+  so `SimSnapshot` is gone from `build_milp_inputs`, `run_planner`, `SolveRequest` and
+  `build_solve_request`. The MILP test helpers build snapshots from the real assets and rebuild
+  entries through them after a state change.
+Still open, same shape: R-73 (plan-result future states for battery/EV/heater are computed by
+planner-side "Mirrors" helpers, not by the assets).

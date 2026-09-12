@@ -116,6 +116,25 @@ impl SimState {
         }
     }
 
+    /// Each `Thermostat` asset's own setpoint for a user comfort target
+    /// (`heater_setpoint_c` inject); empty when no target is set. The
+    /// dispatcher applies these instead of deciding on/off from temperatures.
+    pub fn thermostat_setpoints_kw(&self, target_c: Option<f64>) -> HashMap<String, f64> {
+        let Some(target_c) = target_c else {
+            return HashMap::new();
+        };
+        self.iter_assets()
+            .filter_map(|(entry, cfg)| {
+                cfg.as_thermostat().map(|t| {
+                    (
+                        entry.id.clone(),
+                        t.thermostat_setpoint_kw(&entry.state, target_c),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// Build a domain-only `TimelineSnapshot`. All infra→domain conversions happen here
     /// before the sim lock is released; no `AssetHistoryBuffer`/`AssetConfig`/`AssetState`
     /// escapes to the domain layer.
@@ -190,6 +209,30 @@ impl SimState {
 mod tests {
     use crate::entities::asset_params::{AssetParams, HeaterParams};
     use crate::simulator::SimState;
+
+    #[test]
+    fn thermostat_setpoints_come_from_each_thermostat_asset() {
+        let now = chrono::Utc::now();
+        let sim = SimState::from_params(
+            &[AssetParams::Heater(HeaterParams {
+                id: crate::ids::ASSET_HEATER.to_string(),
+                temp_initial_c: 20.0,
+                max_kw: 3.0,
+                ..Default::default()
+            })],
+            now,
+        );
+        let heater = crate::ids::ASSET_HEATER;
+        assert_eq!(
+            sim.thermostat_setpoints_kw(Some(22.0)).get(heater),
+            Some(&3.0)
+        );
+        assert_eq!(
+            sim.thermostat_setpoints_kw(Some(18.0)).get(heater),
+            Some(&0.0)
+        );
+        assert!(sim.thermostat_setpoints_kw(None).is_empty());
+    }
 
     #[test]
     fn sim_snapshot_carries_the_assets_own_forced_power() {

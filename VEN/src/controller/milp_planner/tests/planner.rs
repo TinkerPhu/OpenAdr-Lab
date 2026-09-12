@@ -64,7 +64,6 @@ fn run_planner_no_assets_covers_base_load() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -120,7 +119,6 @@ fn test_plan_carries_optimal_status_and_objective_value() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -186,7 +184,6 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
 
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &[],
@@ -292,7 +289,6 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
         }]);
         let plan = super::super::run_planner(
             build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-            &sim,
             &tariffs,
             &no_capacity(),
             &[],
@@ -358,7 +354,6 @@ fn run_planner_battery_absent_no_bat_allocation() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -397,7 +392,6 @@ fn run_planner_ev_absent_no_ev_allocation() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -429,7 +423,6 @@ fn run_planner_battery_charges_on_cheap_tariff() {
     let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -498,7 +491,6 @@ fn run_planner_ev_must_run_energy_met() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -535,7 +527,6 @@ fn run_planner_power_balance_invariant() {
     let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -577,7 +568,6 @@ fn run_planner_absent_battery_no_panic() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -690,7 +680,6 @@ fn run_planner_n48_full_horizon() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -735,10 +724,8 @@ fn run_planner_n48_full_horizon() {
 fn run_planner_n48_empty_asset_contexts_no_panic() {
     let now = fixed_now();
     let profile = make_profile_n48();
-    let sim = make_snap_from_profile(&profile);
     let plan = run_planner(
         vec![],
-        &sim,
         &make_tariffs(0.25, 0.08, 300.0),
         &no_capacity(),
         &profile,
@@ -759,13 +746,11 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
     use crate::services::test_support::milp_mocks::MockEvCtx;
     let now = fixed_now();
     let profile = make_profile_n48();
-    let sim = make_snap_from_profile(&profile);
     let n = 48_usize;
     let ev_ctx: Box<dyn crate::controller::milp_planner::AssetMilpContext> =
         Box::new(MockEvCtx::must_not_run(n, 7.2));
     let plan = run_planner(
         vec![ev_ctx],
-        &sim,
         &make_tariffs(0.25, 0.08, 300.0),
         &no_capacity(),
         &profile,
@@ -798,14 +783,12 @@ fn run_planner_duplicate_asset_kind_panics() {
     use crate::services::test_support::milp_mocks::MockBatteryCtx;
     let now = fixed_now();
     let profile = make_profile_n48();
-    let sim = make_snap_from_profile(&profile);
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![
         Box::new(MockBatteryCtx::new(10.0, 5.0, 1.0, 5.0, 0.9487)),
         Box::new(MockBatteryCtx::new(5.0, 2.5, 0.5, 3.0, 0.9487)), // duplicate Battery kind
     ];
     let _ = run_planner(
         ctxs,
-        &sim,
         &make_tariffs(0.25, 0.08, 300.0),
         &no_capacity(),
         &profile,
@@ -877,14 +860,12 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
 
     let now = fixed_now();
     let profile = make_profile_n48();
-    let sim = make_snap_from_profile(&profile);
     let infeasible: Box<dyn AssetMilpContext> = Box::new(InfeasibleBatCtx {
         inner: MockBatteryCtx::new(10.0, 5.0, 1.0, 5.0, 0.9487),
     });
     // run_planner catches the solver Err and returns a fallback plan — must not panic
     let plan = run_planner(
         vec![infeasible],
-        &sim,
         &make_tariffs(0.25, 0.08, 300.0),
         &no_capacity(),
         &profile,
@@ -937,7 +918,6 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
 
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &sim,
         &tariffs,
         &cap,
         std::slice::from_ref(&alert),
@@ -990,7 +970,6 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
     // path is exercised end-to-end through a genuine HiGHS solve.
     let plan = super::super::run_planner(
         ctxs,
-        &sim,
         &tariffs,
         &no_capacity(),
         std::slice::from_ref(&alert),
@@ -1055,7 +1034,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
 
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &sim,
         &tariffs,
         &cap,
         &[],
@@ -1097,7 +1075,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
     };
     let inputs2 = super::super::inputs::build_milp_inputs(
         &build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &cap,
         std::slice::from_ref(&alert),
@@ -1215,7 +1192,6 @@ fn run_planner_shiftable_tie_breaks_to_earliest_start() {
     push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
         ctxs,
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -1265,7 +1241,6 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
     push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
         ctxs,
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -1331,7 +1306,6 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
     let tariffs = make_two_zone_tariffs(0.10, 0.50);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,

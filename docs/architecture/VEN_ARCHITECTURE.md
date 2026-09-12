@@ -682,8 +682,14 @@ asset must arrive there as the asset's own answer, never as raw values they inte
 60 s sustain rule, the EV's plugged/target gate), `available_*_kwh`, and `forced_power_kw`
 (`Asset::forced_power_kw`: what it will draw regardless of its setpoint, e.g. the heater's
 thermostat emergency/cutoff). The dispatcher, arbiter and dispatch override read these; the
-2026-09-12 sweep removed their SoC/temperature re-derivations. Open remainders: R-78..R-80 in
-`docs/reference/TECHNICAL_DEBTS.md`. Test snapshots are built from real assets via
+2026-09-12 sweep removed their SoC/temperature re-derivations. Questions that depend on
+something the snapshot can't know are still answered by the asset, just asked where that input
+exists: a user comfort target via `SimState::thermostat_setpoints_kw` (each `Thermostat`
+asset's own `thermostat_setpoint_kw`), and the arbiter's emergency-mode what-ifs via the
+heater's own `emergency_heat_kw` / `absorb_headroom_kw` values (its thermostat rule evaluated
+under Normal / Absorb). The MILP planner no longer takes a `SimSnapshot` at all
+(`SolveRequest`/`run_planner`): everything it knows about an asset arrives through that asset's
+own `AssetMilpContext` (e.g. the EV's `soc_init`). Test snapshots are built from real assets via
 `services/test_support/asset_snapshots.rs`.
 
 ### 3.1 Generic Asset Model

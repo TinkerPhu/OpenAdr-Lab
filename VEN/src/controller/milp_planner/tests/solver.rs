@@ -970,7 +970,6 @@ fn configured_mip_gap_target_reaches_the_plan() {
 
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,

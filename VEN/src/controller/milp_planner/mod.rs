@@ -36,7 +36,6 @@ pub(crate) use self::types::ShiftableLoadMilpContext;
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
-use crate::controller::simulator_port::SimSnapshot;
 #[allow(unused_imports)]
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
@@ -118,7 +117,6 @@ fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
 #[allow(clippy::too_many_arguments)]
 pub fn run_planner(
     mut asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
-    assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     alert_windows: &[crate::entities::capacity::AlertWindow],
@@ -170,7 +168,6 @@ pub fn run_planner(
     let base_load = base_load_params(asset_params);
     let inputs = build_milp_inputs(
         &asset_contexts,
-        assets,
         tariffs,
         capacity,
         alert_windows,
@@ -257,7 +254,6 @@ impl crate::controller::SolverPort for MilpSolver {
     fn solve(&self, req: crate::controller::SolveRequest) -> Plan {
         run_planner(
             req.asset_contexts,
-            &req.assets,
             &req.tariffs,
             &req.capacity,
             &req.alert_windows,

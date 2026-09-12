@@ -55,11 +55,9 @@ fn build_milp_inputs_p_base_kw_matches_live_base_load_forecast_kw_at() {
     let base_load_live_forecast_kw =
         resolve_base_load_forecast_kw(&sim_state, n_slots, &cum_s, now);
 
-    let sim_snap = sim_state.to_sim_snapshot();
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &sim_snap,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &[],

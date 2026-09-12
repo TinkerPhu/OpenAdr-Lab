@@ -4,7 +4,6 @@ use tracing::info;
 
 use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
-use crate::controller::simulator_port::SimSnapshot;
 #[cfg(test)]
 use crate::controller::SolverPort;
 use crate::controller::{HistoryPort, SolveRequest};
@@ -135,7 +134,6 @@ async fn resolve_diurnal_reference_for_cycle(
 #[allow(clippy::too_many_arguments)]
 pub async fn build_solve_request(
     asset_contexts: Vec<Box<dyn AssetMilpContext>>,
-    assets: SimSnapshot,
     tariffs: TariffTimeSeries,
     capacity: OadrCapacityState,
     alert_windows: Vec<AlertWindow>,
@@ -175,7 +173,6 @@ pub async fn build_solve_request(
         resolve_diurnal_reference_for_cycle(history, now).await;
     SolveRequest {
         asset_contexts,
-        assets,
         tariffs,
         capacity,
         alert_windows,
@@ -521,12 +518,10 @@ mod tests {
     #[tokio::test]
     async fn solve_plan_returns_fallback_plan_when_solver_panics() {
         use crate::entities::plan::SolveStatus;
-        use crate::services::test_support::mock_simulator_port::MockSimulatorPort;
         use crate::services::test_support::mock_solver_port::PanickingSolverPort;
 
         let req = SolveRequest {
             asset_contexts: vec![],
-            assets: MockSimulatorPort::empty_snapshot(),
             tariffs: TariffTimeSeries::from_snapshots(&[]),
             capacity: OadrCapacityState::default(),
             alert_windows: vec![],

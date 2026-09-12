@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 
 use crate::common::TimeSeries;
 use crate::controller::asset_milp_port::AssetMilpContext;
-use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
@@ -20,7 +19,6 @@ use crate::entities::tariff_snapshot::TariffTimeSeries;
 /// run on a blocking thread.
 pub struct SolveRequest {
     pub asset_contexts: Vec<Box<dyn AssetMilpContext>>,
-    pub assets: SimSnapshot,
     pub tariffs: TariffTimeSeries,
     pub capacity: OadrCapacityState,
     /// WP3.1 (BL-04): active grid-alert windows — planner clamps the

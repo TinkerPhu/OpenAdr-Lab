@@ -85,7 +85,6 @@ pub(super) async fn run_plan_cycle(
 
     // ── Run blocking HiGHS solve off the async runtime ────────────
     let solve_start = std::time::Instant::now();
-    let snap = sim_snap.to_sim_snapshot();
 
     // Read before the blocking solve so heater tiers pin to the last adopted plan.
     let anchor_until = state.anchor_until().await;
@@ -132,7 +131,6 @@ pub(super) async fn run_plan_cycle(
     // R-50: build_solve_request resolves the weather-sourced PV forecast internally.
     let solve_req = crate::services::planning::build_solve_request(
         asset_contexts,
-        snap,
         tariff_ts,
         capacity,
         alert_windows,
