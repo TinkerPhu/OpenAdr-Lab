@@ -33,7 +33,7 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
     And I create a priority-1 PRICE event of 0.45 for 10 minutes starting 20 minutes into that hour
     When I wait for the VEN /tariffs endpoint to show 0.45 inside that hour
     Then the VEN /tariffs price that hour at 0.09 before, 0.45 during and 0.09 after the 10-minute window
-    And no two VEN /tariffs snapshots overlap
+    And the day-ahead price resumes in its own segment when the 10-minute window ends
 
   Scenario: IMPORT_CAPACITY_LIMIT event updates the capacity state
     Given I create a rate-system program and save its ID

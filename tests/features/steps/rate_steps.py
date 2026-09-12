@@ -179,10 +179,15 @@ def _parse_ts(s):
 
 
 def _price_at(rates, at):
-    for s in rates:
-        if _parse_ts(s["interval_start"]) <= at < _parse_ts(s["interval_end"]):
-            return s.get("import_tariff_eur_kwh")
-    return None
+    """Forward-fill, as the /tariffs contract and the VEN UI read it (the API exposes
+    each segment's start only): the last snapshot starting at or before `at`."""
+    current = None
+    for s in sorted(rates, key=lambda r: _parse_ts(r["interval_start"])):
+        if _parse_ts(s["interval_start"]) <= at:
+            current = s.get("import_tariff_eur_kwh")
+        else:
+            break
+    return current
 
 
 @given("I create a priority-5 day-ahead PRICE event of 0.09 for one hour 30 hours from now")
@@ -222,11 +227,16 @@ def step_assert_intra_hour_resolution(context):
     assert got == {5: 0.09, 19: 0.09, 20: 0.45, 25: 0.45, 29: 0.45, 30: 0.09, 45: 0.09}, got
 
 
-@then("no two VEN /tariffs snapshots overlap")
-def step_assert_tariffs_non_overlapping(context):
-    spans = sorted((_parse_ts(s["interval_start"]), _parse_ts(s["interval_end"])) for s in context.ven_rates)
-    for (s1, e1), (s2, e2) in zip(spans, spans[1:]):
-        assert e1 <= s2, f"overlap: [{s1}, {e1}) and [{s2}, {e2})"
+@then("the day-ahead price resumes in its own segment when the 10-minute window ends")
+def step_assert_resume_segment(context):
+    # The resolved schedule is segmented: a snapshot must start exactly at the end of
+    # the DR window carrying the day-ahead price again, and no two snapshots may share
+    # a start (the API exposes starts only, so that is what non-overlap looks like here).
+    resume = context.day_ahead_hour_start + timedelta(minutes=30)
+    starts = [_parse_ts(s["interval_start"]) for s in context.ven_rates]
+    assert len(starts) == len(set(starts)), "duplicate segment starts in /tariffs"
+    at_resume = [s for s in context.ven_rates if _parse_ts(s["interval_start"]) == resume]
+    assert at_resume and at_resume[0].get("import_tariff_eur_kwh") == 0.09, at_resume
 
 
 # ---------------------------------------------------------------------------
