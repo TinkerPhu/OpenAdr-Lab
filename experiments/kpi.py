@@ -35,6 +35,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
+import compliance
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 # The recorder dumps its whole lab_recorder table (unfiltered by run window),
 # which over a long-lived deployment accumulates payload_json blobs past
 # Python's 128 KiB default csv field limit. sys.maxsize overflows the C long
@@ -65,6 +71,57 @@ def grid_rows(db_path, t_from, t_to):
         ).fetchall()
     finally:
         con.close()
+
+
+def tick_assets_by_minute(db_path, t_from, t_to):
+    """GB-46: per-minute asset state from tick_samples, keyed like grid_samples' ts,
+    as compliance.import_floor_kw expects it: ts → {asset_id: {power_kw, soc_pct,
+    temperature_c}} (last sample of each asset within the minute)."""
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c FROM tick_samples"
+            " WHERE ts >= ? AND ts < ? ORDER BY ts",
+            (t_from, t_to),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        con.close()
+    by_minute = {}
+    for ts, asset_id, power_kw, soc_pct, temperature_c in rows:
+        by_minute.setdefault(ts - ts % 60, {})[asset_id] = {
+            "power_kw": power_kw, "soc_pct": soc_pct, "temperature_c": temperature_c,
+        }
+    return by_minute
+
+
+def ven_compliance(db_path, t_from, t_to, windows, profile):
+    """GB-46: measured compliance per limit window for one VEN (see compliance.py)."""
+    rows = grid_rows(db_path, t_from, t_to)
+    assets = tick_assets_by_minute(db_path, t_from, t_to)
+    floor_by_ts = {ts: compliance.import_floor_kw(a, profile) for ts, a in assets.items()}
+    scored = [compliance.window_compliance(rows, w, floor_by_ts) for w in windows]
+    return [s for s in scored if s is not None], rows
+
+
+def fleet_compliance_summary(per_ven):
+    """Per limit window: engaged VENs, how many of them passed, which failed."""
+    summary = {}
+    for ven, results in per_ven.items():
+        for r in results:
+            key = (r["type"], r["at_minute"], r["direction"], r["limit_kw"])
+            s = summary.setdefault(key, {"engaged": 0, "passed": 0, "failing": []})
+            if r["engaged"]:
+                s["engaged"] += 1
+                if r["pass"]:
+                    s["passed"] += 1
+                else:
+                    s["failing"].append(ven)
+    return [
+        {"type": t, "at_minute": m, "direction": d, "limit_kw": lim, **s}
+        for (t, m, d, lim), s in sorted(summary.items(), key=lambda kv: (kv[0][1] or 0, kv[0][0]))
+    ]
 
 
 def ven_kpis(db_path, t_from, t_to):
@@ -769,6 +826,11 @@ def main():
         "--manifest",
         help="WP4.5: fleet manifest.json with persona tags — adds a per-persona KPI block",
     )
+    p.add_argument(
+        "--profiles-dir", default=str(REPO_ROOT / "VEN" / "profiles"),
+        help="GB-46: directory with each VEN's <ven>.yaml profile, for the physical-floor "
+             "model behind measured compliance (missing profile → floor 0, i.e. the raw limit)",
+    )
     args = p.parse_args()
 
     run_dir = Path(args.run)
@@ -802,6 +864,12 @@ def main():
                     baseline[ven] = {"energy_import_kwh": k["energy_import_kwh"], "cost_eur": k["cost_eur"]}
 
     out = {"scenario": meta["scenario"], "meta": {"tier": tier}, "vens": {}}
+    windows, compliance_notes = compliance.limit_windows(actions)
+    price_action = next(
+        (a for a in actions if a.get("type") == "price_series" and "values_eur_kwh" in a), None
+    )
+    compliance_by_ven = {}
+    rows_by_ven = {}
     for ven in meta["vens"]:
         db = run_dir / f"{ven}-history.sqlite"
         if not db.exists():
@@ -809,6 +877,12 @@ def main():
         k = ven_kpis(db, t_from, t_to)
         if k is None:
             continue
+
+        profile_path = Path(args.profiles_dir) / f"{ven}.yaml"
+        profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {}
+        ven_windows, rows = ven_compliance(db, t_from, t_to, windows, profile)
+        compliance_by_ven[ven] = ven_windows
+        rows_by_ven[ven] = rows
 
         # Grid stakeholder: envelope compliance + signal-response latency,
         # both directions -- export gets equal billing with import (an
@@ -876,7 +950,22 @@ def main():
             "energy_business": energy_business,
             "ven_impact": ven_impact,
             "mechanism_health": mechanism_health,
+            "compliance": ven_windows,
         }
+        if price_action is not None:
+            out["vens"][ven]["signal_integrity"] = compliance.signal_integrity(rows, price_action)
+
+    out["fleet"] = {
+        "coincident_peak_import_kw": compliance.fleet_coincident_peak(rows_by_ven),
+        "compliance": fleet_compliance_summary(compliance_by_ven),
+        "compliance_notes": compliance_notes,
+        "pass_bar_s": compliance.GRACE_S,
+    }
+    if price_action is not None:
+        out["fleet"]["signal_integrity_mismatched_vens"] = sorted(
+            v for v, x in out["vens"].items()
+            if x.get("signal_integrity", {}).get("mismatched_minutes", 0) > 0
+        )
 
     out["report_timeliness"] = report_lag_stats(
         run_dir / "recorder-reports_received.csv", t_from, t_to, event_ids
@@ -911,6 +1000,24 @@ def main():
 
     (run_dir / "kpis.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(json.dumps(out, indent=2))
+    print_compliance_table(out)
+
+
+def print_compliance_table(out):
+    """GB-46: the verdict a reader actually needs, after the full JSON."""
+    fleet = out.get("fleet", {})
+    print(f"\n=== {out['scenario']}: measured compliance (pass = limit or physical floor "
+          f"within {fleet.get('pass_bar_s')} s, sustained) ===")
+    for w in fleet.get("compliance", []):
+        failing = ", ".join(w["failing"]) or "-"
+        print(f"  +{w['at_minute']} min {w['type']:<22} {w['direction']:<6} {w['limit_kw']:>5.2f} kW  "
+              f"engaged {w['engaged']:>2}  passed {w['passed']:>2}  failing: {failing}")
+    for note in fleet.get("compliance_notes", []):
+        print(f"  note: {note}")
+    if "signal_integrity_mismatched_vens" in fleet:
+        bad = fleet["signal_integrity_mismatched_vens"]
+        print(f"  signal integrity: {'OK' if not bad else 'tariff mismatch on ' + ', '.join(bad)}")
+    print(f"  fleet coincident peak import: {fleet.get('coincident_peak_import_kw')} kW")
 
 
 if __name__ == "__main__":
