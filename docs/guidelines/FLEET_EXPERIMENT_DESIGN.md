@@ -71,6 +71,54 @@ against the S-1..S-10 fleet without checking GB-37's status first.
    carries build/test offload, so don't assume idle-container memory
    footprint scales linearly under a concurrent build.
 
+## Run isolation and signal verification
+
+- **Background events are suspended for every run.** `run_experiment.py` saves
+  every event already on the VTN (the demo events `scripts/seed_vtn.py` seeds,
+  including a broadcast day-ahead TOU price) to `<run>/background-events.json`,
+  deletes them, and re-creates them afterwards — also on an exception or
+  `SIGTERM`. After a hard kill, `run_experiment.py --restore-background-events
+  <file>` recovers them. `--keep-background-events` opts out, at the cost of a
+  confounded run. Consequence: paired-baseline windows run with no price event
+  at all, so the VEN uses its default import price there; the scenario window
+  differs from its baseline only by the scenario's own signal.
+- **Pre-flight**: right after the first `price_series` action every VEN's
+  resolved tariff (`GET /tariffs`) must equal the scenario's price within
+  180 s, or the run aborts (events cleaned up, background restored, non-zero
+  exit, no `run.json`, so `run_batch.py --resume` retries it).
+- **Signal integrity** (`kpi.py`): the recorded `grid_samples` tariff is compared
+  minute by minute with the scenario's price series (first 2 minutes of each
+  interval skipped for propagation); any mismatch is listed in `kpis.json`
+  `fleet.signal_integrity_mismatched_vens`.
+
+## Judging limits: the pass bar
+
+A VEN **passes** a hard-limit window (capacity limit, export capacity limit,
+alert = 0 kW import) when it reaches the limit — or its **physical floor** if
+the limit is unreachable — within **5 minutes** of the event start and stays
+there for the rest of the window (sustained, not first touch). Implemented in
+`experiments/compliance.py` (`python3 experiments/compliance.py --self-check`
+shows the cases), reported by `kpi.py` per VEN (`compliance`) and per window
+(`fleet.compliance`: engaged / passed / failing).
+
+- **Measured, never predicted.** Compliance comes from each VEN's own
+  per-minute meter data. `CAPACITY_VIOLATION` plan warnings are the planner's
+  forecast and diverge from what happened in both directions; don't score
+  from them.
+- **Physical floor** per minute = base load + running shiftable loads + PV
+  (negative while generating) − available battery discharge, never below 0.
+  EVs and heaters count as controllable to 0 — a heater only counts toward
+  the floor while at or below its own `temp_min_c` (a genuine thermostat
+  emergency), so a thermostat override above it can never be excused. Export
+  floor is 0 (PV is curtailable).
+- **Engaged**: the window mattered to that VEN (it reached ≥ 80 % of the
+  limit, its floor exceeded the limit, or it started above the limit). Pass
+  rates are over engaged VENs only; a limit nobody gets near is not a pass,
+  it is an uncalibrated scenario — recalibrate it (as `s9_diurnal.yaml`'s
+  caps were, from the previous run's per-VEN levels).
+- **Peaks**: `raw.peak_import_kw` is one VEN's own peak; the fleet's
+  simultaneous peak is `fleet.coincident_peak_import_kw`.
+
 ## Related
 
 - GB-37 (`docs/BACKLOG.md`) — closing the `--personas`/manifest gap for the
