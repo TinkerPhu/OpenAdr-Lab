@@ -12475,3 +12475,31 @@ hour). Non-overlapping input produces exactly the old output.
 
 Learning: a shared parser that returns ambiguous data pushes the resolution rule into every
 consumer, and they will not agree. Resolve once at the source so consumers can't differ.
+## 2026-09-12 — Heater thermostat latch made explicit; forced power visible in the UI (GB-44)
+
+What: `HeaterState` carries `emergency_latched`, set when the thermostat emergency fires (at or
+below `temp_min_c`) and cleared at `temp_min_c + 3 °C` or under `Curtail`. The thermostat rule
+(`emergency_active_in`) reads the flag instead of inferring "emergency running" from
+`actual_power_kw >= max_kw`. `Heater::forecast()` now steps through `step_inner`, so the
+forecast's thermostat is the real one (with hysteresis) rather than a second, hysteresis-less copy.
+The Controller page marks an asset's power "· forced" whenever `/sim` reports `forced_power_kw`
+for it (any asset, inline so the cell height stays fixed).
+
+Why: in the 2026-08-31 S-7 fleet run ven-10 held its heater at 3.5 kW through a 20-minute 1.5 kW
+capacity limit and the alert inside it: 90% of the fleet's excess. Its plan had turned the
+heater off, but the room sat at 19.8–20.4 °C, inside the 18–21 °C band, and the heater was at
+full power because the planner had put it there, so the thermostat treated it as a running
+emergency. Over the 24h S-9 run the space-heater VENs spent 5–16% of the day like this. Nothing
+in any KPI or warning showed it.
+
+Verified: three new `step_inner` tests (commanded top stage doesn't latch; a real emergency
+latches until the band's end; Curtail clears it) failed first and pass now; existing tests that
+encoded the latch through `actual_power_kw` now express it with the flag. That covers
+`forced_power_kw_reports_what_the_thermostat_forces` (which also gained the unlatched
+counter-case) and the arbiter's hysteresis-lever fixture, whose intent is unchanged. A serde
+test covers old `sim_state.json` without the field. UI unit tests cover the marker, and a BDD
+scenario (`ven_heater_tank.feature`) checks that the override is visible during a real emergency
+and gone once the tank is above the band.
+
+Learning: state that a rule depends on ("has this emergency fired?") must be stored where the
+rule lives, not reconstructed from an output (power level) that other actors can also produce.
