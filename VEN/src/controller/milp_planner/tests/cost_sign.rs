@@ -112,7 +112,6 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -161,7 +160,6 @@ fn heater_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, Some(&target), &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -201,7 +199,6 @@ fn shiftable_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let plan = run_planner(
         ctxs,
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -231,7 +228,6 @@ fn battery_charging_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() 
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -327,7 +323,6 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
             Some(&heater_target),
             &tariffs,
         ),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,

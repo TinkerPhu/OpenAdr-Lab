@@ -117,8 +117,8 @@ pub(crate) fn resolve_pv_limit(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
+    thermostat_setpoints_kw: &HashMap<String, f64>,
     plan_snap: Option<&Plan>,
-    inject: &SimInjectState,
     overlay_enabled: bool,
     now: DateTime<Utc>,
     dispatch_windows: &[crate::entities::capacity::DispatchWindow],
@@ -131,7 +131,7 @@ pub(crate) fn build_tick_setpoints(
 ) -> controller::arbiter::ArbiterOutcome {
     let base_sp = match plan_snap {
         Some(plan) => {
-            controller::dispatcher::build_setpoints(plan, sim_snap, inject.heater_setpoint_c, now)
+            controller::dispatcher::build_setpoints(plan, sim_snap, thermostat_setpoints_kw, now)
         }
         None => sim_snap
             .assets

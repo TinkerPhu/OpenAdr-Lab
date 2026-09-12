@@ -6,7 +6,7 @@ use crate::assets::{
     heater::{Heater, HeaterState},
     AssetState, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
 };
-use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
+use crate::controller::simulator_port::{AssetSnapshot, SimSnapshot};
 use crate::entities::asset_params::AssetParams;
 use crate::entities::asset_params::{
     BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
@@ -193,202 +193,102 @@ fn make_profile() -> Profile {
     }
 }
 
+/// A real simulator snapshot of the profile's assets: capability, storage and
+/// values all come from the assets themselves (asset-competence rule).
 fn make_snap_from_profile(profile: &Profile) -> SimSnapshot {
-    use std::collections::HashMap as HM;
+    crate::simulator::SimState::from_params(&profile.assets, chrono::Utc::now()).to_sim_snapshot()
+}
 
-    let mut assets: HM<String, AssetSnapshot> = HM::new();
-
-    for asset in &profile.assets {
-        match asset {
-            AssetProfile::Battery(cfg) => {
-                let soc = cfg.initial_soc;
-                let cap = cfg.capacity_kwh;
-                let min_soc = cfg.min_soc;
-                let max_ch = cfg.max_charge_kw;
-                let max_dis = cfg.max_discharge_kw;
-                let eff = cfg.round_trip_efficiency;
-                let cap_max_export_kw = if soc <= min_soc { 0.0 } else { -max_dis };
-                let cap_max_import_kw = if soc >= 1.0 { 0.0 } else { max_ch };
-                let mut values = HM::new();
-                values.insert("soc".into(), soc);
-                values.insert("capacity_kwh".into(), cap);
-                values.insert("max_charge_kw".into(), max_ch);
-                values.insert("max_discharge_kw".into(), max_dis);
-                values.insert("min_soc".into(), min_soc);
-                values.insert("round_trip_efficiency".into(), eff);
-                assets.insert(
-                    "battery".to_string(),
-                    AssetSnapshot {
-                        power_kw: 0.0,
-                        asset_type: "battery".to_string(),
-                        cap_max_import_kw,
-                        cap_max_export_kw,
-                        available_discharge_kwh: Some((soc - min_soc).max(0.0) * cap),
-                        available_charge_kwh: Some((1.0 - soc).max(0.0) * cap),
-                        forced_power_kw: None,
-                        default_setpoint_kw: 0.0,
-                        setpoint_kw: 0.0,
-                        values,
-                    },
-                );
-            }
-            AssetProfile::Ev(cfg) => {
-                let soc = cfg.initial_soc;
-                let bat_kwh = cfg.battery_kwh;
-                let max_ch = cfg.max_charge_kw;
-                let soc_target = cfg.soc_target;
-                let cap_max_import_kw = if soc >= soc_target { 0.0 } else { max_ch };
-                let mut values = HM::new();
-                values.insert("soc".into(), soc);
-                values.insert("plugged".into(), 1.0);
-                values.insert("max_charge_kw".into(), max_ch);
-                values.insert("soc_target".into(), soc_target);
-                values.insert("battery_kwh".into(), bat_kwh);
-                assets.insert(
-                    "ev".to_string(),
-                    AssetSnapshot {
-                        power_kw: 0.0,
-                        asset_type: "ev".to_string(),
-                        cap_max_import_kw,
-                        cap_max_export_kw: 0.0,
-                        available_discharge_kwh: Some(soc * bat_kwh),
-                        available_charge_kwh: Some((1.0 - soc) * bat_kwh),
-                        forced_power_kw: None,
-                        default_setpoint_kw: cfg.default_charge_kw,
-                        setpoint_kw: 0.0,
-                        values,
-                    },
-                );
-            }
-            AssetProfile::Heater(cfg) => {
-                let temp_c = cfg.temp_initial_c;
-                let max_kw = cfg.max_kw;
-                let p_step_kw = max_kw / cfg.power_stages.max(1) as f64;
-                let mut values = HM::new();
-                values.insert("temp_c".into(), temp_c);
-                values.insert("max_kw".into(), max_kw);
-                values.insert("power_stages".into(), cfg.power_stages as f64);
-                values.insert("p_step_kw".into(), p_step_kw);
-                values.insert("temp_min_c".into(), cfg.temp_min_c);
-                values.insert("temp_max_c".into(), cfg.temp_max_c);
-                let cap_max_import_kw = if temp_c >= cfg.temp_max_c {
-                    0.0
-                } else {
-                    max_kw
-                };
-                assets.insert(
-                    "heater".to_string(),
-                    AssetSnapshot {
-                        power_kw: 0.0,
-                        asset_type: "heater".to_string(),
-                        cap_max_import_kw,
-                        cap_max_export_kw: 0.0,
-                        available_discharge_kwh: None,
-                        available_charge_kwh: None,
-                        forced_power_kw: None,
-                        default_setpoint_kw: 0.0,
-                        setpoint_kw: 0.0,
-                        values,
-                    },
-                );
-            }
-            AssetProfile::Pv(cfg) => {
-                let mut values = HM::new();
-                values.insert("irradiance".into(), 0.0);
-                values.insert("rated_kw".into(), cfg.rated_kw);
-                values.insert("irradiance_offset".into(), 0.0);
-                values.insert("tau_s".into(), 2847.37);
-                assets.insert(
-                    "pv".to_string(),
-                    AssetSnapshot {
-                        power_kw: 0.0,
-                        asset_type: "pv".to_string(),
-                        cap_max_import_kw: 0.0,
-                        cap_max_export_kw: 0.0,
-                        available_discharge_kwh: None,
-                        available_charge_kwh: None,
-                        forced_power_kw: None,
-                        default_setpoint_kw: 0.0,
-                        setpoint_kw: 0.0,
-                        values,
-                    },
-                );
-            }
-            AssetProfile::BaseLoad(cfg) => {
-                let mut values = HM::new();
-                values.insert("baseline_kw".into(), cfg.baseline_kw);
-                assets.insert(
-                    "base_load".to_string(),
-                    AssetSnapshot {
-                        power_kw: 0.0,
-                        asset_type: "base_load".to_string(),
-                        cap_max_import_kw: cfg.baseline_kw,
-                        cap_max_export_kw: cfg.baseline_kw,
-                        available_discharge_kwh: None,
-                        available_charge_kwh: None,
-                        forced_power_kw: None,
-                        default_setpoint_kw: cfg.baseline_kw,
-                        setpoint_kw: 0.0,
-                        values,
-                    },
-                );
-            }
-        }
-    }
-
-    SimSnapshot {
-        ts: chrono::Utc::now(),
-        grid: GridSnapshot {
-            net_power_w: 0.0,
-            voltage_v: 230.0,
-            import_kwh: 0.0,
-            export_kwh: 0.0,
-            import_limit_kw: f64::MAX,
-            export_limit_kw: -f64::MAX,
-        },
-        assets,
-    }
+/// Rebuild one snapshot entry through the real asset after a state change, so
+/// its capability/storage/forced power can't go stale.
+fn refresh_from_asset(
+    entry: &mut AssetSnapshot,
+    asset: &dyn crate::assets::Asset,
+    state: AssetState,
+) {
+    let fresh = crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        asset,
+        state,
+        &entry.asset_type,
+        entry.power_kw,
+        entry.setpoint_kw,
+    );
+    *entry = AssetSnapshot {
+        default_setpoint_kw: entry.default_setpoint_kw,
+        ..fresh
+    };
 }
 
 fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
     if let Some(ev) = snap.assets.get_mut("ev") {
-        let soc = ev.val("soc").unwrap_or(0.0);
-        let max_ch = ev.val("max_charge_kw").unwrap_or(0.0);
-        let soc_target = ev.val("soc_target").unwrap_or(1.0);
-        let bat_kwh = ev.val("battery_kwh").unwrap_or(0.0);
-        ev.values
-            .insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
-        if plugged {
-            ev.cap_max_import_kw = if soc >= soc_target { 0.0 } else { max_ch };
-            ev.cap_max_export_kw = 0.0;
-            ev.available_discharge_kwh = Some(soc * bat_kwh);
-            ev.available_charge_kwh = Some((1.0 - soc) * bat_kwh);
-        } else {
-            ev.cap_max_import_kw = 0.0;
-            ev.cap_max_export_kw = 0.0;
-            ev.available_discharge_kwh = None;
-            ev.available_charge_kwh = None;
-        }
+        let v = |k: &str| ev.val(k).unwrap_or(0.0);
+        let charger = EvCharger {
+            max_charge_kw: v("max_charge_kw"),
+            max_discharge_kw: v("max_discharge_kw"),
+            v2g_capable: v("max_discharge_kw") > 0.0,
+            battery_kwh: v("battery_kwh"),
+            soc_target: v("soc_target"),
+            soc_target_profile: v("soc_target"),
+            default_charge_kw: ev.default_setpoint_kw,
+            min_soc: v("min_soc"),
+            min_charge_kw: v("min_charge_kw"),
+            response_delay_s: 0.0,
+            departure_time: None,
+        };
+        let state = AssetState::Ev(EvState {
+            soc: v("soc"),
+            plugged,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+        });
+        refresh_from_asset(ev, &charger, state);
     }
 }
 
 fn set_battery_soc(snap: &mut SimSnapshot, soc: f64) {
     if let Some(bat) = snap.assets.get_mut("battery") {
-        let cap = bat.val("capacity_kwh").unwrap_or(0.0);
-        let max_ch = bat.val("max_charge_kw").unwrap_or(0.0);
-        let max_dis = bat.val("max_discharge_kw").unwrap_or(0.0);
-        let min_soc = bat.val("min_soc").unwrap_or(0.0);
-        bat.values.insert("soc".into(), soc);
-        bat.cap_max_import_kw = if soc >= 1.0 { 0.0 } else { max_ch };
-        bat.cap_max_export_kw = if soc <= min_soc { 0.0 } else { -max_dis };
-        bat.available_discharge_kwh = Some((soc - min_soc).max(0.0) * cap);
-        bat.available_charge_kwh = Some((1.0 - soc).max(0.0) * cap);
+        let v = |k: &str| bat.val(k).unwrap_or(0.0);
+        let battery = Battery {
+            capacity_kwh: v("capacity_kwh"),
+            max_charge_kw: v("max_charge_kw"),
+            max_discharge_kw: v("max_discharge_kw"),
+            round_trip_efficiency: v("round_trip_efficiency"),
+            min_soc: v("min_soc"),
+        };
+        let state = AssetState::Battery(BatteryState {
+            soc,
+            actual_power_kw: 0.0,
+        });
+        refresh_from_asset(bat, &battery, state);
     }
 }
 
 fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
+    use crate::assets::heater::HeaterEmergencyMode;
     if let Some(h) = snap.assets.get_mut("heater") {
-        h.values.insert("temp_c".into(), temp_c);
+        let v = |k: &str| h.val(k).unwrap_or(0.0);
+        let heater = Heater {
+            max_kw: v("max_kw"),
+            power_stages: v("power_stages") as u8,
+            temp_min_c: v("temp_min_c"),
+            temp_max_c: v("temp_max_c"),
+            temp_min_c_profile: v("temp_min_c"),
+            temp_max_c_profile: v("temp_max_c"),
+            temp_safety_max_c: v("temp_safety_max_c"),
+            emergency_mode: HeaterEmergencyMode::from_overrides(
+                Some(v("emergency_curtail") > 0.5),
+                Some(v("emergency_absorb") > 0.5),
+            ),
+            thermal_mass_kwh_per_c: v("thermal_mass_kwh_per_c"),
+            k_loss_kw_per_c: 0.0,
+            draw_kw: 0.0,
+            ambient_temp_c: 10.0,
+        };
+        let state = AssetState::Heater(HeaterState {
+            temperature_c: temp_c,
+            actual_power_kw: 0.0,
+        });
+        refresh_from_asset(h, &heater, state);
     }
 }
 
@@ -658,6 +558,7 @@ fn contexts_from_inputs(
         v.push(Box::new(MockEvCtx {
             ctx: EvMilpContext {
                 mode,
+                soc_init: inputs.soc_ev_init.unwrap_or(0.0),
                 a_ev: inputs.a_ev.clone(),
                 t_dead_step: inputs.t_ev_dead_step,
                 p_max_kw: inputs.p_ev_max_kw,
@@ -769,7 +670,6 @@ fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs(
     ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
-    sim: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     profile: &Profile,
@@ -779,7 +679,6 @@ fn build_milp_inputs(
 ) -> MilpInputs {
     build_milp_inputs_with_override(
         ctxs,
-        sim,
         tariffs,
         cap,
         profile,
@@ -793,7 +692,6 @@ fn build_milp_inputs(
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs_with_override(
     ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
-    sim: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     profile: &Profile,
@@ -807,7 +705,6 @@ fn build_milp_inputs_with_override(
 ) -> MilpInputs {
     super::build_milp_inputs(
         ctxs,
-        sim,
         tariffs,
         cap,
         &[],
@@ -834,7 +731,6 @@ fn build_milp_inputs_with_override(
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn run_planner(
     asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
-    assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -848,7 +744,6 @@ fn run_planner(
 ) -> Plan {
     super::run_planner(
         asset_contexts,
-        assets,
         tariffs,
         capacity,
         &[],
@@ -883,7 +778,7 @@ fn bmi(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> MilpInputs {
     let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
-    build_milp_inputs(&ctxs, sim, tariffs, cap, profile, now, &[], None)
+    build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None)
 }
 
 mod base_load;

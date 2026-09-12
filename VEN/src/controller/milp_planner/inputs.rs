@@ -3,7 +3,6 @@ use chrono::{DateTime, Duration, Utc};
 use super::asset_port::AssetMilpParams;
 use crate::common::TimeSeries;
 use crate::controller::milp_planner::AssetMilpContext;
-use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::BaselineOverride;
@@ -15,11 +14,10 @@ use super::types::*;
 /// Build the full MILP input parameter set from asset contexts and current runtime state.
 ///
 /// Asset-specific parameters (battery, EV, heater) are extracted via the `AssetMilpContext`
-/// trait; grid, PV, and baseline parameters are still read from `profile` and `assets`.
+/// trait; grid, PV, and baseline parameters come from `profile`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_milp_inputs(
     asset_contexts: &[Box<dyn AssetMilpContext>],
-    assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     alert_windows: &[AlertWindow],
@@ -282,7 +280,7 @@ pub(crate) fn build_milp_inputs(
                 v_ev_extra = e.v_extra_eur_kwh;
                 v_ev_core = e.v_core_eur;
                 ev_budget_eur = e.budget_eur;
-                soc_ev_init = assets.assets.get("ev").and_then(|s| s.val("soc"));
+                soc_ev_init = Some(e.soc_init);
             }
             AssetMilpParams::Heater(h) => {
                 heater_mode = h.mode;

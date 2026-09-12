@@ -239,14 +239,15 @@ impl EvMilpContext {
         w_ghg_eur_kg: f64,
     ) -> Self {
         use crate::entities::design_vocabulary::UserRequestMode;
-        let plugged = if let super::AssetState::Ev(s) = state {
-            s.plugged
+        let (plugged, current_soc) = if let super::AssetState::Ev(s) = state {
+            (s.plugged, s.soc)
         } else {
-            false
+            (false, 0.0)
         };
         // Idle/unplugged template — every branch below overrides only what differs.
         let base = Self {
             mode: EvMilpMode::MustNotRun,
+            soc_init: current_soc,
             a_ev: vec![false; n],
             t_dead_step: None,
             p_max_kw: cfg.max_charge_kw,
@@ -274,11 +275,6 @@ impl EvMilpContext {
                 a_ev: vec![true; n],
                 ..base
             };
-        };
-        let current_soc = if let super::AssetState::Ev(s) = state {
-            s.soc
-        } else {
-            0.0
         };
         let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
         let secs = (session.departure_time - now).num_seconds();
@@ -408,6 +404,7 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         crate::controller::milp_planner::AssetMilpParams::Ev(
             crate::controller::milp_planner::EvScalars {
                 mode,
+                soc_init: self.soc_init,
                 a_ev: self.a_ev.clone(),
                 t_dead_step: self.t_dead_step,
                 p_max_kw: self.p_max_kw,
@@ -528,6 +525,7 @@ mod milp_context_trait_tests {
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
             mode: EvMilpMode::MustRun,
+            soc_init: 0.0,
             a_ev: vec![true; n],
             t_dead_step: Some(n - 1),
             p_max_kw: 7.2,
@@ -630,6 +628,52 @@ mod milp_context_trait_tests {
         assert_eq!(ctx.mode, EvMilpMode::MayRun);
     }
 
+    /// The planner seeds the EV's SoC forecast from the EV's own MILP params,
+    /// not from a raw snapshot read — for every branch, session or not.
+    #[test]
+    fn milp_params_report_the_live_soc_in_every_branch() {
+        let cfg = super::EvCharger {
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            v2g_capable: false,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            soc_target_profile: 0.8,
+            default_charge_kw: 7.4,
+            min_soc: 0.0,
+            min_charge_kw: 0.0,
+            response_delay_s: 0.0,
+            departure_time: None,
+        };
+        let cum_s: Vec<i64> = (0..=4).map(|i| i * 300).collect();
+        for plugged in [true, false] {
+            let state = super::super::AssetState::Ev(super::super::EvState {
+                soc: 0.42,
+                plugged,
+                actual_power_kw: 0.0,
+                pending_command_kw: 0.0,
+            });
+            let ctx = EvMilpContext::from_state(
+                &state,
+                &cfg,
+                4,
+                &cum_s,
+                chrono::Utc::now(),
+                None,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            );
+            match ctx.milp_params(4, chrono::Utc::now()) {
+                AssetMilpParams::Ev(e) => assert_eq!(e.soc_init, 0.42, "plugged={plugged}"),
+                _ => panic!("expected Ev variant"),
+            }
+        }
+    }
+
     /// Empty `comfort_rates` (legacy `/ev-session` route, VTN-commanded sessions) falls back
     /// to the passed-in global defaults exactly — no panic, no behavior change.
     #[test]
@@ -719,6 +763,7 @@ mod milp_context_trait_tests {
     fn milp_params_may_run_mode() {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
+            soc_init: 0.0,
             a_ev: vec![true; 4],
             t_dead_step: None,
             p_max_kw: 7.2,
@@ -747,6 +792,7 @@ mod milp_context_trait_tests {
     fn milp_params_must_not_run_mode() {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MustNotRun,
+            soc_init: 0.0,
             a_ev: vec![false; 4],
             t_dead_step: None,
             p_max_kw: 7.2,
@@ -777,6 +823,7 @@ mod milp_context_trait_tests {
         let a_ev = vec![true, false, true, false];
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
+            soc_init: 0.0,
             a_ev: a_ev.clone(),
             t_dead_step: None,
             p_max_kw: 7.2,

@@ -209,7 +209,6 @@ fn solve_heater_dynamics_respected() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -268,7 +267,6 @@ fn solve_heater_must_run_meets_e_target() {
     };
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, Some(&target), &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -304,7 +302,6 @@ fn solve_heater_soft_low_positive_when_below_min() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -377,7 +374,6 @@ fn solve_heater_switching_reduces_with_penalty() {
 
     let plan_no = run_planner(
         build_asset_contexts(&profile_no, &sim_no, now, None, None, &tariffs),
-        &sim_no,
         &tariffs,
         &no_capacity(),
         &profile_no,
@@ -391,7 +387,6 @@ fn solve_heater_switching_reduces_with_penalty() {
     );
     let plan_high = run_planner(
         build_asset_contexts(&profile_high, &sim_high, now, None, None, &tariffs),
-        &sim_high,
         &tariffs,
         &no_capacity(),
         &profile_high,
@@ -443,7 +438,6 @@ fn solve_heater_upper_bound_not_exceeded() {
     let tariffs = make_tariffs(0.05, 0.04, 300.0); // very cheap → heater wants to run
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -484,7 +478,6 @@ fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
     let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -570,7 +563,6 @@ fn ev_planned_state_soc_populated() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -692,7 +684,6 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -739,7 +730,6 @@ fn heater_planned_state_temp_c_populated() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -795,7 +785,6 @@ fn planned_heater_kw_only_takes_reachable_stage_levels() {
         let tariffs = make_tariffs(0.25, 0.08, 300.0);
         let plan = run_planner(
             build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-            &sim,
             &tariffs,
             &no_capacity(),
             &profile,

@@ -80,6 +80,8 @@ pub enum EvMilpMode {
 #[derive(Debug, Clone)]
 pub struct EvMilpContext {
     pub mode: EvMilpMode,
+    /// Live SoC at plan time, reported by the EV itself (seeds the plan's EV SoC forecast).
+    pub soc_init: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0).
     pub a_ev: Vec<bool>,
     /// Last step index that counts toward the core energy sum (None = open horizon).

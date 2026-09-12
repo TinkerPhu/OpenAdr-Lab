@@ -380,7 +380,6 @@ fn test_rate_estimated_flag_lands_in_plan_slots() {
     let tariffs = coverage_2h_tariffs();
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, fixed_now(), None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,

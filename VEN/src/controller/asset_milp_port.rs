@@ -45,6 +45,8 @@ pub struct BatteryScalars {
 #[derive(Debug, Clone)]
 pub struct EvScalars {
     pub mode: MilpLoadMode,
+    /// Live SoC at plan time, from the EV's own MILP context.
+    pub soc_init: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0). len = n.
     pub a_ev: Vec<bool>,
     pub t_dead_step: Option<usize>,

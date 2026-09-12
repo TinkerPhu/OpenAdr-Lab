@@ -111,6 +111,7 @@ impl MockEvCtx {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustNotRun,
+                soc_init: 0.0,
                 a_ev: vec![false; n],
                 t_dead_step: None,
                 p_max_kw,
@@ -137,6 +138,7 @@ impl MockEvCtx {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustRun,
+                soc_init: 0.0,
                 a_ev: vec![true; n],
                 t_dead_step: Some(n - 1),
                 p_max_kw,
@@ -176,6 +178,7 @@ impl AssetMilpContext for MockEvCtx {
         };
         AssetMilpParams::Ev(EvScalars {
             mode,
+            soc_init: self.ctx.soc_init,
             a_ev: self.ctx.a_ev.clone(),
             t_dead_step: self.ctx.t_dead_step,
             p_max_kw: self.ctx.p_max_kw,

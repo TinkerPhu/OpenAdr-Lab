@@ -206,11 +206,10 @@ pub(super) fn heater_emergency_lever(
     is_incumbent: bool,
 ) -> Option<Lever> {
     let snap = sim.assets.get(crate::ids::ASSET_HEATER)?;
-    let temp_c = snap.val("temp_c")?;
-    let temp_min_c = snap.val("temp_min_c")?;
-    let temp_max_c = snap.val("temp_max_c")?;
-    let temp_safety_max_c = snap.val("temp_safety_max_c").unwrap_or(temp_max_c);
-    let max_kw = snap.val("max_kw").unwrap_or(0.0);
+    // The heater's own answers (its thermostat rule under Normal/Absorb),
+    // not a re-derivation from temperatures here.
+    let emergency_heat_kw = snap.val("emergency_heat_kw")?;
+    let absorb_headroom_kw = snap.val("absorb_headroom_kw")?;
     let threshold = if is_incumbent {
         HEATER_COMFORT_OVERRIDE_EUR_PER_KWH - LEVER_PREEMPTION_MARGIN_EUR_PER_KWH
     } else {
@@ -224,12 +223,12 @@ pub(super) fn heater_emergency_lever(
         if slot.marginal_cost_import_eur_per_kwh <= threshold {
             return None;
         }
-        if temp_c > temp_min_c || max_kw <= 0.0 {
-            return None; // not currently in the forced-on band
+        if emergency_heat_kw <= 0.0 {
+            return None; // thermostat isn't forcing emergency heat
         }
         Some(Lever {
             id: "heater_emergency",
-            available_capacity_kw: max_kw,
+            available_capacity_kw: emergency_heat_kw,
             marginal_cost_eur_per_kwh: slot.marginal_cost_import_eur_per_kwh,
         })
     } else {
@@ -238,12 +237,12 @@ pub(super) fn heater_emergency_lever(
         if slot.marginal_cost_export_eur_per_kwh <= threshold {
             return None;
         }
-        if temp_c >= temp_safety_max_c {
+        if absorb_headroom_kw <= 0.0 {
             return None; // already at the true safety ceiling
         }
         Some(Lever {
             id: "heater_emergency",
-            available_capacity_kw: max_kw,
+            available_capacity_kw: absorb_headroom_kw,
             marginal_cost_eur_per_kwh: slot.marginal_cost_export_eur_per_kwh,
         })
     }

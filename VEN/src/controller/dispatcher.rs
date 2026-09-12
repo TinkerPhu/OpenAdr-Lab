@@ -17,8 +17,9 @@ use std::collections::HashMap;
 /// 1. Start with each asset's `default_setpoint_kw` from the snapshot.
 /// 2. Find the slot covering `now` in the plan.
 /// 3. Overwrite entries for assets that have an allocation in that slot.
-/// 4. If `heater_setpoint_c` override is set and the plan has no heater allocation,
-///    compute ON/OFF setpoint based on current temperature vs. target.
+/// 4. For each thermostat asset without a plan allocation, apply its own
+///    setpoint for the user comfort target (`thermostat_setpoints_kw`, computed
+///    by the asset via `SimState::thermostat_setpoints_kw`).
 ///
 /// PV generation limiting is not handled here — see `resolve_pv_generation_limit_kw`,
 /// applied directly to `PvInverter.generation_limit_kw` every tick, since
@@ -30,7 +31,7 @@ use std::collections::HashMap;
 pub fn build_setpoints(
     plan: &Plan,
     sim: &SimSnapshot,
-    heater_setpoint_c: Option<f64>,
+    thermostat_setpoints_kw: &HashMap<String, f64>,
     now: DateTime<Utc>,
 ) -> HashMap<String, f64> {
     // Start with defaults from snapshot
@@ -47,31 +48,15 @@ pub fn build_setpoints(
         .find(|s| s.start <= now && now < s.end)
         .map(|s| &s.allocations);
 
-    let mut plan_allocated_heater = false;
-    if let Some(allocs) = slot_allocs {
-        for alloc in allocs {
-            // Battery allocations have no associated packet
-            if alloc.asset_id == crate::ids::ASSET_BATTERY {
-                setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), alloc.power_kw);
-                continue;
-            }
-            if alloc.asset_id == crate::ids::ASSET_HEATER {
-                plan_allocated_heater = true;
-            }
-            setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
-        }
+    for alloc in slot_allocs.into_iter().flatten() {
+        setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
     }
 
-    // Heater setpoint override: compute ON/OFF based on current temp vs. target.
-    // Only applies when the plan has no heater allocation for the current slot.
-    if let Some(target_c) = heater_setpoint_c {
-        if !plan_allocated_heater {
-            if let Some(snap) = sim.assets.get(crate::ids::ASSET_HEATER) {
-                let temp_c = snap.val("temp_c").unwrap_or(20.0);
-                let max_kw = snap.values.get("max_kw").copied().unwrap_or(0.0);
-                let power_kw = if temp_c < target_c { max_kw } else { 0.0 };
-                setpoints.insert(crate::ids::ASSET_HEATER.to_string(), power_kw);
-            }
+    // Comfort-target override: only where the plan has no allocation this slot.
+    for (id, kw) in thermostat_setpoints_kw {
+        let plan_allocated = slot_allocs.is_some_and(|a| a.iter().any(|x| &x.asset_id == id));
+        if !plan_allocated {
+            setpoints.insert(id.clone(), *kw);
         }
     }
 
@@ -520,11 +505,42 @@ mod tests {
     }
 
     #[test]
+    fn build_setpoints_applies_a_thermostat_assets_own_setpoint_without_a_plan_allocation() {
+        let now = Utc::now();
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
+        let plan = make_test_plan(-3.0, now);
+        let thermostat_setpoints_kw = HashMap::from([("heater".to_string(), 3.0)]);
+        let sp = build_setpoints(&plan, &sim, &thermostat_setpoints_kw, now);
+        assert_eq!(sp.get("heater"), Some(&3.0));
+    }
+
+    #[test]
+    fn build_setpoints_keeps_the_plans_allocation_over_a_thermostat_setpoint() {
+        let now = Utc::now();
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
+        let mut plan = make_test_plan(-3.0, now);
+        plan.slots[0]
+            .allocations
+            .push(crate::entities::plan::AssetAllocation {
+                asset_id: "heater".to_string(),
+                power_kw: 1.5,
+                surplus_power_kw: 0.0,
+                grid_power_kw: 1.5,
+                marginal_value: 0.0,
+                cost_eur: 0.0,
+                co2_g: 0.0,
+            });
+        let thermostat_setpoints_kw = HashMap::from([("heater".to_string(), 3.0)]);
+        let sp = build_setpoints(&plan, &sim, &thermostat_setpoints_kw, now);
+        assert_eq!(sp.get("heater"), Some(&1.5));
+    }
+
+    #[test]
     fn build_setpoints_follows_plan_battery_allocation() {
         let now = Utc::now();
         let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let plan = make_test_plan(-3.0, now);
-        let sp = build_setpoints(&plan, &sim, None, now);
+        let sp = build_setpoints(&plan, &sim, &HashMap::new(), now);
         let bat = sp.get("battery").copied().unwrap_or(999.0);
         assert!(
             (bat - (-3.0)).abs() < 0.01,
@@ -572,7 +588,7 @@ mod tests {
                 mip_gap_target: None,
             }
         };
-        let sp = build_setpoints(&plan, &sim, None, now);
+        let sp = build_setpoints(&plan, &sim, &HashMap::new(), now);
         assert!(
             sp.is_empty(),
             "empty snapshot + no plan slots → empty setpoints map"

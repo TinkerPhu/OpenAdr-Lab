@@ -115,7 +115,6 @@ fn time_one_solve(with_heater: bool) -> (f64, usize) {
     let started = Instant::now();
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &sim,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -225,7 +224,7 @@ fn solve_at(
     let cap = no_capacity();
 
     let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &sim, &tariffs, &cap, &profile, now, &[], None);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
     let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;

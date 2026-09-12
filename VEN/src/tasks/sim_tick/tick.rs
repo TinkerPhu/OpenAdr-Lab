@@ -94,10 +94,12 @@ pub(crate) async fn tick_once(
             ctx.base_load_heuristic_kw_now,
         );
 
+        let thermostat_setpoints_kw =
+            sim_guard.thermostat_setpoints_kw(ctx.inject.heater_setpoint_c);
         let outcome = super::helpers::build_tick_setpoints(
             &pre_snap,
+            &thermostat_setpoints_kw,
             ctx.plan_snap.as_ref(),
-            &ctx.inject,
             ctx.overlay_enabled,
             now,
             &ctx.dispatch_windows,
