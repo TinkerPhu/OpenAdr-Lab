@@ -42,13 +42,19 @@ actions:
     # 20-24 evening decline.
     values_eur_kwh: [0.15, 0.20, 0.28, 0.08, 0.40, 0.22]
     interval_minutes: 240
-  - at_minute: 660          # 11:00 — through 16:00; ven-1/2/3's PV is azimuth_deg: 267
+  # GB-46 calibration: the limits must engage for a meaningful part of the fleet, or a
+  # "0 violations" result proves nothing. The 2026-09-08/09 run's 4.0 kW import and
+  # 6.0 kW export caps never came within ~2.5 kW of any VEN (per-VEN max 1.4 kW each
+  # way in these windows); its per-VEN p90 was 0.36-1.32 kW export on the 7 PV VENs
+  # that export at all, and 0.9-1.35 kW import on most VENs in the evening. Re-derive
+  # from kpi.py's `engaged` counts if the season or fleet changes.
+  - at_minute: 660          # 11:00 local — through 16:00; ven-1/2/3's PV is azimuth_deg: 267
     type: export_capacity_limit  # (near-due-west), so its real peak lands mid-to-late
-    export_kw: 6.0          # afternoon, not solar noon -- this 5h window is deliberately
+    export_kw: 0.5          # afternoon, not solar noon -- this 5h window is deliberately
     duration_minutes: 300   # wide enough to still cover that peak comfortably (unlike
                              # s10_overexport's narrow 30 min window, which needs a
                              # precisely-timed --start-at instead, see that file)
-  - at_minute: 1080         # 18:00 — evening demand peak
+  - at_minute: 1080         # 18:00 local — evening demand peak
     type: capacity_limit
-    import_kw: 4.0           # above base-load-only VENs, below EV-charging-at-peak VENs
-    duration_minutes: 240    # through 22:00
+    import_kw: 1.0           # below most VENs' evening level; where base load alone
+    duration_minutes: 240    # exceeds it, kpi.py scores against the physical floor
