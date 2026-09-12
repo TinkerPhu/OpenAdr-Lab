@@ -1875,3 +1875,30 @@ re-reporting the current plan, so counting its rows counts minutes, not solves.
 **How to apply:** load the profile YAML and select on `assets[].type`. Count solves from
 `plan_history` (one row per persisted plan). When a result contradicts a previously solid finding,
 first re-check how the groups were formed and what is being counted.
+
+## Killing the process behind `docker compose run` does not stop the run container (E2E, 2026-09-12)
+
+The laptop ran out of memory and the harness killed the local `run_all_tests.sh` whose SSH
+session was driving `docker compose ... run test-runner` on Node2. The behave run kept going
+inside its container, detached from any log. Relaunching the suite then put a second runner on
+the same compose project. The first one's resilience scenarios stopped `test-vtn` under the
+second, which reported 43 failures that were entirely self-inflicted (`Failed to resolve
+'test-vtn'`). The killed script's EXIT trap had also released the Node2 lock while the orphan
+was still running.
+
+**How to apply:** after any interrupted remote test run, list `docker ps -a | grep
+openadr-test` and `docker rm -f` leftover `*-run-*` containers before relaunching. Run long
+remote suites detached *on the host* (`nohup bash script &`, log file on the host) so a laptop
+hiccup can't orphan them. A result that fails whole families at once (health, integration,
+isolation, resilience) points to the environment; read one error before debugging code.
+
+## Worktrees must not share a cargo target dir (2026-09-12)
+
+To save a full rebuild, a second worktree's `cargo test` was pointed at the first worktree's
+`CARGO_TARGET_DIR`. Cargo reported the test binary fresh and ran the *other* worktree's
+binary. The new tests of the second branch never ran, and a supposed red run "passed". Detected
+only because a modified existing test also passed, which it couldn't have.
+
+**How to apply:** each worktree builds in its own `target/`, even though that costs a full
+dependency build. When a red run comes back green, check that the new test names appear in the
+output before believing it.
