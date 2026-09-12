@@ -72,6 +72,10 @@ pub struct AssetSnapshot {
     /// Available energy for charge (kWh), if applicable (battery/EV only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_charge_kwh: Option<f64>,
+    /// Power the asset will draw/produce regardless of its setpoint this tick
+    /// (`Asset::forced_power_kw`, e.g. a heater's thermostat override).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forced_power_kw: Option<f64>,
     /// Default setpoint for this asset (kW) when no plan is active.
     pub default_setpoint_kw: f64,
     /// Last setpoint applied by the VEN controller (kW).
@@ -141,6 +145,7 @@ mod tests {
             cap_max_export_kw: 5.0,
             available_discharge_kwh: Some(2.0),
             available_charge_kwh: Some(5.0),
+            forced_power_kw: None,
             default_setpoint_kw: 0.0,
             setpoint_kw: 0.0,
             values,

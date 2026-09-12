@@ -172,46 +172,6 @@ pub fn resolve_pv_generation_limit_kw(
     }
 }
 
-/// Predicts the heater's actual physical power this tick when its own thermostat
-/// hysteresis forces a value regardless of the commanded setpoint — mirrors the same
-/// "commanded ≠ actual" gap `live_pv_kw` already closes for PV. The emergency-heat
-/// hysteresis (fires at `temp_min_c`, holds until `temp_min_c + 3°C`, see
-/// `Heater::step_inner`) and the overheat safety cutoff both override whatever
-/// setpoint the dispatcher/overlay computed, so any net-power accounting that trusts
-/// the commanded heater setpoint under-counts import while the hysteresis is active
-/// (found via the WP3.4 DISPATCH_SETPOINT E2E scenario: reported `grid.net_power_w`
-/// was 3 kW — exactly `max_kw` — above the commanded target because the heater was
-/// mid-hysteresis and drawing full power while its setpoint read 0).
-/// Returns `None` when the heater is following its commanded setpoint normally, so
-/// callers should use the setpoints-map value as before.
-pub(crate) fn predict_heater_forced_kw(
-    snap: &crate::controller::simulator_port::AssetSnapshot,
-) -> Option<f64> {
-    let max_kw = snap.val("max_kw")?;
-    let temp_c = snap.val("temp_c")?;
-    let temp_min_c = snap.val("temp_min_c")?;
-    let temp_max_c = snap.val("temp_max_c")?;
-    let temp_safety_max_c = snap.val("temp_safety_max_c").unwrap_or(temp_max_c);
-    let curtail = snap.val("emergency_curtail").unwrap_or(0.0) > 0.5;
-    let absorb = snap.val("emergency_absorb").unwrap_or(0.0) > 0.5;
-    const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-    let emergency_active = !curtail
-        && (temp_c <= temp_min_c
-            || (snap.power_kw >= max_kw && temp_c < temp_min_c + EMERGENCY_HYSTERESIS_C));
-    let safety_ceiling_c = if absorb {
-        temp_safety_max_c
-    } else {
-        temp_max_c
-    };
-    if temp_c >= safety_ceiling_c {
-        Some(0.0)
-    } else if emergency_active {
-        Some(max_kw)
-    } else {
-        None
-    }
-}
-
 /// Opportunistic surplus EV charging overlay.
 ///
 /// Kept for the `deviation_arbiter_enabled == false` rollout-gate path only
@@ -261,10 +221,8 @@ pub fn apply_surplus_ev_overlay(
                     return pv_kw;
                 }
             }
-            if id.as_str() == crate::ids::ASSET_HEATER {
-                if let Some(forced_kw) = predict_heater_forced_kw(snap) {
-                    return forced_kw;
-                }
+            if let Some(forced_kw) = snap.forced_power_kw {
+                return forced_kw;
             }
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
@@ -284,13 +242,11 @@ pub fn apply_surplus_ev_overlay(
         return;
     }
     if let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) {
-        let plugged = snap.val("plugged").unwrap_or(0.0) > 0.5;
-        let soc = snap.val("soc").unwrap_or(0.0);
-        let soc_target = snap.val("soc_target").unwrap_or(1.0);
-        if plugged && soc < soc_target {
-            let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
+        // The EV's own capability is 0 while unplugged or at/above its target.
+        let charge_ceiling_kw = snap.cap_max_import_kw;
+        if charge_ceiling_kw > 0.0 {
             let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
-            let charge_kw = surplus_kw.min(max_charge_kw);
+            let charge_kw = surplus_kw.min(charge_ceiling_kw);
             if charge_kw >= min_charge_kw {
                 setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
             }
@@ -304,69 +260,52 @@ pub fn apply_surplus_ev_overlay(
 mod tests {
     use super::*;
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use crate::services::test_support::asset_snapshots::snapshot_from_asset;
     use std::collections::HashMap as StdHashMap;
 
     fn battery_entry(soc: f64) -> (String, AssetSnapshot) {
-        let cap_max_export_kw = if soc <= 0.1 { 0.0 } else { -5.0 };
-        let cap_max_import_kw = if soc >= 1.0 { 0.0 } else { 5.0 };
-        let available_discharge_kwh = Some((soc - 0.1).max(0.0) * 10.0);
-        let available_charge_kwh = Some((1.0 - soc).max(0.0) * 10.0);
-        let mut values = StdHashMap::new();
-        values.insert("soc".into(), soc);
-        values.insert("capacity_kwh".into(), 10.0);
-        values.insert("max_charge_kw".into(), 5.0);
-        values.insert("max_discharge_kw".into(), 5.0);
-        values.insert("min_soc".into(), 0.1);
+        use crate::assets::battery::{Battery, BatteryState};
+        let battery = Battery {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 1.0,
+            min_soc: 0.1,
+        };
+        let state = crate::assets::AssetState::Battery(BatteryState {
+            soc,
+            actual_power_kw: 0.0,
+        });
         (
             "battery".to_string(),
-            AssetSnapshot {
-                power_kw: 0.0,
-                asset_type: "battery".to_string(),
-                cap_max_import_kw,
-                cap_max_export_kw,
-                available_discharge_kwh,
-                available_charge_kwh,
-                default_setpoint_kw: 0.0,
-                setpoint_kw: 0.0,
-                values,
-            },
+            snapshot_from_asset(&battery, state, "battery", 0.0, 0.0),
         )
     }
 
     fn ev_entry(soc: f64, plugged: bool, soc_target: f64) -> (String, AssetSnapshot) {
-        let max_ch = 7.4_f64;
-        let bat_kwh = 60.0_f64;
-        let (cap_max_import_kw, cap_max_export_kw, avail_dis, avail_ch) = if plugged {
-            let import = if soc >= soc_target { 0.0 } else { max_ch };
-            (
-                import,
-                0.0_f64,
-                Some(soc * bat_kwh),
-                Some((1.0 - soc) * bat_kwh),
-            )
-        } else {
-            (0.0, 0.0, None, None)
+        use crate::assets::ev::{EvCharger, EvState};
+        let ev = EvCharger {
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            v2g_capable: false,
+            battery_kwh: 60.0,
+            soc_target,
+            soc_target_profile: soc_target,
+            default_charge_kw: 0.0,
+            min_soc: 0.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 10.0,
+            departure_time: None,
         };
-        let mut values = StdHashMap::new();
-        values.insert("soc".into(), soc);
-        values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
-        values.insert("max_charge_kw".into(), max_ch);
-        values.insert("min_charge_kw".into(), 1.4);
-        values.insert("soc_target".into(), soc_target);
-        values.insert("battery_kwh".into(), bat_kwh);
+        let state = crate::assets::AssetState::Ev(EvState {
+            soc,
+            plugged,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+        });
         (
             "ev".to_string(),
-            AssetSnapshot {
-                power_kw: 0.0,
-                asset_type: "ev".to_string(),
-                cap_max_import_kw,
-                cap_max_export_kw,
-                available_discharge_kwh: avail_dis,
-                available_charge_kwh: avail_ch,
-                default_setpoint_kw: 0.0,
-                setpoint_kw: 0.0,
-                values,
-            },
+            snapshot_from_asset(&ev, state, "ev", 0.0, 0.0),
         )
     }
 
@@ -385,6 +324,7 @@ mod tests {
                 cap_max_export_kw: last_power_kw,
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
+                forced_power_kw: None,
                 default_setpoint_kw: 0.0,
                 setpoint_kw: 0.0,
                 values,
@@ -404,6 +344,7 @@ mod tests {
                 cap_max_export_kw: last_power_kw,
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
+                forced_power_kw: None,
                 default_setpoint_kw: last_power_kw.max(0.0),
                 setpoint_kw: 0.0,
                 values,
@@ -442,60 +383,6 @@ mod tests {
     }
 
     // ── surplus_ev_overlay tests ──────────────────────────────────────────────
-
-    #[test]
-    fn predict_heater_forced_kw_returns_max_kw_during_emergency_hysteresis() {
-        // Regression (WP3.4 DISPATCH_SETPOINT E2E failure): temp is back inside the
-        // comfort band (20 > temp_min_c 18) but the heater was drawing max_kw last
-        // tick and hasn't yet climbed past temp_min_c + 3°C — hysteresis says it's
-        // still forced on regardless of what setpoint the dispatcher commanded.
-        let mut values = StdHashMap::new();
-        values.insert("temp_c".into(), 20.0);
-        values.insert("max_kw".into(), 3.0);
-        values.insert("temp_min_c".into(), 18.0);
-        values.insert("temp_max_c".into(), 23.0);
-        values.insert("temp_safety_max_c".into(), 23.0);
-        let snap = AssetSnapshot {
-            power_kw: 3.0, // last tick's actual output == max_kw
-            asset_type: "heater".to_string(),
-            cap_max_import_kw: 3.0,
-            cap_max_export_kw: 0.0,
-            available_discharge_kwh: None,
-            available_charge_kwh: None,
-            default_setpoint_kw: 0.0,
-            setpoint_kw: 0.0,
-            values,
-        };
-        assert_eq!(
-            predict_heater_forced_kw(&snap),
-            Some(3.0),
-            "hysteresis must force max_kw even though temp is inside the comfort band"
-        );
-    }
-
-    #[test]
-    fn predict_heater_forced_kw_returns_none_in_normal_band() {
-        // Temp mid-band, last tick's output was below max_kw — no hysteresis or
-        // safety override active, so the caller should trust the commanded setpoint.
-        let mut values = StdHashMap::new();
-        values.insert("temp_c".into(), 20.0);
-        values.insert("max_kw".into(), 3.0);
-        values.insert("temp_min_c".into(), 18.0);
-        values.insert("temp_max_c".into(), 23.0);
-        values.insert("temp_safety_max_c".into(), 23.0);
-        let snap = AssetSnapshot {
-            power_kw: 0.0,
-            asset_type: "heater".to_string(),
-            cap_max_import_kw: 3.0,
-            cap_max_export_kw: 0.0,
-            available_discharge_kwh: None,
-            available_charge_kwh: None,
-            default_setpoint_kw: 0.0,
-            setpoint_kw: 0.0,
-            values,
-        };
-        assert_eq!(predict_heater_forced_kw(&snap), None);
-    }
 
     // ── surplus_ev_overlay: pinned for the deviation_arbiter_enabled=false
     //    rollout-gate path (see this function's doc comment) ─────────────────

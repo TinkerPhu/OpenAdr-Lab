@@ -108,6 +108,7 @@ mod tests {
                     cap_max_export_kw: 0.0,
                     available_discharge_kwh: None,
                     available_charge_kwh: None,
+                    forced_power_kw: None,
                     default_setpoint_kw: power_kw,
                     setpoint_kw: power_kw,
                     values: HashMap::new(),

@@ -676,6 +676,16 @@ see `docs/history/project_journal.md`'s "Asset Competence Assurance" entries for
 record of what each phase found and fixed (the phased plan document itself is deleted once
 its work lands, per this repo's own no-lingering-plans rule).
 
+Controllers only see the flattened `AssetSnapshot`, so everything they need to know about an
+asset must arrive there as the asset's own answer, never as raw values they interpret:
+`cap_max_import_kw`/`cap_max_export_kw` (what power it can deliver now — e.g. the battery's
+60 s sustain rule, the EV's plugged/target gate), `available_*_kwh`, and `forced_power_kw`
+(`Asset::forced_power_kw`: what it will draw regardless of its setpoint, e.g. the heater's
+thermostat emergency/cutoff). The dispatcher, arbiter and dispatch override read these; the
+2026-09-12 sweep removed their SoC/temperature re-derivations. Open remainders: R-78..R-80 in
+`docs/reference/TECHNICAL_DEBTS.md`. Test snapshots are built from real assets via
+`services/test_support/asset_snapshots.rs`.
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.

@@ -6,11 +6,8 @@ use super::*;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
 use std::collections::HashMap as StdHashMap;
 
-/// Capability and storage come from the real `Battery` asset, not hand-set
-/// numbers, so the fixture can't disagree with the asset about full/empty.
 fn battery_snap(setpoint_kw: f64, soc: f64) -> AssetSnapshot {
     use crate::assets::battery::{Battery, BatteryState};
-    use crate::assets::{Asset, AssetState};
     let battery = Battery {
         capacity_kwh: 8.0,
         max_charge_kw: 5.0,
@@ -18,47 +15,47 @@ fn battery_snap(setpoint_kw: f64, soc: f64) -> AssetSnapshot {
         round_trip_efficiency: 1.0,
         min_soc: 0.1,
     };
-    let state = AssetState::Battery(BatteryState {
+    let state = crate::assets::AssetState::Battery(BatteryState {
         soc,
         actual_power_kw: setpoint_kw,
     });
-    let cap = battery.capability(&state);
-    let (available_discharge_kwh, available_charge_kwh) = battery
-        .as_request_resolvable()
-        .and_then(|r| r.available_storage_kwh(&state))
-        .expect("battery reports storage");
-    let values = Asset::state_values(&battery, &state).into_iter().collect();
-    AssetSnapshot {
-        power_kw: setpoint_kw,
-        asset_type: "battery".into(),
-        cap_max_import_kw: cap.max_import_kw,
-        cap_max_export_kw: cap.max_export_kw,
-        available_discharge_kwh: Some(available_discharge_kwh),
-        available_charge_kwh: Some(available_charge_kwh),
-        default_setpoint_kw: 0.0,
+    crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        &battery,
+        state,
+        "battery",
         setpoint_kw,
-        values,
-    }
+        setpoint_kw,
+    )
 }
 
 fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetSnapshot {
-    let mut values = StdHashMap::new();
-    values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
-    values.insert("soc".into(), soc);
-    values.insert("soc_target".into(), soc_target);
-    values.insert("max_charge_kw".into(), 7.0);
-    values.insert("min_charge_kw".into(), 1.4);
-    AssetSnapshot {
-        power_kw: setpoint_kw,
-        asset_type: "ev".into(),
-        cap_max_import_kw: 7.0,
-        cap_max_export_kw: 0.0,
-        available_discharge_kwh: None,
-        available_charge_kwh: None,
-        default_setpoint_kw: 0.0,
+    use crate::assets::ev::{EvCharger, EvState};
+    let ev = EvCharger {
+        max_charge_kw: 7.0,
+        max_discharge_kw: 0.0,
+        v2g_capable: false,
+        battery_kwh: 60.0,
+        soc_target,
+        soc_target_profile: soc_target,
+        default_charge_kw: 0.0,
+        min_soc: 0.0,
+        min_charge_kw: 1.4,
+        response_delay_s: 10.0,
+        departure_time: None,
+    };
+    let state = crate::assets::AssetState::Ev(EvState {
+        soc,
+        plugged,
+        actual_power_kw: setpoint_kw.max(0.0),
+        pending_command_kw: setpoint_kw.max(0.0),
+    });
+    crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        &ev,
+        state,
+        "ev",
         setpoint_kw,
-        values,
-    }
+        setpoint_kw,
+    )
 }
 
 fn heater_snap(
@@ -67,23 +64,28 @@ fn heater_snap(
     temp_max_c: f64,
     temp_safety_max_c: f64,
 ) -> AssetSnapshot {
-    let mut values = StdHashMap::new();
-    values.insert("temp_c".into(), temp_c);
-    values.insert("temp_min_c".into(), temp_min_c);
-    values.insert("temp_max_c".into(), temp_max_c);
-    values.insert("temp_safety_max_c".into(), temp_safety_max_c);
-    values.insert("max_kw".into(), 3.0);
-    AssetSnapshot {
-        power_kw: 0.0,
-        asset_type: "heater".into(),
-        cap_max_import_kw: 3.0,
-        cap_max_export_kw: 0.0,
-        default_setpoint_kw: 0.0,
-        setpoint_kw: 0.0,
-        available_discharge_kwh: None,
-        available_charge_kwh: None,
-        values,
-    }
+    use crate::assets::heater::{Heater, HeaterEmergencyMode, HeaterState};
+    let heater = Heater {
+        max_kw: 3.0,
+        power_stages: 2,
+        temp_min_c,
+        temp_max_c,
+        temp_min_c_profile: temp_min_c,
+        temp_max_c_profile: temp_max_c,
+        temp_safety_max_c,
+        emergency_mode: HeaterEmergencyMode::Normal,
+        thermal_mass_kwh_per_c: 2.0,
+        k_loss_kw_per_c: 0.1,
+        draw_kw: 0.0,
+        ambient_temp_c: 10.0,
+    };
+    let state = crate::assets::AssetState::Heater(HeaterState {
+        temperature_c: temp_c,
+        actual_power_kw: 0.0,
+    });
+    crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        &heater, state, "heater", 0.0, 0.0,
+    )
 }
 
 fn base_snap(power_kw: f64) -> AssetSnapshot {
@@ -94,6 +96,7 @@ fn base_snap(power_kw: f64) -> AssetSnapshot {
         cap_max_export_kw: 0.0,
         available_discharge_kwh: None,
         available_charge_kwh: None,
+        forced_power_kw: None,
         default_setpoint_kw: power_kw,
         setpoint_kw: power_kw,
         values: StdHashMap::new(),

@@ -402,6 +402,13 @@ impl Asset for Heater {
         self.flexibility_floor_inner(s)
     }
 
+    fn forced_power_kw(&self, state: &AssetState) -> Option<f64> {
+        let AssetState::Heater(s) = state else {
+            unreachable!()
+        };
+        self.thermostat_forced_kw(s)
+    }
+
     fn default_setpoint(&self) -> f64 {
         Self::default_setpoint(self)
     }
@@ -609,6 +616,18 @@ mod tests {
             heater.flexibility_floor_inner(&state).min_import_kw,
             heater.max_kw
         );
+    }
+
+    #[test]
+    fn forced_power_kw_reports_what_the_thermostat_forces() {
+        let heater = default_heater(); // temp_min_c=20, temp_max_c=23, max_kw=2.5
+        let forced = |temp_c, last_kw| {
+            Asset::forced_power_kw(&heater, &AssetState::Heater(state_at(temp_c, last_kw)))
+        };
+        assert_eq!(forced(19.0, 0.0), Some(2.5), "too cold: emergency heat");
+        assert_eq!(forced(21.0, 2.5), Some(2.5), "still within hysteresis");
+        assert_eq!(forced(21.5, 0.0), None, "normal band follows the setpoint");
+        assert_eq!(forced(23.5, 0.0), Some(0.0), "overheated: forced off");
     }
 
     #[test]

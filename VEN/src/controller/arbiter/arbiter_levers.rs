@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use super::{
     DEAD_BAND_KW, HEATER_COMFORT_OVERRIDE_EUR_PER_KWH, LEVER_PREEMPTION_MARGIN_EUR_PER_KWH,
 };
-use crate::controller::dispatcher::predict_heater_forced_kw;
 use crate::controller::SimSnapshot;
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
@@ -112,21 +111,15 @@ pub(super) fn ev_lever(
         return None;
     }
     let snap = sim.assets.get(crate::ids::ASSET_EV)?;
-    let plugged = snap.val("plugged").unwrap_or(0.0) > 0.5;
-    if !plugged {
+    // The EV's own capability is 0 while unplugged or at/above its target.
+    let charge_ceiling_kw = snap.cap_max_import_kw;
+    if charge_ceiling_kw <= 0.0 {
         return None;
     }
-    let soc = snap.val("soc").unwrap_or(0.0);
-    let soc_target = snap.val("soc_target").unwrap_or(1.0);
-    let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
     let current_sp = snap.setpoint_kw.max(0.0);
 
     let available_capacity_kw = if deviation_kw < 0.0 {
-        if soc >= soc_target {
-            0.0
-        } else {
-            (max_charge_kw - current_sp).max(0.0)
-        }
+        (charge_ceiling_kw - current_sp).max(0.0)
     } else {
         current_sp
     };
@@ -300,10 +293,8 @@ pub(super) fn apply_ev_lever_opportunistic(
                     return bl_kw;
                 }
             }
-            if id.as_str() == crate::ids::ASSET_HEATER {
-                if let Some(forced_kw) = predict_heater_forced_kw(snap) {
-                    return forced_kw;
-                }
+            if let Some(forced_kw) = snap.forced_power_kw {
+                return forced_kw;
             }
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
@@ -325,13 +316,11 @@ pub(super) fn apply_ev_lever_opportunistic(
     let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) else {
         return;
     };
-    let plugged = snap.val("plugged").unwrap_or(0.0) > 0.5;
-    let soc = snap.val("soc").unwrap_or(0.0);
-    let soc_target = snap.val("soc_target").unwrap_or(1.0);
-    if plugged && soc < soc_target {
-        let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
+    // The EV's own capability is 0 while unplugged or at/above its target.
+    let charge_ceiling_kw = snap.cap_max_import_kw;
+    if charge_ceiling_kw > 0.0 {
         let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
-        let charge_kw = surplus_kw.min(max_charge_kw);
+        let charge_kw = surplus_kw.min(charge_ceiling_kw);
         if charge_kw >= min_charge_kw {
             setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
         }

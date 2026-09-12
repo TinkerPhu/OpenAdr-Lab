@@ -39,11 +39,10 @@ pub(crate) fn apply_dispatch_override(
     // tick's value from `SimState::peek_pv_kw`) over the snapshot, which holds
     // last tick's output. Uncontrollable assets carry an f64::MAX sentinel
     // default_setpoint_kw that lands in `sp` — any non-finite or absurd
-    // magnitude falls back to live power. The heater prefers
-    // `predict_heater_forced_kw` over its commanded setpoint whenever its own
-    // thermostat hysteresis/safety cutoff will override that setpoint this tick
-    // (same "commanded ≠ actual" gap PV's live_pv_kw closes — see that function's
-    // doc comment for the E2E failure this fixes).
+    // magnitude falls back to live power. An asset reporting a forced power
+    // (`AssetSnapshot::forced_power_kw`, e.g. a heater in thermostat
+    // hysteresis/safety cutoff) is taken at that value, not its commanded
+    // setpoint (same "commanded ≠ actual" gap PV's live_pv_kw closes).
     let net_without_battery: f64 = sim_snap
         .assets
         .iter()
@@ -54,12 +53,8 @@ pub(crate) fn apply_dispatch_override(
                     return pv_kw;
                 }
             }
-            if id.as_str() == crate::ids::ASSET_HEATER {
-                if let Some(forced_kw) =
-                    crate::controller::dispatcher::predict_heater_forced_kw(snap)
-                {
-                    return forced_kw;
-                }
+            if let Some(forced_kw) = snap.forced_power_kw {
+                return forced_kw;
             }
             sp.get(id)
                 .copied()
@@ -136,6 +131,7 @@ mod dispatch_override_tests {
             cap_max_export_kw: exp,
             available_discharge_kwh: None,
             available_charge_kwh: None,
+            forced_power_kw: None,
             default_setpoint_kw: power_kw,
             setpoint_kw: power_kw,
             values: std::collections::HashMap::new(),
@@ -261,15 +257,10 @@ mod dispatch_override_tests {
         // heater was mid-emergency-hysteresis (drawing max_kw physically) while
         // its commanded setpoint read 0 — the override's net_without_battery
         // calc trusted the commanded 0 and undershot the battery correction by
-        // exactly the heater's forced power (see
-        // `dispatcher::predict_heater_forced_kw`'s doc comment for the full story).
+        // exactly the heater's forced power. The heater itself reports that
+        // override (`Asset::forced_power_kw`, covered in heater.rs); this test
+        // pins that the override consumes it.
         let mut sim = make_sim();
-        let mut heater_values = std::collections::HashMap::new();
-        heater_values.insert("temp_c".to_string(), 20.0);
-        heater_values.insert("max_kw".to_string(), 3.0);
-        heater_values.insert("temp_min_c".to_string(), 18.0);
-        heater_values.insert("temp_max_c".to_string(), 23.0);
-        heater_values.insert("temp_safety_max_c".to_string(), 23.0);
         sim.assets.insert(
             "heater".to_string(),
             AssetSnapshot {
@@ -279,9 +270,10 @@ mod dispatch_override_tests {
                 cap_max_export_kw: 0.0,
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
+                forced_power_kw: Some(3.0),
                 default_setpoint_kw: 0.0,
                 setpoint_kw: 0.0,
-                values: heater_values,
+                values: std::collections::HashMap::new(),
             },
         );
         let mut sp = HashMap::from([
