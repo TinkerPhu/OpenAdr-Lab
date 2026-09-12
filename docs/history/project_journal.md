@@ -12450,3 +12450,28 @@ Follow-up, same day (R-78..R-80 fixed):
   entries through them after a state change.
 Still open, same shape: R-73 (plan-result future states for battery/EV/heater are computed by
 planner-side "Mirrors" helpers, not by the assets).
+
+## 2026-09-12 — Overlapping event intervals resolved by priority per segment (GB-45)
+
+What: `controller/rate_schedule.rs::collect_interval_groups` now expands every active event's
+intervals into candidates, splits them at every boundary into atomic segments, and gives each
+segment, per payload type, the value of the highest-ranked covering event (priority, then newer
+`createdDateTime`, then input order). The PRICE/EXPORT_PRICE/GHG and IMPORT/EXPORT_CAPACITY_LIMIT
+schedules the VEN publishes are therefore non-overlapping.
+
+Why: BL-02's merge only arbitrated intervals with identical `(start, end)`. Partially overlapping
+events all survived, and each consumer resolved the overlap its own way: the monitor and history
+sampler took the earliest-starting interval, the planner's `TariffTimeSeries` the latest (whose
+value then leaked past its own end). The 2026-08-31 fleet run exposed it: a broadcast day-ahead
+TOU demo event beat the scenario price in every recorded tariff of S-1 and S-2, while the
+planner — by the opposite accident — most likely planned against the scenario price. One VEN,
+two prices. OpenADR 3.1 User Guide §7.1 says priority governs events that overlap in time.
+
+How it was verified: eight unit tests written first and confirmed failing for the right reason,
+among them a consumer-agreement test that reproduced the S-2 split (planner 0.45 vs tick lookup
+0.09 at the same instant); all existing parse and BL-02 tests unchanged and green; a use-case
+BDD scenario (`ven_rate_system.feature`: intra-hour priority-1 price inside a priority-5 day-ahead
+hour). Non-overlapping input produces exactly the old output.
+
+Learning: a shared parser that returns ambiguous data pushes the resolution rule into every
+consumer, and they will not agree. Resolve once at the source so consumers can't differ.
