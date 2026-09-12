@@ -1238,10 +1238,22 @@ impl TimeSeries {
 - **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
   averaging for the UI chart.
 
-**Event merge** (`openadr_interface.rs`): when multiple events define the same
-interval, events are pre-sorted by ascending `priority` (newer `createdDateTime`
-breaking ties) so the highest-priority event is processed last and wins the
-last-write-wins merge (BL-02).
+**Event interval resolution** (`controller/rate_schedule.rs::collect_interval_groups`,
+shared by `parse_rate_snapshots` and `parse_capacity_schedule`): all active events'
+intervals (after looping expansion) are split at every interval boundary into atomic
+segments; each segment takes, per payload type, the value of the highest-ranked event
+covering it that carries that type. Rank: lower `priority` wins, absent priority ranks
+lowest, equal priority → newer `createdDateTime`, still tied → later in the input (BL-02,
+GB-45). A short high-priority interval therefore applies for exactly its own window and
+the lower-priority value resumes after it, whether or not the two share boundaries.
+The published schedules are non-overlapping, so every consumer — tick-time cost
+(`monitor.rs`), `grid_samples` tariff/limit columns (history sampler), the planner's
+`TariffTimeSeries`, planned capacity limits and `/tariffs`/`/capacity/schedule` — reads
+the same value for the same instant with no resolution rule of its own. Input with no
+overlaps comes out unchanged. The live strictest-limit capacity state
+(`parse_capacity_state`) is a separate, deliberate collapse and not part of this.
+Tests: `openadr_interface.rs` `parse_rate_snapshots_*` / `parse_capacity_schedule_*`
+(incl. `parse_rate_snapshots_planner_series_agrees_with_tick_lookup`).
 
 The MILP planner prices each slot at its **time-weighted mean** tariff
 (`TimeSeries::time_weighted_mean` via `milp_planner/inputs.rs` and
@@ -1253,7 +1265,7 @@ import, export, and CO₂ alike.
 The spec defines interval structure but leaves VEN-side alignment to the implementer:
 - Mixed `intervalPeriod` granularities within a single event (or across events) are legal.
 - Reports may use `dataQuality = ESTIMATED` for interpolated/inferred values — acknowledged but unspecified.
-- Event `priority` is defined but conflict resolution for overlapping same-type payloads is not specified; priority-based ordering before merge is the correct interpretation.
+- Event `priority` governs events that overlap in time and conflict (OpenADR 3.1 User Guide §7.1: lower number wins, zero highest); equal-priority conflicts are unspecified — the VEN breaks them by newer `createdDateTime`, then input order.
 
 ---
 

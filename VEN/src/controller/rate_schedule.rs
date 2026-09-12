@@ -13,16 +13,25 @@ use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
-/// One merged interval group: [start, end) plus every requested payload type's
-/// value for that interval (last-write-wins per type, see `collect_interval_groups`).
+/// One resolved segment: [start, end) plus every requested payload type's value
+/// for that segment, each taken from the highest-ranked event covering it.
 type IntervalGroup = (
     DateTime<Utc>,
     DateTime<Utc>,
     std::collections::HashMap<String, f64>,
 );
 
+/// One event interval after looping expansion, before overlap resolution.
+struct Candidate {
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    /// Position in the BL-02 "wins last" order: a higher rank wins an overlap.
+    rank: usize,
+    payloads: Vec<(String, f64)>,
+}
+
 /// Shared interval-collection core for both `parse_rate_snapshots` and
-/// `parse_capacity_schedule` — same priority-merge and cycle-looping semantics,
+/// `parse_capacity_schedule` — same priority and cycle-looping semantics,
 /// differing only in which OpenADR payload types are collected. Extracted so the
 /// two callers don't duplicate the looping/priority logic (generic-over-bespoke).
 ///
@@ -30,21 +39,25 @@ type IntervalGroup = (
 /// span of all intervals, the interval set is repeated (offset by one cycle each time)
 /// to cover [now − 1 cycle … now + 3 days]. This implements the OpenADR 3 spec's
 /// "persistent daily prices" pattern (`event.intervalPeriod.duration = "P9999Y"`).
+///
+/// GB-45: the result is non-overlapping and already priority-resolved (see
+/// `resolve_segments`), so every consumer — tick-time cost, history sampler,
+/// planner tariff series, planned capacity limits — reads the same value for the
+/// same instant without a resolution rule of its own.
 fn collect_interval_groups(
     events: &[OadrEvent],
     now: DateTime<Utc>,
     payload_types: &[&str],
 ) -> Vec<IntervalGroup> {
-    let mut map: std::collections::BTreeMap<(i64, i64), IntervalGroup> =
-        std::collections::BTreeMap::new();
+    let mut candidates: Vec<Candidate> = Vec::new();
 
-    // ── BL-02: priority-ordered merge ───────────────────────────────────────
-    // OpenADR 3 spec (§ 6.6): event `priority` — lower number = higher priority; an
-    // absent priority is treated as lowest. Sort ascending by "wins last" order so the
-    // last-write-wins merge below naturally lets the higher-priority event survive:
-    // lowest-priority events (including `None`) are processed first, highest-priority
-    // last. Equal priority breaks the tie on `createdDateTime` — newer wins, so older
-    // events are processed first.
+    // ── BL-02: priority order ───────────────────────────────────────────────
+    // OpenADR 3.1 User Guide §7.1: event `priority` — lower number = higher
+    // priority; an absent priority is treated as lowest. Sorted into "wins last"
+    // order: lowest-priority events (including `None`) first, highest-priority
+    // last; equal priority breaks the tie on `createdDateTime` — newer last. The
+    // sort is stable, so a remaining tie keeps input order (later input wins).
+    // Each event's position in this order is its rank in `resolve_segments`.
     let mut ordered: Vec<&OadrEvent> = events.iter().collect();
     ordered.sort_by(|a, b| {
         let pa = a.priority.unwrap_or(i64::MAX);
@@ -60,7 +73,7 @@ fn collect_interval_groups(
         })
     });
 
-    for event in ordered {
+    for (rank, event) in ordered.into_iter().enumerate() {
         if event.intervals.is_empty() {
             continue;
         }
@@ -141,31 +154,63 @@ fn collect_interval_groups(
             vec![0i64]
         };
 
-        // ── Insert snapshots into map for each offset ─────────────────────────
+        // ── Expand into candidates for each offset ────────────────────────────
         for &offset in &offsets {
             for (base_start, dur, payloads) in &base {
-                let start = *base_start + Duration::seconds(offset);
-                let end = start + Duration::seconds(*dur);
-                let key = (start.timestamp(), end.timestamp());
-
-                // CONFLICT NOTE: Multiple active events can define values for the same interval
-                // (e.g. one PRICE event + one GHG event, or two PRICE events from different programs).
-                // This merge uses last-write-wins: whichever event is processed last in the loop
-                // overwrites a previously-set value for the same payload type. `ordered` above is
-                // sorted so the highest-priority event (BL-02) is processed last and therefore wins.
-                let entry = map
-                    .entry(key)
-                    .or_insert_with(|| (start, end, std::collections::HashMap::new()));
-
-                for (t, v) in payloads {
-                    entry.2.insert(t.clone(), *v);
+                // An interval carrying none of the requested payload types must not
+                // contribute segment boundaries that would split relevant ones.
+                if payloads.is_empty() || *dur <= 0 {
+                    continue;
                 }
+                let start = *base_start + Duration::seconds(offset);
+                candidates.push(Candidate {
+                    start,
+                    end: start + Duration::seconds(*dur),
+                    rank,
+                    payloads: payloads.clone(),
+                });
             }
         }
     }
 
-    let mut result: Vec<IntervalGroup> = map.into_values().collect();
-    result.sort_by_key(|(start, _, _)| *start);
+    resolve_segments(&candidates)
+}
+
+/// GB-45: resolve possibly-overlapping candidates into non-overlapping segments.
+/// Boundaries are the union of every candidate's start and end, so input without
+/// overlaps comes out unchanged. Within each segment, each payload type takes the
+/// value of the highest-ranked candidate covering the segment that carries that
+/// type (OpenADR 3.1 User Guide §7.1: priority governs events that overlap in time,
+/// not only identical intervals; e.g. PRICE from one event, GHG from another).
+/// Segments no candidate covers are not emitted (gaps stay gaps).
+fn resolve_segments(candidates: &[Candidate]) -> Vec<IntervalGroup> {
+    let mut bounds: Vec<DateTime<Utc>> = candidates.iter().flat_map(|c| [c.start, c.end]).collect();
+    bounds.sort();
+    bounds.dedup();
+
+    let mut result = Vec::new();
+    for w in bounds.windows(2) {
+        let (seg_start, seg_end) = (w[0], w[1]);
+        let mut winners: std::collections::HashMap<String, (usize, f64)> =
+            std::collections::HashMap::new();
+        for c in candidates
+            .iter()
+            .filter(|c| c.start <= seg_start && seg_end <= c.end)
+        {
+            for (payload_type, value) in &c.payloads {
+                let beaten = winners
+                    .get(payload_type)
+                    .is_some_and(|(rank, _)| *rank > c.rank);
+                if !beaten {
+                    winners.insert(payload_type.clone(), (c.rank, *value));
+                }
+            }
+        }
+        if !winners.is_empty() {
+            let values = winners.into_iter().map(|(t, (_, v))| (t, v)).collect();
+            result.push((seg_start, seg_end, values));
+        }
+    }
     result
 }
 

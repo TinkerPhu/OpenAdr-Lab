@@ -259,6 +259,21 @@ A utility publishes tomorrow's hourly electricity prices: $0.06/kWh at 3 AM (off
 - Check the **Trace** page to see the reactor responding to each price level
 - In a real deployment, the seed script creates 24 hourly intervals with realistic pricing curves (see `scripts/seed_vtn.py`)
 
+### Overlapping price events: priority decides, per time segment
+
+A day-ahead hourly tariff and a short intra-hour DR price often overlap. The VEN resolves
+them per time segment: inside the short event's window the **higher-priority** (lower
+number) event's price applies; before and after it, the day-ahead price does. Boundaries
+don't need to line up. To observe it: keep `manual-tou-pricing` (priority 5) running and
+add a second event with priority `1` and one 1-minute interval starting inside one of its
+2-minute intervals, e.g. `{"id": 0, "intervalPeriod": {"start": "<t+1min>", "duration":
+"PT1M"}, "payloads": [{"type": "PRICE", "values": [0.90]}]}`. VEN UI → Diagnostics →
+**Raw Data** → Tariffs (or `GET /tariffs`) then shows that 2-minute interval split into three: day-ahead price,
+0.90 for the priority-1 minute, day-ahead price again. The planner, the live cost and the
+recorded history all use this same resolved schedule. Covered by the BDD scenario "An
+intra-hour high-priority PRICE event overrides the day-ahead price for exactly its window"
+(`tests/features/ven_rate_system.feature`).
+
 ---
 
 ## UC4 — Planned Peak Shaving

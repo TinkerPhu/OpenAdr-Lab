@@ -156,6 +156,79 @@ def step_create_price_event_no_descriptors(context):
     context.rate_event_id = r.json().get("id")
 
 
+def _post_single_price_event(context, name, priority, start, duration, price):
+    r = vtn_post(
+        "/events",
+        context.vtn_token,
+        json={
+            "programID": context.saved_program_id,
+            "eventName": name,
+            "priority": priority,
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": {"start": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "duration": duration},
+                "payloads": [{"type": "PRICE", "values": [price]}],
+            }],
+        },
+    )
+    r.raise_for_status()
+
+
+def _parse_ts(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def _price_at(rates, at):
+    for s in rates:
+        if _parse_ts(s["interval_start"]) <= at < _parse_ts(s["interval_end"]):
+            return s.get("import_tariff_eur_kwh")
+    return None
+
+
+@given("I create a priority-5 day-ahead PRICE event of 0.09 for one hour 30 hours from now")
+def step_create_day_ahead_hour(context):
+    # 30 h out: clear of every other rate scenario's +1..+4 h events in this feature.
+    hour = (datetime.now(timezone.utc) + timedelta(hours=30)).replace(minute=0, second=0, microsecond=0)
+    context.day_ahead_hour_start = hour
+    _post_single_price_event(context, "gb45-day-ahead", 5, hour, "PT1H", 0.09)
+
+
+@given("I create a priority-1 PRICE event of 0.45 for 10 minutes starting 20 minutes into that hour")
+def step_create_intra_hour_dr(context):
+    start = context.day_ahead_hour_start + timedelta(minutes=20)
+    _post_single_price_event(context, "gb45-intra-hour-dr", 1, start, "PT10M", 0.45)
+
+
+@when("I wait for the VEN /tariffs endpoint to show 0.45 inside that hour")
+def step_wait_intra_hour_price(context):
+    at = context.day_ahead_hour_start + timedelta(minutes=25)
+
+    def fetch():
+        resp = ven_get("/tariffs")
+        return resp.json() if resp.ok else []
+
+    context.ven_rates = poll_until(
+        fetch,
+        lambda rates: isinstance(rates, list) and _price_at(rates, at) == 0.45,
+        timeout=60,
+        description="VEN /tariffs resolves the intra-hour DR price",
+    )
+
+
+@then("the VEN /tariffs price that hour at 0.09 before, 0.45 during and 0.09 after the 10-minute window")
+def step_assert_intra_hour_resolution(context):
+    h = context.day_ahead_hour_start
+    got = {m: _price_at(context.ven_rates, h + timedelta(minutes=m)) for m in (5, 19, 20, 25, 29, 30, 45)}
+    assert got == {5: 0.09, 19: 0.09, 20: 0.45, 25: 0.45, 29: 0.45, 30: 0.09, 45: 0.09}, got
+
+
+@then("no two VEN /tariffs snapshots overlap")
+def step_assert_tariffs_non_overlapping(context):
+    spans = sorted((_parse_ts(s["interval_start"]), _parse_ts(s["interval_end"])) for s in context.ven_rates)
+    for (s1, e1), (s2, e2) in zip(spans, spans[1:]):
+        assert e1 <= s2, f"overlap: [{s1}, {e1}) and [{s2}, {e2})"
+
+
 # ---------------------------------------------------------------------------
 # When: poll VEN endpoints
 # ---------------------------------------------------------------------------

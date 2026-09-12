@@ -1264,6 +1264,363 @@ mod tests {
         );
     }
 
+    // ── GB-45: priority across partially overlapping intervals ───────────
+
+    fn ts(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
+    /// Single-interval event over `[start, start + duration)` carrying `payloads`.
+    fn window_event(
+        id: &str,
+        priority: Option<i64>,
+        created: &str,
+        start: &str,
+        duration: &str,
+        payloads: &[(&str, f64)],
+    ) -> OadrEvent {
+        let payloads: Vec<serde_json::Value> = payloads
+            .iter()
+            .map(|(t, v)| json!({"type": t, "values": [v]}))
+            .collect();
+        serde_json::from_value(json!({
+            "id": id,
+            "programID": "prog-1",
+            "priority": priority,
+            "createdDateTime": created,
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": {"start": start, "duration": duration},
+                "payloads": payloads
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn import_at(
+        snaps: &[crate::entities::tariff_snapshot::TariffSnapshot],
+        at: &str,
+    ) -> Option<f64> {
+        let at = ts(at);
+        snaps
+            .iter()
+            .find(|s| s.interval_start <= at && at < s.interval_end)
+            .and_then(|s| s.import_tariff_eur_kwh)
+    }
+
+    fn segments(
+        snaps: &[crate::entities::tariff_snapshot::TariffSnapshot],
+    ) -> Vec<(DateTime<Utc>, DateTime<Utc>, Option<f64>)> {
+        snaps
+            .iter()
+            .map(|s| (s.interval_start, s.interval_end, s.import_tariff_eur_kwh))
+            .collect()
+    }
+
+    fn day_ahead_and_intra_hour() -> Vec<OadrEvent> {
+        vec![
+            window_event(
+                "tou",
+                Some(5),
+                "2026-08-31T00:00:00Z",
+                "2026-08-31T05:00:00Z",
+                "PT1H",
+                &[("PRICE", 0.09)],
+            ),
+            window_event(
+                "dr",
+                Some(1),
+                "2026-08-30T00:00:00Z",
+                "2026-08-31T05:20:00Z",
+                "PT10M",
+                &[("PRICE", 0.45)],
+            ),
+        ]
+    }
+
+    #[test]
+    fn parse_rate_snapshots_intra_hour_high_priority_splits_hour() {
+        let now = ts("2026-08-31T04:00:00Z");
+        for events in [
+            day_ahead_and_intra_hour(),
+            day_ahead_and_intra_hour().into_iter().rev().collect(),
+        ] {
+            let snaps = parse_rate_snapshots(&events, now);
+            assert_eq!(
+                segments(&snaps),
+                vec![
+                    (ts("2026-08-31T05:00:00Z"), ts("2026-08-31T05:20:00Z"), Some(0.09)),
+                    (ts("2026-08-31T05:20:00Z"), ts("2026-08-31T05:30:00Z"), Some(0.45)),
+                    (ts("2026-08-31T05:30:00Z"), ts("2026-08-31T06:00:00Z"), Some(0.09)),
+                ],
+                "the 10-min priority-1 price must apply for exactly its window, the hour's own price around it"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_rate_snapshots_earlier_start_lower_priority_loses() {
+        // S-2 of the 2026-08-31 fleet run: hourly TOU from 05:00, scenario window from 05:29.
+        let now = ts("2026-08-31T04:00:00Z");
+        let events = vec![
+            window_event(
+                "tou",
+                Some(5),
+                "2026-08-31T00:00:00Z",
+                "2026-08-31T05:00:00Z",
+                "PT1H",
+                &[("PRICE", 0.09)],
+            ),
+            window_event(
+                "scn",
+                Some(1),
+                "2026-08-30T00:00:00Z",
+                "2026-08-31T05:29:00Z",
+                "PT30M",
+                &[("PRICE", 0.10)],
+            ),
+        ];
+        let snaps = parse_rate_snapshots(&events, now);
+        assert_eq!(import_at(&snaps, "2026-08-31T05:28:59Z"), Some(0.09));
+        for minute in 29..59 {
+            assert_eq!(
+                import_at(&snaps, &format!("2026-08-31T05:{minute:02}:00Z")),
+                Some(0.10),
+                "05:{minute:02} must resolve to the priority-1 event despite its later start"
+            );
+        }
+        assert_eq!(import_at(&snaps, "2026-08-31T05:59:30Z"), Some(0.09));
+    }
+
+    #[test]
+    fn parse_rate_snapshots_partial_overlap_equal_priority_newer_wins() {
+        let now = ts("2026-02-01T09:00:00Z");
+        let older = window_event(
+            "old",
+            Some(2),
+            "2026-01-15T08:00:00Z",
+            "2026-02-01T10:00:00Z",
+            "PT1H",
+            &[("PRICE", 0.20)],
+        );
+        let newer = window_event(
+            "new",
+            Some(2),
+            "2026-02-01T08:00:00Z",
+            "2026-02-01T10:30:00Z",
+            "PT1H",
+            &[("PRICE", 0.40)],
+        );
+        for events in [
+            vec![older.clone(), newer.clone()],
+            vec![newer.clone(), older.clone()],
+        ] {
+            let snaps = parse_rate_snapshots(&events, now);
+            assert_eq!(
+                segments(&snaps),
+                vec![
+                    (
+                        ts("2026-02-01T10:00:00Z"),
+                        ts("2026-02-01T10:30:00Z"),
+                        Some(0.20)
+                    ),
+                    (
+                        ts("2026-02-01T10:30:00Z"),
+                        ts("2026-02-01T11:00:00Z"),
+                        Some(0.40)
+                    ),
+                    (
+                        ts("2026-02-01T11:00:00Z"),
+                        ts("2026-02-01T11:30:00Z"),
+                        Some(0.40)
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn parse_rate_snapshots_absent_priority_ranks_lowest_on_partial_overlap() {
+        let now = ts("2026-02-01T09:00:00Z");
+        let none = window_event(
+            "none",
+            None,
+            "2026-02-01T09:00:00Z",
+            "2026-02-01T10:00:00Z",
+            "PT1H",
+            &[("PRICE", 0.99)],
+        );
+        let p9 = window_event(
+            "p9",
+            Some(9),
+            "2026-01-01T00:00:00Z",
+            "2026-02-01T10:30:00Z",
+            "PT1H",
+            &[("PRICE", 0.30)],
+        );
+        let snaps = parse_rate_snapshots(&[p9, none], now);
+        assert_eq!(import_at(&snaps, "2026-02-01T10:15:00Z"), Some(0.99));
+        assert_eq!(import_at(&snaps, "2026-02-01T10:45:00Z"), Some(0.30));
+        assert_eq!(import_at(&snaps, "2026-02-01T11:15:00Z"), Some(0.30));
+    }
+
+    #[test]
+    fn parse_rate_snapshots_resolves_each_payload_type_independently() {
+        let now = ts("2026-02-01T09:00:00Z");
+        let price_only = window_event(
+            "p1",
+            Some(1),
+            "2026-01-01T00:00:00Z",
+            "2026-02-01T10:15:00Z",
+            "PT30M",
+            &[("PRICE", 0.45)],
+        );
+        let price_ghg = window_event(
+            "p5",
+            Some(5),
+            "2026-01-01T00:00:00Z",
+            "2026-02-01T10:00:00Z",
+            "PT1H",
+            &[("PRICE", 0.09), ("GHG", 300.0)],
+        );
+        let snaps = parse_rate_snapshots(&[price_only, price_ghg], now);
+        let at = |s: &str| {
+            let t = ts(s);
+            let snap = snaps
+                .iter()
+                .find(|x| x.interval_start <= t && t < x.interval_end)
+                .expect("covered");
+            (snap.import_tariff_eur_kwh, snap.co2_g_kwh)
+        };
+        assert_eq!(at("2026-02-01T10:05:00Z"), (Some(0.09), Some(300.0)));
+        assert_eq!(at("2026-02-01T10:30:00Z"), (Some(0.45), Some(300.0)));
+        assert_eq!(at("2026-02-01T10:50:00Z"), (Some(0.09), Some(300.0)));
+    }
+
+    #[test]
+    fn parse_rate_snapshots_output_never_overlaps() {
+        // Looping hourly day-ahead price (P9999Y) plus two short DR prices, one straddling
+        // an hour boundary: the published schedule must be sorted and non-overlapping.
+        let now: DateTime<Utc> = ts("2026-01-03T14:30:00Z");
+        let intervals: Vec<serde_json::Value> = (0u32..24)
+            .map(|h| {
+                json!({
+                    "id": h,
+                    "intervalPeriod": {"start": format!("2026-01-01T{:02}:00:00Z", h), "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [h as f64]}]
+                })
+            })
+            .collect();
+        let mut events: Vec<OadrEvent> = serde_json::from_value(json!([{
+            "id": "evt-daily",
+            "programID": "prog-1",
+            "priority": 5,
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "intervals": intervals
+        }]))
+        .unwrap();
+        events.push(window_event(
+            "dr1",
+            Some(1),
+            "2026-01-03T00:00:00Z",
+            "2026-01-03T15:20:00Z",
+            "PT10M",
+            &[("PRICE", 99.0)],
+        ));
+        events.push(window_event(
+            "dr2",
+            Some(1),
+            "2026-01-03T00:00:00Z",
+            "2026-01-03T16:50:00Z",
+            "PT20M",
+            &[("PRICE", 77.0)],
+        ));
+
+        let snaps = parse_rate_snapshots(&events, now);
+        for w in snaps.windows(2) {
+            assert!(
+                w[0].interval_end <= w[1].interval_start,
+                "overlap: [{}, {}) and [{}, {})",
+                w[0].interval_start,
+                w[0].interval_end,
+                w[1].interval_start,
+                w[1].interval_end
+            );
+        }
+        assert_eq!(import_at(&snaps, "2026-01-03T15:10:00Z"), Some(15.0));
+        assert_eq!(import_at(&snaps, "2026-01-03T15:25:00Z"), Some(99.0));
+        assert_eq!(import_at(&snaps, "2026-01-03T15:35:00Z"), Some(15.0));
+        assert_eq!(import_at(&snaps, "2026-01-03T16:55:00Z"), Some(77.0));
+        assert_eq!(import_at(&snaps, "2026-01-03T17:05:00Z"), Some(77.0));
+        assert_eq!(import_at(&snaps, "2026-01-03T17:15:00Z"), Some(17.0));
+    }
+
+    #[test]
+    fn parse_capacity_schedule_short_high_priority_limit_splits_longer_one() {
+        let now = ts("2026-09-09T12:00:00Z");
+        let events = vec![
+            window_event(
+                "env",
+                Some(5),
+                "2026-09-09T00:00:00Z",
+                "2026-09-09T18:00:00Z",
+                "PT4H",
+                &[("IMPORT_CAPACITY_LIMIT", 6.0)],
+            ),
+            window_event(
+                "cap",
+                Some(1),
+                "2026-09-08T00:00:00Z",
+                "2026-09-09T19:00:00Z",
+                "PT30M",
+                &[("IMPORT_CAPACITY_LIMIT", 2.0)],
+            ),
+        ];
+        let got: Vec<_> = parse_capacity_schedule(&events, now)
+            .into_iter()
+            .map(|c| (c.interval_start, c.interval_end, c.import_limit_kw))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    ts("2026-09-09T18:00:00Z"),
+                    ts("2026-09-09T19:00:00Z"),
+                    Some(6.0)
+                ),
+                (
+                    ts("2026-09-09T19:00:00Z"),
+                    ts("2026-09-09T19:30:00Z"),
+                    Some(2.0)
+                ),
+                (
+                    ts("2026-09-09T19:30:00Z"),
+                    ts("2026-09-09T22:00:00Z"),
+                    Some(6.0)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_rate_snapshots_planner_series_agrees_with_tick_lookup() {
+        use crate::entities::tariff_snapshot::TariffTimeSeries;
+        let snaps = parse_rate_snapshots(&day_ahead_and_intra_hour(), ts("2026-08-31T04:00:00Z"));
+        let series = TariffTimeSeries::from_snapshots(&snaps);
+        for at in [
+            "2026-08-31T05:10:00Z",
+            "2026-08-31T05:25:00Z",
+            "2026-08-31T05:35:00Z",
+            "2026-08-31T05:55:00Z",
+        ] {
+            assert_eq!(
+                series.import_eur_kwh.interpolate_at(ts(at)),
+                import_at(&snaps, at),
+                "planner series and tick-time lookup disagree at {at}"
+            );
+        }
+    }
+
     #[test]
     fn test_extract_report_obligations_dedup() {
         // Dedup by (event_id, payload_type) is intentionally unconditional — it does

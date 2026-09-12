@@ -24,6 +24,17 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
     When I wait for the VEN /tariffs endpoint to have a snapshot with export_tariff_eur_kwh
     Then at least one rate snapshot has an export_tariff_eur_kwh value
 
+  Scenario: An intra-hour high-priority PRICE event overrides the day-ahead price for exactly its window
+    # GB-45: a grid operator's short DR price (priority 1) inside a day-ahead hourly
+    # tariff (priority 5) must apply for its own 10 minutes only, and the VEN must
+    # publish one unambiguous, non-overlapping schedule every consumer reads.
+    Given I create a rate-system program and save its ID
+    And I create a priority-5 day-ahead PRICE event of 0.09 for one hour 30 hours from now
+    And I create a priority-1 PRICE event of 0.45 for 10 minutes starting 20 minutes into that hour
+    When I wait for the VEN /tariffs endpoint to show 0.45 inside that hour
+    Then the VEN /tariffs price that hour at 0.09 before, 0.45 during and 0.09 after the 10-minute window
+    And no two VEN /tariffs snapshots overlap
+
   Scenario: IMPORT_CAPACITY_LIMIT event updates the capacity state
     Given I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 5.0 kW for the saved program
