@@ -101,7 +101,9 @@ def window_compliance(rows, window, floor_by_ts=None):
     scored = []
     for r in rows:
         ts = r[0]
-        if window["start_ts"] <= ts < window["end_ts"]:
+        # Only samples wholly inside the window: a 1-minute sample straddling either
+        # edge blends in-window and out-of-window power.
+        if window["start_ts"] <= ts and ts + 60 <= window["end_ts"]:
             floor = floor_by_ts.get(ts, 0.0) if window["direction"] == "import" else 0.0
             scored.append((ts, r[idx], max(limit, floor), floor))
     if not scored:
@@ -142,14 +144,18 @@ def window_compliance(rows, window, floor_by_ts=None):
 def signal_integrity(rows, price_action):
     """Did the recorded tariff equal the scenario's price? `rows`: (ts, import_kw,
     export_kw, import_tariff_eur_kwh, ...). Minutes within PRICE_PROPAGATION_S of an
-    interval boundary are skipped (event poll + sampling lag)."""
+    interval boundary are skipped (event poll + sampling lag), and so is a minute whose
+    1-minute sample window straddles the next boundary (it records a time-weighted blend
+    of both prices; runs start mid-minute)."""
     start = _epoch(price_action["started_at"])
     step = 60 * int(price_action["interval_minutes"])
     values = price_action["values_eur_kwh"]
     checked = mismatched = 0
     for r in rows:
         offset = r[0] - start
-        if offset < 0 or offset >= step * len(values) or offset % step < PRICE_PROPAGATION_S:
+        if offset < 0 or offset >= step * len(values):
+            continue
+        if offset % step < PRICE_PROPAGATION_S or offset % step > step - 60:
             continue
         checked += 1
         recorded = r[3]
@@ -263,6 +269,11 @@ def _self_check_window_compliance():
     exp_rows = _minute_rows([0.0] * 10, export=[2.0, 0.4] + [0.3] * 8)
     exp = window_compliance(exp_rows, _window(limit=0.5, minutes=10, direction="export"))
     assert (exp["time_to_comply_s"], exp["pass"], exp["engaged"]) == (60, True, True), exp
+    # A window ending mid-minute (campaign 2026-09-12 S-7 ven-16: alert ended at :23 s):
+    # the last 1-minute sample straddles the end and blends in post-window import. Only
+    # samples wholly inside the window are scored.
+    straddle = window_compliance(_minute_rows([0.0] * 10 + [0.37]), _window(limit=0.0, minutes=10) | {"end_ts": T0S + 623})
+    assert (straddle["samples"], straddle["pass"]) == (10, True), straddle
     print("compliance self-check OK: window_compliance")
 
 
@@ -274,6 +285,24 @@ def _self_check_signal_integrity():
     overridden = [(T0S + 60 * m, 0.0, 0.0, 0.09) for m in range(30)]
     res = signal_integrity(overridden, price)
     assert res["mismatched_minutes"] == res["checked_minutes"] > 20, res
+    # Real runs start mid-minute: a 1-minute sample straddling an interval boundary
+    # records a time-weighted blend (campaign 2026-09-12 S-2: 0.263 between 0.10 and
+    # 0.45). That minute is not evidence of a wrong price.
+    shifted = dict(price, started_at="2026-08-31T10:48:32Z")
+    start = T0S + 32
+    blended = []
+    for m in range(-1, 30):
+        ts = T0S + 60 * m
+        lo, hi = max(ts, start), ts + 60
+        parts = []
+        for k, v in enumerate(price["values_eur_kwh"]):
+            a, b = max(lo, start + 600 * k), min(hi, start + 600 * (k + 1))
+            if b > a:
+                parts.append((b - a, v))
+        if parts:
+            blended.append((ts, 0.0, 0.0, sum(w * v for w, v in parts) / sum(w for w, _ in parts)))
+    res = signal_integrity(blended, shifted)
+    assert res["mismatched_minutes"] == 0 and res["checked_minutes"] > 15, res
     print("compliance self-check OK: signal_integrity")
 
 
