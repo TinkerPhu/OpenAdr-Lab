@@ -1855,3 +1855,66 @@ and reservations, so S-4/S-6 compliance is measurable directly; the tariff's
 source event id next to `import_tariff_eur_kwh`, so GB-45-style overrides are
 visible in the data; per-slot plan allocations retained for experiment
 windows; and a thermostat-override counter (GB-44).
+
+---
+
+## Campaign 2026-09-12/14: first run with GB-44/45/46 fixed — measured verdicts
+
+Runs S-9 (2026-09-13 00:00–24:00 CEST), then S-1..S-8, then S-10 (15:10 CEST on 09-14), all
+from one detached driver on Node1 (`experiments/results/campaign-2026-09-12/`), with every
+run's background demo events suspended and restored (12 events), a price pre-flight that passed
+on all 20 VENs in every scenario, and `kpi.py`'s measured compliance (pass = limit or physical
+floor within 5 minutes, held; pass rates over *engaged* VENs). All ten runs exited 0.
+
+Before judging, two scoring bugs in the new tooling were found and fixed (`63d23821`):
+1-minute samples that straddle a price boundary or a window's end record a time-weighted blend
+(runs start mid-minute) and were scored as violations. That had flagged "tariff mismatch" on
+every VEN in S-2/S-6/S-7 and a false alert failure on ven-16. After the fix:
+
+| Scenario | Hard limit | Engaged | Passed | Failing | Signal integrity |
+|---|---|---|---|---|---|
+| S-1 flat | — | — | — | — | OK |
+| S-2 price spike | — (price only) | — | — | — | OK |
+| S-3 | 3 kW import cap | 2 | 1 | ven-20 | OK |
+| S-4 | alert (0 kW) | 16 | **16** | — | OK |
+| S-5 | dispatch setpoint (not scored) | — | — | — | OK |
+| S-6 | alert (0 kW) | 14 | **14** | — | OK |
+| S-7 | 1.5 kW import cap | 4 | 2 | ven-10, ven-12 | OK |
+| S-7 | alert inside the cap | 16 | **16** | — | OK |
+| S-8 budget | — | — | — | — | OK |
+| S-9 | 0.5 kW export cap (midday) | 1 | 1 | — | OK |
+| S-9 | 1.0 kW import cap (evening) | 15 | 12 | ven-1, ven-3, ven-5 | OK |
+| S-10 | 1.0 kW export cap | 4 | **4** | — | OK |
+
+**What now works:** the scenario price reaches every VEN and is what they bill (GB-45); every
+alert and export cap is met by every engaged VEN; price response is real and attributable —
+S-2's fleet import in the 0.45 €/kWh spike interval was 1.42 kWh against 2.19 kWh in its paired
+baseline (−35%), with pre-loading in the cheap interval before it (2.25 vs 1.80 kWh). ven-10's
+heater now follows each new plan (3.5 → 1.75 → 0 kW) instead of latching (GB-44). ven-1's EV
+charged 30 → 80% again (the previous run's 36.9% was consistent with it being fed the wrong
+price).
+
+**What still fails — two mechanisms, both import caps:**
+
+1. **Timed-out plans that put a heater stage inside the cap** (ven-3, ven-10, ven-12, ven-20;
+   4 of 6 failures). Every one of these VENs' cap-aware plans ended `TIME_LIMIT`, and the
+   returned incumbent scheduled a heater stage that doesn't fit: ven-10 1.75 kW over 0.47 kW
+   base load under 1.5 kW, ven-12 1.5 over 0.67 under 1.5, ven-20 3.5 kW under 3.0 (tank
+   43.6 °C, above its latch band, so a planner choice), ven-3 3.0 kW at the start of S-9's
+   evening cap. The cap is a penalised slack in the MILP, so a timed-out incumbent can violate
+   it. This is GB-40's consequence on grid compliance, at fleet scale (heater VENs `TIME_LIMIT`
+   59% of plans vs 7% without, unchanged).
+2. **Unforecast load with nothing reacting in real time** (ven-1, ven-5). ven-1's base load
+   (real measured house data) jumped to 2.3 kW under the 1.0 kW cap while its battery, with
+   charge available, stayed at 0 kW; ven-5 ran 0.05–0.09 kW over for a few minutes because its
+   planned battery discharge covered the forecast load, not the noise on top. The plan was
+   compliant; execution wasn't corrected. The deviation arbiter, which exists for this, is
+   disabled by default.
+
+GB-41 unchanged: ven-11, ven-12, ven-16 charged nothing, ven-18 29 minutes (30 → 31.1%); the
+other five roster VENs reached 70.8–80%.
+
+**Next steps:** mechanism 1 → a dispatcher-level clamp of staged loads to an active hard limit
+(pick the highest stage that fits under limit − other load, else 0), and/or have the planner
+return a cap-respecting incumbent before optimising cost; mechanism 2 → re-run S-3/S-7/S-9 with
+`deviation_arbiter_enabled` on the fleet to see how much it closes. Tracked as GB-47.
