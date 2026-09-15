@@ -35,12 +35,23 @@ def step_quiet_site(context, soc):
     r.raise_for_status()
 
 
-@when("I release the sustained base-load step")
-def step_release_base_load_step(context):
-    # With alpha 1.0 the offset decays to zero on the next tick — a clean
-    # release, unlike forcing 0 kW (which leaves a slowly decaying negative offset).
-    r = ven_post("/sim/inject", json={"base_load_kw": 0.5, "base_load_alpha": 1.0})
+def _release_base_load_step():
+    # alpha 1.0 decays the offset to zero on the next tick — a clean release,
+    # unlike forcing 0 kW (which leaves a slowly decaying negative offset). Then
+    # restore the default inject state, alpha included.
+    ven_post("/sim/inject", json={"base_load_kw": 0.5, "base_load_alpha": 1.0})
+    time.sleep(3)
+    ven_post("/sim/inject/reset", json={})
+
+
+@when("a sustained base-load step of {kw:f} kW starts")
+def step_sustained_base_load(context, kw):
+    # alpha 0.0 keeps the injected offset until released (alpha 1.0, as other
+    # features use it, is a one-tick spike). Released when the scenario ends,
+    # also when it fails, so the offset cannot leak into later scenarios.
+    r = ven_post("/sim/inject", json={"base_load_kw": kw, "base_load_alpha": 0.0})
     r.raise_for_status()
+    context.add_cleanup(_release_base_load_step)
 
 
 def _net_kw():
