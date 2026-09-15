@@ -13,20 +13,28 @@ use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
-/// One resolved segment: [start, end) plus every requested payload type's value
-/// for that segment, each taken from the highest-ranked event covering it.
+/// One requested payload type's value in a resolved segment, with the event it
+/// came from (the highest-ranked event covering the segment).
+#[derive(Debug, Clone)]
+struct SegmentValue {
+    value: f64,
+    event_id: String,
+}
+
+/// One resolved segment: [start, end) plus every requested payload type's value.
 type IntervalGroup = (
     DateTime<Utc>,
     DateTime<Utc>,
-    std::collections::HashMap<String, f64>,
+    std::collections::HashMap<String, SegmentValue>,
 );
 
 /// One event interval after looping expansion, before overlap resolution.
-struct Candidate {
+struct Candidate<'a> {
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     /// Position in the BL-02 "wins last" order: a higher rank wins an overlap.
     rank: usize,
+    event_id: &'a str,
     payloads: Vec<(String, f64)>,
 }
 
@@ -74,99 +82,63 @@ fn collect_interval_groups(
     });
 
     for (rank, event) in ordered.into_iter().enumerate() {
-        if event.intervals.is_empty() {
-            continue;
-        }
-
-        // ── Collect base intervals ────────────────────────────────────────────
-        type IntervalEntry = (DateTime<Utc>, i64, Vec<(String, f64)>);
-        let mut base: Vec<IntervalEntry> = Vec::new();
-
-        for interval in &event.intervals {
-            // GB-33: a single-interval event (every capacity_limit/reservation
-            // event this project's own experiment tooling sends, and any
-            // spec-compliant one-window DR event) is allowed to set
-            // `intervalPeriod` only at the event level, not per-interval. Only
-            // fall back for that narrow, unambiguous case — a multi-interval
-            // event without per-interval periods has spec-ambiguous sequential
-            // timing nothing here needs to guess at (see
-            // test_parse_capacity_schedule_does_not_guess_for_multi_interval_events).
-            let event_level_fallback = (event.intervals.len() == 1)
-                .then_some(event.intervalPeriod.as_ref())
-                .flatten();
-            let ip = match interval.intervalPeriod.as_ref().or(event_level_fallback) {
-                Some(ip) => ip,
-                None => continue,
-            };
-            let start_str = match ip.start.as_deref() {
-                Some(s) => s,
-                None => continue,
-            };
-            let interval_start: DateTime<Utc> = match start_str.parse() {
-                Ok(dt) => dt,
-                Err(_) => continue,
-            };
-            let duration_secs =
-                parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-
-            let mut payloads: Vec<(String, f64)> = Vec::new();
-            for p in &interval.payloads {
-                let t = p.r#type.as_str();
-                let v = p.values.first().and_then(|v| v.as_f64());
-                if payload_types.contains(&t) {
-                    if let Some(val) = v {
-                        payloads.push((t.to_string(), val));
-                    }
-                }
-            }
-
-            base.push((interval_start, duration_secs, payloads));
-        }
-
+        // Interval timing: the one shared rule (`controller::event_timing`).
+        let base: Vec<_> = crate::controller::event_timing::timed_intervals(event)
+            .into_iter()
+            .map(|t| {
+                let payloads: Vec<(String, f64)> = t
+                    .interval
+                    .payloads
+                    .iter()
+                    .filter(|p| payload_types.contains(&p.r#type.as_str()))
+                    .filter_map(|p| Some((p.r#type.clone(), p.values.first()?.as_f64()?)))
+                    .collect();
+                (t, payloads)
+            })
+            // An interval carrying none of the requested payload types must not
+            // contribute segment boundaries that would split relevant ones.
+            .filter(|(t, payloads)| !payloads.is_empty() && t.start < t.end)
+            .collect();
         if base.is_empty() {
             continue;
         }
 
         // ── Determine looping offsets ─────────────────────────────────────────
-        let first_start = base.iter().map(|(s, _, _)| *s).min().unwrap();
-        let last_end = base
-            .iter()
-            .map(|(s, d, _)| *s + Duration::seconds(*d))
-            .max()
-            .unwrap();
-        let cycle_secs = (last_end - first_start).num_seconds();
-
-        let event_dur_secs = event
-            .intervalPeriod
-            .as_ref()
-            .and_then(|ip| ip.duration.as_deref())
-            .map(parse_iso8601_duration_secs)
-            .unwrap_or(cycle_secs);
-
-        let offsets: Vec<i64> = if cycle_secs > 0 && event_dur_secs > cycle_secs {
-            let elapsed = (now - first_start).num_seconds().max(0);
-            let n = elapsed / cycle_secs; // index of the cycle that contains now
-            let from = n.saturating_sub(1); // one cycle back for "most recent past" fallback
-            let ahead = (3 * 86400i64) / cycle_secs + 2; // cycles needed to cover 3 days ahead
-            let to = (from + ahead).min(from + 10); // hard cap: at most 11 cycles total
-            (from..=to).map(|k| k * cycle_secs).collect()
+        // Only a fully bounded interval set can repeat; an open-ended one
+        // already covers everything after its start.
+        let offsets: Vec<i64> = if base.iter().all(|(t, _)| t.is_bounded()) {
+            let first_start = base.iter().map(|(t, _)| t.start).min().unwrap();
+            let last_end = base.iter().map(|(t, _)| t.end).max().unwrap();
+            let cycle_secs = (last_end - first_start).num_seconds();
+            let event_dur_secs = event
+                .intervalPeriod
+                .as_ref()
+                .and_then(|ip| ip.duration.as_deref())
+                .map(parse_iso8601_duration_secs)
+                .unwrap_or(cycle_secs);
+            if cycle_secs > 0 && event_dur_secs > cycle_secs {
+                let elapsed = (now - first_start).num_seconds().max(0);
+                let n = elapsed / cycle_secs; // index of the cycle that contains now
+                let from = n.saturating_sub(1); // one cycle back for "most recent past" fallback
+                let ahead = (3 * 86400i64) / cycle_secs + 2; // cycles needed to cover 3 days ahead
+                let to = (from + ahead).min(from + 10); // hard cap: at most 11 cycles total
+                (from..=to).map(|k| k * cycle_secs).collect()
+            } else {
+                vec![0i64]
+            }
         } else {
             vec![0i64]
         };
 
         // ── Expand into candidates for each offset ────────────────────────────
         for &offset in &offsets {
-            for (base_start, dur, payloads) in &base {
-                // An interval carrying none of the requested payload types must not
-                // contribute segment boundaries that would split relevant ones.
-                if payloads.is_empty() || *dur <= 0 {
-                    continue;
-                }
-                let start = *base_start + Duration::seconds(offset);
+            let shift = Duration::seconds(offset);
+            for (t, payloads) in &base {
                 candidates.push(Candidate {
-                    start,
-                    end: start + Duration::seconds(*dur),
+                    start: t.start + shift,
+                    end: t.end + shift,
                     rank,
+                    event_id: &event.id,
                     payloads: payloads.clone(),
                 });
             }
@@ -183,7 +155,7 @@ fn collect_interval_groups(
 /// type (OpenADR 3.1 User Guide §7.1: priority governs events that overlap in time,
 /// not only identical intervals; e.g. PRICE from one event, GHG from another).
 /// Segments no candidate covers are not emitted (gaps stay gaps).
-fn resolve_segments(candidates: &[Candidate]) -> Vec<IntervalGroup> {
+fn resolve_segments(candidates: &[Candidate<'_>]) -> Vec<IntervalGroup> {
     let mut bounds: Vec<DateTime<Utc>> = candidates.iter().flat_map(|c| [c.start, c.end]).collect();
     bounds.sort();
     bounds.dedup();
@@ -191,7 +163,7 @@ fn resolve_segments(candidates: &[Candidate]) -> Vec<IntervalGroup> {
     let mut result = Vec::new();
     for w in bounds.windows(2) {
         let (seg_start, seg_end) = (w[0], w[1]);
-        let mut winners: std::collections::HashMap<String, (usize, f64)> =
+        let mut winners: std::collections::HashMap<String, (usize, SegmentValue)> =
             std::collections::HashMap::new();
         for c in candidates
             .iter()
@@ -202,7 +174,11 @@ fn resolve_segments(candidates: &[Candidate]) -> Vec<IntervalGroup> {
                     .get(payload_type)
                     .is_some_and(|(rank, _)| *rank > c.rank);
                 if !beaten {
-                    winners.insert(payload_type.clone(), (c.rank, *value));
+                    let value = SegmentValue {
+                        value: *value,
+                        event_id: c.event_id.to_string(),
+                    };
+                    winners.insert(payload_type.clone(), (c.rank, value));
                 }
             }
         }
@@ -221,9 +197,10 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
     collect_interval_groups(events, now, &["PRICE", "EXPORT_PRICE", "GHG"])
         .into_iter()
         .filter_map(|(interval_start, interval_end, payloads)| {
-            let import_tariff_eur_kwh = payloads.get("PRICE").copied();
-            let export_tariff_eur_kwh = payloads.get("EXPORT_PRICE").copied();
-            let co2_g_kwh = payloads.get("GHG").copied();
+            let value = |t: &str| payloads.get(t).map(|v| v.value);
+            let import_tariff_eur_kwh = value("PRICE");
+            let export_tariff_eur_kwh = value("EXPORT_PRICE");
+            let co2_g_kwh = value("GHG");
             if import_tariff_eur_kwh.is_none()
                 && export_tariff_eur_kwh.is_none()
                 && co2_g_kwh.is_none()
@@ -243,9 +220,9 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
 
 /// Parse the capacity-limit schedule (Dynamic Operating Envelope, OpenADR 3.1
 /// User Guide §8.10.1) from a slice of OpenADR events. Handles
-/// IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT payload types per event interval,
-/// keeping the full per-interval schedule — unlike `parse_capacity_state`, which
-/// collapses everything into a single current-value scalar.
+/// IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT payload types per event interval.
+/// The single source for "which limit applies when" (GB-48): read it through
+/// `entities::capacity::tightest_capacity_limit`.
 pub fn parse_capacity_schedule(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<CapacitySnapshot> {
     collect_interval_groups(
         events,
@@ -254,18 +231,18 @@ pub fn parse_capacity_schedule(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<
     )
     .into_iter()
     .filter_map(|(interval_start, interval_end, payloads)| {
-        let import_limit_kw = payloads.get("IMPORT_CAPACITY_LIMIT").copied();
-        let export_limit_kw = payloads.get("EXPORT_CAPACITY_LIMIT").copied();
-        if import_limit_kw.is_none() && export_limit_kw.is_none() {
+        let import = payloads.get("IMPORT_CAPACITY_LIMIT");
+        let export = payloads.get("EXPORT_CAPACITY_LIMIT");
+        if import.is_none() && export.is_none() {
             return None;
         }
         Some(CapacitySnapshot {
             interval_start,
             interval_end,
-            import_limit_kw,
-            export_limit_kw,
-            import_limit_event_id: None,
-            export_limit_event_id: None,
+            import_limit_kw: import.map(|v| v.value),
+            export_limit_kw: export.map(|v| v.value),
+            import_limit_event_id: import.map(|v| v.event_id.clone()),
+            export_limit_event_id: export.map(|v| v.event_id.clone()),
         })
     })
     .collect()

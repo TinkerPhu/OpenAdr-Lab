@@ -4,7 +4,10 @@ use super::asset_port::AssetMilpParams;
 use crate::common::TimeSeries;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
-use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
+use crate::entities::capacity::{
+    tightest_capacity_limit, AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow,
+};
+use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -89,14 +92,16 @@ pub(crate) fn build_milp_inputs(
         capacity.export_subscription_kw,
         capacity.export_reservation_kw,
     );
-    let cont_imp = capacity
-        .import_limit_kw
-        .unwrap_or(phys_imp)
-        .min(imp_allowance);
-    let cont_exp = capacity
-        .export_limit_kw
-        .unwrap_or(phys_exp)
-        .min(exp_allowance);
+    // GB-48: a slot's contractual cap is the tightest scheduled limit
+    // overlapping it (never planning through the capped part of a coarse
+    // slot, like alerts/SIMPLE), else the physical bound, and never above the
+    // allowance. The folded `capacity.import/export_limit_kw` ("in force now")
+    // is not a planner input.
+    let slot_cap = |direction: CommitmentDirection, from, to, phys: f64, allowance: f64| {
+        tightest_capacity_limit(capacity_schedule, direction, from, to)
+            .map_or(phys, |l| l.limit_kw)
+            .min(allowance)
+    };
     // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no live
     // "base_load" asset exists this cycle — see the per-slot loop below.
     let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
@@ -194,6 +199,20 @@ pub(crate) fn build_milp_inputs(
         p_base.push(base_kw_t);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
+        let cont_imp = slot_cap(
+            CommitmentDirection::Import,
+            slot_t,
+            slot_end,
+            phys_imp,
+            imp_allowance,
+        );
+        let cont_exp = slot_cap(
+            CommitmentDirection::Export,
+            slot_t,
+            slot_end,
+            phys_exp,
+            exp_allowance,
+        );
         // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
         // configurable fraction of the contractual limit, level 2 to the
         // baseline forecast (defer all flexible draw), level 3 to 0. Highest

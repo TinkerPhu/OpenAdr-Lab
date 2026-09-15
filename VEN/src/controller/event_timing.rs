@@ -44,8 +44,36 @@ impl TimedInterval<'_> {
 
 /// Every interval of `event`, in order, with its absolute `[start, end)`.
 pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
-    let _ = event;
-    unimplemented!()
+    let parse_start = |s: Option<&str>| s.and_then(|s| s.parse::<DateTime<Utc>>().ok());
+    let event_period = event.intervalPeriod.as_ref();
+    let default_duration = event_period.and_then(|p| p.duration.as_deref());
+    // Where the next interval starts unless it says otherwise.
+    let mut cursor = event_period.and_then(|p| parse_start(p.start.as_deref()));
+
+    event
+        .intervals
+        .iter()
+        .map(|interval| {
+            let own = interval.intervalPeriod.as_ref();
+            let start = own.and_then(|p| parse_start(p.start.as_deref())).or(cursor);
+            let duration = own.and_then(|p| p.duration.as_deref()).or(default_duration);
+            let (start, end) = match (start, duration) {
+                (None, _) => (OPEN_START, OPEN_END),
+                (Some(start), None) => (start, OPEN_END),
+                (Some(start), Some(d)) => {
+                    let secs = crate::common::parse_iso8601_duration_secs(d);
+                    let end = start.checked_add_signed(chrono::Duration::seconds(secs));
+                    (start, end.unwrap_or(OPEN_END))
+                }
+            };
+            cursor = Some(end);
+            TimedInterval {
+                interval,
+                start,
+                end,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

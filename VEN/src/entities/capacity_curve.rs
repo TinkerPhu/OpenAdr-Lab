@@ -9,9 +9,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Which sustained commitment this curve models. Not mirror images of each
-/// other — the contributing asset set and bounds differ per direction (see
-/// `controller::capacity_forecast`).
+/// The site's grid direction — import or export. Named for the sustained
+/// commitment a capacity curve models (the two curves are not mirror images:
+/// the contributing asset set and bounds differ per direction), and the one
+/// import/export selector elsewhere too, e.g. which capacity limit
+/// `entities::capacity::tightest_capacity_limit` reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommitmentDirection {

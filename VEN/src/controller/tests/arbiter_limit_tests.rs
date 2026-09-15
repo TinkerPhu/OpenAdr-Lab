@@ -374,32 +374,3 @@ fn decision_event_fires_on_a_lever_or_unresolved_change_only() {
         "released"
     );
 }
-
-#[test]
-fn capacity_import_limit_at_kw_reads_only_intervals_in_force_now() {
-    use crate::entities::capacity::CapacitySnapshot;
-    let now = chrono::Utc::now();
-    let interval = |from_min: i64, to_min: i64, kw: f64| CapacitySnapshot {
-        interval_start: now + chrono::Duration::minutes(from_min),
-        interval_end: now + chrono::Duration::minutes(to_min),
-        import_limit_kw: Some(kw),
-        export_limit_kw: None,
-        import_limit_event_id: None,
-        export_limit_event_id: None,
-    };
-    // A stricter limit scheduled for later must not be enforced now.
-    let schedule = [interval(-5, 5, 3.0), interval(10, 20, 1.0)];
-    assert_eq!(
-        limit::capacity_import_limit_at_kw(&schedule, now),
-        Some(3.0)
-    );
-    assert_eq!(
-        limit::capacity_import_limit_at_kw(&schedule[1..], now),
-        None
-    );
-    let overlapping = [interval(-5, 5, 3.0), interval(-1, 1, 2.0)];
-    assert_eq!(
-        limit::capacity_import_limit_at_kw(&overlapping, now),
-        Some(2.0)
-    );
-}

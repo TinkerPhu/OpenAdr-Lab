@@ -1,8 +1,8 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::common::parse_iso8601_duration_secs;
-use crate::controller::vtn_port::OadrEvent;
+use crate::controller::event_timing::{timed_intervals, TimedInterval};
+use crate::controller::vtn_port::{OadrEvent, OadrPayload};
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
@@ -16,303 +16,151 @@ pub use crate::controller::rate_schedule::{parse_capacity_schedule, parse_rate_s
 // Capacity state parsing
 // ---------------------------------------------------------------------------
 
-/// Parse capacity limits from the CURRENT set of active events.
-/// Computed from scratch on each call — reflects the live VTN state.
-/// Strictest limit wins (lowest value when multiple events specify same field).
+/// The capacity state in force at `now` (GB-48). The import/export limits are
+/// the priority-resolved schedule's values covering `now`, read through the one
+/// lookup (`entities::capacity::tightest_capacity_limit`) — a limit that has not
+/// started or has ended is not in force. Subscription and reservation stay the
+/// strictest value over all listed events (making them time-aware is a separate
+/// step, BACKLOG GB-48 option C). `last_updated` is set when any capacity payload
+/// is listed.
 pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCapacityState {
-    let mut existing = OadrCapacityState::default();
-    let mut import_limit: Option<(f64, String)> = None;
-    let mut export_limit: Option<(f64, String)> = None;
-    let mut import_sub: Option<f64> = None;
-    let mut import_res: Option<f64> = None;
-    let mut export_sub: Option<f64> = None;
-    let mut export_res: Option<f64> = None;
-    let mut found_any = false;
+    use crate::entities::capacity::tightest_capacity_limit;
+    use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
 
-    for event in events {
-        let event_id = event.id.clone();
-
-        for interval in &event.intervals {
-            for payload in &interval.payloads {
-                let payload_type = payload.r#type.as_str();
-                let value = payload.values.first().and_then(|v| v.as_f64());
-
-                match payload_type {
-                    "IMPORT_CAPACITY_LIMIT" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            import_limit = Some(match import_limit {
-                                None => (v, event_id.clone()),
-                                Some((cur, ref eid)) => {
-                                    if v < cur {
-                                        (v, event_id.clone())
-                                    } else {
-                                        (cur, eid.clone())
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    "EXPORT_CAPACITY_LIMIT" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            export_limit = Some(match export_limit {
-                                None => (v, event_id.clone()),
-                                Some((cur, ref eid)) => {
-                                    if v < cur {
-                                        (v, event_id.clone())
-                                    } else {
-                                        (cur, eid.clone())
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    "IMPORT_CAPACITY_SUBSCRIPTION" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            import_sub = Some(match import_sub {
-                                None => v,
-                                Some(cur) => cur.min(v),
-                            });
-                        }
-                    }
-                    "IMPORT_CAPACITY_RESERVATION" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            import_res = Some(match import_res {
-                                None => v,
-                                Some(cur) => cur.min(v),
-                            });
-                        }
-                    }
-                    // WP3.3: export-side subscription/reservation (strictest wins,
-                    // matching the import side).
-                    "EXPORT_CAPACITY_SUBSCRIPTION" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            export_sub = Some(match export_sub {
-                                None => v,
-                                Some(cur) => cur.min(v),
-                            });
-                        }
-                    }
-                    "EXPORT_CAPACITY_RESERVATION" => {
-                        if let Some(v) = value {
-                            found_any = true;
-                            export_res = Some(match export_res {
-                                None => v,
-                                Some(cur) => cur.min(v),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+    let strictest = |payload_type: &str| {
+        events
+            .iter()
+            .flat_map(|e| &e.intervals)
+            .flat_map(|i| &i.payloads)
+            .filter(|p| p.r#type == payload_type)
+            .filter_map(|p| p.values.first()?.as_f64())
+            .reduce(f64::min)
+    };
+    let found_any = [
+        "IMPORT_CAPACITY_LIMIT",
+        "EXPORT_CAPACITY_LIMIT",
+        "IMPORT_CAPACITY_SUBSCRIPTION",
+        "IMPORT_CAPACITY_RESERVATION",
+        "EXPORT_CAPACITY_SUBSCRIPTION",
+        "EXPORT_CAPACITY_RESERVATION",
+    ]
+    .iter()
+    .any(|t| strictest(t).is_some());
+    if !found_any {
+        return OadrCapacityState::default();
     }
 
-    if found_any {
-        existing.import_limit_kw = import_limit.as_ref().map(|(v, _)| *v);
-        existing.import_limit_event_id = import_limit.map(|(_, eid)| eid);
-        existing.export_limit_kw = export_limit.as_ref().map(|(v, _)| *v);
-        existing.export_limit_event_id = export_limit.map(|(_, eid)| eid);
-        existing.import_subscription_kw = import_sub;
-        existing.import_reservation_kw = import_res;
-        existing.export_subscription_kw = export_sub;
-        existing.export_reservation_kw = export_res;
-        existing.last_updated = Some(now);
+    let schedule = parse_capacity_schedule(events, now);
+    let import = tightest_capacity_limit(&schedule, Import, now, now);
+    let export = tightest_capacity_limit(&schedule, Export, now, now);
+    OadrCapacityState {
+        import_limit_kw: import.as_ref().map(|l| l.limit_kw),
+        import_limit_event_id: import.and_then(|l| l.event_id),
+        export_limit_kw: export.as_ref().map(|l| l.limit_kw),
+        export_limit_event_id: export.and_then(|l| l.event_id),
+        import_subscription_kw: strictest("IMPORT_CAPACITY_SUBSCRIPTION"),
+        import_reservation_kw: strictest("IMPORT_CAPACITY_RESERVATION"),
+        export_subscription_kw: strictest("EXPORT_CAPACITY_SUBSCRIPTION"),
+        export_reservation_kw: strictest("EXPORT_CAPACITY_RESERVATION"),
+        last_updated: Some(now),
     }
-
-    existing
 }
 
 // ---------------------------------------------------------------------------
-// Grid alert parsing (WP3.1, BL-04)
+// Windowed signals: alerts, SIMPLE levels, direct setpoints
 // ---------------------------------------------------------------------------
 
-/// Extract grid-alert windows (ALERT_GRID_EMERGENCY / ALERT_BLACK_START) from
-/// active events. The window comes from the interval's own `intervalPeriod`,
-/// falling back to the event-level one (User Guide Example 8.1-1 puts it at
-/// event level with a bare interval). Intervals without any resolvable start
-/// are skipped. The payload value is the spec's human-readable message.
+/// Every payload of one of `payload_types` in `events`, with its event and its
+/// interval's window. Interval timing is the one shared rule
+/// (`controller::event_timing`): contiguous intervals from the event-level
+/// period, an interval's own period winning, open-ended without a duration,
+/// in force while listed without any start (GB-48).
+fn timed_payloads<'a>(
+    events: &'a [OadrEvent],
+    payload_types: &'a [&'a str],
+) -> impl Iterator<Item = (&'a OadrEvent, TimedInterval<'a>, &'a OadrPayload)> + 'a {
+    events.iter().flat_map(move |event| {
+        timed_intervals(event).into_iter().flat_map(move |timed| {
+            timed
+                .interval
+                .payloads
+                .iter()
+                .filter(move |p| payload_types.contains(&p.r#type.as_str()))
+                .map(move |p| (event, timed, p))
+        })
+    })
+}
+
+/// Grid-alert windows (ALERT_GRID_EMERGENCY / ALERT_BLACK_START, WP3.1/BL-04).
+/// The payload value is the spec's human-readable message.
 pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
-    let mut out = Vec::new();
-    for event in events {
-        for interval in &event.intervals {
-            for payload in &interval.payloads {
-                let alert_type = payload.r#type.as_str();
-                if !matches!(alert_type, "ALERT_GRID_EMERGENCY" | "ALERT_BLACK_START") {
-                    continue;
-                }
-                let Some(ip) = interval
-                    .intervalPeriod
-                    .as_ref()
-                    .or(event.intervalPeriod.as_ref())
-                else {
-                    continue;
-                };
-                let Some(start) = ip
-                    .start
-                    .as_deref()
-                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                else {
-                    continue;
-                };
-                let duration_s =
-                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-                let message = payload
-                    .values
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                out.push(AlertWindow {
-                    alert_type: alert_type.to_string(),
-                    start,
-                    end: start + Duration::seconds(duration_s),
-                    event_id: event.id.clone(),
-                    message,
-                });
-            }
-        }
-    }
-    out
+    timed_payloads(events, &["ALERT_GRID_EMERGENCY", "ALERT_BLACK_START"])
+        .map(|(event, timed, payload)| AlertWindow {
+            alert_type: payload.r#type.clone(),
+            start: timed.start,
+            end: timed.end,
+            event_id: event.id.clone(),
+            message: payload
+                .values
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
 }
 
-// ---------------------------------------------------------------------------
-// SIMPLE level parsing (WP3.2)
-// ---------------------------------------------------------------------------
-
-/// Extract SIMPLE load-shed windows (levels 1–3) from active events. Window
-/// resolution matches `parse_alert_windows` (interval-level `intervalPeriod`,
-/// event-level fallback). Level 0 ("normal") windows are dropped here — they
-/// constrain nothing. Non-numeric or out-of-range values are skipped.
+/// SIMPLE load-shed windows, levels 1–3 (WP3.2). Level 0 ("normal") windows
+/// are dropped — they constrain nothing. Non-numeric or out-of-range values
+/// are skipped.
 pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
-    let mut out = Vec::new();
-    for event in events {
-        for interval in &event.intervals {
-            for payload in &interval.payloads {
-                if payload.r#type != "SIMPLE" {
-                    continue;
-                }
-                let Some(level) = payload
-                    .values
-                    .first()
-                    .and_then(|v| v.as_f64())
-                    .filter(|v| (0.0..=3.0).contains(v))
-                    .map(|v| v as u8)
-                else {
-                    continue;
-                };
-                if level == 0 {
-                    continue;
-                }
-                let Some(ip) = interval
-                    .intervalPeriod
-                    .as_ref()
-                    .or(event.intervalPeriod.as_ref())
-                else {
-                    continue;
-                };
-                let Some(start) = ip
-                    .start
-                    .as_deref()
-                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                else {
-                    continue;
-                };
-                let duration_s =
-                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-                out.push(SimpleWindow {
-                    level,
-                    start,
-                    end: start + Duration::seconds(duration_s),
-                    event_id: event.id.clone(),
-                });
-            }
-        }
-    }
-    out
+    timed_payloads(events, &["SIMPLE"])
+        .filter_map(|(event, timed, payload)| {
+            let level = payload
+                .values
+                .first()
+                .and_then(|v| v.as_f64())
+                .filter(|v| (1.0..=3.0).contains(v))? as u8;
+            Some(SimpleWindow {
+                level,
+                start: timed.start,
+                end: timed.end,
+                event_id: event.id.clone(),
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
 // Direct setpoints (WP3.4 — BL-06/BL-24)
 // ---------------------------------------------------------------------------
 
-/// Extract DISPATCH_SETPOINT windows. Window resolution matches the alert/
-/// SIMPLE parsers (interval-level `intervalPeriod`, event-level fallback);
-/// the payload value is the commanded net site setpoint in kW.
+/// DISPATCH_SETPOINT windows; the payload value is the commanded net site
+/// setpoint in kW.
 pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
-    let mut out = Vec::new();
-    for event in events {
-        for interval in &event.intervals {
-            for payload in &interval.payloads {
-                if payload.r#type != "DISPATCH_SETPOINT" {
-                    continue;
-                }
-                let Some(setpoint_kw) = payload.values.first().and_then(|v| v.as_f64()) else {
-                    continue;
-                };
-                let Some(ip) = interval
-                    .intervalPeriod
-                    .as_ref()
-                    .or(event.intervalPeriod.as_ref())
-                else {
-                    continue;
-                };
-                let Some(start) = ip
-                    .start
-                    .as_deref()
-                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                else {
-                    continue;
-                };
-                let duration_s =
-                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-                out.push(DispatchWindow {
-                    setpoint_kw,
-                    start,
-                    end: start + Duration::seconds(duration_s),
-                    event_id: event.id.clone(),
-                });
-            }
-        }
-    }
-    out
+    timed_payloads(events, &["DISPATCH_SETPOINT"])
+        .filter_map(|(event, timed, payload)| {
+            Some(DispatchWindow {
+                setpoint_kw: payload.values.first()?.as_f64()?,
+                start: timed.start,
+                end: timed.end,
+                event_id: event.id.clone(),
+            })
+        })
+        .collect()
 }
 
-/// Extract the first CHARGE_STATE_SETPOINT from active events (WP3.4):
-/// `(target_soc 0.0–1.0, window_end, event_id)`. Values > 1 are read as
-/// percent (80 → 0.8); out-of-range results are dropped.
+/// The first CHARGE_STATE_SETPOINT (WP3.4): `(target_soc 0.0–1.0, window_end,
+/// event_id)`. Values > 1 are read as percent (80 → 0.8); out-of-range
+/// results are dropped.
 pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTime<Utc>, String)> {
-    for event in events {
-        for interval in &event.intervals {
-            for payload in &interval.payloads {
-                if payload.r#type != "CHARGE_STATE_SETPOINT" {
-                    continue;
-                }
-                let raw = payload.values.first().and_then(|v| v.as_f64())?;
-                let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
-                if !(0.0..=1.0).contains(&target_soc) {
-                    continue;
-                }
-                let ip = interval
-                    .intervalPeriod
-                    .as_ref()
-                    .or(event.intervalPeriod.as_ref())?;
-                let start = ip.start.as_deref()?.parse::<DateTime<Utc>>().ok()?;
-                let duration_s =
-                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-                return Some((
-                    target_soc,
-                    start + Duration::seconds(duration_s),
-                    event.id.clone(),
-                ));
-            }
-        }
-    }
-    None
+    timed_payloads(events, &["CHARGE_STATE_SETPOINT"]).find_map(|(event, timed, payload)| {
+        let raw = payload.values.first()?.as_f64()?;
+        let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
+        (0.0..=1.0)
+            .contains(&target_soc)
+            .then(|| (target_soc, timed.end, event.id.clone()))
+    })
 }
 
 // ---------------------------------------------------------------------------
