@@ -1,3 +1,4 @@
+mod app_ctx;
 mod assets;
 mod common;
 mod config;
@@ -18,7 +19,6 @@ mod tasks;
 mod vtn;
 mod weather;
 
-use crate::assets::ControlDescriptor;
 use config::Config;
 use domain_params::build_domain_params;
 use entities::asset::PlanTrigger;
@@ -26,67 +26,15 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::Profile;
 use rand::SeedableRng;
-use simulator::SimState;
-use std::collections::HashMap;
 
 use crate::controller::{SolverPort, VtnPort};
-use crate::entities::planner_params::PlannerObjective;
 use state::AppState;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
 
-#[derive(Clone)]
-pub struct AppCtx {
-    pub state: AppState,
-    pub vtn: VtnClient,
-    pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
-    pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
-    /// Pre-computed simulator schema (asset → control descriptors).
-    /// Built once at startup from `profile`; route handlers access it without
-    /// touching the raw `Profile` type or acquiring any lock.
-    pub sim_schema: Arc<HashMap<String, Vec<ControlDescriptor>>>,
-    pub sim: Arc<Mutex<SimState>>,
-    pub active_objective: Arc<RwLock<PlannerObjective>>,
-    pub planner_event_tx: PlannerEventTx,
-    /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled`
-    /// is false or the store failed to open.
-    pub history: Option<Arc<dyn controller::HistoryPort>>,
-    /// WP4.3 (BL-20): notification fan-out (ring + SSE broadcast + persistence).
-    pub notifier: services::notify::Notifier,
-    /// WP4.2 (BL-19): per-asset user-settings persistence (comfort curves).
-    pub settings: Option<Arc<dyn controller::SettingsPort>>,
-    /// Weather forecast plugin port (docs/architecture/weather_forecast.md).
-    /// Always present — `NoopWeatherPort` when no MQTT broker is configured,
-    /// so consumers never need `Option<Arc<dyn WeatherForecastPort>>`.
-    pub weather: Arc<dyn controller::WeatherForecastPort>,
-    /// Weather-sourced PV forecast config (weather-forecast-visibility).
-    /// `None` when the profile has no `weather_pv` section — the `/weather`
-    /// route's `derived` field is `null` in that case, not an error.
-    pub weather_pv_params: Option<crate::entities::asset_params::PvForecastParams>,
-    /// Real-measurement MQTT feeds (real-measurement-mqtt). Always present —
-    /// `NoopMeasurementPort` when no MQTT broker is configured for a given
-    /// signal, so consumers never need `Option<Arc<dyn MeasurementPort>>`.
-    pub pv_measurement: Arc<dyn controller::MeasurementPort>,
-    pub pv_measurement_enabled: bool,
-    pub base_load_measurement: Arc<dyn controller::MeasurementPort>,
-    pub base_load_measurement_enabled: bool,
-    /// R-59: VTN-communication-loss curtailment debounce window, seconds.
-    /// `None` when the profile has no `comms_loss:` section —
-    /// `/health`/`/vtn/status` report `comms_loss_active: false`
-    /// unconditionally in that case. Only the primitive `debounce_s` is
-    /// carried (not the full `CommsLossConfig`) because `routes/` may not
-    /// import `crate::profile` types (AB-06, `tests/architecture.rs`).
-    pub comms_loss_debounce_s: Option<u64>,
-    /// Base-load heuristics learner config, resolved once from the profile
-    /// at startup (`services::heuristics::HeuristicsConfig` — all-`Copy`
-    /// primitives, safe to clone into `AppCtx`). Threading a single shared
-    /// value into both `tasks::heuristics_job` and
-    /// `routes::debug::preload_heuristics` closes a latent drift risk where
-    /// each independently called `HeuristicsConfig::default()`.
-    pub heuristics_config: services::heuristics::HeuristicsConfig,
-}
+pub use app_ctx::AppCtx;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -480,6 +428,8 @@ async fn main() -> anyhow::Result<()> {
         base_load_measurement_enabled,
         comms_loss_debounce_s: profile.comms_loss.map(|c| c.debounce_s),
         heuristics_config,
+        grid_max_import_kw,
+        grid_max_export_kw,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

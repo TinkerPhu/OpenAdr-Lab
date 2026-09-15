@@ -347,8 +347,11 @@ export class VenApi {
     return r.json();
   }
 
-  async capacityCurves(): Promise<CapacityCurvesResponse | null> {
-    const r = await this.getReq("/flexibility/capacity");
+  /** Omit `startMs` for the per-tick curves anchored at now; pass it to anchor
+   * both curves at the future plan slot it snaps down to. */
+  async capacityCurves(startMs?: number): Promise<CapacityCurvesResponse | null> {
+    const query = startMs === undefined ? "" : `?start=${encodeURIComponent(new Date(startMs).toISOString())}`;
+    const r = await this.getReq(`/flexibility/capacity${query}`);
     if (r.status === 204) return null;
     if (!r.ok) throw new Error(`flexibility/capacity ${r.status}`);
     return r.json();

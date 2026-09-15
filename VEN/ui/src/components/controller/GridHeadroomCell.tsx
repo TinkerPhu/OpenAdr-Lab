@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
+import { Box, IconButton, Paper, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
@@ -16,6 +16,16 @@ import type {
   SiteFlexibilityForecastSlot,
 } from "../../api/types";
 import { SiteHeadroomChart } from "./charts/SiteHeadroomChart";
+import { formatTs } from "./charts/tariffChartShared";
+import { useCapacityCurvesAt } from "../../api/hooks";
+import { useDebouncedValue } from "../../utils/useDebouncedValue";
+
+/** What the chart cursor does: show values (tooltip only), or also move the commitment
+ * curves' start to the hovered plan slot. */
+type CursorMode = "values" | "move-commitment-start";
+
+/** The cursor must rest this long before its curves are requested. */
+const HOVER_DEBOUNCE_MS = 150;
 
 interface GridHeadroomCellProps {
   envelope: SiteFlexibilityEnvelope | null | undefined;
@@ -43,6 +53,14 @@ function fmtDuration(s: number | null | undefined): string {
  * BL-43: live site-level flexibility headroom — the VEN's own instant-only
  * `up_kw`/`down_kw` (no forward schedule, unlike the Dynamic Operating Envelope
  * in `GridTariffCell`). Follows the same sibling-cell pattern (pin/tall-toggle).
+ *
+ * "Move commitment start" cursor mode: hovering a future time anchors the dashed
+ * Import/Export commitment curves at the plan slot it falls in
+ * (`GET /flexibility/capacity?start=`, one request once the cursor rests; the server snaps
+ * the time to a slot and names the one it used); a double-click holds that
+ * start while the cursor moves on, a second one releases it. The caption names the start
+ * the server actually used. On touch screens a tap moves the start there and it stays
+ * until the next tap (the browser's emulated cursor never leaves).
  */
 export function GridHeadroomCell({
   envelope,
@@ -57,6 +75,43 @@ export function GridHeadroomCell({
 }: GridHeadroomCellProps) {
   const [tall, setTall] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
+
+  const [cursorMode, setCursorMode] = useState<CursorMode>("values");
+  const [hoverMs, setHoverMs] = useState<number | null>(null);
+  const [heldMs, setHeldMs] = useState<number | null>(null);
+  const moveMode = cursorMode === "move-commitment-start";
+  // The cursor time itself is sent; the server alone decides which plan slot it falls in
+  // (`plan_state_boundary_at`) and answers with the `start` it used.
+  const settledHoverMs = useDebouncedValue(
+    moveMode && hoverMs !== null && hoverMs > nowMs ? hoverMs : null,
+    HOVER_DEBOUNCE_MS
+  );
+  const requestedStartMs = moveMode ? heldMs ?? settledHoverMs : null;
+  const { data: curvesAtStart } = useCapacityCurvesAt(requestedStartMs);
+  const anchored = requestedStartMs !== null && curvesAtStart ? curvesAtStart : null;
+  const anchoredStartMs = anchored ? Date.parse(anchored.start) : null;
+  // The server answers with the now-anchored curves when there's no plan slot to anchor at.
+  const anchoredAtNow = anchoredStartMs !== null && anchoredStartMs <= nowMs;
+  const commitmentStartMs = anchored && !anchoredAtNow ? anchoredStartMs : null;
+
+  const selectCursorMode = (mode: CursorMode | null) => {
+    if (mode === null) return; // exclusive group: re-clicking the active mode keeps it
+    setCursorMode(mode);
+    setHoverMs(null);
+    setHeldMs(null);
+  };
+  const toggleHold = (tsMs: number) =>
+    setHeldMs((held) => (held !== null ? null : tsMs > nowMs ? tsMs : null));
+
+  const caption = !moveMode
+    ? null
+    : anchoredAtNow || forecast.length === 0
+      ? "No active plan — commitment curves start now"
+      : commitmentStartMs !== null
+        ? `Commitment start: ${formatTs(commitmentStartMs)} (plan slot) · ${
+            heldMs !== null ? "held — double-click to release" : "double-click to hold"
+          }`
+        : "Hover the future part of the chart to move the commitment start";
 
   return (
     <Paper
@@ -83,13 +138,37 @@ export function GridHeadroomCell({
           gridTimeline={gridTimeline}
           history={history}
           forecast={forecast}
-          capacity={capacity}
+          capacity={commitmentStartMs !== null ? anchored : capacity}
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
           height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
           xAxisTickIntervalMinutes={extended ? EXTENDED_TICK_INTERVAL_MINUTES : DEFAULT_TICK_INTERVAL_MINUTES}
+          commitmentStartMs={commitmentStartMs}
+          onCursorMove={moveMode ? setHoverMs : undefined}
+          onCursorDoubleClick={moveMode ? toggleHold : undefined}
         />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, pb: 0.5, flexWrap: "wrap" }}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={cursorMode}
+            onChange={(_, mode: CursorMode | null) => selectCursorMode(mode)}
+            aria-label="Chart cursor"
+          >
+            <ToggleButton value="values" sx={{ py: 0, fontSize: 11, textTransform: "none" }}>
+              Values
+            </ToggleButton>
+            <ToggleButton value="move-commitment-start" sx={{ py: 0, fontSize: 11, textTransform: "none" }}>
+              Move commitment start
+            </ToggleButton>
+          </ToggleButtonGroup>
+          {caption && (
+            <Typography variant="caption" color="text.secondary" data-testid="commitment-start-caption">
+              {caption}
+            </Typography>
+          )}
+        </Box>
       </Box>
 
       {/* Right column: pin button + vertical expand button */}

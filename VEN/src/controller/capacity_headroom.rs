@@ -12,6 +12,13 @@
 //!   plan's own horizon (`compute_site_capacity_curve`).
 //! - **Site Headroom (forecast)** — `t2 = 0` fixed, sweep `t1` across the
 //!   plan's remaining slots (`compute_site_headroom_forecast`).
+//! - **Capacity Forecast from a future start** — `t1` = one remaining plan
+//!   slot boundary, sweep `t2` (`compute_site_capacity_curves_at`, the
+//!   Controller's "Move commitment start" mode).
+//!
+//! All of them go through one computation, `site_capacity_curve_from`; they
+//! differ only in `t1`, `t2_max`, and whether each asset starts from its live
+//! or its plan-forecasted state.
 //!
 //! A third fixed slice of the same domain — `t1 = now` only, `t2 = 0` — feeds
 //! the *history/live* half of the same Site Headroom UI panel:
@@ -23,18 +30,14 @@
 //! (not "envelope") is exactly what surfaced the gap; don't let a future
 //! addition to this same UI panel go unnoticed the same way again.
 //!
-//! **PV special-casing retired** (`pv-competence-consolidation` section 5).
-//! Both `compute_site_capacity_curve` and `compute_site_headroom_forecast`
-//! now flow PV through the same primitives every other asset kind uses —
-//! `asset_max_power_series`/`simulated_trajectory`, backed by `PvInverter`'s
-//! own weather/decay-aware `max_effort_schedule`/`simulate_forward`
-//! overrides (sections 1-3, 5b). `compute_site_headroom_forecast` keeps one
-//! small PV-specific branch reading `TrajectoryPoint::power_kw` directly
-//! instead of calling `max_effort_setpoint` again per point — PV's own
-//! `max_effort_setpoint` deliberately ignores `state` for the Physical tier
-//! (see that method's doc comment), so it can't answer a future point's own
-//! question the way a SoC-based asset's `state` naturally can. See
-//! design.md D6 for the full history.
+//! **No PV special-casing** (`pv-competence-consolidation` section 5,
+//! `movable-capacity-curve-start`). PV flows through the same
+//! `asset_max_power_series`/`simulated_trajectory` primitives every other
+//! asset kind uses, backed by `PvInverter`'s own weather/decay-aware
+//! `max_effort_schedule`/`simulate_forward` overrides, which measure elapsed
+//! time from the instant PV's live inputs were captured
+//! (`PvInverter::live_inputs_at`) — so a projection starting at a future slot
+//! reads the forecast there, not the live measurement.
 //!
 //! **`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
 //! import, negative = export — the same convention `Asset::max_effort_setpoint`/
@@ -54,29 +57,32 @@
 //! `entities/plan.rs`).
 //!
 //! The Controller's Site Headroom chart (`SiteHeadroomChart.tsx`) overlays
-//! both — the headroom band and the capacity curves — in one view, and now
-//! touch at exactly `t = now` for both directions (they're the same
-//! function's `t2 = 0` point, not two independent computations that happen
-//! to agree). For `t > now` they still legitimately diverge — different
-//! questions (per-instant snapshot along the plan's own trajectory vs. a
-//! single continuous full-effort commitment starting now) — so the capacity
-//! curve sitting inside the band there, or an Export curve swinging positive
-//! past the band's usual scale (this module's own `merge_events` doc,
-//! below), is still expected past the seam.
+//! both — the headroom band and the capacity curves — in one view. A curve
+//! touches the band exactly at its own start, whether that is now or a
+//! future slot (the band's value there is the same function's `t2 = 0`
+//! point, not an independent computation that happens to agree). Past the
+//! start they legitimately diverge — different questions (per-instant
+//! snapshot along the plan's own trajectory vs. a single continuous
+//! full-effort commitment from the start) — so the capacity curve sitting
+//! inside the band there, or an Export curve swinging positive past the
+//! band's usual scale (this module's own `merge_events` doc, below), is
+//! still expected past the seam.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::assets::asset_max_power_series;
+use crate::assets::{asset_max_power_series, AssetState, Trajectory};
 use crate::entities::capacity_curve::{
-    CapacityCurve, CapacityCurveStep, CommitmentDirection, LimitTier,
+    CapacityCurve, CapacityCurveStep, CapacityCurves, CommitmentDirection, LimitTier,
 };
-use crate::entities::plan::{Plan, PlanTimeSlot, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
 #[cfg(test)]
 use crate::ids::ASSET_PV;
-use crate::simulator::forecast::simulated_trajectory;
-use crate::simulator::SimState;
+use crate::simulator::forecast::{
+    plan_state_boundary_at, remaining_slots, resolve_plan_state_at, simulated_trajectory,
+};
+use crate::simulator::{AssetEntry, SimState};
 
 /// One (elapsed_s, delta_kw) breakpoint. Multiple events at the same
 /// `elapsed_s` are summed by `merge_events`. Ported verbatim from the
@@ -98,9 +104,37 @@ pub fn compute_site_capacity_curve(
     phys_imp_kw: f64,
     phys_exp_kw: f64,
 ) -> CapacityCurve {
+    site_capacity_curve_from(
+        direction,
+        now,
+        t2_max,
+        sim,
+        |_, entry| &entry.state,
+        phys_imp_kw,
+        phys_exp_kw,
+    )
+}
+
+/// The one capacity-curve computation every slice of the `(t1, t2)` domain
+/// goes through (`compute_site_capacity_curve`, `compute_site_capacity_curves_at`,
+/// `compute_site_headroom_forecast`): a sustained `direction` commitment
+/// starting at `t1`, each asset starting from `state_of(asset_index, entry)`
+/// — its live state for a commitment starting now, its plan-forecasted state
+/// for a later `t1`. Asset configs (PV's weather series, the EV's departure,
+/// base load's heuristic) always come from the live `sim`; each is already
+/// time-aware by timestamp, so only the states differ between slices.
+fn site_capacity_curve_from<'s>(
+    direction: CommitmentDirection,
+    t1: DateTime<Utc>,
+    t2_max: Duration,
+    sim: &'s SimState,
+    state_of: impl Fn(usize, &'s AssetEntry) -> &'s AssetState,
+    phys_imp_kw: f64,
+    phys_exp_kw: f64,
+) -> CapacityCurve {
     let mut events: Vec<Event> = Vec::new();
 
-    for (entry, cfg) in sim.iter_assets() {
+    for (asset_index, (entry, cfg)) in sim.iter_assets().enumerate() {
         // pv-competence-consolidation section 5a: PV is no longer special-
         // cased here — asset_max_power_series already calls PvInverter's own
         // max_effort_schedule (weather/decay-aware), which is now
@@ -111,21 +145,63 @@ pub fn compute_site_capacity_curve(
         }
         let series = asset_max_power_series(
             cfg,
-            &entry.state,
-            now,
+            state_of(asset_index, entry),
+            t1,
             t2_max,
             direction,
             LimitTier::Physical,
         );
         events.extend(series_to_events(&series));
     }
-    events.extend(base_load_capacity_events(sim, now, t2_max));
+    events.extend(base_load_capacity_events(sim, t1, t2_max));
 
     CapacityCurve {
         direction,
-        start: now,
+        start: t1,
         steps: merge_events(events, direction, phys_imp_kw, phys_exp_kw),
     }
+}
+
+// ─── Capacity Forecast from a future start (t1 = a plan slot, sweep t2) ────
+
+/// Both capacity curves for a commitment starting at a future plan slot
+/// boundary instead of now (the Controller's "Move commitment start" mode,
+/// `GET /flexibility/capacity?start=`). `start` snaps down to a remaining
+/// slot boundary (`plan_state_boundary_at`), clamped to the last remaining
+/// slot's start; each asset starts from its plan-forecasted state there
+/// (`resolve_plan_state_at`) and the sweep runs to the plan's horizon end.
+///
+/// `None` wherever the curve would start at now — `start <= now`, no
+/// remaining slot, or `start` before the first remaining boundary — so the
+/// caller serves the per-tick curves instead of recomputing them.
+pub fn compute_site_capacity_curves_at(
+    sim: &SimState,
+    plan: &Plan,
+    start: DateTime<Utc>,
+    now: DateTime<Utc>,
+    phys_imp_kw: f64,
+    phys_exp_kw: f64,
+) -> Option<CapacityCurves> {
+    let last_slot_start = remaining_slots(plan, now).last()?.start;
+    let t1 = plan_state_boundary_at(plan, start.min(last_slot_start), now)?;
+    let states = resolve_plan_state_at(sim, plan, t1, now);
+    let t2_max = (plan.horizon.end_time - t1).max(Duration::zero());
+    let curve = |direction| {
+        site_capacity_curve_from(
+            direction,
+            t1,
+            t2_max,
+            sim,
+            |_, entry| states.get(&entry.id).unwrap_or(&entry.state),
+            phys_imp_kw,
+            phys_exp_kw,
+        )
+    };
+    Some(CapacityCurves {
+        start: t1,
+        import: curve(CommitmentDirection::Import),
+        export: curve(CommitmentDirection::Export),
+    })
 }
 
 /// Converts a dense `asset_max_power_series` output into sparse delta events
@@ -265,21 +341,27 @@ fn merge_events(
 
 // ─── Site Headroom (t2 = 0, sweep t1 across plan slots) ────────────────────
 
-/// Each future plan slot's absolute achievable import/export power
-/// (`max_effort_setpoint` at that slot's plan-forecasted state) — NOT a
+/// Each future plan slot's absolute achievable import/export power — NOT a
 /// delta from the plan's own chosen dispatch (design.md D5: this is the
 /// resolved absolute-vs-relative product decision). `up_kw` = absolute max
 /// export achievable at this slot; `down_kw` = absolute max import
 /// achievable at this slot (same direction mapping `CapacityCurve` uses).
 ///
-/// `ev-departure-consolidation`: `EvCharger` now has its own `simulate_forward`
-/// override that forces `plugged=false` for any trajectory point at or after
-/// the live session's `departure_time` (injected each tick via
-/// `TickOverrides.ev_departure_time`, mirroring PV's `weather_forecast`/base
-/// load's `heuristic` pattern), so `capability_inner`/`max_effort_setpoint`
-/// already correctly report zero for those points — no site-level exclusion
-/// needed here any more (was: a manual `ev_session` parameter re-deriving the
-/// same fact this function has no business computing on the asset's behalf).
+/// Each slot is literally the `t2 = 0` point of `site_capacity_curve_from`,
+/// started from that slot's plan-forecasted states — the same way
+/// `compute_site_headroom` is its `t2 = 0` point at now, and the same
+/// function `compute_site_capacity_curves_at` sweeps from that slot. That is
+/// what makes a curve anchored at any slot touch this band there
+/// (`movable-capacity-curve-start`), by construction rather than by two
+/// computations happening to agree. It also retired this function's own
+/// PV branch, which read the plan trajectory's PV power — capped by the
+/// plan's own PV setpoint, so any planned curtailment narrowed the export
+/// side, although curtailment can always be released (Physical tier).
+///
+/// `ev-departure-consolidation`: `EvCharger`'s own `simulate_forward` forces
+/// `plugged=false` for any trajectory point at or after the live session's
+/// `departure_time`, so an EV past departure contributes nothing — no
+/// site-level exclusion here.
 pub fn compute_site_headroom_forecast(
     sim: &SimState,
     plan: &Plan,
@@ -287,102 +369,44 @@ pub fn compute_site_headroom_forecast(
     phys_imp_kw: f64,
     phys_exp_kw: f64,
 ) -> Vec<SiteFlexibilityForecastSlot> {
-    let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
+    let future_slots = remaining_slots(plan, now);
     if future_slots.is_empty() {
         return Vec::new();
     }
-
-    // Signed net site power per slot (CapacityCurve's convention: positive =
-    // import, negative = export) — up_kw holds the Export-direction total,
-    // down_kw the Import-direction total, matching `compute_site_capacity_curve`'s
-    // own per-direction shape (site-capacity-seam-unification).
-    let mut up_kw = vec![0.0_f64; future_slots.len()];
-    let mut down_kw = vec![0.0_f64; future_slots.len()];
-
-    for (entry, cfg) in sim.iter_assets() {
-        let asset_kind = cfg.asset_type_str();
-        // base-load-competence-consolidation: base load's forecasted draw is
-        // handled once, below (site-capacity-seam-unification), via
-        // `resolve_base_load_forecast_kw` — the same BaseLoad-authoritative
-        // per-slot forecast `build_milp_inputs` uses, not a second
-        // hand-rolled read of this asset's own state here.
-        if asset_kind == "base_load" {
-            continue;
-        }
-        // Computed once per asset (design.md D4) -- NOT once per slot, which
-        // would redundantly re-walk this same trajectory for every slot
-        // requested (the mistake `resolve_plan_state_at`'s per-call design
-        // would make if called in a loop here).
-        let traj = simulated_trajectory(entry, cfg, &future_slots);
-        for (i, point) in traj.points.iter().enumerate() {
-            if i >= future_slots.len() {
-                break; // the trailing sentinel point (Spec D) — no matching slot.
-            }
-            if asset_kind == "pv" {
-                // pv-competence-consolidation section 5b: unlike every other
-                // asset kind, PvInverter::max_effort_setpoint's Physical tier
-                // deliberately ignores `state` (see that method's own doc
-                // comment) -- it answers "what's the panel/inverter's true
-                // ceiling right now" from `self`'s own live fields, not from
-                // a hypothetical future state, so calling it again per point
-                // here would flatten PV back to a constant. `point.power_kw`
-                // (built by PvInverter::simulate_forward directly from this
-                // point's own timestamp) is already the correct time-varying
-                // Physical/Export answer -- use it directly (already signed
-                // negative when generating). Import stays the well-established
-                // constant 0.0, no call needed.
-                up_kw[i] += point.power_kw;
-                continue;
-            }
-            let export_kw = cfg.max_effort_setpoint(
-                &point.state,
-                CommitmentDirection::Export,
-                LimitTier::Physical,
-            );
-            let import_kw = cfg.max_effort_setpoint(
-                &point.state,
-                CommitmentDirection::Import,
-                LimitTier::Physical,
-            );
-            up_kw[i] += export_kw;
-            down_kw[i] += import_kw;
-        }
-    }
-
-    // base-load-competence-consolidation: base load's own forecasted draw,
-    // direction-independent (matches `base_load_capacity_events`'s reasoning
-    // in `compute_site_capacity_curve` — always `+forecast_kw`, added to
-    // both directions' signed totals the same way).
-    let cum_s: Vec<i64> = future_slots
-        .iter()
-        .map(|s| (s.start - now).num_seconds())
+    // One plan-driven trajectory per asset, walked once for the whole horizon
+    // (design.md D4) -- NOT once per slot, which would redundantly re-walk the
+    // same trajectory for every slot requested.
+    let trajectories: Vec<Trajectory> = sim
+        .iter_assets()
+        .map(|(entry, cfg)| simulated_trajectory(entry, cfg, &future_slots))
         .collect();
-    if let Some(base_load_kw) = crate::simulator::plan_context::resolve_base_load_forecast_kw(
-        sim,
-        future_slots.len(),
-        &cum_s,
-        now,
-    ) {
-        for (i, &kw) in base_load_kw.iter().enumerate() {
-            up_kw[i] += kw;
-            down_kw[i] += kw;
-        }
-    }
-
-    // Physical/safety site clamp (R-72, site-capacity-seam-unification) --
-    // same shape `merge_events` applies to the capacity curve, not
-    // reimplemented independently: Import floors at 0.0 (defensive,
-    // redundant -- every Import contributor is already >= 0) and ceilings at
-    // phys_imp_kw; Export floors at -phys_exp_kw and ceilings at phys_imp_kw
-    // (a sustained-Export slot can legitimately swing net-importing, same
-    // reasoning as `merge_events`'s own doc comment).
     future_slots
         .iter()
         .enumerate()
-        .map(|(i, slot)| SiteFlexibilityForecastSlot {
-            ts: slot.start,
-            up_kw: up_kw[i].clamp(-phys_exp_kw, phys_imp_kw),
-            down_kw: down_kw[i].clamp(0.0, phys_imp_kw),
+        .map(|(slot_index, slot)| {
+            let headroom_kw = |direction| {
+                site_capacity_curve_from(
+                    direction,
+                    slot.start,
+                    Duration::zero(),
+                    sim,
+                    |asset_index, entry| {
+                        trajectories[asset_index]
+                            .points
+                            .get(slot_index)
+                            .map_or(&entry.state, |point| &point.state)
+                    },
+                    phys_imp_kw,
+                    phys_exp_kw,
+                )
+                .steps[0]
+                    .power_kw
+            };
+            SiteFlexibilityForecastSlot {
+                ts: slot.start,
+                up_kw: headroom_kw(CommitmentDirection::Export),
+                down_kw: headroom_kw(CommitmentDirection::Import),
+            }
         })
         .collect()
 }
@@ -1059,6 +1083,319 @@ mod tests {
         assert!(
             (noon_kw - 3.0).abs() < 1e-6,
             "noon step should be 3.0, got {noon_kw}"
+        );
+    }
+
+    // ── compute_site_capacity_curves_at (movable-capacity-curve-start) ─────
+
+    fn battery_params(initial_soc: f64) -> AssetParams {
+        AssetParams::Battery(BatteryParams {
+            id: ASSET_BATTERY.to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc,
+            round_trip_efficiency: 1.0,
+            min_soc: 0.1,
+            c_terminal_eur_kwh: Some(0.0),
+        })
+    }
+
+    /// 8 x 15-min slots from `now`, the battery charging at `charge_kw` in every one.
+    fn charging_plan(now: DateTime<Utc>, charge_kw: f64) -> Plan {
+        let mut plan = make_plan(900, 8, now);
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset
+                .insert(ASSET_BATTERY.to_string(), charge_kw);
+        }
+        plan
+    }
+
+    fn curves_at(
+        sim: &SimState,
+        plan: &Plan,
+        start: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Option<CapacityCurves> {
+        compute_site_capacity_curves_at(sim, plan, start, now, 1_000.0, 1_000.0)
+    }
+
+    #[test]
+    fn site_capacity_curve_from_given_live_states_reproduces_the_per_tick_curve() {
+        // The future-start path looks states up by asset id; fed the live
+        // states, it must be indistinguishable from the per-tick curve.
+        let now = t0();
+        let sim = SimState::from_params(
+            &[
+                battery_params(0.6),
+                AssetParams::BaseLoad(BaseLoadParams {
+                    baseline_kw: 0.5,
+                    ..Default::default()
+                }),
+                AssetParams::Pv(PvParams {
+                    id: ASSET_PV.to_string(),
+                    rated_kw: 5.0,
+                    inverter_max_kw: 5.0,
+                    co2_g_kwh: 0.0,
+                }),
+            ],
+            now,
+        );
+        let live_states: Map<String, AssetState> = sim
+            .iter_assets()
+            .map(|(entry, _)| (entry.id.clone(), entry.state.clone()))
+            .collect();
+        for direction in [CommitmentDirection::Import, CommitmentDirection::Export] {
+            let from_states = site_capacity_curve_from(
+                direction,
+                now,
+                Duration::hours(2),
+                &sim,
+                |_, entry| live_states.get(&entry.id).unwrap_or(&entry.state),
+                1_000.0,
+                1_000.0,
+            );
+            let per_tick = compute_site_capacity_curve(
+                direction,
+                now,
+                Duration::hours(2),
+                &sim,
+                1_000.0,
+                1_000.0,
+            );
+            assert_eq!(from_states, per_tick, "{direction:?}");
+        }
+    }
+
+    #[test]
+    fn capacity_curves_at_a_mid_slot_start_snap_down_to_the_slot_start() {
+        let now = t0();
+        let sim = SimState::from_params(&[battery_params(0.5)], now);
+        let plan = charging_plan(now, 0.0);
+        let at = curves_at(&sim, &plan, plan.slots[3].start + Duration::minutes(8), now)
+            .expect("a future start inside the plan must produce curves");
+        assert_eq!(at.start, plan.slots[3].start);
+        assert_eq!(at.import.start, plan.slots[3].start);
+        assert_eq!(at.export.start, plan.slots[3].start);
+    }
+
+    #[test]
+    fn capacity_curves_at_sweep_no_further_than_the_plan_horizon_end() {
+        let now = t0();
+        let sim = SimState::from_params(&[battery_params(0.5)], now);
+        let plan = charging_plan(now, 0.0);
+        let at = curves_at(&sim, &plan, plan.slots[2].start, now).unwrap();
+        let max_elapsed_s = (plan.horizon.end_time - at.start).num_seconds();
+        for curve in [&at.import, &at.export] {
+            let last = curve.steps.last().unwrap().elapsed_s;
+            assert!(
+                last <= max_elapsed_s,
+                "{:?} ends at {last}s, past the horizon end ({max_elapsed_s}s)",
+                curve.direction
+            );
+        }
+    }
+
+    #[test]
+    fn capacity_curves_at_start_from_the_plan_forecasted_state_not_the_live_one() {
+        // Live soc 0.5 -> 5 kWh of charge room. The plan charges 2.5 kW for
+        // the 4 slots before slot 4 (4 x 0.625 kWh), leaving 2.5 kWh there.
+        let now = t0();
+        let sim = SimState::from_params(&[battery_params(0.5)], now);
+        let plan = charging_plan(now, 2.5);
+        let at_now = compute_site_capacity_curve(
+            CommitmentDirection::Import,
+            now,
+            plan.horizon.end_time - now,
+            &sim,
+            1_000.0,
+            1_000.0,
+        );
+        let at_slot_4 = curves_at(&sim, &plan, plan.slots[4].start, now).unwrap();
+        assert!(
+            (at_now.energy_kwh_total() - 5.0).abs() < 0.1,
+            "import energy behind a commitment now: {}",
+            at_now.energy_kwh_total()
+        );
+        assert!(
+            (at_slot_4.import.energy_kwh_total() - 2.5).abs() < 0.1,
+            "import energy behind a commitment at slot 4: {}",
+            at_slot_4.import.energy_kwh_total()
+        );
+    }
+
+    #[test]
+    fn capacity_curves_at_clamp_a_start_past_the_last_slot_to_that_slots_start() {
+        let now = t0();
+        let sim = SimState::from_params(&[battery_params(0.5)], now);
+        let plan = charging_plan(now, 0.0);
+        let at = curves_at(&sim, &plan, plan.horizon.end_time + Duration::hours(4), now).unwrap();
+        assert_eq!(at.start, plan.slots[7].start);
+    }
+
+    #[test]
+    fn capacity_curves_at_are_none_wherever_the_curve_would_start_at_now() {
+        let now = t0();
+        let sim = SimState::from_params(&[battery_params(0.5)], now);
+        let plan = charging_plan(now, 0.0);
+        assert!(curves_at(&sim, &plan, now, now).is_none(), "start == now");
+        assert!(
+            curves_at(&sim, &plan, now - Duration::hours(1), now).is_none(),
+            "start in the past"
+        );
+        let later = now + Duration::minutes(5); // plan's slot 0 already started
+        assert!(
+            curves_at(&sim, &plan, later + Duration::minutes(3), later).is_none(),
+            "start before the first remaining slot boundary"
+        );
+        assert!(
+            curves_at(&sim, &make_plan(900, 0, now), now + Duration::hours(1), now).is_none(),
+            "no remaining slot"
+        );
+    }
+
+    /// Battery (plan-charged), EV, heater, base load, a shiftable load, and PV
+    /// with a live measurement, a weather forecast, and a plan that curtails it.
+    fn mixed_fleet(now: DateTime<Utc>) -> (SimState, Plan) {
+        use crate::assets::shiftable_load::ShiftableLoadAsset;
+        use crate::assets::AssetHistoryBuffer;
+        use crate::entities::asset_params::EvParams;
+        use crate::ids::ASSET_EV;
+        use crate::simulator::energy::EnergyCounter;
+        use crate::simulator::AssetEntry;
+
+        let mut sim = SimState::from_params(
+            &[
+                battery_params(0.5),
+                AssetParams::Ev(EvParams {
+                    id: ASSET_EV.to_string(),
+                    max_charge_kw: 7.0,
+                    max_discharge_kw: 0.0,
+                    initial_soc: 0.5,
+                    battery_kwh: 60.0,
+                    soc_target: 0.8,
+                    default_charge_kw: 0.0,
+                    min_charge_kw: 1.4,
+                    response_delay_s: 0.0,
+                    v2g_capable: false,
+                }),
+                AssetParams::Heater(HeaterParams {
+                    id: ASSET_HEATER.to_string(),
+                    temp_initial_c: 20.0,
+                    ..Default::default()
+                }),
+                AssetParams::BaseLoad(BaseLoadParams {
+                    baseline_kw: 0.4,
+                    ..Default::default()
+                }),
+                AssetParams::Pv(PvParams {
+                    id: ASSET_PV.to_string(),
+                    rated_kw: 8.0,
+                    inverter_max_kw: 8.0,
+                    co2_g_kwh: 0.0,
+                }),
+            ],
+            now,
+        );
+        sim.add_asset(
+            AssetEntry {
+                id: "wm-1".to_string(),
+                state: AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
+                setpoint_kw: 0.0,
+                last_power_kw: 0.0,
+                energy: EnergyCounter::new(),
+                history: AssetHistoryBuffer::new(3600),
+            },
+            Box::new(ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 30,
+                earliest_start: now + Duration::minutes(30),
+                latest_end: now + Duration::hours(3),
+            }),
+        )
+        .unwrap();
+        {
+            let (_, cfg) = sim.find_asset_mut(ASSET_PV).unwrap();
+            let pv = cfg
+                .as_any_mut()
+                .downcast_mut::<crate::assets::PvInverter>()
+                .unwrap();
+            pv.weather_forecast = Some(
+                (0..=3)
+                    .map(|h| crate::entities::solar::WeatherPvForecastSlot {
+                        valid_at: now + Duration::hours(h),
+                        forecast_ac_kw: 6.0 - h as f64,
+                        snow_covered: false,
+                    })
+                    .collect(),
+            );
+            pv.measured_power_kw = Some(1.5);
+            pv.live_inputs_at = Some(now);
+        }
+        let mut plan = charging_plan(now, 2.5);
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset.insert(ASSET_PV.to_string(), -1.0); // curtail to 1 kW
+        }
+        (sim, plan)
+    }
+
+    #[test]
+    fn a_future_start_curve_touches_the_site_headroom_forecast_at_every_slot() {
+        // The seam the chart relies on at `now` must hold at every slot a
+        // curve can be anchored at: first step == that slot's band value.
+        let now = t0();
+        let (sim, plan) = mixed_fleet(now);
+        let band = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
+        for (i, slot) in plan.slots.iter().enumerate().skip(1) {
+            let at = curves_at(&sim, &plan, slot.start, now).unwrap();
+            assert_eq!(
+                at.import.steps[0].power_kw, band[i].down_kw,
+                "import seam at slot {i}"
+            );
+            assert_eq!(
+                at.export.steps[0].power_kw, band[i].up_kw,
+                "export seam at slot {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn site_headroom_forecast_reports_pv_uncurtailed_where_the_plan_curtails_it() {
+        // Physical headroom: curtailment can always be released, so the plan's
+        // own 1 kW PV cap must not narrow the export side. PV-only, so the
+        // export side is PV's alone.
+        let now = t0();
+        let mut sim = SimState::from_params(
+            &[AssetParams::Pv(PvParams {
+                id: ASSET_PV.to_string(),
+                rated_kw: 8.0,
+                inverter_max_kw: 8.0,
+                co2_g_kwh: 0.0,
+            })],
+            now,
+        );
+        {
+            let (_, cfg) = sim.find_asset_mut(ASSET_PV).unwrap();
+            let pv = cfg
+                .as_any_mut()
+                .downcast_mut::<crate::assets::PvInverter>()
+                .unwrap();
+            pv.weather_forecast = Some(vec![crate::entities::solar::WeatherPvForecastSlot {
+                valid_at: now,
+                forecast_ac_kw: 6.0,
+                snow_covered: false,
+            }]);
+            pv.live_inputs_at = Some(now);
+        }
+        let mut plan = make_plan(900, 4, now);
+        for slot in &mut plan.slots {
+            slot.planned_kw_by_asset.insert(ASSET_PV.to_string(), -1.0);
+        }
+        let band = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
+        assert!(
+            band.iter().all(|s| (s.up_kw + 6.0).abs() < 1e-9),
+            "every slot's export side must be the uncurtailed -6.0 kW, got {:?}",
+            band.iter().map(|s| s.up_kw).collect::<Vec<_>>()
         );
     }
 

@@ -12582,3 +12582,38 @@ and ven-12 fail the S-7 cap again at 2.2 kW; with it on they hold their 0.5–0.
 0.3 °C cooler than baseline, and the decisions log names the levers. A late review scoped the
 release hysteresis to switching levers (heater stage, EV floor) — applied to the battery it would
 have held import 0.2 kW further under the cap.
+
+## 2026-09-15 — Move the Site Headroom commitment curves' start (044, movable-capacity-curve-start)
+
+What: Controller → Site Headroom has a cursor switch, "Values" / "Move commitment start". In the
+second mode, hovering a future time anchors the dashed Import/Export commitment curves at the plan
+slot the time falls in; a double-click holds that start, a second one releases it; a caption names
+the start the server used. Backend: `GET /flexibility/capacity?start=` →
+`compute_site_capacity_curves_at`, which snaps `start` to a remaining plan slot boundary
+(`plan_state_boundary_at`), starts each asset from `resolve_plan_state_at`'s state there (its first
+production caller) and sweeps to the plan's horizon end. Without `start`, or wherever it resolves
+to now, the per-tick curves are served unchanged. UI: generic `onCursorMove`/`onCursorDoubleClick`
+hooks on `TimeSeriesChart`; the rested cursor time (150 ms debounce) goes to the server unsnapped,
+which alone decides the slot (`useCapacityCurvesAt`). A first client-side snap was a second
+copy of the server's rule and was removed under the one-concept-one-function rule.
+
+Why: the user wanted to sweep the power/duration "triangle" along the timeline rather than only
+see it for a commitment starting now. The analysis found the arbitrary-`t1` slice costs about
+as much as one per-tick curve (which every VEN already computes every second), so on-demand
+per-slot computation was chosen over precomputing all slots (≈288× the per-tick work).
+
+How it held together: every slice of the `(t1, t2)` domain now goes through one private function,
+`site_capacity_curve_from`; the band's forecast half is its `t2 = 0` point per slot. Writing the
+"curve touches the band at its start, at every slot" test first surfaced three asset-level
+divergences, each fixed in the asset: PV measured elapsed time from its schedule's start (so a
+future-start curve reused the live measurement; now it measures from `PvInverter::live_inputs_at`,
+set each tick); the band read plan-curtailed PV power (export headroom is now the uncurtailed
+ceiling); and `ShiftableLoadAsset` answered every zero-length window with 0 kW (it now applies its
+own placement at `t1`, so the live headroom includes a load that could start now). `AppCtx` moved
+to `app_ctx.rs`, the `/flexibility*` handlers to `routes/hems/flexibility.rs`, PV's `forecast()` to
+`pv_schedule.rs`, all to stay under the file-size cap.
+
+Verified: `ven-app` 1359 unit tests + architecture test, `cargo fmt --check`, clippy
+`-D warnings`, file-size audit, invariant greps; VEN UI 649 tests, eslint 0 errors, build; on Node2
+openleadr-rs, E2E (276 + 14 isolated scenarios, including the three new ones) and resilience all
+green; the BDD scenarios are in `capacity_envelope_absolute_quantities.feature`.

@@ -6,7 +6,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     TickOverridable, TickOverrides, Trajectory,
 };
-use crate::common::{Interpolation, TimeSeries};
+use crate::common::TimeSeries;
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
@@ -111,6 +111,15 @@ pub struct PvInverter {
     /// Set each tick by the sim loop. NOT from YAML.
     #[serde(default)]
     pub measured_power_kw: Option<f64>,
+    /// The instant this tick's live inputs (measurement, weather series,
+    /// irradiance offset) were written — the origin every forward projection
+    /// measures `elapsed_s` from (`elapsed_since_live_inputs_s`), so a
+    /// projection starting at a future `t1` neither reuses the live
+    /// measurement there nor restarts the offset decay. Set each tick by the
+    /// sim loop, NOT from YAML, not persisted. `None` outside a tick (e.g. a
+    /// PV built directly in a unit test).
+    #[serde(skip)]
+    pub live_inputs_at: Option<DateTime<Utc>>,
 }
 
 /// PV mutable state.
@@ -142,6 +151,7 @@ impl PvInverter {
             weather_forecast: None,
             irradiance_forced: false,
             measured_power_kw: None,
+            live_inputs_at: None,
         }
     }
 
@@ -285,46 +295,6 @@ impl PvInverter {
     pub fn update_config(&mut self, values: HashMap<String, f64>) {
         if let Some(&v) = values.get("rated_kw") {
             self.rated_kw = v.max(0.0);
-        }
-    }
-
-    /// D5: samples the same weather/decay-aware `uncurtailed_power_kw_at` path
-    /// `max_effort_schedule` uses, rather than the bare sin model. Still applies the
-    /// currently-active `generation_limit_kw` (this represents expected actual output,
-    /// curtailment included — unlike `max_effort_schedule`'s deliberately-uncurtailed
-    /// `Physical` tier).
-    pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Linear);
-        }
-        let end = now + timespan;
-        let curtailed = |uncurtailed_kw: f64| -> f64 {
-            self.generation_limit_kw
-                .map(|lim| uncurtailed_kw.max(lim))
-                .unwrap_or(uncurtailed_kw)
-        };
-        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
-
-        let mut t = now;
-        while t < end {
-            let elapsed_s = (t - now).num_seconds() as f64;
-            samples.push((t, curtailed(self.uncurtailed_power_kw_at(t, elapsed_s))));
-            t += Duration::seconds(60);
-        }
-        let elapsed_s = (end - now).num_seconds() as f64;
-        samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
-
-        if samples.len() >= 2 {
-            let n = samples.len();
-            if (samples[n - 2].0 - samples[n - 1].0).num_seconds().abs() < 1 {
-                samples.truncate(n - 1);
-                samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
-            }
-        }
-
-        TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
         }
     }
 
@@ -543,6 +513,7 @@ impl TickOverridable for PvInverter {
         self.weather_forecast = overrides.pv_weather_forecast.clone();
         self.measured_power_kw = overrides.pv_measured_power_kw;
         self.irradiance_forced = overrides.pv_irradiance_forced;
+        self.live_inputs_at = Some(overrides.now);
     }
 }
 
@@ -565,6 +536,7 @@ mod tests {
                 weather_forecast: None,
                 irradiance_forced: false,
                 measured_power_kw: None,
+                live_inputs_at: None,
             },
             PvState {
                 actual_power_kw: 0.0,
@@ -944,6 +916,88 @@ mod tests {
             "t=now series point must use the measurement, got {}",
             series[0].1
         );
+    }
+
+    /// PV whose live inputs were captured at `now`: the meter reads 1.9 kW,
+    /// weather forecasts 4.0 kW from `now` on.
+    fn pv_measured_at(now: DateTime<Utc>) -> (PvInverter, AssetState) {
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_forecast = Some(vec![crate::entities::solar::WeatherPvForecastSlot {
+            valid_at: now,
+            forecast_ac_kw: 4.0,
+            snow_covered: false,
+        }]);
+        pv.measured_power_kw = Some(1.9);
+        pv.live_inputs_at = Some(now);
+        (pv, AssetState::Pv(state))
+    }
+
+    #[test]
+    fn max_power_series_from_a_future_t1_uses_the_forecast_not_the_live_measurement() {
+        // The measurement only describes `now`; a commitment starting 2 h
+        // later must read the weather forecast at its own start.
+        let now = Utc.with_ymd_and_hms(2026, 9, 11, 10, 0, 0).unwrap();
+        let (pv, state) = pv_measured_at(now);
+        let series = crate::assets::asset_max_power_series(
+            &pv,
+            &state,
+            now + Duration::hours(2),
+            Duration::minutes(5),
+            CommitmentDirection::Export,
+            LimitTier::Physical,
+        );
+        assert!(
+            (series[0].1 + 4.0).abs() < 1e-9,
+            "future t1 must use the forecast (-4.0), got {}",
+            series[0].1
+        );
+    }
+
+    #[test]
+    fn simulate_forward_from_a_future_start_uses_the_forecast_not_the_live_measurement() {
+        let now = Utc.with_ymd_and_hms(2026, 9, 11, 10, 0, 0).unwrap();
+        let (pv, state) = pv_measured_at(now);
+        let traj = pv.simulate_forward(
+            &state,
+            &[(now + Duration::minutes(15), pv.default_setpoint())],
+        );
+        assert!(
+            (traj.points[0].power_kw + 4.0).abs() < 1e-9,
+            "a point after the capture instant must use the forecast (-4.0), got {}",
+            traj.points[0].power_kw
+        );
+    }
+
+    #[test]
+    fn apply_tick_overrides_records_the_capture_instant() {
+        let (mut pv, state) = make_pv(10.0);
+        let now = Utc.with_ymd_and_hms(2026, 9, 11, 10, 0, 0).unwrap();
+        let overrides = crate::assets::TickOverrides {
+            now,
+            pv_irradiance: 0.0,
+            pv_irradiance_offset: 0.0,
+            pv_tau_s: 0.1,
+            pv_generation_limit_kw: None,
+            pv_curtailment_source: PvCurtailmentSource::None,
+            pv_weather_power_kw: None,
+            pv_weather_forecast: None,
+            pv_measured_power_kw: None,
+            pv_irradiance_forced: false,
+            heater_ambient_temp_c_override: None,
+            heater_temp_min_override: None,
+            heater_temp_max_override: None,
+            heater_emergency_curtail_override: None,
+            heater_emergency_absorb_override: None,
+            base_load_measured_kw: None,
+            base_load_baseline_kw: None,
+            base_load_heuristic: None,
+            ev_plugged_override: None,
+            ev_soc_target_override: None,
+            ev_departure_time: None,
+        };
+        let mut asset_state = AssetState::Pv(state);
+        pv.apply_tick_overrides(&mut asset_state, &overrides);
+        assert_eq!(pv.live_inputs_at, Some(now));
     }
 
     #[test]

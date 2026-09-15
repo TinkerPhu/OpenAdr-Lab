@@ -1,31 +1,50 @@
 /**
  * GridHeadroomCell (BL-43) — left-section text, pin/expand controls, and chart prop threading.
  * Mocks SiteHeadroomChart (same pattern as GridTariffCell.test.tsx mocking TariffEnvelopeChart)
- * so this stays a unit test of the cell, not a recharts integration test.
+ * so this stays a unit test of the cell, not a recharts integration test. The mock records
+ * its props so the "Move commitment start" tests can drive its cursor callbacks directly.
  */
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
-import type { SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot } from "../api/types";
+import type {
+  CapacityCurvesResponse,
+  SiteFlexibilityEnvelope,
+  SiteFlexibilitySample,
+  SiteFlexibilityForecastSlot,
+} from "../api/types";
+
+const { chartProps, curvesAtCalls, curvesAtResponse } = vi.hoisted(() => ({
+  chartProps: [] as Array<Record<string, unknown>>,
+  curvesAtCalls: [] as Array<number | null>,
+  curvesAtResponse: { current: null as ((startMs: number) => CapacityCurvesResponse) | null },
+}));
 
 vi.mock("../components/controller/charts/SiteHeadroomChart", () => ({
-  SiteHeadroomChart: ({
-    history,
-    forecast,
-    xAxisTickIntervalMinutes,
-  }: {
+  SiteHeadroomChart: (props: {
     history: SiteFlexibilitySample[];
     forecast: SiteFlexibilityForecastSlot[];
     xAxisTickIntervalMinutes?: number;
-  }) => (
-    <div
-      data-testid="site-headroom-chart"
-      data-history-len={String(history.length)}
-      data-forecast-len={String(forecast.length)}
-      data-tick-interval-minutes={String(xAxisTickIntervalMinutes)}
-    />
-  ),
+  }) => {
+    chartProps.push(props);
+    return (
+      <div
+        data-testid="site-headroom-chart"
+        data-history-len={String(props.history.length)}
+        data-forecast-len={String(props.forecast.length)}
+        data-tick-interval-minutes={String(props.xAxisTickIntervalMinutes)}
+      />
+    );
+  },
+}));
+
+vi.mock("../api/hooks", () => ({
+  useCapacityCurvesAt: (startMs: number | null) => {
+    curvesAtCalls.push(startMs);
+    const respond = curvesAtResponse.current;
+    return { data: startMs === null || respond === null ? undefined : respond(startMs) };
+  },
 }));
 
 const envelope: SiteFlexibilityEnvelope = {
@@ -164,5 +183,139 @@ describe("GridHeadroomCell", () => {
     );
     await user.click(screen.getByTestId("grid-headroom-cell-pin-btn"));
     expect(onTogglePin).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GridHeadroomCell — Move commitment start", () => {
+  const MIN = 60_000;
+  const nowMs = Date.parse("2026-01-01T10:00:00Z");
+  // Remaining plan slots every 15 min from 10:15.
+  const slotStartsMs = [1, 2, 3, 4].map((i) => nowMs + i * 15 * MIN);
+  const slots: SiteFlexibilityForecastSlot[] = slotStartsMs.map((ms) => ({
+    ts: new Date(ms).toISOString(),
+    up_kw: -3,
+    down_kw: 4,
+  }));
+  const curvesAnchoredAt = (startMs: number): CapacityCurvesResponse => {
+    const start = new Date(startMs).toISOString();
+    return {
+      start,
+      import: { direction: "import", start, steps: [{ elapsed_s: 0, power_kw: 4 }] },
+      export: { direction: "export", start, steps: [{ elapsed_s: 0, power_kw: -3 }] },
+    };
+  };
+  const perTick = curvesAnchoredAt(nowMs);
+  // Stands in for the server: it, not the cell, snaps a requested time down to its plan slot.
+  const serverAnswer = (requestedMs: number): CapacityCurvesResponse =>
+    curvesAnchoredAt(slotStartsMs.filter((s) => s <= requestedMs).pop() ?? nowMs);
+
+  const lastChart = () => chartProps[chartProps.length - 1] as {
+    capacity: CapacityCurvesResponse | null;
+    commitmentStartMs: number | null;
+    onCursorMove?: (tsMs: number | null) => void;
+    onCursorDoubleClick?: (tsMs: number) => void;
+  };
+  const hover = (tsMs: number | null) => {
+    act(() => lastChart().onCursorMove?.(tsMs));
+    act(() => vi.advanceTimersByTime(200)); // past the hover debounce
+  };
+  const doubleClick = (tsMs: number) => act(() => lastChart().onCursorDoubleClick?.(tsMs));
+  const selectMode = (name: RegExp) => act(() => screen.getByRole("button", { name }).click());
+
+  const renderCell = () =>
+    render(
+      <GridHeadroomCell
+        envelope={envelope}
+        history={[]}
+        forecast={slots}
+        capacity={perTick}
+        gridTimeline={[]}
+        nowMs={nowMs}
+        extended={false}
+        pinned={false}
+        onTogglePin={vi.fn()}
+      />
+    );
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    chartProps.length = 0;
+    curvesAtCalls.length = 0;
+    curvesAtResponse.current = serverAnswer;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("defaults to Values: the cursor never moves the curves", () => {
+    renderCell();
+    hover(slotStartsMs[2] + 5 * MIN);
+    expect(lastChart().capacity).toBe(perTick);
+    expect(lastChart().commitmentStartMs).toBeNull();
+    expect(curvesAtCalls.every((c) => c === null)).toBe(true);
+  });
+
+  it("hovering a future time anchors the curves at the plan slot it falls in", () => {
+    renderCell();
+    selectMode(/move commitment start/i);
+    hover(slotStartsMs[1] + 7 * MIN);
+    expect(curvesAtCalls).toContain(slotStartsMs[1] + 7 * MIN);
+    expect(lastChart().capacity?.start).toBe(new Date(slotStartsMs[1]).toISOString());
+    expect(lastChart().commitmentStartMs).toBe(slotStartsMs[1]);
+    expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/Commitment start: /);
+  });
+
+  it("hovering at or before now keeps the curves at now", () => {
+    renderCell();
+    selectMode(/move commitment start/i);
+    hover(nowMs - 10 * MIN);
+    expect(lastChart().capacity).toBe(perTick);
+    expect(lastChart().commitmentStartMs).toBeNull();
+  });
+
+  it("sends the cursor time itself, only once the cursor rests", () => {
+    renderCell();
+    selectMode(/move commitment start/i);
+    act(() => lastChart().onCursorMove?.(slotStartsMs[2] + MIN));
+    act(() => vi.advanceTimersByTime(50));
+    act(() => lastChart().onCursorMove?.(slotStartsMs[2] + 6 * MIN));
+    act(() => vi.advanceTimersByTime(50));
+    expect(curvesAtCalls.filter((c) => c !== null)).toEqual([]);
+    act(() => vi.advanceTimersByTime(200));
+    expect(new Set(curvesAtCalls.filter((c) => c !== null))).toEqual(new Set([slotStartsMs[2] + 6 * MIN]));
+  });
+
+  it("a double-click holds the start until the next double-click", () => {
+    renderCell();
+    selectMode(/move commitment start/i);
+    hover(slotStartsMs[1] + MIN);
+    doubleClick(slotStartsMs[1] + MIN);
+    hover(slotStartsMs[3] + MIN);
+    expect(lastChart().commitmentStartMs).toBe(slotStartsMs[1]);
+    expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/held/i);
+    doubleClick(slotStartsMs[3] + MIN);
+    hover(slotStartsMs[3] + 2 * MIN);
+    expect(lastChart().commitmentStartMs).toBe(slotStartsMs[3]);
+  });
+
+  it("switching back to Values releases a held start", () => {
+    renderCell();
+    selectMode(/move commitment start/i);
+    doubleClick(slotStartsMs[2] + MIN);
+    selectMode(/values/i);
+    expect(lastChart().capacity).toBe(perTick);
+    expect(lastChart().commitmentStartMs).toBeNull();
+    selectMode(/move commitment start/i);
+    hover(null);
+    expect(lastChart().commitmentStartMs).toBeNull();
+  });
+
+  it("says so when the server anchored the curves at now instead (no active plan)", () => {
+    curvesAtResponse.current = () => perTick;
+    renderCell();
+    selectMode(/move commitment start/i);
+    hover(slotStartsMs[1] + MIN);
+    expect(lastChart().commitmentStartMs).toBeNull();
+    expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/no active plan/i);
   });
 });

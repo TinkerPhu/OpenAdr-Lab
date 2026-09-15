@@ -5,6 +5,8 @@ controller::capacity_headroom -> HTTP), not just the Rust unit tests already
 covering the same logic in isolation.
 """
 
+from datetime import datetime, timedelta, timezone
+
 from behave import then, when
 from features.helpers.api_client import ven_get
 from features.helpers.wait import poll_until
@@ -226,4 +228,99 @@ def step_import_curve_first_step_matches_non_pv_capability(context):
         context.capacity_curves["import"]["steps"][0]["power_kw"],
         "import capacity curve's first step",
         context,
+    )
+
+
+# ── Move commitment start: curves anchored at a future plan slot ────────────
+
+# Base load's live draw moves between two reads a few ms apart; the exact
+# seam is pinned by the Rust unit test named in the feature file.
+_SEAM_TOLERANCE_KW = 1.0
+
+
+def _parse_ts(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+@when("I request the capacity curves starting {minutes:d} minutes into the site headroom forecast's third slot")
+def step_request_curves_inside_third_slot(context, minutes):
+    # Re-read the band and the curves back-to-back in one attempt: a replan or
+    # a slot rolling into the past between the two reads would pair a band
+    # value with curves anchored somewhere else, so retry until the server
+    # anchored the curves exactly at the slot the band was read for.
+    def _capture():
+        r = ven_get("/flexibility/forecast")
+        if r.status_code != 200 or len(r.json()) < 3:
+            return None
+        slot = r.json()[2]
+        start = _parse_ts(slot["ts"]) + timedelta(minutes=minutes)
+        curves = ven_get("/flexibility/capacity", params={"start": start.isoformat()})
+        if curves.status_code != 200:
+            return None
+        return slot, curves.json()
+
+    context.anchor_slot, context.capacity_curves = poll_until(
+        _capture,
+        lambda result: result is not None
+        and _parse_ts(result[1]["start"]) == _parse_ts(result[0]["ts"]),
+        timeout=60,
+        interval=3,
+        description="capacity curves anchored at the headroom forecast's third slot",
+    )
+
+
+@when("I request the capacity curves without a start")
+def step_request_curves_without_start(context):
+    context.capacity_curves = poll_until(
+        lambda: ven_get("/flexibility/capacity"),
+        lambda r: r.status_code == 200,
+        timeout=30,
+        interval=2,
+        description="capacity curves available",
+    ).json()
+    context.requested_at = datetime.now(timezone.utc)
+
+
+@when('I request the capacity curves starting at "{start}"')
+def step_request_curves_with_raw_start(context, start):
+    context.capacity_response = ven_get("/flexibility/capacity", params={"start": start})
+
+
+@then("the capacity curves are anchored at that slot's start")
+def step_curves_anchored_at_slot(context):
+    slot_start = _parse_ts(context.anchor_slot["ts"])
+    assert _parse_ts(context.capacity_curves["start"]) == slot_start
+    for direction in ("import", "export"):
+        curve_start = _parse_ts(context.capacity_curves[direction]["start"])
+        assert curve_start == slot_start, (
+            f"{direction} curve starts at {curve_start}, not the slot start {slot_start}"
+        )
+
+
+@then("the capacity curves' first steps equal that slot's site headroom")
+def step_curves_touch_band(context):
+    pairs = (("import", "down_kw"), ("export", "up_kw"))
+    for direction, band_key in pairs:
+        first_kw = context.capacity_curves[direction]["steps"][0]["power_kw"]
+        band_kw = context.anchor_slot[band_key]
+        assert abs(first_kw - band_kw) <= _SEAM_TOLERANCE_KW, (
+            f"{direction} curve's first step ({first_kw:.2f} kW) does not touch the "
+            f"site headroom band's {band_key} ({band_kw:.2f} kW) at the slot it is "
+            f"anchored at ({context.anchor_slot['ts']})."
+        )
+
+
+@then("the capacity curves are anchored at now")
+def step_curves_anchored_at_now(context):
+    start = _parse_ts(context.capacity_curves["start"])
+    assert start == _parse_ts(context.capacity_curves["import"]["start"])
+    # Per-tick curves: at most a few ticks old (1 s tick) when read.
+    age_s = (context.requested_at - start).total_seconds()
+    assert -5.0 <= age_s <= 30.0, f"per-tick curves start {age_s:.1f} s before the request"
+
+
+@then("the capacity curves request is rejected as a bad request")
+def step_curves_request_rejected(context):
+    assert context.capacity_response.status_code == 400, (
+        f"expected 400, got {context.capacity_response.status_code}: {context.capacity_response.text}"
     )

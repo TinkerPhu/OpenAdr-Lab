@@ -885,10 +885,23 @@ curl -s http://Node1:8211/flexibility | python3 -m json.tool
 
 How long the site could sustain a maximum import or export commitment starting now, and how much
 energy is behind it — distinct from the instantaneous headroom above. Also visible in the VEN UI
-under Diagnostics → Capacity Forecast.
+under Diagnostics → Capacity Forecast, and as the dashed "Import/Export commitment" lines on
+Controller → Site Headroom.
+
+The same question for a commitment starting **later**: on Controller → Site Headroom, switch the
+cursor from "Values" to "Move commitment start" and hover the future part of the chart. The dashed
+curves then start at the plan slot under the cursor (5/10/15-min steps, following the plan's
+zones), from each asset's plan-forecasted state there — "if the plan runs as intended until then,
+and the site then goes all-in". A vertical START line marks the anchor, and the caption names it.
+Double-click holds the start while you read values elsewhere; double-click again to release it.
+At or before now, or with no active plan, the curves stay at now and the caption says so. Each
+curve touches the headroom band at its own start. See
+`tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
 
 ```bash
 curl -s http://Node1:8211/flexibility/capacity | python3 -m json.tool
+# anchored at the plan slot containing 18:07 UTC (response "start" = the slot actually used)
+curl -s "http://Node1:8211/flexibility/capacity?start=2026-09-12T18:07:00Z" | python3 -m json.tool
 ```
 
 ### View the forward site headroom forecast

@@ -39,6 +39,7 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
     const start = "2026-08-20T12:00:00.000Z";
     const startMs = new Date(start).getTime();
     const curves: CapacityCurvesResponse = {
+      start,
       import: {
         direction: "import",
         start,
@@ -94,6 +95,7 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
   it("shows each direction's cumulative energy total", () => {
     const start = "2026-08-20T12:00:00.000Z";
     const curves: CapacityCurvesResponse = {
+      start,
       import: {
         direction: "import",
         start,

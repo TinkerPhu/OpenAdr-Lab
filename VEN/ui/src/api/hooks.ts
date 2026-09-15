@@ -1,4 +1,4 @@
-import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useRef, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "../App";
 import type {
@@ -622,6 +622,23 @@ export function useCapacityCurves() {
     queryKey: ["capacity_curves", api.baseUrl],
     queryFn: () => api.capacityCurves(),
     refetchInterval: 10_000,
+  });
+}
+
+/** The same curves anchored at the plan slot a future time falls in (the Site
+ * Headroom chart's "Move commitment start" mode) — the server snaps `startMs`
+ * and reports the slot it used as the response's `start`. As fresh as
+ * `useCapacityCurves`'s own poll; `null` disables the query. The previous
+ * answer stays on screen while the next one loads. */
+export function useCapacityCurvesAt(startMs: number | null) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["capacity_curves_at", api.baseUrl, startMs],
+    queryFn: () => api.capacityCurves(startMs ?? undefined),
+    enabled: startMs !== null,
+    staleTime: 10_000,
+    refetchInterval: 10_000,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -77,6 +77,17 @@ pub struct CapacityCurve {
     pub steps: Vec<CapacityCurveStep>,
 }
 
+/// Both directions' curves for one commitment start — the
+/// `GET /flexibility/capacity` response body. `start` is the instant both
+/// curves are anchored at: the per-tick `now`, or, for a `?start=` request,
+/// the plan slot boundary the requested start snapped down to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CapacityCurves {
+    pub start: DateTime<Utc>,
+    pub import: CapacityCurve,
+    pub export: CapacityCurve,
+}
+
 impl CapacityCurve {
     /// Cumulative energy (kWh) across the whole curve — trapezoidal-free
     /// since each step holds constant power until the next step (or the

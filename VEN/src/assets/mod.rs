@@ -1016,6 +1016,7 @@ mod phase2b_tick_overridable_tests {
 
     fn default_overrides() -> TickOverrides {
         TickOverrides {
+            now: "2026-01-01T12:00:00Z".parse().unwrap(),
             pv_irradiance: 0.0,
             pv_irradiance_offset: 0.0,
             pv_tau_s: 0.1,

@@ -102,8 +102,9 @@ interface TimeSeriesChartProps {
   zones?: ZoneDef[];
   /** Fallback used only for series that don't declare their own `formatter`. */
   tooltipFormatter?: (value: number, name: string) => [string, string];
-  /** Chart-specific overlay `<ReferenceArea>` elements (e.g. AssetTimelineChart's PV
-   * curtailment shading) that don't fit the generic zone-shading primitive — rendered
+  /** Chart-specific overlay `<ReferenceArea>`/`<ReferenceLine>` elements (e.g.
+   * AssetTimelineChart's PV curtailment shading, SiteHeadroomChart's commitment-start
+   * marker) that don't fit the generic zone-shading primitive — rendered
    * after zones, before the NOW line, same stacking order every consumer used before
    * migration. */
   extraReferenceAreas?: ReactElement[];
@@ -116,6 +117,20 @@ interface TimeSeriesChartProps {
    * existed. Toggle state is local to this chart instance, not persisted. */
   interactiveLegend?: boolean;
   margin?: { top: number; right: number; left: number; bottom: number };
+  /** Opt-in: the `ts` of the row under the cursor (the same row the tooltip shows),
+   * `null` when the cursor is on no row or leaves the plot. Generic, so any chart can
+   * drive something off the cursor position (SiteHeadroomChart's "Move commitment
+   * start" mode). Unset: no mouse handlers are registered at all. */
+  onCursorMove?: (tsMs: number | null) => void;
+  /** Opt-in: the `ts` of the row under a double-click. */
+  onCursorDoubleClick?: (tsMs: number) => void;
+}
+
+/** The hovered row's `ts` from recharts' chart-level mouse state — its `activeLabel`
+ * on this component's numeric time axis. */
+function activeTs(state: unknown): number | null {
+  const label = (state as { activeLabel?: unknown } | null | undefined)?.activeLabel;
+  return typeof label === "number" ? label : null;
 }
 
 /**
@@ -144,6 +159,8 @@ export function TimeSeriesChart({
   legend = true,
   interactiveLegend = false,
   margin = { top: 4, right: 4, left: 0, bottom: 0 },
+  onCursorMove,
+  onCursorDoubleClick,
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();
   // The single Y-axis tick rule for every chart built on this composition: each axis' data
@@ -166,7 +183,19 @@ export function TimeSeriesChart({
   return (
     <div data-testid={testId} style={{ width: "100%", height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={margin}>
+        <ComposedChart
+          data={data}
+          margin={margin}
+          onMouseMove={onCursorMove && ((state: unknown) => onCursorMove(activeTs(state)))}
+          onMouseLeave={onCursorMove && (() => onCursorMove(null))}
+          onDoubleClick={
+            onCursorDoubleClick &&
+            ((state: unknown) => {
+              const ts = activeTs(state);
+              if (ts !== null) onCursorDoubleClick(ts);
+            })
+          }
+        >
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"

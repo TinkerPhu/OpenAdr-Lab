@@ -346,6 +346,7 @@ impl SimState {
         // smoothing. Built once, shared read-only by every asset in the loop
         // below (Battery declines — no arm in the old match for it either).
         let tick_overrides = TickOverrides {
+            now,
             pv_irradiance: irradiance,
             pv_irradiance_offset: self.pv_smoothing.irradiance_offset,
             pv_tau_s,
