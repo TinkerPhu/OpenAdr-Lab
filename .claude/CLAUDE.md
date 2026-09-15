@@ -242,6 +242,9 @@ near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one
 case), stop and name the general pattern instead of writing another one-off. Prefer pushing
 the fix into the shared component/primitive so it applies by construction to every current
 and future case, over a helper function every caller must remember to invoke.
+Reuse means calling the same function. Never copy-paste-and-adapt existing logic; if the
+shared function doesn't quite fit the new caller, change it (with its tests) so both callers
+use it.
 
 declare-dont-branch: when a component handles N structurally-similar cases (one per series,
 one per asset, one per event type), don't dispatch between them with a chain of `if`/`switch`
