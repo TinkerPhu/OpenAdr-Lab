@@ -59,12 +59,18 @@ pub(crate) struct TickContext {
     pub grid_max_export_kw: f64,
     pub plan_snap: Option<crate::entities::plan::Plan>,
     pub capacity_snap: crate::entities::capacity::OadrCapacityState,
+    /// Per-interval capacity limits (priority-resolved) — the arbiter's limit
+    /// pass reads the one in force at `now`.
+    pub capacity_schedule: Vec<crate::entities::capacity::CapacitySnapshot>,
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
     pub alert_windows: Vec<crate::entities::capacity::AlertWindow>,
     pub rates_snap: Vec<crate::entities::tariff_snapshot::TariffSnapshot>,
     pub overlay_enabled: bool,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
+    /// GB-47 limit-enforcement gate and that pass's own last-tick lever.
+    pub limit_enforcement_enabled: bool,
+    pub limit_incumbent_lever: Option<String>,
     /// Live EV session state for the site-headroom forecast
     /// (`controller::capacity_headroom::compute_site_headroom_forecast`) —
     /// read fresh here (pre-lock, async) so a session's departure time is a
@@ -106,16 +112,15 @@ pub(crate) async fn resolve_tick_context(
 
     let plan_snap = state.active_plan().await;
     let (weather_pv_kw_now, weather_pv_forecast) =
-        super::arbiter_glue::resolve_weather_pv_kw_for_tick(weather, weather_pv_params, now).await;
-    let (pv_measured_kw_now, base_load_measured_kw_now) =
-        super::arbiter_glue::resolve_measurements_now(
-            pv_measurement,
-            pv_measurement_enabled,
-            base_load_measurement,
-            base_load_measurement_enabled,
-            now,
-        )
-        .await;
+        super::feeds::resolve_weather_pv_kw_for_tick(weather, weather_pv_params, now).await;
+    let (pv_measured_kw_now, base_load_measured_kw_now) = super::feeds::resolve_measurements_now(
+        pv_measurement,
+        pv_measurement_enabled,
+        base_load_measurement,
+        base_load_measurement_enabled,
+        now,
+    )
+    .await;
     let base_load_heuristic = state
         .asset_heuristics()
         .await
@@ -137,12 +142,15 @@ pub(crate) async fn resolve_tick_context(
         grid_max_export_kw,
         plan_snap,
         capacity_snap: state.capacity_state().await,
+        capacity_schedule: state.planned_capacity_limits().await,
         dispatch_windows: state.dispatch_windows().await,
         alert_windows: state.alert_windows().await,
         rates_snap: state.planned_tariffs().await,
         overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state, now).await,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
+        limit_enforcement_enabled: state.limit_enforcement_enabled().await,
+        limit_incumbent_lever: state.limit_active_lever().await,
         ev_session: state.ev_session().await,
         comms_loss,
     }

@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 
 mod arbiter_levers;
+pub mod limit;
 
 use crate::controller::SimSnapshot;
 use crate::entities::plan::PlanTimeSlot;
@@ -72,6 +73,48 @@ pub struct ArbiterOutcome {
     /// exists to compute a deviation against.
     pub net_kw: Option<f64>,
     pub dev_kw: Option<f64>,
+    /// Part of `dev_kw` no lever could take (kW).
+    pub unresolved_kw: f64,
+    /// The limit-enforcement pass's result (`None` while it is switched off).
+    pub limit: Option<limit::LimitPassOutcome>,
+}
+
+impl ArbiterOutcome {
+    /// What this tick adds to the residual accumulator (§5.5), per SoC-coupled
+    /// asset: the deviation pass's absorbed amounts, plus the limit pass's
+    /// battery/EV adjustments as energy over `dt_h`. The limit pass is
+    /// memoryless — it re-applies its whole adjustment every tick — so only
+    /// energy, not a per-tick kW delta, may accumulate. Heater pauses never
+    /// feed it (no SoC to protect).
+    pub fn residual_kwh_by_asset(&self, dt_h: f64) -> HashMap<String, f64> {
+        let mut residual_kwh = self.absorbed_kwh_by_asset.clone();
+        let limit_adjustments = self.limit.iter().flat_map(|l| &l.adjusted_kw_by_asset);
+        for (asset_id, adjusted_kw) in limit_adjustments {
+            if asset_id == crate::ids::ASSET_BATTERY || asset_id == crate::ids::ASSET_EV {
+                *residual_kwh.entry(asset_id.clone()).or_insert(0.0) += adjusted_kw.abs() * dt_h;
+            }
+        }
+        residual_kwh
+    }
+}
+
+/// This tick's inputs, shared by both arbiter passes.
+#[derive(Clone, Copy)]
+pub struct ArbiterTick<'a> {
+    pub sim: &'a SimSnapshot,
+    /// `None` in the no-plan-yet startup window.
+    pub plan_slot: Option<&'a PlanTimeSlot>,
+    pub objective: PlannerObjective,
+    pub plan_has_ev_allocation: bool,
+    pub overlay_enabled: bool,
+    pub live_pv_kw: Option<f64>,
+    pub live_base_load_kw: Option<f64>,
+    /// An alert window is active — the only case that may curtail the heater's
+    /// thermostat-forced emergency heat.
+    pub alert_active: bool,
+    /// The import ceiling both passes steer to (`limit::limit_target_kw`);
+    /// `None` = no hard import limit in force.
+    pub limit_target_kw: Option<f64>,
 }
 
 /// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
@@ -95,8 +138,22 @@ pub fn projected_net_kw(
     live_pv_kw: Option<f64>,
     live_base_load_kw: Option<f64>,
 ) -> f64 {
+    projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_load_kw, &[])
+}
+
+/// `projected_net_kw` without the assets in `except_asset_ids` — for callers
+/// that solve for those assets' own setpoints (dispatch override, the no-plan
+/// EV fallback).
+pub fn projected_net_kw_except(
+    sim: &SimSnapshot,
+    setpoints: &HashMap<String, f64>,
+    live_pv_kw: Option<f64>,
+    live_base_load_kw: Option<f64>,
+    except_asset_ids: &[&str],
+) -> f64 {
     sim.assets
         .iter()
+        .filter(|(id, _)| !except_asset_ids.contains(&id.as_str()))
         .map(|(id, snap)| {
             if id.as_str() == crate::ids::ASSET_PV {
                 if let Some(pv_kw) = live_pv_kw {
@@ -117,6 +174,11 @@ pub fn projected_net_kw(
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
                 snap.power_kw
+            } else if id.as_str() == crate::ids::ASSET_HEATER {
+                // The heater draws its nearest stage (the rule its own step
+                // physics applies). Not generic over `power_steps_kw`: a
+                // shiftable load starts at full power for any setpoint > 0.
+                crate::entities::asset::nearest_power_step_kw(&snap.power_steps_kw, sp)
             } else {
                 sp
             }
@@ -124,12 +186,20 @@ pub fn projected_net_kw(
         .sum()
 }
 
-/// `projected_net_kw − plan_signed_net_kw`. Positive = importing more than
-/// planned (need an import-reducing lever); negative = exporting more than
-/// planned / surplus (need an export-absorbing lever).
-pub fn deviation_kw(plan_slot: &PlanTimeSlot, projected_net_kw: f64) -> f64 {
+/// `projected_net_kw − target`, where the target is the plan's signed net
+/// power, capped at `limit_target_kw` when a hard import limit is in force —
+/// the one target both passes share, so deviation correction never steers
+/// above a limit the limit pass would then have to push back down. Positive =
+/// importing more than wanted (need an import-reducing lever); negative =
+/// exporting more than planned / surplus (need an export-absorbing lever).
+pub fn deviation_kw(
+    plan_slot: &PlanTimeSlot,
+    projected_net_kw: f64,
+    limit_target_kw: Option<f64>,
+) -> f64 {
     let plan_signed_net_kw = plan_slot.net_import_kw - plan_slot.net_export_kw;
-    projected_net_kw - plan_signed_net_kw
+    let target_kw = limit_target_kw.map_or(plan_signed_net_kw, |t| plan_signed_net_kw.min(t));
+    projected_net_kw - target_kw
 }
 
 /// The greedy ranking loop: exclude zero-or-below-capacity levers outright
@@ -164,18 +234,13 @@ fn rank_levers(mut levers: Vec<Lever>, incumbent_lever: Option<&str>) -> Vec<Lev
 /// Top-level entry point, called once per tick from
 /// `tasks::sim_tick::helpers::build_tick_setpoints` in place of the former
 /// direct call to `apply_surplus_ev_overlay`.
-#[allow(clippy::too_many_arguments)]
 pub fn reconcile(
-    sim: &SimSnapshot,
+    tick: &ArbiterTick,
     base_setpoints: &HashMap<String, f64>,
-    plan_slot: Option<&PlanTimeSlot>,
-    objective: PlannerObjective,
-    plan_has_ev_allocation: bool,
-    overlay_enabled: bool,
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
     incumbent_lever: Option<&str>,
 ) -> ArbiterOutcome {
+    let sim = tick.sim;
+    let (live_pv_kw, live_base_load_kw) = (tick.live_pv_kw, tick.live_base_load_kw);
     let mut setpoints = base_setpoints.clone();
     // Carry forward the dead-beat correctors' own last-applied setpoint as
     // the baseline, not the plan's static per-slot allocation — otherwise a
@@ -191,7 +256,7 @@ pub fn reconcile(
         }
     }
 
-    let Some(slot) = plan_slot else {
+    let Some(slot) = tick.plan_slot else {
         // No active plan yet (startup window): same fallback as the
         // pre-arbiter no-plan branch — opportunistic EV-only, since there's
         // no plan target to compute a deviation against.
@@ -200,8 +265,8 @@ pub fn reconcile(
             sim,
             live_pv_kw,
             live_base_load_kw,
-            plan_has_ev_allocation,
-            overlay_enabled,
+            tick.plan_has_ev_allocation,
+            tick.overlay_enabled,
         );
         return ArbiterOutcome {
             setpoints,
@@ -210,7 +275,7 @@ pub fn reconcile(
     };
 
     let net_kw = projected_net_kw(sim, &setpoints, live_pv_kw, live_base_load_kw);
-    let dev_kw = deviation_kw(slot, net_kw);
+    let dev_kw = deviation_kw(slot, net_kw, tick.limit_target_kw);
 
     if dev_kw.abs() < DEAD_BAND_KW {
         return ArbiterOutcome {
@@ -222,12 +287,9 @@ pub fn reconcile(
     }
 
     let inputs = LeverInputs {
-        sim,
-        slot,
-        objective,
-        plan_has_ev_allocation,
-        overlay_enabled,
+        tick,
         incumbent_lever,
+        bounds_kw: &SetpointBoundsKw::new(),
     };
     let applied = apply_ranked_levers(&mut setpoints, &DEVIATION_POLICY, &inputs, dev_kw);
 
@@ -239,7 +301,35 @@ pub fn reconcile(
         active_lever: applied.active_lever,
         net_kw: Some(net_kw),
         dev_kw: Some(dev_kw),
+        unresolved_kw: applied.unresolved_kw,
+        limit: None,
     }
+}
+
+/// The `ControllerEvent::ArbiterDecision` for `pass` when its decision changed
+/// since last tick — a different leading lever, or an unresolved excess
+/// appearing or clearing (above `DEAD_BAND_KW`). `prev`/`now` are
+/// `(active_lever, unresolved_kw)`; `None` when nothing changed, so the event
+/// log records decisions, not ticks.
+pub fn decision_event(
+    pass: &str,
+    prev: (Option<&str>, f64),
+    now: (Option<&str>, f64),
+    target_kw: Option<f64>,
+    excess_kw: Option<f64>,
+    ts: chrono::DateTime<chrono::Utc>,
+) -> Option<crate::controller::trace::ControllerEvent> {
+    let key = |(lever, unresolved_kw): (Option<&str>, f64)| (lever, unresolved_kw > DEAD_BAND_KW);
+    (key(prev) != key(now)).then(
+        || crate::controller::trace::ControllerEvent::ArbiterDecision {
+            ts,
+            pass: pass.to_string(),
+            active_lever: now.0.map(str::to_string),
+            target_kw,
+            excess_kw,
+            unresolved_kw: now.1,
+        },
+    )
 }
 
 /// How a pass may use the levers — the only thing that differs between the
@@ -263,14 +353,16 @@ pub(crate) const DEVIATION_POLICY: LeverPolicy = LeverPolicy {
     battery_respects_objective: true,
 };
 
+/// Per-asset `(min, max)` setpoint bounds (kW) a pass must stay inside — the
+/// comms-loss fail-safe's clamp (`tasks::sim_tick::dispatch_override`).
+pub type SetpointBoundsKw = HashMap<String, (f64, f64)>;
+
 /// Everything a pass hands the shared lever machinery besides the setpoints.
 pub(crate) struct LeverInputs<'a> {
-    pub(crate) sim: &'a SimSnapshot,
-    pub(crate) slot: &'a PlanTimeSlot,
-    pub(crate) objective: PlannerObjective,
-    pub(crate) plan_has_ev_allocation: bool,
-    pub(crate) overlay_enabled: bool,
+    pub(crate) tick: &'a ArbiterTick<'a>,
+    /// This pass's own last-tick lever (preemption-margin hysteresis).
     pub(crate) incumbent_lever: Option<&'a str>,
+    pub(crate) bounds_kw: &'a SetpointBoundsKw,
 }
 
 /// What the shared lever loop did this tick.
@@ -293,20 +385,27 @@ pub(crate) fn apply_ranked_levers(
     inputs: &LeverInputs,
     deviation_kw: f64,
 ) -> AppliedLevers {
-    let sim = inputs.sim;
+    let (tick, sim) = (inputs.tick, inputs.tick.sim);
     let (ev_plan_allocated, ev_overlay_enabled) = if policy.ev_overrides_plan {
         (false, true)
     } else {
-        (inputs.plan_has_ev_allocation, inputs.overlay_enabled)
+        (tick.plan_has_ev_allocation, tick.overlay_enabled)
     };
+    let battery_bounds_kw = inputs.bounds_kw.get(crate::ids::ASSET_BATTERY).copied();
     let battery_objective = if policy.battery_respects_objective {
-        inputs.objective
+        tick.objective
     } else {
         PlannerObjective::MinCost
     };
 
     let mut candidates = Vec::new();
-    candidates.extend(battery_lever(setpoints, sim, inputs.slot, deviation_kw));
+    candidates.extend(battery_lever(
+        setpoints,
+        sim,
+        tick.plan_slot,
+        deviation_kw,
+        battery_bounds_kw,
+    ));
     candidates.extend(ev_lever(
         setpoints,
         sim,
@@ -317,11 +416,12 @@ pub(crate) fn apply_ranked_levers(
     candidates.extend(heater_pause_lever(setpoints, sim, deviation_kw));
     candidates.extend(heater_emergency_lever(
         sim,
-        inputs.slot,
+        tick.plan_slot,
         deviation_kw,
         inputs.incumbent_lever == Some("heater_emergency"),
+        tick.alert_active,
     ));
-    candidates.extend(pv_curtailment_lever(inputs.slot, deviation_kw));
+    candidates.extend(pv_curtailment_lever(tick.plan_slot, deviation_kw));
 
     let mut applied = AppliedLevers::default();
     let mut remaining_kw = deviation_kw.abs();
@@ -343,7 +443,13 @@ pub(crate) fn apply_ranked_levers(
         };
         let achieved_kw = match lever.id {
             "battery" => {
-                let delta = apply_battery_lever(setpoints, sim, signed_assigned_kw, battery_objective);
+                let delta = apply_battery_lever(
+                    setpoints,
+                    sim,
+                    signed_assigned_kw,
+                    battery_objective,
+                    battery_bounds_kw,
+                );
                 if delta > 0.0 {
                     *applied
                         .absorbed_kwh_by_asset
@@ -363,7 +469,9 @@ pub(crate) fn apply_ranked_levers(
             "heater_pause" => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
             "heater_emergency" => {
                 applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
-                    (true, false) // Curtail
+                    // Curtail (alerts only): no planned stage either.
+                    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), 0.0);
+                    (true, false)
                 } else {
                     (false, true) // Absorb
                 });

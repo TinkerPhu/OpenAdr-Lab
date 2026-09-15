@@ -60,6 +60,22 @@ pub enum ControllerEvent {
         setpoint_kw: Option<f64>,
         active: bool,
     },
+    /// GB-47: an arbiter pass changed its decision — the lever it leads with,
+    /// or whether part of its excess stays unresolved. Emitted on change
+    /// only (`controller::arbiter::decision_event`), never per tick.
+    ArbiterDecision {
+        ts: DateTime<Utc>,
+        /// `"deviation"` (deviation correction) or `"limit"` (limit enforcement).
+        pass: String,
+        active_lever: Option<String>,
+        /// What the pass steered to (kW): plan net power, capped at the
+        /// import ceiling / the import ceiling.
+        target_kw: Option<f64>,
+        /// Projected excess over the target before the pass acted (kW).
+        excess_kw: Option<f64>,
+        /// Part of the excess no lever could shed (kW).
+        unresolved_kw: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------

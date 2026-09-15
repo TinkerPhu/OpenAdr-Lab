@@ -7,7 +7,9 @@ use super::{
     Thermostat, TickOverridable,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{
+    nearest_power_step_kw, ComfortRate, CompletionPolicy, PowerAdjustability,
+};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 
@@ -79,6 +81,14 @@ impl Heater {
         self.max_kw / self.power_stages.max(1) as f64
     }
 
+    /// The full physical stage set (0, p_step, 2·p_step, …, max_kw) — a
+    /// hardware fact, independent of the live temperature-driven ceiling.
+    pub fn power_steps_kw(&self) -> Vec<f64> {
+        (0..=self.power_stages.max(1))
+            .map(|k| k as f64 * self.p_step_kw())
+            .collect()
+    }
+
     pub fn from_params(cfg: &HeaterParams) -> Self {
         Self {
             max_kw: cfg.max_kw,
@@ -134,17 +144,9 @@ impl Heater {
         dt: Duration,
     ) -> (HeaterState, f64) {
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        // Quantize to the nearest reachable stage: k × p_step_kw. Each stage is
-        // its own contactor, so intermediate values are physically impossible.
-        let p_step = self.p_step_kw();
-        let tier = if p_step > 0.0 {
-            (setpoint_kw / p_step)
-                .round()
-                .clamp(0.0, self.power_stages.max(1) as f64)
-                * p_step
-        } else {
-            0.0
-        };
+        // Quantize to the nearest reachable stage. Each stage is its own
+        // contactor, so intermediate values are physically impossible.
+        let tier = nearest_power_step_kw(&self.power_steps_kw(), setpoint_kw);
         let actual = self.thermostat_forced_kw(state).unwrap_or(tier);
         // Thermal model: Newton cooling + simulated draw
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
@@ -215,12 +217,9 @@ impl Heater {
             max_export_kw: 0.0,
             max_import_kw,
             adjustability: PowerAdjustability::Stepped,
-            // Full physical stage set (0, p_step, 2·p_step, …) regardless of the
-            // current temperature-driven ceiling above — a hardware fact, not a
-            // live feasibility range.
-            power_steps_kw: (0..=self.power_stages.max(1))
-                .map(|k| k as f64 * self.p_step_kw())
-                .collect(),
+            // Regardless of the temperature-driven ceiling above — a hardware
+            // fact, not a live feasibility range.
+            power_steps_kw: self.power_steps_kw(),
         }
     }
 

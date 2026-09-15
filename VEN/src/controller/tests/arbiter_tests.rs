@@ -183,13 +183,13 @@ fn test_slot(
 #[test]
 fn deviation_kw_zero_when_projection_matches_plan() {
     let slot = test_slot(0.2, 0.2, 2.0, 0.0, 0.0, 0.08);
-    assert_eq!(deviation_kw(&slot, 2.0), 0.0);
+    assert_eq!(deviation_kw(&slot, 2.0, None), 0.0);
 }
 
 #[test]
 fn deviation_kw_positive_means_importing_more_than_planned() {
     let slot = test_slot(0.2, 0.2, 2.0, 0.0, 0.0, 0.08);
-    assert!((deviation_kw(&slot, 3.0) - 1.0).abs() < 1e-9);
+    assert!((deviation_kw(&slot, 3.0, None) - 1.0).abs() < 1e-9);
 }
 
 // ── §5.4 scenario A: EV picked over battery for a surplus/import mix ───────
@@ -212,14 +212,18 @@ fn scenario_a_ev_picked_over_battery_no_battery_movement() {
     let slot = test_slot(0.25, 0.06, 0.0, 3.3, 4.5, 0.08);
     let base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
     let outcome = reconcile(
-        &sim,
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(-6.0),
+            live_base_load_kw: Some(0.5),
+            alert_active: false,
+            limit_target_kw: None,
+        },
         &base_setpoints,
-        Some(&slot),
-        PlannerObjective::MinCost,
-        false,
-        true,
-        Some(-6.0),
-        Some(0.5),
         None,
     );
     assert_eq!(outcome.active_lever, Some("ev"));
@@ -252,14 +256,18 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
     let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
     base_setpoints.insert("heater".to_string(), 0.0);
     let outcome = reconcile(
-        &sim,
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(0.0),
+            live_base_load_kw: Some(2.5),
+            alert_active: false,
+            limit_target_kw: None,
+        },
         &base_setpoints,
-        Some(&slot),
-        PlannerObjective::MinCost,
-        false,
-        true,
-        Some(0.0),
-        Some(2.5),
         None,
     );
     assert_eq!(
@@ -270,30 +278,26 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
     assert!(!outcome.setpoints.contains_key("ev") || outcome.setpoints["ev"] == 0.0);
 }
 
-// ── §5.4 scenario H: heater emergency only above the comfort-override threshold ─
+// ── Heater emergency Curtail: alerts only (GB-47 — the heater's own thermostat
+//    is its safety; a capacity limit's penalty-inflated cost must not override it) ─
 
 #[test]
-fn heater_emergency_not_offered_below_comfort_override_threshold() {
+fn heater_emergency_curtail_not_offered_outside_an_alert() {
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
-    // Routine tariff-level marginal cost, well below the override threshold.
     let slot = test_slot(0.30, 0.30, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, &slot, 1.0, false);
+    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, false);
     assert!(
         lever.is_none(),
-        "routine marginal cost must not invade the safety envelope"
+        "outside an alert, forced emergency heat is the heater's own safety"
     );
 }
 
 #[test]
-fn heater_emergency_offered_once_obligation_penalty_exceeds_threshold() {
+fn heater_emergency_curtail_offered_during_an_alert() {
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
-    // Obligation-penalty-inflated marginal cost, above the override threshold.
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, &slot, 1.0, false);
-    assert!(
-        lever.is_some(),
-        "an obligation breach penalty must cross the threshold and offer the lever"
-    );
+    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, true);
+    assert!(lever.is_some(), "an alert may curtail emergency heat");
 }
 
 #[test]
@@ -311,7 +315,7 @@ fn heater_emergency_offered_while_the_heater_is_held_on_by_its_own_hysteresis() 
     );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, &slot, 1.0, false);
+    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, true);
     assert_eq!(lever.map(|l| l.available_capacity_kw), Some(3.0));
 }
 
@@ -329,7 +333,7 @@ fn heater_emergency_stays_offered_while_its_own_curtail_is_active() {
     );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    assert!(heater_emergency_lever(&sim, &slot, 1.0, true).is_some());
+    assert!(heater_emergency_lever(&sim, Some(&slot), 1.0, true, true).is_some());
 }
 
 // ── PV curtailment backstop ─────────────────────────────────────────────────
@@ -348,14 +352,18 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
     let slot = test_slot(0.2, 0.06, 0.0, 5.0, 5.0, 0.08);
     let base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
     let outcome = reconcile(
-        &sim,
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(-6.0),
+            live_base_load_kw: None,
+            alert_active: false,
+            limit_target_kw: None,
+        },
         &base_setpoints,
-        Some(&slot),
-        PlannerObjective::MinCost,
-        false,
-        true,
-        Some(-6.0),
-        None,
         None,
     );
     assert_eq!(outcome.active_lever, Some("pv_curtail"));
@@ -502,6 +510,13 @@ fn heater_pause_commands_a_reachable_step_not_one_the_heater_rounds_back_up() {
 }
 
 #[test]
+fn projected_net_kw_counts_the_heater_stage_its_setpoint_rounds_to() {
+    let sim = make_sim(vec![("heater", heater_snap(20.0, 18.0, 23.0, 23.0))]);
+    let sp = StdHashMap::from([("heater".to_string(), 1.03)]);
+    assert!((projected_net_kw(&sim, &sp, None, None) - 1.5).abs() < 1e-9);
+}
+
+#[test]
 fn heater_pause_offers_no_capacity_while_the_thermostat_forces_power() {
     // 17 °C ≤ temp_min_c 18: the thermostat forces emergency heat, so pausing
     // the setpoint frees nothing and must not be claimed.
@@ -518,7 +533,7 @@ fn battery_lever_discharges_on_shortfall() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost);
+    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost, None);
     assert!(
         delta > 0.0,
         "expected non-zero correction magnitude, got {delta}"
@@ -535,7 +550,7 @@ fn battery_lever_suppressed_when_at_min_soc() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.105))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost);
+    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost, None);
     assert_eq!(delta, 0.0, "discharge must be suppressed near min_soc");
 }
 
@@ -544,7 +559,7 @@ fn battery_lever_suppressed_for_maxrevenue_discharge() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MaxRevenue);
+    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MaxRevenue, None);
     assert_eq!(delta, 0.0, "MaxRevenue must suppress discharge corrections");
 }
 
@@ -553,7 +568,7 @@ fn battery_lever_allows_maxrevenue_on_export_excess() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, -3.0, PlannerObjective::MaxRevenue);
+    let delta = apply_battery_lever(&mut sp, &sim, -3.0, PlannerObjective::MaxRevenue, None);
     assert!(
         delta > 0.0,
         "MaxRevenue must allow charge corrections, got {delta}"
@@ -567,7 +582,7 @@ fn battery_lever_clamped_to_max_discharge_kw() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let _delta = apply_battery_lever(&mut sp, &sim, 20.0, PlannerObjective::MinCost);
+    let _delta = apply_battery_lever(&mut sp, &sim, 20.0, PlannerObjective::MinCost, None);
     let bat_sp = sp.get("battery").copied().unwrap();
     assert!(
         bat_sp >= -5.0,
@@ -592,14 +607,18 @@ fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
     let slot = test_slot(0.20, 0.20, 0.0, 0.0, 0.0, 0.08);
     // Projected net = 4.17 (battery) − 8.67 (live base load as a surplus) = −4.5.
     let outcome = reconcile(
-        &sim,
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: None,
+            live_base_load_kw: Some(-8.67),
+            alert_active: false,
+            limit_target_kw: None,
+        },
         &base_setpoints,
-        Some(&slot),
-        PlannerObjective::MinCost,
-        false,
-        true,
-        None,
-        Some(-8.67),
         None,
     );
     let bat_sp = outcome.setpoints["battery"];
@@ -638,7 +657,8 @@ fn battery_lever_converges_under_stationary_disturbance_across_multiple_ticks() 
         // — NOT a constant reapplied every tick, which would double-count the
         // battery's own correction and never converge.
         let assigned_kw = STATIONARY_DEVIATION_KW + setpoint_kw;
-        let _delta = apply_battery_lever(&mut sp, &sim, assigned_kw, PlannerObjective::MinCost);
+        let _delta =
+            apply_battery_lever(&mut sp, &sim, assigned_kw, PlannerObjective::MinCost, None);
         setpoint_kw = sp.get("battery").copied().unwrap_or(setpoint_kw);
         // Physics: setpoint_kw negative = discharge, drains SoC.
         soc = (soc - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
@@ -703,14 +723,19 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
             ("base_load", base_snap(2.0)),
         ]);
         let outcome = reconcile(
-            &sim,
+            &ArbiterTick {
+                sim: &sim,
+                plan_slot: Some(&slot),
+                objective: PlannerObjective::MinCost,
+                plan_has_ev_allocation: false,
+                overlay_enabled: true,
+                live_pv_kw: None,
+                live_base_load_kw: Some(2.0 + STATIONARY_DEVIATION_KW),
+                alert_active: false,
+                limit_target_kw: None,
+            },
             &base_setpoints,
-            Some(&slot),
-            PlannerObjective::MinCost,
-            false,
-            true,
-            None,
-            Some(2.0 + STATIONARY_DEVIATION_KW), // live base load: 2.0 planned + 2.0 kW step
+            // live base load: 2.0 planned + 2.0 kW step
             incumbent,
         );
         incumbent = outcome.active_lever;
@@ -745,14 +770,15 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
 }
 
 #[test]
-fn heater_emergency_mode_hysteresis_stays_active_within_margin_of_threshold() {
-    let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
+fn heater_emergency_absorb_hysteresis_stays_active_within_margin_of_threshold() {
+    // Absorb (surplus direction) is still entered on marginal cost.
+    let sim = make_sim(vec![("heater", heater_snap(20.0, 18.0, 23.0, 23.0))]);
     // Marginal cost just below the plain threshold but within the margin of
     // it — as incumbent, the lever must still be offered (sticky exit).
     let cost = HEATER_COMFORT_OVERRIDE_EUR_PER_KWH - (LEVER_PREEMPTION_MARGIN_EUR_PER_KWH / 2.0);
-    let slot = test_slot(cost, cost, 5.0, 0.0, 0.0, 0.08);
-    let as_incumbent = heater_emergency_lever(&sim, &slot, 1.0, true);
-    let as_challenger = heater_emergency_lever(&sim, &slot, 1.0, false);
+    let slot = test_slot(cost, cost, 0.0, 5.0, 0.0, 0.08);
+    let as_incumbent = heater_emergency_lever(&sim, Some(&slot), -1.0, true, false);
+    let as_challenger = heater_emergency_lever(&sim, Some(&slot), -1.0, false, false);
     assert!(
         as_incumbent.is_some(),
         "incumbent heater emergency mode must not exit within the margin band"
@@ -762,3 +788,6 @@ fn heater_emergency_mode_hysteresis_stays_active_within_margin_of_threshold() {
         "a non-incumbent must still require the full threshold to enter"
     );
 }
+
+#[path = "arbiter_limit_tests.rs"]
+mod limit_tests;

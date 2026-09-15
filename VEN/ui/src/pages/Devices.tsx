@@ -31,7 +31,8 @@ export function DevicesPage() {
   const { data: evSettings } = useEvSettings();
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
-    arbiterSettings?.deviation_arbiter_enabled ?? false,
+    (arbiterSettings?.deviation_arbiter_enabled ?? false) ||
+      (arbiterSettings?.limit_enforcement_enabled ?? false),
   );
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();

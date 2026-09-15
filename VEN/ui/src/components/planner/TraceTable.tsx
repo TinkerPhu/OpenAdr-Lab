@@ -10,6 +10,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { TraceEntry } from "../../api/types";
+import { arbiterDecisionText } from "./arbiterDecisionText";
 
 function TypeChip({ type: t }: { type: string }) {
   const color =
@@ -67,6 +68,8 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
             : <b>cleared</b>}
         </span>
       );
+    case "ArbiterDecision":
+      return <span>{arbiterDecisionText(entry)}</span>;
   }
 }
 

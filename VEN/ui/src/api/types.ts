@@ -156,7 +156,8 @@ export type TraceEntry =
   | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
   | { type: "PlanCycle";        ts: string; trigger_reason: string; total_slots: number }
   | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string }
-  | { type: "DispatchOverride";  ts: string; setpoint_kw: number | null; active: boolean };
+  | { type: "DispatchOverride";  ts: string; setpoint_kw: number | null; active: boolean }
+  | { type: "ArbiterDecision";   ts: string; pass: string; active_lever: string | null; target_kw: number | null; excess_kw: number | null; unresolved_kw: number };
 
 // ─── Sim schema types ─────────────────────────────────────────────────────────
 
@@ -503,22 +504,41 @@ export type UpdateEvSettingsBody = {
   opportunistic_charging_enabled: boolean;
 };
 
-/** Deviation arbiter rollout gate (openspec/changes/deviation-arbiter/). Default false. */
+/** The arbiter's two passes (GET/PUT /arbiter-settings): deviation
+ * correction (default off) and limit enforcement (GB-47, default on). */
 export type ArbiterSettings = {
   deviation_arbiter_enabled: boolean;
+  limit_enforcement_enabled: boolean;
 };
 
+/** Each toggle optional — one switch changes without restating the other. */
 export type UpdateArbiterSettingsBody = {
-  deviation_arbiter_enabled: boolean;
+  deviation_arbiter_enabled?: boolean;
+  limit_enforcement_enabled?: boolean;
+};
+
+/** The limit-enforcement pass's last tick (controller::arbiter::limit). */
+export type LimitPassOutcome = {
+  target_kw: number;
+  excess_kw: number;
+  unresolved_kw: number;
+  active_lever: string | null;
+  heater_emergency_mode: [boolean, boolean] | null;
+  adjusted_kw_by_asset: Record<string, number>;
 };
 
 /** Last tick's arbiter reasoning (GET /arbiter-diagnostics) — null fields
  * before the arbiter has run this process, or during the no-plan-yet
- * startup window. */
+ * startup window. `net_kw`/`dev_kw`/`active_lever`/`unresolved_kw` are the
+ * deviation pass's; `limit` is null while limit enforcement is off or no hard
+ * import limit is in force. */
 export type ArbiterDiagnostics = {
   net_kw: number | null;
   dev_kw: number | null;
   active_lever: string | null;
+  unresolved_kw: number;
+  measured_net_kw: number | null;
+  limit: LimitPassOutcome | null;
   updated_at: string | null;
 };
 

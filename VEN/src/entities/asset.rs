@@ -34,17 +34,36 @@ pub enum PowerAdjustability {
 /// nearest of its `power_steps_kw` (ascending; a tie goes to the higher step).
 /// The single quantization rule — the asset's own step physics and every
 /// projection of what it will draw call this, so they can't disagree.
+/// Without steps (a continuously adjustable asset) the setpoint passes through.
 pub fn nearest_power_step_kw(power_steps_kw: &[f64], setpoint_kw: f64) -> f64 {
-    let _ = (power_steps_kw, setpoint_kw);
-    unimplemented!()
+    power_steps_kw
+        .iter()
+        .copied()
+        .reduce(|best_kw, step_kw| {
+            // `<=` lets the later (higher) step win a tie.
+            if (step_kw - setpoint_kw).abs() <= (best_kw - setpoint_kw).abs() {
+                step_kw
+            } else {
+                best_kw
+            }
+        })
+        .unwrap_or(setpoint_kw)
 }
 
 /// The highest of `power_steps_kw` (ascending) at or below `kw` — what to
 /// command when a stepped asset must draw no more than `kw`. Below the lowest
-/// step, the lowest step.
+/// step, the lowest step. Without steps, `kw` itself.
 pub fn highest_power_step_at_or_below_kw(power_steps_kw: &[f64], kw: f64) -> f64 {
-    let _ = (power_steps_kw, kw);
-    unimplemented!()
+    let lowest_kw = match power_steps_kw.first() {
+        Some(&lowest_kw) => lowest_kw,
+        None => return kw,
+    };
+    power_steps_kw
+        .iter()
+        .copied()
+        .filter(|&step_kw| step_kw <= kw + 1e-9)
+        .last()
+        .unwrap_or(lowest_kw)
 }
 
 /// How to handle completion when the last DeadlineTier expires (§1.10).

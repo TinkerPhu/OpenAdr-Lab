@@ -8,6 +8,7 @@ use super::{
     DEAD_BAND_KW, HEATER_COMFORT_OVERRIDE_EUR_PER_KWH, LEVER_PREEMPTION_MARGIN_EUR_PER_KWH,
 };
 use crate::controller::SimSnapshot;
+use crate::entities::asset::{highest_power_step_at_or_below_kw, nearest_power_step_kw};
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
 
@@ -34,30 +35,47 @@ pub(super) fn current_setpoint_kw(
         .unwrap_or(0.0)
 }
 
+/// The battery's setpoint range: its own capability (it already reports 0 in
+/// a direction it can't sustain near full/empty — no SoC re-interpretation
+/// here), narrowed by a pass's `bounds_kw` (the comms-loss clamp).
+fn battery_setpoint_range_kw(
+    snap: &crate::controller::simulator_port::AssetSnapshot,
+    bounds_kw: Option<(f64, f64)>,
+) -> (f64, f64) {
+    let (min_kw, max_kw) = (-snap.cap_max_export_kw.abs(), snap.cap_max_import_kw);
+    match bounds_kw {
+        Some((lo_kw, hi_kw)) => (min_kw.max(lo_kw).min(0.0), max_kw.min(hi_kw).max(0.0)),
+        None => (min_kw, max_kw),
+    }
+}
+
 /// Battery lever capacity + cost. Direction-dependent: absorbing an import
 /// deviation (`deviation_kw > 0`) needs headroom to discharge more (or charge
 /// less); absorbing a surplus (`deviation_kw < 0`) needs headroom to charge
-/// more (or discharge less).
+/// more (or discharge less). Without a plan slot (startup window) the cost is
+/// 0 — ranking then falls back to candidate order.
 pub(super) fn battery_lever(
     setpoints: &HashMap<String, f64>,
     sim: &SimSnapshot,
-    slot: &PlanTimeSlot,
+    slot: Option<&PlanTimeSlot>,
     deviation_kw: f64,
+    bounds_kw: Option<(f64, f64)>,
 ) -> Option<Lever> {
     let snap = sim.assets.get(crate::ids::ASSET_BATTERY)?;
     let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_BATTERY);
+    let (min_kw, max_kw) = battery_setpoint_range_kw(snap, bounds_kw);
     let (power_headroom_kw, energy_headroom_kwh, marginal_cost_eur_per_kwh) = if deviation_kw > 0.0
     {
         (
-            snap.cap_max_export_kw.abs() + current_sp.max(0.0),
+            current_sp - min_kw,
             snap.available_discharge_kwh,
-            slot.marginal_cost_import_eur_per_kwh,
+            slot.map_or(0.0, |s| s.marginal_cost_import_eur_per_kwh),
         )
     } else {
         (
-            snap.cap_max_import_kw + (-current_sp).max(0.0),
+            max_kw - current_sp,
             snap.available_charge_kwh,
-            slot.marginal_cost_export_eur_per_kwh,
+            slot.map_or(0.0, |s| s.marginal_cost_export_eur_per_kwh),
         )
     };
     // Zero available energy (e.g. full/empty SoC) means zero capacity
@@ -90,6 +108,7 @@ pub(super) fn apply_battery_lever(
     sim: &SimSnapshot,
     assigned_kw: f64,
     objective: PlannerObjective,
+    bounds_kw: Option<(f64, f64)>,
 ) -> f64 {
     let Some(snap) = sim.assets.get(crate::ids::ASSET_BATTERY) else {
         return 0.0;
@@ -97,14 +116,11 @@ pub(super) fn apply_battery_lever(
     if objective == PlannerObjective::MaxRevenue && assigned_kw > 0.0 {
         return 0.0;
     }
-    // The battery's own capability already reports 0 in a direction it can't
-    // sustain (near full/empty) — no SoC re-interpretation here.
-    let max_discharge_kw = snap.cap_max_export_kw.abs();
-    let max_charge_kw = snap.cap_max_import_kw;
+    let (min_kw, max_kw) = battery_setpoint_range_kw(snap, bounds_kw);
     let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_BATTERY);
 
     let raw_target = current_sp - assigned_kw;
-    let clamped = raw_target.clamp(-max_discharge_kw, max_charge_kw);
+    let clamped = raw_target.clamp(min_kw, max_kw);
 
     let delta = clamped - current_sp;
     if delta.abs() < 1e-6 {
@@ -175,63 +191,88 @@ pub(super) fn apply_ev_lever(
 }
 
 /// Heater pause-within-comfort-band lever: flat zero cost, available
-/// whenever the heater's plan-allocated setpoint is > 0 this slot (§5.4
-/// scenario D — "not because a static rule ranked it third but because its
-/// marginal cost is genuinely zero whenever available").
+/// whenever the heater draws a stage this tick (§5.4 scenario D — "not because
+/// a static rule ranked it third but because its marginal cost is genuinely
+/// zero whenever available"). Nothing to pause while the thermostat forces the
+/// heater's power (`forced_power_kw`) — the setpoint is ignored then.
 pub(super) fn heater_pause_lever(
     setpoints: &HashMap<String, f64>,
-    _sim: &SimSnapshot,
+    sim: &SimSnapshot,
     deviation_kw: f64,
 ) -> Option<Lever> {
     if deviation_kw < 0.0 {
         return None; // pausing a load can't absorb a surplus
     }
-    let planned_kw = setpoints
-        .get(crate::ids::ASSET_HEATER)
-        .copied()
-        .unwrap_or(0.0);
-    if planned_kw <= 0.0 {
+    let snap = sim.assets.get(crate::ids::ASSET_HEATER)?;
+    if snap.forced_power_kw.is_some() {
+        return None;
+    }
+    let drawn_kw = heater_drawn_kw(setpoints, sim);
+    if drawn_kw <= 0.0 {
         return None;
     }
     Some(Lever {
         id: "heater_pause",
-        available_capacity_kw: planned_kw,
+        available_capacity_kw: drawn_kw,
         marginal_cost_eur_per_kwh: 0.0,
     })
 }
 
-/// Returns the achieved change (kW, magnitude).
+/// Commands the highest stage at or below `drawn − assigned` — an in-between
+/// setpoint would round back up to the stage it came from and shed nothing.
+/// Returns the achieved change (kW, magnitude): a whole stage, which may
+/// exceed `assigned_kw`.
 pub(super) fn apply_heater_pause_lever(
     setpoints: &mut HashMap<String, f64>,
-    _sim: &SimSnapshot,
+    sim: &SimSnapshot,
     assigned_kw: f64,
 ) -> f64 {
-    let planned_kw = setpoints
+    let drawn_kw = heater_drawn_kw(setpoints, sim);
+    let new_kw = highest_power_step_at_or_below_kw(
+        heater_power_steps_kw(sim),
+        (drawn_kw - assigned_kw).max(0.0),
+    );
+    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), new_kw);
+    drawn_kw - new_kw
+}
+
+/// The stage the heater draws for its current setpoint (through the same
+/// quantization its own step physics uses).
+fn heater_drawn_kw(setpoints: &HashMap<String, f64>, sim: &SimSnapshot) -> f64 {
+    let setpoint_kw = setpoints
         .get(crate::ids::ASSET_HEATER)
         .copied()
         .unwrap_or(0.0);
-    let new_kw = (planned_kw - assigned_kw).max(0.0);
-    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), new_kw);
-    planned_kw - new_kw
+    nearest_power_step_kw(heater_power_steps_kw(sim), setpoint_kw)
 }
 
-/// Heater emergency-mode lever (`HeaterEmergencyMode::Curtail`/`Absorb`):
-/// only offered when the directional marginal cost exceeds
-/// `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH` (§5.4 scenario H — routine tariff
-/// swings must never invade the safety envelope; an obligation breach
-/// penalty, baked into the slot's marginal cost, does).
+fn heater_power_steps_kw(sim: &SimSnapshot) -> &[f64] {
+    sim.assets
+        .get(crate::ids::ASSET_HEATER)
+        .map_or(&[], |snap| snap.power_steps_kw.as_slice())
+}
+
+/// Heater emergency-mode lever (`HeaterEmergencyMode::Curtail`/`Absorb`).
 ///
-/// `is_incumbent` (§4a.2): when the heater emergency mode was already active
-/// last tick, the entry threshold is lowered by the preemption margin,
-/// making the mode "stickier" to exit than to enter — a marginal cost
-/// hovering right at `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH` cannot flip the
-/// mode on and off every tick, since leaving requires dropping below
-/// `threshold − margin`, not just below `threshold`.
+/// Curtail (import direction) is offered only during an alert window: the
+/// heater's own thermostat is its safety, and nothing short of a grid alert
+/// overrides it — not a capacity limit, whose violation penalty inflates the
+/// slot's marginal cost just like an alert's would (GB-47). Priced at
+/// `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH`, so cheaper levers go first.
+///
+/// Absorb (surplus direction) is offered when the export marginal cost exceeds
+/// `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH` (§5.4 scenario H — routine tariff
+/// swings must never invade the safety envelope). `is_incumbent` (§4a.2):
+/// when the mode was already active last tick, that entry threshold is
+/// lowered by the preemption margin, making the mode "stickier" to exit than
+/// to enter — a marginal cost hovering right at the threshold cannot flip the
+/// mode on and off every tick.
 pub(super) fn heater_emergency_lever(
     sim: &SimSnapshot,
-    slot: &PlanTimeSlot,
+    slot: Option<&PlanTimeSlot>,
     deviation_kw: f64,
     is_incumbent: bool,
+    alert_active: bool,
 ) -> Option<Lever> {
     let snap = sim.assets.get(crate::ids::ASSET_HEATER)?;
     // The heater's own answers (its thermostat rule under Normal/Absorb),
@@ -248,7 +289,7 @@ pub(super) fn heater_emergency_lever(
         // Import deviation: Curtail lets the tank drift toward ambient below
         // temp_min_c instead of the forced-on emergency heat — capacity is
         // however much of the currently-forced emergency draw that would free up.
-        if slot.marginal_cost_import_eur_per_kwh <= threshold {
+        if !alert_active {
             return None;
         }
         if emergency_heat_kw <= 0.0 {
@@ -257,11 +298,12 @@ pub(super) fn heater_emergency_lever(
         Some(Lever {
             id: "heater_emergency",
             available_capacity_kw: emergency_heat_kw,
-            marginal_cost_eur_per_kwh: slot.marginal_cost_import_eur_per_kwh,
+            marginal_cost_eur_per_kwh: HEATER_COMFORT_OVERRIDE_EUR_PER_KWH,
         })
     } else {
         // Surplus/export deviation: Absorb lets the tank heat past temp_max_c
         // up to temp_safety_max_c, soaking up otherwise-exported surplus.
+        let slot = slot?;
         if slot.marginal_cost_export_eur_per_kwh <= threshold {
             return None;
         }
@@ -278,7 +320,11 @@ pub(super) fn heater_emergency_lever(
 
 /// PV curtailment: backstop only, export-excess direction, priced at the
 /// forgone export tariff — naturally ranks last.
-pub(super) fn pv_curtailment_lever(slot: &PlanTimeSlot, deviation_kw: f64) -> Option<Lever> {
+pub(super) fn pv_curtailment_lever(
+    slot: Option<&PlanTimeSlot>,
+    deviation_kw: f64,
+) -> Option<Lever> {
+    let slot = slot?;
     if deviation_kw >= 0.0 || slot.pv_used_kw <= 0.0 {
         return None;
     }
@@ -303,34 +349,13 @@ pub(super) fn apply_ev_lever_opportunistic(
     if plan_has_ev_allocation || !overlay_enabled {
         return;
     }
-    let net_other_kw: f64 = sim
-        .assets
-        .iter()
-        .filter(|(id, _)| {
-            id.as_str() != crate::ids::ASSET_EV && id.as_str() != crate::ids::ASSET_BATTERY
-        })
-        .map(|(id, snap)| {
-            if id.as_str() == crate::ids::ASSET_PV {
-                if let Some(pv_kw) = live_pv_kw {
-                    return pv_kw;
-                }
-            }
-            if id.as_str() == crate::ids::ASSET_BASE_LOAD {
-                if let Some(bl_kw) = live_base_load_kw {
-                    return bl_kw;
-                }
-            }
-            if let Some(forced_kw) = snap.forced_power_kw {
-                return forced_kw;
-            }
-            let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
-            if sp.abs() > 1e20 {
-                snap.power_kw
-            } else {
-                sp
-            }
-        })
-        .sum();
+    let net_other_kw = super::projected_net_kw_except(
+        sim,
+        setpoints,
+        live_pv_kw,
+        live_base_load_kw,
+        &[crate::ids::ASSET_EV, crate::ids::ASSET_BATTERY],
+    );
     let battery_charge_kw = setpoints
         .get(crate::ids::ASSET_BATTERY)
         .copied()

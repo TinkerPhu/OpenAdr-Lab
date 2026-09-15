@@ -3,6 +3,7 @@ import {
   Badge, Box, Chip, Popover, Stack, Typography,
 } from "@mui/material";
 import type { TraceEntry } from "../../api/types";
+import { arbiterDecisionText, isUnresolved } from "./arbiterDecisionText";
 
 // ─── Chip appearance per event type ──────────────────────────────────────────
 
@@ -40,6 +41,11 @@ function chipFor(event: TraceEntry): ChipProps {
       return {
         label: event.active ? `⚡ dispatch ${event.setpoint_kw ?? "?"} kW` : "⚡ dispatch cleared",
         color: "error",
+      };
+    case "ArbiterDecision":
+      return {
+        label: `⚖ ${event.pass}: ${event.active_lever ?? "released"}`,
+        color: isUnresolved(event) ? "error" : "info",
       };
   }
 }
@@ -142,6 +148,15 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" display="block">
             {event.active ? `active · ${event.setpoint_kw ?? "?"} kW` : "cleared"}
           </Typography>
+        </>
+      );
+    case "ArbiterDecision":
+      return (
+        <>
+          {countHeader}
+          <Typography variant="caption" fontWeight="bold">ArbiterDecision</Typography>
+          <Typography variant="caption" display="block">ts: {ts}</Typography>
+          <Typography variant="caption" display="block">{arbiterDecisionText(event)}</Typography>
         </>
       );
   }
