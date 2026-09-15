@@ -1,3 +1,29 @@
+one-concept-one-function (the rule above all others for code; older code and docs cite it as
+`generic-over-bespoke`): every concept this project
+computes has exactly ONE implementation, and every caller calls it. The recurring root cause of
+this project's bugs is the same logic living in several places, each copy a little different —
+GB-48: "when does interval i of an OpenADR event run" was decided in seven parsers with four
+rules, and "which limit applies at t" in three places. The differences between copies ARE the
+bugs.
+  - Search before you write. Before adding any logic, grep for the concept, not for the name you
+    would give your function: its domain words, the spec field names, the UI label, the unit
+    suffix, the shapes it takes (`interval_start <= now`, `.intervalPeriod`, `.min(`). Read what
+    you find. "I didn't find it" must mean "I searched for it".
+  - Found once: call it. If it doesn't quite fit, change the shared function (with its tests) so
+    both callers use it. Never copy-paste-and-adapt.
+  - Found twice or more, even slightly different: consolidate into one shared function in the
+    same piece of work, delete the copies, and pin the unified behaviour with tests. Never add a
+    third copy "for now".
+  - Generalise the primitive, not the call site: when several call sites solve the same shape
+    with near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`), name the
+    general pattern and push it into the shared component so it applies by construction to every
+    current and future case, instead of a helper each caller must remember to invoke.
+  - Every plan and openspec design names the existing functions it reuses or consolidates (an
+    inventory of where the concept lives today). A design that adds logic without that inventory
+    is incomplete. Copies you find but cannot consolidate in reach go into
+    docs/reference/TECHNICAL_DEBTS.md immediately.
+Small code is the goal: fewer places that know a rule means fewer places that can get it wrong.
+
 docker: docker runs on ssh Node1 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
 docker-compose stack) or ssh Node2 (secondary — ven-4 + build/test offload, see
 VEN/scale_out/node2/). Run tasks with docker on the intended host via ssh in
@@ -236,15 +262,6 @@ of asking the asset (capability, flexibility floor, forced power, forecast). Fix
 reach in the same piece of work; record the rest in docs/reference/TECHNICAL_DEBTS.md. Test
 fixtures that hand-build an asset's capability are the same violation: build them from the real
 asset.
-
-generic-over-bespoke: when several call sites solve the same shape of problem with separate
-near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one boolean per
-case), stop and name the general pattern instead of writing another one-off. Prefer pushing
-the fix into the shared component/primitive so it applies by construction to every current
-and future case, over a helper function every caller must remember to invoke.
-Reuse means calling the same function. Never copy-paste-and-adapt existing logic; if the
-shared function doesn't quite fit the new caller, change it (with its tests) so both callers
-use it.
 
 declare-dont-branch: when a component handles N structurally-similar cases (one per series,
 one per asset, one per event type), don't dispatch between them with a chain of `if`/`switch`
