@@ -60,9 +60,9 @@ pub fn highest_power_step_at_or_below_kw(power_steps_kw: &[f64], kw: f64) -> f64
     };
     power_steps_kw
         .iter()
+        .rev()
         .copied()
-        .filter(|&step_kw| step_kw <= kw + 1e-9)
-        .last()
+        .find(|&step_kw| step_kw <= kw + 1e-9)
         .unwrap_or(lowest_kw)
 }
 
