@@ -204,6 +204,7 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
       { ts: nowMs + 300_000, values: { power_kw: 2.0 } },
     ];
     const capacity: CapacityCurvesResponse = {
+      start: new Date(nowMs).toISOString(),
       import: {
         direction: "import",
         start: new Date(nowMs).toISOString(),

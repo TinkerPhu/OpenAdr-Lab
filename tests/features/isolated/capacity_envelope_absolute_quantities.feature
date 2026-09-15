@@ -48,3 +48,28 @@ Feature: Unified capacity/envelope engine reports absolute quantities — isolat
     When I wait for PV to generate and capture the live site headroom with the live asset snapshot
     Then the live site headroom's import side equals the site's non-PV controllable assets' own import capability
     And the captured import capacity curve's first step equals the site's non-PV controllable assets' own import capability
+
+  # ── Move commitment start: curves anchored at a future plan slot ─────────
+  # movable-capacity-curve-start: what the Controller's "Move commitment start"
+  # cursor mode asks for when the user hovers the future part of Site Headroom.
+  # The exact seam is pinned by the Rust unit test
+  # `a_future_start_curve_touches_the_site_headroom_forecast_at_every_slot`;
+  # end to end, the band and the curves are two reads a few ms apart, so a
+  # tolerance absorbs live drift between them (base load noise).
+
+  @isolated
+  Scenario: Capacity curves requested for a future start begin at that plan slot, where they touch the headroom band
+    When I wait for the VEN site headroom forecast to be available
+    And I request the capacity curves starting 7 minutes into the site headroom forecast's third slot
+    Then the capacity curves are anchored at that slot's start
+    And the capacity curves' first steps equal that slot's site headroom
+
+  @isolated
+  Scenario: Capacity curves requested without a start are still anchored at now
+    When I request the capacity curves without a start
+    Then the capacity curves are anchored at now
+
+  @isolated
+  Scenario: A malformed commitment start is rejected
+    When I request the capacity curves starting at "not-a-time"
+    Then the capacity curves request is rejected as a bad request

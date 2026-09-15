@@ -105,10 +105,9 @@ pub(crate) fn simulated_trajectory(
 /// (deleted once this change lands; see `docs/history/project_journal.md`
 /// for the design record) before assuming this resolves more than it does.
 ///
-/// Not yet called from production code -- this change (`planstate-t1-resolver`)
-/// only builds and unit-tests the resolver; wiring it (and Spec C's
-/// `asset_max_power`) into the unified capacity/envelope engine is Spec E's job.
-#[allow(dead_code)]
+/// Called by `controller::capacity_headroom::compute_site_capacity_curves_at`
+/// (the Controller's "Move commitment start" capacity curves), together with
+/// `plan_state_boundary_at` below for the boundary it snapped to.
 pub fn resolve_plan_state_at(
     sim: &SimState,
     plan: &Plan,
@@ -125,25 +124,12 @@ pub fn resolve_plan_state_at(
         return live_snapshot();
     }
 
-    let future_slots: Vec<&PlanTimeSlot> = plan.all_slots().filter(|s| s.start >= now).collect();
+    let future_slots = remaining_slots(plan, now);
     if future_slots.is_empty() {
         return live_snapshot();
     }
 
-    // One boundary per `future_slots` entry (its `start`, matching
-    // `traj.points[i]`'s "state before this slot's own action" semantics)
-    // plus one trailing boundary at the last slot's own `end` — matching
-    // `simulated_trajectory`'s appended sentinel point, the one point that
-    // genuinely reflects the state AFTER the last remaining slot's action
-    // completes. Without this trailing boundary, `t1` at or past the plan's
-    // true horizon end would resolve to the second-to-last point instead
-    // (the last slot's own action still uncommitted), silently
-    // under-reporting the plan's real effect.
-    let boundaries: Vec<DateTime<Utc>> = future_slots
-        .iter()
-        .map(|s| s.start)
-        .chain(future_slots.last().map(|s| s.end))
-        .collect();
+    let boundaries = remaining_boundaries(&future_slots);
     sim.iter_assets()
         .map(|(entry, cfg)| {
             if cfg.asset_type_str() == "pv" {
@@ -158,6 +144,48 @@ pub fn resolve_plan_state_at(
                 .unwrap_or_else(|| entry.state.clone());
             (entry.id.clone(), state)
         })
+        .collect()
+}
+
+/// The plan boundary `resolve_plan_state_at(sim, plan, t1, now)` resolves `t1`
+/// to — `None` when it hands back the live state instead: `t1 <= now`, no
+/// remaining slot, or `t1` before the first remaining slot's start (the state
+/// there is still the live one). Same boundary list and snap-down rule as the
+/// resolver, so the two can't disagree about which instant a state belongs to.
+pub fn plan_state_boundary_at(
+    plan: &Plan,
+    t1: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    if t1 <= now {
+        return None;
+    }
+    let boundaries = remaining_boundaries(&remaining_slots(plan, now));
+    boundaries
+        .iter()
+        .rposition(|&b| b <= t1)
+        .map(|idx| boundaries[idx])
+}
+
+/// The plan's slots starting at or after `now` — the ones a forward
+/// re-simulation still has to walk.
+pub(crate) fn remaining_slots(plan: &Plan, now: DateTime<Utc>) -> Vec<&PlanTimeSlot> {
+    plan.all_slots().filter(|s| s.start >= now).collect()
+}
+
+/// One boundary per remaining slot (its `start`, matching `traj.points[i]`'s
+/// "state before this slot's own action" semantics) plus one trailing
+/// boundary at the last slot's own `end` — matching `simulated_trajectory`'s
+/// appended sentinel point, the one point that genuinely reflects the state
+/// AFTER the last remaining slot's action completes. Without this trailing
+/// boundary, `t1` at or past the plan's true horizon end would resolve to the
+/// second-to-last point instead (the last slot's own action still
+/// uncommitted), silently under-reporting the plan's real effect.
+fn remaining_boundaries(future_slots: &[&PlanTimeSlot]) -> Vec<DateTime<Utc>> {
+    future_slots
+        .iter()
+        .map(|s| s.start)
+        .chain(future_slots.last().map(|s| s.end))
         .collect()
 }
 
@@ -514,6 +542,63 @@ mod tests {
             "resolver={resolver_soc}, planner-believed={planner_believed_soc} -- \
              battery.rs and battery_milp.rs must agree on partial-cycle SoC now that both \
              use the symmetric sqrt(round_trip_efficiency) split"
+        );
+    }
+
+    // ── plan_state_boundary_at ──────────────────────────────────────────────
+
+    #[test]
+    fn plan_state_boundary_at_snaps_mid_slot_down_to_the_slot_start() {
+        let now = Utc::now();
+        let plan = make_plan(900, 4, now);
+        let t1 = plan.slots[2].start + Duration::minutes(7);
+        assert_eq!(
+            plan_state_boundary_at(&plan, t1, now),
+            Some(plan.slots[2].start)
+        );
+    }
+
+    #[test]
+    fn plan_state_boundary_at_keeps_an_exact_boundary() {
+        let now = Utc::now();
+        let plan = make_plan(900, 4, now);
+        assert_eq!(
+            plan_state_boundary_at(&plan, plan.slots[3].start, now),
+            Some(plan.slots[3].start)
+        );
+    }
+
+    #[test]
+    fn plan_state_boundary_at_past_the_horizon_is_the_last_slots_end() {
+        let now = Utc::now();
+        let plan = make_plan(900, 4, now);
+        let last_end = plan.slots[3].end;
+        assert_eq!(
+            plan_state_boundary_at(&plan, last_end + Duration::hours(3), now),
+            Some(last_end)
+        );
+    }
+
+    #[test]
+    fn plan_state_boundary_at_is_none_where_the_resolver_returns_the_live_state() {
+        // The plan started 5 min ago: its first slot is no longer remaining,
+        // so the first remaining boundary is slot 1's start (now + 10 min).
+        let now = Utc::now();
+        let plan = make_plan(900, 4, now - Duration::minutes(5));
+        assert_eq!(plan_state_boundary_at(&plan, now, now), None);
+        assert_eq!(
+            plan_state_boundary_at(&plan, now - Duration::minutes(1), now),
+            None
+        );
+        assert_eq!(
+            plan_state_boundary_at(&plan, now + Duration::minutes(3), now),
+            None,
+            "before the first remaining boundary the resolver still hands back live state"
+        );
+        assert_eq!(
+            plan_state_boundary_at(&make_plan(900, 0, now), now + Duration::hours(1), now),
+            None,
+            "no remaining slot"
         );
     }
 }

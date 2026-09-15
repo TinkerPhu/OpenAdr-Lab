@@ -554,12 +554,14 @@ which is out of scope. A future reader should not assume this resolver
 predicts PV curtailment — it doesn't, and that's documented rather than
 silently wrong.
 
-`resolve_plan_state_at` itself is not called by the unified engine (§3.0c) —
-that engine reuses `simulated_trajectory` directly, once per asset for the whole
-remaining horizon, rather than calling this per-`t1` resolver in a loop (which
-would redundantly re-walk the same trajectory for every `t1` requested). The
-resolver remains available (`#[allow(dead_code)]`) for a future caller that
-genuinely needs a single arbitrary `t1`, not a sweep.
+The resolver's caller is the single-`t1` slice of §3.0c,
+`compute_site_capacity_curves_at` (the Controller's "Move commitment start"
+curves). Its sibling `plan_state_boundary_at(plan, t1, now)` reports which
+boundary the resolver snapped to, from the same boundary list, or `None` where the
+resolver hands back the live state (`t1 <= now`, no remaining slot, `t1` before the
+first remaining slot's start). The site-headroom sweep does not loop over the
+resolver; it walks `simulated_trajectory` once per asset for the whole remaining
+horizon instead of re-walking it for every slot.
 
 ### 3.0c Unified Capacity/Headroom Engine (`unified-capacity-envelope-engine`, Spec E)
 
@@ -576,8 +578,29 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   onto their shared 60s grid, deduplicated into sparse `CapacityCurveStep`s.
 - **Site Headroom, forecast** (Controller/History) — `compute_site_headroom_forecast`:
   `t2 = 0` fixed, sweep `t1` across the plan's remaining slots.
-  `simulated_trajectory` called once per asset, `max_effort_setpoint` read at
-  every slot's point for both directions.
+  `simulated_trajectory` called once per asset; each slot is the `t2 = 0` point
+  of the shared curve computation, started from that slot's trajectory states.
+- **Capacity Forecast from a future start** (Controller → Site Headroom, "Move
+  commitment start" cursor mode, `GET /flexibility/capacity?start=`) —
+  `compute_site_capacity_curves_at`: `t1` = the remaining plan slot boundary the
+  requested start snaps down to (clamped to the last remaining slot's start),
+  each asset starting from `resolve_plan_state_at`'s state there, sweep `t2` to
+  the plan's horizon end. Computed on demand under the `SimState` lock; `None`
+  wherever the start resolves to now, where the route serves the per-tick curves
+  instead. The response's `start` is the instant actually used.
+
+All slices go through one private function, `site_capacity_curve_from(direction,
+t1, t2_max, sim, state_of, …)`. They differ only in `t1`, `t2_max`, and whether each
+asset starts from its live or its plan-forecasted state; asset configs (PV's
+weather series, the EV's departure, base load's heuristic) always come from the
+live `SimState`. So a curve anchored at any slot touches the band there by
+construction — pinned by
+`a_future_start_curve_touches_the_site_headroom_forecast_at_every_slot`
+(`capacity_headroom.rs`, a mixed fleet with plan-curtailed PV). A `t2 = 0`
+point asks each asset's `max_effort_schedule` for a zero-length window, so
+every asset must answer that window with the same value its longer schedules
+start with. `ShiftableLoadAsset` does this by applying its own placement at
+`t1` (drawing if its run is placed at or before `t1`).
 - **Site Headroom, live/history** (same UI panel's other half, `GET
   /flexibility`/`GET /flexibility/history`) — `controller/site_headroom.rs`'s
   `compute_site_headroom`: `t1 = now` only, `t2 = 0` (the degenerate case of
@@ -605,21 +628,22 @@ own module is the sole authority for its forecast, per the
 three slices**: PV can always be curtailed to 0, so the Import commitment's
 `max_effort_setpoint` is `0.0`, and `PvInverter::simulate_forward` treats each
 setpoint as PV's allowed export magnitude (`|setpoint|` kW — `0.0` curtails to
-0, `default_setpoint()`'s `f64::MAX` leaves generation uncapped). Export at
-`t = now` uses the live measurement when present (`measured.or(weather)`,
-exactly `max_effort_setpoint`'s Physical answer); later points use the weather
-forecast (or the sin model). Guarded by mixed battery+PV tests
-(`site_headroom.rs`, `capacity_headroom.rs`) and the "PV generation never
-reduces the live Site Headroom import side" scenario in
-`tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
-`simulated_trajectory` runs an asset the plan doesn't allocate (PV is never in
-the MILP allocations) at its own `default_setpoint()` — the same fallback the
-live tick uses (`SimState::tick`). `compute_site_headroom_forecast` keeps one
-small PV-specific branch reading the trajectory's own `power_kw` directly
-instead of calling `max_effort_setpoint` again per point, since
-`PvInverter::max_effort_setpoint` deliberately ignores `state` for the
-Physical tier (unlike a SoC-based asset's `state`, which a future trajectory
-point naturally varies).
+0, `default_setpoint()`'s `f64::MAX` leaves generation uncapped). PV's
+projections measure elapsed time from the instant its live inputs were
+captured (`PvInverter::live_inputs_at`, set each tick from `TickOverrides.now`),
+not from the start of whatever schedule they're handed. So Export at that
+instant (`t = now`) uses the live measurement when present (`measured.or(weather)`,
+exactly `max_effort_setpoint`'s Physical answer), while any later point uses the
+weather forecast (or the sin model with the manual-inject offset decayed from
+capture time), including the first point of a schedule starting at a future
+slot. The Export side is uncurtailed in every slice, since a planned PV
+curtailment can always be released. Guarded by mixed battery+PV tests
+(`site_headroom.rs`, `capacity_headroom.rs`), PV's own
+`*_from_a_future_*_uses_the_forecast_not_the_live_measurement` tests (`pv.rs`),
+and the "PV generation never reduces the live Site Headroom import side"
+scenario in `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
+`simulated_trajectory` runs an asset the plan doesn't allocate at its own
+`default_setpoint()`, the same fallback the live tick uses (`SimState::tick`).
 
 **`CapacityCurve`/`CapacityCurveStep::power_kw` is SIGNED** (positive =
 import, negative = export — the same convention `max_effort_setpoint`/

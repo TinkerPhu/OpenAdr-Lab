@@ -330,9 +330,6 @@ impl Asset for ShiftableLoadAsset {
         let AssetState::ShiftableLoad(s) = state else {
             unreachable!("ShiftableLoadAsset/state mismatch")
         };
-        if t_end <= t1 {
-            return vec![(t1, 0.0), (t1, 0.0)];
-        }
         let start = if s.started {
             t1
         } else {
@@ -344,6 +341,14 @@ impl Asset for ShiftableLoadAsset {
                 }
             }
         };
+        if t_end <= t1 {
+            // Zero-length commitment (the `t2 = 0` headroom point): the same
+            // placement decided at `t1` itself — drawing if the run is placed
+            // at or before `t1`, the same first value a longer commitment
+            // from `t1` reports.
+            let power_kw = if start <= t1 { self.power_kw } else { 0.0 };
+            return vec![(t1, power_kw), (t1, power_kw)];
+        }
         if start >= t_end {
             // Can't even begin within the queried window.
             return vec![(t1, 0.0), (t_end, 0.0)];
@@ -534,6 +539,60 @@ mod tests {
             earliest_start: now,
             latest_end: now + Duration::hours(4),
         }
+    }
+
+    /// The `t2 = 0` point of a sustained commitment starting at `t1` — what
+    /// the Site Headroom band reads at every slot.
+    fn instant_max_kw(
+        l: &ShiftableLoadAsset,
+        t1: DateTime<Utc>,
+        direction: CommitmentDirection,
+    ) -> f64 {
+        crate::assets::asset_max_power_series(
+            l,
+            &AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
+            t1,
+            Duration::zero(),
+            direction,
+            LimitTier::Physical,
+        )[0]
+        .1
+    }
+
+    #[test]
+    fn a_zero_length_commitment_reports_the_load_where_its_placement_has_it_running() {
+        // Import places the run at its earliest start, Export at its latest:
+        // at that instant the load is drawing, so the instant answer must
+        // match the first point of a longer commitment from the same `t1`.
+        let l = load(2.0, 60);
+        let latest_start = l.latest_end - Duration::minutes(60);
+        assert_eq!(
+            instant_max_kw(&l, l.earliest_start, CommitmentDirection::Import),
+            2.0
+        );
+        assert_eq!(
+            instant_max_kw(&l, latest_start, CommitmentDirection::Export),
+            2.0
+        );
+    }
+
+    #[test]
+    fn a_zero_length_commitment_reports_nothing_where_the_load_is_not_yet_placed() {
+        let l = load(2.0, 60);
+        assert_eq!(
+            instant_max_kw(
+                &l,
+                l.earliest_start - Duration::minutes(5),
+                CommitmentDirection::Import
+            ),
+            0.0,
+            "before its window opens"
+        );
+        assert_eq!(
+            instant_max_kw(&l, l.earliest_start, CommitmentDirection::Export),
+            0.0,
+            "Export defers the run to its latest start"
+        );
     }
 
     #[test]

@@ -12,7 +12,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-const { lines, legends, tooltips, areas, xAxes, yAxes } = vi.hoisted(() => ({
+const { lines, legends, tooltips, areas, xAxes, yAxes, charts } = vi.hoisted(() => ({
+  charts: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
   yAxes: [] as Array<Record<string, unknown>>,
   legends: [] as Array<Record<string, unknown>>,
@@ -22,7 +23,10 @@ const { lines, legends, tooltips, areas, xAxes, yAxes } = vi.hoisted(() => ({
 }));
 
 vi.mock("recharts", () => ({
-  ComposedChart: ({ children }: { children: ReactNode }) => children,
+  ComposedChart: (props: Record<string, unknown> & { children: ReactNode }) => {
+    charts.push(props);
+    return props.children;
+  },
   ResponsiveContainer: ({ children }: { children: ReactNode }) => children,
   CartesianGrid: () => null,
   XAxis: (props: Record<string, unknown>) => {
@@ -484,5 +488,50 @@ describe("TimeSeriesChart — rounded Y ticks (applied by the composition, not t
     const axis = yAxes.find((a) => a.yAxisId === "state")!;
     expect(axis.domain).toEqual([0, 1]);
     expect(axis.ticks).toBeUndefined();
+  });
+});
+
+describe("TimeSeriesChart — cursor hooks", () => {
+  beforeEach(() => {
+    charts.length = 0;
+  });
+
+  const renderChart = (props: {
+    onCursorMove?: (tsMs: number | null) => void;
+    onCursorDoubleClick?: (tsMs: number) => void;
+  }) =>
+    render(<TimeSeriesChart data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} {...props} />);
+
+  const chartHandler = (name: string) => charts[charts.length - 1][name] as (state: unknown) => void;
+
+  it("reports the hovered row's ts, and null once the cursor leaves the plot", () => {
+    const onCursorMove = vi.fn();
+    renderChart({ onCursorMove });
+    chartHandler("onMouseMove")({ activeLabel: 2000 });
+    chartHandler("onMouseLeave")({});
+    expect(onCursorMove.mock.calls).toEqual([[2000], [null]]);
+  });
+
+  it("reports null while the cursor is over the plot but on no row", () => {
+    const onCursorMove = vi.fn();
+    renderChart({ onCursorMove });
+    chartHandler("onMouseMove")({ activeLabel: undefined });
+    expect(onCursorMove).toHaveBeenCalledWith(null);
+  });
+
+  it("reports the ts under a double-click, and nothing without an active row", () => {
+    const onCursorDoubleClick = vi.fn();
+    renderChart({ onCursorDoubleClick });
+    chartHandler("onDoubleClick")({ activeLabel: 1000 });
+    chartHandler("onDoubleClick")({});
+    expect(onCursorDoubleClick.mock.calls).toEqual([[1000]]);
+  });
+
+  it("charts without the hooks register no mouse handlers", () => {
+    renderChart({});
+    const chart = charts[charts.length - 1];
+    expect(chart.onMouseMove).toBeUndefined();
+    expect(chart.onMouseLeave).toBeUndefined();
+    expect(chart.onDoubleClick).toBeUndefined();
   });
 });

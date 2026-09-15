@@ -442,6 +442,9 @@ pub trait TickOverridable {
 /// kinds, each reading only its own fields — same shape as
 /// `MilpParticipant::build_milp_context`'s signature, shared by 3 kinds.
 pub struct TickOverrides {
+    /// This tick's instant — the moment every live input below was captured.
+    pub now: DateTime<Utc>,
+
     // PV
     pub pv_irradiance: f64,
     pub pv_irradiance_offset: f64,

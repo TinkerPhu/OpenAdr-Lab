@@ -624,8 +624,12 @@ export type CapacityCurve = {
 };
 
 /** `GET /flexibility/capacity` response body — both directions in one
- * response (mirrors `SiteHeadroomChart`'s up/down pairing convention). */
+ * response (mirrors `SiteHeadroomChart`'s up/down pairing convention).
+ * `start` is the instant both curves are anchored at: the per-tick "now", or
+ * for a `?start=` request the plan slot the requested start snapped down to
+ * (or "now" again when there was no plan slot to anchor at). */
 export type CapacityCurvesResponse = {
+  start: string;
   import: CapacityCurve;
   export: CapacityCurve;
 };

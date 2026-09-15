@@ -6,6 +6,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+use crate::common::{Interpolation, TimeSeries};
+
 use super::pv::{PvInverter, PvPowerInputs, PvState};
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
@@ -138,22 +140,23 @@ impl PvInverter {
             schedule.push((t_end, setpoint));
             return schedule;
         }
-        // t1 itself: identical to max_effort_setpoint's answer — a live
-        // measurement wins at elapsed_s=0 (see uncurtailed_power_kw_at),
-        // otherwise weather_forecast is sampled at t1 the same way
-        // weather_power_kw already is for "now".
+        // `elapsed_s` counts from when the live inputs were captured, not
+        // from `t1`: at the capture instant (a commitment starting now) a
+        // live measurement wins, matching max_effort_setpoint's answer (see
+        // uncurtailed_power_kw_at); a commitment starting at a future `t1`
+        // reads the weather forecast there instead.
         if t_end <= t1 {
-            let v = self.uncurtailed_power_kw_at(t1, 0.0);
+            let v = self.uncurtailed_power_kw_at(t1, self.elapsed_since_live_inputs_s(t1, t1));
             return vec![(t1, v), (t1, v)];
         }
         let mut schedule = Vec::new();
         let mut t = t1;
         while t < t_end {
-            let elapsed_s = (t - t1).num_seconds() as f64;
+            let elapsed_s = self.elapsed_since_live_inputs_s(t, t1);
             schedule.push((t, self.uncurtailed_power_kw_at(t, elapsed_s)));
             t += Duration::seconds(60);
         }
-        let elapsed_s = (t_end - t1).num_seconds() as f64;
+        let elapsed_s = self.elapsed_since_live_inputs_s(t_end, t1);
         schedule.push((t_end, self.uncurtailed_power_kw_at(t_end, elapsed_s)));
         schedule
     }
@@ -175,9 +178,10 @@ impl PvInverter {
     /// generation-limit slider): `0.0` — the Import commitment's
     /// `max_effort_setpoint` — curtails to 0, and `default_setpoint()`
     /// (`f64::MAX`) leaves generation uncapped.
-    /// `elapsed_s` is measured from `setpoints[0].0`, matching every caller's
-    /// own convention (`asset_max_power_series`/`simulated_trajectory` both
-    /// build `setpoints` starting at their own commitment/forecast origin).
+    /// `elapsed_s` is measured from the live inputs' capture instant
+    /// (`elapsed_since_live_inputs_s`), not from `setpoints[0].0` — a
+    /// trajectory starting at a future plan slot must not treat that slot as
+    /// "now" (reuse the live measurement, restart the offset decay).
     pub(super) fn simulate_forward_inner(
         &self,
         initial: &AssetState,
@@ -192,7 +196,7 @@ impl PvInverter {
         let points = setpoints
             .iter()
             .map(|&(ts, setpoint_kw)| {
-                let elapsed_s = (ts - t0).num_seconds() as f64;
+                let elapsed_s = self.elapsed_since_live_inputs_s(ts, t0);
                 let power_kw = self
                     .uncurtailed_power_kw_at(ts, elapsed_s)
                     .max(-setpoint_kw.abs());
@@ -208,5 +212,58 @@ impl PvInverter {
             })
             .collect();
         Trajectory { points }
+    }
+
+    /// Seconds from the live inputs' capture instant to `ts` — the `elapsed_s`
+    /// `uncurtailed_power_kw_at` needs. Falls back to `origin` (the caller's
+    /// own schedule start) only when no tick has set `live_inputs_at`.
+    pub(crate) fn elapsed_since_live_inputs_s(
+        &self,
+        ts: DateTime<Utc>,
+        origin: DateTime<Utc>,
+    ) -> f64 {
+        (ts - self.live_inputs_at.unwrap_or(origin))
+            .num_seconds()
+            .max(0) as f64
+    }
+
+    /// D5: samples the same weather/decay-aware `uncurtailed_power_kw_at` path
+    /// `max_effort_schedule` uses, rather than the bare sin model. Still applies the
+    /// currently-active `generation_limit_kw` (this represents expected actual output,
+    /// curtailment included — unlike `max_effort_schedule`'s deliberately-uncurtailed
+    /// `Physical` tier).
+    pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
+        if timespan <= Duration::zero() {
+            return TimeSeries::empty(Interpolation::Linear);
+        }
+        let end = now + timespan;
+        let curtailed = |uncurtailed_kw: f64| -> f64 {
+            self.generation_limit_kw
+                .map(|lim| uncurtailed_kw.max(lim))
+                .unwrap_or(uncurtailed_kw)
+        };
+        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
+
+        let mut t = now;
+        while t < end {
+            let elapsed_s = (t - now).num_seconds() as f64;
+            samples.push((t, curtailed(self.uncurtailed_power_kw_at(t, elapsed_s))));
+            t += Duration::seconds(60);
+        }
+        let elapsed_s = (end - now).num_seconds() as f64;
+        samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
+
+        if samples.len() >= 2 {
+            let n = samples.len();
+            if (samples[n - 2].0 - samples[n - 1].0).num_seconds().abs() < 1 {
+                samples.truncate(n - 1);
+                samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
+            }
+        }
+
+        TimeSeries {
+            samples,
+            interpolation: Interpolation::Linear,
+        }
     }
 }

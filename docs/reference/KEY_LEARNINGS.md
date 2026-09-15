@@ -1922,3 +1922,30 @@ summary that collapses a schedule is fine for display, never for enforcement at 
 
 **How to apply:** stop remote runs by container (`docker rm -f <run container>`) or by PID from
 `pgrep`, and launch in a separate `ssh` call.
+
+## A projection that assumes it starts "now" breaks the first time a caller starts it later (movable-capacity-curve-start, 2026-09-15)
+
+PV's projections measured `elapsed_s` (which decides "live measurement or forecast" and how far
+the manual-inject offset has decayed) from the first point of whatever schedule they were handed.
+That was only correct while every schedule started at now. The first caller to start one at a
+future plan slot silently got today's live meter reading for that slot. Nothing failed; the value
+was just plausible. It only surfaced because the test written first asserted that two slices of
+the same domain (band at slot k, curve starting at slot k) agree exactly. The same test caught a
+second hidden assumption: `ShiftableLoadAsset` had a special branch for zero-length windows that
+returned 0 kW, diverging from what its own longer schedules report at the same instant.
+
+**How to apply:** when a function takes a time series or schedule, check what it uses as its
+time origin, and whether that origin is a fact about the world (when the inputs were captured) or
+about the call (where the schedule happens to begin). Store the former on the owner, not in the
+caller's arguments. And a degenerate-input branch (empty window, zero length) must return the
+limit of the general case, not a separately invented value. Assert that directly.
+
+## `run_all_tests.sh` started on the docker host itself: never set `DOCKER_HOST` (2026-09-15)
+
+The script's host variable is named `DOCKER_HOST`, which is also the Docker CLI's own variable.
+Started on Node2 itself, `DOCKER_HOST=` (empty) is treated as unset, so the script falls back to
+Node1 and tries to take Node1's lock over SSH. `DOCKER_HOST=localhost` is exported to every
+`docker` call, which then dials `tcp://localhost:2375` and fails. **How to apply:** on the host
+itself, run `env -u DOCKER_HOST OPENADR_LAB_HOST=localhost setsid nohup bash run_all_tests.sh … &`.
+The script then sees a local host and runs docker directly, without its own lock, so hold the
+host's lock yourself for the whole run.

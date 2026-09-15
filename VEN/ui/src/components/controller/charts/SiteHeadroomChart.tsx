@@ -1,3 +1,4 @@
+import { ReferenceLine } from "recharts";
 import type { AssetTimelinePoint } from "../types";
 import type {
   CapacityCurvesResponse,
@@ -43,7 +44,15 @@ interface SiteHeadroomChartProps {
   /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:30, ...) instead of
    * recharts' default "nice" ticks — same mechanism as GridRatesChart/TariffEnvelopeChart. */
   xAxisTickIntervalMinutes?: number;
+  /** "Move commitment start" mode: marks the instant the commitment curves are anchored
+   * at when that is not now (`capacity.start`, as the server reported it). */
+  commitmentStartMs?: number | null;
+  /** Forwarded to `TimeSeriesChart`'s generic cursor hooks. */
+  onCursorMove?: (tsMs: number | null) => void;
+  onCursorDoubleClick?: (tsMs: number) => void;
 }
+
+const COLOR_COMMITMENT_START = "#6A1B9A";
 
 /**
  * BL-43 / `unified-capacity-envelope-engine` (Spec E): live site-level flexibility
@@ -58,8 +67,11 @@ interface SiteHeadroomChartProps {
  *
  * Also overlays the sustained-commitment capacity curves (`GET /flexibility/capacity`,
  * `controller::capacity_headroom::compute_site_capacity_curve`) as dashed step-lines,
- * starting exactly at `now` with no backward extension (that endpoint's `t1` is always
- * "now" — there is no meaningful past value for it, unlike the band's own history).
+ * starting exactly at `capacity.start` with no backward extension — "now" by default, or,
+ * in the cell's "Move commitment start" mode, the future plan slot the server anchored them
+ * at (`?start=`, `compute_site_capacity_curves_at`), marked by a vertical line. A curve
+ * always touches the band at its own start: the band's value there is the same backend
+ * function's `t2 = 0` point.
  * Since `up_kw`/`down_kw` are now literally `compute_site_capacity_curve`'s own `t2 = 0`
  * point (`site-capacity-seam-unification`), the band and these dashed lines touch exactly
  * at `t = now` for both directions — no longer two independent computations that merely
@@ -82,6 +94,9 @@ export function SiteHeadroomChart({
   hoursForward = 1.0,
   height,
   xAxisTickIntervalMinutes,
+  commitmentStartMs = null,
+  onCursorMove,
+  onCursorDoubleClick,
 }: SiteHeadroomChartProps) {
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
@@ -232,6 +247,22 @@ export function SiteHeadroomChart({
       ]}
       nowMs={nowMs}
       referenceAxisId="power"
+      extraReferenceAreas={
+        commitmentStartMs === null
+          ? undefined
+          : [
+              <ReferenceLine
+                key="commitment-start"
+                yAxisId="power"
+                x={commitmentStartMs}
+                stroke={COLOR_COMMITMENT_START}
+                strokeDasharray="2 2"
+                label={{ value: "START", position: "top", fontSize: 9, fill: COLOR_COMMITMENT_START }}
+              />,
+            ]
+      }
+      onCursorMove={onCursorMove}
+      onCursorDoubleClick={onCursorDoubleClick}
       height={height ?? CELL_CHART_HEIGHT}
       // No right-side axis here (single "power" axis, left only), but this chart is
       // stacked in the same column as TariffEnvelopeChart/GridRatesChart/AssetTimelineChart,
