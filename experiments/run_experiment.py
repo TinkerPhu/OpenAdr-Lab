@@ -534,6 +534,21 @@ def fetch_forecast_accuracy(out_dir, vens, fleet_map, t_from, t_to):
         )
 
 
+def new_arbiter_decisions(events, seen):
+    """GB-47: the `ArbiterDecision` entries of a GET /trace/events response (newest
+    first) not logged yet, oldest first. `seen` holds (ts, pass) keys and is updated —
+    the ring is re-read every poll, so the same decision comes back until evicted."""
+    fresh = []
+    for e in reversed(events or []):
+        if e.get("type") != "ArbiterDecision":
+            continue
+        key = (e.get("ts"), e.get("pass"))
+        if key not in seen:
+            seen.add(key)
+            fresh.append(e)
+    return fresh
+
+
 def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
     """Background poll loop (runs for the scenario's duration): every
     `interval_s`, GET /plan on each VEN and append the fields useful for
@@ -554,14 +569,29 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
     # GB-46: each newly adopted plan's per-slot allocations, for plan-vs-actual analysis
     # after the fact (GB-41: did the plan ever schedule the EV? S-7: what did ven-12 plan?).
     plan_handles = {ven: open(out_dir / f"{ven}-plans.jsonl", "a", encoding="utf-8") for ven in vens}
+    # GB-47: the arbiter's decisions (limit enforcement / deviation correction), from the
+    # VEN's controller event log, so a pass can be traced to the lever that achieved it.
+    arbiter_handles = {ven: open(out_dir / f"{ven}-arbiter-events.jsonl", "a", encoding="utf-8") for ven in vens}
+    arbiter_seen = {ven: set() for ven in vens}
     last_plan_id = {}
     try:
-        while not stop_event.is_set():
+        while True:
+            # One last poll after the stop signal, so decisions from the final
+            # interval (e.g. the limit released at window end) are not lost.
+            stopping = stop_event.is_set()
             for ven in vens:
                 entry = fleet_map.get(ven, {"host": "local", "port": None})
                 if entry.get("port") is None:
                     continue
                 base = _ven_base_url(entry)
+                try:
+                    r = requests.get(f"{base}/trace/events", params={"limit": 500}, timeout=10)
+                    r.raise_for_status()
+                    for e in new_arbiter_decisions(r.json(), arbiter_seen[ven]):
+                        arbiter_handles[ven].write(json.dumps(e) + "\n")
+                    arbiter_handles[ven].flush()
+                except requests.RequestException as e:
+                    print(f"WARN: arbiter events {ven}: {e}")
                 try:
                     r = requests.get(f"{base}/plan", timeout=10)
                     r.raise_for_status()
@@ -593,9 +623,11 @@ def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
                     }
                 handles[ven].write(json.dumps(record) + "\n")
                 handles[ven].flush()
+            if stopping:
+                break
             stop_event.wait(interval_s)
     finally:
-        for f in list(handles.values()) + list(plan_handles.values()):
+        for f in list(handles.values()) + list(plan_handles.values()) + list(arbiter_handles.values()):
             f.close()
 
 
@@ -1456,6 +1488,18 @@ def _self_check_gb46_harness():
     rec, last = plan_record_if_new(plan, "p1")
     assert rec is None and last == "p1"
     assert plan_record_if_new(None, "p1") == (None, "p1")
+
+    # GB-47 arbiter decisions: only ArbiterDecision entries, oldest first, each once.
+    seen = set()
+    ring = [  # GET /trace/events: newest first
+        {"type": "ArbiterDecision", "ts": "t2", "pass": "limit", "active_lever": None},
+        {"type": "PlanCycle", "ts": "t1", "trigger_reason": "Periodic", "total_slots": 48},
+        {"type": "ArbiterDecision", "ts": "t0", "pass": "limit", "active_lever": "battery"},
+    ]
+    assert [e["ts"] for e in new_arbiter_decisions(ring, seen)] == ["t0", "t2"]
+    ring.insert(0, {"type": "ArbiterDecision", "ts": "t3", "pass": "limit", "active_lever": "ev"})
+    assert [e["ts"] for e in new_arbiter_decisions(ring, seen)] == ["t3"], "re-read ring: only new"
+    assert new_arbiter_decisions(None, seen) == []
     print("_self_check_gb46_harness OK")
 
 

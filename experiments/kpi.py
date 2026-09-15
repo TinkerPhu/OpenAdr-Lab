@@ -96,32 +96,85 @@ def tick_assets_by_minute(db_path, t_from, t_to):
     return by_minute
 
 
-def ven_compliance(db_path, t_from, t_to, windows, profile):
-    """GB-46: measured compliance per limit window for one VEN (see compliance.py)."""
+def ven_compliance(db_path, t_from, t_to, windows, profile, baseline=None):
+    """GB-46: measured compliance per limit window for one VEN (see compliance.py).
+    GB-47: each window also carries `utilisation` and `comfort` next to the pass bar,
+    against `baseline` = (db_path, t_from, t_to) of the paired baseline run, aligned
+    by minute offset from each run's own start."""
     rows = grid_rows(db_path, t_from, t_to)
     assets = tick_assets_by_minute(db_path, t_from, t_to)
     floor_by_ts = {ts: compliance.import_floor_kw(a, profile) for ts, a in assets.items()}
-    scored = [compliance.window_compliance(rows, w, floor_by_ts) for w in windows]
-    return [s for s in scored if s is not None], rows
+    base_import = base_assets = None
+    if baseline is not None:
+        b_db, b_from, b_to = baseline
+        base_import = {compliance.minute_index(r[0], b_from): r[1] for r in grid_rows(b_db, b_from, b_to)}
+        base_assets = {
+            compliance.minute_index(ts, b_from): a
+            for ts, a in tick_assets_by_minute(b_db, b_from, b_to).items()
+        }
+    scored = []
+    for w in windows:
+        result = compliance.window_compliance(rows, w, floor_by_ts)
+        if result is None:
+            continue
+        minutes = [r[0] for r in compliance.scored_rows(rows, w)]
+        result["utilisation"] = compliance.window_utilisation(rows, base_import, w, t_from)
+        result["comfort"] = compliance.window_comfort(
+            [assets.get(ts, {}) for ts in minutes],
+            None if base_assets is None
+            else [base_assets.get(compliance.minute_index(ts, t_from), {}) for ts in minutes],
+            profile,
+        )
+        scored.append(result)
+    return scored, rows
 
 
 def fleet_compliance_summary(per_ven):
-    """Per limit window: engaged VENs, how many of them passed, which failed."""
+    """Per limit window: engaged VENs, how many of them passed, which failed — and
+    (GB-47) the engaged VENs' mean utilisation and summed unused headroom, where a
+    paired baseline gave them one."""
     summary = {}
     for ven, results in per_ven.items():
         for r in results:
             key = (r["type"], r["at_minute"], r["direction"], r["limit_kw"])
-            s = summary.setdefault(key, {"engaged": 0, "passed": 0, "failing": []})
+            s = summary.setdefault(key, {"engaged": 0, "passed": 0, "failing": [], "_util": []})
             if r["engaged"]:
                 s["engaged"] += 1
                 if r["pass"]:
                     s["passed"] += 1
                 else:
                     s["failing"].append(ven)
-    return [
-        {"type": t, "at_minute": m, "direction": d, "limit_kw": lim, **s}
-        for (t, m, d, lim), s in sorted(summary.items(), key=lambda kv: (kv[0][1] or 0, kv[0][0]))
-    ]
+                if r.get("utilisation"):
+                    s["_util"].append(r["utilisation"])
+    out = []
+    for (t, m, d, lim), s in sorted(summary.items(), key=lambda kv: (kv[0][1] or 0, kv[0][0])):
+        util = s.pop("_util")
+        row = {"type": t, "at_minute": m, "direction": d, "limit_kw": lim, **s}
+        if util:
+            row["mean_utilisation"] = round(sum(u["utilisation"] for u in util) / len(util), 3)
+            row["unused_headroom_kwh"] = round(sum(u["unused_headroom_kwh"] for u in util), 4)
+        out.append(row)
+    return out
+
+
+def arbiter_decisions_summary(run_dir, ven):
+    """GB-47: the arbiter decisions the harness logged for this VEN
+    (`{ven}-arbiter-events.jsonl`, from GET /trace/events), per pass: how many, which
+    levers led, and the largest excess left unresolved. None when nothing was logged."""
+    path = Path(run_dir) / f"{ven}-arbiter-events.jsonl"
+    if not path.exists():
+        return None
+    by_pass = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        p = by_pass.setdefault(e["pass"], {"decisions": 0, "levers": set(), "max_unresolved_kw": 0.0})
+        p["decisions"] += 1
+        if e.get("active_lever"):
+            p["levers"].add(e["active_lever"])
+        p["max_unresolved_kw"] = max(p["max_unresolved_kw"], e.get("unresolved_kw") or 0.0)
+    return {k: {**v, "levers": sorted(v["levers"])} for k, v in by_pass.items()} or None
 
 
 def ven_kpis(db_path, t_from, t_to):
@@ -807,6 +860,53 @@ def _self_check():
 
     print("kpi.py self-check OK: grid_envelope_compliance, compliance_latency_s, tariff_response_correlation")
 
+    # GB-47: utilisation + comfort ride along each compliance window, against the
+    # paired baseline aligned by minute offset from each run's own start.
+    with tempfile.TemporaryDirectory() as tmp:
+        def grid_db(name, start, imports):
+            path = Path(tmp) / name
+            con = sqlite3.connect(path)
+            con.execute(
+                "CREATE TABLE grid_samples (ts INTEGER NOT NULL, import_kw REAL NOT NULL,"
+                " export_kw REAL NOT NULL, import_tariff_eur_kwh REAL, export_tariff_eur_kwh REAL,"
+                " co2_g_kwh REAL, import_limit_kw REAL, export_limit_kw REAL)"
+            )
+            con.executemany(
+                "INSERT INTO grid_samples VALUES (?, ?, 0, 0.25, 0.08, NULL, NULL, NULL)",
+                [(start + 60 * i, kw) for i, kw in enumerate(imports)],
+            )
+            con.commit()
+            con.close()
+            return path
+
+        run_start, base_start = int(t0), int(t0) + 7200  # baseline ran two hours later
+        run_db = grid_db("run.sqlite", run_start, [2.0] * 5 + [1.4] * 10)
+        base_db = grid_db("base.sqlite", base_start, [2.0] * 15)
+        win = {"type": "capacity_limit", "direction": "import", "limit_kw": 1.5,
+               "start_ts": run_start + 300, "end_ts": run_start + 900, "at_minute": 5}
+        results, _ = ven_compliance(run_db, run_start, run_start + 900, [win], {"assets": []},
+                                    baseline=(base_db, base_start, base_start + 900))
+        assert abs(results[0]["utilisation"]["utilisation"] - 1.4 / 1.5) < 1e-3, results[0]
+        assert results[0]["comfort"]["ev_kwh"] is None, results[0]
+        results, _ = ven_compliance(run_db, run_start, run_start + 900, [win], {"assets": []})
+        assert results[0]["utilisation"] is None, "no paired baseline, no utilisation"
+        summary = fleet_compliance_summary({"ven-1": [dict(results[0], utilisation={"utilisation": 0.9, "unused_headroom_kwh": 0.1})],
+                                            "ven-2": [dict(results[0], utilisation={"utilisation": 0.7, "unused_headroom_kwh": 0.3})]})
+        assert summary[0]["mean_utilisation"] == 0.8 and summary[0]["unused_headroom_kwh"] == 0.4, summary
+
+        # Arbiter decisions logged by the harness poller.
+        run_dir = Path(tmp)
+        events = [
+            {"type": "ArbiterDecision", "ts": "2026-01-01T10:06:00Z", "pass": "limit", "active_lever": "heater_pause", "unresolved_kw": 0.0},
+            {"type": "ArbiterDecision", "ts": "2026-01-01T10:07:00Z", "pass": "limit", "active_lever": "battery", "unresolved_kw": 0.4},
+            {"type": "ArbiterDecision", "ts": "2026-01-01T10:15:00Z", "pass": "limit", "active_lever": None, "unresolved_kw": 0.0},
+        ]
+        (run_dir / "ven-1-arbiter-events.jsonl").write_text("".join(json.dumps(e) + chr(10) for e in events), encoding="utf-8")
+        arb = arbiter_decisions_summary(run_dir, "ven-1")
+        assert arb == {"limit": {"decisions": 3, "levers": ["battery", "heater_pause"], "max_unresolved_kw": 0.4}}, arb
+        assert arbiter_decisions_summary(run_dir, "ven-missing") is None
+    print("kpi.py self-check OK: utilisation/comfort per window, arbiter_decisions_summary")
+
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
@@ -852,6 +952,7 @@ def main():
             baseline_dir_arg = str(auto_baseline)
 
     baseline = {}
+    baseline_window_by_ven = {}  # GB-47: per-window utilisation/comfort
     if baseline_dir_arg:
         bdir = Path(baseline_dir_arg)
         bmeta = json.loads((bdir / "run.json").read_text(encoding="utf-8"))
@@ -859,6 +960,7 @@ def main():
         for ven in bmeta["vens"]:
             db = bdir / f"{ven}-history.sqlite"
             if db.exists():
+                baseline_window_by_ven[ven] = (db, bfrom, bto)
                 k = ven_kpis(db, bfrom, bto)
                 if k:
                     baseline[ven] = {"energy_import_kwh": k["energy_import_kwh"], "cost_eur": k["cost_eur"]}
@@ -880,7 +982,9 @@ def main():
 
         profile_path = Path(args.profiles_dir) / f"{ven}.yaml"
         profile = yaml.safe_load(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {}
-        ven_windows, rows = ven_compliance(db, t_from, t_to, windows, profile)
+        ven_windows, rows = ven_compliance(
+            db, t_from, t_to, windows, profile, baseline_window_by_ven.get(ven)
+        )
         compliance_by_ven[ven] = ven_windows
         rows_by_ven[ven] = rows
 
@@ -943,6 +1047,9 @@ def main():
         fa = forecast_accuracy_summary(run_dir, ven)
         if fa is not None:
             mechanism_health["forecast_accuracy"] = fa
+        arbiter = arbiter_decisions_summary(run_dir, ven)
+        if arbiter is not None:
+            mechanism_health["arbiter_decisions"] = arbiter
 
         out["vens"][ven] = {
             "raw": k,
@@ -1010,8 +1117,10 @@ def print_compliance_table(out):
           f"within {fleet.get('pass_bar_s')} s, sustained) ===")
     for w in fleet.get("compliance", []):
         failing = ", ".join(w["failing"]) or "-"
+        util = (f"  utilisation {w['mean_utilisation']:.0%}  unused {w['unused_headroom_kwh']:.2f} kWh"
+                if "mean_utilisation" in w else "")
         print(f"  +{w['at_minute']} min {w['type']:<22} {w['direction']:<6} {w['limit_kw']:>5.2f} kW  "
-              f"engaged {w['engaged']:>2}  passed {w['passed']:>2}  failing: {failing}")
+              f"engaged {w['engaged']:>2}  passed {w['passed']:>2}{util}  failing: {failing}")
     for note in fleet.get("compliance_notes", []):
         print(f"  note: {note}")
     if "signal_integrity_mismatched_vens" in fleet:
