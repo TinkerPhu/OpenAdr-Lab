@@ -12532,3 +12532,53 @@ the cap.
 Operational lessons from the same day are in KEY_LEARNINGS ("Killing the process behind
 `docker compose run` does not stop the run container", "Worktrees must not share a cargo target
 dir").
+
+## 2026-09-15 — Arbiter limit enforcement: hard import limits met at execution (GB-47)
+
+What: the arbiter got a second pass. Deviation correction (`reconcile`, off by default) is
+unchanged in purpose; the new limit-enforcement pass (`controller::arbiter::limit`, on by
+default, switchable to measure the planner alone) runs last in every tick and sheds whatever
+projected import exceeds the hard limit in force — the VTN capacity import limit valid at `now`,
+or 0 during an alert — minus a 0.1 kW margin. Both passes run through one shared
+rank-and-apply function; their differences are a `LeverPolicy` value (the limit pass may cut
+planned EV charging and discharge under `MaxRevenue`) and a shared target (plan net capped at the
+limit), so they cannot steer against each other. The heater is now stage-aware everywhere: one
+quantization function used by the heater's own physics and the arbiter, exact stages when
+shedding, nothing to pause while the thermostat forces heat, emergency heat curtailed only in an
+alert. Decisions are visible: per-pass `GET /arbiter-diagnostics`, an edge-triggered
+`ArbiterDecision` controller event, both switches and readouts on the Devices page, the events
+in the Planner's Decision Trace. Fleet KPIs gained utilisation, unused headroom and comfort per
+limit window next to the unchanged pass bar; the harness logs the arbiter decisions.
+
+Why: the 2026-09-12/14 campaign met every alert and export cap but only 15 of 21 engaged
+import caps. Two causes: timed-out plans that scheduled a heater stage inside the cap (the cap
+is a penalised slack in the MILP), and unforecast base load nothing corrected. Deviation
+correction follows the plan, so it could not fix a plan that itself breaks the cap. The user
+decided on one arbiter with two switches instead of a parallel mechanism, and asked that its
+decisions be traceable.
+
+How it went: a behaviour-neutral refactor came first (levers read the setpoint map, `apply_*`
+report what they achieved, one shared loop); the full suite stayed green on it, which the step-2
+red run confirmed (exactly the six new tests failed, 1314 passed). One existing test changed form:
+`battery_lever_converges_not_oscillates_using_prev_setpoint` asserted on the lever that it reads
+`snap.setpoint_kw`; levers now read the map, and the rule "integrate from the last applied
+command, not the plan allocation" lives in `reconcile`, which seeds the map — so the test moved
+there (`reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation`), same scenario and
+expectation. The heater emergency tests changed expectation by decision: a penalty-inflated
+marginal cost no longer opens Curtail; an alert does.
+
+While wiring the limit source, `OadrCapacityState.import_limit_kw` turned out to fold in limits
+that have not started yet; the limit pass reads the priority-resolved per-interval schedule
+instead, and the planner's use of the scalar is recorded as GB-48 (KEY_LEARNINGS).
+
+Verified: fmt, clippy `-D warnings` and all 1342 Rust tests green on Node2 (the step-2
+red run failed exactly the six new tests); 638 UI tests, eslint clean; E2E 273/275 on the first
+run — only the two new scenarios failed, because the planner met the VTN cap by itself and the
+load inject was a one-tick spike (alpha 1.0). Reworked: a sustained step (alpha 0.0, released by
+`add_cleanup`) and, for the lever/trace/off-reference, the simulator's execution-only import
+limit; then 3/3, isolated 11/11, resilience green. On the fleet (details in
+`docs/history/fleet_run_journal.md`, "GB-47 verification"): with limit enforcement off, ven-10
+and ven-12 fail the S-7 cap again at 2.2 kW; with it on they hold their 0.5–0.7 kW floor, heater
+0.3 °C cooler than baseline, and the decisions log names the levers. A late review scoped the
+release hysteresis to switching levers (heater stage, EV floor) — applied to the battery it would
+have held import 0.2 kW further under the cap.
