@@ -106,6 +106,11 @@ def step_create_export_price_event(context):
 
 @given("I create an IMPORT_CAPACITY_LIMIT event with limit {limit:f} kW for the saved program")
 def step_create_capacity_limit_event(context, limit):
+    # A limit in force now, covering the planner's 24 h horizon. It used to
+    # start an hour in the future, which the scenarios using this step only
+    # passed with because the VEN applied a not-yet-started limit immediately
+    # and to every plan slot — the GB-48 bug. Announced limits have their own
+    # feature (ven_capacity_schedule.feature).
     r = vtn_post(
         "/events",
         context.vtn_token,
@@ -117,8 +122,8 @@ def step_create_capacity_limit_event(context, limit):
                 {
                     "id": 0,
                     "intervalPeriod": {
-                        "start": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "duration": "PT1H",
+                        "start": (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "duration": "PT26H",
                     },
                     "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [limit]}],
                 }
