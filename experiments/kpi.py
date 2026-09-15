@@ -157,10 +157,12 @@ def fleet_compliance_summary(per_ven):
     return out
 
 
-def arbiter_decisions_summary(run_dir, ven):
+def arbiter_decisions_summary(run_dir, ven, t_from, t_to):
     """GB-47: the arbiter decisions the harness logged for this VEN
-    (`{ven}-arbiter-events.jsonl`, from GET /trace/events), per pass: how many, which
-    levers led, and the largest excess left unresolved. None when nothing was logged."""
+    (`{ven}-arbiter-events.jsonl`, from GET /trace/events) within [t_from, t_to), per
+    pass: how many, which levers led, and the largest excess left unresolved. The VEN's
+    event ring outlives a run, so the log can hold earlier runs' decisions — only the
+    window counts. None when nothing falls in it."""
     path = Path(run_dir) / f"{ven}-arbiter-events.jsonl"
     if not path.exists():
         return None
@@ -169,6 +171,11 @@ def arbiter_decisions_summary(run_dir, ven):
         if not line.strip():
             continue
         e = json.loads(line)
+        # The VEN writes nanoseconds; fromisoformat takes at most microseconds.
+        iso_ts = re.sub(r"(\.\d{6})\d+", r"\1", e["ts"]).replace("Z", "+00:00")
+        ts = datetime.fromisoformat(iso_ts).timestamp()
+        if not t_from <= ts < t_to:
+            continue
         p = by_pass.setdefault(e["pass"], {"decisions": 0, "levers": set(), "max_unresolved_kw": 0.0})
         p["decisions"] += 1
         if e.get("active_lever"):
@@ -899,12 +906,17 @@ def _self_check():
         events = [
             {"type": "ArbiterDecision", "ts": "2026-01-01T10:06:00Z", "pass": "limit", "active_lever": "heater_pause", "unresolved_kw": 0.0},
             {"type": "ArbiterDecision", "ts": "2026-01-01T10:07:00Z", "pass": "limit", "active_lever": "battery", "unresolved_kw": 0.4},
-            {"type": "ArbiterDecision", "ts": "2026-01-01T10:15:00Z", "pass": "limit", "active_lever": None, "unresolved_kw": 0.0},
+            {"type": "ArbiterDecision", "ts": "2026-01-01T10:15:00.123456789Z", "pass": "limit", "active_lever": None, "unresolved_kw": 0.0},
         ]
         (run_dir / "ven-1-arbiter-events.jsonl").write_text("".join(json.dumps(e) + chr(10) for e in events), encoding="utf-8")
-        arb = arbiter_decisions_summary(run_dir, "ven-1")
+        w_from = int(datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc).timestamp())
+        arb = arbiter_decisions_summary(run_dir, "ven-1", w_from, w_from + 1800)
         assert arb == {"limit": {"decisions": 3, "levers": ["battery", "heater_pause"], "max_unresolved_kw": 0.4}}, arb
-        assert arbiter_decisions_summary(run_dir, "ven-missing") is None
+        # The VEN's event ring outlives a run: decisions from before the window are not this run's.
+        late = arbiter_decisions_summary(run_dir, "ven-1", w_from + 400, w_from + 1800)
+        assert late == {"limit": {"decisions": 2, "levers": ["battery"], "max_unresolved_kw": 0.4}}, late
+        assert arbiter_decisions_summary(run_dir, "ven-1", w_from + 1800, w_from + 3600) is None
+        assert arbiter_decisions_summary(run_dir, "ven-missing", w_from, w_from + 1800) is None
     print("kpi.py self-check OK: utilisation/comfort per window, arbiter_decisions_summary")
 
 
@@ -1047,7 +1059,7 @@ def main():
         fa = forecast_accuracy_summary(run_dir, ven)
         if fa is not None:
             mechanism_health["forecast_accuracy"] = fa
-        arbiter = arbiter_decisions_summary(run_dir, ven)
+        arbiter = arbiter_decisions_summary(run_dir, ven, t_from, t_to)
         if arbiter is not None:
             mechanism_health["arbiter_decisions"] = arbiter
 

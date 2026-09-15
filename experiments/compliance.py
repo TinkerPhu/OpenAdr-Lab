@@ -17,6 +17,9 @@ ENGAGED_FRACTION = 0.8
 # Minutes after a price interval starts during which the recorded tariff may still
 # lag (VEN event poll + 1-minute history sampling), skipped by signal_integrity.
 PRICE_PROPAGATION_S = 120
+# Below this much allowed import energy in a window (kWh) a utilisation ratio is
+# noise, not a measure (a baseline that exported or idled at 0 kW).
+MIN_ALLOWED_KWH = 0.01
 
 
 def _epoch(iso):
@@ -156,8 +159,8 @@ def window_utilisation(rows, baseline_import_by_minute, window, run_start_ts):
     baseline run (same scenario without events) at the same minute offset.
     utilisation = Σ actual / Σ allowed (> 1 = over); unused_headroom_kwh =
     Σ max(0, allowed − actual) / 60 — comfort or flexibility given up for nothing.
-    None for export windows, without a baseline, or when nothing was allowed
-    (an alert's 0 kW)."""
+    None for export windows, without a baseline, or when next to nothing was allowed
+    (an alert's 0 kW, a baseline that exported) — below MIN_ALLOWED_KWH."""
     if window["direction"] != "import" or not baseline_import_by_minute:
         return None
     actual_sum = allowed_sum = unused = 0.0
@@ -169,7 +172,7 @@ def window_utilisation(rows, baseline_import_by_minute, window, run_start_ts):
         actual_sum += r[1]
         allowed_sum += allowed
         unused += max(0.0, allowed - r[1])
-    if allowed_sum <= 0.0:
+    if allowed_sum / 60.0 < MIN_ALLOWED_KWH:
         return None
     return {
         "utilisation": round(actual_sum / allowed_sum, 3),
@@ -407,6 +410,10 @@ def _self_check_window_utilisation():
     base5 = [9.9] * 5 + [1.0] * 20
     aligned = window_utilisation(rows5, dict(enumerate(base5)), shifted, run_start_ts=T0S)
     assert abs(aligned["utilisation"] - 1.0) < 1e-3, aligned
+    # A baseline that allowed next to nothing (it exported, or idled at 0 kW) gives no
+    # meaningful ratio — campaign 2026-09-15 S-7 ven-5 read 2e16 — so None.
+    tiny = window_utilisation(_minute_rows([0.04] * 20), dict(enumerate([1e-17] * 20)), _window(), run_start_ts=T0S)
+    assert tiny is None, tiny
     # No baseline, or an export window → None.
     assert window_utilisation(rows, None, _window(), run_start_ts=T0S) is None
     assert window_utilisation(rows, dict(enumerate(baseline)), _window(direction="export"), run_start_ts=T0S) is None
