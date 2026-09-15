@@ -1918,3 +1918,46 @@ other five roster VENs reached 70.8–80%.
 (pick the highest stage that fits under limit − other load, else 0), and/or have the planner
 return a cap-respecting incumbent before optimising cost; mechanism 2 → re-run S-3/S-7/S-9 with
 `deviation_arbiter_enabled` on the fleet to see how much it closes. Tracked as GB-47.
+
+---
+
+## GB-47 verification 2026-09-15: limit enforcement on vs. off
+
+After GB-47 (the arbiter's limit-enforcement pass, on by default) was deployed to all 20 VENs,
+S-3 and S-7 ran with it on, then S-7 once more with it switched off on every VEN (the
+planner-only reference), each with its paired baseline, from one detached driver on Node1
+(`experiments/results/20260915-0726-s3_capacity_limit`, `…-0831-s7_stress` (on),
+`…-0936-s7_stress` (off)). All runs exited 0, signal integrity OK. The same VENs, the same
+scenario an hour apart — the switch is the only intended difference.
+
+| S-7, 1.5 kW import cap | ven-10 max import | ven-12 max import | engaged / passed | fleet coincident peak |
+|---|---|---|---|---|
+| limit enforcement **on** | 0.475 kW (its floor) | 0.675 kW (its floor) | 1 / 1 | 7.7 kW |
+| limit enforcement **off** | 2.225 kW — fail | 2.175 kW — fail | 3 / 1 (ven-10, ven-12 fail) | 12.6 kW |
+
+The alert inside the cap passed on every engaged VEN in both runs (5/5 on, 8/8 off).
+
+**The limit pass did it, not luck.** With it off, ven-10 and ven-12 fail exactly as in the
+2026-09-12/14 campaign (heater stage inside the cap). With it on, the logged `ArbiterDecision`s
+show who shed what: `heater_pause` on ven-5, ven-12, ven-17, ven-18; `battery` on ven-13,
+ven-14, ven-16, ven-17, ven-19; `ev` on ven-1, ven-3, ven-5, ven-7, ven-18. The off run logged no
+decision. VENs with an unresolved excess and no lever (ven-9, ven-10, ven-11, ven-12, ven-20,
+0.5–1.0 kW) are the alert window: 0 kW against base load that nothing can shed, scored against
+their physical floor, which they met.
+
+**Comfort** barely moved: the heater VENs ended the window 0.3–0.6 °C below their baseline
+(ven-10 20.3 vs 20.5 °C, ven-12 21.4 vs 21.7 °C, ven-20 67.3 vs 67.9 °C) with no minute below
+`temp_min_c`. **Utilisation** of the allowed import (min(baseline, limit)) was 85–100% on the
+VENs the pass shed (ven-10 85%, ven-12 89%, ven-20 100%); the battery VENs ven-13, ven-14 and
+ven-16 sat at 38–51% in *both* runs, so that headroom is left by the plan, not by the limit pass
+(the planner applies the cap to every slot — GB-48).
+
+S-3's 3 kW cap fell at midday and bound no VEN (all 20 importing −1.8…0.9 kW; every one showed
+the 2.9 kW ceiling in `/arbiter-diagnostics`), so it tested only that the limit reaches every VEN.
+
+Scoring note: "engaged" is judged on the run's own import, so a VEN the limit pass keeps far
+below the cap no longer counts as engaged (S-7 on: 1 engaged against 3 off). Compare the two
+runs per VEN, not by pass rate. Two KPI tooling bugs found and fixed on the way (`3b01a632`):
+the harness log of arbiter decisions also carried the previous run's (the VEN's event ring
+outlives a run — now filtered to the run window), and a baseline that allowed ~0 kWh produced
+a utilisation of 2e16 (now `None` below 0.01 kWh).
