@@ -23,12 +23,21 @@ def step_wait_plan_import_cap(context, cap):
             return None
         return body
 
+    # A plan computed before this scenario sent its limit may already satisfy
+    # the cap (a previous scenario's tighter limit) but not the rest of the
+    # scenario's setup — only a plan created after the limit was sent counts.
+    sent_at = getattr(context, "capacity_limit_sent_at", None)
+
     def has_cap(plan):
         if plan is None:
             return False
         slots = plan.get("slots", [])
         if not slots:
             return False
+        if sent_at is not None:
+            created = datetime.fromisoformat(plan["created_at"].replace("Z", "+00:00"))
+            if created < sent_at:
+                return False
         return all(
             slot.get("import_cap_kw", float("inf")) <= cap + 0.01
             for slot in slots
