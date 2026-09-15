@@ -678,8 +678,18 @@ Wait 30 seconds for VEN to reconnect. Controller Plan card should show `RATE_CHA
 - `trace_ev` shows the reduced setpoint in solid lines
 
 **After 5 minutes:**
-- Event expires. Next `CapacityChange` event shows `import_limit_kw = null` (no limit).
+- The interval ends. Next `CapacityChange` event shows `import_limit_kw = null` (no limit).
 - EV charging resumes at normal rate.
+
+**Announced in advance** (GB-48): give the interval a start in the future (e.g. `NOW+02:00`)
+and the limit is not in force yet — Dashboard "Import limit" shows none, `GET /capacity`
+reports `import_limit_kw: null` — but **Planner → plan** already caps only the slots that
+overlap the window (`import_cap_kw` in `GET /plan`), so the plan can prepare (charge the
+battery, heat the tank) before it. `GET /capacity/schedule` lists the announced interval.
+The limit comes into force at its start (first event poll after it, ≤ 30 s), with a
+`CapacityChange` event. A Dynamic Operating Envelope in the spec's own form — one
+event-level `intervalPeriod`, intervals without their own — shows up as back-to-back
+intervals in `/capacity/schedule`.
 
 ### Conceptual difference
 `DISPATCH_SETPOINT` targets a specific asset by `resource_name`. The lab's `IMPORT_CAPACITY_LIMIT` targets the whole site. The observable behavior (asset reduction, `CapacityChange` + `PlanCycle` in Trace, setpoint drop in Simulation) is the same. The VEN3 `partial` strategy means compliance is at 70% — the override is partially followed, which you can verify in the Trace constraints.

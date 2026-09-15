@@ -1949,3 +1949,16 @@ Node1 and tries to take Node1's lock over SSH. `DOCKER_HOST=localhost` is export
 itself, run `env -u DOCKER_HOST OPENADR_LAB_HOST=localhost setsid nohup bash run_all_tests.sh … &`.
 The script then sees a local host and runs docker directly, without its own lock, so hold the
 host's lock yourself for the whole run.
+
+## Before calling a spec case "ambiguous", read the spec's examples (GB-48, 2026-09-15)
+
+GB-33 made the capacity-schedule parser skip multi-interval events without per-interval
+periods, with a comment calling them "spec-ambiguous — nothing here needs to guess". The
+OpenADR 3.1 User Guide defines them (§7.3: contiguous from the event-level start, each lasting
+the event-level duration) and its own Dynamic Operating Envelope example (8.10.1-1) uses exactly
+that shape, so a spec-form DOE parsed to an empty schedule. The same rule was meanwhile written
+four other ways in six other parsers.
+
+**How to apply:** when code declines to handle an input shape as "ambiguous", check the spec
+text *and* its worked examples first; the examples are also the best test fixtures. And one
+concept, one function — a spec rule implemented once can't disagree with itself.

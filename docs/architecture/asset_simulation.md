@@ -435,13 +435,13 @@ None. Output is entirely determined by profile / active inject.
 | Source | Influence |
 |---|---|
 | All other assets | `net_power_kw = Σ(all asset powers)` |
-| VTN `IMPORT_CAPACITY_LIMIT` event | Sets `import_limit_kw` in `OadrCapacityState` |
-| VTN `EXPORT_CAPACITY_LIMIT` event | Sets `export_limit_kw` in `OadrCapacityState` |
+| VTN `IMPORT_CAPACITY_LIMIT` event | Sets `import_limit_kw` in `OadrCapacityState` while its interval is in force |
+| VTN `EXPORT_CAPACITY_LIMIT` event | Sets `export_limit_kw` in `OadrCapacityState` while its interval is in force |
 | `grid_import_limit_kw` inject | Overrides import limit when no VTN event is active |
 | `grid_export_limit_kw` inject | Overrides export limit when no VTN event is active |
 
-**Grid limit priority**: VTN event always wins. Inject only applies when
-`capacity_snap.import_limit_event_id.is_none()`.
+**Grid limit priority**: a VTN limit in force always wins. Inject only applies when
+`capacity_snap.import_limit_event_id.is_none()`, i.e. no VTN limit is in force now.
 
 ### Default Limits
 
