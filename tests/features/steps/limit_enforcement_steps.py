@@ -2,7 +2,7 @@
 
 import time
 
-from behave import given, then
+from behave import given, then, when
 from features.helpers.api_client import ven_get, ven_post, ven_put
 from features.helpers.wait import poll_until
 
@@ -32,6 +32,14 @@ def step_quiet_site(context, soc):
             "battery_soc": soc,
         },
     )
+    r.raise_for_status()
+
+
+@when("I release the sustained base-load step")
+def step_release_base_load_step(context):
+    # With alpha 1.0 the offset decays to zero on the next tick — a clean
+    # release, unlike forcing 0 kW (which leaves a slowly decaying negative offset).
+    r = ven_post("/sim/inject", json={"base_load_kw": 0.5, "base_load_alpha": 1.0})
     r.raise_for_status()
 
 
