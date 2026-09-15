@@ -84,7 +84,7 @@ The direction parameter reuses an existing import/export enum if one fits, else 
 
 *Alternative:* time-weighted mean like tariffs — exact on energy, but lets a 1-h slot exceed a 20-min limit inside it.
 
-### D6. Missing duration and untimed events — one rule each (confirm, see Open Questions)
+### D6. Missing duration and untimed events — one rule each (confirmed 2026-09-15)
 
 - **Missing duration** (neither the interval nor the event gives one): open-ended. The VTN only lists events whose lifespan has not ended, so the event bounds it. Replaces PT1H (five parsers) and one year (reporter). The spec schema's `PT0S` default would silently drop such signals.
 - **No start anywhere** (neither the interval, nor the event, nor a preceding interval): open-ended from the beginning of time, i.e. "in force while the VTN lists it". Keeps today's capacity behaviour for untimed events (the E2E UC events send 10000 kW untimed). Alerts, SIMPLE, dispatch and charge-state events without timing would become active; today they are skipped.
@@ -97,7 +97,7 @@ The "persistent daily prices" repetition (event duration longer than its interva
 
 - [Other parsers change for multi-interval events without per-interval periods: alert/SIMPLE/dispatch/charge-state windows become contiguous instead of all equal to the event window] → the spec defines contiguity; the lab's VTN tooling (harness, seed, BDD) sends single-interval events or per-interval periods, so no current sender is affected. Unit tests per parser pin the new shape.
 - [`reporter::event_is_active` treats intervals without a period as active today; with the resolver they inherit the event's timing] → can change which events receive reports. Test: an event with only an event-level period in the past is no longer reported.
-- [D6 untimed rule activates timing-less alerts/SIMPLE/dispatch] → confirm before implementation (Open Questions).
+- [D6 untimed rule activates timing-less alerts/SIMPLE/dispatch] → confirmed by the user; the alert test pins it.
 - [Poll lag for tick consumers of the folded value (D3)] → ≤ one poll (~30 s); the plan and the GB-47 pass carry the exact timing. B′ removes it if needed.
 - [A planner that now sees future limits plans differently around them (pre-charging, pre-heating)] → intended; BDD asserts the plan shape, fleet KPIs (utilisation) can show the effect.
 
@@ -105,7 +105,7 @@ The "persistent daily prices" repetition (event duration longer than its interva
 
 No persisted format changes: capacity state and schedule are in-memory and rebuilt every poll; `/capacity` keeps its shape. Deploy as usual (Node1 + Node2); rollback is a redeploy of the previous image.
 
-## Open Questions
+## Resolved Questions (user, 2026-09-15)
 
-1. D6 missing duration: open-ended (recommended), PT1H (today's parsers), or PT0S (schema default)?
-2. D6 untimed events: "in force while listed" for all event types (recommended; alerts etc. become active), or only for capacity limits (keeps today's alert skip, but two rules)?
+1. D6 missing duration: open-ended.
+2. D6 untimed events: in force while listed, for all event types.

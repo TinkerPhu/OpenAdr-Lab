@@ -116,10 +116,10 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 |---|---|---|
 | `PRICE` / `EXPORT_PRICE` | `TariffSnapshot.import_tariff_eur_kwh` / `.export_tariff_eur_kwh` | ✅ implemented (supports looping daily-price events, e.g. `duration: P9999Y`) |
 | `GHG` | `TariffSnapshot.co2_g_kwh` | ✅ implemented |
-| `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` | `OadrCapacityState.import_limit_kw` / `.export_limit_kw` (strictest active event wins) | ✅ implemented |
+| `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` | `CapacitySnapshot` schedule (`/capacity/schedule`) — the planner caps each slot by it; `OadrCapacityState.import_limit_kw` / `.export_limit_kw` = the limit in force at the last poll (see *Capacity limits* below) | ✅ implemented |
 | `IMPORT_CAPACITY_SUBSCRIPTION` / `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.import_subscription_kw` / `.import_reservation_kw` | ✅ implemented |
 | `EXPORT_CAPACITY_SUBSCRIPTION` / `EXPORT_CAPACITY_RESERVATION` | `OadrCapacityState` export-side scalar fields (min wins); subscription+reservation form a contracted allowance that binds the solver when tighter than the limit | ✅ implemented |
-| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `AlertWindow` (window from interval- or event-level `intervalPeriod`); `PlanTrigger::Alert` fires on change; both types clamp planned import to 0 over the window (soft constraint — never infeasible) | ✅ implemented |
+| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `AlertWindow` (window per the shared interval timing below); `PlanTrigger::Alert` fires on change; both types clamp planned import to 0 over the window (soft constraint — never infeasible) | ✅ implemented |
 | `SIMPLE` (levels 0–3) | `SimpleWindow` — L1 caps import at a configurable % of contract, L2 at baseline, L3 at 0; highest level wins, alerts override | ✅ implemented |
 | `DISPATCH_SETPOINT` | `DispatchWindow` — dispatcher steers the battery to the commanded net site power during the window, plan running underneath; alert wins precedence | ✅ implemented |
 | `CHARGE_STATE_SETPOINT` | `EvSession` create/modify targeting the given SoC (fraction or percent); event deletion cancels the event-created session | ✅ implemented |
@@ -184,8 +184,7 @@ cannot shed.
 **Shared target.** Both passes steer to `min(plan signed net, hard limit − LIMIT_MARGIN_KW)`
 (`deviation_kw`, `limit::limit_target_kw`). The hard import limit is 0 during an alert window,
 else the VTN capacity import limit in force at `now` from the priority-resolved capacity schedule
-(`limit::capacity_import_limit_at_kw` — not `OadrCapacityState.import_limit_kw`, which folds in
-limits that have not started yet), else a sim-injected `grid_import_limit_kw`. Deviation
+(`entities::capacity::tightest_capacity_limit` at the tick's `now`), else a sim-injected `grid_import_limit_kw`. Deviation
 correction therefore never steers above a limit the limit pass would push back down. While a
 switching lever (a heater stage, the EV's minimum-charge floor) led the limit pass last tick its
 target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed stage is restored only with room to
@@ -1006,8 +1005,8 @@ behaviour classes (`state.rs::SimInjectState`):
 | Method | Path | Stage | Description |
 |---|---|---|---|
 | GET | `/tariffs` | 2 | `TariffSnapshot` array parsed from active events |
-| GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events (single current-value scalar) |
-| GET | `/capacity/schedule` | 2 | `CapacitySnapshot[]` — the Dynamic Operating Envelope's per-interval import/export limit schedule, the timeline `/capacity` collapses away |
+| GET | `/capacity` | 2 | `OadrCapacityState` — the limits in force at the last event poll, plus subscription/reservation |
+| GET | `/capacity/schedule` | 2 | `CapacitySnapshot[]` — the Dynamic Operating Envelope's per-interval import/export limit schedule (with each limit's source event) — the single source for which limit applies when |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
 | GET | `/plan` | 3 | Active Plan or `null` |
 | PUT | `/plan/objective` | 3 | Override the active `PlannerObjective` |
@@ -1305,6 +1304,18 @@ impl TimeSeries {
 - **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
   averaging for the UI chart.
 
+**Event interval timing** (`controller/event_timing.rs::timed_intervals`, GB-48): the one
+answer to "when does interval i of this event run", used by every event parser — price and
+capacity schedules, alert/SIMPLE/dispatch/charge-state windows (`openadr_interface.rs::
+timed_payloads`) and the reporter's activity check. Per OpenADR 3.1 User Guide §7.3: an
+interval's own `intervalPeriod` wins; otherwise it starts where the previous interval ended
+(the first at `event.intervalPeriod.start`) and lasts the event-level duration — so the
+spec's Dynamic Operating Envelope form (one event-level period, contiguous intervals, Example
+8.10.1-1) parses. One project rule for the gaps the spec leaves, for every event type: no
+duration anywhere → open-ended (the VTN lists only events whose lifespan has not ended); no
+start derivable → in force while the VTN lists the event. Tests: `event_timing.rs`,
+`openadr_interface.rs` `test_window_parsers_give_contiguous_intervals_their_own_windows`.
+
 **Event interval resolution** (`controller/rate_schedule.rs::collect_interval_groups`,
 shared by `parse_rate_snapshots` and `parse_capacity_schedule`): all active events'
 intervals (after looping expansion) are split at every interval boundary into atomic
@@ -1317,8 +1328,26 @@ The published schedules are non-overlapping, so every consumer — tick-time cos
 (`monitor.rs`), `grid_samples` tariff/limit columns (history sampler), the planner's
 `TariffTimeSeries`, planned capacity limits and `/tariffs`/`/capacity/schedule` — reads
 the same value for the same instant with no resolution rule of its own. Input with no
-overlaps comes out unchanged. The live strictest-limit capacity state
-(`parse_capacity_state`) is a separate, deliberate collapse and not part of this.
+overlaps comes out unchanged. Each capacity segment also carries the event its limit came
+from.
+
+**Capacity limits** (GB-48): the capacity schedule is the single source for which limit
+applies when, read through one lookup, `entities::capacity::tightest_capacity_limit` (the
+tightest limit per direction among segments overlapping a span; an instant is a zero-width
+span). Its callers:
+- the planner caps each slot at the tightest limit overlapping the slot (else the physical
+  bound, never above the subscription/reservation allowance), so a limit announced for later
+  caps only its own slots and the plan can prepare for it;
+- `parse_capacity_state` reports the limit in force at the poll's `now` in
+  `OadrCapacityState.import_limit_kw`/`export_limit_kw`. Every consumer of that value — PV
+  generation-limit resolver, grid asset, `/capacity` and the Dashboard, the `CapacityChange`
+  trace — sees "in force now", at most one event poll late at an interval boundary.
+  Subscription and reservation are still folded over all listed events (BACKLOG GB-48,
+  option C);
+- the arbiter's limit pass and the history sampler read it at tick/sample time.
+
+Tests: `entities/capacity.rs` `capacity_limit_tests`, `milp_planner/tests/capacity_schedule.rs`,
+`openadr_interface.rs` `test_parse_capacity_state_*`.
 Tests: `openadr_interface.rs` `parse_rate_snapshots_*` / `parse_capacity_schedule_*`
 (incl. `parse_rate_snapshots_planner_series_agrees_with_tick_lookup`).
 
