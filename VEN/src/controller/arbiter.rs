@@ -319,8 +319,9 @@ pub fn decision_event(
     excess_kw: Option<f64>,
     ts: chrono::DateTime<chrono::Utc>,
 ) -> Option<crate::controller::trace::ControllerEvent> {
-    let key = |(lever, unresolved_kw): (Option<&str>, f64)| (lever, unresolved_kw > DEAD_BAND_KW);
-    (key(prev) != key(now)).then(
+    let unresolved = |unresolved_kw: f64| unresolved_kw > DEAD_BAND_KW;
+    let changed = prev.0 != now.0 || unresolved(prev.1) != unresolved(now.1);
+    changed.then(
         || crate::controller::trace::ControllerEvent::ArbiterDecision {
             ts,
             pass: pass.to_string(),

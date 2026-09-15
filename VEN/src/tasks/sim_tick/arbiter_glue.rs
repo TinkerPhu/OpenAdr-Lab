@@ -99,7 +99,7 @@ pub(crate) async fn record_arbiter_outcome(
     )
     .await;
     state
-        .set_arbiter_diagnostics(crate::state::arbiter::ArbiterDiagnostics {
+        .set_arbiter_diagnostics(crate::state::ArbiterDiagnostics {
             net_kw: outcome.net_kw,
             dev_kw: outcome.dev_kw,
             active_lever: active_lever.clone(),
