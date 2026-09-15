@@ -587,7 +587,12 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   each asset starting from `resolve_plan_state_at`'s state there, sweep `t2` to
   the plan's horizon end. Computed on demand under the `SimState` lock; `None`
   wherever the start resolves to now, where the route serves the per-tick curves
-  instead. The response's `start` is the instant actually used.
+  instead. The response's `start` is the instant actually used, and the server is
+  the only place that snaps: the UI sends the rested cursor time as-is.
+  Measured on Node1 (ven-1, 48 h plan, 286 slots, one request per slot, over
+  localhost HTTP): median 9.8 ms, p95 14.3 ms, max 29.1 ms, against 4.5 ms for the
+  stored per-tick curves. The compute share is roughly 5–10 ms, negligible against
+  the 1 s tick sharing the lock.
 
 All slices go through one private function, `site_capacity_curve_from(direction,
 t1, t2_max, sim, state_of, …)`. They differ only in `t1`, `t2_max`, and whether each
