@@ -711,6 +711,7 @@ fn build_milp_inputs_with_override(
         cap,
         &[],
         &[],
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
@@ -750,6 +751,7 @@ fn run_planner(
         capacity,
         &[],
         &[],
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
@@ -785,6 +787,7 @@ fn bmi(
 
 mod base_load;
 mod basic;
+mod capacity_schedule;
 mod cost_sign;
 mod heater;
 mod modes;

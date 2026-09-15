@@ -453,6 +453,31 @@ mod tests {
         DateTime::from_timestamp(1_700_000_000 + offset_s, 0).unwrap()
     }
 
+    // GB-48: activity comes from the shared interval timing — an interval
+    // without its own period takes the event-level one (it used to count as
+    // active regardless), and a missing duration is open-ended (was one year).
+    #[test]
+    fn event_is_active_uses_the_event_level_period() {
+        let event: OadrEvent = serde_json::from_value(serde_json::json!({
+            "id": "e", "programID": "p",
+            "intervalPeriod": {"start": "2023-11-14T22:13:20Z", "duration": "PT1H"},
+            "intervals": [{"id": 0, "payloads": []}]
+        }))
+        .unwrap();
+        assert!(event_is_active(&event, ts(0)));
+        assert!(event_is_active(&event, ts(3599)));
+        assert!(
+            !event_is_active(&event, ts(3600)),
+            "ended with its event-level period"
+        );
+        assert!(!event_is_active(&event, ts(-1)), "not yet started");
+        let untimed: OadrEvent = serde_json::from_value(serde_json::json!({
+            "id": "u", "programID": "p", "intervals": [{"id": 0, "payloads": []}]
+        }))
+        .unwrap();
+        assert!(event_is_active(&untimed, ts(0)), "in force while listed");
+    }
+
     /// Build `(id, Vec<AssetReportSample>)` from `(offset_s, power_kw)` pairs.
     fn make_samples(id: &str, rows: &[(i64, f64)]) -> (String, Vec<AssetReportSample>) {
         let samples = rows

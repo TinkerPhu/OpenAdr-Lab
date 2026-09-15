@@ -264,6 +264,8 @@ pub fn parse_capacity_schedule(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<
             interval_end,
             import_limit_kw,
             export_limit_kw,
+            import_limit_event_id: None,
+            export_limit_event_id: None,
         })
     })
     .collect()

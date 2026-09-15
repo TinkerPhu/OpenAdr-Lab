@@ -39,6 +39,33 @@ pub struct CapacitySnapshot {
     pub interval_end: DateTime<Utc>,
     pub import_limit_kw: Option<f64>,
     pub export_limit_kw: Option<f64>,
+    /// The event each limit came from (the priority winner for this segment).
+    #[serde(default)]
+    pub import_limit_event_id: Option<String>,
+    #[serde(default)]
+    pub export_limit_event_id: Option<String>,
+}
+
+/// A capacity limit and the event it came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapacityLimit {
+    pub limit_kw: f64,
+    pub event_id: Option<String>,
+}
+
+/// Which capacity limit applies (GB-48) — the one answer for the planner's
+/// slot caps, the limit in force now (`OadrCapacityState`), the history
+/// sampler and the arbiter's limit pass: the tightest `direction` limit among
+/// `schedule` segments overlapping `[from, to)`. For `from == to` it is the
+/// instant `from`, covered by segments with `start ≤ from < end`.
+pub fn tightest_capacity_limit(
+    schedule: &[CapacitySnapshot],
+    direction: crate::entities::capacity_curve::CommitmentDirection,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Option<CapacityLimit> {
+    let _ = (schedule, direction, from, to);
+    unimplemented!()
 }
 
 /// WP3.1 (BL-04) — an active grid-alert window parsed from an
@@ -178,5 +205,80 @@ mod window_expiry_tests {
             event_id: "e".into(),
         };
         assert!(!d.is_ended(ts(300)));
+    }
+}
+
+#[cfg(test)]
+mod capacity_limit_tests {
+    use super::*;
+    use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
+    use chrono::TimeZone;
+
+    fn at(h: u32, m: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 9, 15, h, m, 0).unwrap()
+    }
+
+    fn seg(
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        imp: Option<f64>,
+        exp: Option<f64>,
+    ) -> CapacitySnapshot {
+        CapacitySnapshot {
+            interval_start: from,
+            interval_end: to,
+            import_limit_kw: imp,
+            export_limit_kw: exp,
+            import_limit_event_id: imp.map(|_| format!("imp-{}", from.format("%H%M"))),
+            export_limit_event_id: exp.map(|_| format!("exp-{}", from.format("%H%M"))),
+        }
+    }
+
+    #[test]
+    fn tightest_capacity_limit_at_an_instant_inside_a_segment() {
+        let schedule = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
+        let limit = tightest_capacity_limit(&schedule, Import, at(10, 30), at(10, 30)).unwrap();
+        assert_eq!(limit.limit_kw, 3.0);
+        assert_eq!(limit.event_id.as_deref(), Some("imp-1000"));
+    }
+
+    #[test]
+    fn tightest_capacity_limit_instant_is_half_open() {
+        let schedule = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
+        assert!(tightest_capacity_limit(&schedule, Import, at(10, 0), at(10, 0)).is_some());
+        assert!(tightest_capacity_limit(&schedule, Import, at(11, 0), at(11, 0)).is_none());
+        assert!(tightest_capacity_limit(&schedule, Import, at(9, 59), at(9, 59)).is_none());
+    }
+
+    #[test]
+    fn tightest_capacity_limit_over_a_span_takes_the_tightest_overlap() {
+        let schedule = [
+            seg(at(10, 0), at(10, 40), Some(5.0), None),
+            seg(at(10, 40), at(11, 0), Some(2.0), None),
+        ];
+        let limit = tightest_capacity_limit(&schedule, Import, at(10, 0), at(11, 0)).unwrap();
+        assert_eq!(limit.limit_kw, 2.0);
+        // A span that ends where the tighter segment starts does not overlap it.
+        let limit = tightest_capacity_limit(&schedule, Import, at(10, 0), at(10, 40)).unwrap();
+        assert_eq!(limit.limit_kw, 5.0);
+    }
+
+    #[test]
+    fn tightest_capacity_limit_reads_the_requested_direction() {
+        let schedule = [seg(at(10, 0), at(11, 0), Some(3.0), Some(0.5))];
+        let exp = tightest_capacity_limit(&schedule, Export, at(10, 0), at(11, 0)).unwrap();
+        assert_eq!(
+            (exp.limit_kw, exp.event_id.as_deref()),
+            (0.5, Some("exp-1000"))
+        );
+        let only_imp = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
+        assert!(tightest_capacity_limit(&only_imp, Export, at(10, 0), at(11, 0)).is_none());
+    }
+
+    #[test]
+    fn tightest_capacity_limit_none_without_overlap() {
+        let schedule = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
+        assert!(tightest_capacity_limit(&schedule, Import, at(12, 0), at(13, 0)).is_none());
+        assert!(tightest_capacity_limit(&[], Import, at(10, 0), at(11, 0)).is_none());
     }
 }
