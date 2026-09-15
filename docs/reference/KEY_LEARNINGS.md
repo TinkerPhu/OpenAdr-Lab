@@ -1902,3 +1902,23 @@ only because a modified existing test also passed, which it couldn't have.
 **How to apply:** each worktree builds in its own `target/`, even though that costs a full
 dependency build. When a red run comes back green, check that the new test names appear in the
 output before believing it.
+
+## Enforce a signal from its time-resolved schedule, not from a collapsed "current" value (GB-47, 2026-09-15)
+
+`OadrCapacityState.import_limit_kw` looks like "the import limit now", but
+`parse_capacity_state` folds every interval of every event the VTN returns for
+`?active=true` into the strictest value — and `active=true` keeps events that have not
+started yet. Wiring that scalar into the arbiter's real-time limit pass would have curtailed
+households ahead of a limit announced for later. The planner already uses it for every slot
+(GB-48). The priority-resolved per-interval schedule (`planned_capacity_limits`) was right there.
+
+**How to apply:** before acting on a state value in real time, read how it is built: a
+summary that collapses a schedule is fine for display, never for enforcement at `now`.
+
+## `pkill -f <pattern>` over SSH kills the SSH command that contains the pattern (2026-09-15)
+
+`ssh Node2 "pkill -f unit_node2.sh; nohup bash ~/unit_node2.sh …"` killed its own remote shell
+— the pattern matches that shell's command line — so the relaunch never ran (twice).
+
+**How to apply:** stop remote runs by container (`docker rm -f <run container>`) or by PID from
+`pgrep`, and launch in a separate `ssh` call.
