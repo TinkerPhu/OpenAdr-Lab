@@ -30,6 +30,7 @@ mod report_submissions;
 mod site_headroom_forecast;
 mod task_status;
 
+pub use arbiter::ArbiterDiagnostics;
 pub use connection::VtnConnectionStatus;
 pub use event_log::EventLogEntry;
 pub use task_status::TaskStatus;

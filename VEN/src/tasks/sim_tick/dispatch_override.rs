@@ -300,7 +300,7 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_inactive_outside_window() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(700), &[win(2.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(700), &[win(2.0)], &[], None, None);
         assert!(!sp.contains_key("battery"), "window ended - no override");
     }
 
