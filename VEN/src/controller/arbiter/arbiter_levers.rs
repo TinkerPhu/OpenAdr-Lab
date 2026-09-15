@@ -18,26 +18,44 @@ pub(super) struct Lever {
     pub(super) marginal_cost_eur_per_kwh: f64,
 }
 
+/// The setpoint this tick's adjustments start from: the value already in the
+/// setpoint map, else the asset's last applied command. `reconcile` seeds the
+/// map with the last applied command for battery/EV (their dead-beat
+/// integrator state), so both passes read the same value through here.
+pub(super) fn current_setpoint_kw(
+    setpoints: &HashMap<String, f64>,
+    sim: &SimSnapshot,
+    asset_id: &str,
+) -> f64 {
+    setpoints
+        .get(asset_id)
+        .copied()
+        .or_else(|| sim.assets.get(asset_id).map(|s| s.setpoint_kw))
+        .unwrap_or(0.0)
+}
+
 /// Battery lever capacity + cost. Direction-dependent: absorbing an import
 /// deviation (`deviation_kw > 0`) needs headroom to discharge more (or charge
 /// less); absorbing a surplus (`deviation_kw < 0`) needs headroom to charge
 /// more (or discharge less).
 pub(super) fn battery_lever(
+    setpoints: &HashMap<String, f64>,
     sim: &SimSnapshot,
     slot: &PlanTimeSlot,
     deviation_kw: f64,
 ) -> Option<Lever> {
     let snap = sim.assets.get(crate::ids::ASSET_BATTERY)?;
+    let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_BATTERY);
     let (power_headroom_kw, energy_headroom_kwh, marginal_cost_eur_per_kwh) = if deviation_kw > 0.0
     {
         (
-            snap.cap_max_export_kw.abs() + snap.setpoint_kw.max(0.0),
+            snap.cap_max_export_kw.abs() + current_sp.max(0.0),
             snap.available_discharge_kwh,
             slot.marginal_cost_import_eur_per_kwh,
         )
     } else {
         (
-            snap.cap_max_import_kw + (-snap.setpoint_kw).max(0.0),
+            snap.cap_max_import_kw + (-current_sp).max(0.0),
             snap.available_charge_kwh,
             slot.marginal_cost_export_eur_per_kwh,
         )
@@ -62,10 +80,11 @@ pub(super) fn battery_lever(
 /// share of the deviation, from the shared `remaining_kw` pool) rather than
 /// the full deviation — adapted from the former
 /// `dispatcher::apply_battery_correction_overlay`, which computed and
-/// canceled the *entire* deviation unconditionally. Uses the previously
-/// applied setpoint (`snap.setpoint_kw`) as the integrator state, not the
-/// plan allocation, to avoid a limit cycle (same rationale, see §3a's
-/// stability re-verification test).
+/// canceled the *entire* deviation unconditionally. Starts from
+/// `current_setpoint_kw`: for the deviation pass that is the previously
+/// applied setpoint (`reconcile` seeds it), not the plan allocation, to avoid
+/// a limit cycle (see §3a's stability re-verification tests). Returns the
+/// achieved change (kW, magnitude).
 pub(super) fn apply_battery_lever(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
@@ -82,7 +101,7 @@ pub(super) fn apply_battery_lever(
     // sustain (near full/empty) — no SoC re-interpretation here.
     let max_discharge_kw = snap.cap_max_export_kw.abs();
     let max_charge_kw = snap.cap_max_import_kw;
-    let current_sp = snap.setpoint_kw;
+    let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_BATTERY);
 
     let raw_target = current_sp - assigned_kw;
     let clamped = raw_target.clamp(-max_discharge_kw, max_charge_kw);
@@ -102,6 +121,7 @@ pub(super) fn apply_battery_lever(
 /// only claw back whatever opportunistic charge is already flowing (BL-12's
 /// discrete relay floor makes finer-grained reduction physically meaningless).
 pub(super) fn ev_lever(
+    setpoints: &HashMap<String, f64>,
     sim: &SimSnapshot,
     deviation_kw: f64,
     plan_has_ev_allocation: bool,
@@ -116,7 +136,7 @@ pub(super) fn ev_lever(
     if charge_ceiling_kw <= 0.0 {
         return None;
     }
-    let current_sp = snap.setpoint_kw.max(0.0);
+    let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_EV).max(0.0);
 
     let available_capacity_kw = if deviation_kw < 0.0 {
         (charge_ceiling_kw - current_sp).max(0.0)
@@ -133,22 +153,25 @@ pub(super) fn ev_lever(
     })
 }
 
+/// Returns the achieved change (kW, magnitude) — can exceed `assigned_kw`
+/// when BL-12's `min_charge_kw` floor snaps a reduction to 0.
 pub(super) fn apply_ev_lever(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     assigned_kw: f64,
-) {
+) -> f64 {
     let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) else {
-        return;
+        return 0.0;
     };
     let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
-    let current_sp = snap.setpoint_kw.max(0.0);
+    let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_EV).max(0.0);
     let new_sp = (current_sp - assigned_kw).max(0.0);
     // BL-12: the charger cannot sustain below min_charge_kw — snap to 0
     // rather than commanding a sub-minimum rate that yields 0 kW physically
     // while corrupting the arbiter's own next-tick accounting.
     let new_sp = if new_sp < min_charge_kw { 0.0 } else { new_sp };
     setpoints.insert(crate::ids::ASSET_EV.to_string(), new_sp);
+    (new_sp - current_sp).abs()
 }
 
 /// Heater pause-within-comfort-band lever: flat zero cost, available
@@ -156,13 +179,13 @@ pub(super) fn apply_ev_lever(
 /// scenario D — "not because a static rule ranked it third but because its
 /// marginal cost is genuinely zero whenever available").
 pub(super) fn heater_pause_lever(
-    base_setpoints: &HashMap<String, f64>,
+    setpoints: &HashMap<String, f64>,
     deviation_kw: f64,
 ) -> Option<Lever> {
     if deviation_kw < 0.0 {
         return None; // pausing a load can't absorb a surplus
     }
-    let planned_kw = base_setpoints
+    let planned_kw = setpoints
         .get(crate::ids::ASSET_HEATER)
         .copied()
         .unwrap_or(0.0);
@@ -176,15 +199,18 @@ pub(super) fn heater_pause_lever(
     })
 }
 
-pub(super) fn apply_heater_pause_lever(setpoints: &mut HashMap<String, f64>, assigned_kw: f64) {
+/// Returns the achieved change (kW, magnitude).
+pub(super) fn apply_heater_pause_lever(
+    setpoints: &mut HashMap<String, f64>,
+    assigned_kw: f64,
+) -> f64 {
     let planned_kw = setpoints
         .get(crate::ids::ASSET_HEATER)
         .copied()
         .unwrap_or(0.0);
-    setpoints.insert(
-        crate::ids::ASSET_HEATER.to_string(),
-        (planned_kw - assigned_kw).max(0.0),
-    );
+    let new_kw = (planned_kw - assigned_kw).max(0.0);
+    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), new_kw);
+    planned_kw - new_kw
 }
 
 /// Heater emergency-mode lever (`HeaterEmergencyMode::Curtail`/`Absorb`):

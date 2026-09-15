@@ -77,21 +77,21 @@ pub struct ArbiterOutcome {
 /// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
 /// calculation: this tick's projected net site power, preferring
 /// `live_pv_kw`/`live_base_load_kw` over the necessarily-stale `SimSnapshot`
-/// for those two physics-driven inputs, and `base_setpoints` (the plan's own
-/// allocation, before any arbiter adjustment) for heater.
+/// for those two physics-driven inputs, and `setpoints` for every controlled
+/// asset.
 ///
-/// Battery/EV are deliberately excluded from the `base_setpoints` fallback:
-/// both are dead-beat correctors whose `apply_*_lever` already treats
-/// `AssetSnapshot.setpoint_kw` (the arbiter's own last-tick command) as the
-/// integrator state, not the plan's static per-slot allocation. Reading
-/// `base_setpoints` here instead would make the deviation signal blind to a
-/// correction already applied — the next tick "rediscovers" the same
-/// deviation and re-applies a fresh correction on top of it, an unbounded
-/// per-tick runaway rather than settling once corrected (see
+/// For battery/EV, `setpoints` must hold the command the adjustments start
+/// from: `reconcile` seeds them with `AssetSnapshot.setpoint_kw` (the
+/// arbiter's own last-tick command, the dead-beat integrator state), never the
+/// plan's static per-slot allocation. Reading the plan allocation instead would
+/// make the deviation signal blind to a correction already applied — the next
+/// tick "rediscovers" the same deviation and re-applies a fresh correction on
+/// top of it, an unbounded per-tick runaway rather than settling once
+/// corrected (see
 /// `reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp`).
 pub fn projected_net_kw(
     sim: &SimSnapshot,
-    base_setpoints: &HashMap<String, f64>,
+    setpoints: &HashMap<String, f64>,
     live_pv_kw: Option<f64>,
     live_base_load_kw: Option<f64>,
 ) -> f64 {
@@ -112,9 +112,9 @@ pub fn projected_net_kw(
                 return forced_kw;
             }
             if id.as_str() == crate::ids::ASSET_BATTERY || id.as_str() == crate::ids::ASSET_EV {
-                return snap.setpoint_kw;
+                return arbiter_levers::current_setpoint_kw(setpoints, sim, id);
             }
-            let sp = base_setpoints.get(id).copied().unwrap_or(snap.power_kw);
+            let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
                 snap.power_kw
             } else {
@@ -209,7 +209,7 @@ pub fn reconcile(
         };
     };
 
-    let net_kw = projected_net_kw(sim, base_setpoints, live_pv_kw, live_base_load_kw);
+    let net_kw = projected_net_kw(sim, &setpoints, live_pv_kw, live_base_load_kw);
     let dev_kw = deviation_kw(slot, net_kw);
 
     if dev_kw.abs() < DEAD_BAND_KW {
@@ -221,32 +221,111 @@ pub fn reconcile(
         };
     }
 
-    let mut candidates = Vec::new();
-    candidates.extend(battery_lever(sim, slot, dev_kw));
-    candidates.extend(ev_lever(
-        sim,
-        dev_kw,
-        plan_has_ev_allocation,
-        overlay_enabled,
-    ));
-    candidates.extend(heater_pause_lever(base_setpoints, dev_kw));
-    candidates.extend(heater_emergency_lever(
+    let inputs = LeverInputs {
         sim,
         slot,
-        dev_kw,
-        incumbent_lever == Some("heater_emergency"),
+        objective,
+        plan_has_ev_allocation,
+        overlay_enabled,
+        incumbent_lever,
+    };
+    let applied = apply_ranked_levers(&mut setpoints, &DEVIATION_POLICY, &inputs, dev_kw);
+
+    ArbiterOutcome {
+        setpoints,
+        heater_emergency_mode: applied.heater_emergency_mode,
+        pv_generation_limit_tighten_kw: applied.pv_generation_limit_tighten_kw,
+        absorbed_kwh_by_asset: applied.absorbed_kwh_by_asset,
+        active_lever: applied.active_lever,
+        net_kw: Some(net_kw),
+        dev_kw: Some(dev_kw),
+    }
+}
+
+/// How a pass may use the levers — the only thing that differs between the
+/// arbiter's passes; the candidate/rank/apply machinery is shared
+/// (`apply_ranked_levers`). Declared as data, not branched on per call site.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LeverPolicy {
+    /// The EV lever may also reduce charging the plan itself scheduled, and
+    /// regardless of the opportunistic-overlay toggle — not only opportunistic
+    /// charge.
+    pub(crate) ev_overrides_plan: bool,
+    /// Battery discharge follows the planner objective's refusal under
+    /// `MaxRevenue`.
+    pub(crate) battery_respects_objective: bool,
+}
+
+/// Deviation correction: never second-guesses the plan's own EV commitment
+/// and keeps `MaxRevenue`'s discharge refusal.
+pub(crate) const DEVIATION_POLICY: LeverPolicy = LeverPolicy {
+    ev_overrides_plan: false,
+    battery_respects_objective: true,
+};
+
+/// Everything a pass hands the shared lever machinery besides the setpoints.
+pub(crate) struct LeverInputs<'a> {
+    pub(crate) sim: &'a SimSnapshot,
+    pub(crate) slot: &'a PlanTimeSlot,
+    pub(crate) objective: PlannerObjective,
+    pub(crate) plan_has_ev_allocation: bool,
+    pub(crate) overlay_enabled: bool,
+    pub(crate) incumbent_lever: Option<&'a str>,
+}
+
+/// What the shared lever loop did this tick.
+#[derive(Debug, Default)]
+pub(crate) struct AppliedLevers {
+    pub(crate) heater_emergency_mode: Option<(bool, bool)>,
+    pub(crate) pv_generation_limit_tighten_kw: Option<f64>,
+    pub(crate) absorbed_kwh_by_asset: HashMap<String, f64>,
+    pub(crate) active_lever: Option<&'static str>,
+    /// Part of `|deviation_kw|` no lever could take (kW).
+    pub(crate) unresolved_kw: f64,
+}
+
+/// Candidate → `rank_levers` → greedy apply, shared by every arbiter pass.
+/// Positive `deviation_kw` = import to shed; negative = surplus to absorb.
+/// Each lever consumes what it actually achieved, not what it was assigned.
+pub(crate) fn apply_ranked_levers(
+    setpoints: &mut HashMap<String, f64>,
+    policy: &LeverPolicy,
+    inputs: &LeverInputs,
+    deviation_kw: f64,
+) -> AppliedLevers {
+    let sim = inputs.sim;
+    let (ev_plan_allocated, ev_overlay_enabled) = if policy.ev_overrides_plan {
+        (false, true)
+    } else {
+        (inputs.plan_has_ev_allocation, inputs.overlay_enabled)
+    };
+    let battery_objective = if policy.battery_respects_objective {
+        inputs.objective
+    } else {
+        PlannerObjective::MinCost
+    };
+
+    let mut candidates = Vec::new();
+    candidates.extend(battery_lever(setpoints, sim, inputs.slot, deviation_kw));
+    candidates.extend(ev_lever(
+        setpoints,
+        sim,
+        deviation_kw,
+        ev_plan_allocated,
+        ev_overlay_enabled,
     ));
-    candidates.extend(pv_curtailment_lever(slot, dev_kw));
+    candidates.extend(heater_pause_lever(setpoints, deviation_kw));
+    candidates.extend(heater_emergency_lever(
+        sim,
+        inputs.slot,
+        deviation_kw,
+        inputs.incumbent_lever == Some("heater_emergency"),
+    ));
+    candidates.extend(pv_curtailment_lever(inputs.slot, deviation_kw));
 
-    let ranked = rank_levers(candidates, incumbent_lever);
-
-    let mut remaining_kw = dev_kw.abs();
-    let mut absorbed_kwh_by_asset = HashMap::new();
-    let mut heater_emergency_mode = None;
-    let mut pv_generation_limit_tighten_kw = None;
-    let mut active_lever = None;
-
-    for lever in ranked {
+    let mut applied = AppliedLevers::default();
+    let mut remaining_kw = deviation_kw.abs();
+    for lever in rank_levers(candidates, inputs.incumbent_lever) {
         if remaining_kw < DEAD_BAND_KW {
             break;
         }
@@ -257,60 +336,52 @@ pub fn reconcile(
         // Sign convention: positive assigned_kw always means "reduce import /
         // increase export by this much" — apply_* functions below translate
         // that into the correct setpoint-delta direction per asset.
-        let signed_assigned_kw = if dev_kw > 0.0 {
+        let signed_assigned_kw = if deviation_kw > 0.0 {
             assigned_kw
         } else {
             -assigned_kw
         };
-        match lever.id {
+        let achieved_kw = match lever.id {
             "battery" => {
-                let delta = apply_battery_lever(&mut setpoints, sim, signed_assigned_kw, objective);
+                let delta = apply_battery_lever(setpoints, sim, signed_assigned_kw, battery_objective);
                 if delta > 0.0 {
-                    *absorbed_kwh_by_asset
+                    *applied
+                        .absorbed_kwh_by_asset
                         .entry(crate::ids::ASSET_BATTERY.to_string())
                         .or_insert(0.0) += delta;
-                    active_lever.get_or_insert(lever.id);
-                    remaining_kw -= delta;
-                    continue;
                 }
+                delta
             }
             "ev" => {
-                apply_ev_lever(&mut setpoints, sim, signed_assigned_kw);
-                *absorbed_kwh_by_asset
+                let delta = apply_ev_lever(setpoints, sim, signed_assigned_kw);
+                *applied
+                    .absorbed_kwh_by_asset
                     .entry(crate::ids::ASSET_EV.to_string())
-                    .or_insert(0.0) += assigned_kw;
-                active_lever.get_or_insert(lever.id);
+                    .or_insert(0.0) += delta;
+                delta
             }
-            "heater_pause" => {
-                apply_heater_pause_lever(&mut setpoints, signed_assigned_kw);
-                active_lever.get_or_insert(lever.id);
-            }
+            "heater_pause" => apply_heater_pause_lever(setpoints, signed_assigned_kw),
             "heater_emergency" => {
-                heater_emergency_mode = Some(if dev_kw > 0.0 {
+                applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
                     (true, false) // Curtail
                 } else {
                     (false, true) // Absorb
                 });
-                active_lever.get_or_insert(lever.id);
+                assigned_kw
             }
             "pv_curtail" => {
-                pv_generation_limit_tighten_kw = Some(assigned_kw);
-                active_lever.get_or_insert(lever.id);
+                applied.pv_generation_limit_tighten_kw = Some(assigned_kw);
+                assigned_kw
             }
-            _ => {}
+            _ => 0.0,
+        };
+        if achieved_kw > 0.0 {
+            applied.active_lever.get_or_insert(lever.id);
+            remaining_kw -= achieved_kw;
         }
-        remaining_kw -= assigned_kw;
     }
-
-    ArbiterOutcome {
-        setpoints,
-        heater_emergency_mode,
-        pv_generation_limit_tighten_kw,
-        absorbed_kwh_by_asset,
-        active_lever,
-        net_kw: Some(net_kw),
-        dev_kw: Some(dev_kw),
-    }
+    applied.unresolved_kw = remaining_kw.max(0.0);
+    applied
 }
 
 #[cfg(test)]
