@@ -41,22 +41,6 @@ pub(crate) const LIMIT_POLICY: LeverPolicy = LeverPolicy {
     battery_respects_objective: false,
 };
 
-/// The VTN capacity import limit in force at `now` (kW): the strictest
-/// IMPORT_CAPACITY_LIMIT among the priority-resolved capacity schedule's
-/// intervals covering `now` (`controller::rate_schedule::parse_capacity_schedule`).
-/// Not `OadrCapacityState.import_limit_kw`, which collapses every active
-/// event's intervals — ones that have not started yet included — into one value.
-pub fn capacity_import_limit_at_kw(
-    schedule: &[crate::entities::capacity::CapacitySnapshot],
-    now: chrono::DateTime<chrono::Utc>,
-) -> Option<f64> {
-    schedule
-        .iter()
-        .filter(|s| s.interval_start <= now && now < s.interval_end)
-        .filter_map(|s| s.import_limit_kw)
-        .reduce(f64::min)
-}
-
 /// The hard import limit in force now (kW): 0 while an alert window is active
 /// (strictest wins), else the VTN's capacity import limit, if any.
 pub fn hard_import_limit_kw(

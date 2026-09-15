@@ -7,7 +7,7 @@
 use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
-use crate::common::{parse_iso8601_duration_secs, Aggregation};
+use crate::common::Aggregation;
 use crate::controller::report_intervals::{
     build_baseline_report_intervals, build_capacity_forecast_intervals, build_forecast_intervals,
     build_net_site_power_ts, build_soc_intervals,
@@ -42,32 +42,12 @@ pub struct AssetReportSample {
 // Interval activity detection
 // ---------------------------------------------------------------------------
 
-/// Returns true if `event` has at least one interval that is currently active.
+/// Returns true if `event` has at least one interval that is currently active
+/// (interval timing: the shared rule, `controller::event_timing`).
 fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
-    if event.intervals.is_empty() {
-        return false;
-    }
-    event.intervals.iter().any(|interval| {
-        let ip = match interval.intervalPeriod.as_ref() {
-            Some(ip) => ip,
-            None => return true,
-        };
-        let start_str = match ip.start.as_deref() {
-            Some(s) => s,
-            None => return true,
-        };
-        let interval_start: DateTime<Utc> = match start_str.parse() {
-            Ok(dt) => dt,
-            Err(_) => return true,
-        };
-        let duration_secs = ip
-            .duration
-            .as_deref()
-            .map(parse_iso8601_duration_secs)
-            .unwrap_or(365 * 24 * 3_600);
-        let interval_end = interval_start + Duration::seconds(duration_secs);
-        interval_start <= now && now < interval_end
-    })
+    crate::controller::event_timing::timed_intervals(event)
+        .iter()
+        .any(|t| t.covers(now))
 }
 
 // ---------------------------------------------------------------------------

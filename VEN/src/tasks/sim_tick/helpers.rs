@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::controller;
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::OadrCapacityState;
+use crate::entities::capacity::{tightest_capacity_limit, OadrCapacityState};
 use crate::entities::plan::Plan;
 use crate::entities::sim_inject::SimInjectState;
 use crate::simulator::SimState;
@@ -139,7 +139,9 @@ pub(crate) fn build_tick_setpoints(
         .iter()
         .any(|a| a.start <= now && now < a.end);
     // A sim-injected import limit stands in only while no VTN limit is in force.
-    let capacity_limit_kw = limit::capacity_import_limit_at_kw(&ctx.capacity_schedule, now)
+    use crate::entities::capacity_curve::CommitmentDirection::Import;
+    let capacity_limit_kw = tightest_capacity_limit(&ctx.capacity_schedule, Import, now, now)
+        .map(|l| l.limit_kw)
         .or(ctx.inject.grid_import_limit_kw);
     let hard_limit_kw = limit::hard_import_limit_kw(capacity_limit_kw, alert_active)
         .filter(|_| ctx.limit_enforcement_enabled);

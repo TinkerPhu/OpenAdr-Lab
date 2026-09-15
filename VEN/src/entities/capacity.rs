@@ -2,12 +2,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Current capacity state derived from active OpenADR events.
+/// Capacity state in force now, derived from the listed OpenADR events
+/// (`controller::openadr_interface::parse_capacity_state`, GB-48).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OadrCapacityState {
-    /// Maximum import power allowed (kW); None = no limit
+    /// Import limit in force at the last poll (kW); None = no limit now. A
+    /// limit scheduled for later is in `CapacitySnapshot`s, not here.
     pub import_limit_kw: Option<f64>,
-    /// Maximum export power allowed (kW); None = no limit
+    /// Export limit in force at the last poll (kW); None = no limit now.
     pub export_limit_kw: Option<f64>,
     /// Subscribed capacity (kW) committed to the grid
     pub import_subscription_kw: Option<f64>,
@@ -26,12 +28,11 @@ pub struct OadrCapacityState {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
-/// A single capacity-limit snapshot for a time interval, mirroring
-/// `TariffSnapshot`'s shape. Parsed from IMPORT_CAPACITY_LIMIT/
-/// EXPORT_CAPACITY_LIMIT event payloads (the OpenADR 3.1 "Dynamic Operating
-/// Envelope", User Guide §8.10.1) — keeps the per-interval schedule that
-/// `OadrCapacityState` collapses into a single current-value scalar, so the
-/// UI can chart the envelope over time the same way it charts tariffs.
+/// One segment of the capacity-limit schedule, mirroring `TariffSnapshot`'s
+/// shape. Parsed from IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT event
+/// payloads (the OpenADR 3.1 "Dynamic Operating Envelope", User Guide §8.10.1),
+/// priority-resolved and non-overlapping. The schedule is the single source
+/// for which limit applies when — read it through `tightest_capacity_limit`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapacitySnapshot {
     pub interval_start: DateTime<Utc>,
@@ -64,15 +65,34 @@ pub fn tightest_capacity_limit(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Option<CapacityLimit> {
-    let _ = (schedule, direction, from, to);
-    unimplemented!()
+    use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
+    schedule
+        .iter()
+        .filter(|s| {
+            if from == to {
+                s.interval_start <= from && from < s.interval_end
+            } else {
+                s.interval_start < to && from < s.interval_end
+            }
+        })
+        .filter_map(|s| {
+            let (limit_kw, event_id) = match direction {
+                Import => (s.import_limit_kw?, &s.import_limit_event_id),
+                Export => (s.export_limit_kw?, &s.export_limit_event_id),
+            };
+            Some(CapacityLimit {
+                limit_kw,
+                event_id: event_id.clone(),
+            })
+        })
+        .min_by(|a, b| a.limit_kw.total_cmp(&b.limit_kw))
 }
 
 /// WP3.1 (BL-04) — an active grid-alert window parsed from an
 /// ALERT_GRID_EMERGENCY / ALERT_BLACK_START event. Both alert types carry a
-/// human-readable string payload (Definition doc, event payload type table)
-/// and take their window from the interval's own `intervalPeriod`, falling
-/// back to the event-level one (User Guide Example 8.1-1 uses the latter).
+/// human-readable string payload (Definition doc, event payload type table);
+/// the window is the interval's, per the shared timing rule
+/// (`controller::event_timing`).
 /// Both mean "minimize electricity use": the planner clamps the contractual
 /// import cap to 0 over the window (soft constraint — unavoidable base load
 /// becomes a penalized violation with a PlanWarning, never infeasibility);
@@ -273,6 +293,35 @@ mod capacity_limit_tests {
         );
         let only_imp = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
         assert!(tightest_capacity_limit(&only_imp, Export, at(10, 0), at(11, 0)).is_none());
+    }
+
+    // Moved from the GB-47 limit pass's own lookup (`capacity_import_limit_at_kw`,
+    // now removed): a limit scheduled for later is not in force now, and
+    // overlapping segments at an instant give the tightest.
+    #[test]
+    fn tightest_capacity_limit_ignores_later_limits_and_takes_the_tightest_overlap() {
+        let schedule = [
+            seg(at(9, 55), at(10, 5), Some(3.0), None),
+            seg(at(10, 10), at(10, 20), Some(1.0), None),
+        ];
+        let now = at(10, 0);
+        assert_eq!(
+            tightest_capacity_limit(&schedule, Import, now, now)
+                .unwrap()
+                .limit_kw,
+            3.0
+        );
+        assert!(tightest_capacity_limit(&schedule[1..], Import, now, now).is_none());
+        let overlapping = [
+            seg(at(9, 55), at(10, 5), Some(3.0), None),
+            seg(at(9, 59), at(10, 1), Some(2.0), None),
+        ];
+        assert_eq!(
+            tightest_capacity_limit(&overlapping, Import, now, now)
+                .unwrap()
+                .limit_kw,
+            2.0
+        );
     }
 
     #[test]

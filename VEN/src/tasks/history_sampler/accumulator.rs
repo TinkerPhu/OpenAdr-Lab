@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 use crate::controller::simulator_port::SimSnapshot;
-use crate::entities::capacity::CapacitySnapshot;
+use crate::entities::capacity::{tightest_capacity_limit, CapacitySnapshot};
+use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
 use crate::entities::history::{GridSample, TickSample};
 use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -141,13 +142,12 @@ impl HistorySampler {
             self.grid.co2_n += 1;
         }
 
-        let applicable_capacity = capacity_limits
-            .iter()
-            .find(|c| c.interval_start <= now && now < c.interval_end);
-        if let Some(v) = applicable_capacity.and_then(|c| c.import_limit_kw) {
+        let limit_now =
+            |d| tightest_capacity_limit(capacity_limits, d, now, now).map(|l| l.limit_kw);
+        if let Some(v) = limit_now(Import) {
             self.grid.import_limit_kw = Some(self.grid.import_limit_kw.map_or(v, |cur| cur.min(v)));
         }
-        if let Some(v) = applicable_capacity.and_then(|c| c.export_limit_kw) {
+        if let Some(v) = limit_now(Export) {
             self.grid.export_limit_kw = Some(self.grid.export_limit_kw.map_or(v, |cur| cur.min(v)));
         }
 
