@@ -119,6 +119,35 @@ shows the cases), reported by `kpi.py` per VEN (`compliance`) and per window
 - **Peaks**: `raw.peak_import_kw` is one VEN's own peak; the fleet's
   simultaneous peak is `fleet.coincident_peak_import_kw`.
 
+## Next to the pass bar: utilisation and comfort
+
+Passing says the VEN stayed under the limit, not how close under it stayed or
+what the household gave up. Each import window in `kpis.json` therefore also
+carries (against the paired baseline, minutes aligned by offset from each
+run's own start; `None` without one):
+
+- **`utilisation`** — Σ actual / Σ min(baseline, limit) over the window, and
+  **`unused_headroom_kwh`** — Σ max(0, min(baseline, limit) − actual). A VEN
+  that passes at 40 % utilisation shed far more than the limit required.
+  `fleet.compliance` shows the engaged VENs' mean and summed values; not
+  defined for an alert (0 kW allowed).
+- **`comfort`** — heater temperature at the window end and minutes below its
+  `temp_min_c`, EV energy charged in the window, each next to the baseline's.
+
+The pass bar is unchanged by these.
+
+## Tracing who met the limit
+
+The arbiter's limit-enforcement pass (on by default, see
+`docs/architecture/VEN_ARCHITECTURE.md`) meets hard import limits at
+execution. The harness saves its decisions (`ControllerEvent::ArbiterDecision`
+from `GET /trace/events`) to `<ven>-arbiter-events.jsonl`; `kpi.py` summarises
+them under `mechanism_health.arbiter_decisions` (decisions per pass, levers,
+largest unresolved excess), so a pass can be told apart from luck. To measure
+the planner alone, switch limit enforcement off on the fleet
+(`PUT /arbiter-settings {"limit_enforcement_enabled": false}`) for the run and
+back on afterwards.
+
 ## Related
 
 - GB-37 (`docs/BACKLOG.md`) — closing the `--personas`/manifest gap for the
