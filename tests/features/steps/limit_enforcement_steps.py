@@ -74,22 +74,41 @@ def step_net_power_exceeds(context, limit_kw, seconds):
     )
 
 
-@then("the arbiter diagnostics show the limit pass holding import under {limit_kw:f} kW with nothing unresolved")
-def step_limit_diagnostics(context, limit_kw):
+def _wait_for_limit_diagnostics(limit_kw, lever_required):
     def fetch():
         r = ven_get("/arbiter-diagnostics")
         return r.json() if r.ok else None
 
-    def holding(diag):
+    def steering(diag):
         limit = (diag or {}).get("limit")
         return (
             limit is not None
             and limit["target_kw"] < limit_kw
-            and limit["active_lever"] is not None
+            and (limit["active_lever"] is not None or not lever_required)
             and limit["unresolved_kw"] < 0.1  # the arbiter's dead band
         )
 
-    poll_until(fetch, holding, timeout=15, interval=1, description="limit pass diagnostics")
+    poll_until(fetch, steering, timeout=15, interval=1, description="limit pass diagnostics")
+
+
+@then("the arbiter diagnostics show the limit pass steering under {limit_kw:f} kW with nothing unresolved")
+def step_limit_diagnostics(context, limit_kw):
+    # Whether a lever is needed depends on the plan: a plan that already
+    # accounts for the limit leaves the pass nothing to shed.
+    _wait_for_limit_diagnostics(limit_kw, lever_required=False)
+
+
+@then("the arbiter diagnostics show the limit pass steering under {limit_kw:f} kW with a lever and nothing unresolved")
+def step_limit_diagnostics_with_lever(context, limit_kw):
+    _wait_for_limit_diagnostics(limit_kw, lever_required=True)
+
+
+@given("the simulator imposes an import limit of {limit_kw:f} kW")
+def step_sim_import_limit(context, limit_kw):
+    # `grid_import_limit_kw` stands in for a capacity limit at execution only
+    # (the planner never reads it), so the plan keeps violating it.
+    r = ven_post("/sim/inject", json={"grid_import_limit_kw": limit_kw})
+    r.raise_for_status()
 
 
 @then('the controller event log has a "{pass_name}" ArbiterDecision')
