@@ -48,12 +48,17 @@ fn hard_import_limit_kw_is_zero_during_an_alert_else_the_capacity_limit() {
 }
 
 #[test]
-fn limit_target_kw_sits_a_margin_below_and_lower_while_engaged() {
-    assert_eq!(limit_target_kw(None, true), None);
-    let fresh = limit_target_kw(Some(3.0), false).unwrap();
-    let engaged = limit_target_kw(Some(3.0), true).unwrap();
+fn limit_target_kw_sits_a_margin_below_and_lower_after_a_switching_lever() {
+    assert_eq!(limit_target_kw(None, Some("heater_pause")), None);
+    let fresh = limit_target_kw(Some(3.0), None).unwrap();
+    let stage_shed = limit_target_kw(Some(3.0), Some("heater_pause")).unwrap();
+    let battery = limit_target_kw(Some(3.0), Some("battery")).unwrap();
     assert!((fresh - (3.0 - LIMIT_MARGIN_KW)).abs() < 1e-9);
-    assert!((engaged - (3.0 - LIMIT_MARGIN_KW - LIMIT_RELEASE_HYSTERESIS_KW)).abs() < 1e-9);
+    assert!((stage_shed - (3.0 - LIMIT_MARGIN_KW - LIMIT_RELEASE_HYSTERESIS_KW)).abs() < 1e-9);
+    assert_eq!(
+        battery, fresh,
+        "the battery adjusts continuously — no release hysteresis"
+    );
 }
 
 #[test]
@@ -79,7 +84,7 @@ fn enforce_import_limit_sheds_a_planned_heater_stage_inside_the_cap() {
         &sim,
         Some(&slot),
         0.47,
-        limit_target_kw(Some(1.5), false),
+        limit_target_kw(Some(1.5), None),
         false,
     );
     let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
@@ -103,7 +108,7 @@ fn enforce_import_limit_discharges_the_battery_for_an_unforecast_base_load() {
         &sim,
         Some(&slot),
         2.3,
-        limit_target_kw(Some(1.0), false),
+        limit_target_kw(Some(1.0), None),
         false,
     );
     let mut sp = StdHashMap::from([("battery".to_string(), 0.0)]);
@@ -126,7 +131,7 @@ fn enforce_import_limit_reduces_charging_the_plan_itself_scheduled() {
         &sim,
         Some(&slot),
         0.5,
-        limit_target_kw(Some(3.0), false),
+        limit_target_kw(Some(3.0), None),
         false,
     );
     t.plan_has_ev_allocation = true;
@@ -147,7 +152,7 @@ fn enforce_import_limit_discharges_the_battery_under_max_revenue_too() {
         &sim,
         Some(&slot),
         2.0,
-        limit_target_kw(Some(1.0), false),
+        limit_target_kw(Some(1.0), None),
         false,
     );
     t.objective = PlannerObjective::MaxRevenue;
@@ -162,7 +167,7 @@ fn enforce_import_limit_works_before_the_first_plan() {
         ("battery", battery_snap(0.0, 0.5)),
         ("base_load", base_snap(2.0)),
     ]);
-    let t = tick(&sim, None, 2.0, limit_target_kw(Some(1.0), false), false);
+    let t = tick(&sim, None, 2.0, limit_target_kw(Some(1.0), None), false);
     let mut sp = StdHashMap::from([("battery".to_string(), 0.0)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
     assert_eq!(out.active_lever, Some("battery"));
@@ -176,7 +181,7 @@ fn enforce_import_limit_cuts_back_battery_charging_commanded_above_the_cap() {
         ("battery", battery_snap(4.0, 0.5)),
         ("base_load", base_snap(0.5)),
     ]);
-    let t = tick(&sim, None, 0.5, limit_target_kw(Some(2.0), false), false);
+    let t = tick(&sim, None, 0.5, limit_target_kw(Some(2.0), None), false);
     let mut sp = StdHashMap::from([("battery".to_string(), 4.0)]);
     enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
     assert!((sp["battery"] - (2.0 - LIMIT_MARGIN_KW - 0.5)).abs() < 1e-6);
@@ -188,7 +193,7 @@ fn enforce_import_limit_stays_inside_the_comms_loss_bounds_and_reports_the_rest(
         ("battery", battery_snap(0.0, 0.5)),
         ("base_load", base_snap(3.0)),
     ]);
-    let t = tick(&sim, None, 3.0, limit_target_kw(Some(1.0), false), false);
+    let t = tick(&sim, None, 3.0, limit_target_kw(Some(1.0), None), false);
     let bounds = SetpointBoundsKw::from([("battery".to_string(), (-1.0, 1.0))]);
     let mut sp = StdHashMap::from([("battery".to_string(), 0.0)]);
     let out = enforce_import_limit(&t, &mut sp, None, &bounds).unwrap();
@@ -207,7 +212,7 @@ fn enforce_import_limit_curtails_emergency_heat_during_an_alert() {
     ]);
     let slot = test_slot(0.25, 0.08, 0.5, 0.0, 0.0, 0.08);
     let hard = hard_import_limit_kw(Some(3.0), true);
-    let t = tick(&sim, Some(&slot), 0.5, limit_target_kw(hard, false), true);
+    let t = tick(&sim, Some(&slot), 0.5, limit_target_kw(hard, None), true);
     let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
     assert_eq!(out.heater_emergency_mode, Some((true, false)), "Curtail");
@@ -227,7 +232,7 @@ fn enforce_import_limit_never_curtails_emergency_heat_for_a_capacity_limit() {
         &sim,
         Some(&slot),
         0.5,
-        limit_target_kw(Some(1.0), false),
+        limit_target_kw(Some(1.0), None),
         false,
     );
     let mut sp = StdHashMap::from([("heater".to_string(), 0.0)]);
@@ -257,13 +262,19 @@ fn enforce_import_limit_keeps_a_shed_stage_off_until_it_fits_with_room_to_spare(
         ("base_load", base_snap(0.35)),
     ]);
     let mut sp_fresh = StdHashMap::from([("heater".to_string(), 1.5)]);
-    let t_fresh = tick(&sim, None, 0.35, limit_target_kw(Some(2.0), false), false);
+    let t_fresh = tick(&sim, None, 0.35, limit_target_kw(Some(2.0), None), false);
     let fresh = enforce_import_limit(&t_fresh, &mut sp_fresh, None, &no_bounds()).unwrap();
     assert_eq!(sp_fresh["heater"], 1.5);
     assert_eq!(fresh.active_lever, None);
 
     let mut sp_engaged = StdHashMap::from([("heater".to_string(), 1.5)]);
-    let t_engaged = tick(&sim, None, 0.35, limit_target_kw(Some(2.0), true), false);
+    let t_engaged = tick(
+        &sim,
+        None,
+        0.35,
+        limit_target_kw(Some(2.0), Some("heater_pause")),
+        false,
+    );
     let engaged = enforce_import_limit(
         &t_engaged,
         &mut sp_engaged,
@@ -292,7 +303,7 @@ fn both_passes_together_settle_under_a_persistent_unforecast_load() {
             ("battery", battery_snap(battery_kw, 0.5)),
             ("base_load", base_snap(2.3)),
         ]);
-        let target = limit_target_kw(Some(1.0), limit_incumbent.is_some());
+        let target = limit_target_kw(Some(1.0), limit_incumbent);
         let t = tick(&sim, Some(&slot), 2.3, target, false);
         let mut outcome = reconcile(&t, &base_setpoints, dev_incumbent);
         let limit = enforce_import_limit(&t, &mut outcome.setpoints, limit_incumbent, &no_bounds())
