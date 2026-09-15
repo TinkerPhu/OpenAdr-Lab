@@ -369,11 +369,21 @@ fn pv_forecast_override_wins_over_weather_pv_kw() {
 
 // ── PV-export decision variable (pv-export-curtailment) ────────────────────
 
-fn capacity_with_export_limit_kw(limit_kw: f64) -> OadrCapacityState {
-    OadrCapacityState {
+/// An export limit covering the whole horizon from `now`, as a capacity-schedule
+/// segment (GB-48: the planner reads limits from the schedule per slot; the
+/// folded `OadrCapacityState.export_limit_kw` means "in force now" only).
+fn export_limit_schedule(
+    limit_kw: f64,
+    now: DateTime<Utc>,
+) -> Vec<crate::entities::capacity::CapacitySnapshot> {
+    vec![crate::entities::capacity::CapacitySnapshot {
+        interval_start: now - Duration::hours(1),
+        interval_end: now + Duration::days(2),
+        import_limit_kw: None,
         export_limit_kw: Some(limit_kw),
-        ..no_capacity()
-    }
+        import_limit_event_id: None,
+        export_limit_event_id: Some("export-cap".to_string()),
+    }]
 }
 
 /// PV + base load only — no battery/EV/heater to absorb surplus, so curtailment
@@ -426,17 +436,28 @@ fn export_cap_forces_pv_curtailment_without_soft_violation() {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     // Rated 5.0 kW PV, 0.5 kW base load → up to ~4.5 kW export at noon.
     // Cap far below that so curtailment is the only zero-cost relief.
-    let capacity = capacity_with_export_limit_kw(1.0);
-    let plan = run_planner(
+    let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, noon, None, None, &tariffs),
         &tariffs,
-        &capacity,
-        &profile,
+        &no_capacity(),
+        &export_limit_schedule(1.0, noon),
+        &[],
+        &[],
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        &profile.assets,
         noon,
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
         &[],
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         None,
         None,
     );
