@@ -153,7 +153,10 @@ pub(crate) fn build_tick_setpoints(
         live_pv_kw,
         live_base_load_kw,
         alert_active,
-        limit_target_kw: limit::limit_target_kw(hard_limit_kw, ctx.limit_incumbent_lever.is_some()),
+        limit_target_kw: limit::limit_target_kw(
+            hard_limit_kw,
+            ctx.limit_incumbent_lever.as_deref(),
+        ),
     };
 
     let mut outcome = if ctx.deviation_arbiter_enabled {

@@ -9,8 +9,9 @@
 //! machinery (`super::apply_ranked_levers`) under its own `LeverPolicy`.
 //!
 //! Memoryless: the only state carried between ticks is its own incumbent
-//! lever, which lowers the target by `LIMIT_RELEASE_HYSTERESIS_KW` so a shed
-//! heater stage is restored only once it fits with room to spare.
+//! lever; while that is a switching lever (heater stage, EV minimum-charge
+//! floor) the target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed stage
+//! is restored only once it fits with room to spare.
 
 use std::collections::HashMap;
 
@@ -23,10 +24,15 @@ use super::{
 /// How far below a hard import limit both passes steer (kW) — room for the
 /// one-tick lag between projection and physics.
 pub const LIMIT_MARGIN_KW: f64 = 0.1;
-/// While the limit pass was engaged last tick its target sits this much lower
-/// (kW): restoring a shed stage needs room to spare, or a load hovering at the
-/// threshold would switch a heater relay every second.
+/// While a switching lever led the limit pass last tick its target sits this
+/// much lower (kW): restoring a shed stage needs room to spare, or a load
+/// hovering at the threshold would switch a heater relay every second.
 pub const LIMIT_RELEASE_HYSTERESIS_KW: f64 = 0.2;
+
+/// Levers whose release switches discretely — a heater stage, the EV's
+/// minimum-charge floor. The battery adjusts continuously and gets no
+/// hysteresis, so it can hold import right at the target.
+const SWITCHING_LEVERS: [&str; 2] = ["heater_pause", "ev"];
 
 /// A hard limit may also cut charging the plan itself scheduled, and battery
 /// discharge ignores `MaxRevenue`'s refusal — the limit outranks the objective.
@@ -65,10 +71,10 @@ pub fn hard_import_limit_kw(
 }
 
 /// The import ceiling both passes steer to: `LIMIT_MARGIN_KW` below the hard
-/// limit, a further `LIMIT_RELEASE_HYSTERESIS_KW` below while the limit pass
-/// was engaged last tick.
-pub fn limit_target_kw(hard_limit_kw: Option<f64>, engaged_last_tick: bool) -> Option<f64> {
-    let hysteresis_kw = if engaged_last_tick {
+/// limit, a further `LIMIT_RELEASE_HYSTERESIS_KW` below while a switching lever
+/// led the limit pass last tick (`incumbent_lever`).
+pub fn limit_target_kw(hard_limit_kw: Option<f64>, incumbent_lever: Option<&str>) -> Option<f64> {
+    let hysteresis_kw = if incumbent_lever.is_some_and(|l| SWITCHING_LEVERS.contains(&l)) {
         LIMIT_RELEASE_HYSTERESIS_KW
     } else {
         0.0

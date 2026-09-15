@@ -186,9 +186,10 @@ cannot shed.
 else the VTN capacity import limit in force at `now` from the priority-resolved capacity schedule
 (`limit::capacity_import_limit_at_kw` — not `OadrCapacityState.import_limit_kw`, which folds in
 limits that have not started yet), else a sim-injected `grid_import_limit_kw`. Deviation
-correction therefore never steers above a limit the limit pass would push back down. While the
-limit pass was engaged last tick its target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed
-heater stage is restored only with room to spare.
+correction therefore never steers above a limit the limit pass would push back down. While a
+switching lever (a heater stage, the EV's minimum-charge floor) led the limit pass last tick its
+target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed stage is restored only with room to
+spare; the battery, which adjusts continuously, holds import right at the target.
 
 **Deviation correction** (`deviation_arbiter_enabled`, default off): compares a live projection
 (`projected_net_kw` — this tick's `peek_pv_kw`/`peek_base_load_kw`, forced power, heater stages,
