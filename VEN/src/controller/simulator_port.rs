@@ -76,6 +76,11 @@ pub struct AssetSnapshot {
     /// (`Asset::forced_power_kw`, e.g. a heater's thermostat override).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forced_power_kw: Option<f64>,
+    /// The discrete power levels a `Stepped` asset can actually draw, ascending
+    /// (from its own capability; empty for continuously adjustable assets).
+    /// Commands and projections go through `entities::asset`'s step helpers.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub power_steps_kw: Vec<f64>,
     /// Default setpoint for this asset (kW) when no plan is active.
     pub default_setpoint_kw: f64,
     /// Last setpoint applied by the VEN controller (kW).
@@ -146,6 +151,7 @@ mod tests {
             available_discharge_kwh: Some(2.0),
             available_charge_kwh: Some(5.0),
             forced_power_kw: None,
+            power_steps_kw: Vec::new(),
             default_setpoint_kw: 0.0,
             setpoint_kw: 0.0,
             values,

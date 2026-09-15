@@ -109,6 +109,7 @@ mod tests {
                     available_discharge_kwh: None,
                     available_charge_kwh: None,
                     forced_power_kw: None,
+                    power_steps_kw: Vec::new(),
                     default_setpoint_kw: power_kw,
                     setpoint_kw: power_kw,
                     values: HashMap::new(),

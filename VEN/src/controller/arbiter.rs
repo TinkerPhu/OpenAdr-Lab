@@ -314,7 +314,7 @@ pub(crate) fn apply_ranked_levers(
         ev_plan_allocated,
         ev_overlay_enabled,
     ));
-    candidates.extend(heater_pause_lever(setpoints, deviation_kw));
+    candidates.extend(heater_pause_lever(setpoints, sim, deviation_kw));
     candidates.extend(heater_emergency_lever(
         sim,
         inputs.slot,
@@ -360,7 +360,7 @@ pub(crate) fn apply_ranked_levers(
                     .or_insert(0.0) += delta;
                 delta
             }
-            "heater_pause" => apply_heater_pause_lever(setpoints, signed_assigned_kw),
+            "heater_pause" => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
             "heater_emergency" => {
                 applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
                     (true, false) // Curtail
