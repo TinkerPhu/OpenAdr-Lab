@@ -288,7 +288,7 @@ def _cleanup_vtn_resources(context):
         token = get_token_value("any-business", "any-business")
 
         event_ids: set = set()
-        for attr in ("rate_event_id", "planner_event_id"):
+        for attr in ("rate_event_id", "planner_event_id", "schedule_event_id", "capacity_event_id"):
             val = getattr(context, attr, None)
             if val:
                 event_ids.add(val)

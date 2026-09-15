@@ -132,6 +132,7 @@ def step_create_capacity_limit_event(context, limit):
     )
     r.raise_for_status()
     context.capacity_limit = limit
+    context.capacity_limit_sent_at = datetime.now(timezone.utc)
     context.rate_event_id = r.json().get("id")
 
 
