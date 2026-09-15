@@ -322,6 +322,20 @@ def _reset_ven_sim_overrides():
         pass
 
 
+def _reset_arbiter_settings():
+    """Restore both arbiter passes to their defaults on VEN-1 (deviation
+    correction off, limit enforcement on) so a scenario that flips one
+    cannot leak it into the next, even when it fails midway."""
+    try:
+        from features.helpers.api_client import ven_put
+        ven_put(
+            "/arbiter-settings",
+            json={"deviation_arbiter_enabled": False, "limit_enforcement_enabled": True},
+        )
+    except Exception:
+        pass
+
+
 def _reset_device_sessions():
     """Clear all device sessions on VEN-1 between scenarios.
 
@@ -359,6 +373,7 @@ def after_scenario(context, scenario):
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
     _reset_ven_sim_overrides()
+    _reset_arbiter_settings()
     _reset_device_sessions()
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
