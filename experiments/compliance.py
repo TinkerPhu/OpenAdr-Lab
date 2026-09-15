@@ -99,13 +99,9 @@ def window_compliance(rows, window, floor_by_ts=None):
     idx = 1 if window["direction"] == "import" else 2
     limit = window["limit_kw"]
     scored = []
-    for r in rows:
-        ts = r[0]
-        # Only samples wholly inside the window: a 1-minute sample straddling either
-        # edge blends in-window and out-of-window power.
-        if window["start_ts"] <= ts and ts + 60 <= window["end_ts"]:
-            floor = floor_by_ts.get(ts, 0.0) if window["direction"] == "import" else 0.0
-            scored.append((ts, r[idx], max(limit, floor), floor))
+    for r in scored_rows(rows, window):
+        floor = floor_by_ts.get(r[0], 0.0) if window["direction"] == "import" else 0.0
+        scored.append((r[0], r[idx], max(limit, floor), floor))
     if not scored:
         return None
     ok = [actual <= target + TOL_KW for _, actual, target, _ in scored]
@@ -138,6 +134,83 @@ def window_compliance(rows, window, floor_by_ts=None):
         "time_to_comply_s": time_to_comply_s,
         "pass": time_to_comply_s is not None and time_to_comply_s <= GRACE_S,
         "overshoot_after_grace_kwh": round(overshoot, 4),
+    }
+
+
+def scored_rows(rows, window):
+    """Rows wholly inside the window (a 1-minute sample straddling either edge
+    blends in-window and out-of-window power) — the same minutes every window KPI
+    reads."""
+    return [r for r in rows if window["start_ts"] <= r[0] and r[0] + 60 <= window["end_ts"]]
+
+
+def minute_index(ts, run_start_ts):
+    """A sample's minute offset from its own run's start — how a run's minutes pair
+    with its paired baseline's, which ran at a different wall-clock time."""
+    return int(ts - run_start_ts) // 60
+
+
+def window_utilisation(rows, baseline_import_by_minute, window, run_start_ts):
+    """GB-47: how much of the import it was allowed did the VEN use in an import
+    window? Per scored minute, allowed = min(baseline import, limit), from the paired
+    baseline run (same scenario without events) at the same minute offset.
+    utilisation = Σ actual / Σ allowed (> 1 = over); unused_headroom_kwh =
+    Σ max(0, allowed − actual) / 60 — comfort or flexibility given up for nothing.
+    None for export windows, without a baseline, or when nothing was allowed
+    (an alert's 0 kW)."""
+    if window["direction"] != "import" or not baseline_import_by_minute:
+        return None
+    actual_sum = allowed_sum = unused = 0.0
+    for r in scored_rows(rows, window):
+        base = baseline_import_by_minute.get(minute_index(r[0], run_start_ts))
+        if base is None:
+            continue
+        allowed = min(base, window["limit_kw"])
+        actual_sum += r[1]
+        allowed_sum += allowed
+        unused += max(0.0, allowed - r[1])
+    if allowed_sum <= 0.0:
+        return None
+    return {
+        "utilisation": round(actual_sum / allowed_sum, 3),
+        "unused_headroom_kwh": round(unused / 60.0, 4),
+    }
+
+
+def window_comfort(run_minutes, baseline_minutes, profile):
+    """GB-47: what a limit window cost the household, next to the pass bar.
+    `run_minutes`/`baseline_minutes`: per scored minute (aligned by offset), asset_id →
+    {power_kw, temperature_c}. Heater temperature at the window end and minutes below
+    its temp_min_c, EV energy charged — each for the run and its paired baseline
+    (None where the profile has no such asset or there is no baseline)."""
+    by_type = {a["type"]: a for a in profile.get("assets", [])}
+    heater, ev = by_type.get("heater"), by_type.get("ev")
+
+    def heater_temps(minutes):
+        hid = heater.get("id", "heater")
+        return [m[hid]["temperature_c"] for m in minutes if m.get(hid, {}).get("temperature_c") is not None]
+
+    def summary(minutes):
+        if minutes is None:
+            return None, None, None
+        temps = heater_temps(minutes) if heater else []
+        end_c = temps[-1] if temps else None
+        below = sum(1 for t in temps if t < heater["temp_min_c"]) if heater and "temp_min_c" in heater else None
+        ev_kwh = None
+        if ev:
+            eid = ev.get("id", "ev")
+            ev_kwh = round(sum(max(0.0, m.get(eid, {}).get("power_kw") or 0.0) for m in minutes) / 60.0, 4)
+        return end_c, (below if temps else None), ev_kwh
+
+    end_c, below, ev_kwh = summary(run_minutes)
+    b_end_c, b_below, b_ev_kwh = summary(baseline_minutes)
+    return {
+        "heater_temp_end_c": end_c,
+        "heater_temp_end_baseline_c": b_end_c,
+        "heater_minutes_below_min": below,
+        "heater_minutes_below_min_baseline": b_below,
+        "ev_kwh": ev_kwh,
+        "ev_kwh_baseline": b_ev_kwh,
     }
 
 
@@ -313,7 +386,53 @@ def _self_check_fleet_coincident_peak():
     print("compliance self-check OK: fleet_coincident_peak")
 
 
+def _self_check_window_utilisation():
+    # 20-minute 1.5 kW import cap; baseline (same scenario, no events) drew 2.0 kW,
+    # so 1.5 kW per minute was allowed. Holding 1.4 kW uses 1.4/1.5 of it.
+    rows = _minute_rows([1.4] * 20)
+    baseline = [2.0] * 20
+    u = window_utilisation(rows, dict(enumerate(baseline)), _window(), run_start_ts=T0S)
+    assert abs(u["utilisation"] - 1.4 / 1.5) < 1e-3, u
+    assert abs(u["unused_headroom_kwh"] - 20 * 0.1 / 60) < 1e-4, u
+    # Baseline below the limit: allowed = baseline; shedding below it is unused headroom.
+    low = window_utilisation(_minute_rows([0.5] * 20), dict(enumerate([1.0] * 20)), _window(), run_start_ts=T0S)
+    assert abs(low["utilisation"] - 0.5) < 1e-3 and abs(low["unused_headroom_kwh"] - 20 * 0.5 / 60) < 1e-4, low
+    # Over the limit counts as > 100 %, never as negative headroom.
+    over = window_utilisation(_minute_rows([2.0] * 20), dict(enumerate(baseline)), _window(), run_start_ts=T0S)
+    assert over["utilisation"] > 1.0 and over["unused_headroom_kwh"] == 0.0, over
+    # Baseline aligned by minute offset from its own run start, not by wall clock:
+    # a window at run minute 5 reads baseline minutes 5..
+    shifted = _window(start=T0S + 300)
+    rows5 = [(T0S + 300 + 60 * i, 1.0, 0.0) for i in range(20)]
+    base5 = [9.9] * 5 + [1.0] * 20
+    aligned = window_utilisation(rows5, dict(enumerate(base5)), shifted, run_start_ts=T0S)
+    assert abs(aligned["utilisation"] - 1.0) < 1e-3, aligned
+    # No baseline, or an export window → None.
+    assert window_utilisation(rows, None, _window(), run_start_ts=T0S) is None
+    assert window_utilisation(rows, dict(enumerate(baseline)), _window(direction="export"), run_start_ts=T0S) is None
+    print("compliance self-check OK: window_utilisation")
+
+
+def _self_check_window_comfort():
+    heater_cfg = {"assets": [{"type": "heater", "id": "heater", "temp_min_c": 18.0}, {"type": "ev", "id": "ev"}]}
+    def minutes(temps, ev_kw):
+        return [{"heater": {"power_kw": 0.0, "temperature_c": t}, "ev": {"power_kw": e}} for t, e in zip(temps, ev_kw)]
+    run = minutes([20.0, 19.0, 17.9, 17.5], [0.0, 0.0, 3.0, 3.0])
+    base = minutes([20.0, 20.5, 21.0, 21.5], [6.0, 6.0, 6.0, 6.0])
+    c = window_comfort(run, base, heater_cfg)
+    assert c["heater_temp_end_c"] == 17.5 and c["heater_temp_end_baseline_c"] == 21.5, c
+    assert c["heater_minutes_below_min"] == 2 and c["heater_minutes_below_min_baseline"] == 0, c
+    assert abs(c["ev_kwh"] - 0.1) < 1e-9 and abs(c["ev_kwh_baseline"] - 0.4) < 1e-9, c
+    # No heater/EV in the profile → those fields are None; no baseline → baseline fields None.
+    bare = window_comfort([{"base_load": {"power_kw": 1.0}}], None, {"assets": []})
+    assert bare["heater_temp_end_c"] is None and bare["ev_kwh"] is None, bare
+    assert bare["heater_temp_end_baseline_c"] is None and bare["ev_kwh_baseline"] is None, bare
+    print("compliance self-check OK: window_comfort")
+
+
 def _self_check():
+    _self_check_window_utilisation()
+    _self_check_window_comfort()
     _self_check_limit_windows()
     _self_check_import_floor()
     _self_check_window_compliance()
