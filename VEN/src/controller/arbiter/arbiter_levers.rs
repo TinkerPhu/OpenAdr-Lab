@@ -180,6 +180,7 @@ pub(super) fn apply_ev_lever(
 /// marginal cost is genuinely zero whenever available").
 pub(super) fn heater_pause_lever(
     setpoints: &HashMap<String, f64>,
+    _sim: &SimSnapshot,
     deviation_kw: f64,
 ) -> Option<Lever> {
     if deviation_kw < 0.0 {
@@ -202,6 +203,7 @@ pub(super) fn heater_pause_lever(
 /// Returns the achieved change (kW, magnitude).
 pub(super) fn apply_heater_pause_lever(
     setpoints: &mut HashMap<String, f64>,
+    _sim: &SimSnapshot,
     assigned_kw: f64,
 ) -> f64 {
     let planned_kw = setpoints

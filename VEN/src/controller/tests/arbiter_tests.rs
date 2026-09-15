@@ -118,6 +118,7 @@ fn base_snap(power_kw: f64) -> AssetSnapshot {
         available_discharge_kwh: None,
         available_charge_kwh: None,
         forced_power_kw: None,
+        power_steps_kw: Vec::new(),
         default_setpoint_kw: power_kw,
         setpoint_kw: power_kw,
         values: StdHashMap::new(),
@@ -484,6 +485,29 @@ fn opportunistic_ev_disabled_suppresses_charging() {
         !sp.contains_key("ev"),
         "overlay_enabled=false must suppress"
     );
+}
+
+// ── GB-47: stage-aware heater pause ─────────────────────────────────────────
+
+#[test]
+fn heater_pause_commands_a_reachable_step_not_one_the_heater_rounds_back_up() {
+    // heater_snap: max 3.0 kW, 2 stages → steps 0 / 1.5 / 3.0; 20 °C is inside the band.
+    let sim = make_sim(vec![("heater", heater_snap(20.0, 18.0, 23.0, 23.0))]);
+    let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
+    // 1.5 − 0.6 = 0.9 kW: the heater would round 0.9 up to 1.5, so the lever
+    // must command the highest step at or below it — 0.
+    let achieved = apply_heater_pause_lever(&mut sp, &sim, 0.6);
+    assert_eq!(sp["heater"], 0.0);
+    assert_eq!(achieved, 1.5);
+}
+
+#[test]
+fn heater_pause_offers_no_capacity_while_the_thermostat_forces_power() {
+    // 17 °C ≤ temp_min_c 18: the thermostat forces emergency heat, so pausing
+    // the setpoint frees nothing and must not be claimed.
+    let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
+    let sp = StdHashMap::from([("heater".to_string(), 1.5)]);
+    assert!(heater_pause_lever(&sp, &sim, 1.0).is_none());
 }
 
 // ── Ported regression tests: apply_battery_lever (adapted from the former

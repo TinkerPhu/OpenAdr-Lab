@@ -30,6 +30,23 @@ pub enum PowerAdjustability {
     Croppable,      // can be curtailed downward only (e.g. PV — can't exceed natural output)
 }
 
+/// The power step a `Stepped` asset actually draws for `setpoint_kw`: the
+/// nearest of its `power_steps_kw` (ascending; a tie goes to the higher step).
+/// The single quantization rule — the asset's own step physics and every
+/// projection of what it will draw call this, so they can't disagree.
+pub fn nearest_power_step_kw(power_steps_kw: &[f64], setpoint_kw: f64) -> f64 {
+    let _ = (power_steps_kw, setpoint_kw);
+    unimplemented!()
+}
+
+/// The highest of `power_steps_kw` (ascending) at or below `kw` — what to
+/// command when a stepped asset must draw no more than `kw`. Below the lowest
+/// step, the lowest step.
+pub fn highest_power_step_at_or_below_kw(power_steps_kw: &[f64], kw: f64) -> f64 {
+    let _ = (power_steps_kw, kw);
+    unimplemented!()
+}
+
 /// How to handle completion when the last DeadlineTier expires (§1.10).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -106,6 +123,42 @@ impl ComfortRate {
     /// Interpolate `max_marginal_co2` at an arbitrary fill level. See `interpolate_at_fill`.
     pub fn co2_value_at_fill(rates: &[ComfortRate], fill: f64) -> f64 {
         Self::interpolate_at_fill(rates, fill, |r| r.max_marginal_co2)
+    }
+}
+
+#[cfg(test)]
+mod power_step_tests {
+    use super::{highest_power_step_at_or_below_kw, nearest_power_step_kw};
+
+    const STEPS: [f64; 3] = [0.0, 1.75, 3.5];
+
+    #[test]
+    fn nearest_power_step_kw_rounds_to_the_closest_step() {
+        assert_eq!(nearest_power_step_kw(&STEPS, 1.2), 1.75);
+        assert_eq!(nearest_power_step_kw(&STEPS, 0.8), 0.0);
+        assert_eq!(nearest_power_step_kw(&STEPS, 3.0), 3.5);
+    }
+
+    #[test]
+    fn nearest_power_step_kw_tie_goes_to_the_higher_step() {
+        // Matches the heater's former `(setpoint / p_step).round()`: 0.875 = 0.5 steps → 1.
+        assert_eq!(nearest_power_step_kw(&STEPS, 0.875), 1.75);
+    }
+
+    #[test]
+    fn nearest_power_step_kw_clamps_outside_the_range() {
+        assert_eq!(nearest_power_step_kw(&STEPS, -2.0), 0.0);
+        assert_eq!(nearest_power_step_kw(&STEPS, 9.0), 3.5);
+    }
+
+    #[test]
+    fn highest_power_step_at_or_below_kw_never_rounds_up() {
+        // GB-47: shedding 0.72 kW from 1.75 leaves 1.03 — must command 0, not
+        // a value the heater would round back up to 1.75.
+        assert_eq!(highest_power_step_at_or_below_kw(&STEPS, 1.03), 0.0);
+        assert_eq!(highest_power_step_at_or_below_kw(&STEPS, 1.75), 1.75);
+        assert_eq!(highest_power_step_at_or_below_kw(&STEPS, 3.4), 1.75);
+        assert_eq!(highest_power_step_at_or_below_kw(&STEPS, -0.1), 0.0);
     }
 }
 
