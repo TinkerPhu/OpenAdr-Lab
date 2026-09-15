@@ -163,43 +163,67 @@ setpoints — narrowed to plan-allocation only:
 3. Caps PV export at the active capacity limit
 
 Reactive adjustment on top of the plan's allocation — including the opportunistic
-surplus-EV overlay's role — has moved to the Deviation Arbiter (below). Ledger
+surplus-EV overlay's role — has moved to the Arbiter (below). Ledger
 accounting is **not** the Dispatcher's responsibility — see Monitor above.
 
-#### Deviation Arbiter (BL-22 resolved)
+#### Arbiter: deviation correction and limit enforcement (BL-22, GB-47)
 
-`controller::arbiter::reconcile`, called once per tick from
-`tasks/sim_tick/helpers.rs::build_tick_setpoints` after `dispatcher::build_setpoints`, is the
-single owner of every reactive (non-plan, non-VTN-override) actuator adjustment — resolving the
-gap R5/BL-22 tracked (`apply_battery_correction_overlay`'s dead-beat P-controller sat unwired,
-and the opportunistic EV-surplus overlay ran as a separate, uncoordinated writer). It:
+`controller::arbiter` is the single owner of every reactive (non-plan) actuator adjustment. It
+runs two passes per tick from `tasks/sim_tick/helpers.rs::build_tick_setpoints`, both through
+**one shared lever machinery** (`apply_ranked_levers`: candidate levers → `rank_levers` by marginal
+cost with preemption-margin hysteresis → greedy apply, each lever consuming what it actually
+achieved). What differs between the passes is data (`LeverPolicy`), not a second code path.
 
-1. Computes this tick's deviation between the plan's expected net site power and a live
-   projection (using `SimState::peek_pv_kw`/`peek_base_load_kw` so neither physics-driven input
-   is ever one tick stale — the specific lag that caused feature 017's removal, twice; see
-   `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section). For battery/EV specifically,
-   the projection reads `AssetSnapshot.setpoint_kw` (the arbiter's own last-applied command), not
-   the plan's static per-slot allocation — reading the static value instead caused a real
-   production bug (a tick-to-tick correction runaway/revert cycle, visible as rapid battery
-   oscillation on the dashboard) since a correction already applied was invisible to the next
-   tick's deviation calc and got re-applied or silently reverted; both `apply_battery_lever` and
-   `apply_ev_lever` already used `setpoint_kw` as their own integrator state, so the deviation
-   signal now agrees with them.
-2. Ranks available levers (battery, EV, heater pause/emergency-mode, PV curtailment backstop) by
-   marginal cost (`PlanTimeSlot.marginal_cost_import/export_eur_per_kwh`, `solver-marginal-cost`),
-   excluding zero-capacity levers outright and applying preemption-margin/dwell hysteresis so two
-   near-equal-cost levers don't chatter tick to tick
-3. Feeds absorbed kWh into a per-asset (battery/EV) residual accumulator; a capacity-fraction
-   breach past a cooldown emits `PlanTrigger::ResidualThreshold` — accumulator-based, never a raw
-   per-tick-deviation trigger
+Tick order: plan setpoints (`dispatcher::build_setpoints`) → **deviation correction**
+(`reconcile`, when enabled; else the pre-arbiter surplus-EV overlay) → DISPATCH_SETPOINT override →
+comms-loss clamp → **limit enforcement** (`limit::enforce_import_limit`, when enabled). Because the
+limit pass runs last, a hard import limit also bounds a dispatch setpoint above it; it stays inside
+the comms-loss clamp's per-asset bounds (`comms_loss_setpoint_bounds_kw`), reporting what it then
+cannot shed.
 
-Gated behind `deviation_arbiter_enabled` (`AppState`, default `false`) for a fully reversible
-rollout; when disabled, `build_tick_setpoints` takes the pre-arbiter code path unchanged.
+**Shared target.** Both passes steer to `min(plan signed net, hard limit − LIMIT_MARGIN_KW)`
+(`deviation_kw`, `limit::limit_target_kw`). The hard import limit is 0 during an alert window,
+else the VTN capacity import limit in force at `now` from the priority-resolved capacity schedule
+(`limit::capacity_import_limit_at_kw` — not `OadrCapacityState.import_limit_kw`, which folds in
+limits that have not started yet), else a sim-injected `grid_import_limit_kw`. Deviation
+correction therefore never steers above a limit the limit pass would push back down. While the
+limit pass was engaged last tick its target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed
+heater stage is restored only with room to spare.
 
-Per-tick reasoning (projected net power, residual deviation, active lever) is surfaced via
-`GET /arbiter-diagnostics` and a readout in the VEN UI's `ArbiterSettingsCard` — see
-`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`. The exact convergence/hysteresis
-invariants are enforced by `controller/tests/arbiter_tests.rs`, not restated here.
+**Deviation correction** (`deviation_arbiter_enabled`, default off): compares a live projection
+(`projected_net_kw` — this tick's `peek_pv_kw`/`peek_base_load_kw`, forced power, heater stages,
+battery/EV from the setpoint map seeded with their last applied command, see
+`docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section) with the target and corrects the
+difference; it never touches the plan's own EV allocation and keeps `MaxRevenue`'s discharge
+refusal. Absorbed amounts feed the per-asset residual accumulator (`PlanTrigger::ResidualThreshold`
+past a capacity fraction and cooldown — never a per-tick trigger).
+
+**Limit enforcement** (`limit_enforcement_enabled`, default on; off only to measure the planner
+alone): memoryless — recomputed each tick from this tick's setpoint map — and it may reduce a
+planned EV allocation and discharge the battery regardless of the objective. It meets a hard limit
+from the next tick while the planner catches up (e.g. a timed-out MILP incumbent that put a heater
+stage inside a cap, or unforecast load). Its battery/EV adjustments feed the residual accumulator
+as energy over the tick, so persistent use leads to a replan. Excess nothing can shed (forced
+power, the heater's comfort floor) is reported as `unresolved_kw`, never hidden.
+
+**Heater.** Levers command only exact stages: one quantization rule
+(`entities::asset::nearest_power_step_kw`, used by the heater's own `step_inner`) and
+`highest_power_step_at_or_below_kw` for shedding, from `AssetSnapshot.power_steps_kw`. No pause
+capacity while the thermostat forces power. The heater's own thermostat is its safety: emergency
+heat may be curtailed (`HeaterEmergencyMode::Curtail`, plus heater setpoint 0) **only during an
+alert**, in either pass — a capacity limit's penalty-inflated marginal cost cannot open it.
+`temp_safety_max_c` stays a hard stop.
+
+**Visibility.** `GET /arbiter-diagnostics` (both passes: projection, deviation, lever, the limit
+pass's target/excess/adjustments/unresolved excess, and the measured net power the tick came to),
+`GET/PUT /arbiter-settings` (both toggles, each optional in the PUT body), and
+`ControllerEvent::ArbiterDecision` in the controller event log (`GET /trace/events`) — emitted only
+when a pass's leading lever or unresolved state changes. The VEN UI shows both switches and the
+readouts on the Devices page's Arbiter card and the decisions in the Planner's Decision Trace (see
+`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`). Invariants (convergence, hysteresis, the
+campaign cases, stability with both passes on) are enforced by `controller/tests/arbiter_tests.rs`
+and `controller/tests/arbiter_limit_tests.rs`; the use case by
+`tests/features/ven_import_limit_enforcement.feature`.
 
 ### 2.2 Two-Speed Loop
 

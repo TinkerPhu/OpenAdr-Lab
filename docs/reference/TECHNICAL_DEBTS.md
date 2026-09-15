@@ -1,7 +1,7 @@
 # Technical Debts Register
 
-> **Next ID: R-81.** Use this number for the next new item filed, then increment this
-> line to R-82. When resolving and removing an item — even the current highest ID —
+> **Next ID: R-83.** Use this number for the next new item filed, then increment this
+> line to R-84. When resolving and removing an item — even the current highest ID —
 > do NOT decrement this line: it tracks every ID ever issued, not the count of rows
 > currently in the table, so a removed row never frees its number for reuse. This is
 > the single source of truth for the next ID; do not derive it by scanning for the
@@ -43,6 +43,8 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | ID | Description | Affected files | Effort | Risk | Gain |
 |----|-------------|----------------|--------|------|------|
 | R-39 | `state/mod.rs` mixes app wiring (`AppState`) with domain-ish value types (`EvSettings`, `HemsState`). Decide whether the two value types move to entities/ (as `AssetLedgerEntry` did) or stay — record the conclusion either way. | `VEN/src/state/mod.rs` | Trivial | Mechanical | Low — architecture clarity, no behavior change |
+| R-81 | A stepped asset's quantization rule is not declared by the asset. The heater draws its nearest stage (`entities::asset::nearest_power_step_kw`, called by `Heater::step_inner` and by `controller::arbiter::projected_net_kw_except`), but a shiftable load starts at full power for any setpoint > 0 — so the arbiter's projection special-cases the heater by id instead of asking each stepped asset what a setpoint yields (asset-competence-assurance). Fix: an asset-declared "power drawn for setpoint" (on the capability or snapshot) used by both the asset and the projection | `controller/arbiter.rs`, `controller/simulator_port.rs`, `assets/heater.rs`, `assets/shiftable_load.rs` | Small | Low | Low-Medium |
+| R-82 | The arbiter's EV lever sheds a setpoint the EV follows only after `response_delay_s` (10 s in the profiles): the projection counts the new setpoint immediately, so shedding EV charge under a hard limit leaves a ~10 s excess the pass does not see. Negligible against a minute-averaged limit, but the projection should use the asset's own answer for "power next tick" (pending command) rather than the setpoint | `controller/arbiter.rs`, `controller/arbiter/arbiter_levers.rs`, `assets/ev.rs` | Small | Low | Low |
 | R-47 | `AppState` keeps accumulating flat diagnostic fields (VTN connection status, storage-ok flag, per-task status map, etc.) added ad hoc per WP (T1/T3). No grouping/namespacing, so it will keep growing linearly with every future observability WP. Consider a `diagnostics: DiagnosticsState` sub-struct. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/state/mod.rs` | Small | Low | Low-Medium — prevents compounding maintenance debt on every future observability WP |
 
 ### Code & repo hygiene

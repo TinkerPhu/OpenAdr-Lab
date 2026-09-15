@@ -17,7 +17,7 @@ This manual shows how to observe all 14 HEMS controller use cases using the live
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |
 | **Events** | Raw OpenADR events polled from VTN |
-| **Devices** | Per-device settings cards (EV overlay, Deviation Arbiter, Heater, Shiftable loads, Comfort curve, Baseline Override) |
+| **Devices** | Per-device settings cards (EV overlay, Arbiter, Heater, Shiftable loads, Comfort curve, Baseline Override) |
 | **History** | Persisted per-asset/grid/event/report history over a selectable window; the PV and base_load charts additionally overlay the planner's near- and far-horizon forecast for each point against the actual measured value once it's reconciled — a way to see how well the planner's own forecasts held up, not just what happened |
 
 Under a **Diagnostics** nav group (WP-T1–T8): **VTN Status**, **Tasks**, **Event Log**,
@@ -745,14 +745,14 @@ underlying disturbance persists.
 ### Setup
 
 1. Switch to **VEN1**
-2. Navigate to **Devices** page, find the **Deviation Arbiter** card, enable it
+2. Navigate to **Devices** page, find the **Arbiter** card, switch **Deviation correction** on
 3. Navigate to **Simulation** page, adjust **Manual Irradiance** away from what the current plan
    assumed (e.g. drop it 20–30 percentage points)
 4. Wait 30–60 seconds for several ticks
 
 ### What to observe
 
-**Devices → Deviation Arbiter card** (readout only visible while enabled):
+**Devices → Arbiter card** (the deviation readout is visible while deviation correction is on):
 - `Projected net site power` and `Deviation from plan` update every ~5s
 - `Active lever` shows `battery` briefly while correcting, then `none` once converged
 
@@ -767,6 +767,49 @@ Rapid small-magnitude alternation in the battery's power (e.g. flipping sign eve
 ticks). That was a real bug (deviation signal read the plan's static allocation instead of the
 arbiter's own last-applied setpoint for the battery/EV terms) — fixed; if you see it recur, it's a
 regression, not expected behavior.
+
+---
+
+## UC-16: A Hard Import Limit Met at Execution
+
+**Scenario:** The VTN sends an `IMPORT_CAPACITY_LIMIT` (or a grid alert, which means 0 kW import).
+Whatever the plan says — a timed-out plan may still schedule a heater stage inside the cap, and
+real base load may exceed its forecast — site import must stay under the limit from the next
+tick, with as little comfort given up as possible, while the planner catches up.
+
+**What the controller should do:** the arbiter's limit-enforcement pass (on by default) projects
+this tick's import and sheds whatever exceeds the limit minus a 0.1 kW margin with the cheapest
+lever: pause a heater stage (exact stages only, never while the thermostat forces heat), reduce EV
+charging (also charging the plan scheduled), discharge the battery (also under `MaxRevenue`). Only
+an alert may curtail the heater's thermostat-forced emergency heat; under a capacity limit that
+heat is the heater's safety and stays, reported as unresolved if nothing else can cover it.
+
+**Suggested VEN:** VEN1 (battery 10 kWh)
+
+### Setup
+
+1. Switch to **VEN1**; on **Devices → Arbiter** check that **Limit enforcement** is on
+2. Send an `IMPORT_CAPACITY_LIMIT` of e.g. 2 kW for 10 minutes from the VTN UI (or
+   `POST /sim/inject {"grid_import_limit_kw": 2.0}` when no VTN limit is active)
+3. On **Simulation**, raise the base load by ~3 kW (`base_load_kw` inject)
+
+### What to observe
+
+**Devices → Arbiter card → Limit enforcement:** `Import ceiling` 1.90 kW, `Excess before
+shedding` > 0, `Lever` e.g. `battery` or `heater_pause`, `Unresolved` 0.00 kW. `Measured net site
+power` stays at or just under the limit.
+
+**Planner → Decision Trace:** an `ArbiterDecision` row (`limit: battery · target 1.90 kW · excess
+…`) when the pass engages, another when it hands over to a different lever, when an excess stays
+unresolved, and when it releases — one row per decision, not per tick.
+
+**Raw check:** `GET /arbiter-diagnostics` → `limit`; `GET /trace/events` → `ArbiterDecision`.
+
+### Reference: the planner alone
+
+Switch **Limit enforcement** off and repeat: the same base-load step now exceeds the limit until
+the planner's next plan accounts for it — the measure of what the planner achieves by itself
+(fleet runs compare both, see `docs/guidelines/FLEET_EXPERIMENT_DESIGN.md`).
 
 ---
 
