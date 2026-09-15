@@ -256,6 +256,7 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
         &no_capacity(),
         &[],
         &[],
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,

@@ -62,6 +62,7 @@ fn build_milp_inputs_p_base_kw_matches_live_base_load_forecast_kw_at() {
         &no_capacity(),
         &[],
         &[],
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,

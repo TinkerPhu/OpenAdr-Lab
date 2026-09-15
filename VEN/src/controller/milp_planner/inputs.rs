@@ -4,7 +4,7 @@ use super::asset_port::AssetMilpParams;
 use crate::common::TimeSeries;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
-use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -20,6 +20,10 @@ pub(crate) fn build_milp_inputs(
     asset_contexts: &[Box<dyn AssetMilpContext>],
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
+    // GB-48: the priority-resolved capacity-limit schedule; each slot is capped
+    // by the tightest limit overlapping it (`capacity` supplies only the
+    // subscription/reservation allowance).
+    capacity_schedule: &[CapacitySnapshot],
     alert_windows: &[AlertWindow],
     simple_windows: &[SimpleWindow],
     planner: &PlannerParams,

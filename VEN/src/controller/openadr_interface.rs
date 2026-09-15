@@ -579,9 +579,11 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alert_windows_skips_unresolvable_start() {
-        // No intervalPeriod anywhere — window can't be resolved, alert skipped
-        // rather than guessed.
+    fn test_parse_alert_windows_untimed_alert_is_in_force_while_listed() {
+        // No intervalPeriod anywhere: one project rule for every event type
+        // (`controller::event_timing`, decided 2026-09-15) — in force for as long
+        // as the VTN lists the event. Formerly skipped here while a timing-less
+        // capacity limit applied, two rules for the same gap.
         let events = json!([{
             "id": "alert-3",
             "programID": "prog-1",
@@ -592,7 +594,51 @@ mod tests {
         }]);
         let alerts =
             parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
-        assert!(alerts.is_empty());
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].start, crate::controller::event_timing::OPEN_START);
+        assert_eq!(alerts[0].end, crate::controller::event_timing::OPEN_END);
+    }
+
+    // GB-48: intervals without their own period follow each other (User Guide
+    // §7.3) — they no longer all inherit the whole event window.
+    #[test]
+    fn test_window_parsers_give_contiguous_intervals_their_own_windows() {
+        let events = |payload_type: &str, v0: serde_json::Value, v1: serde_json::Value| {
+            serde_json::from_value::<Vec<OadrEvent>>(json!([{
+                "id": "multi",
+                "programID": "prog-1",
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
+                "intervals": [
+                    { "id": 0, "payloads": [{ "type": payload_type, "values": [v0] }] },
+                    { "id": 1, "payloads": [{ "type": payload_type, "values": [v1] }] }
+                ]
+            }]))
+            .unwrap()
+        };
+        let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        let (t0, t30, t60) = (
+            t("2026-03-14T00:00:00Z"),
+            t("2026-03-14T00:30:00Z"),
+            t("2026-03-14T01:00:00Z"),
+        );
+
+        let alerts = parse_alert_windows(&events("ALERT_GRID_EMERGENCY", json!("a"), json!("b")));
+        assert_eq!((alerts[0].start, alerts[0].end), (t0, t30));
+        assert_eq!((alerts[1].start, alerts[1].end), (t30, t60));
+
+        let simple = parse_simple_windows(&events("SIMPLE", json!(1), json!(3)));
+        assert_eq!(
+            (simple[1].level, simple[1].start, simple[1].end),
+            (3, t30, t60)
+        );
+
+        let dispatch = parse_dispatch_windows(&events("DISPATCH_SETPOINT", json!(1.0), json!(2.0)));
+        assert_eq!((dispatch[1].setpoint_kw, dispatch[1].start), (2.0, t30));
+
+        let (_, end, _) =
+            parse_charge_state_setpoint(&events("CHARGE_STATE_SETPOINT", json!(0.8), json!(0.9)))
+                .unwrap();
+        assert_eq!(end, t30, "the first interval's own end, not the event's");
     }
 
     #[test]
@@ -879,13 +925,14 @@ mod tests {
         );
     }
 
-    // A multi-interval event without per-interval `intervalPeriod`s is a
-    // genuinely different, spec-ambiguous case (sequential offsets from the
-    // event start) -- this project's own tooling never emits that shape, so
-    // the fallback deliberately stays narrow to the single-interval case
-    // rather than guessing at multi-interval semantics nothing exercises.
+    // GB-48: a multi-interval event without per-interval `intervalPeriod`s is
+    // not ambiguous — User Guide §7.3 makes the intervals contiguous from the
+    // event-level start, each lasting the event-level duration, and Example
+    // 8.10.1-1 (Dynamic Operating Envelope) uses exactly this shape. This test
+    // used to assert an empty schedule ("does not guess"); that dropped every
+    // spec-form DOE.
     #[test]
-    fn test_parse_capacity_schedule_does_not_guess_for_multi_interval_events() {
+    fn test_parse_capacity_schedule_multi_interval_events_are_contiguous() {
         let events = json!([
             {
                 "id": "evt-cap-multi",
@@ -904,7 +951,30 @@ mod tests {
             &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
             Utc::now(),
         );
-        assert!(snapshots.is_empty());
+        let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        let got: Vec<_> = snapshots
+            .iter()
+            .map(|c| (c.interval_start, c.interval_end, c.import_limit_kw))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    t("2025-01-01T10:00:00Z"),
+                    t("2025-01-01T12:00:00Z"),
+                    Some(5.0)
+                ),
+                (
+                    t("2025-01-01T12:00:00Z"),
+                    t("2025-01-01T14:00:00Z"),
+                    Some(3.0)
+                ),
+            ]
+        );
+        assert_eq!(
+            snapshots[0].import_limit_event_id.as_deref(),
+            Some("evt-cap-multi")
+        );
     }
 
     #[test]
@@ -927,26 +997,40 @@ mod tests {
                 ]
             }
         ]);
-        let now = Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap();
-        let cap = parse_capacity_state(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
+        let events = serde_json::from_value::<Vec<OadrEvent>>(events).unwrap();
+        // GB-48: the limit fields mean "in force now". At 09:00 the 10:00–11:00
+        // limit has not started — this test used to expect 5.0 here, which is
+        // exactly the bug (a future limit applied now).
+        let before = Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap();
+        let cap = parse_capacity_state(&events, before);
+        assert_eq!(
+            cap.import_limit_kw, None,
+            "not in force before its interval"
         );
-        assert_eq!(cap.import_limit_kw, Some(5.0));
-        assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
         assert_eq!(
             cap.last_updated,
-            Some(now),
+            Some(before),
             "last_updated must equal the injected clock, not wall-clock Utc::now()"
         );
+        let during = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
+        let cap = parse_capacity_state(&events, during);
+        assert_eq!(cap.import_limit_kw, Some(5.0));
+        assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
+        let after = Utc.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap();
+        assert_eq!(parse_capacity_state(&events, after).import_limit_kw, None);
     }
 
+    // GB-48: overlapping limits resolve like every other payload type — by
+    // event priority, then creation time (GB-45, User Guide §7.1) — not
+    // "strictest wins", which was a second rule contradicting the schedule the
+    // history records. Formerly `test_parse_capacity_state_strictest_wins`.
     #[test]
-    fn test_parse_capacity_state_strictest_wins() {
+    fn test_parse_capacity_state_overlapping_limits_resolve_by_priority() {
         let events = json!([
             {
                 "id": "evt-a",
                 "programID": "prog-1",
+                "priority": 1,
                 "intervals": [{
                     "id": 0,
                     "intervalPeriod": {"start": "2025-01-01T10:00:00Z", "duration": "PT1H"},
@@ -956,6 +1040,7 @@ mod tests {
             {
                 "id": "evt-b",
                 "programID": "prog-1",
+                "priority": 5,
                 "intervals": [{
                     "id": 0,
                     "intervalPeriod": {"start": "2025-01-01T10:00:00Z", "duration": "PT1H"},
@@ -963,12 +1048,32 @@ mod tests {
                 }]
             }
         ]);
+        let now = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
+        let cap = parse_capacity_state(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
+        assert_eq!(
+            cap.import_limit_kw,
+            Some(10.0),
+            "priority 1 wins over priority 5"
+        );
+        assert_eq!(cap.import_limit_event_id, Some("evt-a".to_string()));
+    }
+
+    #[test]
+    fn test_parse_capacity_state_untimed_limit_is_in_force_while_listed() {
+        // The E2E use-case events send limits without any intervalPeriod.
+        let events = json!([{
+            "id": "evt-untimed",
+            "programID": "prog-1",
+            "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [10000.0]}]}]
+        }]);
         let cap = parse_capacity_state(
             &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
             Utc::now(),
         );
-        assert_eq!(cap.import_limit_kw, Some(3.0));
-        assert_eq!(cap.import_limit_event_id, Some("evt-b".to_string()));
+        assert_eq!(cap.import_limit_kw, Some(10000.0));
     }
 
     #[test]

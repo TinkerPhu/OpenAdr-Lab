@@ -8,7 +8,7 @@ use crate::common::TimeSeries;
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -21,6 +21,9 @@ pub struct SolveRequest {
     pub asset_contexts: Vec<Box<dyn AssetMilpContext>>,
     pub tariffs: TariffTimeSeries,
     pub capacity: OadrCapacityState,
+    /// GB-48: priority-resolved capacity-limit schedule (`planned_capacity_limits`)
+    /// — the planner caps each slot by the tightest limit overlapping it.
+    pub capacity_schedule: Vec<CapacitySnapshot>,
     /// WP3.1 (BL-04): active grid-alert windows — planner clamps the
     /// contractual import cap to 0 for slots overlapping any of these.
     pub alert_windows: Vec<AlertWindow>,

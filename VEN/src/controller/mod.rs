@@ -40,6 +40,7 @@ pub use measurement_port::{MeasurementPort, MeasurementReading, NoopMeasurementP
 pub use weather_port::{NoopWeatherPort, WeatherForecastPort};
 
 // ── OpenADR interface ─────────────────────────────────────────────────────────
+pub mod event_timing;
 pub mod openadr_interface;
 pub mod rate_schedule;
 

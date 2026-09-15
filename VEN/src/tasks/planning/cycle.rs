@@ -50,6 +50,7 @@ pub(super) async fn run_plan_cycle(
 ) {
     let rates = state.planned_tariffs().await;
     let capacity = state.capacity_state().await;
+    let capacity_schedule = state.planned_capacity_limits().await;
     let alert_windows = state.alert_windows().await;
     let simple_windows = state.simple_windows().await;
 
@@ -133,6 +134,7 @@ pub(super) async fn run_plan_cycle(
         asset_contexts,
         tariff_ts,
         capacity,
+        capacity_schedule,
         alert_windows,
         simple_windows,
         planner.clone(),

@@ -9,7 +9,7 @@ use crate::controller::SolverPort;
 use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
-use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
@@ -136,6 +136,7 @@ pub async fn build_solve_request(
     asset_contexts: Vec<Box<dyn AssetMilpContext>>,
     tariffs: TariffTimeSeries,
     capacity: OadrCapacityState,
+    capacity_schedule: Vec<CapacitySnapshot>,
     alert_windows: Vec<AlertWindow>,
     simple_windows: Vec<SimpleWindow>,
     planner: PlannerParams,
@@ -175,6 +176,7 @@ pub async fn build_solve_request(
         asset_contexts,
         tariffs,
         capacity,
+        capacity_schedule,
         alert_windows,
         simple_windows,
         planner,
@@ -524,6 +526,7 @@ mod tests {
             asset_contexts: vec![],
             tariffs: TariffTimeSeries::from_snapshots(&[]),
             capacity: OadrCapacityState::default(),
+            capacity_schedule: vec![],
             alert_windows: vec![],
             simple_windows: vec![],
             planner: PlannerParams::default(),

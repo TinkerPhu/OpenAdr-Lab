@@ -384,6 +384,8 @@ fn capacity_import_limit_at_kw_reads_only_intervals_in_force_now() {
         interval_end: now + chrono::Duration::minutes(to_min),
         import_limit_kw: Some(kw),
         export_limit_kw: None,
+        import_limit_event_id: None,
+        export_limit_event_id: None,
     };
     // A stricter limit scheduled for later must not be enforced now.
     let schedule = [interval(-5, 5, 3.0), interval(10, 20, 1.0)];
