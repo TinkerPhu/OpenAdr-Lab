@@ -552,16 +552,33 @@ fn battery_lever_clamped_to_max_discharge_kw() {
 }
 
 #[test]
-fn battery_lever_converges_not_oscillates_using_prev_setpoint() {
+fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
     // Regression (moved from dispatcher.rs): previous tick applied +4.17 kW
-    // correction; using setpoint_kw (not the plan's sp_map entry) as the
-    // integrator state must push the correction harder, not oscillate to
-    // discharge.
-    let sim = make_sim(vec![("battery", battery_snap(4.17, 0.5))]);
-    let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    sp.insert("battery".to_string(), -0.5); // plan allocation, must be ignored
-    let _delta = apply_battery_lever(&mut sp, &sim, -4.5, PlannerObjective::MinCost);
-    let bat_sp = sp.get("battery").copied().unwrap();
+    // correction; the integrator state must be that applied setpoint, not the
+    // plan's allocation, so a surplus pushes the correction harder instead of
+    // oscillating to discharge. The levers act on the setpoint map (shared by
+    // every arbiter pass), so this rule lives in `reconcile`, which seeds the
+    // map from `AssetSnapshot.setpoint_kw` — tested there, not on the lever.
+    let sim = make_sim(vec![
+        ("battery", battery_snap(4.17, 0.5)),
+        ("base_load", base_snap(0.0)),
+    ]);
+    let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
+    base_setpoints.insert("battery".to_string(), -0.5); // plan allocation, must be ignored
+    let slot = test_slot(0.20, 0.20, 0.0, 0.0, 0.0, 0.08);
+    // Projected net = 4.17 (battery) − 8.67 (live base load as a surplus) = −4.5.
+    let outcome = reconcile(
+        &sim,
+        &base_setpoints,
+        Some(&slot),
+        PlannerObjective::MinCost,
+        false,
+        true,
+        None,
+        Some(-8.67),
+        None,
+    );
+    let bat_sp = outcome.setpoints["battery"];
     assert!(
         bat_sp > 4.17,
         "correction must increase charging above prev setpoint (4.17), not oscillate to discharge; got {bat_sp}"
