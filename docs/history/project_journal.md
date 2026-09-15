@@ -12617,3 +12617,49 @@ Verified: `ven-app` 1359 unit tests + architecture test, `cargo fmt --check`, cl
 `-D warnings`, file-size audit, invariant greps; VEN UI 649 tests, eslint 0 errors, build; on Node2
 openleadr-rs, E2E (276 + 14 isolated scenarios, including the three new ones) and resilience all
 green; the BDD scenarios are in `capacity_envelope_absolute_quantities.feature`.
+
+## 2026-09-15 — Time-aware capacity limits and one interval-timing rule (GB-48)
+
+What: a capacity limit is now treated as a schedule everywhere. `controller::event_timing::
+timed_intervals` is the one answer to "when does interval i of an OpenADR event run" (OpenADR 3.1
+User Guide §7.3: own period wins, contiguous from the event-level period, open-ended without a
+duration, in force while listed without a start). The schedule parser, the alert/SIMPLE/
+dispatch/charge-state parsers (now one `timed_payloads` iterator) and the reporter's activity
+check use it; their own timing code is gone. `entities::capacity::tightest_capacity_limit` is the
+one "which limit applies" lookup: the planner caps each slot by it, `parse_capacity_state`
+reports the limit in force now (priority-resolved, with its source event carried through the
+schedule), and the GB-47 limit pass and the history sampler call it instead of their own copies.
+CLAUDE.md gained the leading *one-concept-one-function* rule.
+
+Why: the planner applied the strictest limit of every listed event — including ones not yet
+started — to all 24 h of its horizon; the PV resolver, grid asset, Dashboard and trace showed a
+future limit as current (the demo seed's 0 kW limit two hours ahead would have planned ven-2's
+whole day at 0 kW import). The schedule parser dropped the spec's own DOE form. Behind it: the
+interval-timing rule lived in seven places with four variants (default duration PT1H in five,
+one year in the reporter), and "limit at t" in three.
+
+Decisions (user): overlapping limits resolve by priority like prices (not strictest wins); a
+missing duration is open-ended; an event without timing is in force while listed, for every
+event type.
+
+Tests whose expectations changed, by these decisions: the untimed alert is now in force (was
+skipped); a multi-interval capacity event without own periods is contiguous (was "does not
+guess" → empty); `test_parse_capacity_state_import_limit` now expects no limit before its
+interval (it asserted the bug); `strictest_wins` became a priority test; the planner test that
+set the folded limit moved to a schedule segment (`capacity_schedule.rs`), and the PV
+export-cap test gives its cap as a segment. GB-47's `capacity_import_limit_at_kw` test moved with
+the function into `entities/capacity.rs`.
+
+Verified: red first at unit level (exactly the 30 new/changed tests failed, 1338 passed) and at
+BDD level (the new feature failed 3/3 on main); then fmt, clippy `-D warnings`, 1368 Rust tests,
+the new BDD feature 3/3, isolated and resilience suites green. The first full E2E run
+failed seven existing scenarios, and they were right to fail: the shared step `I create an
+IMPORT_CAPACITY_LIMIT event with limit X kW` posted a limit starting an hour ahead, and those
+scenarios expected it in `/capacity` at once and in every plan slot — they passed only because of
+the bug. The step now posts a limit in force now over the plan horizon (their intent kept); the
+plan-cap wait now requires a plan created after the scenario's limit, since UC-12a had grabbed a
+previous scenario's stale plan. All features using those steps re-run green (33 scenarios).
+
+Remaining copies of "does this window cover t" (window `is_ended` ×3, tariff lookups, slot
+overlaps) are recorded as R-83; the folded limit fields (B′) and time-aware
+subscription/reservation (C) stay under GB-48.
