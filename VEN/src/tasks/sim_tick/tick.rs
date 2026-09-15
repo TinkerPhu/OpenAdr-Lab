@@ -65,8 +65,7 @@ pub(crate) async fn tick_once(
         tick_forecast,
         tick_capacity_curves,
         cleared_fields,
-        absorbed_kwh_by_asset,
-        (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
+        arbiter_outcome,
     ) = {
         let mut sim_guard = sim.lock().await;
 
@@ -96,19 +95,12 @@ pub(crate) async fn tick_once(
 
         let thermostat_setpoints_kw =
             sim_guard.thermostat_setpoints_kw(ctx.inject.heater_setpoint_c);
-        let outcome = super::helpers::build_tick_setpoints(
+        let mut outcome = super::helpers::build_tick_setpoints(
+            &ctx,
             &pre_snap,
             &thermostat_setpoints_kw,
-            ctx.plan_snap.as_ref(),
-            ctx.overlay_enabled,
             now,
-            &ctx.dispatch_windows,
-            &ctx.alert_windows,
-            live_pv_kw,
-            live_base_load_kw,
-            ctx.deviation_arbiter_enabled,
-            ctx.incumbent_lever.as_deref(),
-            ctx.comms_loss,
+            (live_pv_kw, live_base_load_kw),
         );
 
         let resolved_pv_generation_limit = super::helpers::resolve_pv_limit(
@@ -127,13 +119,9 @@ pub(crate) async fn tick_once(
                 outcome.heater_emergency_mode,
             );
 
-        let absorbed_kwh_by_asset = outcome.absorbed_kwh_by_asset.clone();
-        let new_active_lever = outcome.active_lever.map(|s| s.to_string());
-        let (arbiter_net_kw, arbiter_dev_kw) = (outcome.net_kw, outcome.dev_kw);
-
         sim_guard.tick(
             dt_s,
-            outcome.setpoints,
+            std::mem::take(&mut outcome.setpoints),
             now,
             ctx.inject.pv_irradiance,
             ctx.inject.pv_tau_s,
@@ -167,17 +155,24 @@ pub(crate) async fn tick_once(
             tick_forecast,
             tick_capacity_curves,
             cleared_fields,
-            absorbed_kwh_by_asset,
-            (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
+            outcome,
         )
     };
 
-    let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
-    super::arbiter_glue::record_arbiter_outcome(&state, &notifier, arbiter_summary, now).await;
+    let measured_net_kw = Some(tick_sim_snap.grid.net_power_w / 1000.0);
+    super::arbiter_glue::record_arbiter_outcome(
+        &state,
+        &notifier,
+        &arbiter_outcome,
+        measured_net_kw,
+        now,
+    )
+    .await;
+    let residual_kwh_by_asset = arbiter_outcome.residual_kwh_by_asset(dt_s / 3600.0);
     super::arbiter_glue::apply_residual_escalation(
         &state,
         &trigger_tx,
-        &absorbed_kwh_by_asset,
+        &residual_kwh_by_asset,
         now,
     )
     .await;

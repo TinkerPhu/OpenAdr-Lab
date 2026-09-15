@@ -19,6 +19,7 @@ pub(crate) fn apply_dispatch_override(
     dispatch_windows: &[crate::entities::capacity::DispatchWindow],
     alert_windows: &[crate::entities::capacity::AlertWindow],
     live_pv_kw: Option<f64>,
+    live_base_load_kw: Option<f64>,
 ) {
     let alert_active = alert_windows.iter().any(|a| a.start <= now && now < a.end);
     if alert_active {
@@ -34,34 +35,16 @@ pub(crate) fn apply_dispatch_override(
         return; // no dispatchable actuator - nothing to steer with
     };
 
-    // Net site power without the battery: commanded setpoints for controlled
-    // assets, live power for uncontrolled ones. PV prefers `live_pv_kw` (this
-    // tick's value from `SimState::peek_pv_kw`) over the snapshot, which holds
-    // last tick's output. Uncontrollable assets carry an f64::MAX sentinel
-    // default_setpoint_kw that lands in `sp` — any non-finite or absurd
-    // magnitude falls back to live power. An asset reporting a forced power
-    // (`AssetSnapshot::forced_power_kw`, e.g. a heater in thermostat
-    // hysteresis/safety cutoff) is taken at that value, not its commanded
-    // setpoint (same "commanded ≠ actual" gap PV's live_pv_kw closes).
-    let net_without_battery: f64 = sim_snap
-        .assets
-        .iter()
-        .filter(|(id, _)| id.as_str() != crate::ids::ASSET_BATTERY)
-        .map(|(id, snap)| {
-            if id.as_str() == crate::ids::ASSET_PV {
-                if let Some(pv_kw) = live_pv_kw {
-                    return pv_kw;
-                }
-            }
-            if let Some(forced_kw) = snap.forced_power_kw {
-                return forced_kw;
-            }
-            sp.get(id)
-                .copied()
-                .filter(|v| v.is_finite() && v.abs() < 1.0e6)
-                .unwrap_or(snap.power_kw)
-        })
-        .sum();
+    // Net site power without the battery — the arbiter's own projection
+    // (live PV/base load for this tick, forced power, heater stages), so the
+    // override and the limit pass that may follow it agree on the site.
+    let net_without_battery = crate::controller::arbiter::projected_net_kw_except(
+        sim_snap,
+        sp,
+        live_pv_kw,
+        live_base_load_kw,
+        &[crate::ids::ASSET_BATTERY],
+    );
 
     // battery > 0 = charging (adds import). Clamp to live capability.
     let wanted_bat_kw = win.setpoint_kw - net_without_battery;
@@ -83,12 +66,25 @@ pub(crate) fn apply_comms_loss_clamp(
     sim_snap: &SimSnapshot,
     comms_loss: Option<super::context::CommsLossState>,
 ) {
+    for (asset_id, (min_kw, max_kw)) in comms_loss_setpoint_bounds_kw(sim_snap, comms_loss) {
+        if let Some(sp_kw) = sp.get_mut(&asset_id) {
+            *sp_kw = sp_kw.clamp(min_kw, max_kw);
+        }
+    }
+}
+
+/// The comms-loss clamp's per-asset `(min, max)` setpoint bounds — applied by
+/// `apply_comms_loss_clamp` and handed to the arbiter's limit pass, which runs
+/// after it and must stay inside them. Empty while comms-loss is not active.
+pub(crate) fn comms_loss_setpoint_bounds_kw(
+    sim_snap: &SimSnapshot,
+    comms_loss: Option<super::context::CommsLossState>,
+) -> crate::controller::arbiter::SetpointBoundsKw {
     let Some(cl) = comms_loss.filter(|c| c.active) else {
-        return;
+        return Default::default();
     };
     let pct = cl.max_power_pct;
-
-    for (asset_id, import_key, export_key) in [
+    [
         (crate::ids::ASSET_EV, "max_charge_kw", None),
         (crate::ids::ASSET_HEATER, "max_kw", None),
         (
@@ -96,20 +92,19 @@ pub(crate) fn apply_comms_loss_clamp(
             "max_charge_kw",
             Some("max_discharge_kw"),
         ),
-    ] {
-        let Some(snap) = sim_snap.assets.get(asset_id) else {
-            continue;
-        };
-        let Some(&sp_val) = sp.get(asset_id) else {
-            continue;
-        };
+    ]
+    .into_iter()
+    .filter_map(|(asset_id, import_key, export_key)| {
+        let snap = sim_snap.assets.get(asset_id)?;
         let max_charge = snap.val(import_key).unwrap_or(f64::MAX);
         let max_discharge = export_key.and_then(|k| snap.val(k)).unwrap_or(0.0);
-        // Sign convention matches this file's existing battery clamp above:
-        // positive = charge/import, negative = discharge/export.
-        let clamped = sp_val.clamp(-(pct * max_discharge), pct * max_charge);
-        sp.insert(asset_id.to_string(), clamped);
-    }
+        // Positive = charge/import, negative = discharge/export.
+        Some((
+            asset_id.to_string(),
+            (-(pct * max_discharge), pct * max_charge),
+        ))
+    })
+    .collect()
 }
 
 #[cfg(test)]
@@ -170,9 +165,18 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_steers_battery_to_site_setpoint() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // site = base 0.5 + battery -> battery must charge 1.5 kW to hit 2.0.
         assert!((sp["battery"] - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_dispatch_override_uses_this_ticks_live_base_load() {
+        let sim = make_sim();
+        let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, Some(1.2));
+        // net w/o battery = live base load 1.2 → battery charges 0.8, not 1.5.
+        assert!((sp["battery"] - 0.8).abs() < 1e-9, "got {}", sp["battery"]);
     }
 
     #[test]
@@ -185,7 +189,7 @@ mod dispatch_override_tests {
             ("base_load".to_string(), 0.5),
             ("pv".to_string(), f64::MAX), // uncontrollable sentinel
         ]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], Some(-3.0));
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], Some(-3.0), None);
         // net w/o battery = base 0.5 + live PV −3.0 = −2.5 → battery charges 4.5.
         assert!(
             (sp["battery"] - 4.5).abs() < 1e-9,
@@ -200,7 +204,7 @@ mod dispatch_override_tests {
         sim.assets
             .insert("pv".to_string(), snap_asset(0.0, 0.0, 8.0));
         let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net w/o battery = base 0.5 + stale PV 0.0 → battery charges 1.5.
         assert!((sp["battery"] - 1.5).abs() < 1e-9);
     }
@@ -209,9 +213,9 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_clamps_to_battery_capability() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(20.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(20.0)], &[], None, None);
         assert!((sp["battery"] - 5.0).abs() < 1e-9, "clamped at max charge");
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(-20.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(-20.0)], &[], None, None);
         assert!(
             (sp["battery"] - (-5.0)).abs() < 1e-9,
             "clamped at max discharge"
@@ -229,7 +233,7 @@ mod dispatch_override_tests {
             event_id: "a1".into(),
             message: String::new(),
         };
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[alert], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[alert], None, None);
         assert!(
             !sp.contains_key("battery"),
             "override skipped while alert active"
@@ -247,7 +251,7 @@ mod dispatch_override_tests {
         sim.assets
             .insert("pv".to_string(), snap_asset(-2.0, f64::MAX, f64::MAX));
         let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net without battery = 0.5 + (-2.0 live PV) = -1.5 -> battery 3.5.
         assert!((sp["battery"] - 3.5).abs() < 1e-9);
     }
@@ -282,7 +286,7 @@ mod dispatch_override_tests {
             ("base_load".to_string(), 0.5),
             ("heater".to_string(), 0.0), // dispatcher committed 0; hysteresis overrides it
         ]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net w/o battery = base 0.5 + forced heater 3.0 = 3.5 -> battery must
         // discharge 1.5 kW (charge = -1.5) to still hit the 2.0 kW site target.
         assert!(

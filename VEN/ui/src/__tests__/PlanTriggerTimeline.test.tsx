@@ -184,6 +184,25 @@ describe("PlanTriggerTimeline", () => {
     expect(popover.textContent).toMatch(/×2/);
   });
 
+  it("shows the pass and lever in an ArbiterDecision chip and popover", async () => {
+    const decision: TraceEntry = {
+      type: "ArbiterDecision",
+      ts: "2026-04-04T10:00:00Z",
+      pass: "limit",
+      active_lever: "battery",
+      target_kw: 0.9,
+      excess_kw: 1.4,
+      unresolved_kw: 0.3,
+    };
+    const user = userEvent.setup();
+    render(<PlanTriggerTimeline events={[decision]} />);
+    const chip = screen.getByTestId("trigger-chip-0");
+    expect(chip.textContent).toMatch(/limit/);
+    expect(chip.textContent).toMatch(/battery/);
+    await user.click(chip);
+    await waitFor(() => expect(screen.getByText(/unresolved 0\.30 kW/)).toBeInTheDocument());
+  });
+
   it("renders all 6 event types without throwing", () => {
     const events: TraceEntry[] = [
       makePlanCycle(),

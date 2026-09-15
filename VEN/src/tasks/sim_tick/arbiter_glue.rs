@@ -42,16 +42,51 @@ pub(crate) async fn apply_residual_escalation(
     }
 }
 
-/// PHASE 3.5 (post-lock): update the preemption-margin hysteresis state
-/// (§4a.1), record this tick's arbiter reasoning for `GET /arbiter-diagnostics`
+/// PHASE 3.5 (post-lock): update both passes' preemption-margin hysteresis
+/// state (§4a.1; the limit pass's also drives its release hysteresis), record
+/// this tick's arbiter reasoning for `GET /arbiter-diagnostics`
 /// (ui-transparency), and emit a BL-37 edge-triggered notification when the
-/// active-lever state transitions — all in one call.
+/// deviation pass's active-lever state transitions — all in one call.
+///
+/// Each pass's decision changes also go to the controller event log
+/// (`ControllerEvent::ArbiterDecision`, `GET /trace/events`).
 pub(crate) async fn record_arbiter_outcome(
     state: &crate::state::AppState,
     notifier: &crate::services::notify::Notifier,
-    (active_lever, net_kw, dev_kw): (Option<String>, Option<f64>, Option<f64>),
+    outcome: &controller::arbiter::ArbiterOutcome,
+    measured_net_kw: Option<f64>,
     now: DateTime<Utc>,
 ) {
+    use controller::arbiter::decision_event;
+    let active_lever = outcome.active_lever.map(str::to_string);
+    let limit_lever = outcome.limit.as_ref().and_then(|l| l.active_lever);
+    state
+        .set_limit_active_lever(limit_lever.map(str::to_string))
+        .await;
+    let prev = state.arbiter_diagnostics().await;
+    let prev_limit = prev.limit.as_ref();
+    let limit = outcome.limit.as_ref();
+    let events = [
+        decision_event(
+            "deviation",
+            (prev.active_lever.as_deref(), prev.unresolved_kw),
+            (outcome.active_lever, outcome.unresolved_kw),
+            outcome.net_kw.zip(outcome.dev_kw).map(|(n, d)| n - d),
+            outcome.dev_kw,
+            now,
+        ),
+        decision_event(
+            "limit",
+            prev_limit.map_or((None, 0.0), |l| (l.active_lever, l.unresolved_kw)),
+            limit.map_or((None, 0.0), |l| (l.active_lever, l.unresolved_kw)),
+            limit.map(|l| l.target_kw),
+            limit.map(|l| l.excess_kw),
+            now,
+        ),
+    ];
+    for event in events.into_iter().flatten() {
+        state.push_controller_event(event).await;
+    }
     // Read the previous tick's value before it's overwritten below — the
     // prev/current pair needed for edge detection (design.md D2).
     let prev_active_lever = state.arbiter_active_lever().await;
@@ -64,7 +99,15 @@ pub(crate) async fn record_arbiter_outcome(
     )
     .await;
     state
-        .set_arbiter_diagnostics(net_kw, dev_kw, active_lever.clone(), now)
+        .set_arbiter_diagnostics(crate::state::arbiter::ArbiterDiagnostics {
+            net_kw: outcome.net_kw,
+            dev_kw: outcome.dev_kw,
+            active_lever: active_lever.clone(),
+            unresolved_kw: outcome.unresolved_kw,
+            measured_net_kw,
+            limit: outcome.limit.clone(),
+            updated_at: Some(now),
+        })
         .await;
     state.set_arbiter_active_lever(active_lever).await;
 }
@@ -98,84 +141,6 @@ pub(crate) async fn resolve_overlay_enabled(
             .await;
     }
     ev_settings_tick.opportunistic_charging_enabled && !session_active
-}
-
-/// Weather-sourced PV for this tick: the value at this exact instant, plus one
-/// value per remaining plan slot for the site-headroom / capacity forecast.
-///
-/// Both come from a SINGLE `latest()` fetch and a SINGLE
-/// `weather_pv_forecast_series` evaluation — that series runs solar-position
-/// and transposition physics over every forecast sample plus a snow
-/// trajectory, and the tick loop runs once a second, so resolving the instant
-/// and the slot grid separately would double that work on every tick of every
-/// VEN. Same staleness gating and same translation the planner's own PV input
-/// uses (R-50), reached through the one shared entry point rather than
-/// re-derived, so a plan and the headroom drawn against it never disagree.
-pub(crate) async fn resolve_weather_pv_kw_for_tick(
-    weather: &dyn crate::controller::WeatherForecastPort,
-    weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
-    now: DateTime<Utc>,
-) -> (
-    Option<f64>,
-    Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
-) {
-    let Some(params) = weather_pv_params else {
-        return (None, None);
-    };
-    let Some(forecast) = weather.latest().await else {
-        return (None, None);
-    };
-    if !forecast.is_fresh(now, crate::services::planning::WEATHER_STALENESS_THRESHOLD) {
-        return (None, None);
-    }
-    let series = crate::entities::solar::weather_pv_forecast_series(params, &forecast);
-    let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
-        .first()
-        .copied();
-    // pv-competence-consolidation section 5: the per-slot series (formerly a
-    // separate `slots_kw` return value, pre-sampled onto plan-slot
-    // boundaries by this function) is superseded entirely by the raw series
-    // below, threaded onto PvInverter each tick (TickOverrides.pv_weather_forecast)
-    // so PvInverter::max_effort_schedule/forecast()/simulate_forward can
-    // sample it themselves at whatever future timestamps they need, rather
-    // than a site-level caller pre-sampling it onto boundaries the asset
-    // doesn't own.
-    (now_kw, Some(series))
-}
-
-/// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt).
-/// `enabled` is the profile-level gate (`measurements.pv_enabled` /
-/// `.base_load_enabled`) — the second gate alongside the port itself only
-/// existing when the corresponding env var was set at startup.
-async fn resolve_measured_kw_now(
-    port: &dyn crate::controller::MeasurementPort,
-    enabled: bool,
-    now: DateTime<Utc>,
-) -> Option<f64> {
-    if !enabled {
-        return None;
-    }
-    let latest = port.latest_kw().await;
-    crate::entities::measurement::resolve_measured_kw(
-        latest,
-        now,
-        crate::entities::measurement::MEASUREMENT_STALENESS_THRESHOLD,
-    )
-}
-
-/// Both signals' measured readings for this instant, `(pv, base_load)` —
-/// bundles the two `resolve_measured_kw_now` calls into one await site to
-/// keep `tick_once` under the tasks/ file-size cap.
-pub(crate) async fn resolve_measurements_now(
-    pv_port: &dyn crate::controller::MeasurementPort,
-    pv_enabled: bool,
-    base_load_port: &dyn crate::controller::MeasurementPort,
-    base_load_enabled: bool,
-    now: DateTime<Utc>,
-) -> (Option<f64>, Option<f64>) {
-    let pv = resolve_measured_kw_now(pv_port, pv_enabled, now).await;
-    let base_load = resolve_measured_kw_now(base_load_port, base_load_enabled, now).await;
-    (pv, base_load)
 }
 
 /// Manual sim-inject heater overrides win over the arbiter's decision
@@ -216,22 +181,23 @@ mod tests {
         let state = AppState::new();
         let notifier = crate::services::notify::Notifier::new(None);
 
-        record_arbiter_outcome(&state, &notifier, (None, None, None), ts(0)).await;
+        let outcome = |lever: Option<&'static str>| controller::arbiter::ArbiterOutcome {
+            active_lever: lever,
+            net_kw: lever.map(|_| 1.0),
+            dev_kw: lever.map(|_| 0.5),
+            ..Default::default()
+        };
+        record_arbiter_outcome(&state, &notifier, &outcome(None), None, ts(0)).await;
+        record_arbiter_outcome(&state, &notifier, &outcome(Some("battery")), None, ts(1)).await;
         record_arbiter_outcome(
             &state,
             &notifier,
-            (Some("battery".to_string()), Some(1.0), Some(0.5)),
-            ts(1),
-        )
-        .await;
-        record_arbiter_outcome(
-            &state,
-            &notifier,
-            (Some("heater_pause".to_string()), Some(1.0), Some(0.5)),
+            &outcome(Some("heater_pause")),
+            None,
             ts(2),
         )
         .await;
-        record_arbiter_outcome(&state, &notifier, (None, None, None), ts(3)).await;
+        record_arbiter_outcome(&state, &notifier, &outcome(None), None, ts(3)).await;
 
         let ring = state.notifications_since(None).await;
         assert_eq!(ring.len(), 2, "exactly one active + one cleared");
@@ -243,6 +209,48 @@ mod tests {
             ring[1].dedup_key.as_deref(),
             Some("arbiter-correction-cleared")
         );
+    }
+
+    /// GB-47: the event log records the limit pass's decisions, not ticks —
+    /// engage, hold for two ticks, release = two `ArbiterDecision` events.
+    #[tokio::test]
+    async fn record_arbiter_outcome_logs_limit_decisions_on_change_only() {
+        use controller::arbiter::limit::LimitPassOutcome;
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+        let limit = |lever: Option<&'static str>| controller::arbiter::ArbiterOutcome {
+            limit: Some(LimitPassOutcome {
+                target_kw: 0.9,
+                excess_kw: 1.4,
+                active_lever: lever,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let levers = [
+            None,
+            Some("battery"),
+            Some("battery"),
+            Some("battery"),
+            None,
+        ];
+        for (i, lever) in levers.into_iter().enumerate() {
+            record_arbiter_outcome(&state, &notifier, &limit(lever), Some(1.0), ts(i as i64)).await;
+        }
+        let decisions = state
+            .controller_trace()
+            .await
+            .events()
+            .into_iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    controller::trace::ControllerEvent::ArbiterDecision { pass, .. } if pass == "limit"
+                )
+            })
+            .count();
+        assert_eq!(decisions, 2);
+        assert_eq!(state.limit_active_lever().await, None);
     }
 
     fn make_ev_session(

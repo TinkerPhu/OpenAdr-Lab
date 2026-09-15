@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DevicesPage } from "../pages/Devices";
-import type { UserRequestWithSession, EvSettings, ArbiterSettings, SimSnapshot } from "../api/types";
+import type {
+  UserRequestWithSession, EvSettings, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
+} from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -130,12 +132,23 @@ const mockEvSettingsData = vi.fn((): EvSettings => ({
 }));
 const mockArbiterSettingsData = vi.fn((): ArbiterSettings => ({
   deviation_arbiter_enabled: false,
+  limit_enforcement_enabled: true,
 }));
 const mockSimData = vi.fn((): SimSnapshot | undefined => undefined);
 const mockPostRequest = vi.fn();
 const mockDeleteRequest = vi.fn();
 const mockPutEvSettings = vi.fn();
 const mockPutArbiterSettings = vi.fn();
+const emptyArbiterDiagnostics: ArbiterDiagnostics = {
+  net_kw: null,
+  dev_kw: null,
+  active_lever: null,
+  unresolved_kw: 0,
+  measured_net_kw: null,
+  limit: null,
+  updated_at: null,
+};
+const mockArbiterDiagnosticsData = vi.fn((): ArbiterDiagnostics => emptyArbiterDiagnostics);
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
@@ -173,12 +186,7 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
   }),
   useArbiterDiagnostics: () => ({
-    data: {
-      net_kw: null,
-      dev_kw: null,
-      active_lever: null,
-      updated_at: null,
-    },
+    data: mockArbiterDiagnosticsData(),
   }),
   useSim: () => ({ data: mockSimData() }),
   useBaselineOverride: () => ({ data: null }),
@@ -209,8 +217,12 @@ describe("DevicesPage", () => {
       opportunistic_charging_enabled: true,
       paused_by_active_session: false,
     });
-    mockArbiterSettingsData.mockReturnValue({ deviation_arbiter_enabled: false });
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: false,
+      limit_enforcement_enabled: true,
+    });
     mockSimData.mockReturnValue(undefined);
+    mockArbiterDiagnosticsData.mockReturnValue(emptyArbiterDiagnostics);
   });
 
   // 1. All idle
@@ -487,11 +499,56 @@ describe("DevicesPage", () => {
 
   // 16c. Arbiter toggle reflects enabled state
   it("shows arbiter toggle checked when enabled", () => {
-    mockArbiterSettingsData.mockReturnValue({ deviation_arbiter_enabled: true });
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: true,
+      limit_enforcement_enabled: true,
+    });
     renderPage();
     const sw = screen.getByTestId("arbiter-enabled-switch");
     const input = sw.querySelector("input[type='checkbox']")!;
     expect(input).toBeChecked();
+  });
+
+  // 16d. Limit enforcement: on by default, its own switch
+  it("renders the limit enforcement switch checked by default", () => {
+    renderPage();
+    const input = screen
+      .getByTestId("limit-enforcement-switch")
+      .querySelector("input[type='checkbox']")!;
+    expect(input).toBeChecked();
+  });
+
+  // 16e. The limit switch sends only its own toggle
+  it("calls putArbiterSettings with only limit_enforcement_enabled", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("limit-enforcement-switch"));
+    expect(mockPutArbiterSettings).toHaveBeenCalledWith({ limit_enforcement_enabled: false });
+  });
+
+  // 16f. The limit pass's decision is visible (ui-transparency)
+  it("shows the limit pass target, lever and unresolved excess", () => {
+    mockArbiterDiagnosticsData.mockReturnValue({
+      net_kw: null,
+      dev_kw: null,
+      active_lever: null,
+      unresolved_kw: 0,
+      measured_net_kw: 0.95,
+      limit: {
+        target_kw: 0.9,
+        excess_kw: 1.4,
+        unresolved_kw: 0.3,
+        active_lever: "battery",
+        heater_emergency_mode: null,
+        adjusted_kw_by_asset: { battery: -1.1 },
+      },
+      updated_at: "2026-09-15T08:00:00Z",
+    });
+    renderPage();
+    const readout = screen.getByTestId("arbiter-limit-diagnostics");
+    expect(readout.textContent).toMatch(/0\.90 kW/);
+    expect(readout.textContent).toMatch(/battery/);
+    expect(readout.textContent).toMatch(/0\.30 kW/);
   });
 
   // 17. All Requests accordion expands

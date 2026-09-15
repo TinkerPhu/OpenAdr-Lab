@@ -113,6 +113,10 @@ pub struct HemsState {
     pub ev_settings: EvSettings,
     /// Deviation-arbiter rollout gate, default `false` (see `state::arbiter`).
     pub deviation_arbiter_enabled: bool,
+    /// Arbiter limit-enforcement pass (GB-47), default `true` (see `state::arbiter`).
+    pub limit_enforcement_enabled: bool,
+    /// The limit pass's previous-tick lever — drives its release hysteresis.
+    pub limit_active_lever: Option<String>,
     /// Per-asset absorbed-deviation accumulator, keyed by asset id (§5.5).
     pub arbiter_residual: HashMap<String, crate::entities::arbiter_residual::AssetResidual>,
     /// Cooldown guard for `PlanTrigger::ResidualThreshold` (§5.5/§4).
@@ -196,6 +200,7 @@ impl AppState {
                     opportunistic_charging_enabled: true,
                     paused_by_active_session: false,
                 },
+                limit_enforcement_enabled: true,
                 ..HemsState::default()
             })),
             notifications: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
