@@ -58,9 +58,10 @@ pub async fn get_asset_forecast(
 
 /// GET /capability/:asset_id — point-in-time feasible power range for one asset (Phase A).
 /// Returns `{"max_import_kw": ..., "max_export_kw": ..., "min_import_kw": ...,
-/// "min_export_kw": ..., "is_fixed": ..., "adjustability": ..., "power_steps_kw": [...]}`
-/// (BL-27: the last two are a static control-mode classification, not part of the
-/// live feasible range).
+/// "min_export_kw": ..., "is_fixed": ..., "adjustability": ...}` plus the asset's
+/// declared setpoint response, flattened (`power_steps_kw`, `step_rule`,
+/// `snap_to_zero_below_kw`, `power_next_tick_kw` — R-81). BL-27: `adjustability`
+/// is a static control-mode classification, not part of the live feasible range.
 pub async fn get_asset_capability(
     State(ctx): State<AppCtx>,
     Path(asset_id): Path<String>,
@@ -77,16 +78,24 @@ pub async fn get_asset_capability(
         Some((entry, cfg)) => {
             let cap = cfg.capability(&entry.state);
             let floor = cfg.flexibility_floor(&entry.state);
-            Json(serde_json::json!({
-                "max_import_kw": cap.max_import_kw,
-                "max_export_kw": cap.max_export_kw,
+            // Serialized from the capability itself, so every field the asset
+            // declares — including a future addition to its setpoint response
+            // — reaches the UI without a second list to keep in step.
+            let mut body = serde_json::json!({
                 "min_import_kw": floor.min_import_kw,
                 "min_export_kw": floor.min_export_kw,
                 "is_fixed": cap.is_fixed(&floor),
-                "adjustability": cap.adjustability,
-                "power_steps_kw": cap.power_steps_kw,
-            }))
-            .into_response()
+            });
+            if let (Some(body), Some(cap)) = (
+                body.as_object_mut(),
+                serde_json::to_value(&cap).ok().and_then(|v| match v {
+                    serde_json::Value::Object(map) => Some(map),
+                    _ => None,
+                }),
+            ) {
+                body.extend(cap);
+            }
+            Json(body).into_response()
         }
     }
 }

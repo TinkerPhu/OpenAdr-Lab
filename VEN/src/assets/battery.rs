@@ -7,7 +7,7 @@ use super::{
     RequestResolvable,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::BatteryParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 
@@ -116,7 +116,7 @@ impl Battery {
                 0.0
             },
             adjustability: PowerAdjustability::Stepless,
-            power_steps_kw: vec![],
+            response: SetpointResponse::continuous(),
         }
     }
 
@@ -459,7 +459,7 @@ mod tests {
         let (bat, state) = make_battery_cfg(0.5);
         let cap = bat.capability_inner(&state);
         assert_eq!(cap.adjustability, PowerAdjustability::Stepless);
-        assert!(cap.power_steps_kw.is_empty());
+        assert!(cap.response.power_steps_kw.is_empty());
     }
 
     #[test]

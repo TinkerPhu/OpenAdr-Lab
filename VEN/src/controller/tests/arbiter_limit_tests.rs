@@ -142,6 +142,42 @@ fn enforce_import_limit_reduces_charging_the_plan_itself_scheduled() {
 }
 
 #[test]
+fn enforce_import_limit_covers_the_chargers_response_lag_with_the_battery() {
+    // R-82: the charger applies the command it accepted last tick, so the
+    // shed commanded now buys nothing this tick. The limit pass must not
+    // credit it — it hands the excess to the battery for the one tick the
+    // charger needs, and still commands the charger down.
+    let sim = make_sim(vec![
+        ("ev", ev_snap(7.0, 0.4, 0.8, true)),
+        ("battery", battery_snap(0.0, 0.5)),
+        ("base_load", base_snap(0.5)),
+    ]);
+    let slot = test_slot(0.25, 0.08, 7.5, 0.0, 0.0, 0.08);
+    let t = tick(
+        &sim,
+        Some(&slot),
+        0.5,
+        limit_target_kw(Some(3.0), None),
+        false,
+    );
+    let mut sp = StdHashMap::from([("ev".to_string(), 7.0), ("battery".to_string(), 0.0)]);
+    let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
+
+    assert!(sp["ev"] < 7.0, "the charger is still told to back off");
+    assert!(
+        sp["battery"] < 0.0,
+        "and the battery covers what the charger cannot shed yet, got {}",
+        sp["battery"]
+    );
+    assert_eq!(
+        out.active_lever,
+        Some("battery"),
+        "the lever that actually moved this tick"
+    );
+    assert!(projected(&t, &sp) <= 3.0);
+}
+
+#[test]
 fn enforce_import_limit_discharges_the_battery_under_max_revenue_too() {
     let sim = make_sim(vec![
         ("battery", battery_snap(0.0, 0.5)),

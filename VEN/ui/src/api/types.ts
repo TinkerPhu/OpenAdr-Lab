@@ -764,7 +764,20 @@ export type AssetCapability = {
   /** Explicit discrete import levels in kW (ascending, including 0.0) — only
    * meaningful for `adjustability === "STEPPED"`, empty otherwise. */
   power_steps_kw: number[];
+  /** Which of `power_steps_kw` a commanded setpoint selects (R-81). */
+  step_rule?: StepRule;
+  /** A commanded import above 0 but below this falls back to 0 (the EV
+   * charger's minimum sustained charge rate). Absent/0 = no such floor. */
+  snap_to_zero_below_kw?: number;
+  /** Present when the asset's next-tick power does not follow the setpoint
+   * commanded now: a charger still applying its previous command, a running
+   * batch load, an uncontrollable load. */
+  power_next_tick_kw?: number;
 };
+
+/** How an asset's actual power follows a commanded setpoint — declared by the
+ * asset itself (`SetpointResponse`, R-81). */
+export type StepRule = "CONTINUOUS" | "NEAREST" | "LATCH_ON_FULL";
 
 export type ForecastSource =
   | "WEATHER_MODEL"

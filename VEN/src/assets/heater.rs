@@ -7,9 +7,7 @@ use super::{
     Thermostat, TickOverridable,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::{
-    nearest_power_step_kw, ComfortRate, CompletionPolicy, PowerAdjustability,
-};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 
@@ -144,10 +142,14 @@ impl Heater {
         dt: Duration,
     ) -> (HeaterState, f64) {
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        // Quantize to the nearest reachable stage. Each stage is its own
-        // contactor, so intermediate values are physically impossible.
-        let tier = nearest_power_step_kw(&self.power_steps_kw(), setpoint_kw);
-        let actual = self.thermostat_forced_kw(state).unwrap_or(tier);
+        // Quantization to the nearest reachable stage (each stage is its own
+        // contactor, so intermediate values are physically impossible) and the
+        // thermostat's override both live in the capability's declared
+        // response, so this physics and anyone projecting it agree by
+        // construction.
+        let actual = self
+            .capability_inner(state)
+            .power_drawn_for_setpoint_kw(setpoint_kw);
         // Thermal model: Newton cooling + simulated draw
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
         let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
@@ -212,14 +214,20 @@ impl Heater {
 
     /// Point-in-time feasible power range.
     pub fn capability_inner(&self, state: &HeaterState) -> AssetCapability {
-        let max_import_kw = self.thermostat_forced_kw(state).unwrap_or(self.max_kw);
+        let forced_kw = self.thermostat_forced_kw(state);
+        // The stage set is declared regardless of the temperature-driven
+        // ceiling below — a hardware fact, not a live feasibility range. While
+        // the thermostat forces a value, that is what the heater draws whatever
+        // it is commanded, which the response says outright.
+        let mut response = SetpointResponse::stepped_nearest(self.power_steps_kw());
+        if let Some(forced_kw) = forced_kw {
+            response = response.with_power_next_tick_kw(forced_kw);
+        }
         AssetCapability {
             max_export_kw: 0.0,
-            max_import_kw,
+            max_import_kw: forced_kw.unwrap_or(self.max_kw),
             adjustability: PowerAdjustability::Stepped,
-            // Regardless of the temperature-driven ceiling above — a hardware
-            // fact, not a live feasibility range.
-            power_steps_kw: self.power_steps_kw(),
+            response,
         }
     }
 
@@ -647,7 +655,7 @@ mod tests {
         let heater = default_heater(); // p_step=1.25, max_kw=2.5
         let cap = heater.capability_inner(&state_at(21.5, 0.0)); // normal band
         assert_eq!(cap.adjustability, PowerAdjustability::Stepped);
-        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]);
+        assert_eq!(cap.response.power_steps_kw, vec![0.0, 1.25, 2.5]);
     }
 
     #[test]
@@ -657,11 +665,11 @@ mod tests {
         let heater = default_heater();
         let overheated = heater.capability_inner(&state_at(23.5, 0.0));
         assert_eq!(overheated.max_import_kw, 0.0);
-        assert_eq!(overheated.power_steps_kw, vec![0.0, 1.25, 2.5]);
+        assert_eq!(overheated.response.power_steps_kw, vec![0.0, 1.25, 2.5]);
 
         let too_cold = heater.capability_inner(&state_at(19.0, 0.0));
         assert_eq!(too_cold.max_import_kw, heater.max_kw);
-        assert_eq!(too_cold.power_steps_kw, vec![0.0, 1.25, 2.5]);
+        assert_eq!(too_cold.response.power_steps_kw, vec![0.0, 1.25, 2.5]);
     }
 
     #[test]
@@ -672,11 +680,11 @@ mod tests {
         let mut heater = default_heater(); // max_kw = 2.5
         heater.power_stages = 2;
         let cap = heater.capability_inner(&state_at(21.5, 0.0));
-        assert_eq!(cap.power_steps_kw, vec![0.0, 1.25, 2.5]);
+        assert_eq!(cap.response.power_steps_kw, vec![0.0, 1.25, 2.5]);
 
         heater.power_stages = 1;
         let cap = heater.capability_inner(&state_at(21.5, 0.0));
-        assert_eq!(cap.power_steps_kw, vec![0.0, 2.5]);
+        assert_eq!(cap.response.power_steps_kw, vec![0.0, 2.5]);
     }
 
     /// What `step_inner` actually draws when asked for full power right now.

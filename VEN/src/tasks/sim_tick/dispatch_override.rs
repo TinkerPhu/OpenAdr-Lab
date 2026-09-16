@@ -111,6 +111,7 @@ pub(crate) fn comms_loss_setpoint_bounds_kw(
 mod dispatch_override_tests {
     use super::*;
     use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+    use crate::entities::asset::SetpointResponse;
     use crate::entities::capacity::{AlertWindow, DispatchWindow};
     use chrono::TimeZone;
 
@@ -127,7 +128,7 @@ mod dispatch_override_tests {
             available_discharge_kwh: None,
             available_charge_kwh: None,
             forced_power_kw: None,
-            power_steps_kw: Vec::new(),
+            response: SetpointResponse::continuous(),
             default_setpoint_kw: power_kw,
             setpoint_kw: power_kw,
             values: std::collections::HashMap::new(),
@@ -276,7 +277,7 @@ mod dispatch_override_tests {
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
                 forced_power_kw: Some(3.0),
-                power_steps_kw: Vec::new(),
+                response: SetpointResponse::continuous(),
                 default_setpoint_kw: 0.0,
                 setpoint_kw: 0.0,
                 values: std::collections::HashMap::new(),

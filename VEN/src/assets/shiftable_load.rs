@@ -9,7 +9,7 @@ use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, ShiftableLoadMilpContext, ShiftableLoadScalars,
 };
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 
@@ -82,13 +82,17 @@ impl ShiftableLoadAsset {
         }
         let dt_min = dt.num_milliseconds() as f64 / 60_000.0;
         let elapsed = (state.elapsed_min + dt_min).min(self.duration_min as f64);
+        // Full power, from the same declaration the arbiter projects through.
+        let actual_power_kw = self
+            .capability_inner(state)
+            .power_drawn_for_setpoint_kw(setpoint_kw);
         (
             ShiftableLoadState {
                 started: true,
                 elapsed_min: elapsed,
-                actual_power_kw: self.power_kw,
+                actual_power_kw,
             },
-            self.power_kw,
+            actual_power_kw,
         )
     }
 
@@ -96,18 +100,21 @@ impl ShiftableLoadAsset {
     /// While running: forced on, no off option (non-interruptible).
     /// Once finished: forced off.
     pub fn capability_inner(&self, state: &ShiftableLoadState) -> AssetCapability {
-        let steps = if self.is_finished(state) {
-            vec![0.0]
+        // Pending: any setpoint above zero starts it at full power — it never
+        // modulates. Once started or finished its power is settled, whatever
+        // it is commanded.
+        let response = if self.is_finished(state) {
+            SetpointResponse::latching(vec![0.0]).with_power_next_tick_kw(0.0)
         } else if state.started {
-            vec![self.power_kw]
+            SetpointResponse::latching(vec![self.power_kw]).with_power_next_tick_kw(self.power_kw)
         } else {
-            vec![0.0, self.power_kw]
+            SetpointResponse::latching(vec![0.0, self.power_kw])
         };
         AssetCapability {
             max_export_kw: 0.0,
-            max_import_kw: *steps.last().unwrap_or(&0.0),
+            max_import_kw: *response.power_steps_kw.last().unwrap_or(&0.0),
             adjustability: PowerAdjustability::Stepped,
-            power_steps_kw: steps,
+            response,
         }
     }
 
@@ -664,7 +671,7 @@ mod tests {
     fn capability_offers_on_or_off_while_pending() {
         let l = load(2.0, 60);
         let cap = l.capability_inner(&ShiftableLoadAsset::initial_state());
-        assert_eq!(cap.power_steps_kw, vec![0.0, 2.0]);
+        assert_eq!(cap.response.power_steps_kw, vec![0.0, 2.0]);
         assert_eq!(cap.max_import_kw, 2.0);
     }
 
@@ -677,7 +684,11 @@ mod tests {
             Duration::minutes(1),
         );
         let cap = l.capability_inner(&started);
-        assert_eq!(cap.power_steps_kw, vec![2.0], "no off option once running");
+        assert_eq!(
+            cap.response.power_steps_kw,
+            vec![2.0],
+            "no off option once running"
+        );
     }
 
     #[test]

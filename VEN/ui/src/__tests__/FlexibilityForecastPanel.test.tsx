@@ -94,6 +94,33 @@ describe("FlexibilityForecastPanel", () => {
     expect(screen.getByTestId("flexibility-row-heater")).toHaveTextContent("(fixed)");
   });
 
+  it("shows how the asset says it answers a setpoint", () => {
+    // R-81: the arbiter projects an asset through its declared response, so
+    // an operator has to be able to see what that declaration says.
+    mockCapabilities.mockReturnValue([
+      {
+        data: {
+          max_import_kw: 7.4,
+          min_import_kw: 1.4,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+          adjustability: "STEPLESS",
+          power_steps_kw: [],
+          step_rule: "CONTINUOUS",
+          snap_to_zero_below_kw: 1.4,
+          power_next_tick_kw: 7.4,
+        },
+      },
+    ]);
+    mockForecasts.mockReturnValue([]);
+    renderPanel(["ev"]);
+
+    const cell = screen.getByTestId("adjustability-ev");
+    expect(cell).toHaveTextContent("off below 1.4 kW");
+    expect(cell).toHaveTextContent("drawing 7.4 kW until the command lands");
+  });
+
   it("shows the heater's Min import distinct from Max import (tiered asset)", () => {
     mockCapabilities.mockReturnValue([
       {

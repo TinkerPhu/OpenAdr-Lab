@@ -76,11 +76,12 @@ pub struct AssetSnapshot {
     /// (`Asset::forced_power_kw`, e.g. a heater's thermostat override).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forced_power_kw: Option<f64>,
-    /// The discrete power levels a `Stepped` asset can actually draw, ascending
-    /// (from its own capability; empty for continuously adjustable assets).
-    /// Commands and projections go through `entities::asset`'s step helpers.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub power_steps_kw: Vec<f64>,
+    /// How this asset's power follows a commanded setpoint, as the asset
+    /// itself declares it (`AssetCapability::response`) — the only authority
+    /// on what a setpoint will actually draw. Flattened, so `power_steps_kw`
+    /// keeps its place in the `/sim` JSON.
+    #[serde(flatten)]
+    pub response: crate::entities::asset::SetpointResponse,
     /// Default setpoint for this asset (kW) when no plan is active.
     pub default_setpoint_kw: f64,
     /// Last setpoint applied by the VEN controller (kW).
@@ -96,6 +97,37 @@ impl AssetSnapshot {
     #[inline]
     pub fn val(&self, key: &str) -> Option<f64> {
         self.values.get(key).copied()
+    }
+
+    /// The power this asset will actually draw next tick if commanded
+    /// `setpoint_kw` — its own declared response, within its capability
+    /// range. Every projection asks this; none may reason about stages,
+    /// latching or command lag itself (R-81/R-82).
+    pub fn power_drawn_for_setpoint_kw(&self, setpoint_kw: f64) -> f64 {
+        self.response.power_drawn_for_setpoint_kw(
+            -self.cap_max_export_kw.abs(),
+            self.cap_max_import_kw,
+            setpoint_kw,
+        )
+    }
+
+    /// The power `setpoint_kw` produces once the command has landed — what a
+    /// lever may count on in steady state, ignoring any response lag.
+    pub fn power_when_command_lands_kw(&self, setpoint_kw: f64) -> f64 {
+        self.response.power_when_command_lands_kw(
+            -self.cap_max_export_kw.abs(),
+            self.cap_max_import_kw,
+            setpoint_kw,
+        )
+    }
+
+    /// The setpoint to command so this asset draws no more than `kw`.
+    pub fn setpoint_for_power_at_or_below_kw(&self, kw: f64) -> f64 {
+        self.response.setpoint_for_power_at_or_below_kw(
+            -self.cap_max_export_kw.abs(),
+            self.cap_max_import_kw,
+            kw,
+        )
     }
 }
 
@@ -131,6 +163,7 @@ pub enum SnapshotError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::asset::SetpointResponse;
 
     fn _assert_send_sync<T: Send + Sync>() {}
 
@@ -151,7 +184,7 @@ mod tests {
             available_discharge_kwh: Some(2.0),
             available_charge_kwh: Some(5.0),
             forced_power_kw: None,
-            power_steps_kw: Vec::new(),
+            response: SetpointResponse::continuous(),
             default_setpoint_kw: 0.0,
             setpoint_kw: 0.0,
             values,

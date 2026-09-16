@@ -110,19 +110,23 @@ fn heater_snap_in(
 }
 
 fn base_snap(power_kw: f64) -> AssetSnapshot {
-    AssetSnapshot {
+    // From the real asset, like every other fixture here: a hand-built
+    // capability is exactly the drift the arbiter is not allowed to have.
+    use crate::assets::base_load::{BaseLoad, BaseLoadState};
+    let base_load = BaseLoad::from_params(&crate::entities::asset_params::BaseLoadParams {
+        baseline_kw: power_kw,
+        ..Default::default()
+    });
+    let state = crate::assets::AssetState::BaseLoad(BaseLoadState {
+        actual_power_kw: power_kw,
+    });
+    crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        &base_load,
+        state,
+        "base_load",
         power_kw,
-        asset_type: "base_load".into(),
-        cap_max_import_kw: power_kw,
-        cap_max_export_kw: 0.0,
-        available_discharge_kwh: None,
-        available_charge_kwh: None,
-        forced_power_kw: None,
-        power_steps_kw: Vec::new(),
-        default_setpoint_kw: power_kw,
-        setpoint_kw: power_kw,
-        values: StdHashMap::new(),
-    }
+        power_kw,
+    )
 }
 
 fn make_sim(pairs: Vec<(&str, AssetSnapshot)>) -> SimSnapshot {
@@ -514,6 +518,41 @@ fn projected_net_kw_counts_the_heater_stage_its_setpoint_rounds_to() {
     let sim = make_sim(vec![("heater", heater_snap(20.0, 18.0, 23.0, 23.0))]);
     let sp = StdHashMap::from([("heater".to_string(), 1.03)]);
     assert!((projected_net_kw(&sim, &sp, None, None) - 1.5).abs() < 1e-9);
+}
+
+#[test]
+fn projected_net_kw_asks_every_stepped_asset_not_just_the_heater() {
+    // R-81: a shiftable load starts at full power for any setpoint above 0 —
+    // a rule the projection used to apply to the heater alone, by asset id,
+    // and so got wrong for every other stepped asset.
+    use crate::assets::shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};
+    let now = chrono::Utc::now();
+    let load = ShiftableLoadAsset {
+        power_kw: 2.0,
+        duration_min: 90,
+        earliest_start: now,
+        latest_end: now + chrono::Duration::hours(6),
+    };
+    let snap = crate::services::test_support::asset_snapshots::snapshot_from_asset(
+        &load,
+        crate::assets::AssetState::ShiftableLoad(ShiftableLoadState {
+            started: false,
+            elapsed_min: 0.0,
+            actual_power_kw: 0.0,
+        }),
+        "shiftable_load",
+        0.0,
+        0.0,
+    );
+    let sim = make_sim(vec![("shiftable_load", snap)]);
+
+    let sp = StdHashMap::from([("shiftable_load".to_string(), 0.5)]);
+    assert!(
+        (projected_net_kw(&sim, &sp, None, None) - 2.0).abs() < 1e-9,
+        "a part-load command still starts it at full power"
+    );
+    let off = StdHashMap::from([("shiftable_load".to_string(), 0.0)]);
+    assert!((projected_net_kw(&sim, &off, None, None)).abs() < 1e-9);
 }
 
 #[test]

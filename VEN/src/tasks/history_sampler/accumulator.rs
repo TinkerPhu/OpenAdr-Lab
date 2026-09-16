@@ -217,6 +217,7 @@ impl HistorySampler {
 mod tests {
     use super::*;
     use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+    use crate::entities::asset::SetpointResponse;
     use chrono::TimeZone;
 
     fn ts(secs: i64) -> DateTime<Utc> {
@@ -239,7 +240,7 @@ mod tests {
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
                 forced_power_kw: None,
-                power_steps_kw: Vec::new(),
+                response: SetpointResponse::continuous(),
                 default_setpoint_kw: power_kw,
                 setpoint_kw: power_kw,
                 values,
@@ -501,7 +502,7 @@ mod tests {
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
                 forced_power_kw: None,
-                power_steps_kw: Vec::new(),
+                response: SetpointResponse::continuous(),
                 default_setpoint_kw: power_kw,
                 setpoint_kw: power_kw,
                 values,

@@ -159,15 +159,13 @@ pub fn resolve_pv_generation_limit_kw(
 
 /// Opportunistic surplus EV charging overlay.
 ///
-/// Kept for the `deviation_arbiter_enabled == false` rollout-gate path only
-/// (`tasks::sim_tick::helpers::build_tick_setpoints`) — when the arbiter is
-/// enabled, `controller::arbiter::reconcile` owns this decision instead (its
-/// `apply_ev_lever_opportunistic` is a from-scratch reimplementation, not a
-/// call into this function, so this exact pre-arbiter behavior is preserved
-/// byte-for-byte regardless of any future change to the arbiter's version).
-/// See `openspec/changes/deviation-arbiter/` — "when false, the tick loop
-/// SHALL behave exactly as before this change" is the reason this still
-/// exists rather than being deleted outright.
+/// The entry point for the `deviation_arbiter_enabled == false` rollout-gate
+/// path (`tasks::sim_tick::helpers::build_tick_setpoints`); when the arbiter is
+/// enabled, `controller::arbiter::reconcile` owns this decision. Both run the
+/// same `arbiter_levers::apply_ev_lever_opportunistic` — this used to be a
+/// deliberate second copy, "so pre-arbiter behaviour is preserved byte-for-byte
+/// regardless of any future change to the arbiter's version", which is exactly
+/// the divergence one-concept-one-function forbids (R-81).
 ///
 /// When generation exceeds all other active loads, offer the surplus to the EV
 /// (up to its max charge rate). All non-EV, non-battery assets are included in
@@ -191,52 +189,14 @@ pub fn apply_surplus_ev_overlay(
     overlay_enabled: bool,
     live_pv_kw: Option<f64>,
 ) {
-    if plan_has_ev_allocation || !overlay_enabled {
-        return;
-    }
-    let net_other_kw: f64 = sim
-        .assets
-        .iter()
-        .filter(|(id, _)| {
-            id.as_str() != crate::ids::ASSET_EV && id.as_str() != crate::ids::ASSET_BATTERY
-        })
-        .map(|(id, snap)| {
-            if id.as_str() == crate::ids::ASSET_PV {
-                if let Some(pv_kw) = live_pv_kw {
-                    return pv_kw;
-                }
-            }
-            if let Some(forced_kw) = snap.forced_power_kw {
-                return forced_kw;
-            }
-            let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
-            if sp.abs() > 1e20 {
-                snap.power_kw
-            } else {
-                sp
-            }
-        })
-        .sum();
-    let battery_charge_kw = setpoints
-        .get(crate::ids::ASSET_BATTERY)
-        .copied()
-        .unwrap_or(0.0)
-        .max(0.0);
-    let surplus_kw = (-net_other_kw - battery_charge_kw).max(0.0);
-    if surplus_kw < 0.1 {
-        return;
-    }
-    if let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) {
-        // The EV's own capability is 0 while unplugged or at/above its target.
-        let charge_ceiling_kw = snap.cap_max_import_kw;
-        if charge_ceiling_kw > 0.0 {
-            let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
-            let charge_kw = surplus_kw.min(charge_ceiling_kw);
-            if charge_kw >= min_charge_kw {
-                setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
-            }
-        }
-    }
+    crate::controller::arbiter::arbiter_levers::apply_ev_lever_opportunistic(
+        setpoints,
+        sim,
+        live_pv_kw,
+        None,
+        plan_has_ev_allocation,
+        overlay_enabled,
+    );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -245,6 +205,7 @@ pub fn apply_surplus_ev_overlay(
 mod tests {
     use super::*;
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use crate::entities::asset::SetpointResponse;
     use crate::services::test_support::asset_snapshots::snapshot_from_asset;
     use std::collections::HashMap as StdHashMap;
 
@@ -310,7 +271,7 @@ mod tests {
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
                 forced_power_kw: None,
-                power_steps_kw: Vec::new(),
+                response: SetpointResponse::continuous(),
                 default_setpoint_kw: 0.0,
                 setpoint_kw: 0.0,
                 values,
@@ -331,7 +292,7 @@ mod tests {
                 available_discharge_kwh: None,
                 available_charge_kwh: None,
                 forced_power_kw: None,
-                power_steps_kw: Vec::new(),
+                response: SetpointResponse::continuous(),
                 default_setpoint_kw: last_power_kw.max(0.0),
                 setpoint_kw: 0.0,
                 values,

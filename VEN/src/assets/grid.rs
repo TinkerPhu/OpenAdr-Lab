@@ -4,7 +4,7 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState, GridState,
     HistoryPoint,
 };
-use crate::entities::asset::PowerAdjustability;
+use crate::entities::asset::{PowerAdjustability, SetpointResponse};
 
 /// Grid virtual asset.
 ///
@@ -101,13 +101,13 @@ impl Asset for Grid {
                 // doc comment above. Not reachable via GET /capability/:id
                 // either (Grid isn't in AssetConfig).
                 adjustability: PowerAdjustability::None,
-                power_steps_kw: vec![],
+                response: SetpointResponse::continuous(),
             },
             _ => AssetCapability {
                 max_export_kw: 0.0,
                 max_import_kw: 0.0,
                 adjustability: PowerAdjustability::None,
-                power_steps_kw: vec![],
+                response: SetpointResponse::continuous(),
             },
         }
     }

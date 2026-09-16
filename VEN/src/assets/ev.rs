@@ -7,19 +7,9 @@ use super::{
     MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::EvParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
-
-/// Snap a commanded EV setpoint to 0 if it falls strictly between 0 and the minimum
-/// sustained charge rate (BL-12) — does not apply to V2G discharge (negative setpoints).
-fn snap_to_min_charge(setpoint_kw: f64, min_charge_kw: f64) -> f64 {
-    if setpoint_kw > 0.0 && setpoint_kw < min_charge_kw {
-        0.0
-    } else {
-        setpoint_kw
-    }
-}
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,15 +113,13 @@ impl EvCharger {
                 0.0,
             );
         }
-        let kw = setpoint_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let kw = snap_to_min_charge(kw, self.min_charge_kw);
-        let kw = if (kw > 0.0 && state.soc >= self.soc_target)
-            || (kw < 0.0 && state.soc <= self.min_soc)
-        {
-            0.0
-        } else {
-            kw
-        };
+        // Rate limits, the SoC gates and BL-12's minimum sustained charge rate
+        // all live in the capability's declared response, so what this charger
+        // does with a setpoint and what the controller projects it will do are
+        // the same function.
+        let kw = self
+            .capability_inner(state)
+            .power_when_command_lands_kw(setpoint_kw);
 
         // BL-12 response delay: apply the command accepted on the *previous* tick
         // now, and stage this tick's command to be applied one tick later.
@@ -156,7 +144,7 @@ impl EvCharger {
                 max_export_kw: 0.0,
                 max_import_kw: 0.0,
                 adjustability: PowerAdjustability::Stepless,
-                power_steps_kw: vec![],
+                response: SetpointResponse::fixed(0.0),
             };
         }
         AssetCapability {
@@ -171,16 +159,21 @@ impl EvCharger {
                 self.max_charge_kw
             },
             adjustability: PowerAdjustability::Stepless,
-            power_steps_kw: vec![],
+            // BL-12: the charger cannot sustain a trickle below
+            // `min_charge_kw`, and a new command only lands one tick later —
+            // until then it keeps drawing what it already accepted.
+            response: SetpointResponse::continuous()
+                .with_snap_to_zero_below_kw(self.min_charge_kw)
+                .with_power_next_tick_kw(state.pending_command_kw),
         }
     }
 
     /// Smallest nonzero achievable commitment. Import side: `min_charge_kw` is
-    /// already a real, modeled minimum sustained charge rate (see
-    /// `snap_to_min_charge`), gated by the exact same plugged/soc_target
+    /// already a real, modeled minimum sustained charge rate (the response's
+    /// `snap_to_zero_below_kw`), gated by the exact same plugged/soc_target
     /// condition `capability_inner` uses for its import ceiling. Export side
-    /// (V2G discharge) has no such floor — "does not apply to V2G discharge"
-    /// per `snap_to_min_charge`'s doc comment — so it's continuously
+    /// (V2G discharge) has no such floor — the snap never applies to a
+    /// negative setpoint — so it's continuously
     /// controllable down to 0, same as battery, regardless of `max_export_kw`.
     pub fn flexibility_floor_inner(&self, state: &EvState) -> AssetFlexibilityFloor {
         let min_import_kw = if !state.plugged || state.soc >= self.soc_target {
@@ -669,7 +662,7 @@ mod tests {
                 PowerAdjustability::Stepless,
                 "plugged={plugged}"
             );
-            assert!(cap.power_steps_kw.is_empty(), "plugged={plugged}");
+            assert!(cap.response.power_steps_kw.is_empty(), "plugged={plugged}");
         }
     }
 
@@ -823,14 +816,35 @@ mod tests {
 
     // ── BL-12: minimum charge rate + response delay ─────────────────────────
 
+    // The charger declares its own minimum sustained charge rate, so the
+    // controller projects the same snap the physics applies (R-81).
     #[test]
-    fn test_snap_to_min_charge_below_floor_snaps_to_zero() {
-        assert_eq!(snap_to_min_charge(0.5, 1.5), 0.0);
+    fn capability_inner_command_below_min_charge_lands_at_zero() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        assert_eq!(
+            ev.capability_inner(&state).power_when_command_lands_kw(0.5),
+            0.0
+        );
     }
 
     #[test]
-    fn test_snap_to_min_charge_above_floor_unchanged() {
-        assert_eq!(snap_to_min_charge(2.0, 1.5), 2.0);
+    fn capability_inner_command_above_min_charge_lands_unchanged() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        assert_eq!(
+            ev.capability_inner(&state).power_when_command_lands_kw(2.0),
+            2.0
+        );
+    }
+
+    #[test]
+    fn capability_inner_declares_the_power_drawn_until_the_command_lands() {
+        // R-82: a shed commanded now buys nothing this tick — the charger
+        // still draws what it accepted last tick.
+        let (ev, state) = make_ev(true, 0.5, 7.4);
+        assert_eq!(
+            ev.capability_inner(&state).power_drawn_for_setpoint_kw(0.0),
+            7.4
+        );
     }
 
     #[test]
