@@ -299,7 +299,7 @@ describe("SiteHeadroomChart — commitment-start marker", () => {
     propsCalls.length = 0;
   });
 
-  it("marks a future commitment start with a label inside the plot, below NOW's row", () => {
+  it("marks a future commitment start with a bare line at that time", () => {
     const nowMs = 1_000_000_000;
     const startMs = nowMs + 30 * 60_000;
     render(
@@ -314,13 +314,12 @@ describe("SiteHeadroomChart — commitment-start marker", () => {
     );
 
     const { extraReferenceAreas } = propsCalls[0] as {
-      extraReferenceAreas?: Array<{ props: { x: number; label: { value: string; position: string } } }>;
+      extraReferenceAreas?: Array<{ props: { x: number; stroke: string; label?: unknown } }>;
     };
     expect(extraReferenceAreas).toHaveLength(1);
     const marker = extraReferenceAreas![0].props;
     expect(marker.x).toBe(startMs);
-    expect(marker.label.value).toBe("START");
-    expect(marker.label.position).toBe("insideTop"); // "top" is clipped away by the chart's own edge
+    expect(marker.label).toBeUndefined();
   });
 
   it("draws no marker while the curves start at now", () => {
