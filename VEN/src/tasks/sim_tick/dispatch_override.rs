@@ -135,6 +135,57 @@ mod dispatch_override_tests {
         }
     }
 
+    /// The real inverter: its power never follows the setpoint map, which is
+    /// what makes the `f64::MAX` "no generation limit" entry harmless.
+    fn pv_snap(last_power_kw: f64) -> AssetSnapshot {
+        use crate::assets::pv::PvInverter;
+        let params = crate::entities::asset_params::PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 10.0,
+            co2_g_kwh: 41.0,
+        };
+        let pv = PvInverter::from_params(&params);
+        let mut state = PvInverter::initial_state(&params);
+        state.actual_power_kw = last_power_kw;
+        crate::services::test_support::asset_snapshots::snapshot_from_asset(
+            &pv,
+            crate::assets::AssetState::Pv(state),
+            "pv",
+            last_power_kw,
+            f64::MAX,
+        )
+    }
+
+    /// The real heater, below `temp_min_c`: its thermostat forces emergency
+    /// heat, which its capability declares as the power it will draw whatever
+    /// the dispatcher committed.
+    fn forced_heater_snap() -> AssetSnapshot {
+        use crate::assets::heater::{Heater, HeaterEmergencyMode, HeaterState};
+        let heater = Heater {
+            max_kw: 3.0,
+            power_stages: 1,
+            temp_min_c: 20.0,
+            temp_max_c: 23.0,
+            temp_min_c_profile: 20.0,
+            temp_max_c_profile: 23.0,
+            temp_safety_max_c: 23.0,
+            emergency_mode: HeaterEmergencyMode::Normal,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            ambient_temp_c: 10.0,
+        };
+        let state = crate::assets::AssetState::Heater(HeaterState {
+            temperature_c: 19.0, // below temp_min_c: emergency heat is forced on
+            actual_power_kw: 3.0,
+            emergency_latched: true,
+        });
+        crate::services::test_support::asset_snapshots::snapshot_from_asset(
+            &heater, state, "heater", 3.0, 0.0,
+        )
+    }
+
     fn make_sim() -> SimSnapshot {
         let mut assets = std::collections::HashMap::new();
         assets.insert("base_load".to_string(), snap_asset(0.5, 0.5, 0.5));
@@ -249,8 +300,7 @@ mod dispatch_override_tests {
         // battery got clamped to full discharge because the wanted power
         // came out -inf).
         let mut sim = make_sim();
-        sim.assets
-            .insert("pv".to_string(), snap_asset(-2.0, f64::MAX, f64::MAX));
+        sim.assets.insert("pv".to_string(), pv_snap(-2.0));
         let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
         apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net without battery = 0.5 + (-2.0 live PV) = -1.5 -> battery 3.5.
@@ -267,22 +317,8 @@ mod dispatch_override_tests {
         // override (`Asset::forced_power_kw`, covered in heater.rs); this test
         // pins that the override consumes it.
         let mut sim = make_sim();
-        sim.assets.insert(
-            "heater".to_string(),
-            AssetSnapshot {
-                power_kw: 3.0, // forced on last tick, still within hysteresis window
-                asset_type: "heater".into(),
-                cap_max_import_kw: 3.0,
-                cap_max_export_kw: 0.0,
-                available_discharge_kwh: None,
-                available_charge_kwh: None,
-                forced_power_kw: Some(3.0),
-                response: SetpointResponse::continuous(),
-                default_setpoint_kw: 0.0,
-                setpoint_kw: 0.0,
-                values: std::collections::HashMap::new(),
-            },
-        );
+        sim.assets
+            .insert("heater".to_string(), forced_heater_snap());
         let mut sp = HashMap::from([
             ("base_load".to_string(), 0.5),
             ("heater".to_string(), 0.0), // dispatcher committed 0; hysteresis overrides it

@@ -39,7 +39,7 @@ function formatAdjustability(cap: AssetCapability): string {
 /** R-81: how the asset says it answers a setpoint — what the controller
  * projects it will draw. Only the parts that differ from "follows the
  * setpoint immediately" are worth a line. */
-export function formatSetpointResponse(cap: AssetCapability): string {
+function formatSetpointResponse(cap: AssetCapability): string {
   const notes: string[] = [];
   if (cap.step_rule === "LATCH_ON_FULL") {
     notes.push("starts at full power");

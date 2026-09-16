@@ -12686,3 +12686,39 @@ without text; one shared marker function fixes both (`one-concept-one-function`)
 
 Verified: VEN UI 654 tests (5 new, pinning label position, row stacking and the marker's absence
 while the curves start at now), eslint 0 errors, build; re-checked on the deployed page.
+
+## 2026-09-16 — Each asset declares how it answers a setpoint (R-81 + R-82)
+
+What: `entities::asset::SetpointResponse` — reachable `power_steps_kw`, which step a setpoint
+selects (`step_rule`), the sustainable-import floor (`snap_to_zero_below_kw`), and
+`power_next_tick_kw` for power that does not follow the command at all — declared by every asset
+on its `AssetCapability`, carried (flattened, so the JSON keys don't move) into `AssetSnapshot`,
+and read by exactly two functions plus `power_when_command_lands_kw`. Every asset's `step_inner`
+now calls them, and so does `controller::arbiter::projected_net_kw_except`, which lost all of its
+per-asset branching (heater, battery/EV, PV, base load and the `> 1e20` "uncommanded" sentinel —
+a setpoint is simply clamped into the capability's own range now).
+
+Why: "what will this asset draw next tick if I command X?" had four different answers in five
+places. The arbiter picked between them **by asset id**, so a shiftable load — which starts at
+full power for any setpoint above zero — was projected as its raw setpoint (R-81), and a shed EV
+setpoint was counted as effective immediately although the charger only follows after
+`response_delay_s` (R-82). Two more copies of the charger's own minimum-sustained-rate rule sat
+in `arbiter_levers` and `dispatcher`, reading `snap.values["min_charge_kw"]` and deciding for it.
+
+Behaviour changes, both deliberate: the limit pass no longer credits an EV shed in the tick it is
+commanded (the charger is still told to back off; the battery covers the excess for the one tick
+it needs — `enforce_import_limit_covers_the_chargers_response_lag_with_the_battery`), and the
+projection now counts base load at its live power rather than its configured baseline, which is
+what the live-measurement path already did.
+
+Issues on the way: the dispatcher's opportunistic surplus-EV overlay carried a comment saying it
+was deliberately a second copy "so pre-arbiter behaviour is preserved byte-for-byte regardless of
+any future change to the arbiter's version" — the exact divergence `one-concept-one-function`
+forbids, and a reminder that a copy justified as a safety measure is still a copy. It now
+delegates. The arbiter tests' base-load fixture was hand-built rather than taken from the real
+asset (`asset-competence-assurance`'s own fixture rule); it comes from `BaseLoad` now.
+
+Verified: VEN cargo tests + clippy `-D warnings` + fmt on Node2, file-size audit, VEN UI vitest
+(one new case pinning the declaration's UI surface in the Flexibility & Forecast panel), E2E on
+Node2 — GB-47's `ven_import_limit_enforcement.feature` is what proves the limit pass still meets
+a cap with the lag now visible to it.
