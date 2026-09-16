@@ -95,7 +95,7 @@ impl SimState {
                     available_discharge_kwh,
                     available_charge_kwh,
                     forced_power_kw: cfg.forced_power_kw(&entry.state),
-                    power_steps_kw: cap.power_steps_kw.clone(),
+                    response: cap.response.clone(),
                     default_setpoint_kw: cfg.default_setpoint(),
                     setpoint_kw: entry.setpoint_kw,
                     values,

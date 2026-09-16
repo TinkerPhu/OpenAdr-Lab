@@ -28,7 +28,7 @@ pub fn snapshot_from_asset(
         available_discharge_kwh,
         available_charge_kwh,
         forced_power_kw: asset.forced_power_kw(&state),
-        power_steps_kw: cap.power_steps_kw.clone(),
+        response: cap.response.clone(),
         default_setpoint_kw: 0.0,
         setpoint_kw,
         values: asset.state_values(&state).into_iter().collect(),

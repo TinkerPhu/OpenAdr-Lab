@@ -8,7 +8,6 @@ use super::{
     DEAD_BAND_KW, HEATER_COMFORT_OVERRIDE_EUR_PER_KWH, LEVER_PREEMPTION_MARGIN_EUR_PER_KWH,
 };
 use crate::controller::SimSnapshot;
-use crate::entities::asset::{highest_power_step_at_or_below_kw, nearest_power_step_kw};
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
 
@@ -169,8 +168,11 @@ pub(super) fn ev_lever(
     })
 }
 
-/// Returns the achieved change (kW, magnitude) — can exceed `assigned_kw`
-/// when BL-12's `min_charge_kw` floor snaps a reduction to 0.
+/// Returns the change achieved **this tick** (kW, magnitude) — which is zero
+/// while the charger is still applying the command it accepted last tick
+/// (BL-12's `response_delay_s`, R-82): the reduction is commanded all the same
+/// and lands next tick, and the greedy loop meanwhile passes the excess to the
+/// next lever instead of believing an actuator that has not moved yet.
 pub(super) fn apply_ev_lever(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
@@ -179,15 +181,14 @@ pub(super) fn apply_ev_lever(
     let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) else {
         return 0.0;
     };
-    let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
     let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_EV).max(0.0);
-    let new_sp = (current_sp - assigned_kw).max(0.0);
-    // BL-12: the charger cannot sustain below min_charge_kw — snap to 0
-    // rather than commanding a sub-minimum rate that yields 0 kW physically
-    // while corrupting the arbiter's own next-tick accounting.
-    let new_sp = if new_sp < min_charge_kw { 0.0 } else { new_sp };
+    // The charger's own answer for what the reduced command will draw — it
+    // cannot sustain a trickle below its minimum charge rate and says so, so
+    // no sub-minimum setpoint is ever commanded (which would yield 0 kW
+    // physically while corrupting the arbiter's next-tick accounting).
+    let new_sp = snap.power_when_command_lands_kw((current_sp - assigned_kw).max(0.0));
     setpoints.insert(crate::ids::ASSET_EV.to_string(), new_sp);
-    (new_sp - current_sp).abs()
+    (snap.power_drawn_for_setpoint_kw(current_sp) - snap.power_drawn_for_setpoint_kw(new_sp)).abs()
 }
 
 /// Heater pause-within-comfort-band lever: flat zero cost, available
@@ -207,7 +208,7 @@ pub(super) fn heater_pause_lever(
     if snap.forced_power_kw.is_some() {
         return None;
     }
-    let drawn_kw = heater_drawn_kw(setpoints, sim);
+    let drawn_kw = drawn_kw(setpoints, sim, crate::ids::ASSET_HEATER);
     if drawn_kw <= 0.0 {
         return None;
     }
@@ -218,38 +219,31 @@ pub(super) fn heater_pause_lever(
     })
 }
 
-/// Commands the highest stage at or below `drawn − assigned` — an in-between
-/// setpoint would round back up to the stage it came from and shed nothing.
-/// Returns the achieved change (kW, magnitude): a whole stage, which may
-/// exceed `assigned_kw`.
+/// Commands whatever setpoint makes the heater draw at most
+/// `drawn − assigned` — the asset's own answer, so an in-between value that
+/// would round back up to the stage it came from is never sent. Returns the
+/// achieved change (kW, magnitude): a whole stage, which may exceed
+/// `assigned_kw`.
 pub(super) fn apply_heater_pause_lever(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     assigned_kw: f64,
 ) -> f64 {
-    let drawn_kw = heater_drawn_kw(setpoints, sim);
-    let new_kw = highest_power_step_at_or_below_kw(
-        heater_power_steps_kw(sim),
-        (drawn_kw - assigned_kw).max(0.0),
-    );
-    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), new_kw);
-    drawn_kw - new_kw
+    let Some(snap) = sim.assets.get(crate::ids::ASSET_HEATER) else {
+        return 0.0;
+    };
+    let drawn_kw = drawn_kw(setpoints, sim, crate::ids::ASSET_HEATER);
+    let new_sp = snap.setpoint_for_power_at_or_below_kw((drawn_kw - assigned_kw).max(0.0));
+    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), new_sp);
+    drawn_kw - snap.power_drawn_for_setpoint_kw(new_sp)
 }
 
-/// The stage the heater draws for its current setpoint (through the same
-/// quantization its own step physics uses).
-fn heater_drawn_kw(setpoints: &HashMap<String, f64>, sim: &SimSnapshot) -> f64 {
-    let setpoint_kw = setpoints
-        .get(crate::ids::ASSET_HEATER)
-        .copied()
-        .unwrap_or(0.0);
-    nearest_power_step_kw(heater_power_steps_kw(sim), setpoint_kw)
-}
-
-fn heater_power_steps_kw(sim: &SimSnapshot) -> &[f64] {
-    sim.assets
-        .get(crate::ids::ASSET_HEATER)
-        .map_or(&[], |snap| snap.power_steps_kw.as_slice())
+/// What `asset_id` draws for the setpoint currently commanded — its own
+/// answer, whatever kind of asset it is (R-81).
+pub(super) fn drawn_kw(setpoints: &HashMap<String, f64>, sim: &SimSnapshot, asset_id: &str) -> f64 {
+    sim.assets.get(asset_id).map_or(0.0, |snap| {
+        snap.power_drawn_for_setpoint_kw(current_setpoint_kw(setpoints, sim, asset_id))
+    })
 }
 
 /// Heater emergency-mode lever (`HeaterEmergencyMode::Curtail`/`Absorb`).
@@ -335,10 +329,13 @@ pub(super) fn pv_curtailment_lever(
     })
 }
 
-/// No-plan-yet fallback: reproduces the former `apply_surplus_ev_overlay`'s
-/// exact surplus computation (independent of any plan target, since none
-/// exists during the startup window before the first plan is adopted).
-pub(super) fn apply_ev_lever_opportunistic(
+/// Opportunistic surplus EV charging: offer whatever generation exceeds every
+/// other active load to the EV, up to what the charger says it can take. The
+/// one implementation of that decision — the deviation pass's no-plan-yet
+/// fallback and the pre-arbiter overlay path (`dispatcher::
+/// apply_surplus_ev_overlay`) both call this. Independent of any plan target,
+/// since none exists during the startup window before the first plan.
+pub(crate) fn apply_ev_lever_opportunistic(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     live_pv_kw: Option<f64>,
@@ -368,13 +365,10 @@ pub(super) fn apply_ev_lever_opportunistic(
     let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) else {
         return;
     };
-    // The EV's own capability is 0 while unplugged or at/above its target.
-    let charge_ceiling_kw = snap.cap_max_import_kw;
-    if charge_ceiling_kw > 0.0 {
-        let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
-        let charge_kw = surplus_kw.min(charge_ceiling_kw);
-        if charge_kw >= min_charge_kw {
-            setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
-        }
+    // The charger's own answer: 0 while unplugged, at/above its target, or
+    // when the surplus is below the rate it can sustain (R-81).
+    let charge_kw = snap.power_when_command_lands_kw(surplus_kw);
+    if charge_kw > 0.0 {
+        setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
     }
 }

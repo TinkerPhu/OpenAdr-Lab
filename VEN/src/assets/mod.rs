@@ -100,12 +100,37 @@ pub struct AssetCapability {
     /// curtail-only, etc. A static classification of the device's control mode,
     /// independent of the live ceiling above.
     pub adjustability: crate::entities::asset::PowerAdjustability,
-    /// For `Stepped` adjustability: explicit discrete import levels in kW
-    /// (ascending, including 0.0). Empty for every other adjustability.
-    pub power_steps_kw: Vec<f64>,
+    /// How the asset's actual power follows a commanded setpoint — its own
+    /// answer to "what will you draw next tick if I command X?" (R-81/R-82).
+    /// Flattened, so `power_steps_kw` keeps its place in the `/assets` and
+    /// `/sim` JSON.
+    #[serde(flatten)]
+    pub response: crate::entities::asset::SetpointResponse,
 }
 
 impl AssetCapability {
+    /// The power the asset will actually draw next tick if commanded
+    /// `setpoint_kw` — its declared `response` applied within this
+    /// capability's range. The asset's own physics call this; so does every
+    /// projection, through `AssetSnapshot`'s identical wrapper.
+    pub fn power_drawn_for_setpoint_kw(&self, setpoint_kw: f64) -> f64 {
+        self.response.power_drawn_for_setpoint_kw(
+            -self.max_export_kw.abs(),
+            self.max_import_kw,
+            setpoint_kw,
+        )
+    }
+
+    /// The power `setpoint_kw` produces once the command has landed — see
+    /// `SetpointResponse::power_when_command_lands_kw`.
+    pub fn power_when_command_lands_kw(&self, setpoint_kw: f64) -> f64 {
+        self.response.power_when_command_lands_kw(
+            -self.max_export_kw.abs(),
+            self.max_import_kw,
+            setpoint_kw,
+        )
+    }
+
     /// True if the asset has no controllable headroom in either direction right
     /// now (floor == ceiling for both `min_export_kw`/`max_export_kw` and
     /// `min_import_kw`/`max_import_kw`) — not whether the two directions equal

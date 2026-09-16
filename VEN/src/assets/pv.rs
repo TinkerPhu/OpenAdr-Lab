@@ -7,7 +7,7 @@ use super::{
     TickOverridable, TickOverrides, Trajectory,
 };
 use crate::common::TimeSeries;
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 
@@ -204,7 +204,9 @@ impl PvInverter {
             max_export_kw: state.actual_power_kw, // e.g. -2.0
             max_import_kw: 0.0,
             adjustability: PowerAdjustability::Croppable,
-            power_steps_kw: vec![],
+            // Curtailable anywhere between 0 and the live ceiling above; a
+            // setpoint beyond it simply resolves to that ceiling.
+            response: SetpointResponse::continuous(),
         }
     }
 
@@ -570,7 +572,7 @@ mod tests {
         };
         let cap = pv.capability_inner(&state);
         assert_eq!(cap.adjustability, PowerAdjustability::Croppable);
-        assert!(cap.power_steps_kw.is_empty());
+        assert!(cap.response.power_steps_kw.is_empty());
     }
 
     #[test]

@@ -745,6 +745,26 @@ under Normal / Absorb). The MILP planner no longer takes a `SimSnapshot` at all
 own `AssetMilpContext` (e.g. the EV's `soc_init`). Test snapshots are built from real assets via
 `services/test_support/asset_snapshots.rs`.
 
+**"What will you draw next tick if I command X?"** is such a question, and the asset answers it
+with `entities::asset::SetpointResponse`, carried on its `AssetCapability` (and from there into
+`AssetSnapshot`, flattened, so `power_steps_kw` keeps its place in the `/assets` and `/sim`
+JSON). It declares the reachable `power_steps_kw`, which step a setpoint selects (`step_rule`:
+`Continuous`, `Nearest` for a heater's stage contactors, `LatchOnFull` for a batch load that
+starts at full power and never modulates), a `snap_to_zero_below_kw` floor (the EV charger's
+minimum sustained charge rate), and `power_next_tick_kw` when next tick's power does not follow
+the command at all — a thermostat override, a load already running, an uncontrollable base load,
+or a charger still applying the command it accepted last tick (`response_delay_s`).
+
+Two functions read it — `power_drawn_for_setpoint_kw` and its inverse
+`setpoint_for_power_at_or_below_kw` (plus `power_when_command_lands_kw`, the same answer without
+the response lag, for what a lever may count on in steady state) — and everyone calls them: each
+asset's own `step_inner`, so the declaration cannot drift from the physics, and
+`controller::arbiter::projected_net_kw_except`, which consequently contains no per-asset
+branching at all. Before this (R-81/R-82) the arbiter applied the heater's rounding rule by
+asset id — wrong for any other stepped asset — and believed a shed EV setpoint took effect
+immediately, leaving a one-tick excess under a hard import limit. The limit pass now sees that
+lag and covers it with another lever for the tick the charger needs.
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.

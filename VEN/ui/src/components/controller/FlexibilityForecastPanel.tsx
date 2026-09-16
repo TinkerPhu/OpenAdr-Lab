@@ -36,6 +36,25 @@ function formatAdjustability(cap: AssetCapability): string {
   return `${label} (${levels} kW)`;
 }
 
+/** R-81: how the asset says it answers a setpoint — what the controller
+ * projects it will draw. Only the parts that differ from "follows the
+ * setpoint immediately" are worth a line. */
+export function formatSetpointResponse(cap: AssetCapability): string {
+  const notes: string[] = [];
+  if (cap.step_rule === "LATCH_ON_FULL") {
+    notes.push("starts at full power");
+  } else if (cap.step_rule === "NEAREST") {
+    notes.push("rounds to nearest step");
+  }
+  if (cap.snap_to_zero_below_kw) {
+    notes.push(`off below ${cap.snap_to_zero_below_kw} kW`);
+  }
+  if (cap.power_next_tick_kw !== undefined) {
+    notes.push(`drawing ${cap.power_next_tick_kw} kW until the command lands`);
+  }
+  return notes.join(", ");
+}
+
 export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
   const capabilityResults = useAssetCapabilities(assetIds);
   const { data: forecasts = [] } = useAssetForecasts();
@@ -71,7 +90,14 @@ export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
                 <TableCell>{ASSET_LABELS[assetId] ?? assetId}</TableCell>
                 <TableCell data-testid={`adjustability-${assetId}`}>
                   {cap ? (
-                    <Chip size="small" label={formatAdjustability(cap)} />
+                    <>
+                      <Chip size="small" label={formatAdjustability(cap)} />
+                      {formatSetpointResponse(cap) && (
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {formatSetpointResponse(cap)}
+                        </Typography>
+                      )}
+                    </>
                   ) : (
                     "—"
                   )}

@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-mod arbiter_levers;
+pub(crate) mod arbiter_levers;
 pub mod limit;
 
 use crate::controller::SimSnapshot;
@@ -155,35 +155,36 @@ pub fn projected_net_kw_except(
         .iter()
         .filter(|(id, _)| !except_asset_ids.contains(&id.as_str()))
         .map(|(id, snap)| {
-            if id.as_str() == crate::ids::ASSET_PV {
-                if let Some(pv_kw) = live_pv_kw {
-                    return pv_kw;
-                }
-            }
-            if id.as_str() == crate::ids::ASSET_BASE_LOAD {
-                if let Some(bl_kw) = live_base_load_kw {
-                    return bl_kw;
-                }
-            }
-            if let Some(forced_kw) = snap.forced_power_kw {
-                return forced_kw;
-            }
-            if id.as_str() == crate::ids::ASSET_BATTERY || id.as_str() == crate::ids::ASSET_EV {
-                return arbiter_levers::current_setpoint_kw(setpoints, sim, id);
-            }
-            let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
-            if sp.abs() > 1e20 {
-                snap.power_kw
-            } else if id.as_str() == crate::ids::ASSET_HEATER {
-                // The heater draws its nearest stage (the rule its own step
-                // physics applies). Not generic over `power_steps_kw`: a
-                // shiftable load starts at full power for any setpoint > 0.
-                crate::entities::asset::nearest_power_step_kw(&snap.power_steps_kw, sp)
-            } else {
-                sp
+            // A live measurement beats the model for the two assets that have
+            // one; everything else is the asset's own answer to what this
+            // tick's command makes it draw — stage quantization, an all-or-
+            // nothing start, a thermostat override and a charger's response
+            // lag all included, none of them re-derived here (R-81/R-82).
+            match measured_kw_for(id, live_pv_kw, live_base_load_kw) {
+                Some(measured_kw) => measured_kw,
+                None => snap.power_drawn_for_setpoint_kw(arbiter_levers::current_setpoint_kw(
+                    setpoints, sim, id,
+                )),
             }
         })
         .sum()
+}
+
+/// The measurement standing in for the model for `asset_id`, if that asset has
+/// a live feed at all. Declared as a table rather than a chain of id tests: a
+/// feed belongs to exactly one asset, and a third one is another row here.
+fn measured_kw_for(
+    asset_id: &str,
+    live_pv_kw: Option<f64>,
+    live_base_load_kw: Option<f64>,
+) -> Option<f64> {
+    [
+        (crate::ids::ASSET_PV, live_pv_kw),
+        (crate::ids::ASSET_BASE_LOAD, live_base_load_kw),
+    ]
+    .into_iter()
+    .find(|(id, _)| *id == asset_id)
+    .and_then(|(_, measured_kw)| measured_kw)
 }
 
 /// `projected_net_kw − target`, where the target is the plan's signed net

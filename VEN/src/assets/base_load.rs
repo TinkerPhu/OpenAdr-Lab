@@ -9,7 +9,7 @@ use super::{
     TickOverridable, TickOverrides,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
 
 /// One configured appliance's daily draw: a trapezoidal power pulse
@@ -215,7 +215,8 @@ impl BaseLoad {
             max_export_kw: 0.0,
             max_import_kw: state.actual_power_kw,
             adjustability: PowerAdjustability::None,
-            power_steps_kw: vec![],
+            // Follows no setpoint at all: it draws what it draws.
+            response: SetpointResponse::fixed(state.actual_power_kw),
         }
     }
 
@@ -588,7 +589,7 @@ mod tests {
         };
         let cap = bl.capability_inner(&state);
         assert_eq!(cap.adjustability, PowerAdjustability::None);
-        assert!(cap.power_steps_kw.is_empty());
+        assert!(cap.response.power_steps_kw.is_empty());
     }
 
     #[test]
