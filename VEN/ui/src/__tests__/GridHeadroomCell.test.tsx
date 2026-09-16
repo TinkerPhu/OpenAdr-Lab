@@ -2,7 +2,7 @@
  * GridHeadroomCell (BL-43) — left-section text, pin/expand controls, and chart prop threading.
  * Mocks SiteHeadroomChart (same pattern as GridTariffCell.test.tsx mocking TariffEnvelopeChart)
  * so this stays a unit test of the cell, not a recharts integration test. The mock records
- * its props so the "Move commitment start" tests can drive its cursor callbacks directly.
+ * its props so the click tests can drive its cursor callback directly.
  */
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -186,7 +186,7 @@ describe("GridHeadroomCell", () => {
   });
 });
 
-describe("GridHeadroomCell — Move commitment start", () => {
+describe("GridHeadroomCell — click moves the commitment start", () => {
   const MIN = 60_000;
   const nowMs = Date.parse("2026-01-01T10:00:00Z");
   // Remaining plan slots every 15 min from 10:15.
@@ -215,7 +215,6 @@ describe("GridHeadroomCell — Move commitment start", () => {
     onCursorClick?: (tsMs: number) => void;
   };
   const clickChart = (tsMs: number) => act(() => lastChart().onCursorClick?.(tsMs));
-  const selectMode = (name: RegExp) => act(() => screen.getByRole("button", { name }).click());
 
   const renderCell = () =>
     render(
@@ -238,17 +237,16 @@ describe("GridHeadroomCell — Move commitment start", () => {
     curvesAtResponse.current = serverAnswer;
   });
 
-  it("defaults to Values: clicking the chart never moves the curves", () => {
+  it("needs no mode armed first: the chart is clickable as rendered", () => {
     renderCell();
-    expect(lastChart().onCursorClick).toBeUndefined();
+    expect(lastChart().onCursorClick).toBeTypeOf("function");
     expect(lastChart().capacity).toBe(perTick);
     expect(lastChart().commitmentStartMs).toBeNull();
-    expect(curvesAtCalls.every((c) => c === null)).toBe(true);
+    expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/click a future time/i);
   });
 
   it("clicking a future time anchors the curves at the plan slot it falls in", () => {
     renderCell();
-    selectMode(/move commitment start/i);
     clickChart(slotStartsMs[1] + 7 * MIN);
     expect(curvesAtCalls).toContain(slotStartsMs[1] + 7 * MIN); // the click time, unsnapped
     expect(lastChart().capacity?.start).toBe(new Date(slotStartsMs[1]).toISOString());
@@ -258,7 +256,6 @@ describe("GridHeadroomCell — Move commitment start", () => {
 
   it("clicking again moves the start to the new slot", () => {
     renderCell();
-    selectMode(/move commitment start/i);
     clickChart(slotStartsMs[1] + MIN);
     clickChart(slotStartsMs[3] + MIN);
     expect(lastChart().commitmentStartMs).toBe(slotStartsMs[3]);
@@ -266,7 +263,6 @@ describe("GridHeadroomCell — Move commitment start", () => {
 
   it("clicking at or before now puts the curves back at now", () => {
     renderCell();
-    selectMode(/move commitment start/i);
     clickChart(slotStartsMs[2] + MIN);
     expect(lastChart().commitmentStartMs).toBe(slotStartsMs[2]);
     clickChart(nowMs - 10 * MIN);
@@ -274,19 +270,14 @@ describe("GridHeadroomCell — Move commitment start", () => {
     expect(lastChart().commitmentStartMs).toBeNull();
   });
 
-  it("switching back to Values resets the curves to now", () => {
+  it("asks for nothing until a click happens", () => {
     renderCell();
-    selectMode(/move commitment start/i);
-    clickChart(slotStartsMs[2] + MIN);
-    selectMode(/values/i);
-    expect(lastChart().capacity).toBe(perTick);
-    expect(lastChart().commitmentStartMs).toBeNull();
+    expect(curvesAtCalls.every((c) => c === null)).toBe(true);
   });
 
   it("says so when the server anchored the curves at now instead (no active plan)", () => {
     curvesAtResponse.current = () => perTick;
     renderCell();
-    selectMode(/move commitment start/i);
     clickChart(slotStartsMs[1] + MIN);
     expect(lastChart().commitmentStartMs).toBeNull();
     expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/no active plan/i);
