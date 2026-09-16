@@ -535,3 +535,24 @@ describe("TimeSeriesChart — cursor hooks", () => {
     expect(chart.onDoubleClick).toBeUndefined();
   });
 });
+
+describe("TimeSeriesChart — double-click does not select chart text", () => {
+  it("suppresses text selection only where a double-click handler is registered", () => {
+    const { getByTestId, rerender } = render(
+      <TimeSeriesChart
+        testId="chart"
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        onCursorDoubleClick={vi.fn()}
+      />
+    );
+    expect(getByTestId("chart")).toHaveStyle({ userSelect: "none" });
+
+    rerender(
+      <TimeSeriesChart testId="chart" data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} />
+    );
+    expect(getByTestId("chart")).not.toHaveStyle({ userSelect: "none" });
+  });
+});

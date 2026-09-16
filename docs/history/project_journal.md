@@ -12672,8 +12672,10 @@ its second one (row 1). Labels moved from `position: "top"` to `"insideTop"`. Th
 cell's cursor switch moved from under the chart into the left value column ("Values" / "Move
 start", full name kept as its accessible name).
 
-Why: from the live page — the marker's label rendered above the chart's SVG and was clipped to a
-coloured sliver at the top edge ("a nearly invisible blue gadget around NOW"), and the switch,
+Why: from the live page — two defects. The marker's label rendered above the chart's SVG, clipped to a
+coloured sliver at the top edge; and a double-click selects the text under the cursor, so the
+browser painted its selection highlight over that sliver ("a nearly invisible blue gadget around
+NOW"). Charts with a double-click handler now suppress text selection. The switch,
 sitting under the plot next to the legend, was read as a caption and missed, so the feature looked
 broken although hovering and holding worked. Both confirmed against the deployed UI with
 Playwright (label box 9 px above the chart surface; hover moved the start to 06:20 and a
