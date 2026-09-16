@@ -1978,3 +1978,11 @@ positions. Verify chart rendering by measuring boxes in a real browser, not by r
 this class of bug is invisible in unit tests that mock the chart library away. And where two
 markers can coincide in time (a commitment starting in the first plan slot sits on top of NOW),
 stack the labels in rows instead of letting them overprint.
+
+## A double-click interaction on a chart selects the text under the cursor (2026-09-16)
+
+The same "blue square" report had a second cause behind the clipped label: double-click is also
+the browser's select-word gesture, so it highlighted the very marker label the click had just
+placed — a solid blue box exactly where the user was clicking. **How to apply:** any element
+whose UX defines a double-click (or drag) needs `user-select: none`, or the browser's own
+selection competes with the interaction. Apply it where the handler is registered, not globally.

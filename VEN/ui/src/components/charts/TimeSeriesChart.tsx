@@ -181,7 +181,17 @@ export function TimeSeriesChart({
     return [String(value), name];
   };
   return (
-    <div data-testid={testId} style={{ width: "100%", height }}>
+    <div
+      data-testid={testId}
+      style={{
+        width: "100%",
+        height,
+        // A double-click selects the text under the cursor — on a chart that means the
+        // marker label the click just placed, highlighted in the browser's selection blue
+        // (reported from the live page as a "blue square" over the commitment-start label).
+        ...(onCursorDoubleClick ? { userSelect: "none" as const } : {}),
+      }}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={data}
