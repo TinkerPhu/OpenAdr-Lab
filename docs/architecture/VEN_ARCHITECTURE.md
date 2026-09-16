@@ -579,8 +579,8 @@ Site Headroom and Capacity Forecast are fixed-axis slices of the same
   `t2 = 0` fixed, sweep `t1` across the plan's remaining slots.
   `simulated_trajectory` called once per asset; each slot is the `t2 = 0` point
   of the shared curve computation, started from that slot's trajectory states.
-- **Capacity Forecast from a future start** (Controller → Site Headroom, "Move
-  start" cursor mode — one request per click, `GET /flexibility/capacity?start=`) —
+- **Capacity Forecast from a future start** (Controller → Site Headroom, click a
+  future time — one request per click, `GET /flexibility/capacity?start=`) —
   `compute_site_capacity_curves_at`: `t1` = the remaining plan slot boundary the
   requested start snaps down to (clamped to the last remaining slot's start),
   each asset starting from `resolve_plan_state_at`'s state there, sweep `t2` to

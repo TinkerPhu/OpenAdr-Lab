@@ -12748,3 +12748,17 @@ Why: a deployed UI change (the removed NOW labels) still rendered the previous b
 user's browser. index.html had no cache directive at all, so a heuristically cached copy kept
 pointing at the old fingerprinted bundle. The deploy itself was fine — verified on the host that
 the served bundle no longer contained the string.
+
+## 2026-09-16 — Site Headroom: the chart is clickable as rendered (no cursor mode)
+
+What: the "Values" / "Move start" switch is gone. Clicking any future time in the Site Headroom
+chart anchors the commitment curves there; clicking at or before now resets them to now. The
+caption invites the first click ("Click a future time to start the commitment curves there").
+
+Why: with the mode, a click did nothing until the user found and armed a switch, so the feature
+read as broken — twice, from two different placements of that switch. A mode whose only purpose is
+to arm a single click is worth less than the confusion it causes; the click is harmless and
+reversible (click the past), and the tooltip still works on hover either way.
+
+Verified: VEN UI 653 tests, eslint 0 errors, build; on the deployed page a plain click (no
+preceding interaction) moves the curves and the START marker.
