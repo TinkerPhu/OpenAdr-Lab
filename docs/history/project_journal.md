@@ -12663,3 +12663,24 @@ previous scenario's stale plan. All features using those steps re-run green (33 
 Remaining copies of "does this window cover t" (window `is_ended` ×3, tariff lookups, slot
 overlaps) are recorded as R-83; the folded limit fields (B′) and time-aware
 subscription/reservation (C) stay under GB-48.
+
+## 2026-09-16 — Site Headroom commitment-start marker made visible (044 follow-up)
+
+What: `NowLine.tsx` now exposes `renderTimeMarkerLine(yAxisId, tsMs, {label, color, row})`, with
+`renderNowLine` as its NOW-coloured caller and `SiteHeadroomChart`'s commitment-start marker as
+its second one (row 1). Labels moved from `position: "top"` to `"insideTop"`. The Site Headroom
+cell's cursor switch moved from under the chart into the left value column ("Values" / "Move
+start", full name kept as its accessible name).
+
+Why: from the live page — the marker's label rendered above the chart's SVG and was clipped to a
+coloured sliver at the top edge ("a nearly invisible blue gadget around NOW"), and the switch,
+sitting under the plot next to the legend, was read as a caption and missed, so the feature looked
+broken although hovering and holding worked. Both confirmed against the deployed UI with
+Playwright (label box 9 px above the chart surface; hover moved the start to 06:20 and a
+double-click held 06:25, with both `?start=` requests firing).
+
+The NOW label had the same clipping everywhere, unnoticed because the line itself reads fine
+without text; one shared marker function fixes both (`one-concept-one-function`).
+
+Verified: VEN UI 654 tests (5 new, pinning label position, row stacking and the marker's absence
+while the curves start at now), eslint 0 errors, build; re-checked on the deployed page.

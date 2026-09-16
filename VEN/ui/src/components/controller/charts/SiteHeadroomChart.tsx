@@ -1,4 +1,4 @@
-import { ReferenceLine } from "recharts";
+import { renderTimeMarkerLine } from "../../charts/NowLine";
 import type { AssetTimelinePoint } from "../types";
 import type {
   CapacityCurvesResponse,
@@ -251,14 +251,13 @@ export function SiteHeadroomChart({
         commitmentStartMs === null
           ? undefined
           : [
-              <ReferenceLine
-                key="commitment-start"
-                yAxisId="power"
-                x={commitmentStartMs}
-                stroke={COLOR_COMMITMENT_START}
-                strokeDasharray="2 2"
-                label={{ value: "START", position: "top", fontSize: 9, fill: COLOR_COMMITMENT_START }}
-              />,
+              // Row 1: a start in the first plan slots sits right next to NOW, whose own
+              // label occupies row 0.
+              renderTimeMarkerLine("power", commitmentStartMs, {
+                label: "START",
+                color: COLOR_COMMITMENT_START,
+                row: 1,
+              }),
             ]
       }
       onCursorMove={onCursorMove}

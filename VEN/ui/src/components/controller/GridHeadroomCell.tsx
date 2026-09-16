@@ -130,6 +130,27 @@ export function GridHeadroomCell({
         <Typography variant="caption" color="text.secondary" data-testid="headroom-down-kw">
           Down: {fmtKw(envelope?.down_kw)} ({fmtDuration(envelope?.down_duration_s)})
         </Typography>
+        {/* Next to the values, not under the chart: below the plot the switch reads as a
+            legend caption and goes unnoticed (reported from the live page). */}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={cursorMode}
+          onChange={(_, mode: CursorMode | null) => selectCursorMode(mode)}
+          aria-label="Chart cursor"
+          sx={{ mt: 0.5 }}
+        >
+          <ToggleButton value="values" sx={{ py: 0, fontSize: 11, textTransform: "none" }}>
+            Values
+          </ToggleButton>
+          <ToggleButton
+            value="move-commitment-start"
+            aria-label="Move commitment start"
+            sx={{ py: 0, fontSize: 11, textTransform: "none" }}
+          >
+            Move start
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Box>
 
       {/* Right: live headroom band around the grid-power line */}
@@ -148,27 +169,13 @@ export function GridHeadroomCell({
           onCursorMove={moveMode ? setHoverMs : undefined}
           onCursorDoubleClick={moveMode ? toggleHold : undefined}
         />
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, pb: 0.5, flexWrap: "wrap" }}>
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={cursorMode}
-            onChange={(_, mode: CursorMode | null) => selectCursorMode(mode)}
-            aria-label="Chart cursor"
-          >
-            <ToggleButton value="values" sx={{ py: 0, fontSize: 11, textTransform: "none" }}>
-              Values
-            </ToggleButton>
-            <ToggleButton value="move-commitment-start" sx={{ py: 0, fontSize: 11, textTransform: "none" }}>
-              Move commitment start
-            </ToggleButton>
-          </ToggleButtonGroup>
-          {caption && (
+        {caption && (
+          <Box sx={{ px: 1, pb: 0.5 }}>
             <Typography variant="caption" color="text.secondary" data-testid="commitment-start-caption">
               {caption}
             </Typography>
-          )}
-        </Box>
+          </Box>
+        )}
       </Box>
 
       {/* Right column: pin button + vertical expand button */}
