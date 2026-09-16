@@ -16,6 +16,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::controller::vtn_port::{OadrEvent, OadrInterval};
+use crate::entities::time_window::TimeWindow;
 
 /// The start of an interval no start could be derived for.
 pub const OPEN_START: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
@@ -30,12 +31,16 @@ pub struct TimedInterval<'a> {
     pub end: DateTime<Utc>,
 }
 
-impl TimedInterval<'_> {
-    /// `start ≤ t < end`.
-    pub fn covers(&self, t: DateTime<Utc>) -> bool {
-        self.start <= t && t < self.end
+impl TimeWindow for TimedInterval<'_> {
+    fn start(&self) -> DateTime<Utc> {
+        self.start
     }
+    fn end(&self) -> DateTime<Utc> {
+        self.end
+    }
+}
 
+impl TimedInterval<'_> {
     /// Neither end is open.
     pub fn is_bounded(&self) -> bool {
         self.start != OPEN_START && self.end != OPEN_END

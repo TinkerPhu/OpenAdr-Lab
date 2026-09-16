@@ -1062,9 +1062,7 @@ mod tests {
         );
 
         // An interval must cover now (2026-01-03T00:30 → cycle 24, interval 0: 00:00–01:00)
-        let current = snapshots
-            .iter()
-            .find(|s| s.interval_start <= now && now < s.interval_end);
+        let current = crate::entities::tariff_snapshot::tariff_at(&snapshots, now);
         assert!(current.is_some(), "no interval covers now");
         assert_eq!(current.unwrap().import_tariff_eur_kwh, Some(0.10));
     }
@@ -1136,9 +1134,7 @@ mod tests {
         );
 
         // now = 2026-01-03T14:30 → cycle 2 (offset 2×86400s), hour 14 → price = 14.0
-        let current = snapshots
-            .iter()
-            .find(|s| s.interval_start <= now && now < s.interval_end);
+        let current = crate::entities::tariff_snapshot::tariff_at(&snapshots, now);
         assert!(current.is_some(), "no interval covers now at {}", now);
         assert_eq!(current.unwrap().import_tariff_eur_kwh, Some(14.0));
     }
@@ -1255,10 +1251,7 @@ mod tests {
         at: &str,
     ) -> Option<f64> {
         let at = ts(at);
-        snaps
-            .iter()
-            .find(|s| s.interval_start <= at && at < s.interval_end)
-            .and_then(|s| s.import_tariff_eur_kwh)
+        crate::entities::tariff_snapshot::tariff_at(snaps, at).and_then(|s| s.import_tariff_eur_kwh)
     }
 
     fn segments(
@@ -1439,10 +1432,8 @@ mod tests {
         let snaps = parse_rate_snapshots(&[price_only, price_ghg], now);
         let at = |s: &str| {
             let t = ts(s);
-            let snap = snaps
-                .iter()
-                .find(|x| x.interval_start <= t && t < x.interval_end)
-                .expect("covered");
+            let snap =
+                crate::entities::tariff_snapshot::tariff_at(&snaps, t).expect("covered");
             (snap.import_tariff_eur_kwh, snap.co2_g_kwh)
         };
         assert_eq!(at("2026-02-01T10:05:00Z"), (Some(0.09), Some(300.0)));

@@ -21,14 +21,11 @@ pub(crate) fn apply_dispatch_override(
     live_pv_kw: Option<f64>,
     live_base_load_kw: Option<f64>,
 ) {
-    let alert_active = alert_windows.iter().any(|a| a.start <= now && now < a.end);
-    if alert_active {
+    use crate::entities::time_window::{any_covering, covering};
+    if any_covering(alert_windows, now) {
         return;
     }
-    let Some(win) = dispatch_windows
-        .iter()
-        .find(|w| w.start <= now && now < w.end)
-    else {
+    let Some(win) = covering(dispatch_windows, now) else {
         return;
     };
     let Some(bat) = sim_snap.assets.get(crate::ids::ASSET_BATTERY) else {

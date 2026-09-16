@@ -126,9 +126,7 @@ impl HistorySampler {
         self.grid.import_kw_sum += net_kw.max(0.0);
         self.grid.export_kw_sum += (-net_kw).max(0.0);
         self.grid.n += 1;
-        let applicable = tariffs
-            .iter()
-            .find(|r| r.interval_start <= now && now < r.interval_end);
+        let applicable = crate::entities::tariff_snapshot::tariff_at(tariffs, now);
         if let Some(t) = applicable.and_then(|r| r.import_tariff_eur_kwh) {
             self.grid.import_tariff_sum += t;
             self.grid.import_tariff_n += 1;

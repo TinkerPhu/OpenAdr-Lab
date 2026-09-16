@@ -11,6 +11,7 @@ use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
+use crate::entities::time_window::TimeWindow;
 
 use super::types::*;
 
@@ -219,7 +220,7 @@ pub(crate) fn build_milp_inputs(
         // overlapping level wins; combined with the contractual cap via min.
         let simple_level = simple_windows
             .iter()
-            .filter(|w| w.start < slot_end && slot_t < w.end)
+            .filter(|w| w.overlaps(slot_t, slot_end))
             .map(|w| w.level)
             .max();
         let simple_cap = match simple_level {
@@ -234,9 +235,7 @@ pub(crate) fn build_milp_inputs(
         // base load yields a warned violation, never infeasibility. Export is
         // left untouched — the spec prescribes nothing for it. Alerts override
         // any SIMPLE level.
-        let in_alert = alert_windows
-            .iter()
-            .any(|a| a.start < slot_end && slot_t < a.end);
+        let in_alert = alert_windows.iter().any(|a| a.overlaps(slot_t, slot_end));
         p_imp_cont.push(if in_alert {
             0.0
         } else {

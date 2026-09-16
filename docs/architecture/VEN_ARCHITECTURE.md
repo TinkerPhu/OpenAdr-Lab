@@ -1324,6 +1324,17 @@ impl TimeSeries {
 - **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
   averaging for the UI chart.
 
+**Time windows** (`entities/time_window.rs`, R-83): every window-shaped thing in the VEN —
+alert/SIMPLE/dispatch windows, capacity and tariff segments, an event's timed intervals, a
+plan's slots — spans a half-open `[start, end)` and answers "in force?" through one trait.
+A type supplies `start()`/`end()` and inherits `covers(t)`, `overlaps(from, to)` and
+`is_ended(now)`; `covering` / `any_covering` pick the window applying at an instant. Half-open
+is the project-wide convention: a window is in force at its start instant and not at its end,
+so back-to-back segments cover every instant exactly once, and a zero-length span *is* an
+instant — which is why "right now" and "does this overlap my slot" are the same call.
+Named "value at t" lookups build on it: `entities::capacity::tightest_capacity_limit` and
+`entities::tariff_snapshot::tariff_at`.
+
 **Event interval timing** (`controller/event_timing.rs::timed_intervals`, GB-48): the one
 answer to "when does interval i of this event run", used by every event parser — price and
 capacity schedules, alert/SIMPLE/dispatch/charge-state windows (`openadr_interface.rs::

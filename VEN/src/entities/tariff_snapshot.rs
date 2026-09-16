@@ -2,8 +2,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{Interpolation, TimeSeries};
+use crate::entities::time_window::{covering, TimeWindow};
 
 /// A single tariff data point for a time interval (tariff = price per kWh).
+/// Priority-resolved and non-overlapping like the capacity schedule (GB-45);
+/// read which one applies through `tariff_at`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TariffSnapshot {
     pub interval_start: DateTime<Utc>,
@@ -12,6 +15,23 @@ pub struct TariffSnapshot {
     pub import_tariff_eur_kwh: Option<f64>,
     pub export_tariff_eur_kwh: Option<f64>,
     pub co2_g_kwh: Option<f64>,
+}
+
+impl TimeWindow for TariffSnapshot {
+    fn start(&self) -> DateTime<Utc> {
+        self.interval_start
+    }
+    fn end(&self) -> DateTime<Utc> {
+        self.interval_end
+    }
+}
+
+/// Which tariff applies at `t` — the one answer for the tick's cost and CO2
+/// accounting (`controller::monitor`) and for the history sampler, beside
+/// `entities::capacity::tightest_capacity_limit` (R-83). `None` = no segment
+/// covers `t`, and the caller falls back to its own default.
+pub fn tariff_at(snapshots: &[TariffSnapshot], t: DateTime<Utc>) -> Option<&TariffSnapshot> {
+    covering(snapshots, t)
 }
 
 /// Three independent TimeSeries (import, export, CO2) with Step interpolation,
@@ -143,6 +163,26 @@ mod tests {
             export_tariff_eur_kwh: exp,
             co2_g_kwh: co2,
         }
+    }
+
+    #[test]
+    fn tariff_at_picks_the_segment_covering_the_instant() {
+        let snaps = vec![
+            snap(ts(10, 0), ts(11, 0), Some(0.20), None, Some(300.0)),
+            snap(ts(11, 0), ts(12, 0), Some(0.15), None, Some(250.0)),
+        ];
+        assert_eq!(
+            tariff_at(&snaps, ts(10, 30)).unwrap().import_tariff_eur_kwh,
+            Some(0.20)
+        );
+        // Half-open: the boundary instant belongs to the later segment.
+        assert_eq!(
+            tariff_at(&snaps, ts(11, 0)).unwrap().import_tariff_eur_kwh,
+            Some(0.15)
+        );
+        assert!(tariff_at(&snaps, ts(12, 0)).is_none(), "past the last segment");
+        assert!(tariff_at(&snaps, ts(9, 59)).is_none(), "before the first");
+        assert!(tariff_at(&[], ts(10, 30)).is_none());
     }
 
     #[test]

@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::time_window::TimeWindow;
+
 /// Capacity state in force now, derived from the listed OpenADR events
 /// (`controller::openadr_interface::parse_capacity_state`, GB-48).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -68,13 +70,7 @@ pub fn tightest_capacity_limit(
     use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
     schedule
         .iter()
-        .filter(|s| {
-            if from == to {
-                s.interval_start <= from && from < s.interval_end
-            } else {
-                s.interval_start < to && from < s.interval_end
-            }
-        })
+        .filter(|s| s.overlaps(from, to))
         .filter_map(|s| {
             let (limit_kw, event_id) = match direction {
                 Import => (s.import_limit_kw?, &s.import_limit_event_id),
@@ -168,25 +164,45 @@ impl OadrReportObligation {
     }
 }
 
-/// WP4.6 review fix: OpenADR events are permanent records — an ended window
-/// stays in state as long as its event exists on the VTN. Consumers that show
-/// "current" signals (GET /signals, the UI strip) must drop ended windows;
-/// the planner/dispatcher already filter by slot/now overlap themselves.
-impl AlertWindow {
-    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
-        now >= self.end
+// All four carry a half-open `[start, end)` span, so they answer "in force at
+// t?", "overlapping this slot?" and "over?" through the one shared rule
+// (`entities::time_window`). WP4.6 review fix, still the reason `is_ended`
+// matters: OpenADR events are permanent records — an ended window stays in
+// state as long as its event exists on the VTN, so consumers that show
+// "current" signals (GET /signals, the UI strip) must drop ended windows.
+impl TimeWindow for AlertWindow {
+    fn start(&self) -> DateTime<Utc> {
+        self.start
+    }
+    fn end(&self) -> DateTime<Utc> {
+        self.end
     }
 }
 
-impl SimpleWindow {
-    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
-        now >= self.end
+impl TimeWindow for SimpleWindow {
+    fn start(&self) -> DateTime<Utc> {
+        self.start
+    }
+    fn end(&self) -> DateTime<Utc> {
+        self.end
     }
 }
 
-impl DispatchWindow {
-    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
-        now >= self.end
+impl TimeWindow for DispatchWindow {
+    fn start(&self) -> DateTime<Utc> {
+        self.start
+    }
+    fn end(&self) -> DateTime<Utc> {
+        self.end
+    }
+}
+
+impl TimeWindow for CapacitySnapshot {
+    fn start(&self) -> DateTime<Utc> {
+        self.interval_start
+    }
+    fn end(&self) -> DateTime<Utc> {
+        self.interval_end
     }
 }
 
