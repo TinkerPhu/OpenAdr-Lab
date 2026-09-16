@@ -8,30 +8,23 @@ import { COLOR_NOW } from "../controller/types";
  * types to compute axis domains and positioning; wrapping this in an intermediate component
  * would change what type recharts sees at that position in the tree.
  *
- * A `label` is optional and drawn INSIDE the plot: recharts draws a `position: "top"` label
- * *above* the plot area, where the chart's own SVG clips it away — measured on the live page,
- * a "top" label's box sat 9 px above the surface, leaving a sliver of colour at the upper edge
- * and no readable text.
+ * Deliberately text-free: a marker's colour and its position on the time axis say what it is,
+ * while a label crowds the top of the plot — and recharts draws a `position: "top"` label
+ * *above* the plot area, where the chart's own SVG clips it to a sliver of colour anyway.
  */
-export function renderTimeMarkerLine(
-  yAxisId: string,
-  tsMs: number,
-  { label, color }: { label?: string; color: string }
-) {
+export function renderTimeMarkerLine(yAxisId: string, tsMs: number, color: string) {
   return (
     <ReferenceLine
-      key={`time-marker-${label ?? tsMs}`}
+      key={`time-marker-${color}`}
       yAxisId={yAxisId}
       x={tsMs}
       stroke={color}
       strokeDasharray="3 3"
-      label={label ? { value: label, position: "insideTop", fontSize: 9, fill: color } : undefined}
     />
   );
 }
 
-/** The "now" marker every time-series chart draws — the line alone: its position against the
- * time axis says what it is, and the text only crowded the top of the plot. */
+/** The "now" marker every time-series chart draws. */
 export function renderNowLine(yAxisId: string, nowMs: number) {
-  return renderTimeMarkerLine(yAxisId, nowMs, { color: COLOR_NOW });
+  return renderTimeMarkerLine(yAxisId, nowMs, COLOR_NOW);
 }

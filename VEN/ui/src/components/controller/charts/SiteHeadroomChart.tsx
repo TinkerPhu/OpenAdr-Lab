@@ -248,12 +248,7 @@ export function SiteHeadroomChart({
       extraReferenceAreas={
         commitmentStartMs === null
           ? undefined
-          : [
-              renderTimeMarkerLine("power", commitmentStartMs, {
-                label: "START",
-                color: COLOR_COMMITMENT_START,
-              }),
-            ]
+          : [renderTimeMarkerLine("power", commitmentStartMs, COLOR_COMMITMENT_START)]
       }
       onCursorClick={onCursorClick}
       height={height ?? CELL_CHART_HEIGHT}

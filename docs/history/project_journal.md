@@ -12762,3 +12762,14 @@ reversible (click the past), and the tooltip still works on hover either way.
 
 Verified: VEN UI 653 tests, eslint 0 errors, build; on the deployed page a plain click (no
 preceding interaction) moves the curves and the START marker.
+
+## 2026-09-16 — Chart time markers are text-free
+
+What: the commitment-start marker lost its "START" label, after the NOW label went the same way;
+`renderTimeMarkerLine` no longer takes a label at all, only a colour.
+
+Why: user preference — the marker's colour and its position on the time axis identify it, and the
+label crowded the top of the plot. With no caller left passing one, the label option went too
+rather than lingering unused.
+
+Verified: VEN UI 652 tests, eslint 0 errors, build; re-checked on the deployed page.

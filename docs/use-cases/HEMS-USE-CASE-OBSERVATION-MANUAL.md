@@ -902,7 +902,7 @@ The same question for a commitment starting **later**: on Controller → Site He
 future time in the chart — nothing to switch on first. The dashed curves then start at the plan
 slot you clicked (5/10/15-min steps, following the plan's zones), from each asset's
 plan-forecasted state there — "if the plan runs as intended until then, and the site then goes
-all-in". A vertical START line marks the anchor, and the caption names the slot. Click again to
+all-in". A vertical purple line marks the anchor, and the caption names the slot. Click again to
 move it; click at or before now to put the curves back at now. With no active plan the curves
 stay at now and the caption says so. Each curve touches the headroom band at its own start. See
 `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
