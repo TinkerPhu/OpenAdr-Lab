@@ -180,7 +180,10 @@ mod tests {
             tariff_at(&snaps, ts(11, 0)).unwrap().import_tariff_eur_kwh,
             Some(0.15)
         );
-        assert!(tariff_at(&snaps, ts(12, 0)).is_none(), "past the last segment");
+        assert!(
+            tariff_at(&snaps, ts(12, 0)).is_none(),
+            "past the last segment"
+        );
         assert!(tariff_at(&snaps, ts(9, 59)).is_none(), "before the first");
         assert!(tariff_at(&[], ts(10, 30)).is_none());
     }
