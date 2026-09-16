@@ -491,53 +491,32 @@ describe("TimeSeriesChart — rounded Y ticks (applied by the composition, not t
   });
 });
 
-describe("TimeSeriesChart — cursor hooks", () => {
+describe("TimeSeriesChart — cursor click hook", () => {
   beforeEach(() => {
     charts.length = 0;
   });
 
-  const renderChart = (props: {
-    onCursorMove?: (tsMs: number | null) => void;
-    onCursorDoubleClick?: (tsMs: number) => void;
-  }) =>
+  const renderChart = (props: { onCursorClick?: (tsMs: number) => void }) =>
     render(<TimeSeriesChart data={data} xAxisTickFormatter={() => ""} axes={axes} series={series} {...props} />);
 
   const chartHandler = (name: string) => charts[charts.length - 1][name] as (state: unknown) => void;
 
-  it("reports the hovered row's ts, and null once the cursor leaves the plot", () => {
-    const onCursorMove = vi.fn();
-    renderChart({ onCursorMove });
-    chartHandler("onMouseMove")({ activeLabel: 2000 });
-    chartHandler("onMouseLeave")({});
-    expect(onCursorMove.mock.calls).toEqual([[2000], [null]]);
+  it("reports the ts of the clicked row, and nothing without an active row", () => {
+    const onCursorClick = vi.fn();
+    renderChart({ onCursorClick });
+    chartHandler("onClick")({ activeLabel: 1000 });
+    chartHandler("onClick")({});
+    expect(onCursorClick.mock.calls).toEqual([[1000]]);
   });
 
-  it("reports null while the cursor is over the plot but on no row", () => {
-    const onCursorMove = vi.fn();
-    renderChart({ onCursorMove });
-    chartHandler("onMouseMove")({ activeLabel: undefined });
-    expect(onCursorMove).toHaveBeenCalledWith(null);
-  });
-
-  it("reports the ts under a double-click, and nothing without an active row", () => {
-    const onCursorDoubleClick = vi.fn();
-    renderChart({ onCursorDoubleClick });
-    chartHandler("onDoubleClick")({ activeLabel: 1000 });
-    chartHandler("onDoubleClick")({});
-    expect(onCursorDoubleClick.mock.calls).toEqual([[1000]]);
-  });
-
-  it("charts without the hooks register no mouse handlers", () => {
+  it("charts without the hook register no click handler", () => {
     renderChart({});
-    const chart = charts[charts.length - 1];
-    expect(chart.onMouseMove).toBeUndefined();
-    expect(chart.onMouseLeave).toBeUndefined();
-    expect(chart.onDoubleClick).toBeUndefined();
+    expect(charts[charts.length - 1].onClick).toBeUndefined();
   });
 });
 
-describe("TimeSeriesChart — double-click does not select chart text", () => {
-  it("suppresses text selection only where a double-click handler is registered", () => {
+describe("TimeSeriesChart — a clickable chart does not select its own text", () => {
+  it("suppresses text selection only where a click handler is registered", () => {
     const { getByTestId, rerender } = render(
       <TimeSeriesChart
         testId="chart"
@@ -545,7 +524,7 @@ describe("TimeSeriesChart — double-click does not select chart text", () => {
         xAxisTickFormatter={() => ""}
         axes={axes}
         series={series}
-        onCursorDoubleClick={vi.fn()}
+        onCursorClick={vi.fn()}
       />
     );
     expect(getByTestId("chart")).toHaveStyle({ userSelect: "none" });

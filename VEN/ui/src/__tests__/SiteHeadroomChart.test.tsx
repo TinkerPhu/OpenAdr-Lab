@@ -314,14 +314,13 @@ describe("SiteHeadroomChart — commitment-start marker", () => {
     );
 
     const { extraReferenceAreas } = propsCalls[0] as {
-      extraReferenceAreas?: Array<{ props: { x: number; label: { value: string; position: string; dy: number } } }>;
+      extraReferenceAreas?: Array<{ props: { x: number; label: { value: string; position: string } } }>;
     };
     expect(extraReferenceAreas).toHaveLength(1);
     const marker = extraReferenceAreas![0].props;
     expect(marker.x).toBe(startMs);
     expect(marker.label.value).toBe("START");
     expect(marker.label.position).toBe("insideTop"); // "top" is clipped away by the chart's own edge
-    expect(marker.label.dy).toBeGreaterThan(0); // NOW's label owns row 0
   });
 
   it("draws no marker while the curves start at now", () => {

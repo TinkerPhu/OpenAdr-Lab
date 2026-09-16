@@ -6,7 +6,7 @@
  */
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
 import type {
   CapacityCurvesResponse,
@@ -212,14 +212,9 @@ describe("GridHeadroomCell — Move commitment start", () => {
   const lastChart = () => chartProps[chartProps.length - 1] as {
     capacity: CapacityCurvesResponse | null;
     commitmentStartMs: number | null;
-    onCursorMove?: (tsMs: number | null) => void;
-    onCursorDoubleClick?: (tsMs: number) => void;
+    onCursorClick?: (tsMs: number) => void;
   };
-  const hover = (tsMs: number | null) => {
-    act(() => lastChart().onCursorMove?.(tsMs));
-    act(() => vi.advanceTimersByTime(200)); // past the hover debounce
-  };
-  const doubleClick = (tsMs: number) => act(() => lastChart().onCursorDoubleClick?.(tsMs));
+  const clickChart = (tsMs: number) => act(() => lastChart().onCursorClick?.(tsMs));
   const selectMode = (name: RegExp) => act(() => screen.getByRole("button", { name }).click());
 
   const renderCell = () =>
@@ -238,75 +233,53 @@ describe("GridHeadroomCell — Move commitment start", () => {
     );
 
   beforeEach(() => {
-    vi.useFakeTimers();
     chartProps.length = 0;
     curvesAtCalls.length = 0;
     curvesAtResponse.current = serverAnswer;
   });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
 
-  it("defaults to Values: the cursor never moves the curves", () => {
+  it("defaults to Values: clicking the chart never moves the curves", () => {
     renderCell();
-    hover(slotStartsMs[2] + 5 * MIN);
+    expect(lastChart().onCursorClick).toBeUndefined();
     expect(lastChart().capacity).toBe(perTick);
     expect(lastChart().commitmentStartMs).toBeNull();
     expect(curvesAtCalls.every((c) => c === null)).toBe(true);
   });
 
-  it("hovering a future time anchors the curves at the plan slot it falls in", () => {
+  it("clicking a future time anchors the curves at the plan slot it falls in", () => {
     renderCell();
     selectMode(/move commitment start/i);
-    hover(slotStartsMs[1] + 7 * MIN);
-    expect(curvesAtCalls).toContain(slotStartsMs[1] + 7 * MIN);
+    clickChart(slotStartsMs[1] + 7 * MIN);
+    expect(curvesAtCalls).toContain(slotStartsMs[1] + 7 * MIN); // the click time, unsnapped
     expect(lastChart().capacity?.start).toBe(new Date(slotStartsMs[1]).toISOString());
     expect(lastChart().commitmentStartMs).toBe(slotStartsMs[1]);
     expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/Commitment start: /);
   });
 
-  it("hovering at or before now keeps the curves at now", () => {
+  it("clicking again moves the start to the new slot", () => {
     renderCell();
     selectMode(/move commitment start/i);
-    hover(nowMs - 10 * MIN);
-    expect(lastChart().capacity).toBe(perTick);
-    expect(lastChart().commitmentStartMs).toBeNull();
-  });
-
-  it("sends the cursor time itself, only once the cursor rests", () => {
-    renderCell();
-    selectMode(/move commitment start/i);
-    act(() => lastChart().onCursorMove?.(slotStartsMs[2] + MIN));
-    act(() => vi.advanceTimersByTime(50));
-    act(() => lastChart().onCursorMove?.(slotStartsMs[2] + 6 * MIN));
-    act(() => vi.advanceTimersByTime(50));
-    expect(curvesAtCalls.filter((c) => c !== null)).toEqual([]);
-    act(() => vi.advanceTimersByTime(200));
-    expect(new Set(curvesAtCalls.filter((c) => c !== null))).toEqual(new Set([slotStartsMs[2] + 6 * MIN]));
-  });
-
-  it("a double-click holds the start until the next double-click", () => {
-    renderCell();
-    selectMode(/move commitment start/i);
-    hover(slotStartsMs[1] + MIN);
-    doubleClick(slotStartsMs[1] + MIN);
-    hover(slotStartsMs[3] + MIN);
-    expect(lastChart().commitmentStartMs).toBe(slotStartsMs[1]);
-    expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/held/i);
-    doubleClick(slotStartsMs[3] + MIN);
-    hover(slotStartsMs[3] + 2 * MIN);
+    clickChart(slotStartsMs[1] + MIN);
+    clickChart(slotStartsMs[3] + MIN);
     expect(lastChart().commitmentStartMs).toBe(slotStartsMs[3]);
   });
 
-  it("switching back to Values releases a held start", () => {
+  it("clicking at or before now puts the curves back at now", () => {
     renderCell();
     selectMode(/move commitment start/i);
-    doubleClick(slotStartsMs[2] + MIN);
-    selectMode(/values/i);
+    clickChart(slotStartsMs[2] + MIN);
+    expect(lastChart().commitmentStartMs).toBe(slotStartsMs[2]);
+    clickChart(nowMs - 10 * MIN);
     expect(lastChart().capacity).toBe(perTick);
     expect(lastChart().commitmentStartMs).toBeNull();
+  });
+
+  it("switching back to Values resets the curves to now", () => {
+    renderCell();
     selectMode(/move commitment start/i);
-    hover(null);
+    clickChart(slotStartsMs[2] + MIN);
+    selectMode(/values/i);
+    expect(lastChart().capacity).toBe(perTick);
     expect(lastChart().commitmentStartMs).toBeNull();
   });
 
@@ -314,7 +287,7 @@ describe("GridHeadroomCell — Move commitment start", () => {
     curvesAtResponse.current = () => perTick;
     renderCell();
     selectMode(/move commitment start/i);
-    hover(slotStartsMs[1] + MIN);
+    clickChart(slotStartsMs[1] + MIN);
     expect(lastChart().commitmentStartMs).toBeNull();
     expect(screen.getByTestId("commitment-start-caption")).toHaveTextContent(/no active plan/i);
   });
