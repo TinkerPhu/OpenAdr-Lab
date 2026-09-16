@@ -1432,8 +1432,7 @@ mod tests {
         let snaps = parse_rate_snapshots(&[price_only, price_ghg], now);
         let at = |s: &str| {
             let t = ts(s);
-            let snap =
-                crate::entities::tariff_snapshot::tariff_at(&snaps, t).expect("covered");
+            let snap = crate::entities::tariff_snapshot::tariff_at(&snaps, t).expect("covered");
             (snap.import_tariff_eur_kwh, snap.co2_g_kwh)
         };
         assert_eq!(at("2026-02-01T10:05:00Z"), (Some(0.09), Some(300.0)));

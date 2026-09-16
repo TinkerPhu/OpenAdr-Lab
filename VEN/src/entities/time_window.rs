@@ -116,8 +116,14 @@ mod tests {
     #[test]
     fn overlaps_excludes_touching_spans() {
         let w = win((10, 0), (11, 0), "w");
-        assert!(!w.overlaps(at(9, 0), at(10, 0)), "ends where the window starts");
-        assert!(!w.overlaps(at(11, 0), at(12, 0)), "starts where the window ends");
+        assert!(
+            !w.overlaps(at(9, 0), at(10, 0)),
+            "ends where the window starts"
+        );
+        assert!(
+            !w.overlaps(at(11, 0), at(12, 0)),
+            "starts where the window ends"
+        );
     }
 
     #[test]
