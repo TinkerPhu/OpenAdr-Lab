@@ -205,9 +205,7 @@ pub fn apply_surplus_ev_overlay(
 mod tests {
     use super::*;
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
-    use crate::entities::asset::SetpointResponse;
     use crate::services::test_support::asset_snapshots::snapshot_from_asset;
-    use std::collections::HashMap as StdHashMap;
 
     fn battery_entry(soc: f64) -> (String, AssetSnapshot) {
         use crate::assets::battery::{Battery, BatteryState};
@@ -255,48 +253,43 @@ mod tests {
         )
     }
 
+    // Both fixtures come from the real asset, like `ev_entry` above: a
+    // hand-built capability can declare a setpoint response the asset does not
+    // have, and the projection believes it (R-81).
     fn pv_entry(last_power_kw: f64) -> (String, AssetSnapshot) {
-        let mut values = StdHashMap::new();
-        values.insert("irradiance".into(), 0.0);
-        values.insert("rated_kw".into(), 10.0);
-        values.insert("irradiance_offset".into(), 0.0);
-        values.insert("tau_s".into(), 2847.37);
+        use crate::assets::pv::PvInverter;
+        let pv = PvInverter::from_params(&crate::entities::asset_params::PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 10.0,
+            co2_g_kwh: 41.0,
+        });
+        let mut state = PvInverter::initial_state(&crate::entities::asset_params::PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw: 10.0,
+            inverter_max_kw: 10.0,
+            co2_g_kwh: 41.0,
+        });
+        state.actual_power_kw = last_power_kw;
+        let state = crate::assets::AssetState::Pv(state);
         (
             "pv".to_string(),
-            AssetSnapshot {
-                power_kw: last_power_kw,
-                asset_type: "pv".to_string(),
-                cap_max_import_kw: last_power_kw,
-                cap_max_export_kw: last_power_kw,
-                available_discharge_kwh: None,
-                available_charge_kwh: None,
-                forced_power_kw: None,
-                response: SetpointResponse::continuous(),
-                default_setpoint_kw: 0.0,
-                setpoint_kw: 0.0,
-                values,
-            },
+            snapshot_from_asset(&pv, state, "pv", last_power_kw, f64::MAX),
         )
     }
 
     fn base_entry(last_power_kw: f64) -> (String, AssetSnapshot) {
-        let mut values = StdHashMap::new();
-        values.insert("baseline_kw".into(), last_power_kw.max(0.0));
+        use crate::assets::base_load::{BaseLoad, BaseLoadState};
+        let base_load = BaseLoad::from_params(&crate::entities::asset_params::BaseLoadParams {
+            baseline_kw: last_power_kw.max(0.0),
+            ..Default::default()
+        });
+        let state = crate::assets::AssetState::BaseLoad(BaseLoadState {
+            actual_power_kw: last_power_kw,
+        });
         (
             "base_load".to_string(),
-            AssetSnapshot {
-                power_kw: last_power_kw,
-                asset_type: "base_load".to_string(),
-                cap_max_import_kw: last_power_kw,
-                cap_max_export_kw: last_power_kw,
-                available_discharge_kwh: None,
-                available_charge_kwh: None,
-                forced_power_kw: None,
-                response: SetpointResponse::continuous(),
-                default_setpoint_kw: last_power_kw.max(0.0),
-                setpoint_kw: 0.0,
-                values,
-            },
+            snapshot_from_asset(&base_load, state, "base_load", last_power_kw, 0.0),
         )
     }
 

@@ -204,9 +204,13 @@ impl PvInverter {
             max_export_kw: state.actual_power_kw, // e.g. -2.0
             max_import_kw: 0.0,
             adjustability: PowerAdjustability::Croppable,
-            // Curtailable anywhere between 0 and the live ceiling above; a
-            // setpoint beyond it simply resolves to that ceiling.
-            response: SetpointResponse::continuous(),
+            // The inverter's power does not follow the setpoint map at all:
+            // `step_inner` never reads it, and curtailment arrives out of band
+            // as `generation_limit_kw` (`dispatcher::resolve_pv_generation_limit_kw`).
+            // Saying so outright is also what retires the `f64::MAX` "no
+            // generation limit" sentinel that used to sit in the setpoint map
+            // and had to be filtered out by magnitude at every projection.
+            response: SetpointResponse::fixed(state.actual_power_kw),
         }
     }
 

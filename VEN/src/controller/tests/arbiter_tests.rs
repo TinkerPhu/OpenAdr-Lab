@@ -199,10 +199,12 @@ fn deviation_kw_positive_means_importing_more_than_planned() {
 // ── §5.4 scenario A: EV picked over battery for a surplus/import mix ───────
 
 #[test]
-fn scenario_a_ev_picked_over_battery_no_battery_movement() {
-    // PV surplus deviation (export-excess): EV has headroom at flat 0 cost,
-    // battery has a real marginal cost — EV must absorb first, battery must
-    // not move at all while EV alone can cover the deviation.
+fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
+    // PV surplus deviation (export-excess): the EV has headroom at flat 0
+    // cost, the battery has a real marginal cost — so the EV is the lever
+    // that takes the surplus. It cannot ramp in the tick it is commanded
+    // though (R-82), so the battery bridges that one tick and releases as
+    // soon as the charger has picked the surplus up (second half below).
     let sim = make_sim(vec![
         ("battery", battery_snap(0.0, 0.5)),
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
@@ -230,18 +232,44 @@ fn scenario_a_ev_picked_over_battery_no_battery_movement() {
         &base_setpoints,
         None,
     );
-    assert_eq!(outcome.active_lever, Some("ev"));
-    // `setpoints` now always carries the battery's last-applied setpoint
-    // forward as its baseline (see `projected_net_kw`'s doc comment), so
-    // presence of the key no longer signals movement — check the value is
-    // unchanged from its snapshot instead.
+    let ev_sp = outcome.setpoints.get("ev").copied().unwrap_or(0.0);
+    assert!(ev_sp > 0.0, "EV must pick up the surplus, got {ev_sp}");
+    assert!(
+        outcome.setpoints.get("battery").copied().unwrap_or(0.0) > 0.0,
+        "the battery absorbs what the charger cannot take until its command lands"
+    );
+
+    // Next tick: the charger is drawing what it was told, so the surplus is
+    // gone and the battery goes back to idle — the one-tick bridge, not a
+    // standing commitment. `setpoints` carries the battery's last-applied
+    // value forward as its baseline (see `projected_net_kw`'s doc comment).
+    let settled = make_sim(vec![
+        ("battery", battery_snap(0.0, 0.5)),
+        ("ev", ev_snap(ev_sp, 0.4, 0.8, true)),
+        ("heater", heater_snap(20.0, 18.0, 23.0, 23.0)),
+        ("base_load", base_snap(0.5)),
+        ("pv", base_snap(-6.0)),
+    ]);
+    let outcome = reconcile(
+        &ArbiterTick {
+            sim: &settled,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(-6.0),
+            live_base_load_kw: Some(0.5),
+            alert_active: false,
+            limit_target_kw: None,
+        },
+        &base_setpoints,
+        outcome.active_lever,
+    );
     assert_eq!(
         outcome.setpoints.get("battery").copied().unwrap_or(0.0),
         0.0,
-        "battery must not move while EV alone covers the deviation"
+        "battery released once the charger took the surplus"
     );
-    let ev_sp = outcome.setpoints.get("ev").copied().unwrap_or(0.0);
-    assert!(ev_sp > 0.0, "EV must pick up the surplus, got {ev_sp}");
 }
 
 // ── §5.4 scenario D: battery covers a base-load step, heater pause used too ─
