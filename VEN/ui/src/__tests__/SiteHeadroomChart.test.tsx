@@ -293,3 +293,42 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
     }
   });
 });
+
+describe("SiteHeadroomChart — commitment-start marker", () => {
+  beforeEach(() => {
+    propsCalls.length = 0;
+  });
+
+  it("marks a future commitment start with a label inside the plot, below NOW's row", () => {
+    const nowMs = 1_000_000_000;
+    const startMs = nowMs + 30 * 60_000;
+    render(
+      <SiteHeadroomChart
+        gridTimeline={[]}
+        history={[]}
+        nowMs={nowMs}
+        hoursBack={0.1}
+        hoursForward={1}
+        commitmentStartMs={startMs}
+      />
+    );
+
+    const { extraReferenceAreas } = propsCalls[0] as {
+      extraReferenceAreas?: Array<{ props: { x: number; label: { value: string; position: string; dy: number } } }>;
+    };
+    expect(extraReferenceAreas).toHaveLength(1);
+    const marker = extraReferenceAreas![0].props;
+    expect(marker.x).toBe(startMs);
+    expect(marker.label.value).toBe("START");
+    expect(marker.label.position).toBe("insideTop"); // "top" is clipped away by the chart's own edge
+    expect(marker.label.dy).toBeGreaterThan(0); // NOW's label owns row 0
+  });
+
+  it("draws no marker while the curves start at now", () => {
+    render(
+      <SiteHeadroomChart gridTimeline={[]} history={[]} nowMs={1_000_000_000} hoursBack={0.1} hoursForward={1} />
+    );
+    const { extraReferenceAreas } = propsCalls[0] as { extraReferenceAreas?: unknown[] };
+    expect(extraReferenceAreas).toBeUndefined();
+  });
+});

@@ -1962,3 +1962,19 @@ four other ways in six other parsers.
 **How to apply:** when code declines to handle an input shape as "ambiguous", check the spec
 text *and* its worked examples first; the examples are also the best test fixtures. And one
 concept, one function — a spec rule implemented once can't disagree with itself.
+
+## A recharts `position: "top"` label is drawn outside the chart and clipped away (2026-09-16)
+
+The Site Headroom commitment-start marker looked to the user like a "nearly invisible blue
+gadget" at the chart's upper edge. Measured on the live page with Playwright: the label's box sat
+at y≈825 while the chart's own SVG started at y≈834, so the text was outside the surface and only
+a sliver of its colour showed. `position: "insideTop"` puts it in the plot. The same bug had been
+sitting in the shared NOW line unnoticed since it was written — a marker line is obvious enough
+without its label that nobody missed the text.
+
+**How to apply:** a chart label anchored to the edge of the plot area (`top`, `left`, `right`) is
+outside the drawable surface unless the chart reserves margin for it; prefer the `inside*`
+positions. Verify chart rendering by measuring boxes in a real browser, not by reading the JSX:
+this class of bug is invisible in unit tests that mock the chart library away. And where two
+markers can coincide in time (a commitment starting in the first plan slot sits on top of NOW),
+stack the labels in rows instead of letting them overprint.
