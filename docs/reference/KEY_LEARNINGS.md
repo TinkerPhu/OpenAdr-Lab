@@ -1986,3 +1986,14 @@ the browser's select-word gesture, so it highlighted the very marker label the c
 placed — a solid blue box exactly where the user was clicking. **How to apply:** any element
 whose UX defines a double-click (or drag) needs `user-select: none`, or the browser's own
 selection competes with the interaction. Apply it where the handler is registered, not globally.
+
+## A deployed UI change can be invisible: index.html was cacheable (2026-09-16)
+
+"NOW still visible — is it deployed?" It was: the host's checkout, the container and the served
+bundle all had the change, and the bundle contained no "NOW" at all. The browser was still running
+the previous build, because nginx served `index.html` with no `Cache-Control`, leaving it to
+heuristic caching — and index.html is what names the fingerprinted `/assets/*.js` bundle. **How to
+apply:** for any SPA served from nginx, cache fingerprinted assets hard
+(`max-age=31536000, immutable`) and mark `index.html` `no-cache`. When a user reports a deployed
+change as missing, check what the server sends (`curl -sI`, grep the served bundle) before
+suspecting the code — and check the cache headers, not just the file contents.

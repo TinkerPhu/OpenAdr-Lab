@@ -12738,3 +12738,13 @@ per action instead of one per cursor rest.
 
 Verified: VEN UI 653 tests, eslint 0 errors, build; re-checked on the deployed page (a click moves
 the dashed curves and the START marker to the clicked slot; no NOW text on any chart).
+
+## 2026-09-16 — VEN/VTN UI: fingerprinted assets cached, index.html revalidated
+
+What: both `nginx.conf`s now send `Cache-Control: public, max-age=31536000, immutable` for
+`/assets/` and `no-cache` for `index.html`.
+
+Why: a deployed UI change (the removed NOW labels) still rendered the previous bundle in the
+user's browser. index.html had no cache directive at all, so a heuristically cached copy kept
+pointing at the old fingerprinted bundle. The deploy itself was fine — verified on the host that
+the served bundle no longer contained the string.
