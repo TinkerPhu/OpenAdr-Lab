@@ -117,16 +117,13 @@ interface TimeSeriesChartProps {
    * existed. Toggle state is local to this chart instance, not persisted. */
   interactiveLegend?: boolean;
   margin?: { top: number; right: number; left: number; bottom: number };
-  /** Opt-in: the `ts` of the row under the cursor (the same row the tooltip shows),
-   * `null` when the cursor is on no row or leaves the plot. Generic, so any chart can
-   * drive something off the cursor position (SiteHeadroomChart's "Move commitment
-   * start" mode). Unset: no mouse handlers are registered at all. */
-  onCursorMove?: (tsMs: number | null) => void;
-  /** Opt-in: the `ts` of the row under a double-click. */
-  onCursorDoubleClick?: (tsMs: number) => void;
+  /** Opt-in: the `ts` of the row clicked (the same row the tooltip shows). Generic, so any
+   * chart can drive something off a clicked time (SiteHeadroomChart's "Move commitment
+   * start" mode). Unset: no click handler is registered at all. */
+  onCursorClick?: (tsMs: number) => void;
 }
 
-/** The hovered row's `ts` from recharts' chart-level mouse state — its `activeLabel`
+/** The clicked row's `ts` from recharts' chart-level mouse state — its `activeLabel`
  * on this component's numeric time axis. */
 function activeTs(state: unknown): number | null {
   const label = (state as { activeLabel?: unknown } | null | undefined)?.activeLabel;
@@ -159,8 +156,7 @@ export function TimeSeriesChart({
   legend = true,
   interactiveLegend = false,
   margin = { top: 4, right: 4, left: 0, bottom: 0 },
-  onCursorMove,
-  onCursorDoubleClick,
+  onCursorClick,
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();
   // The single Y-axis tick rule for every chart built on this composition: each axis' data
@@ -186,23 +182,21 @@ export function TimeSeriesChart({
       style={{
         width: "100%",
         height,
-        // A double-click selects the text under the cursor — on a chart that means the
-        // marker label the click just placed, highlighted in the browser's selection blue
-        // (reported from the live page as a "blue square" over the commitment-start label).
-        ...(onCursorDoubleClick ? { userSelect: "none" as const } : {}),
+        // A clickable chart invites a double-click out of habit, and that selects the text
+        // under the cursor — here the marker label the click just placed, painted in the
+        // browser's selection blue (reported from the live page as a "blue square").
+        ...(onCursorClick ? { userSelect: "none" as const } : {}),
       }}
     >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={data}
           margin={margin}
-          onMouseMove={onCursorMove && ((state: unknown) => onCursorMove(activeTs(state)))}
-          onMouseLeave={onCursorMove && (() => onCursorMove(null))}
-          onDoubleClick={
-            onCursorDoubleClick &&
+          onClick={
+            onCursorClick &&
             ((state: unknown) => {
               const ts = activeTs(state);
-              if (ts !== null) onCursorDoubleClick(ts);
+              if (ts !== null) onCursorClick(ts);
             })
           }
         >

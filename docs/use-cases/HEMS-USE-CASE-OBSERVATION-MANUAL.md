@@ -899,13 +899,13 @@ under Diagnostics → Capacity Forecast, and as the dashed "Import/Export commit
 Controller → Site Headroom.
 
 The same question for a commitment starting **later**: on Controller → Site Headroom, switch the
-cursor from "Values" to "Move commitment start" and hover the future part of the chart. The dashed
-curves then start at the plan slot under the cursor (5/10/15-min steps, following the plan's
-zones), from each asset's plan-forecasted state there — "if the plan runs as intended until then,
-and the site then goes all-in". A vertical START line marks the anchor, and the caption names it.
-Double-click holds the start while you read values elsewhere; double-click again to release it.
-At or before now, or with no active plan, the curves stay at now and the caption says so. Each
-curve touches the headroom band at its own start. See
+cursor from "Values" to "Move start" (the switch sits under the Up/Down values) and click a future
+time on the chart. The dashed curves then start at the plan slot you clicked (5/10/15-min steps,
+following the plan's zones), from each asset's plan-forecasted state there — "if the plan runs as
+intended until then, and the site then goes all-in". A vertical START line marks the anchor, and
+the caption names the slot. Click again to move it; click at or before now (or switch back to
+"Values") to put the curves back at now. With no active plan the curves stay at now and the
+caption says so. Each curve touches the headroom band at its own start. See
 `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
 
 ```bash

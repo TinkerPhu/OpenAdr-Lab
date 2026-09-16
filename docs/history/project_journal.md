@@ -12722,3 +12722,19 @@ Verified: VEN cargo tests + clippy `-D warnings` + fmt on Node2, file-size audit
 (one new case pinning the declaration's UI surface in the Flexibility & Forecast panel), E2E on
 Node2 — GB-47's `ven_import_limit_enforcement.feature` is what proves the limit pass still meets
 a cap with the lag now visible to it.
+
+## 2026-09-16 — Site Headroom: click to move the commitment start; NOW labels dropped
+
+What: the "Move start" cursor mode now moves the commitment curves on a single **click**
+(`TimeSeriesChart`'s generic `onCursorClick`); hover-driven movement, the hold/release
+double-click and the debounce helper are gone. Clicking again moves the start, clicking at or
+before now (or switching back to "Values") returns the curves to now. The NOW marker lost its
+text label everywhere — `renderTimeMarkerLine`'s label is optional now, and only the
+commitment-start marker carries one.
+
+Why: user feedback on the deployed page — the double-click did not register as an interaction
+("it does not work"), and the NOW text crowded the top of every plot. A click is also one request
+per action instead of one per cursor rest.
+
+Verified: VEN UI 653 tests, eslint 0 errors, build; re-checked on the deployed page (a click moves
+the dashed curves and the START marker to the clicked slot; no NOW text on any chart).

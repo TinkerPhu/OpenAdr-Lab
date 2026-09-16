@@ -47,9 +47,8 @@ interface SiteHeadroomChartProps {
   /** "Move commitment start" mode: marks the instant the commitment curves are anchored
    * at when that is not now (`capacity.start`, as the server reported it). */
   commitmentStartMs?: number | null;
-  /** Forwarded to `TimeSeriesChart`'s generic cursor hooks. */
-  onCursorMove?: (tsMs: number | null) => void;
-  onCursorDoubleClick?: (tsMs: number) => void;
+  /** Forwarded to `TimeSeriesChart`'s generic cursor-click hook. */
+  onCursorClick?: (tsMs: number) => void;
 }
 
 const COLOR_COMMITMENT_START = "#6A1B9A";
@@ -95,8 +94,7 @@ export function SiteHeadroomChart({
   height,
   xAxisTickIntervalMinutes,
   commitmentStartMs = null,
-  onCursorMove,
-  onCursorDoubleClick,
+  onCursorClick,
 }: SiteHeadroomChartProps) {
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
@@ -251,17 +249,13 @@ export function SiteHeadroomChart({
         commitmentStartMs === null
           ? undefined
           : [
-              // Row 1: a start in the first plan slots sits right next to NOW, whose own
-              // label occupies row 0.
               renderTimeMarkerLine("power", commitmentStartMs, {
                 label: "START",
                 color: COLOR_COMMITMENT_START,
-                row: 1,
               }),
             ]
       }
-      onCursorMove={onCursorMove}
-      onCursorDoubleClick={onCursorDoubleClick}
+      onCursorClick={onCursorClick}
       height={height ?? CELL_CHART_HEIGHT}
       // No right-side axis here (single "power" axis, left only), but this chart is
       // stacked in the same column as TariffEnvelopeChart/GridRatesChart/AssetTimelineChart,
