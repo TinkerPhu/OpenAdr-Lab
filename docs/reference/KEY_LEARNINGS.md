@@ -1997,3 +1997,22 @@ apply:** for any SPA served from nginx, cache fingerprinted assets hard
 (`max-age=31536000, immutable`) and mark `index.html` `no-cache`. When a user reports a deployed
 change as missing, check what the server sends (`curl -sI`, grep the served bundle) before
 suspecting the code — and check the cache headers, not just the file contents.
+
+## An instant is a zero-length span — defining it that way deletes the special case (2026-09-16)
+
+Consolidating the VEN's 16 copies of "does this window cover t" (R-83) surfaced why the copies
+had diverged rather than simply multiplied. Two genuinely different questions were being asked of
+the same `[start, end)` data: "which window is in force *right now*" (`start <= t && t < end`) and
+"which windows touch *this planner slot*" (`start < slot_end && slot_t < end`). Because they look
+different, each grew its own call sites — and `tightest_capacity_limit` eventually had to carry an
+explicit `if from == to` branch to serve both. Defining a zero-length span to *be* an instant
+collapses them: `overlaps(t, t) == covers(t)` by construction, the branch disappears, and a caller
+can no longer pick the wrong form.
+
+**How to apply:** when two predicates over the same data differ only in whether an endpoint is
+open, look for the degenerate case that unifies them before writing the second one. The general
+form here — a trait with the accessors as the only required methods and the rules as provided
+methods — is worth preferring over a free function taking `(start, end, t)`: the type declares its
+span once and the rules arrive with it, so a *new* window kind cannot answer the question in a new
+way. That is the structural difference between fixing the copies that exist and preventing the
+next one.
