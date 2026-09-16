@@ -36,9 +36,9 @@ pub trait TimeWindow {
         }
     }
 
-    /// Over at `now` — `now >= end`. The complement of "still relevant": an
-    /// OpenADR event is a permanent record, so a window outlives its own
-    /// window and consumers showing current signals must drop the ended ones.
+    /// Over at `now` — `now >= end`. An OpenADR event is a permanent record,
+    /// so a window stays in state long after its span has passed; consumers
+    /// showing "current" signals must drop the ended ones themselves.
     fn is_ended(&self, now: DateTime<Utc>) -> bool {
         now >= self.end()
     }
