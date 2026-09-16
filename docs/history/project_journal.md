@@ -3599,9 +3599,9 @@ Four BDD runs were needed to reach a green suite. The investigation uncovered tw
 New files (`planner_params.rs` 165 lines, `asset_params.rs` 13 lines) are well within the 500-line constitution limit.  
 Pre-existing files `heater.rs` (1339), `absorber.rs` (1371), `ev.rs` (945), `battery.rs` (753), `pv.rs` (670), and `simulator/mod.rs` (513) already exceeded the 500-line limit before Phase 4. Phase 4 contributed only 29–80 additional lines to each. These are pre-existing Principle VI violations deferred from earlier phases — not introduced by Phase 4.
 
-## Feature 022 — Deterministic Test Environment ( 22-deterministic-test-env)
+## Feature 022 — Deterministic Test Environment (022-deterministic-test-env)
 
-**Branch**:  22-deterministic-test-env (off  21-decouple-profile-domain)
+**Branch**: 022-deterministic-test-env (off 021-decouple-profile-domain)
 **Status**: COMPLETE — local code changes committed (2026-05-12); Node1 validation pending
 
 ### What changed
@@ -12773,3 +12773,31 @@ label crowded the top of the plot. With no caller left passing one, the label op
 rather than lingering unused.
 
 Verified: VEN UI 652 tests, eslint 0 errors, build; re-checked on the deployed page.
+
+## 2026-09-16 — R-83: one rule for "is this window in force?"
+
+What: `entities::time_window::TimeWindow` — a trait over any half-open `[start, end)` span, with
+`covers(t)`, `overlaps(from, to)` and `is_ended(now)` as provided methods, plus `covering` /
+`any_covering` for the "which window applies / is one active?" shapes. `AlertWindow`,
+`SimpleWindow`, `DispatchWindow`, `CapacitySnapshot`, `TariffSnapshot`, `TimedInterval` and
+`PlanTimeSlot` implement it, each supplying only its own two accessors. `tariff_at` joins
+`tightest_capacity_limit` as the second named "value at t" lookup.
+
+Why: the comparison was written out at 15 call sites across 10 files — three byte-identical
+`is_ended` impls, the tariff lookup once per consumer (tick cost accounting and the history
+sampler), the plan-slot lookup three times in the dispatcher and once in the tick pipeline, and
+two slot-overlap forms in the planner. This is the exact shape that produced GB-48, where "when
+does interval i run" had four rules in seven parsers; R-83 was filed when that work found the
+copies but could not reach them. Declaring the span and inheriting the rules means a new window
+kind cannot answer the question in a new way.
+
+Key learning, and the reason this was worth doing as a trait rather than a helper function: the
+copies were not *quite* identical. The planner's slot overlap used the strict `w.start <
+slot_end && slot_t < w.end`, while `tightest_capacity_limit` had already grown an explicit
+`from == to` branch to handle instant lookups. Folding both into one `overlaps` where a
+zero-length span is defined to be an instant removes that branch and makes "right now" and "this
+slot" the same question — which is what a caller reaching for either of them always meant.
+
+Verified: VEN cargo tests, clippy `-D warnings`, fmt, file-size audit, E2E on Node2. Pure
+refactor — no behaviour change is intended or asserted, and the existing window/limit/tariff
+tests are what prove it.

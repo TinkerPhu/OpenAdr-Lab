@@ -134,10 +134,7 @@ pub(crate) fn build_tick_setpoints(
             .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
             .collect(),
     };
-    let alert_active = ctx
-        .alert_windows
-        .iter()
-        .any(|a| a.start <= now && now < a.end);
+    let alert_active = crate::entities::time_window::any_covering(&ctx.alert_windows, now);
     // A sim-injected import limit stands in only while no VTN limit is in force.
     use crate::entities::capacity_curve::CommitmentDirection::Import;
     let capacity_limit_kw = tightest_capacity_limit(&ctx.capacity_schedule, Import, now, now)
@@ -147,7 +144,7 @@ pub(crate) fn build_tick_setpoints(
         .filter(|_| ctx.limit_enforcement_enabled);
     let tick = controller::arbiter::ArbiterTick {
         sim: sim_snap,
-        plan_slot: plan_snap.and_then(|p| p.slots.iter().find(|s| s.start <= now && now < s.end)),
+        plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
         plan_has_ev_allocation: plan_snap
             .is_some_and(|p| controller::dispatcher::plan_has_ev_allocation(p, now)),

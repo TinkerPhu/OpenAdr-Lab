@@ -36,10 +36,8 @@ pub fn record_tick(
 ) {
     let dt_h = dt_s / 3600.0;
 
-    // Find applicable tariff for this tick
-    let applicable = tariffs
-        .iter()
-        .find(|r| r.interval_start <= now && now < r.interval_end);
+    // Which tariff applies for this tick
+    let applicable = crate::entities::tariff_snapshot::tariff_at(tariffs, now);
     let import_tariff = applicable
         .and_then(|r| r.import_tariff_eur_kwh)
         .unwrap_or(DEFAULT_IMPORT_PRICE);

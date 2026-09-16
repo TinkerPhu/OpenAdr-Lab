@@ -41,12 +41,8 @@ pub fn build_setpoints(
         .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
         .collect();
 
-    // Find the slot covering now
-    let slot_allocs: Option<&Vec<crate::entities::plan::AssetAllocation>> = plan
-        .slots
-        .iter()
-        .find(|s| s.start <= now && now < s.end)
-        .map(|s| &s.allocations);
+    let slot_allocs: Option<&Vec<crate::entities::plan::AssetAllocation>> =
+        plan.current_slot(now).map(|s| &s.allocations);
 
     for alloc in slot_allocs.into_iter().flatten() {
         setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
@@ -67,14 +63,11 @@ pub fn build_setpoints(
 /// arbiter's EV lever is only offered when this is `false` (opportunistic
 /// regime; a plan-committed EV rate is never second-guessed).
 pub fn plan_has_ev_allocation(plan: &Plan, now: DateTime<Utc>) -> bool {
-    plan.slots
-        .iter()
-        .find(|s| s.start <= now && now < s.end)
-        .is_some_and(|s| {
-            s.allocations
-                .iter()
-                .any(|a| a.asset_id == crate::ids::ASSET_EV)
-        })
+    plan.current_slot(now).is_some_and(|s| {
+        s.allocations
+            .iter()
+            .any(|a| a.asset_id == crate::ids::ASSET_EV)
+    })
 }
 
 /// Result of resolving the effective PV generation limit for the current tick.
@@ -115,16 +108,13 @@ pub fn resolve_pv_generation_limit_kw(
 ) -> ResolvedPvGenerationLimit {
     let capacity_limit = capacity.export_limit_kw.map(|v| -v.abs());
     let plan_limit = plan.and_then(|p| {
-        p.slots
-            .iter()
-            .find(|s| s.start <= now && now < s.end)
-            .and_then(|slot| {
-                if slot.pv_used_kw + 1e-6 < slot.pv_forecast_kw {
-                    Some(-slot.pv_used_kw)
-                } else {
-                    None
-                }
-            })
+        p.current_slot(now).and_then(|slot| {
+            if slot.pv_used_kw + 1e-6 < slot.pv_forecast_kw {
+                Some(-slot.pv_used_kw)
+            } else {
+                None
+            }
+        })
     });
     let arbiter_limit = arbiter_tighten_kw.map(|v| -v.abs());
     let manual_limit = manual_limit_kw.map(|v| -v.abs());
