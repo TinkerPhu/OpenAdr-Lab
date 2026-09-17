@@ -12801,3 +12801,29 @@ slot" the same question — which is what a caller reaching for either of them a
 Verified: VEN cargo tests, clippy `-D warnings`, fmt, file-size audit, E2E on Node2. Pure
 refactor — no behaviour change is intended or asserted, and the existing window/limit/tariff
 tests are what prove it.
+
+## 2026-09-17 — BL-37's correction-clear scenario was load-coupled, not broken (GB-35)
+
+R-83's E2E run came back 278/279: `reactive_correction_notifications.feature` timed out waiting
+for "Reactive correction cleared". Moved to `features/isolated/` with a proper Background (VEN
+profile + sim-override reset, which it never had).
+
+The investigation is the part worth recording, because two of its steps were wrong. First I
+argued from a 724 ms "correction active" timestamp that the arbiter must already be correcting
+at enable time, and blamed the previous day's R-81/R-82 change (base load projected at live
+power, against a 0.1 kW deadband). `main` — which contains R-81/R-82 — then passed the scenario,
+which should have ended that theory. Second, and worse, the comparison that produced that result
+was invalid: the runs overlapped. `docker compose run test-runner <feature>` still executes the
+whole `@isolated` pass afterwards, so a "single feature" run takes ~15 minutes, and the next
+run's `down -v` tore down the previous run's stack mid-scenario — two orphaned test-runner
+containers were the evidence. Three results had to be discarded.
+
+The clean measurement was a strictly sequential A/B — branch, main, branch, main, one at a time,
+with `--entrypoint python -m behave <feature>` to skip both the load gate and the isolated pass
+(~2 min per run). Result: branch passed at load 7.45 and 8.05, main passed at 5.62 and **failed
+at 10.14**. The failure follows host load and lands on main as readily as on the branch, so
+R-83 is not implicated — as the diff already said, every substitution in it is the same
+predicate it replaced.
+
+Key learning recorded separately: an A/B on a shared docker-compose project is only an A/B if
+the runs cannot overlap.
