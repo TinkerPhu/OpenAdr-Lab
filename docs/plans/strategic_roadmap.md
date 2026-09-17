@@ -34,6 +34,9 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 - `docs/plans/refactoring_backlog.md` — detailed diagnostics for open register items (currently empty).
 - `docs/plans/roadmap/` — the per-phase implementation plans (phases 0–4 executed;
   phase 5 partially; phase 6 not started).
+- `docs/plans/fleet-monitor/` — VTN-side fleet monitor: `vision.md` (full feature vision for
+  VTN controller, energy provider and grid controller) and `phase-0-foundation.md` (programs,
+  reports, MQTT side channel and BFF services needed before the first views).
 
 ---
 

@@ -12827,3 +12827,21 @@ predicate it replaced.
 
 Key learning recorded separately: an A/B on a shared docker-compose project is only an A/B if
 the runs cannot overlap.
+
+## 2026-09-17 — Fleet monitor: vision and phase 0 foundation concept
+
+What: `docs/plans/fleet-monitor/vision.md` (fleet dashboard/control board for a VTN controller,
+an energy provider and a grid controller) and `phase-0-foundation.md` (the environment and
+services the first three views — signal timeline, fleet power chart, reaction tracing — need
+before any view is built). Decisions taken with the user: one MQTT broker (the existing Node1
+Mosquitto), OpenADR reports and an MQTT side channel as parallel sources, views in the VTN UI.
+
+Why a foundation phase first: analysing the report engine against the live 20-VEN fleet showed
+that reports alone can't carry a fleet monitor. Reports use `USAGE` for mean power in W (the
+spec defines it as energy), clamp export to 0 (so a fleet sum is wrong whenever PV exports),
+read `frequency` as seconds, re-send the whole last hour on every submission, cost three HTTP
+requests per steady-state upsert, and only exist while an event requests them. End-to-end
+report latency is ~6 min. Filed R-84 (BFF list routes return one 50-item page while the
+recorder paginates on its own — live report count is already 40) and R-85 (two measurement-
+report builders).
+
