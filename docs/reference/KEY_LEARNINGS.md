@@ -2016,3 +2016,24 @@ methods — is worth preferring over a free function taking `(start, end, t)`: t
 span once and the rules arrive with it, so a *new* window kind cannot answer the question in a new
 way. That is the structural difference between fixing the copies that exist and preventing the
 next one.
+
+## A/B test runs that share a docker-compose project silently destroy each other (2026-09-17)
+
+Chasing a single failing E2E scenario (BL-37, see the 2026-09-17 journal entry), three
+consecutive "results" were artifacts: each `docker compose -f tests/docker-compose.test.yml run
+--build --rm test-runner <feature>` starts with a `down -v`, and every run uses the same compose
+project name, so launching a second run while the first is still going tears the first one's
+stack down underneath it. The first run then fails for reasons that have nothing to do with the
+code under test. It was easy to miss because `run <feature>` looks like it runs only that
+feature: `tests/entrypoint.sh` still executes the whole `@isolated` pass afterwards, so a
+"single feature" invocation occupies the host for ~15 minutes, far longer than it appears to.
+
+**How to apply:** before launching any test run on Node1/Node2, check `docker ps --filter
+name=openadr-test` — orphaned `*-test-runner-run-*` containers mean a previous run is still
+live. Sequence comparison runs in a single shell loop (`for ref in A B A B; do ... done`) rather
+than launching them separately, so overlap is structurally impossible. To time-box one feature,
+bypass the entrypoint with `--entrypoint python test-runner -m behave <feature>`: that skips
+both the 8-minute load-settle gate and the isolated pass, turning a 15-minute run into ~2
+minutes. And when a scenario is suspected of flakiness, the comparison must include the
+*baseline* branch under the same load — a failure that reproduces on `main` is not a regression,
+and without that arm it is easy to convict the change under test.
