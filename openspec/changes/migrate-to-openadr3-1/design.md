@@ -289,6 +289,37 @@ re-ported `active` filter uses (D8). One function answers the question; the rest
 Under `wire-contracts`, the duration-only case is read from what the event declares — never
 defaulted silently. If we cannot place an interval, that is surfaced, not guessed.
 
+**The rule when sources disagree**: an event's end instant is the **longest** of every end it
+declares. 3.1 lets an event carry up to three: the event-level `intervalPeriod.duration`, the
+new top-level `duration`, and the per-interval periods. An end that cannot be determined
+(a missing duration, an interval with no period) counts as **unbounded**, and unbounded is the
+longest of all — so it yields "always active", as today.
+
+```
+ends_at = max(all determinable candidate ends)      // None (unbounded) wins outright
+        = None if any relevant candidate is unbounded, or if there are no candidates at all
+```
+
+*Why longest rather than "the top-level `duration` is authoritative":* `ends_at()` governs
+**visibility and retention**, not control — dispatch is decided per interval by this same
+authority. An over-long end therefore leaves an event visible with no applicable interval at
+`now`, which is inert. An over-short end removes an event from `?active=true` **while its
+intervals are still dispatching**, so the VEN stops seeing it on the next poll and drops a live
+obligation. The costs are asymmetric; take the side that cannot lose control in flight.
+
+This is not a tie-break bolted onto the existing logic — it is the generalisation the six
+`ends_at` unit tests (D8, P-1) already encode, with `None` as the point at infinity. Each of
+them reproduces under it unchanged, and the 3.1 top-level `duration` is simply one more
+candidate.
+
+**One intentional behaviour change**: today an event-level `intervalPeriod` short-circuits and
+the intervals are never consulted. Under longest-wins, intervals extending past it now win.
+That is the rule working as intended, but it differs from the 3.0 code, so it gets its own
+test rather than arriving silently.
+
+A disagreement between declared ends is still surfaced (`wire-contracts`: we apply a documented
+rule *and say that we did*) — it usually means a malformed or ambiguous event worth seeing.
+
 ---
 
 ### D10: `attributes` carries the lab profile pointer (GB-50)

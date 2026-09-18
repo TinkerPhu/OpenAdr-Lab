@@ -10,15 +10,20 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 - [ ] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
 - [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
 - [ ] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
-- [ ] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()`, extended for 3.1: top-level `duration`, and `intervals` now `Option<Vec<_>>` (D9). Port all 6 unit tests first and watch them fail
-- [ ] 0.6 Port **P-1** `event.ends_at` migration + index + backfill onto the 3.1 schema
-- [ ] 0.7 Port **P-1** SQL-side active filtering into 3.1's `retrieve_all_{with,without}_client_id`, keeping the filter **inside** the query that does `OFFSET/LIMIT` (the original bug), and `ends_at` in sync on insert/update
-- [ ] 0.8 Port **P-1**'s 3 sqlx tests, including `active_filter_combined_with_pagination` (the regression test)
-- [ ] 0.9 Retire **P-4**: drop `strip_ven_name_targets` and the VEN_NAME reconstruction; 3.1 does target hiding natively (D8)
-- [ ] 0.10 Port **P-4**'s 5 privacy tests to clientId targets; confirm they pass against upstream's native implementation, unmodified in intent
-- [ ] 0.11 Regenerate the sqlx offline cache; `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` all green in the submodule **alone**
-- [ ] 0.12 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
-- [ ] 0.13 Verify `git submodule status` on Node1 and Node2 after pull
+- [ ] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
+      (D9): max over the event-level `intervalPeriod.duration`, the new top-level `duration` and
+      the per-interval ends; undeterminable counts as unbounded and wins. Port all 6 unit tests
+      first and watch them fail — each must pass unchanged under the new rule
+- [ ] 0.6 Add tests for the cases 3.0 could not express: intervals outlasting `duration`,
+      `duration` outlasting intervals, and the intentional loss of the event-level short-circuit
+- [ ] 0.7 Port **P-1** `event.ends_at` migration + index + backfill onto the 3.1 schema
+- [ ] 0.8 Port **P-1** SQL-side active filtering into 3.1's `retrieve_all_{with,without}_client_id`, keeping the filter **inside** the query that does `OFFSET/LIMIT` (the original bug), and `ends_at` in sync on insert/update
+- [ ] 0.9 Port **P-1**'s 3 sqlx tests, including `active_filter_combined_with_pagination` (the regression test)
+- [ ] 0.10 Retire **P-4**: drop `strip_ven_name_targets` and the VEN_NAME reconstruction; 3.1 does target hiding natively (D8)
+- [ ] 0.11 Port **P-4**'s 5 privacy tests to clientId targets; confirm they pass against upstream's native implementation, unmodified in intent
+- [ ] 0.12 Regenerate the sqlx offline cache; `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` all green in the submodule **alone**
+- [ ] 0.13 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
+- [ ] 0.14 Verify `git submodule status` on Node1 and Node2 after pull
 
 ## 1. VTN core — fixtures, deploy, smoke
 
