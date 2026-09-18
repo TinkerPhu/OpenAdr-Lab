@@ -12885,3 +12885,93 @@ Key learnings recorded separately: a VEN can be authorized-to-nothing and look h
 GB-49, the VEN-side half — the harness fix only closes the test window); and a Playwright
 `wait_for_selector` on a zero-width SVG line can never pass, which is what the NOW-marker
 scenario had been asserting since the time-marker labels were dropped.
+
+## 2026-09-18 — OpenADR 3.1: reviewing the staged migration, then phase 0 of the rebase
+
+The `migrate-to-openadr3-1` change had been sitting unstarted (73 tasks, 0 done). Reviewed it
+against the actual upstream code before touching anything, and the premise turned out to be
+obsolete: upstream merged 3.1 into **`main`** on 2026-03-13 (#313) and shipped six further
+months on top. Our submodule forked at `823a475`, three weeks *before* that merge — 179 commits
+behind. So this is a fork rebase onto mainline, not the branch switch the change described.
+
+The review (`openspec/changes/migrate-to-openadr3-1/REVIEW.md`) found two errors that would have
+broken the stack on first boot:
+
+1. **The scope names were wrong, and one was dangerous.** 3.1 splits three scopes by actor, and
+   the bare `write_vens` is an *alias for `write_vens_ven`*. `api/ven.rs` branches on which one
+   the caller holds: the `_bl` variant takes `clientID` from the request body, the `_ven` variant
+   overwrites it with the caller's own token subject. A BFF configured as the design specified
+   would have stamped `clientID = "bl-client"` into every VEN object and collided on
+   `ven_client_id_unique` at the second one. Upstream's own `fixtures/users.sql` independently
+   uses `write_vens_bl`, which confirmed the reading.
+2. **`internal-oauth` is not an upstream default feature**, and it gates `POST /auth/token` plus
+   the whole `/users` tree. Upstream passes the flag in its Dockerfile — but *our fork replaced
+   that Dockerfile* with the cargo-chef version, which builds bare and works today only because
+   our fork also carries the feature in `default`. Rebasing removes both props at once. This is
+   a collision between two of our own patches, which is exactly what a rebase hides.
+
+Also: D5 proposed deleting `VEN/src/simulator/` and `VEN/src/reactor/` and rewriting both.
+`reactor/` does not exist and `simulator/` is the physics core, untouched by 3.1. That was the
+largest block in the plan; it is gone.
+
+### The fork patches, audited
+
+The user's own safety and efficiency work was the part the change accounted for least. A full
+diff of the fork (14 files, +576/−163) turned up four patches, not the one the proposal named:
+
+- **P-1, the GB-04 active-event filter** — absent upstream, and much more than a query param: a
+  migration, `EventContent::ends_at()` with 6 unit tests, and SQL-side filtering with 3 sqlx
+  tests. Its migration comment records the real bug — `?active=` plus pagination was silently
+  wrong because `LIMIT/OFFSET` ran *before* the then-Rust-side filter. Dropping it in the rebase
+  would have quietly reintroduced that.
+- **P-2, report cascade-delete** — absent upstream, and more pressing under 3.1 since `eventID`
+  is now a report's only object link.
+- **P-3, the cargo-chef/BuildKit Dockerfile** — also fixes upstream's broken runtime `COPY`.
+- **P-4, the VEN_NAME privacy patches** — genuinely superseded: 3.1 implements target hiding
+  natively and cites the spec in upstream's own code. Its five properties turned out to be fully
+  covered by upstream's existing tests, so porting ours would only have duplicated them.
+
+### Phase 0
+
+Branched `rebase/openadr3_1` from `upstream/main` and re-applied the survivors as clean commits
+rather than rebasing 37 commits of merges and sqlx-cache churn.
+
+`ends_at()` needed a real decision, not a port: 3.1 lets an event declare up to three ends (the
+event-level `intervalPeriod`, the new top-level `duration`, the per-interval periods). The rule
+is **longest wins**, with an undeterminable end counting as unbounded. Not because it is
+lenient, but because `ends_at` governs visibility and retention, not control — dispatch is
+decided per interval. An end that is too late leaves an event visible with no applicable
+interval, which is inert; an end that is too early drops an event out of the active set *while
+its intervals are still running*, losing a live obligation. The costs are asymmetric. It also
+turned out to be the generalisation the original six tests already encoded, with `None` as the
+point at infinity — all six pass unchanged.
+
+Removing the old event-level short-circuit had one consequence worth recording: intervals must
+now inherit the event-level period (which the spec already says they do), or the very common
+shape of an event-level period plus payload-only intervals would report an undeterminable end
+and never expire.
+
+A fifth patch was needed to make the VEN able to adopt the wire types at all: `openleadr-wire`
+depended unconditionally on sqlx (postgres + tls-rustls) purely to derive `sqlx::Type` on four
+newtypes, so any client wanting the wire types had to pull in a Postgres driver and a TLS stack.
+Gated behind a non-default feature; verified that the wire crate now builds with sqlx compiled
+**zero** times, which is what clears the VEN to depend on it.
+
+Results so far: 49 wire tests pass (including all 13 `ends_at` cases), and all 10 migrations
+apply cleanly to a scratch Postgres.
+
+### Two things the review got wrong about our own code
+
+Worth recording, because both are the same mistake the review was written to catch — asserting
+about code instead of reading it:
+
+- The D9 inventory claimed event interval timing was scattered and needed consolidating. It is
+  not: `VEN/src/controller/event_timing.rs` is already the single authority, with three callers.
+  GB-48 was fixed. And `report_intervals.rs`, which the task list wanted merged into it, builds
+  *outgoing report* intervals — a different concept.
+- "Wipe the database" was written before anyone counted what is in it. `vtn-db-1` is 1.4 GB, and
+  **1,337,302** of its rows are `lab_recorder` telemetry that no OpenADR migration touches.
+  Dropping the volume would have destroyed months of irreplaceable history as collateral. The
+  destructive step is now scoped to the `public` schema only, and a full dump plus a
+  `lab_recorder`-only dump were taken and **verified by restore** (26 and 301 rows round-tripped)
+  before anything else.
