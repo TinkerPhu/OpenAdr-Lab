@@ -67,7 +67,19 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 Simulator untouched (D5). `POST /sim/override` stays.
 
-- [ ] 3.1 `controller/vtn_port.rs`: `targets: Vec<String>`; `OadrReportBody` drops `programID`, `eventID` becomes **required** (R7); add `clientID` where the VTN returns it
+- [ ] 3.1 Adopt `openleadr-wire` in the VEN (D12), **incrementally, events first**. Measured
+      2026-09-18: 14 files reference `vtn_port`, with ~184 field-access sites, so this is
+      sequenced rather than done in one pass:
+      - [ ] 3.1a Add `openleadr-wire` as a path dependency with **default features** (no sqlx,
+            verified: the crate builds with sqlx compiled zero times)
+      - [ ] 3.1b Swap the event types first — `OadrEvent`/`OadrInterval`/`OadrIntervalPeriod`/
+            `OadrPayload` → wire `Event`/`EventInterval`/`IntervalPeriod`/`EventValuesMap`. This is
+            where most of the 184 sites are and where the churn is mechanical but wide: fields move
+            behind `.content` and go snake_case (`event.programID` → `event.content.program_id`)
+      - [ ] 3.1c Update `services/test_support/mock_vtn.rs` fixtures — the wire `Event` requires
+            `id`, `createdDateTime` and `modificationDateTime`, which the lenient DTO did not
+      - [ ] 3.1d Reports last: `OadrReportBody` → wire `ReportRequest` — drops `programID`, makes
+            `eventID` required (R7), and brings `reportIntervals` and payload descriptors with it
 - [ ] 3.2 `controller/event_timing.rs` (the existing authority): extend `timed_intervals` for
       3.1 — top-level `duration` and absent `intervals`; surface, never silently default
       (`wire-contracts`). Align its event-level end with `EventRequest::ends_at()` (D9)
@@ -75,6 +87,10 @@ Simulator untouched (D5). `POST /sim/override` stays.
       still go through it, and that no new copy appeared. `report_intervals.rs` builds outgoing
       report intervals and is a different concept — leave it alone (D9)
 - [ ] 3.4 `vtn.rs`: `POST /vens` self-registration on startup with `VenVenRequest`; treat 409 as already-registered, log INFO (R4)
+- [ ] 3.4a Fold **GB-49** in here rather than fixing it twice: after obtaining a token, decode
+      its `scope`/`roles` claim and fail the health check if the expected VEN scopes are absent,
+      instead of polling successfully and seeing an empty world. Doing this against 3.0 roles
+      first would mean rewriting it for scopes immediately afterwards
 - [ ] 3.5 `controller/reporter.rs`: set `eventID` from the triggering event; drop `programID`
 - [ ] 3.6 Declare `reportIntervals` on every report descriptor we emit — answer Q4 rather than inheriting the default (`wire-contracts`)
 - [ ] 3.7 Add `client_id` to the VEN YAML profiles (all 20) and `CLIENT_ID` to both compose files
