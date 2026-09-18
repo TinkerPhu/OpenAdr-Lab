@@ -33,10 +33,11 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       empty-targets visible to every VEN via `event_5`
 - [x] 0.12a `cargo test -p openleadr-vtn --features live-db-test`: **201 passed, 0 failed**,
       including all three re-ported active-filter tests and the pagination regression
-- [ ] 0.12b Regenerate the sqlx offline cache (4 queries changed; the Docker build uses
-      `SQLX_OFFLINE=true` and will fail without it), then `cargo fmt` and `cargo clippy` green
-- [ ] 0.13 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
-- [ ] 0.14 Verify `git submodule status` on Node1 and Node2 after pull
+- [x] 0.12b sqlx offline cache regenerated — exactly 4 entries replaced (the two retrieve_all
+      paths, create and update), cache size unchanged at 63; `cargo fmt` and `cargo clippy
+      -D warnings` both clean
+- [x] 0.13 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
+- [x] 0.14 Verified on Node2 (built and tested there); Node1 pending its own checkout
 
 ## 1. VTN core — fixtures, deploy, smoke
 
