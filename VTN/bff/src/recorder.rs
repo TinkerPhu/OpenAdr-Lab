@@ -3,15 +3,14 @@
 //! openleadr-rs's own VTN already uses) under a separate `lab_recorder`
 //! schema — never touching openleadr-rs's own tables.
 //!
-//! Pagination: until Phase 2's VEN-side pagination lands, this recorder does
-//! its own `skip`/`limit` loop against the VTN's list endpoints (which
-//! already support it, capped at 50/page). Dedup on `(id, modificationDateTime)`
-//! so re-polls don't duplicate rows — enforced via a composite primary key +
-//! `ON CONFLICT DO NOTHING`.
+//! Pagination: collections are read through `VtnClient::get_all_pages`, the
+//! BFF's single paginated-fetch path (shared with the list routes, R-84).
+//! Dedup on `(id, modificationDateTime)` so re-polls don't duplicate rows —
+//! enforced via a composite primary key + `ON CONFLICT DO NOTHING`.
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
@@ -21,7 +20,6 @@ use tracing::{error, info, warn};
 
 use crate::vtn_client::VtnClient;
 
-const PAGE_LIMIT: i64 = 50;
 const INITIAL_BACKOFF_S: u64 = 5;
 const MAX_BACKOFF_S: u64 = 300;
 
@@ -261,28 +259,8 @@ fn report_submission_lag_s(
     }
 }
 
-/// Fetch every page of a list endpoint via `skip`/`limit`, stopping when a
-/// page returns fewer than `PAGE_LIMIT` rows.
-async fn fetch_all_pages(client: &VtnClient, path: &str) -> Result<Vec<Value>> {
-    let mut all = Vec::new();
-    let mut skip = 0i64;
-    loop {
-        let sep = if path.contains('?') { '&' } else { '?' };
-        let page_path = format!("{path}{sep}skip={skip}&limit={PAGE_LIMIT}");
-        let page: Vec<Value> = serde_json::from_value(client.get_json(&page_path, None).await?)
-            .context("paginated response was not a JSON array")?;
-        let n = page.len();
-        all.extend(page);
-        if (n as i64) < PAGE_LIMIT {
-            break;
-        }
-        skip += PAGE_LIMIT;
-    }
-    Ok(all)
-}
-
 async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
-    let reports = fetch_all_pages(client, "/reports").await?;
+    let reports = client.get_all_pages("/reports", None).await?;
     let mut n = 0;
     for r in &reports {
         let Some((id, modified)) = dedup_key(r) else {
@@ -331,7 +309,7 @@ async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
 }
 
 async fn record_events(pool: &PgPool, client: &VtnClient) -> Result<u64> {
-    let events = fetch_all_pages(client, "/events").await?;
+    let events = client.get_all_pages("/events", None).await?;
     let mut n = 0;
     for e in &events {
         let Some((id, modified)) = dedup_key(e) else {
@@ -358,8 +336,7 @@ async fn record_events(pool: &PgPool, client: &VtnClient) -> Result<u64> {
 }
 
 async fn record_ven_snapshots(pool: &PgPool, client: &VtnClient) -> Result<u64> {
-    let vens: Vec<Value> = serde_json::from_value(client.get_json("/vens", None).await?)
-        .context("vens response was not a JSON array")?;
+    let vens = client.get_all_pages("/vens", None).await?;
     let now = chrono::Utc::now();
     let mut n = 0;
     for v in &vens {

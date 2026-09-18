@@ -5,6 +5,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// openleadr-rs caps every list endpoint at 50 rows per page, so this is the
+/// page size for `get_all_pages` — asking for more is rejected by the VTN.
+pub(crate) const PAGE_LIMIT: i64 = 50;
+
 fn upstream_status_err(path: &str, status: StatusCode, body: String) -> anyhow::Error {
     UpstreamStatusError {
         status,
@@ -153,6 +157,36 @@ impl VtnClient {
         }
 
         Ok(resp.json().await?)
+    }
+
+    /// GET every page of a VTN list endpoint via `skip`/`limit`, stopping when a
+    /// page returns fewer than `PAGE_LIMIT` rows.
+    ///
+    /// The one place in the BFF that knows a VTN collection is paginated
+    /// (openleadr-rs caps every list endpoint at 50 per page, silently
+    /// truncating a plain `get_json`): both the list routes and the recorder
+    /// read collections through here, so neither can grow its own loop (R-84).
+    pub async fn get_all_pages(
+        &self,
+        path: &str,
+        request_id: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut all = Vec::new();
+        let mut skip = 0i64;
+        loop {
+            let sep = if path.contains('?') { '&' } else { '?' };
+            let page_path = format!("{path}{sep}skip={skip}&limit={PAGE_LIMIT}");
+            let page: Vec<serde_json::Value> =
+                serde_json::from_value(self.get_json(&page_path, request_id).await?)
+                    .context(format!("{path} did not return a JSON array"))?;
+            let n = page.len();
+            all.extend(page);
+            if (n as i64) < PAGE_LIMIT {
+                break;
+            }
+            skip += PAGE_LIMIT;
+        }
+        Ok(all)
     }
 
     /// POST JSON to a VTN endpoint with automatic 401-retry.
@@ -345,6 +379,94 @@ mod tests {
 
         let body = client.get_json("/programs", None).await.unwrap();
         assert_eq!(body, json!([{"id": "p1"}]));
+    }
+
+    // ── get_all_pages (R-84) ────────────────────────────────────────────────
+
+    /// Records every `skip`/`limit` query the stub was asked for, and serves
+    /// `total` synthetic rows across pages of `PAGE_LIMIT`.
+    fn paged_stub(total: usize, queries: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Router {
+        Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/programs",
+                get(move |axum::extract::RawQuery(q): axum::extract::RawQuery| {
+                    let queries = queries.clone();
+                    async move {
+                        let q = q.unwrap_or_default();
+                        queries.lock().unwrap().push(q.clone());
+                        let skip: usize = q
+                            .split('&')
+                            .find_map(|kv| kv.strip_prefix("skip="))
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+                        let page: Vec<serde_json::Value> = (skip..(skip + PAGE_LIMIT as usize)
+                            .min(total))
+                            .map(|i| json!({"id": format!("p{i}")}))
+                            .collect();
+                        Json(serde_json::Value::Array(page))
+                    }
+                }),
+            )
+    }
+
+    #[tokio::test]
+    async fn get_all_pages_follows_skip_until_a_short_page() {
+        let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = client_for(spawn_stub(paged_stub(53, queries.clone())).await);
+
+        let rows = client.get_all_pages("/programs", None).await.unwrap();
+
+        assert_eq!(rows.len(), 53, "every page must be accumulated");
+        assert_eq!(rows[0], json!({"id": "p0"}));
+        assert_eq!(rows[52], json!({"id": "p52"}));
+        assert_eq!(
+            *queries.lock().unwrap(),
+            vec!["skip=0&limit=50", "skip=50&limit=50"],
+            "must page with skip/limit and stop after the short page"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_all_pages_stops_after_one_request_when_the_first_page_is_short() {
+        let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = client_for(spawn_stub(paged_stub(3, queries.clone())).await);
+
+        let rows = client.get_all_pages("/programs", None).await.unwrap();
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(queries.lock().unwrap().len(), 1, "no needless second page");
+    }
+
+    #[tokio::test]
+    async fn get_all_pages_appends_to_an_existing_query_string() {
+        let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client = client_for(spawn_stub(paged_stub(1, queries.clone())).await);
+
+        client
+            .get_all_pages("/programs?active=true", None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *queries.lock().unwrap(),
+            vec!["active=true&skip=0&limit=50"],
+            "an existing query string must be kept, not replaced"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_all_pages_errors_when_the_body_is_not_an_array() {
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route("/programs", get(|| async { Json(json!({"id": "p1"})) }));
+        let client = client_for(spawn_stub(app).await);
+
+        let err = client.get_all_pages("/programs", None).await.unwrap_err();
+        assert!(
+            err.to_string().contains("did not return a JSON array"),
+            "error must name the problem: {err}"
+        );
     }
 
     #[tokio::test]

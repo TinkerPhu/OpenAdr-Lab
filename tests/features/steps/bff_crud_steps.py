@@ -165,3 +165,33 @@ def step_bff_health_vtn(context):
 # ── Shared assertions ────────────────────────────────────────────────────────
 # "the response status is {status:d}" is defined in vtn_auth_steps.py (shared)
 # 'the response contains "{field}" equal to "{value}"' is defined in vtn_programs_steps.py (shared)
+
+
+# ── Pagination (R-84) ────────────────────────────────────────────────────────
+
+@given('{count:d} programs exist via BFF named "{prefix}"')
+def step_create_n_programs(context, count, prefix):
+    context.paged_program_prefix = prefix
+    context.paged_program_ids = []
+    for i in range(count):
+        r = bff_post("/api/programs", json={"programName": f"{prefix}-{i:03d}"})
+        r.raise_for_status()
+        context.paged_program_ids.append(r.json()["id"])
+
+
+@when("I list programs via BFF")
+def step_list_bff_programs(context):
+    context.response = bff_get("/api/programs")
+
+
+@then('all {count:d} "{prefix}" programs appear in the response')
+def step_all_paged_programs_listed(context, count, prefix):
+    listed = {p["id"] for p in context.response.json()}
+    missing = [pid for pid in context.paged_program_ids if pid not in listed]
+    assert len(context.paged_program_ids) == count, (
+        f"fixture created {len(context.paged_program_ids)} programs, expected {count}"
+    )
+    assert not missing, (
+        f"{len(missing)} of {count} '{prefix}' programs missing from the list "
+        f"(listed {len(listed)} objects) — the list is truncated at a page boundary"
+    )

@@ -3,7 +3,6 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use std::time::Duration;
 
 use crate::error::AppError;
 use crate::routes::request_id;
@@ -13,19 +12,16 @@ pub async fn get_reports(
     State(ctx): State<AppCtx>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if let Some(cached) = ctx.cache.get("reports").await {
-        return Ok(Json(cached));
-    }
-
     let rid = request_id(&headers);
-    let data = ctx.business.get_json("/reports", rid.as_deref()).await?;
-    ctx.cache
-        .set(
-            "reports".into(),
-            data.clone(),
-            Duration::from_secs(ctx.config.cache_ttl_reports),
-        )
-        .await;
+    let data = crate::routes::cached_collection(
+        &ctx.business,
+        &ctx,
+        "reports",
+        "/reports",
+        ctx.config.cache_ttl_reports,
+        rid.as_deref(),
+    )
+    .await?;
     Ok(Json(data))
 }
 
