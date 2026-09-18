@@ -42,7 +42,11 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
 - [ ] 1.3 Update `VTN/docker-compose.yml` to mount the new fixtures
 - [ ] 1.3b Drop **only** the `public` schema on `vtn-db-1`; leave `lab_recorder` intact (D1
-      scope correction — 1.33M telemetry rows live there and no OpenADR migration touches them)
+      scope correction — 1.33M telemetry rows live there and no OpenADR migration touches them).
+      **Rehearsed 2026-09-18 on a scratch Postgres**, so the live run is a replay, not a first
+      attempt: `DROP SCHEMA public CASCADE` takes 13 objects including the `scope` type and
+      `_sqlx_migrations`, a neighbour schema survives untouched, all 10 migrations then replay
+      clean, and the fixture applies (and re-applies) with exactly the intended scopes
 - [ ] 1.3a **Back up the VTN database before anything destructive** — `pg_dump` of `vtn-db-1`
       (including the `lab_recorder` schema) to a file outside the repo, verified non-empty and
       restorable. This is a hard gate: no wipe happens until the dump exists.
