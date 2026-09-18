@@ -487,6 +487,25 @@ no repo-wide search-and-replace; migrate target construction sites individually.
 the standing `fleet-monitoring` program needs a standing *event*; assert `eventID` presence at
 the boundary.
 
+**R8: The 3.1 VTN panics at startup if MQTT is configured but unreachable**
+→ 3.1 loads subscription notifiers during state construction
+(`openleadr-vtn/src/state.rs:325`) and `.expect("failed to retrieve subscriptions from
+database")` turns any broker failure into a panic — the observed error is
+`Mqtt(TcpTlsConnectFailure)`. MQTT is opt-in: it activates only when **all** of `MQTT_URL`,
+`MQTT_USERNAME` and `MQTT_PASSWORD` are set, and setting only some of them is itself a panic
+("Incomplete MQTT configuration").
+
+The trap is that upstream **tracks a `.env`** at the repository root with
+`MQTT_URL=mqtt://localhost:1883`, and the VTN reads it through `dotenvy`. Anything that runs
+with the repo as its working directory picks those up silently. That is what made the whole
+test suite fail on first run here: 201 tests could not build app state until a broker was
+reachable, with no hint in the failure that MQTT was involved.
+
+→ Mitigation for the deploy: decide explicitly. Either point `MQTT_URL` at the lab's existing
+Mosquitto on Node1, or leave all three unset so the notifier stays disabled — and make sure the
+container's environment, not a stray `.env`, is what decides. Revisit when the subscription/MQTT
+non-goal is re-opened (Q3).
+
 ## Migration Plan
 
 Phases are ordered so each one is verifiable before the next begins. `tasks.md` holds the
