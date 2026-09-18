@@ -28,9 +28,9 @@ SQL
 echo "Legacy ven-1 rows cleared."
 
 echo "Provisioning ven-1 via API..."
-python provision_ven1.py
+python provision_ven.py ven-1
 echo "Provisioning ven-2 via API..."
-python provision_ven2.py
+python provision_ven.py ven-2
 echo "Provisioning done."
 
 # Both timing-sensitive @isolated scenarios and the resilience suite

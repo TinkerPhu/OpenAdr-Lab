@@ -55,25 +55,31 @@ def _cleanup_all_programs():
     try:
         from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
         token = get_token_value("any-business", "any-business")
-        skip = 0
         limit = 50
         deleted = 0
-        while True:
-            r = vtn_get(f"/programs?limit={limit}&skip={skip}", token)
+        # Always re-read the FIRST page: deleting a page's rows shifts the
+        # remainder down into offsets 0..49, so advancing `skip` by the page
+        # size would step straight over them and leave programs behind (with
+        # 54 programs it deleted 50 and left 4). The loop ends when a page
+        # comes back empty; `passes` only guards against an undeletable row
+        # spinning forever.
+        for _ in range(100):
+            r = vtn_get(f"/programs?limit={limit}&skip=0", token)
             if not r.ok:
                 break
             programs = r.json()
             if not programs:
                 break
+            progressed = False
             for p in programs:
                 try:
                     vtn_delete(f"/programs/{p['id']}", token)
                     deleted += 1
+                    progressed = True
                 except Exception:
                     pass
-            if len(programs) < limit:
+            if not progressed:
                 break
-            skip += limit
         if deleted:
             print(f"Pre-run cleanup: deleted {deleted} programs (API) from test VTN.")
     except Exception as exc:
