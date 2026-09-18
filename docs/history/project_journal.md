@@ -12975,3 +12975,39 @@ about code instead of reading it:
   destructive step is now scoped to the `public` schema only, and a full dump plus a
   `lab_recorder`-only dump were taken and **verified by restore** (26 and 301 rows round-tripped)
   before anything else.
+
+### Phase 0 closed
+
+Final state: **49 wire tests and 201 VTN tests pass**, `cargo fmt` and
+`cargo clippy -D warnings` are clean, and the sqlx offline cache was regenerated — exactly four
+entries replaced, one per edited query (create, update, and both `retrieve_all` paths), which is
+what the `SQLX_OFFLINE=true` Docker build needs. The three re-ported active-filter tests pass,
+including the pagination regression.
+
+Two environmental traps cost real time and are worth knowing about before the deploy:
+
+- **The 3.1 VTN needs `cmake`.** `paho-mqtt-sys` is now a hard dependency of `openleadr-vtn` and
+  builds the bundled Paho C library with SSL, so the build dies ~200 crates in with "is `cmake`
+  not installed?" without it. Upstream's Dockerfile installs `cmake g++ make`, which is a second
+  reason D7 takes upstream's toolchain line over our old static-openssl one.
+- **The 3.1 VTN panics at startup if MQTT is configured but unreachable.** State construction
+  loads subscription notifiers and `.expect()`s them. MQTT is opt-in — all three of `MQTT_URL`,
+  `MQTT_USERNAME`, `MQTT_PASSWORD` or none — but upstream *tracks a `.env`* pointing at
+  `mqtt://localhost:1883`, which `dotenvy` picks up for anything run from the repo root. That is
+  what made all 201 VTN tests fail on the first run, with nothing in the failure text naming
+  MQTT; they went green the moment a broker was reachable. The lab must decide this explicitly at
+  deploy time rather than inherit it from a file.
+
+One more blocker found while scoping the VEN work: a path dependency on the submodule's wire
+crate **cannot build**, because the VEN's Docker context is `VEN/` and the submodule sits at the
+repository root, outside it. Moving the context to the root would push an 861 MB context through
+20 service builds on two hosts. A git dependency on the fork branch avoids all of it — Cargo
+already fetches over the network in the dependency layer and `Cargo.lock` pins the commit. Proved
+in a throwaway crate: it resolves, pins the revision, and locks 139 dependencies with **zero**
+sqlx — no Postgres driver, no rustls, no tokio.
+
+Phase 1 is prepared but deliberately not deployed. The database half is fully rehearsed (scoped
+`public`-only drop, migrations replayed, fixture applied) and the backups are verified, but
+deploying the 3.1 VTN while the VEN still speaks 3.0 would leave 20 VENs unable to connect for as
+long as phase 3 takes — and phase 3 is 14 files and ~184 field sites. The deploy is staged to run
+when the fleet can come back with it.
