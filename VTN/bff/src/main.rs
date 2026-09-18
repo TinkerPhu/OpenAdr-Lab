@@ -28,8 +28,10 @@ use vtn_client::VtnClient;
 
 #[derive(Clone)]
 pub struct AppCtx {
+    /// The one VTN credential. 3.1's scope model lets a single business-layer
+    /// client hold every scope the BFF needs, so the 3.0 dual-credential split
+    /// (any-business + ven-manager) is gone.
     pub business: VtnClient,
-    pub ven_mgr: VtnClient,
     pub cache: Arc<TtlCache>,
     pub config: Arc<Config>,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
@@ -67,21 +69,14 @@ async fn main() -> anyhow::Result<()> {
 
     let business = VtnClient::new(
         cfg.vtn_base_url.clone(),
-        cfg.business_client_id.clone(),
-        cfg.business_client_secret.clone(),
-    );
-
-    let ven_mgr = VtnClient::new(
-        cfg.vtn_base_url.clone(),
-        cfg.ven_mgr_client_id.clone(),
-        cfg.ven_mgr_client_secret.clone(),
+        cfg.bl_client_id.clone(),
+        cfg.bl_client_secret.clone(),
     );
 
     let recorder_status: recorder::SharedRecorderStatus = Arc::new(Default::default());
 
     let ctx = AppCtx {
         business: business.clone(),
-        ven_mgr: ven_mgr.clone(),
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
         metrics_handle: Arc::new(metrics_handle),
@@ -98,7 +93,6 @@ async fn main() -> anyhow::Result<()> {
         recorder::spawn_recorder(
             database_url,
             business,
-            ven_mgr,
             cfg.recorder_poll_secs,
             recorder_status,
         );

@@ -14,7 +14,7 @@ pub async fn get_vens(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
     let data = crate::routes::cached_collection(
-        &ctx.ven_mgr,
+        &ctx.business,
         &ctx,
         "vens",
         "/vens",
@@ -31,7 +31,7 @@ pub async fn delete_ven(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    ctx.ven_mgr
+    ctx.business
         .delete_json(&format!("/vens/{id}"), rid.as_deref())
         .await?;
     ctx.cache.invalidate("vens").await;
