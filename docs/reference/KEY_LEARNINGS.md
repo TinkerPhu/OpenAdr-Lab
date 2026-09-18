@@ -2037,3 +2037,40 @@ both the 8-minute load-settle gate and the isolated pass, turning a 15-minute ru
 minutes. And when a scenario is suspected of flakiness, the comparison must include the
 *baseline* branch under the same load — a failure that reproduces on `main` is not a regression,
 and without that arm it is easy to convict the change under test.
+
+## A client authorized *after* it first authenticates can stay blind for the token's whole TTL (2026-09-18)
+
+The VTN filters every collection by the caller's roles. A VEN whose cached token carries no VEN
+role therefore gets `[]` for programs and events — with HTTP 200. Nothing in the VEN reads as
+broken: the poll tasks log `poll success count=0`, `/health` shows `vtn_connection: ok`, and the
+token is valid for 30 days, so the condition never self-heals. Four E2E scenarios failed this way
+and every symptom pointed at the wrong layer (the program, the enrollment, the poll cadence);
+what settled it in one step was minting a *fresh* token for the same client and comparing:
+3 programs vs. the container's 0.
+
+Two lessons. First, when provisioning a client in several steps, add the credentials **last** —
+the moment a client_id authenticates it may be used, and any window where it authenticates but
+carries no authorization is a window a retrying client will find (`tests/provision_ven.py`).
+Second, "the call succeeded and returned nothing" and "I am not allowed to see anything" are
+indistinguishable to a poller; a component that can be authorized-to-nothing needs to check what
+its token actually grants and surface that, or it will report itself healthy while seeing
+nothing (filed as GB-49).
+
+## Playwright's "visible" can never match a zero-width SVG line (2026-09-18)
+
+`wait_for_selector` waits for the *visible* state by default, which requires a non-empty bounding
+box. A vertical `<line>` has zero width, so a recharts `<ReferenceLine>` with no label resolves
+as hidden forever — the call log says `15 × locator resolved to hidden`, not "not found", which
+is the tell. The NOW-marker scenario had been passing only because the label that was later
+dropped (deliberately — markers are text-free now) gave the `<g>` a box. Assert what identifies
+such a marker instead: attached, the right stroke colour, `x1 == x2`, and a real height across
+the plot. That is a stronger assertion than the one it replaces, which only needed the element
+to exist.
+
+## Deleting while paging skips rows: re-read page 0 instead of advancing `skip` (2026-09-18)
+
+A cleanup loop that deletes the 50 rows of page 0 and then asks for `skip=50` steps straight over
+the rows that shifted down into offsets 0..49: with 54 programs it deleted 50 and left 4, and the
+log's "deleted 50" looked like a complete sweep. Paging is only stable while the collection is
+not being mutated; a delete-everything loop should re-read the first page until it comes back
+empty, and count only the deletes the server actually accepted so the printed total is the truth.
