@@ -30,10 +30,10 @@ The VTN UI program detail or enrollment display SHALL show the flat `targets` ar
 - **THEN** enrolled clients are shown as a flat list of client ID strings
 
 ### Requirement: Reports page does not show programId
-The VTN UI reports listing SHALL NOT display a `programId` column or field, as it no longer
+The VTN UI reports listing SHALL NOT display a `programID` column or field, as it no longer
 exists in the 3.1 report schema.
 
 #### Scenario: Reports page shows eventID instead of programId
 - **WHEN** the user navigates to the Reports page
 - **THEN** each report row shows `eventID`
-- **AND** no `programId` field is visible
+- **AND** no `programID` field is visible

@@ -1,105 +1,96 @@
-## 1. Submodule — Switch to openadr3_1 branch
+Phases are ordered so each is verifiable before the next starts. Per `test-first`, each phase
+writes its failing test before its implementation. Prefer Node2 for builds and test runs
+(`DOCKER_HOST=Node2`), holding the host lock for the whole sequence.
 
-- [ ] 1.1 Create `openadr3_1` branch in `TinkerPhu/openleadr-rs` fork from `upstream/openadr3_1`
-- [ ] 1.2 Push the branch to origin (`TinkerPhu/openleadr-rs`)
-- [ ] 1.3 Update the lab submodule pointer to `TinkerPhu/openleadr-rs@openadr3_1` and commit
-- [ ] 1.4 Verify `git submodule status` reflects the new commit hash on Node1 after `git pull`
+## 0. Submodule — rebase onto upstream/main and carry our patches
 
-## 2. VTN — Fixture SQL and Docker deploy
+Nothing below phase 0 can be verified until the VTN boots with a token endpoint (D7).
 
-- [ ] 2.1 Write new `VTN/fixtures/users.sql` for 3.1 scope model: `bl-client` (read_all + write scopes) and `ven-1-client`, `ven-2-client`, `ven-3-client` (VEN scopes)
-- [ ] 2.2 Write `VTN/fixtures/credentials.sql` with hashed secrets for all four clients
-- [ ] 2.3 Update `VTN/docker-compose.yml` to mount new fixture SQL instead of old role-based fixtures
-- [ ] 2.4 Deploy VTN on Node1: `docker compose down vtn && docker compose up --build -d vtn` (⚠️ wipes DB)
-- [ ] 2.5 Validate: `POST /auth/token` with `bl-client`/`bl-client` returns a token (HTTP 200)
-- [ ] 2.6 Validate: `POST /auth/token` with `ven-1-client`/`ven-1-client` returns a token (HTTP 200)
-- [ ] 2.7 Validate: `GET /programs` with `bl-client` token returns HTTP 200 with empty array
+- [ ] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
+- [ ] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
+- [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
+- [ ] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
+- [ ] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()`, extended for 3.1: top-level `duration`, and `intervals` now `Option<Vec<_>>` (D9). Port all 6 unit tests first and watch them fail
+- [ ] 0.6 Port **P-1** `event.ends_at` migration + index + backfill onto the 3.1 schema
+- [ ] 0.7 Port **P-1** SQL-side active filtering into 3.1's `retrieve_all_{with,without}_client_id`, keeping the filter **inside** the query that does `OFFSET/LIMIT` (the original bug), and `ends_at` in sync on insert/update
+- [ ] 0.8 Port **P-1**'s 3 sqlx tests, including `active_filter_combined_with_pagination` (the regression test)
+- [ ] 0.9 Retire **P-4**: drop `strip_ven_name_targets` and the VEN_NAME reconstruction; 3.1 does target hiding natively (D8)
+- [ ] 0.10 Port **P-4**'s 5 privacy tests to clientId targets; confirm they pass against upstream's native implementation, unmodified in intent
+- [ ] 0.11 Regenerate the sqlx offline cache; `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` all green in the submodule **alone**
+- [ ] 0.12 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
+- [ ] 0.13 Verify `git submodule status` on Node1 and Node2 after pull
 
-## 3. BFF — Simplify to single credential
+## 1. VTN core — fixtures, deploy, smoke
 
-- [ ] 3.1 Remove `VEN_MANAGER_CLIENT_ID` / `VEN_MANAGER_CLIENT_SECRET` from `VTN/bff/src/config.rs`; add single `BL_CLIENT_ID` / `BL_CLIENT_SECRET`
-- [ ] 3.2 Rewrite `VTN/bff/src/vtn_client.rs` to use a single `VtnClient` with `bl-client` credential
-- [ ] 3.3 Remove dual-client route switching in `VTN/bff/src/routes/`; all routes use the single client
-- [ ] 3.4 Update `VTN/docker-compose.yml` BFF env vars (`BL_CLIENT_ID=bl-client`, `BL_CLIENT_SECRET=bl-client`)
-- [ ] 3.5 Deploy BFF on Node1: `docker compose up --build -d bff`
-- [ ] 3.6 Validate: `GET /api/programs`, `GET /api/events`, `GET /api/vens` all return HTTP 200 via BFF
+- [ ] 1.1 Write fixture SQL for the scope model: `bl-client` with `read_all write_programs write_events write_vens_bl write_reports_bl write_users` — **every scope spelled out, no aliases** (D2)
+- [ ] 1.2 Write VEN fixtures for **ven-1 … ven-20** with `read_targets read_ven_objects write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
+- [ ] 1.3 Update `VTN/docker-compose.yml` to mount the new fixtures
+- [ ] 1.4 Deploy VTN (⚠️ wipes DB); confirm migrations `20260213100612_openadr_3.1.sql` onward applied
+- [ ] 1.5 **Smoke (D7)**: `POST /auth/token` with `bl-client` returns 200. If this 404s, the build lost `internal-oauth` — stop and fix 0.2
+- [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts
+- [ ] 1.7 Smoke: `GET /programs` with the `bl-client` token returns 200 and an empty array
+- [ ] 1.8 Assert the schema: `targets text[]` on program/event/ven/resource; `ven.client_id NOT NULL` + unique index; no `ven_program`; no role tables
 
-## 4. VEN App — Wire format and self-registration
+## 2. BFF — single credential
 
-- [ ] 4.1 Update `VEN/src/models.rs`: `targets: Vec<String>` (not TargetMap), remove `programId`/`venId` from Report, add `eventID` and `clientName`
-- [ ] 4.2 Update `VEN/src/vtn.rs`: use `VenVenRequest` for `POST /vens` self-registration on startup
-- [ ] 4.3 Implement self-registration logic: call `POST /vens` on startup; handle HTTP 409 as "already registered"
-- [ ] 4.4 Update `VEN/src/reporter.rs`: remove `programId`, set `eventID` from triggering event, use `clientName` from profile `venName`
-- [ ] 4.5 Add `client_id` field to `VEN/profiles/ven-1.yaml`, `ven-2.yaml`, `ven-3.yaml`
-- [ ] 4.6 Add `CLIENT_ID` env var to each VEN service in `VEN/docker-compose.yml`
-- [ ] 4.7 Validate Rust compilation: `cargo build` in `VEN/` succeeds with no errors
+- [ ] 2.1 `config.rs`: drop `VTN_VEN_MGR_*`; single `VTN_BL_CLIENT_ID` / `VTN_BL_CLIENT_SECRET`
+- [ ] 2.2 `vtn_client.rs`: one client, one token cache (keep `get_all_pages` / `PAGE_LIMIT` as-is)
+- [ ] 2.3 Remove dual-client switching from `routes/` (16 `ven_mgr` references)
+- [ ] 2.4 Update BFF env vars in `VTN/docker-compose.yml`
+- [ ] 2.5 `cargo test -p` the BFF; fmt + clippy green
+- [ ] 2.6 Deploy; verify `GET /api/{programs,events,vens,reports}` all 200
 
-## 5. VEN Simulator and Reactor — Redesign
+## 3. VEN app — wire boundary and self-registration
 
-- [ ] 5.1 Delete `VEN/src/simulator/` directory contents and `VEN/src/reactor/` directory contents
-- [ ] 5.2 Implement new `VEN/src/simulator/mod.rs`: device state structs (power kW per device), tick update function, `GET /sim` response type
-- [ ] 5.3 Implement device models in simulator: base load, PV (sin curve), flexible device (setpoint-driven)
-- [ ] 5.4 Implement sim state persistence: atomic write to `/data/sim_state.json` on each tick
-- [ ] 5.5 Implement new `VEN/src/reactor/mod.rs`: FSM (Idle → Ramping → Holding → RampingBack → Idle), process 3.1 event interval payloads
-- [ ] 5.6 Implement decision trace: append entry on each state transition; expose via `GET /trace`
-- [ ] 5.7 Wire simulator and reactor into the VEN main polling loop
-- [ ] 5.8 Remove `POST /sim/override` endpoint
-- [ ] 5.9 Run `cargo test` in VEN; fix any compilation or unit test failures
+Simulator untouched (D5). `POST /sim/override` stays.
 
-## 6. VEN Deploy and Validate
+- [ ] 3.1 `controller/vtn_port.rs`: `targets: Vec<String>`; `OadrReportBody` drops `programID`, `eventID` becomes **required** (R7); add `clientID` where the VTN returns it
+- [ ] 3.2 `controller/openadr_interface.rs`: consolidate interval timing into the single authority (D9) — handle top-level `duration` and absent `intervals`; surface, never silently default (`wire-contracts`)
+- [ ] 3.3 Inventory and delete the other copies of that rule (`controller/report_intervals.rs` and any parser found by grep); every caller calls the one function
+- [ ] 3.4 `vtn.rs`: `POST /vens` self-registration on startup with `VenVenRequest`; treat 409 as already-registered, log INFO (R4)
+- [ ] 3.5 `controller/reporter.rs`: set `eventID` from the triggering event; drop `programID`
+- [ ] 3.6 Declare `reportIntervals` on every report descriptor we emit — answer Q4 rather than inheriting the default (`wire-contracts`)
+- [ ] 3.7 Add `client_id` to the VEN YAML profiles (all 20) and `CLIENT_ID` to both compose files
+- [ ] 3.8 `wsl cargo test -p ven-app -j 2` green; fmt + clippy; `scripts/audit_file_sizes.py` passes
+- [ ] 3.9 Deploy VENs on Node1 and Node2; verify each self-registered with **its own** `clientID`, not `bl-client` (R5)
 
-- [ ] 6.1 Deploy 3 VEN instances on Node1: `docker compose up --build -d` (⚠️ full rebuild ~11 min)
-- [ ] 6.2 Validate: each VEN self-registers — `GET /vens` (bl-client token) shows 3 VEN objects with correct `clientID` values
-- [ ] 6.3 Validate: `GET /sim` returns device state on each VEN (ports 8211, 8212, 8213)
-- [ ] 6.4 Validate: `GET /trace` returns an array on each VEN
+## 4. Seed, provisioning and the profile contract
 
-## 7. Seed Script — Rewrite for 3.1
+- [ ] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`
+- [ ] 4.2 Update `tests/provision_ven.py` for scopes, keeping credentials-last ordering (GB-49)
+- [ ] 4.3 Decide fixture SQL vs `POST /users` now that Q1 is answered, and record which
+- [ ] 4.4 Define the GB-50 profile pointer as a namespaced, versioned private `attributes` entry on the program, plus the published profile document it points at (D10)
+- [ ] 4.5 Seed `payloadDescriptors` on programs/events and `reportDescriptors` carrying payload type, units, readingType (`wire-contracts`); no value goes out undeclared
+- [ ] 4.6 Run the seed; verify per-VEN visibility for a targeted and an open program
+- [ ] 4.7 Verify target hiding: a VEN sees only its own id in a program's `targets`, never another VEN's (D8 P-4)
 
-- [ ] 7.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, create 3 programs with flat `targets[]`
-- [ ] 7.2 Seed "Summer Peak DR" with `targets: ["ven-1-client", "ven-2-client"]`
-- [ ] 7.3 Seed "EV Managed Charging" with `targets: ["ven-2-client", "ven-3-client"]`
-- [ ] 7.4 Seed "HVAC Optimization" with `targets: []` (open to all)
-- [ ] 7.5 Add idempotency: skip program/event creation if already exists (check by `programName`)
-- [ ] 7.6 Create at least one event per program with valid 3.1 interval and SIMPLE payload
-- [ ] 7.7 Run seed script; validate programs appear correctly via `GET /programs`
-- [ ] 7.8 Validate: `GET /programs` with `ven-1-client` token returns only "Summer Peak DR" and "HVAC Optimization"
-- [ ] 7.9 Validate: `GET /programs` with `ven-3-client` token returns only "EV Managed Charging" and "HVAC Optimization"
+## 5. UIs
 
-## 8. VTN UI — Update for 3.1 wire format
+- [ ] 5.1 `VTN/ui/src/api/hooks.ts`: `targets: string[]`; drop deprecated program fields; report `eventID` not `programID`
+- [ ] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
+- [ ] 5.3 `EventFormDialog.tsx`: flat targets; expose `duration`
+- [ ] 5.4 `Vens.tsx` (clientID column), `Programs.tsx` (flat targets), `Reports.tsx` (eventID)
+- [ ] 5.5 `VEN/ui`: same type updates; `Programs.tsx`, `Reports.tsx`
+- [ ] 5.6 `npm run build` + `npm test` + eslint clean, both UIs
+- [ ] 5.7 Deploy both; smoke-test in browser
 
-- [ ] 8.1 Update TypeScript types in `VTN/ui/src/api/hooks.ts`: `targets: string[]`, remove deprecated program fields, remove `programId` from report type
-- [ ] 8.2 Update `ProgramFormDialog.tsx`: remove fields for `programType`, `country`, `bindingEvents`, `localPrice`, `retailerName`; add `attributes` field
-- [ ] 8.3 Update `Vens.tsx`: show `clientID` column in VEN list
-- [ ] 8.4 Update enrollment display: show flat `targets` string list for programs
-- [ ] 8.5 Update `Reports.tsx`: replace `programId` column with `eventID` column
-- [ ] 8.6 Run `npm run build` in `VTN/ui/`; fix TypeScript errors
-- [ ] 8.7 Run VTN UI unit tests (`npm test`); fix failures
-- [ ] 8.8 Deploy VTN UI on Node1: `docker compose up --build -d ui`
-- [ ] 8.9 Smoke-test in browser: create a program, view VENs with clientID, check reports page
+## 6. Integration tests
 
-## 9. VEN UI — Update for 3.1 wire format
+- [ ] 6.1 Auth steps: scope-based tokens replacing role-based
+- [ ] 6.2 Provisioning steps: self-registration flow; scenario for happy path **and** 409 idempotency
+- [ ] 6.3 Enrollment steps: flat `targets: ["ven-1"]`
+- [ ] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
+- [ ] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
+- [ ] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
+- [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
+- [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
+- [ ] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
 
-- [ ] 9.1 Update TypeScript types in `VEN/ui/src/api/hooks.ts`: `targets: string[]`, remove `programId` from report type
-- [ ] 9.2 Update `Programs.tsx`: display `targets` as flat string list
-- [ ] 9.3 Update `Reports.tsx`: show `eventID` instead of `programId`
-- [ ] 9.4 Update `Simulation.tsx`: adapt to new `GET /sim` response shape from redesigned simulator; remove override controls
-- [ ] 9.5 Run `npm run build` in `VEN/ui/`; fix TypeScript errors
-- [ ] 9.6 Run VEN UI unit tests (`npm test`); fix failures
-- [ ] 9.7 Deploy VEN UI on Node1: `docker compose up --build -d ui`
-- [ ] 9.8 Smoke-test in browser: view programs (enrolled), reports (eventID), simulation page
+## 7. Documentation and close-out
 
-## 10. Integration Tests — Update for 3.1
-
-- [ ] 10.1 Update auth step definitions: replace role-based token acquisition with scope-based (`bl-client`, per-VEN credentials)
-- [ ] 10.2 Update provisioning steps: remove old 4-step VEN provisioning sequence; replace with self-registration flow
-- [ ] 10.3 Update enrollment steps: use flat `targets: ["ven-1-client"]` instead of `{type:"VEN_NAME", values:["ven-1"]}`
-- [ ] 10.4 Update report assertion steps: assert `eventID` present, assert `programId` absent
-- [ ] 10.5 Add scenario: "VEN self-registers against the VTN" (happy path + 409 idempotency)
-- [ ] 10.6 Run full BDD suite on Node1; fix failures
-- [ ] 10.7 Verify all scenarios pass: enrollment, events, reports, privacy filtering
-
-## 11. Documentation
-
-- [ ] 11.1 Update `docs/project_journal.md` with migration steps, decisions, and key issues encountered
-- [ ] 11.2 Update `docs/KEY_LEARNINGS.md` with 3.1-specific learnings (scope model, clientId identity, flat targets)
-- [ ] 11.3 Update memory file `MEMORY.md` with new credential names, VEN provisioning sequence, and port/container table
+- [ ] 7.1 Journal the migration in `docs/history/project_journal.md` (what, why, issues)
+- [ ] 7.2 Key learnings into `docs/reference/KEY_LEARNINGS.md`: the scope alias trap, the `internal-oauth` Dockerfile collision, clientId identity, flat targets
+- [ ] 7.3 Wave mechanism-level facts into `docs/architecture/VTN_ARCHITECTURE.md` and `VEN_ARCHITECTURE.md`; user-observable behaviour into `docs/use-cases/`
+- [ ] 7.4 Close GB-50 (or record what remains) now that descriptors are on the wire
+- [ ] 7.5 Re-decide the fleet-monitor MQTT question against native subscriptions/notifiers (Q3, proposal Non-Goals)
+- [ ] 7.6 Delete this change directory per workflow rule 3; clean up merged checkouts/worktrees on both hosts
