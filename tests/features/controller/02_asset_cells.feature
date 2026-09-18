@@ -11,9 +11,9 @@ Feature: Controller V2 — Asset Cell Content
     And the EV asset cell shows a CO2eq rate value
 
   @ven-ui
-  Scenario: Asset cell mid section shows a NOW reference line
+  Scenario: Asset cell mid section draws a NOW reference line
     Then the EV asset timeline chart is visible
-    And the NOW reference line is visible on the EV timeline chart
+    And the NOW reference line is drawn on the EV timeline chart
 
   @ven-ui
   Scenario: Battery asset cell shows State of Charge
