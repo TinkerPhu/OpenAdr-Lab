@@ -12852,3 +12852,36 @@ the internal field unit; one report object per VEN with intervals appended and t
 event exists; retention 7 days raw / 90 days at 1-min; telemetry stored in the existing Postgres
 under `lab_recorder` rather than a second store (SQLite's single-writer model and InfluxDB's
 extra service both lose to the schema the BFF recorder already writes).
+
+## 2026-09-18 — R-84: one paginated fetch in the BFF, and two harness defects it uncovered
+
+What: `VtnClient::get_all_pages` is the BFF's single paginated-fetch path. The list routes
+(`/api/programs`, `/api/events`, `/api/reports`, `/api/vens`) read through one
+`routes::cached_collection` that uses it — previously four copies of "check cache, fetch, cache"
+each doing a single `get_json`, so openleadr-rs's 50-object page cap silently truncated every
+list. The recorder's own `fetch_all_pages` loop is gone, and its `/vens` snapshot fetch (plain
+`get_json`, unpaginated too) now goes through the shared call. Live report count on Node1 was
+already 40 of 50.
+
+Why it mattered now: the fleet monitor adds a `DEMAND` series per VEN, which would have pushed
+the report list past the cap — invisible data loss with no error anywhere.
+
+Two harness defects surfaced while validating it, neither caused by the change:
+
+1. `provision_ven1.py`/`provision_ven2.py` added a VEN's credentials *before* attaching its VEN
+   role. The VENs are already polling and retry their token every ~2 s, so one could mint a
+   role-less token and cache it for the full 30-day TTL. The VTN filters every collection by the
+   caller's roles, so that VEN then saw `[]` for programs and events — with HTTP 200,
+   `poll success count=0` in its logs, and `vtn_connection: ok` on `/health`. Four scenarios
+   failed that way. Proof was a fresh `ven-1` token seeing 3 programs while the container saw 0.
+   The two near-duplicate scripts are now one `provision_ven.py <venName>` that creates the VEN
+   entity, user and role first and the credentials last.
+2. `_cleanup_all_programs` deleted page 0 and then advanced `skip` by the page size, stepping
+   over the rows that had shifted down: with 54 programs it deleted 50 and left 4. It re-reads
+   page 0 until empty now. The same delete-while-paging shape as the bug being fixed in the BFF,
+   in the test harness — worth noting that the two were found in the same hour, independently.
+
+Key learnings recorded separately: a VEN can be authorized-to-nothing and look healthy (filed as
+GB-49, the VEN-side half — the harness fix only closes the test window); and a Playwright
+`wait_for_selector` on a zero-width SVG line can never pass, which is what the NOW-marker
+scenario had been asserting since the time-marker labels were dropped.
