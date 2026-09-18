@@ -8,6 +8,10 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 - [x] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
 - [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
+- [ ] 0.3a Decide the MQTT posture before deploying (R8): point `MQTT_URL`/`MQTT_USERNAME`/
+      `MQTT_PASSWORD` at the lab's Mosquitto, or leave **all three** unset. A partial set
+      panics, an unreachable broker panics, and upstream's tracked `.env` supplies a default
+      via dotenvy if nothing else does
 - [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
 - [x] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
 - [x] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
@@ -27,7 +31,10 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       not-found via `AppError::NotFound` in `get_as_ven_client`; list filter+strip in the same
       test; business sees all 5 with full targets in `filter_target_get_all_bl_client`;
       empty-targets visible to every VEN via `event_5`
-- [ ] 0.12 Regenerate the sqlx offline cache; `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` all green in the submodule **alone**
+- [x] 0.12a `cargo test -p openleadr-vtn --features live-db-test`: **201 passed, 0 failed**,
+      including all three re-ported active-filter tests and the pagination regression
+- [ ] 0.12b Regenerate the sqlx offline cache (4 queries changed; the Docker build uses
+      `SQLX_OFFLINE=true` and will fail without it), then `cargo fmt` and `cargo clippy` green
 - [ ] 0.13 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
 - [ ] 0.14 Verify `git submodule status` on Node1 and Node2 after pull
 
