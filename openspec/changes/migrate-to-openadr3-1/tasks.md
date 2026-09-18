@@ -74,8 +74,9 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [ ] 3.1 Adopt `openleadr-wire` in the VEN (D12), **incrementally, events first**. Measured
       2026-09-18: 14 files reference `vtn_port`, with ~184 field-access sites, so this is
       sequenced rather than done in one pass:
-      - [ ] 3.1a Add `openleadr-wire` as a path dependency with **default features** (no sqlx,
-            verified: the crate builds with sqlx compiled zero times)
+      - [ ] 3.1a Add `openleadr-wire` as a **git** dependency on the fork branch with default
+            features (D13 — a path dependency is unreachable from the VEN's `VEN/`-scoped Docker
+            build context; sqlx verified to compile zero times under default features)
       - [ ] 3.1b Swap the event types first — `OadrEvent`/`OadrInterval`/`OadrIntervalPeriod`/
             `OadrPayload` → wire `Event`/`EventInterval`/`IntervalPeriod`/`EventValuesMap`. This is
             where most of the 184 sites are and where the churn is mechanical but wide: fields move
