@@ -453,9 +453,16 @@ without a database stack and without touching its Docker build context.
 surface conflicts well beyond the 3.1 schema. Mitigation: phase 0 rebases and builds the
 submodule *alone*, green, before any lab code changes.
 
-**R2: Long rebuild after the rebase**
-→ New migrations and a changed Cargo.lock mean a full rebuild (~25 min). Mitigation: prefer
-Node2 (`DOCKER_HOST=Node2`), hold the host lock for the whole sequence, run detached.
+**R2: Long rebuild after the rebase, and a heavier one than before**
+→ New migrations and a changed Cargo.lock mean a full rebuild. 3.1 also makes `paho-mqtt-sys` a
+hard dependency of `openleadr-vtn`, which compiles the bundled Paho C library with SSL through
+cmake — so the VTN build now needs `cmake`, `g++` and `make` present, and takes noticeably
+longer than the 3.0 build did. Upstream's Dockerfile already installs them, which is one more
+reason D7 takes upstream's toolchain line rather than our old `openssl-libs-static` one.
+Confirmed the hard way on 2026-09-18: a test container without cmake fails at
+`paho-mqtt-sys v0.10.3` with "is `cmake` not installed?", ~200 crates into the build.
+Mitigation: prefer Node2 (`DOCKER_HOST=Node2`), hold the host lock for the whole sequence, run
+detached, and expect the first build after the rebase to be slow even with the cargo-chef cache.
 
 **R3: Silent loss of the `active` filter**
 → The highest-consequence regression risk in this change (D8). Mitigation: re-port with the
