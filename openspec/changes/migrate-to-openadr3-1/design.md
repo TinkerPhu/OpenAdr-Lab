@@ -355,6 +355,31 @@ conclusion about quantities and units survives the migration unchanged.
 18 `VEN_NAME` references. Node2 has its own docker host lock and its own checkout; a migration
 plan that doesn't mention it leaves 17 VENs on a schema the VTN no longer serves.
 
+### D12: The VEN adopts `openleadr-wire` types
+
+**Decision**: The VEN depends on the submodule's `openleadr-wire` crate instead of its
+hand-rolled DTOs in `VEN/src/controller/vtn_port.rs`.
+
+**Rationale**: D9 requires one authority for event interval timing, but `ends_at()` lives in
+`openleadr-wire` (VTN side) while the VEN parses its own minimal structs — two processes, so
+"one function" cannot hold literally while the DTOs stay hand-rolled. Adopting the wire crate
+makes it literal, and it is also what `wire-contracts` needs: `payloadDescriptors` and
+`reportDescriptors` are invisible to the current DTOs, so the VEN cannot read the contract that
+accompanies a value (GB-50). `vtn_port.rs`'s own header already anticipates this — it says the
+minimal surface exists because "OpenADR 3.1 introduces breaking field/type name changes".
+
+**Feasibility gate**: `openleadr-wire` carries `sqlx::Type` derives (`Target`, `ClientId`,
+`VenId`). Before committing to this, verify they are feature-gated and that depending on the
+crate does not pull `sqlx` into the VEN build. If they leak, fall back to hand-rolled DTOs with
+the timing rule mirrored and pinned by a **shared test-vector fixture**, so the two copies
+cannot drift silently — and record the exception in `TECHNICAL_DEBTS.md`.
+
+**Layering**: `openleadr-wire` is an external protocol crate, so it enters at the infra/adapter
+ring (`vtn.rs`, `controller/vtn_port.rs`), not in `entities/`. The `ven-architecture` dependency
+rule still applies.
+
+---
+
 ## Risks / Trade-offs
 
 **R1: Six months of upstream drift, not one branch switch**
