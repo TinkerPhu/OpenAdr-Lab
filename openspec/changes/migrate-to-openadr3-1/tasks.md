@@ -30,6 +30,9 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 - [ ] 1.1 Write fixture SQL for the scope model: `bl-client` with `read_all write_programs write_events write_vens_bl write_reports_bl write_users` — **every scope spelled out, no aliases** (D2)
 - [ ] 1.2 Write VEN fixtures for **ven-1 … ven-20** with `read_targets read_ven_objects write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
 - [ ] 1.3 Update `VTN/docker-compose.yml` to mount the new fixtures
+- [ ] 1.3a **Back up the VTN database before anything destructive** — `pg_dump` of `vtn-db-1`
+      (including the `lab_recorder` schema) to a file outside the repo, verified non-empty and
+      restorable. This is a hard gate: no wipe happens until the dump exists.
 - [ ] 1.4 Deploy VTN (⚠️ wipes DB); confirm migrations `20260213100612_openadr_3.1.sql` onward applied
 - [ ] 1.5 **Smoke (D7)**: `POST /auth/token` with `bl-client` returns 200. If this 404s, the build lost `internal-oauth` — stop and fix 0.2
 - [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts
