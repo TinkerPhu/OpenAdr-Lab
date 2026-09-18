@@ -299,10 +299,22 @@ does interval *i* of this event run" already had seven parsers with four rules o
 GB-48, the canonical `one-concept-one-function` failure in this project. Adding a second
 legitimate shape (duration-only) to seven adapted copies would recreate it exactly.
 
-**Inventory of where this concept lives today** (to be consolidated, not extended):
-`VEN/src/controller/openadr_interface.rs` (`extract_report_obligations`, event payload
-extraction), `VEN/src/controller/report_intervals.rs`, and the event-window logic the VTN's
-re-ported `active` filter uses (D8). One function answers the question; the rest call it.
+**Inventory of where this concept lives today** — checked against the code, and the earlier
+revision of this inventory (including the one in the first draft of this design) was wrong:
+
+| module | role | action |
+|---|---|---|
+| `VEN/src/controller/event_timing.rs` | **already the single authority** (`timed_intervals`, `OPEN_START`, `OPEN_END`); its docstring states it is "the one answer every event parser uses" | **extend** for 3.1 |
+| `VEN/src/controller/openadr_interface.rs` | caller | no timing logic to move |
+| `VEN/src/controller/rate_schedule.rs` | caller | unchanged |
+| `VEN/src/controller/reporter.rs` | caller | unchanged |
+| `VEN/src/controller/report_intervals.rs` | builds **outgoing report** intervals — a different concept | **leave alone** |
+| `openleadr_wire::event::EventRequest::ends_at()` | the VTN-side answer, shared once the VEN adopts the wire types (D12) | already done (D8, P-1) |
+
+So GB-48 is already fixed: there is one authority, and three callers use it. This change does
+**not** consolidate scattered copies — it extends the existing authority for two new 3.1 shapes
+(a top-level `duration`, and `intervals` becoming optional). Treating `report_intervals.rs` as a
+copy to merge, as the previous task list did, would have folded together two unrelated concepts.
 
 Under `wire-contracts`, the duration-only case is read from what the event declares — never
 defaulted silently. If we cannot place an interval, that is surfaced, not guessed.

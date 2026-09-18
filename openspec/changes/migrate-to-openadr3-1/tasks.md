@@ -66,8 +66,12 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 Simulator untouched (D5). `POST /sim/override` stays.
 
 - [ ] 3.1 `controller/vtn_port.rs`: `targets: Vec<String>`; `OadrReportBody` drops `programID`, `eventID` becomes **required** (R7); add `clientID` where the VTN returns it
-- [ ] 3.2 `controller/openadr_interface.rs`: consolidate interval timing into the single authority (D9) — handle top-level `duration` and absent `intervals`; surface, never silently default (`wire-contracts`)
-- [ ] 3.3 Inventory and delete the other copies of that rule (`controller/report_intervals.rs` and any parser found by grep); every caller calls the one function
+- [ ] 3.2 `controller/event_timing.rs` (the existing authority): extend `timed_intervals` for
+      3.1 — top-level `duration` and absent `intervals`; surface, never silently default
+      (`wire-contracts`). Align its event-level end with `EventRequest::ends_at()` (D9)
+- [ ] 3.3 Confirm the three callers (`openadr_interface.rs`, `rate_schedule.rs`, `reporter.rs`)
+      still go through it, and that no new copy appeared. `report_intervals.rs` builds outgoing
+      report intervals and is a different concept — leave it alone (D9)
 - [ ] 3.4 `vtn.rs`: `POST /vens` self-registration on startup with `VenVenRequest`; treat 409 as already-registered, log INFO (R4)
 - [ ] 3.5 `controller/reporter.rs`: set `eventID` from the triggering event; drop `programID`
 - [ ] 3.6 Declare `reportIntervals` on every report descriptor we emit — answer Q4 rather than inheriting the default (`wire-contracts`)
