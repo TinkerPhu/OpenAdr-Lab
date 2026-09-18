@@ -5,6 +5,9 @@ from features.helpers.api_client import ven_get, ven_post
 from features.helpers.ui import tid
 from features.helpers.wait import poll_until
 
+# VEN UI COLOR_NOW (VEN/ui/src/components/controller/types.ts) — the NOW marker's stroke.
+COLOR_NOW = "#f44336"
+
 
 # ── Given ─────────────────────────────────────────────────────────────────────
 
@@ -129,17 +132,34 @@ def step_ev_timeline_visible(context):
     assert el is not None and el.is_visible(), "asset-timeline-chart-ev not visible"
 
 
-@then("the NOW reference line is visible on the EV timeline chart")
-def step_now_line_visible(context):
-    # recharts ReferenceLine renders as a <line> inside the chart SVG
+@then("the NOW reference line is drawn on the EV timeline chart")
+def step_now_line_drawn(context):
     chart = context.browser_page.wait_for_selector(
         tid("asset-timeline-chart-ev"), timeout=45000
     )
     assert chart is not None, "asset-timeline-chart-ev not found"
-    # Wait for the recharts reference line element (has class recharts-reference-line).
-    # Uses wait_for_selector (not query_selector) to account for async recharts rendering.
-    ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=45000)
+    # The marker is a bare vertical <line> — `renderTimeMarkerLine`
+    # (VEN/ui/src/components/charts/NowLine.tsx) is deliberately text-free, so the
+    # `<g class="recharts-reference-line">` has a zero-width bounding box and
+    # Playwright's default "visible" state can never match it. Wait for it to be
+    # attached instead, and assert what actually identifies the marker: the NOW
+    # colour, and a vertical line with real extent across the plot.
+    ref_line = chart.wait_for_selector(
+        ".recharts-reference-line line", state="attached", timeout=45000
+    )
     assert ref_line is not None, "No recharts-reference-line found inside asset-timeline-chart-ev"
+
+    stroke = (ref_line.get_attribute("stroke") or "").lower()
+    assert stroke == COLOR_NOW, (
+        f"reference line stroke is {stroke!r}, expected the NOW colour {COLOR_NOW!r}"
+    )
+
+    x1, x2 = ref_line.get_attribute("x1"), ref_line.get_attribute("x2")
+    y1, y2 = ref_line.get_attribute("y1"), ref_line.get_attribute("y2")
+    assert x1 == x2, f"NOW marker is not vertical: x1={x1}, x2={x2}"
+    assert abs(float(y2) - float(y1)) > 1.0, (
+        f"NOW marker has no height on the plot: y1={y1}, y2={y2}"
+    )
 
 
 @then("the battery asset cell shows a SoC value")
