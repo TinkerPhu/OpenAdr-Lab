@@ -8,7 +8,7 @@ user is provisioned via fixture SQL.
 
 #### Scenario: Seed creates three VEN users
 - **WHEN** the seed script is run
-- **THEN** users `ven-1-client`, `ven-2-client`, `ven-3-client` exist in the VTN
+- **THEN** users `ven-1`, `ven-2`, `ven-3` exist in the VTN
 - **AND** each can authenticate and obtain a token
 
 ### Requirement: Seed script creates programs with flat clientId targets
@@ -17,7 +17,7 @@ open (empty targets). Targets SHALL be flat string arrays of clientIds.
 
 #### Scenario: Restricted program has correct targets
 - **WHEN** the seed script runs
-- **THEN** "Summer Peak DR" exists with `targets: ["ven-1-client", "ven-2-client"]`
+- **THEN** "Summer Peak DR" exists with `targets: ["ven-1", "ven-2"]`
 
 #### Scenario: Open program has empty targets
 - **WHEN** the seed script runs
