@@ -410,6 +410,36 @@ rule still applies.
 
 ---
 
+### D13: The VEN takes `openleadr-wire` as a git dependency, not a path dependency
+
+**Decision**: `openleadr-wire = { git = "https://github.com/TinkerPhu/openleadr-rs", branch = "rebase/openadr3_1" }`
+in `VEN/Cargo.toml`, with `Cargo.lock` pinning the exact commit.
+
+**Rationale — the obvious approach does not build.** D12 has the VEN depend on the submodule's
+wire crate, and the natural spelling is a path dependency
+(`path = "../openleadr-rs/openleadr-wire"`). That cannot work in the container: the VEN's Docker
+build context is `VEN/` (`context: .` in `VEN/docker-compose.yml`), and the submodule lives at
+the repository root, **outside** it. `VEN/Dockerfile` copies only `Cargo.toml`, `Cargo.lock`,
+`src/` and `profiles/`, so a path outside `VEN/` is unreachable at build time.
+
+**Alternatives considered**:
+
+| option | verdict |
+|---|---|
+| Move the build context to the repo root | Works, but pushes an 861 MB context (and a new `.dockerignore` regime) through 20 VEN service builds across two hosts, and edits three compose files. Real cost, no benefit over a git dep. |
+| Depend on crates.io `openleadr-wire` | Not viable: the published 0.2.6 still pulls `sqlx` unconditionally — that is exactly what P-5 fixes. Available only once P-5 is upstream and released. |
+| Vendor the crate into `VEN/` | A copy that silently drifts from the submodule. Rejected. |
+| **Git dependency on our fork** | **Chosen.** Cargo already fetches dependencies over the network in the dependency-cache layer, so nothing about the Dockerfile changes; `Cargo.lock` pins the commit, so builds stay reproducible. |
+
+**Consequence to accept**: a wire-crate change now needs a push plus `cargo update -p
+openleadr-wire` in the VEN, rather than being picked up from the working tree. That is a mild
+cost and arguably better hygiene — the VEN builds against a committed, pinned revision rather
+than whatever the submodule happens to be checked out at.
+
+**Switch to crates.io** once P-5 is upstreamed and released, and drop the git dependency then.
+
+---
+
 ## Risks / Trade-offs
 
 **R1: Six months of upstream drift, not one branch switch**
