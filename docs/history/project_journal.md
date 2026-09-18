@@ -12845,3 +12845,10 @@ report latency is ~6 min. Filed R-84 (BFF list routes return one 50-item page wh
 recorder paginates on its own — live report count is already 40) and R-85 (two measurement-
 report builders).
 
+Decisions taken the next day (phase 0 §9): telemetry every 5 s; `DEMAND` in kW with W staying
+the internal field unit; one report object per VEN with intervals appended and trimmed to 24 h;
+`USAGE`-as-power left alone for now (so the fleet series is `DEMAND`, and the unit fix moves to
+`docs/BACKLOG_OpenADR_Cert.md` §6); the timer report path deleted once the standing monitoring
+event exists; retention 7 days raw / 90 days at 1-min; telemetry stored in the existing Postgres
+under `lab_recorder` rather than a second store (SQLite's single-writer model and InfluxDB's
+extra service both lose to the schema the BFF recorder already writes).

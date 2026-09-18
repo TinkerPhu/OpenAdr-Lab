@@ -9,7 +9,7 @@ fixes, the MQTT telemetry side channel, BFF ingest/storage/stream, and seeding. 
 BFF endpoint and each one has at least a raw diagnostic surface (see "UI surface in phase 0"
 below — required by `ui-transparency`).
 
-Status: concept — not yet broken into tasks; open decisions are listed in §9.
+Status: concept — not yet broken into tasks; the decisions taken so far are recorded in §9.
 
 ---
 
@@ -143,15 +143,27 @@ programs; it is additive for events, so the standing event needs a name-based lo
 
 Carried by the standing `fleet-telemetry` event. All values signed where the physics is signed.
 
-| payloadType | readingType | Content | Interval | Needed by |
-|---|---|---|---|---|
-| `DEMAND` | `MEAN` | net site grid power, **signed** (import +, export −) | 60 s | §2 report series |
-| `USAGE` | `DIRECT_READ` | net site energy per interval (kWh, signed) | 15 min | M&V, `kpi.py` |
-| `OPERATING_STATE` | — | freshness-derived state (companion payload, as today) | with each | §2 health |
-| `USAGE_FORECAST` | `FORECAST` | planned net power per plan slot (`historical: false`) | on replan / 15 min | later views (§4 flexibility, portfolio) — not required for 1/2/5 |
+| payloadType | readingType | Content | Unit | Interval | Needed by |
+|---|---|---|---|---|---|
+| `DEMAND` | `MEAN` | net site grid power, **signed** (import +, export −) | kW (D-2) | 60 s | §2 report series |
+| `OPERATING_STATE` | — | freshness-derived state (companion payload, as today) | — | with each | §2 health |
+| `USAGE_FORECAST` | `FORECAST` | planned net power per plan slot (`historical: false`) | kW | on replan / 15 min | later views (§4 flexibility, portfolio) — not required for 1/2/5 |
 
-The per-event report requests that experiments already use (`USAGE` + `BASELINE` on `exp-*`)
-keep working, with the corrected unit semantics.
+`DEMAND` in kW is the one conversion point: the VEN's own field stays `net_power_w` (W)
+everywhere inside, MQTT telemetry publishes that field unchanged, and kW appears only at the
+OpenADR boundary, declared in the program's `payloadDescriptors`.
+
+The per-event report requests experiments already use (`USAGE` + `BASELINE` on `exp-*`) keep
+working **unchanged**, including `USAGE`-as-mean-power-in-W (D-4): `experiments/kpi.py` and the
+reporter BDD steps are not migrated here. That leaves `USAGE` with a non-spec meaning for those
+events — recorded in `docs/BACKLOG_OpenADR_Cert.md` §6 as its own later change, and the reason
+the fleet series is `DEMAND` rather than `USAGE`.
+
+**One report object per VEN (D-3).** Each (VEN, event, payloadType) keeps its stable
+`reportName` and report id; new intervals are appended by `PUT` on that id. Consequences to
+build in: cache the id after the first create (F-6, removes the 409 + lookup), trim the
+intervals array to a bounded window (24 h) so the object cannot grow without limit, and keep the
+recorder's appended-interval lag measurement (GB-36), which already assumes exactly this shape.
 
 **Descriptor semantics (fixes F-4, F-5).** Follow the spec: the report interval length comes
 from the event's interval grid; `frequency` counts intervals between submissions; `numIntervals`
@@ -223,7 +235,7 @@ receive time) so sub-minute latencies can be judged against it.
 | **Paginated VTN client** | one `get_all_pages` used by the list routes **and** the recorder (F-1, R-84) |
 | **Fleet MQTT ingest** | subscribe `openadr-lab/fleet/+/#`; update in-memory latest state per VEN; persist telemetry and trace rows |
 | **Recorder (existing)** | unchanged role; stores reports/events; after F-5, stores appended intervals rather than full snapshots |
-| **Fleet store** | Postgres schema `lab_recorder`: `fleet_telemetry(ven_name, ts, net_power_w, payload_json)`, `fleet_trace(ven_name, ts, type, event_id, payload_json)`; retention job (e.g. raw 7 days, 1-min rollup 90 days) |
+| **Fleet store** | Existing Postgres, schema `lab_recorder` (D-7): `fleet_telemetry(ven_name, ts, net_power_w, payload_json)`, `fleet_trace(ven_name, ts, type, event_id, payload_json)`; batched inserts; retention job (raw 7 days, 1-min rollup 90 days) |
 | **Fleet query API** | `GET /api/fleet/power?from&to&step&source=live\|report` — per-VEN series and fleet sum, aligned with the shared `resample_uniform`; `GET /api/fleet/signals?from&to` — events resolved to per-VEN bands with the shared interval-timing rule; `GET /api/fleet/reactions?eventID=` — the §6.3 chain |
 | **Fleet stream** | `GET /api/fleet/stream` (SSE): telemetry, status, trace and VTN-object changes as they arrive |
 
@@ -263,16 +275,44 @@ shows its own fleet-publisher status (connected / last publish).
 
 ---
 
-## 9. Open decisions
+## 9. Decisions
 
-| # | Question | Leaning |
+| # | Question | Decision |
 |---|---|---|
-| D-1 | Telemetry cadence: 1 s (tick), 5 s, or configurable per VEN? | 5 s default, configurable; the chart doesn't need 1 s and 20 VENs × 1 s × retention adds up |
-| D-2 | `DEMAND` unit: `KW` or `W`? | `W` — matches current report values and `grid.net_power_w`, least conversion |
-| D-3 | Report accumulation: append intervals to one report per (VEN, event, type), or one report object per window? | one report per window — keeps each object small and makes openleadr-rs's lack of "modified since" cheap to work around (new ids only) |
-| D-4 | Changing `USAGE` from W to kWh breaks `experiments/kpi.py` and two BDD step files — migrate in the same change or keep `USAGE`-as-W for `exp-*` events? | migrate in the same change (no two meanings for one payload type) |
-| D-5 | Is the timer path (events without descriptors) still needed once a standing monitoring event exists? | remove it; the monitoring event covers "always report", and it resolves F-9 by deletion |
-| D-6 | Retention periods for raw telemetry and rollups | raw 7 d, 1-min rollup 90 d |
+| D-1 | Telemetry cadence | 5 s default, configurable per VEN via profile/env |
+| D-2 | `DEMAND` unit | **kW**, declared in `payloadDescriptors`; W stays the internal field unit (§5) |
+| D-3 | Report accumulation | **one report object per VEN** per (event, payloadType): stable id, intervals appended by `PUT`, trimmed to a 24 h window (§5) |
+| D-4 | Migrate `USAGE` to energy in this phase | **No** — `exp-*` reports and `experiments/kpi.py` stay as they are; the unit fix is its own change (`docs/BACKLOG_OpenADR_Cert.md` §6) |
+| D-5 | Keep the timer report path | **No** — deleted once the standing monitoring event exists (resolves R-85 / F-9) |
+| D-6 | Retention | raw telemetry 7 days, 1-min rollup 90 days |
+| D-7 | Where telemetry is stored | **The existing Postgres instance** (`vtn-db-1`), schema `lab_recorder` — see below |
+
+### D-7: Postgres, not a second database
+
+The VTN's own store is Postgres 16 (`vtn-db-1`, currently 1.4 GB; Node1 has ~569 GB free), and
+the BFF already writes reports/events/VEN snapshots into the `lab_recorder` schema of that same
+instance with `sqlx`. Fleet telemetry joins it as two more tables in that schema.
+
+- **No new service, no new dependency.** A second store (SQLite file or an InfluxDB instance)
+  adds a deployment unit, a second backup story and a second query language for data one
+  service already writes.
+- **Correct writer model.** The BFF's ingest task and the recorder write concurrently; SQLite's
+  single-writer locking is the wrong fit, and a SQLite file inside a container needs its own
+  volume and retention tooling.
+- **Retention is SQL.** The 7 d / 90 d policy (D-6) is a scheduled `DELETE` plus a rollup
+  `INSERT … SELECT`; monthly partitions can be added later if deletes get expensive.
+- **Volume fits.** 20 VENs × one sample per 5 s ≈ 350 k rows/day; with the payload JSON roughly
+  50–100 MB/day raw, so ~0.5 GB at 7 days' retention, and the 1-min rollup is ~1/12 of that.
+- **Isolation.** Separate schema, never openleadr-rs's own tables (unchanged recorder rule).
+  Writes are batched (one multi-row insert per second, not one per message) so telemetry ingest
+  does not compete with the live VTN for IO on the Pi.
+- **Escape hatch.** If IO on Node1 ever becomes the constraint, the `lab_recorder` schema can
+  move to its own Postgres container without touching the query API, since nothing joins across
+  the two schemas.
+
+Rejected: InfluxDB (reachable on Node1's `influxdb_network`) — better suited to this data shape,
+but it would split the monitor's storage across two systems for a volume Postgres handles
+comfortably.
 
 ---
 
@@ -281,8 +321,9 @@ shows its own fleet-publisher status (connected / last publish).
 Each step is test-first and leaves the stack deployable.
 
 1. **R-84** BFF pagination consolidation (unblocks correct report/event lists).
-2. **Report fixes** F-2, F-3, F-6, F-7, F-9 (+ D-4/D-5), with `kpi.py` and BDD steps migrated.
-3. **Descriptor semantics** F-4, F-5 (+ D-3).
+2. **Report fixes** F-3 (signed values), F-6 (cached report id), F-7 (no history copy when
+   nothing is due), F-9/D-5 (delete the timer path). `USAGE` semantics stay put (D-4).
+3. **Descriptor semantics and accumulation** F-4, F-5, D-3 (append + 24 h trim).
 4. **Shared crate** extraction (D-06).
 5. **Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5).
 6. **Broker + compose environment** (§8.1–8.3).
