@@ -89,6 +89,35 @@ holds an unexpired wsl_lock.
 
 dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR spec names) across all layers — backend, BFF, UI. one vocabulary everywhere reduces boilerplate and debugging friction.
 
+wire-contracts: an optional field in an external protocol is mandatory in this project. Every
+message we emit declares what its values mean; every message we accept is interpreted from what it
+says, never from an assumption in the reader. The failure this prevents is a number on the wire
+whose quantity, unit or sign lives only in the sender's head — GB-50: the VEN reads capacity limits
+as kW and writes power as W, no `payloadDescriptors` exist anywhere, and `experiments/kpi.py`
+carries a `* duration` compensation for a payload type the spec defines as energy.
+  - Emit strictly. Never send a value whose quantity, unit, sign convention and reading type are
+    not declared on the wire (OpenADR: program/event `payloadDescriptors`, `reportDescriptors`,
+    report `payloadDescriptors`). "The spec marks it optional" is not a reason to omit it; it is
+    the reason this rule exists.
+  - Accept explicitly. Read the declaration that accompanies a value. A conformant peer may
+    legitimately omit it — then apply the documented profile default *and surface that you did*.
+    A silent assumption is a bug, not a default. Strict in what we send, explicit about what we
+    assume — never reject a peer for omitting what the spec lets it omit.
+  - A request is a guarantee. What a peer asks for (units, readingType, cadence, interval grid) is
+    what we send. If we cannot meet it, fail visibly — never substitute silently.
+  - Protocol fields first. Express the contract in the protocol's own fields. Only what the
+    protocol cannot express goes into a namespaced, versioned extension, and only additively: a
+    spec-only consumer must still be correct without it. Never overload a field peers already
+    interpret (e.g. a private `units` string) — that corrupts the value it describes.
+  - One copy, machine-readable. The contract lives on the wire (seeded descriptors) plus a
+    published profile document the objects themselves point at. Code holds no second copy of that
+    truth — only the seed that writes it and the named fallback that fills a gap.
+  - Make it structural. A constructor that cannot build an undeclared payload, one validator at the
+    boundary, and a test that fails when an object goes out without its contract. A rule that
+    depends on remembering has already failed.
+  Our profile is stricter than the spec, never a variant of it: keep that line explicit so lab
+  convention is never mistaken for protocol behaviour.
+
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
 2. write key learnings into KEY_LEARNINGS.md (at docs/reference/KEY_LEARNINGS.md) and consider them when making decissions.
 3. no lingering old plans or plan items after implementation. The entire openspec/ folder is
