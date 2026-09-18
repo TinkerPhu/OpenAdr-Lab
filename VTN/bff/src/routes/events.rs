@@ -4,7 +4,6 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use std::time::Duration;
 
 use crate::error::AppError;
 use crate::routes::request_id;
@@ -26,24 +25,21 @@ pub async fn get_events(
         None => "events",
     };
 
-    if let Some(cached) = ctx.cache.get(cache_key).await {
-        return Ok(Json(cached));
-    }
-
     let path = match query.active {
         Some(val) => format!("/events?active={val}"),
         None => "/events".to_string(),
     };
 
     let rid = request_id(&headers);
-    let data = ctx.business.get_json(&path, rid.as_deref()).await?;
-    ctx.cache
-        .set(
-            cache_key.into(),
-            data.clone(),
-            Duration::from_secs(ctx.config.cache_ttl_events),
-        )
-        .await;
+    let data = crate::routes::cached_collection(
+        &ctx.business,
+        &ctx,
+        cache_key,
+        &path,
+        ctx.config.cache_ttl_events,
+        rid.as_deref(),
+    )
+    .await?;
     Ok(Json(data))
 }
 

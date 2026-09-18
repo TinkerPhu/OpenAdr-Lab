@@ -17,3 +17,11 @@ Feature: BFF Program CRUD
     When I delete the program via BFF
     Then the response status is 200
     And the program no longer appears in the BFF program list
+
+  # R-84: the VTN caps every list page at 50 objects, so an operator must still
+  # see every program once the fleet's programs cross that page boundary.
+  Scenario: The program list is not truncated at the VTN page size
+    Given 51 programs exist via BFF named "bff-page-test"
+    When I list programs via BFF
+    Then the response status is 200
+    And all 51 "bff-page-test" programs appear in the response
