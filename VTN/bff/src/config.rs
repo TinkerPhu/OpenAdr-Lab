@@ -25,8 +25,7 @@ impl Config {
             std::env::var("BFF_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
         let vtn_base_url = std::env::var("VTN_BASE_URL").context("VTN_BASE_URL missing")?;
 
-        let bl_client_id =
-            std::env::var("VTN_BL_CLIENT_ID").context("VTN_BL_CLIENT_ID missing")?;
+        let bl_client_id = std::env::var("VTN_BL_CLIENT_ID").context("VTN_BL_CLIENT_ID missing")?;
         let bl_client_secret =
             std::env::var("VTN_BL_CLIENT_SECRET").context("VTN_BL_CLIENT_SECRET missing")?;
 
