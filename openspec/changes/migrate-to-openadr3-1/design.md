@@ -438,6 +438,12 @@ than whatever the submodule happens to be checked out at.
 
 **Switch to crates.io** once P-5 is upstreamed and released, and drop the git dependency then.
 
+**Verified 2026-09-18** in a throwaway crate carrying nothing but this dependency: it resolves,
+pins commit `d86b23fc`, and `EventRequest::ends_at()` is callable from outside the workspace. Its
+`Cargo.lock` has **139** dependencies and **zero** occurrences of `sqlx` — no Postgres driver, no
+rustls, no tokio. That is P-5, D12 and D13 confirmed together: the VEN can take the wire types
+without a database stack and without touching its Docker build context.
+
 ---
 
 ## Risks / Trade-offs
