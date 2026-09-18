@@ -6,30 +6,43 @@ writes its failing test before its implementation. Prefer Node2 for builds and t
 
 Nothing below phase 0 can be verified until the VTN boots with a token endpoint (D7).
 
-- [ ] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
-- [ ] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
+- [x] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
+- [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
 - [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
-- [ ] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
-- [ ] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
+- [x] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
+- [x] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
       (D9): max over the event-level `intervalPeriod.duration`, the new top-level `duration` and
       the per-interval ends; undeterminable counts as unbounded and wins. Port all 6 unit tests
       first and watch them fail — each must pass unchanged under the new rule
-- [ ] 0.6 Add tests for the cases 3.0 could not express: intervals outlasting `duration`,
+- [x] 0.6 Add tests for the cases 3.0 could not express: intervals outlasting `duration`,
       `duration` outlasting intervals, and the intentional loss of the event-level short-circuit
-- [ ] 0.7 Port **P-1** `event.ends_at` migration + index + backfill onto the 3.1 schema
-- [ ] 0.8 Port **P-1** SQL-side active filtering into 3.1's `retrieve_all_{with,without}_client_id`, keeping the filter **inside** the query that does `OFFSET/LIMIT` (the original bug), and `ends_at` in sync on insert/update
-- [ ] 0.9 Port **P-1**'s 3 sqlx tests, including `active_filter_combined_with_pagination` (the regression test)
-- [ ] 0.10 Retire **P-4**: drop `strip_ven_name_targets` and the VEN_NAME reconstruction; 3.1 does target hiding natively (D8)
-- [ ] 0.11 Port **P-4**'s 5 privacy tests to clientId targets; confirm they pass against upstream's native implementation, unmodified in intent
+- [x] 0.7 Port **P-1** `event.ends_at` migration + index + backfill onto the 3.1 schema
+- [x] 0.8 Port **P-1** SQL-side active filtering into 3.1's `retrieve_all_{with,without}_client_id`, keeping the filter **inside** the query that does `OFFSET/LIMIT` (the original bug), and `ends_at` in sync on insert/update
+- [x] 0.9 Port **P-1**'s 3 sqlx tests, including `active_filter_combined_with_pagination` (the regression test)
+- [x] 0.10 Retire **P-4** — nothing to drop: branching from `upstream/main` means the lab's
+      `strip_ven_name_targets` and VEN_NAME reconstruction simply never existed here
+- [x] 0.11 **P-4 tests: verified, no port needed.** Upstream's own suite already covers all five
+      properties, and porting ours would have duplicated them: redaction via
+      `without_targets(event_4(), ["target-1"])` in `filter_target_get_all_ven_client`;
+      not-found via `AppError::NotFound` in `get_as_ven_client`; list filter+strip in the same
+      test; business sees all 5 with full targets in `filter_target_get_all_bl_client`;
+      empty-targets visible to every VEN via `event_5`
 - [ ] 0.12 Regenerate the sqlx offline cache; `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` all green in the submodule **alone**
 - [ ] 0.13 Push `rebase/openadr3_1`; update the lab submodule pointer; commit
 - [ ] 0.14 Verify `git submodule status` on Node1 and Node2 after pull
 
 ## 1. VTN core — fixtures, deploy, smoke
 
-- [ ] 1.1 Write fixture SQL for the scope model: `bl-client` with `read_all write_programs write_events write_vens_bl write_reports_bl write_users` — **every scope spelled out, no aliases** (D2)
-- [ ] 1.2 Write VEN fixtures for **ven-1 … ven-20** with `read_targets read_ven_objects write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
+- [x] 1.1 Write fixture SQL for the scope model — `VTN/fixtures/01_bl_client.sql`, every scope
+      spelled out, no aliases (D2). Upstream's own `fixtures/users.sql` independently confirms
+      the reading: their `bl-client` also uses `write_vens_bl`, not the alias
+- [ ] 1.2 Create the **ven-1 … ven-20** users via `POST /users` + `POST /users/{id}` from the
+      seed script rather than fixture SQL, so the VTN hashes each secret itself and no argon2
+      hash is hand-maintained (answers 4.3). Scopes `read_targets read_ven_objects
+      write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
 - [ ] 1.3 Update `VTN/docker-compose.yml` to mount the new fixtures
+- [ ] 1.3b Drop **only** the `public` schema on `vtn-db-1`; leave `lab_recorder` intact (D1
+      scope correction — 1.33M telemetry rows live there and no OpenADR migration touches them)
 - [ ] 1.3a **Back up the VTN database before anything destructive** — `pg_dump` of `vtn-db-1`
       (including the `lab_recorder` schema) to a file outside the repo, verified non-empty and
       restorable. This is a hard gate: no wipe happens until the dump exists.
@@ -66,7 +79,9 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 - [ ] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`
 - [ ] 4.2 Update `tests/provision_ven.py` for scopes, keeping credentials-last ordering (GB-49)
-- [ ] 4.3 Decide fixture SQL vs `POST /users` now that Q1 is answered, and record which
+- [x] 4.3 **Decided: API, with a one-user SQL bootstrap.** Only `bl-client` can live in SQL
+      (nothing can call `/users` without a token), so it is the single fixture; every VEN user
+      is created through the API. Requires the `internal-oauth` build (D7)
 - [ ] 4.4 Define the GB-50 profile pointer as a namespaced, versioned private `attributes` entry on the program, plus the published profile document it points at (D10)
 - [ ] 4.5 Seed `payloadDescriptors` on programs/events and `reportDescriptors` carrying payload type, units, readingType (`wire-contracts`); no value goes out undeclared
 - [ ] 4.6 Run the seed; verify per-VEN visibility for a targeted and an open program

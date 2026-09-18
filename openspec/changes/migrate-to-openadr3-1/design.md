@@ -41,6 +41,24 @@ A fresh seed reaches a known-good 3.1 state in minutes.
 
 **Alternative considered**: A transform script. Rejected — high risk, no lab value.
 
+**Scope correction — `lab_recorder` is NOT wiped.** "Wipe the database" was written before
+anyone counted what is in it. The live `vtn-db-1` is **1.4 GB**, and the bulk of it is the
+lab's own recorder schema, not OpenADR objects:
+
+| schema | contents |
+|---|---|
+| `public` | openleadr's tables — 6 programs, 12 events, 21 reports, 25 VENs |
+| `lab_recorder` | **1,337,302** `reports_received` rows, 301 `events_published`, 26 `ven_snapshots` |
+
+`lab_recorder` is ours. No OpenADR migration touches it, 3.1 changes nothing about it, and it
+is months of irreplaceable telemetry — the baseline any fleet-monitor work will be measured
+against. Dropping the volume to get a clean 3.1 schema would destroy it as collateral.
+
+So the destructive step is scoped to **the `public` schema only**: drop it (taking
+`_sqlx_migrations` with it) and let the migrations rebuild it from scratch, leaving
+`lab_recorder` in place. A full `pg_dump` and a separate `lab_recorder`-only dump are taken
+first regardless, so the data survives even if the scoped drop goes wrong.
+
 ---
 
 ### D2: One business credential for the BFF, with `*_bl` scopes spelled out
