@@ -139,6 +139,11 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
 - [ ] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
+- [ ] 6.10 Carry `fix/cleanup-delete-accounting` (ef012c7f) into the `_cleanup_all_programs`
+      rewrite rather than merging it separately: it counts only DELETEs the VTN accepted and
+      tracks undeletable ids, and this phase rewrites that same function for the scope model.
+      Merging it to main first would only produce a conflict with the rewrite. Delete the
+      branch once its logic is in
 
 ## 7. Documentation and close-out
 
