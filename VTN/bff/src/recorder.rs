@@ -393,7 +393,6 @@ async fn connect_and_init_with_retry(database_url: &str, status: &SharedRecorder
 pub fn spawn_recorder(
     database_url: String,
     business: VtnClient,
-    ven_mgr: VtnClient,
     poll_secs: u64,
     status: SharedRecorderStatus,
 ) -> tokio::task::JoinHandle<()> {
@@ -419,9 +418,9 @@ pub fn spawn_recorder(
                 Ok(n) => info!("recorder: {n} new event(s) archived"),
                 Err(e) => warn!("recorder: events poll failed: {e:#}"),
             }
-            // /vens requires the VenManager role — the "any-business" client
-            // (used for reports/events) is not authorized to list VENs.
-            if let Err(e) = record_ven_snapshots(&pool, &ven_mgr).await {
+            // Under 3.1 the same credential lists VENs: `read_all` covers every
+            // collection, so the separate ven-manager client is gone.
+            if let Err(e) = record_ven_snapshots(&pool, &business).await {
                 warn!("recorder: ven snapshot poll failed: {e:#}");
             }
 

@@ -54,10 +54,12 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 ## 2. BFF — single credential
 
-- [ ] 2.1 `config.rs`: drop `VTN_VEN_MGR_*`; single `VTN_BL_CLIENT_ID` / `VTN_BL_CLIENT_SECRET`
-- [ ] 2.2 `vtn_client.rs`: one client, one token cache (keep `get_all_pages` / `PAGE_LIMIT` as-is)
-- [ ] 2.3 Remove dual-client switching from `routes/` (16 `ven_mgr` references)
-- [ ] 2.4 Update BFF env vars in `VTN/docker-compose.yml`
+- [x] 2.1 `config.rs`: drop `VTN_VEN_MGR_*`; single `VTN_BL_CLIENT_ID` / `VTN_BL_CLIENT_SECRET`
+- [x] 2.2 One client, one token cache — `vtn_client.rs` needed no change; the second client was
+      only ever a second `VtnClient::new` in `main.rs`
+- [x] 2.3 Remove dual-client switching — `main.rs` (AppCtx), `recorder.rs` (ven snapshots) and
+      `routes/vens.rs`; zero `ven_mgr` references remain
+- [x] 2.4 Update BFF env vars in `VTN/docker-compose.yml` and `tests/docker-compose.test.yml`
 - [ ] 2.5 `cargo test -p` the BFF; fmt + clippy green
 - [ ] 2.6 Deploy; verify `GET /api/{programs,events,vens,reports}` all 200
 
@@ -81,7 +83,11 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 ## 4. Seed, provisioning and the profile contract
 
-- [ ] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`
+- [ ] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`.
+      Remaining `any-business`/`ven-manager` callers to migrate with it (inventory taken
+      2026-09-18): `scripts/seed_vtn.py`, `scripts/fleet_status.py`, `scripts/db_reset.sh`,
+      `experiments/run_experiment.py` (4 sites), `tests/failure_recovery_test.sh`,
+      `tests/features/environment.py`
 - [ ] 4.2 Update `tests/provision_ven.py` for scopes, keeping credentials-last ordering (GB-49)
 - [x] 4.3 **Decided: API, with a one-user SQL bootstrap.** Only `bl-client` can live in SQL
       (nothing can call `/users` without a token), so it is the single fixture; every VEN user

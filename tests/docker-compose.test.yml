@@ -222,10 +222,8 @@ services:
     environment:
       BFF_LISTEN_ADDR: "0.0.0.0:8090"
       VTN_BASE_URL: "http://test-vtn:3000"
-      VTN_BUSINESS_CLIENT_ID: "any-business"
-      VTN_BUSINESS_CLIENT_SECRET: "any-business"
-      VTN_VEN_MGR_CLIENT_ID: "ven-manager"
-      VTN_VEN_MGR_CLIENT_SECRET: "ven-manager"
+      VTN_BL_CLIENT_ID: "bl-client"
+      VTN_BL_CLIENT_SECRET: "bl-client"
       # Phase 1 (A-2) VTN recorder — same test-db instance, separate
       # `lab_recorder` schema.
       DATABASE_URL: postgres://openadr:openadr@test-db:5432/openadr
