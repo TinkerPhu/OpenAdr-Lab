@@ -24,6 +24,40 @@ end instant SHALL be `EventRequest::ends_at()` in `openleadr-wire`, and it SHALL
 - **WHEN** `GET /events?active=true` is called
 - **THEN** the event is included
 
+### Requirement: An event's end is the longest end it declares
+`ends_at()` SHALL return the **latest** of every end an event declares — the event-level
+`intervalPeriod.duration`, the top-level `duration`, and the per-interval periods. An end that
+cannot be determined SHALL count as unbounded, and unbounded SHALL win, yielding "always
+active". A disagreement between declared ends SHALL be surfaced.
+
+#### Scenario: Intervals outlast the top-level duration
+- **GIVEN** an event with `duration: "PT1H"` whose intervals run for three hours
+- **WHEN** its end instant is computed
+- **THEN** it is the end of the last interval, not one hour after the start
+- **AND** the event remains in `GET /events?active=true` while those intervals are still running
+  <!-- an over-short end would drop a live obligation mid-flight on the VEN's next poll -->
+
+#### Scenario: Top-level duration outlasts the intervals
+- **GIVEN** an event with `duration: "PT3H"` whose intervals cover only the first hour
+- **WHEN** its end instant is computed
+- **THEN** it is three hours after the start
+
+#### Scenario: Event-level period no longer short-circuits
+- **GIVEN** an event with an event-level `intervalPeriod` of `PT1H` and an interval ending later
+- **WHEN** its end instant is computed
+- **THEN** the later interval end is returned
+  <!-- intentional change from the 3.0 code, where the event-level period won outright -->
+
+#### Scenario: One unbounded source makes the event unbounded
+- **GIVEN** an event with a finite `duration` and one interval carrying no duration
+- **WHEN** its end instant is computed
+- **THEN** it is unbounded, and the event is always active
+
+#### Scenario: Disagreement is reported
+- **WHEN** an event's declared ends disagree
+- **THEN** the applied rule and the disagreement are surfaced in the VEN's trace
+  <!-- wire-contracts: apply a documented rule and say that you did -->
+
 #### Scenario: ends_at stays in sync
 - **WHEN** an event is created or updated
 - **THEN** its stored `ends_at` matches `EventRequest::ends_at()` for the new content
