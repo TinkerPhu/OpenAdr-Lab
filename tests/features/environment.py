@@ -57,29 +57,32 @@ def _cleanup_all_programs():
         token = get_token_value("any-business", "any-business")
         limit = 50
         deleted = 0
+        undeletable: set = set()
         # Always re-read the FIRST page: deleting a page's rows shifts the
         # remainder down into offsets 0..49, so advancing `skip` by the page
         # size would step straight over them and leave programs behind (with
         # 54 programs it deleted 50 and left 4). The loop ends when a page
-        # comes back empty; `passes` only guards against an undeletable row
-        # spinning forever.
+        # holds nothing this credential can delete; the pass cap is a last
+        # resort against a pathological VTN state.
         for _ in range(100):
             r = vtn_get(f"/programs?limit={limit}&skip=0", token)
             if not r.ok:
                 break
-            programs = r.json()
+            programs = [p for p in r.json() if p["id"] not in undeletable]
             if not programs:
                 break
-            progressed = False
             for p in programs:
                 try:
-                    vtn_delete(f"/programs/{p['id']}", token)
-                    deleted += 1
-                    progressed = True
+                    resp = vtn_delete(f"/programs/{p['id']}", token)
+                    # A failed DELETE is not progress: count only what the VTN
+                    # actually removed, so the printed total is the truth and a
+                    # row that cannot be deleted can't spin this loop.
+                    if resp.ok:
+                        deleted += 1
+                    else:
+                        undeletable.add(p["id"])
                 except Exception:
-                    pass
-            if not progressed:
-                break
+                    undeletable.add(p["id"])
         if deleted:
             print(f"Pre-run cleanup: deleted {deleted} programs (API) from test VTN.")
     except Exception as exc:
