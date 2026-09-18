@@ -2074,3 +2074,39 @@ the rows that shifted down into offsets 0..49: with 54 programs it deleted 50 an
 log's "deleted 50" looked like a complete sweep. Paging is only stable while the collection is
 not being mutated; a delete-everything loop should re-read the first page until it comes back
 empty, and count only the deletes the server actually accepted so the printed total is the truth.
+
+## Two of your own patches can prop up the same upstream default; a rebase removes both (2026-09-18)
+
+`internal-oauth` gates `POST /auth/token` and the whole `/users` tree in openleadr-vtn, and it is
+not in upstream's `default` features. It worked in the lab for two independent reasons at once:
+our fork carried the feature in `default`, *and* our fork's Dockerfile replaced upstream's, which
+passes the flag explicitly. Either alone was sufficient, so neither looked load-bearing. Rebasing
+onto upstream removes the first and keeps the second — our Dockerfile wins — and the VTN builds
+clean, starts clean, and 404s every token request. The lesson is not "check feature flags": it is
+that a redundantly-satisfied invariant reads as robust right up to the moment a merge takes the
+redundancy away. When auditing a fork before a rebase, ask of each patch *what it is currently
+compensating for upstream*, not just what it adds.
+
+## Count what is in a database before agreeing to wipe it (2026-09-18)
+
+The 3.1 migration plan said "wipe the database and re-seed — no meaningful row-level mapping from
+the old schema", which was true of every OpenADR table and false of the database. `vtn-db-1` is
+1.4 GB, and 1,337,302 of its rows are in `lab_recorder`, a schema this project owns, that no
+OpenADR migration touches, and that holds months of unrepeatable telemetry. A migration plan
+scopes its destruction by *what the migration actually changes*, not by the convenience of
+dropping a volume; here that meant dropping the `public` schema and leaving the neighbour alone.
+Also: a backup is not a backup until it has been restored. The dumps were verified by restoring
+into a throwaway database and matching row counts, which is also what caught that `pg_restore -t`
+silently skips `CREATE SCHEMA`.
+
+## A protocol alias can resolve to a different actor's permission (2026-09-18)
+
+OpenADR 3.1 splits three scopes by actor — `write_vens_bl` / `write_vens_ven`, and the same for
+reports and subscriptions — and accepts the bare `write_vens` as an alias. The alias resolves to
+the **VEN** variant. The two are not more-and-less privileged versions of one permission; they
+select different code paths: the `_bl` variant takes `clientID` from the request body, the `_ven`
+variant overwrites it with the caller's own token subject. A business client granted the alias
+therefore creates VEN objects owned by itself and collides on the unique index at the second one
+— a failure that surfaces as a duplicate-key error three layers away from the misspelled scope.
+Never configure an aliased permission name when the vocabulary distinguishes actors; write the
+one you mean.
