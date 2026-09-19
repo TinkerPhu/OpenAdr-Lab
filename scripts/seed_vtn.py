@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Seed the VTN with demo programs and events for all 8 use cases.
 
-Also provisions ven-1, ven-2, and ven-3 via API if they don't exist yet
-(GB-02/GB-03: uniform "ven-N" venName + VTN-issued UUID id for all three,
-no special case for ven-1). The SQL fixture test_user_credentials.sql still
-seeds the ven-manager/user-manager/business users this script authenticates
-as, but no longer seeds ven-1 itself.
+Also provisions the fleet's VEN users, credentials and VEN objects via the API
+if they don't exist yet (GB-02/GB-03: uniform "ven-N" venName + VTN-issued UUID
+id, no special case for ven-1).
+
+OpenADR 3.1: everything here authenticates as the single `bl-client` business
+credential, which is the only user seeded in SQL
+(VTN/fixtures/01_bl_client.sql) -- nothing can call /users without a token, so
+exactly one bootstrap credential has to pre-exist. Every VEN user is then
+created through the API, which means the VTN hashes each secret itself and no
+password hash is maintained in this repository.
 
 Usage:
     python3 seed_vtn.py --vtn-url http://localhost:8200
@@ -25,27 +30,15 @@ import requests
 PROGRAMS = [
     {
         "programName": "Summer Peak DR",
-        "programLongName": "Summer Peak Demand Response Program",
-        "programType": "DEMAND_RESPONSE",
-        "targets": [
-            {"type": "VEN_NAME", "values": ["ven-1"]},
-            {"type": "VEN_NAME", "values": ["ven-2"]},
-        ],
+        "targets": ["ven-1", "ven-2"],
     },
     {
         "programName": "EV Managed Charging",
-        "programLongName": "Electric Vehicle Managed Charging Program",
-        "programType": "LOAD_SHIFTING",
-        "targets": [
-            {"type": "VEN_NAME", "values": ["ven-2"]},
-            {"type": "VEN_NAME", "values": ["ven-3"]},
-        ],
+        "targets": ["ven-2", "ven-3"],
     },
     {
         "programName": "HVAC Optimization",
-        "programLongName": "Building HVAC Pre-Cool/Pre-Heat Optimization",
-        "programType": "OPTIMIZATION",
-        "targets": None,  # open — visible to all VENs
+        "targets": [],  # open — an empty target list is visible to every VEN
     },
 ]
 
@@ -66,7 +59,7 @@ def build_events():
                     "start": (now + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT30M",
                 },
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
+                "targets": ["ven-1"],
                 "intervals": [
                     {
                         "id": 0,
@@ -82,10 +75,7 @@ def build_events():
                     "start": tomorrow_14.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT4H",
                 },
-                "targets": [
-                    {"type": "VEN_NAME", "values": ["ven-1"]},
-                    {"type": "VEN_NAME", "values": ["ven-2"]},
-                ],
+                "targets": ["ven-1", "ven-2"],
                 "intervals": [
                     {
                         "id": 0,
@@ -131,9 +121,7 @@ def build_events():
                     "start": (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT2H",
                 },
-                "targets": [
-                    {"type": "VEN_NAME", "values": ["ven-2"]},
-                ],
+                "targets": ["ven-2"],
                 "intervals": [
                     {
                         "id": 0,
@@ -182,7 +170,7 @@ def build_events():
                     "start": (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT5H",
                 },
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
+                "targets": ["ven-1"],
                 "intervals": [
                     {
                         "id": 0,
@@ -269,7 +257,7 @@ def build_events():
             {
                 "eventName": "cancel-demo-event",
                 "priority": None,
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
+                "targets": ["ven-1"],
                 "intervals": [
                     {
                         "id": 0,
@@ -284,6 +272,14 @@ def build_events():
 # ── VENs to provision via API (GB-02/GB-03: uniform pattern, no special case
 # for ven-1 — see the note in vtn_setup_from_blog_step_by_step.md about
 # clearing the fixture's legacy ven-1 rows before running this) ─────────────
+
+# The single business-layer credential. 3.1's scope model lets one client hold
+# every scope this script needs (write_users to create the VEN users,
+# write_vens_bl to create their VEN objects, write_programs/write_events for the
+# demo data), replacing the 3.0 any-business/ven-manager/user-manager trio.
+# Seeded by VTN/fixtures/01_bl_client.sql.
+BL_CLIENT_ID = "bl-client"
+BL_CLIENT_SECRET = "bl-client"
 
 VENS_TO_PROVISION = [
     {"ven_name": "ven-1", "client_id": "ven-1", "client_secret": "ven-1", "user_ref": "ven-1-user"},
@@ -365,13 +361,19 @@ def list_programs(base_url, token):
 
 
 def create_program(base_url, token, prog):
-    body = {"programName": prog["programName"], "intervalPeriod": None, "programDescriptions": None}
-    if prog.get("programLongName"):
-        body["programLongName"] = prog["programLongName"]
-    if prog.get("programType"):
-        body["programType"] = prog["programType"]
-    if prog.get("targets"):
-        body["targets"] = prog["targets"]
+    # 3.1 dropped programType, programLongName, country, principalSubdivision,
+    # bindingEvents, localPrice, businessId and the retailer fields. `targets`
+    # is a flat list of clientIds and is non-optional: [] means "every VEN".
+    body = {
+        "programName": prog["programName"],
+        "intervalPeriod": None,
+        "programDescriptions": None,
+        "targets": prog.get("targets", []),
+    }
+    if prog.get("payloadDescriptors"):
+        body["payloadDescriptors"] = prog["payloadDescriptors"]
+    if prog.get("attributes"):
+        body["attributes"] = prog["attributes"]
     r = requests.post(
         f"{base_url}/programs",
         headers=auth_headers(token),
@@ -384,12 +386,11 @@ def create_program(base_url, token, prog):
 
 def update_program(base_url, token, program_id, prog):
     """PUT targets/metadata onto an existing program (idempotent re-runs)."""
-    body = {"programName": prog["programName"]}
-    if prog.get("programLongName"):
-        body["programLongName"] = prog["programLongName"]
-    if prog.get("programType"):
-        body["programType"] = prog["programType"]
-    body["targets"] = prog.get("targets")  # None clears targets (open program)
+    body = {"programName": prog["programName"], "targets": prog.get("targets", [])}
+    if prog.get("payloadDescriptors"):
+        body["payloadDescriptors"] = prog["payloadDescriptors"]
+    if prog.get("attributes"):
+        body["attributes"] = prog["attributes"]
     r = requests.put(
         f"{base_url}/programs/{program_id}",
         headers=auth_headers(token),
@@ -453,12 +454,12 @@ def delete_event(base_url, token, event_id):
     r.raise_for_status()
 
 
-def _ensure_dashboard_url_attribute(base, vm_token, ven_name, dashboard_url):
+def _ensure_dashboard_url_attribute(base, token, ven_name, dashboard_url):
     """BL-41: set/replace the DASHBOARD_URL attribute on an already-provisioned
     VEN. PUT /vens/{id} is a full-content replace, so this reads the current
     attributes first and merges the DASHBOARD_URL entry in, preserving any
     existing attribute (e.g. PERSONA)."""
-    r = requests.get(f"{base}/vens", headers=auth_headers(vm_token),
+    r = requests.get(f"{base}/vens", headers=auth_headers(token),
                       params={"venName": ven_name}, timeout=10)
     r.raise_for_status()
     matches = [v for v in r.json() if v["venName"] == ven_name]
@@ -470,22 +471,39 @@ def _ensure_dashboard_url_attribute(base, vm_token, ven_name, dashboard_url):
     attributes = [a for a in (ven.get("attributes") or []) if a.get("type") != "DASHBOARD_URL"]
     attributes.append({"type": "DASHBOARD_URL", "values": [dashboard_url]})
 
-    # Ven is VenContent flattened with id/createdDateTime/modificationDateTime;
-    # PUT /vens/{id} takes VenContent only, so drop the non-content fields.
+    # A Ven is BlVenRequest flattened with id/createdDateTime/
+    # modificationDateTime; PUT /vens/{id} takes the request body only, so drop
+    # the VTN-provisioned fields. clientID stays: it is part of the body in 3.1
+    # and dropping it would fail validation.
     body = {k: v for k, v in ven.items() if k not in ("id", "createdDateTime", "modificationDateTime")}
     body["attributes"] = attributes
-    r = requests.put(f"{base}/vens/{ven_id}", headers=auth_headers(vm_token), json=body, timeout=10)
+    r = requests.put(f"{base}/vens/{ven_id}", headers=auth_headers(token), json=body, timeout=10)
     r.raise_for_status()
     print(f"  '{ven_name}' DASHBOARD_URL set to {dashboard_url}")
 
 
+VEN_SCOPES = ["read_targets", "read_ven_objects", "write_reports_ven"]
+
+
 def provision_vens(base, vens):
-    """Provision VEN users, credentials, and VEN entities via API. Idempotent."""
-    um_token = get_token(base, "user-manager", "user-manager")
-    vm_token = get_token(base, "ven-manager", "ven-manager")
+    """Provision VEN users, credentials and VEN entities via API. Idempotent.
+
+    OpenADR 3.1 replaced roles with scopes carried on the user object itself, so
+    the 3.0 four-step dance (create user -> credential -> VEN entity -> PUT the
+    VEN role back onto the user) collapses to three, and the scopes are set in
+    the very first call.
+
+    That ordering matters beyond tidiness. Under 3.0 the role was attached only
+    after the credential existed, which left a window in which a VEN could mint
+    a token that carried no role at all and then cache it for the token's whole
+    lifetime -- authorized to nothing, polling happily, seeing an empty world
+    (GB-49). In 3.1 a user has its scopes from the moment it exists, so that
+    window cannot occur.
+    """
+    token = get_token(base, BL_CLIENT_ID, BL_CLIENT_SECRET)
 
     for ven in vens:
-        # Check if already provisioned by testing the credentials
+        # Already provisioned? The credential answering is the test.
         r = requests.post(
             f"{base}/auth/token",
             data={"grant_type": "client_credentials", "client_id": ven["client_id"], "client_secret": ven["client_secret"]},
@@ -494,21 +512,29 @@ def provision_vens(base, vens):
         if r.ok:
             print(f"VEN '{ven['ven_name']}' already provisioned — skipping.")
             if ven.get("dashboard_url"):
-                _ensure_dashboard_url_attribute(base, vm_token, ven["ven_name"], ven["dashboard_url"])
+                _ensure_dashboard_url_attribute(base, token, ven["ven_name"], ven["dashboard_url"])
             continue
 
         print(f"Provisioning VEN '{ven['ven_name']}' ...")
 
-        r = requests.post(f"{base}/users", headers=auth_headers(um_token),
-                          json={"reference": ven["user_ref"], "description": f"VEN {ven['ven_name']}", "roles": []}, timeout=10)
+        # 1. user, with its scopes set on creation
+        r = requests.post(f"{base}/users", headers=auth_headers(token),
+                          json={"reference": ven["user_ref"],
+                                "description": f"VEN {ven['ven_name']}",
+                                "scope": VEN_SCOPES}, timeout=10)
         r.raise_for_status()
         user_id = r.json()["id"]
 
-        r = requests.post(f"{base}/users/{user_id}", headers=auth_headers(um_token),
+        # 2. credential for that already-scoped user
+        r = requests.post(f"{base}/users/{user_id}", headers=auth_headers(token),
                           json={"client_id": ven["client_id"], "client_secret": ven["client_secret"]}, timeout=10)
         r.raise_for_status()
 
-        ven_body = {"venName": ven["ven_name"]}
+        # 3. the VEN object, carrying the clientID that identifies it. We hold
+        #    write_vens_bl, so the VTN takes clientID from this body; with the
+        #    write_vens_ven variant it would instead stamp in our own token
+        #    subject and every VEN would collide on ven_client_id_unique.
+        ven_body = {"venName": ven["ven_name"], "clientID": ven["client_id"], "targets": []}
         # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
         # can label fleet entries (only present on persona fleets).
         # BL-41: DASHBOARD_URL for VENs on a different host than the VTN/UI.
@@ -519,15 +545,9 @@ def provision_vens(base, vens):
             attributes.append({"type": "DASHBOARD_URL", "values": [ven["dashboard_url"]]})
         if attributes:
             ven_body["attributes"] = attributes
-        r = requests.post(f"{base}/vens", headers=auth_headers(vm_token),
-                          json=ven_body, timeout=10)
+        r = requests.post(f"{base}/vens", headers=auth_headers(token), json=ven_body, timeout=10)
         r.raise_for_status()
         ven_id = r.json()["id"]
-
-        r = requests.put(f"{base}/users/{user_id}", headers=auth_headers(um_token),
-                         json={"reference": ven["user_ref"], "description": f"VEN {ven['ven_name']}",
-                               "roles": [{"role": "VEN", "id": ven_id}]}, timeout=10)
-        r.raise_for_status()
         print(f"  '{ven['ven_name']}' provisioned (user={user_id}, ven={ven_id})")
 
 
@@ -536,8 +556,8 @@ def provision_vens(base, vens):
 def main():
     parser = argparse.ArgumentParser(description="Seed the VTN with demo programs and events")
     parser.add_argument("--vtn-url", default="http://localhost:8200", help="VTN base URL")
-    parser.add_argument("--client-id", default="any-business", help="OAuth client ID")
-    parser.add_argument("--client-secret", default="any-business", help="OAuth client secret")
+    parser.add_argument("--client-id", default=BL_CLIENT_ID, help="OAuth client ID")
+    parser.add_argument("--client-secret", default=BL_CLIENT_SECRET, help="OAuth client secret")
     parser.add_argument("--demo-cancel", action="store_true", help="Demo UC8: create then delete cancel-demo-event")
     parser.add_argument("--skip-provision", action="store_true", help="Skip VEN provisioning (e.g. test stack handles it separately)")
     args = parser.parse_args()
@@ -545,7 +565,7 @@ def main():
     base = args.vtn_url.rstrip("/")
     events_data = build_events()
 
-    # Provision VENs before creating programs (programs with VEN_NAME targets
+    # Provision VENs before creating programs (programs targeting a clientId
     # require those VEN entities to already exist in the VTN)
     if not args.skip_provision:
         provision_vens(base, VENS_TO_PROVISION)
