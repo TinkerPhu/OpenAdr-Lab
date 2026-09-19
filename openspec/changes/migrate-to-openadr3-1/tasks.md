@@ -8,19 +8,21 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 - [x] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
 - [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
-- [x] 0.3a **MQTT posture decided: use the lab Mosquitto.** `VTN/docker-compose.yml` sets all
-      four vars explicitly (so dotenvy can never supply them) at
-      `mqtt://host.docker.internal:1883` with `extra_hosts: host.docker.internal:host-gateway`,
-      matching how the VENs reach the same broker — it sits on `influxdb_network` while the VTN
-      stack is on `vtn_openadr-net`, so the container name does not resolve. Username and
-      password are **empty on purpose**: the broker runs `allow_anonymous` with a `password_file`
-      containing one unrelated user, and mosquitto refuses a supplied username that is not in it
-      ("Connection Refused: not authorised"), which would panic the VTN. Verified from a
-      container on `vtn_openadr-net` over the exact path the VTN will use. The test stack points
-      at its own throwaway broker on `test-net` instead.
-      **First check at deploy:** confirm paho sends an empty username the way `mosquitto_pub -u ''`
-      does; if it refuses, add an `openadr-vtn` entry to the broker's pwfile (`mosquitto_passwd`
-      plus SIGHUP, which reloads without dropping the fleet's connections)
+- [x] 0.3a **MQTT posture decided: the lab runs its own broker.** *(Supersedes an earlier
+      decision to use the house Mosquitto, now reverted.)* `VTN/docker-compose.yml` gains a
+      `lab-mqtt` service on `openadr-net` (eclipse-mosquitto:2, published on host 1884 because
+      the house broker holds 1883). The VTN addresses it **by service name**,
+      `mqtt://lab-mqtt:1883`, which removes the `host.docker.internal` + `extra_hosts`
+      workaround the house broker needed for sitting on `influxdb_network`, and gains a
+      `depends_on: service_healthy` since 3.1 panics if the broker is unreachable at startup.
+      `allow_anonymous false` with a password file generated at container start from env vars,
+      so no credential is committed to this public repo.
+      **Verified on Node1 with the real config and start-up command**: valid credential accepted,
+      anonymous refused, wrong password refused. One trap found and fixed in the process — the
+      start-up command runs as root while mosquitto drops to the `mosquitto` user, so the pwfile
+      needs a `chown` or the broker exits with "Unable to open pwfile".
+      The measurement, weather and boiler feeds are untouched and keep using the house broker;
+      each VEN feed is independently addressable, so no bridge is needed.
 - [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
 - [x] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
 - [x] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
@@ -156,6 +158,10 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
 - [ ] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
+- [ ] 6.9a The test stack's throwaway broker runs anonymous while production now runs
+      `allow_anonymous false`, so an MQTT auth misconfiguration would not be caught by the
+      suite. Decide whether the test broker should carry credentials too (fidelity) or stay
+      anonymous (the weather-plugin scenarios connect to it anonymously today)
 - [ ] 6.10 Carry `fix/cleanup-delete-accounting` (ef012c7f) into the `_cleanup_all_programs`
       rewrite rather than merging it separately: it counts only DELETEs the VTN accepted and
       tracks undeletable ids, and this phase rewrites that same function for the scope model.

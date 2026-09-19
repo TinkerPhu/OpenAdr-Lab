@@ -20,9 +20,30 @@ needs are in [phase-0-foundation.md](phase-0-foundation.md).
 
 ## Decisions already taken
 
-- **One MQTT broker** — the existing Mosquitto on Node1. No second broker; lab traffic is
-  separated by topic namespace (`openadr-lab/fleet/...`) and, where needed, by an
-  authenticated listener, not by a second process.
+- **Two MQTT brokers, split by direction of travel** *(revised 2026-09-19; this decision
+  originally read "one broker — the existing Mosquitto on Node1")*. The house broker keeps
+  carrying what the physical site **measures** (`openadr-lab/measurement/<site>/*`,
+  `openadr-lab/weather/<site>/*`, alongside the house's own `shellies/`, `hargassner/`,
+  `weconnect/`). A lab-owned broker, `lab-mqtt` on Node1 port 1884, carries what the lab
+  **generates**: OpenADR 3.1 subscription notifiers (`openadr-lab/vtn/*`) and fleet telemetry
+  (`openadr-lab/fleet/*`). Both keep the `openadr-lab/` root — the line is direction, not prefix.
+
+  What changed: 3.1 makes MQTT a first-class transport (native `/notifiers/{ws,mqtt,push-mqtt}`,
+  `paho-mqtt` a hard dependency of the VTN), so the lab now *publishes* over MQTT rather than
+  only consuming. That needs auth the lab controls, and the house broker's `allow_anonymous true`
+  cannot be tightened without risking home automation — which is also why R-54 sat unresolved.
+  `lab-mqtt` runs `allow_anonymous false` with per-client credentials from the start.
+
+  No bridge is needed and none is wanted: each VEN feed is independently addressable
+  (`PV_MEASUREMENT_MQTT_HOST`, `BASE_LOAD_MEASUREMENT_MQTT_HOST`, `WEATHER_MQTT_HOST`, each with
+  its own client id), so the measurement and weather feeds keep pointing at the house broker
+  untouched. A relay would only add an invisible failure mode to the one system whose purpose is
+  observability. The cost of the split, stated plainly: watching the whole namespace takes two
+  subscriptions instead of one.
+
+  It lives on Node1, not Node2, because the 3.1 VTN **panics at startup** if its broker is
+  unreachable — putting the broker on the disposable build/test host would make the productive
+  VTN's ability to boot depend on it.
 - **Two data sources in parallel** — OpenADR reports (what a real VTN operator sees) *and* an
   MQTT side channel (what the lab can see live). Every series in the UI carries a source badge
   (`report` / `live`), so the gap between the two views is itself observable.
