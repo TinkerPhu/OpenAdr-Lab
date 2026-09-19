@@ -423,8 +423,8 @@ gained an optional `report_descriptors` param; `run_window()` attaches it to
 the first event of `actions` when present (new `--request-reports` flag,
 default on). For the GB-28 paired-baseline window (`actions=[]`, no events at
 all otherwise), a synthetic **SIMPLE level=0** event spanning the whole window
-carries the descriptors instead — confirmed via `docs/openadr_3_0_specs/
-2_OpenADR 3.0 Definition v3.0.1.md` that level 0 means "normal operations" per
+carries the descriptors instead — confirmed via `docs/openadr_3_1_specs/
+2_OpenADR 3.1.0_Definition_20250801.md` that level 0 means "normal operations" per
 spec, and via `VEN/src/controller/milp_planner/inputs.rs`'s `simple_cap`
 match arm that any level other than 1/2/3 falls through to the unrestricted
 contractual cap — a genuine no-op for planning, unlike posting a real

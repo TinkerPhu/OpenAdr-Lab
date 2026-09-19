@@ -853,7 +853,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
     pure no-intervention window (`actions=[]`) there is no first action to
     attach it to, so one is synthesized: a SIMPLE level=0 event spanning the
     whole window -- level 0 is the spec's "normal operations" SIMPLE level
-    (`docs/openadr_3_0_specs/2_OpenADR 3.0 Definition v3.0.1.md`), and the
+    (`docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md`), and the
     planner's SIMPLE-level handling (`milp_planner/inputs.rs`) treats any
     level other than 1/2/3 as the unrestricted contractual cap -- a genuine
     no-op for planning, unlike posting a real price/capacity/alert event.
