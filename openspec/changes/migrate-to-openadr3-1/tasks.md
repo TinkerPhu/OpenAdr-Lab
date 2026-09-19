@@ -8,10 +8,19 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 - [x] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
 - [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
-- [ ] 0.3a Decide the MQTT posture before deploying (R8): point `MQTT_URL`/`MQTT_USERNAME`/
-      `MQTT_PASSWORD` at the lab's Mosquitto, or leave **all three** unset. A partial set
-      panics, an unreachable broker panics, and upstream's tracked `.env` supplies a default
-      via dotenvy if nothing else does
+- [x] 0.3a **MQTT posture decided: use the lab Mosquitto.** `VTN/docker-compose.yml` sets all
+      four vars explicitly (so dotenvy can never supply them) at
+      `mqtt://host.docker.internal:1883` with `extra_hosts: host.docker.internal:host-gateway`,
+      matching how the VENs reach the same broker — it sits on `influxdb_network` while the VTN
+      stack is on `vtn_openadr-net`, so the container name does not resolve. Username and
+      password are **empty on purpose**: the broker runs `allow_anonymous` with a `password_file`
+      containing one unrelated user, and mosquitto refuses a supplied username that is not in it
+      ("Connection Refused: not authorised"), which would panic the VTN. Verified from a
+      container on `vtn_openadr-net` over the exact path the VTN will use. The test stack points
+      at its own throwaway broker on `test-net` instead.
+      **First check at deploy:** confirm paho sends an empty username the way `mosquitto_pub -u ''`
+      does; if it refuses, add an `openadr-vtn` entry to the broker's pwfile (`mosquitto_passwd`
+      plus SIGHUP, which reloads without dropping the fleet's connections)
 - [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
 - [x] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
 - [x] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins

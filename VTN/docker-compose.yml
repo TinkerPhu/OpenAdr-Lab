@@ -67,6 +67,32 @@ services:
       # OAUTH_TYPE: INTERNAL
       # OAUTH_KEY_TYPE: HMAC
       # OAUTH_BASE64_SECRET: ${OAUTH_BASE64_SECRET:-}
+      #
+      # MQTT — OpenADR 3.1 subscription notifiers (/notifiers/mqtt, push-mqtt).
+      # All three of URL/USERNAME/PASSWORD must be set together: a partial set
+      # is a startup panic, and so is an unreachable broker, because the VTN
+      # loads its notifiers during state construction. Set explicitly here so
+      # the value can never be inherited from openleadr-rs/.env via dotenvy,
+      # which ships MQTT_URL=mqtt://localhost:1883.
+      #
+      # The lab broker is the Mosquitto on Node1, reached the same way the VENs
+      # reach it (host.docker.internal + extra_hosts below) because it sits on
+      # a different docker network than this stack.
+      #
+      # The username and password are deliberately EMPTY. The broker runs
+      # allow_anonymous with a password_file holding one unrelated user, and
+      # mosquitto rejects a supplied username that is not in that file -- so a
+      # made-up credential is refused ("Connection Refused: not authorised")
+      # and the VTN then panics at startup. Empty strings connect anonymously,
+      # which is how every VEN already reaches this broker, while still
+      # satisfying the VTN's all-three-or-none rule. When R-54 puts real auth
+      # on 1883, the VTN gets a real credential like everything else.
+      MQTT_URL: ${MQTT_URL:-mqtt://host.docker.internal:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-openadr-lab/vtn}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: curl --fail http://127.0.0.1:3000/health || exit 1
       interval: 15s
