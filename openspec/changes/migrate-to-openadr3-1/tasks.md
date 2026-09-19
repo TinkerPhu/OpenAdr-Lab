@@ -124,9 +124,11 @@ Simulator untouched (D5). `POST /sim/override` stays.
             `id`, `createdDateTime` and `modificationDateTime`, which the lenient DTO did not
       - [ ] 3.1d Reports last: `OadrReportBody` → wire `ReportRequest` — drops `programID`, makes
             `eventID` required (R7), and brings `reportIntervals` and payload descriptors with it
-- [ ] 3.2 `controller/event_timing.rs` (the existing authority): extend `timed_intervals` for
-      3.1 — top-level `duration` and absent `intervals`; surface, never silently default
-      (`wire-contracts`). Align its event-level end with `EventRequest::ends_at()` (D9)
+- [x] 3.2 `controller/event_timing.rs` extended for 3.1: `OadrEvent` gains `duration`, and
+      `timed_intervals` repeats the interval sequence when that duration exceeds the sequence's
+      own span, truncating the last repetition at the event's end. Expansion is bounded by
+      `MAX_LOOPED_INTERVALS` so `"P9999Y"` ("loop indefinitely", User Guide) cannot be
+      materialised into tens of millions of intervals. 5 new tests; 1411 VEN tests green.
 - [ ] 3.3 Confirm the three callers (`openadr_interface.rs`, `rate_schedule.rs`, `reporter.rs`)
       still go through it, and that no new copy appeared. `report_intervals.rs` builds outgoing
       report intervals and is a different concept — leave it alone (D9)

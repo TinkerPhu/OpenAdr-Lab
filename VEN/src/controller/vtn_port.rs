@@ -47,6 +47,12 @@ pub struct OadrEvent {
     /// OpenADR 3 event creation timestamp (ISO 8601), used to break priority ties. Optional.
     #[serde(default)]
     pub createdDateTime: Option<String>,
+    /// OpenADR 3.1 event-level duration. When it exceeds the sum of the interval
+    /// durations the interval sequence repeats to fill it, and `"P9999Y"` means
+    /// loop indefinitely (User Guide, "Looping intervals"). 3.0 expressed the
+    /// same thing through `intervalPeriod.duration`, which still works.
+    #[serde(default)]
+    pub duration: Option<String>,
     /// Event-level interval period — used for looping price events (e.g. duration = "P9999Y").
     #[serde(default)]
     pub intervalPeriod: Option<OadrIntervalPeriod>,

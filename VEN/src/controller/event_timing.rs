@@ -47,8 +47,79 @@ impl TimedInterval<'_> {
     }
 }
 
+/// How many intervals a looping event may expand to. `duration = "P9999Y"` means
+/// "loop indefinitely" (User Guide, "Looping intervals"), which cannot be
+/// materialised, so expansion stops here. 2000 intervals covers any planning
+/// horizon this VEN uses -- the 288-slot 5-minute grid several times over --
+/// and the planner only ever reads the slots inside its own horizon.
+const MAX_LOOPED_INTERVALS: usize = 2000;
+
 /// Every interval of `event`, in order, with its absolute `[start, end)`.
+///
+/// OpenADR 3.1: when `event.duration` exceeds the sum of the interval durations,
+/// the interval sequence repeats to fill it. Expansion is bounded by
+/// `MAX_LOOPED_INTERVALS`; an unbounded loop simply yields as many intervals as
+/// that allows, which is always more than the caller's horizon needs.
 pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
+    let base = base_intervals(event);
+    let Some(event_end) = looping_end(event, &base) else {
+        return base;
+    };
+
+    // The sequence's own span; a non-positive or open span cannot be repeated.
+    let (Some(first), Some(last)) = (base.first(), base.last()) else {
+        return base;
+    };
+    if !first.is_bounded() || !last.is_bounded() || last.end <= first.start {
+        return base;
+    }
+    let span = last.end - first.start;
+
+    let mut out = base.clone();
+    let mut shift = span;
+    while out.len() < MAX_LOOPED_INTERVALS {
+        let cycle_start = first.start + shift;
+        if cycle_start >= event_end {
+            break;
+        }
+        for it in &base {
+            if out.len() >= MAX_LOOPED_INTERVALS {
+                break;
+            }
+            let start = it.start + shift;
+            if start >= event_end {
+                break;
+            }
+            out.push(TimedInterval {
+                interval: it.interval,
+                start,
+                // The final repetition is truncated at the event's end.
+                end: (it.end + shift).min(event_end),
+            });
+        }
+        shift += span;
+    }
+    out
+}
+
+/// The instant a looping event stops, or `None` when it does not loop --
+/// no `duration`, or one no longer than the sequence already covers.
+fn looping_end(event: &OadrEvent, base: &[TimedInterval<'_>]) -> Option<DateTime<Utc>> {
+    let duration = event.duration.as_deref()?;
+    let first = base.first()?;
+    let last = base.last()?;
+    if !first.is_bounded() || !last.is_bounded() {
+        return None;
+    }
+    let secs = crate::common::parse_iso8601_duration_secs(duration);
+    let end = first
+        .start
+        .checked_add_signed(chrono::Duration::seconds(secs))?;
+    (end > last.end).then_some(end)
+}
+
+/// The interval list exactly as the event declares it, before any looping.
+fn base_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
     let parse_start = |s: Option<&str>| s.and_then(|s| s.parse::<DateTime<Utc>>().ok());
     let event_period = event.intervalPeriod.as_ref();
     let default_duration = event_period.and_then(|p| p.duration.as_deref());
@@ -231,5 +302,91 @@ mod tests {
         let t = timed_intervals(&e)[0];
         assert!(t.covers(at(10, 0)) && t.covers(at(10, 59)) && !t.covers(at(11, 0)));
         assert!(t.is_bounded());
+    }
+
+    // ── OpenADR 3.1 looping intervals (User Guide, "Looping intervals") ──────
+    //
+    // "An event's intervals may be repeated by setting event.duration to a value
+    // greater than the sum of all interval durations."
+
+    #[test]
+    fn event_duration_no_longer_than_the_sequence_does_not_loop() {
+        let e = event(json!({
+            "id": "no-loop", "programID": "p",
+            "duration": "PT1H",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT30M"},
+            "intervals": [limit_interval(0, 10.0), limit_interval(1, 8.0)]
+        }));
+        // Two half-hours already fill the hour, so there is nothing to repeat.
+        assert_eq!(
+            spans(&e),
+            vec![(at(0, 0), at(0, 30)), (at(0, 30), at(1, 0))]
+        );
+    }
+
+    #[test]
+    fn event_duration_longer_than_the_sequence_repeats_it() {
+        let e = event(json!({
+            "id": "loop-2h", "programID": "p",
+            "duration": "PT2H",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT30M"},
+            "intervals": [limit_interval(0, 10.0), limit_interval(1, 8.0)]
+        }));
+        // One hour of intervals repeated to fill two hours.
+        assert_eq!(
+            spans(&e),
+            vec![
+                (at(0, 0), at(0, 30)),
+                (at(0, 30), at(1, 0)),
+                (at(1, 0), at(1, 30)),
+                (at(1, 30), at(2, 0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_looping_repetition_is_truncated_at_the_event_end() {
+        let e = event(json!({
+            "id": "loop-90m", "programID": "p",
+            "duration": "PT1H45M",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT30M"},
+            "intervals": [limit_interval(0, 10.0), limit_interval(1, 8.0)]
+        }));
+        let s = spans(&e);
+        assert_eq!(s.len(), 4, "two full hours' worth, the last one clipped");
+        // The final interval starts inside the event and ends where the event does.
+        assert_eq!(s[3], (at(1, 30), at(1, 45)));
+    }
+
+    #[test]
+    fn looping_forever_is_bounded_rather_than_materialised() {
+        // "To loop indefinitely, set event.duration as: P9999Y". Expanding that
+        // literally would be tens of millions of intervals; the cap keeps it finite
+        // while still covering any horizon the planner asks about.
+        let e = event(json!({
+            "id": "loop-forever", "programID": "p",
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT30M"},
+            "intervals": [limit_interval(0, 10.0), limit_interval(1, 8.0)]
+        }));
+        let s = spans(&e);
+        assert_eq!(s.len(), MAX_LOOPED_INTERVALS);
+        // Still contiguous, and far past any planning horizon: 2000 half-hours
+        // is roughly 41 days, so the last interval ends well beyond this day.
+        assert_eq!(s[0].0, at(0, 0));
+        assert!(s.last().unwrap().1 > at(23, 30));
+    }
+
+    #[test]
+    fn an_open_ended_sequence_is_never_looped() {
+        // Without a duration the sequence has no span to repeat, so the event
+        // duration cannot be filled by repetition and the list stays as declared.
+        let e = event(json!({
+            "id": "loop-open", "programID": "p",
+            "duration": "PT4H",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z"},
+            "intervals": [limit_interval(0, 10.0)]
+        }));
+        assert_eq!(spans(&e).len(), 1);
     }
 }
