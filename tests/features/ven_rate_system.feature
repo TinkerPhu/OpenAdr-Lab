@@ -4,7 +4,7 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
   that are served via dedicated endpoints.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: 3-interval PRICE event produces 3 rate snapshots
     Given I create a rate-system program and save its ID

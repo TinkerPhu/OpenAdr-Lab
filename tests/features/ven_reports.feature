@@ -2,7 +2,7 @@ Feature: VEN Reports
   A VEN can submit a report and it appears in the VTN via the BFF.
 
   Scenario: Submit report via VEN and verify round-trip
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a program named "report-test-program" and save its ID
     And I create an event for the saved program
     When I wait for VEN-1 to have at least 1 event

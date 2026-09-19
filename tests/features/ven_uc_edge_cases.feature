@@ -49,7 +49,7 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
   # each FIRM slot's import_cap_kw from the capacity state.
 
   Scenario: UC-10a — Plan slots reflect the import capacity limit from VTN
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 8.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 8.0
@@ -57,7 +57,7 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
     Then all plan slots have import_cap_kw of at most 8.0
 
   Scenario: UC-10b — Plan net_import_kw does not exceed the capacity limit
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 6.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 6.0

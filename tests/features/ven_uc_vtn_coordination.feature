@@ -17,7 +17,7 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
   Scenario: UC-05c — Each flexibility envelope in /plan has energy_needed and rate range fields
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
-    And I have a VTN token as "any-business"
+    And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have envelopes
@@ -39,14 +39,14 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
   # its capacity state and the planner restricts import in affected slots.
 
   Scenario: UC-06a — IMPORT_CAPACITY_LIMIT event updates /capacity import_limit_kw
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 3.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 3.0
     Then the VEN /capacity response has import_limit_kw equal to 3.0
 
   Scenario: UC-06b — Plan slots respect an import capacity limit
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 5.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 5.0

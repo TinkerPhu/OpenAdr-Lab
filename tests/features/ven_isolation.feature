@@ -2,7 +2,7 @@ Feature: VEN Isolation
   A VEN must never see another VEN's data through any API call.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I have a VEN-1 token
     And I have a VEN-2 token
 

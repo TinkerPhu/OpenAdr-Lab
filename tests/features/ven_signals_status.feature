@@ -3,7 +3,7 @@ Feature: Grid-signal status aggregate (WP4.6)
   active alert / SIMPLE / dispatch windows plus the capacity state.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: An alert window appears in /signals and clears on event deletion
     Given I create an open program "signals-test" and save its ID

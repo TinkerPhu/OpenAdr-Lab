@@ -2,7 +2,7 @@ Feature: VTN Program Management
   Programs can be created and listed via the VTN API.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: Create a program
     When I create a program named "test-program-1"

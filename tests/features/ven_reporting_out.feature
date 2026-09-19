@@ -5,7 +5,7 @@ Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
   machinery as measurement reports.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: IMPORT_RESERVATION_CAPACITY descriptor yields an envelope-valued report
     Given I create a program named "envelope-report-test" and save its ID

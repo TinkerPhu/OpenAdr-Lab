@@ -49,7 +49,7 @@ Feature: Heater tank MILP trajectory model
     # Tank at mid-comfort (20°C). A cheap 3-hour PRICE event starts now.
     # The tariff-aware planner should schedule heater power in cheap slots.
     Given I inject heater_temp_c 20.0 via sim inject
-    And I have a VTN token as "any-business"
+    And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 3-hour PRICE event for the saved program
     When I wait for the VEN /plan to have a heater allocation in slots

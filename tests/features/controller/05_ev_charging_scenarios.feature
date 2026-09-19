@@ -11,7 +11,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
 
   # ── b) IMPORT_CAPACITY_LIMIT caps net import in plan ─────────────────────────
   Scenario: (b) IMPORT_CAPACITY_LIMIT event caps net import in plan slots
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I inject pv irradiance 0.0 via sim inject
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
@@ -23,7 +23,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
 
   # ── e) User request capped by IMPORT_CAPACITY_LIMIT ─────────────────────────
   Scenario: (e) User request capped by IMPORT_CAPACITY_LIMIT event
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I inject pv irradiance 0.0 via sim inject
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
@@ -39,7 +39,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
   # verify the cap propagates correctly to every slot (Phase 5b will add
   # energy-shortfall slack for a tighter bound).
   Scenario: (c) Zero IMPORT_CAPACITY_LIMIT is reflected in plan slots
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I inject pv irradiance 0.0 via sim inject
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
@@ -51,7 +51,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
 
   # ── f) User request with zero import limit ───────────────────────────────────
   Scenario: (f) User request with zero IMPORT_CAPACITY_LIMIT is reflected in plan
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I inject pv irradiance 0.0 via sim inject
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
