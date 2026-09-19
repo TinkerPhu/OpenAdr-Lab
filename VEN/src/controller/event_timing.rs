@@ -47,41 +47,54 @@ impl TimedInterval<'_> {
     }
 }
 
-/// How many intervals a looping event may expand to. `duration = "P9999Y"` means
-/// "loop indefinitely" (User Guide, "Looping intervals"), which cannot be
-/// materialised, so expansion stops here. 2000 intervals covers any planning
-/// horizon this VEN uses -- the 288-slot 5-minute grid several times over --
-/// and the planner only ever reads the slots inside its own horizon.
+/// How many intervals `event.duration` may expand to. The spec defines `"P9999Y"`
+/// as infinity "as agreed to by communicating parties" (User Guide 8.x), so an
+/// indefinitely repeating tariff cannot be materialised; expansion stops here.
+/// 2000 intervals covers any horizon this VEN reads -- the 288-slot 5-minute
+/// grid several times over -- and the planner only looks inside its own horizon.
 const MAX_LOOPED_INTERVALS: usize = 2000;
 
 /// Every interval of `event`, in order, with its absolute `[start, end)`.
 ///
-/// OpenADR 3.1: when `event.duration` exceeds the sum of the interval durations,
-/// the interval sequence repeats to fill it. Expansion is bounded by
-/// `MAX_LOOPED_INTERVALS`; an unbounded loop simply yields as many intervals as
-/// that allows, which is always more than the caller's horizon needs.
+/// OpenADR 3.1 `event.duration` "may be used to augment intervalPeriod
+/// definitions to **shorten or lengthen** the temporal span of an event"
+/// (User Guide, *event.duration*). It is one window, applied in both directions:
+///
+/// * longer than the sequence -- the intervals repeat to fill it, which is how
+///   the spec expresses a persistent tariff: 24 hourly prices plus
+///   `duration = "P9999Y"` repeat indefinitely, or `"P7D"` for a week.
+/// * shorter than the sequence -- the surplus is dropped, and an interval
+///   straddling the end is clipped. The spec's own example: 24 hourly intervals
+///   with `duration = "P12H"` "effectively omits the last 12 intervals".
+///
+/// With no `duration`, the sequence is returned exactly as declared.
 pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
     let base = base_intervals(event);
-    let Some(event_end) = looping_end(event, &base) else {
+    let Some(event_end) = event_window_end(event, &base) else {
         return base;
     };
 
-    // The sequence's own span; a non-positive or open span cannot be repeated.
+    // Trim first: this alone handles a duration shorter than the sequence.
+    let mut out: Vec<TimedInterval<'_>> = base
+        .iter()
+        .filter(|it| it.start < event_end)
+        .map(|it| TimedInterval {
+            interval: it.interval,
+            start: it.start,
+            end: it.end.min(event_end),
+        })
+        .collect();
+
+    // Then repeat, if the declared sequence does not reach the window's end.
     let (Some(first), Some(last)) = (base.first(), base.last()) else {
-        return base;
+        return out;
     };
     if !first.is_bounded() || !last.is_bounded() || last.end <= first.start {
-        return base;
+        return out;
     }
     let span = last.end - first.start;
-
-    let mut out = base.clone();
     let mut shift = span;
-    while out.len() < MAX_LOOPED_INTERVALS {
-        let cycle_start = first.start + shift;
-        if cycle_start >= event_end {
-            break;
-        }
+    while out.len() < MAX_LOOPED_INTERVALS && first.start + shift < event_end {
         for it in &base {
             if out.len() >= MAX_LOOPED_INTERVALS {
                 break;
@@ -93,7 +106,6 @@ pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
             out.push(TimedInterval {
                 interval: it.interval,
                 start,
-                // The final repetition is truncated at the event's end.
                 end: (it.end + shift).min(event_end),
             });
         }
@@ -102,20 +114,19 @@ pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
     out
 }
 
-/// The instant a looping event stops, or `None` when it does not loop --
-/// no `duration`, or one no longer than the sequence already covers.
-fn looping_end(event: &OadrEvent, base: &[TimedInterval<'_>]) -> Option<DateTime<Utc>> {
+/// Where `event.duration` puts the end of the event, or `None` when the event
+/// declares no duration or nothing to anchor it to. Unlike the looping-only
+/// reading, this is returned whether it falls before or after the sequence ends.
+fn event_window_end(event: &OadrEvent, base: &[TimedInterval<'_>]) -> Option<DateTime<Utc>> {
     let duration = event.duration.as_deref()?;
     let first = base.first()?;
-    let last = base.last()?;
-    if !first.is_bounded() || !last.is_bounded() {
+    if !first.is_bounded() {
         return None;
     }
     let secs = crate::common::parse_iso8601_duration_secs(duration);
-    let end = first
+    first
         .start
-        .checked_add_signed(chrono::Duration::seconds(secs))?;
-    (end > last.end).then_some(end)
+        .checked_add_signed(chrono::Duration::seconds(secs))
 }
 
 /// The interval list exactly as the event declares it, before any looping.
@@ -308,6 +319,60 @@ mod tests {
     //
     // "An event's intervals may be repeated by setting event.duration to a value
     // greater than the sum of all interval durations."
+
+    #[test]
+    fn event_duration_shorter_than_the_sequence_omits_the_surplus() {
+        // The User Guide's own example under *event.duration*: "24 hourly price
+        // intervals but duration = \"P12H\" effectively omits the last 12 intervals".
+        let intervals: Vec<_> = (0..24).map(|i| limit_interval(i, 5.0)).collect();
+        let e = event(json!({
+            "id": "tariff-12h", "programID": "p",
+            "duration": "PT12H",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT1H"},
+            "intervals": intervals
+        }));
+        let s = spans(&e);
+        assert_eq!(
+            s.len(),
+            12,
+            "the last 12 of 24 hourly intervals are omitted"
+        );
+        assert_eq!(s[0], (at(0, 0), at(1, 0)));
+        assert_eq!(s[11], (at(11, 0), at(12, 0)));
+    }
+
+    #[test]
+    fn an_interval_straddling_the_event_end_is_clipped() {
+        let e = event(json!({
+            "id": "clip", "programID": "p",
+            "duration": "PT45M",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT30M"},
+            "intervals": [limit_interval(0, 10.0), limit_interval(1, 8.0)]
+        }));
+        // The second interval would run to 01:00; the event stops at 00:45.
+        assert_eq!(
+            spans(&e),
+            vec![(at(0, 0), at(0, 30)), (at(0, 30), at(0, 45))]
+        );
+    }
+
+    #[test]
+    fn a_persistent_daily_tariff_repeats_indefinitely() {
+        // The spec's motivating case: "a tariff that defines 24 hourly prices
+        // that persist indefinitely" -- 24 hourly intervals plus P9999Y.
+        let intervals: Vec<_> = (0..24).map(|i| limit_interval(i, 5.0)).collect();
+        let e = event(json!({
+            "id": "tariff-forever", "programID": "p",
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2023-02-10T00:00:00Z", "duration": "PT1H"},
+            "intervals": intervals
+        }));
+        let s = spans(&e);
+        assert_eq!(s.len(), MAX_LOOPED_INTERVALS);
+        // Day two repeats day one's shape, hour for hour.
+        assert_eq!(s[24].0, s[0].0 + chrono::Duration::days(1));
+        assert_eq!(s[24].1, s[0].1 + chrono::Duration::days(1));
+    }
 
     #[test]
     fn event_duration_no_longer_than_the_sequence_does_not_loop() {
