@@ -34,7 +34,8 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       needs a `chown` or the broker exits with "Unable to open pwfile".
       The measurement, weather and boiler feeds are untouched and keep using the house broker;
       each VEN feed is independently addressable, so no bridge is needed.
-- [ ] 0.3 Decide and record: disable `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
+- [x] 0.3 **Disabled.** The VTN build now states its feature set explicitly
+      (`--no-default-features` plus the set it needs), dropping `experimental-websockets` (upstream default; its own comment says object privacy is not implemented) unless a scenario needs it
 - [x] 0.4 Re-apply **P-2** report cascade-delete migration against the 3.1 `report` table (`event_id` is now the only object link)
 - [x] 0.5 Port **P-1** `EventContent::ends_at()` → `EventRequest::ends_at()` as longest-end-wins
       (D9): max over the event-level `intervalPeriod.duration`, the new top-level `duration` and
@@ -213,5 +214,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 7.2 Key learnings into `docs/reference/KEY_LEARNINGS.md`: the scope alias trap, the `internal-oauth` Dockerfile collision, clientId identity, flat targets
 - [ ] 7.3 Wave mechanism-level facts into `docs/architecture/VTN_ARCHITECTURE.md` and `VEN_ARCHITECTURE.md`; user-observable behaviour into `docs/use-cases/`
 - [ ] 7.4 Close GB-50 (or record what remains) now that descriptors are on the wire
-- [ ] 7.5 Re-decide the fleet-monitor MQTT question against native subscriptions/notifiers (Q3, proposal Non-Goals)
+- [x] 7.5 **Re-decided** in `docs/plans/fleet-monitor/phase-0-foundation.md` §6.1a: both, for
+      different jobs — subscriptions carry OpenADR objects and can replace the BFF's polling of
+      them; they cannot carry VEN internals, which is what the side channel exists for
 - [ ] 7.6 Delete this change directory per workflow rule 3; clean up merged checkouts/worktrees on both hosts

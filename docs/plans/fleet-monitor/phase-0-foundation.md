@@ -184,12 +184,54 @@ Where exact spec semantics and the lab's needs differ, the lab convention is wri
 
 ### 6.1 Broker
 
-Existing Mosquitto on Node1 (`/srv/docker/mosquitto`). VENs on Node1 reach it via
-`host.docker.internal`, VENs on Node2 via the Node1 LAN IP — same wiring as the weather feed.
-Fleet topics require authentication: a second listener (e.g. 1884) with
-`per_listener_settings true`, the existing but unused password file, and an ACL so each VEN may
-publish only below its own `venName`. The anonymous 1883 listener stays as it is for existing
-clients (R-54 remains open for that listener).
+*(Revised 2026-09-19 — this section originally proposed a second listener on the house broker.)*
+
+**`lab-mqtt`**, the lab's own broker, built during the 3.1 migration: a container in the VTN
+stack on `openadr-net`, listening on **1884 everywhere** (container, docker network and host), so
+the port alone says which broker is meant — `:1883` is always the house broker, `:1884` always
+this one. `allow_anonymous false`, with the password file generated at start-up from environment
+variables so no credential is committed.
+
+A separate broker rather than a second listener: the house broker's password file and
+`allow_anonymous` are config the home automation depends on, so the lab could not tighten auth
+there without risking it (R-54). Here the lab owns the policy outright, which is what the 3.1
+notifiers and any later certification profile need.
+
+Addressing: the VTN and the Node1 VENs reach it by service name (`lab-mqtt:1884`); the Node2
+fleet uses the published port over the LAN. The **inbound** feeds are untouched and still come
+from the house broker — `openadr-lab/measurement/<site>/*` and `openadr-lab/weather/<site>/*` are
+derived from real hardware on Node1, and each VEN feed is independently addressable
+(`PV_MEASUREMENT_MQTT_HOST`, `BASE_LOAD_MEASUREMENT_MQTT_HOST`, `WEATHER_MQTT_HOST`), so no bridge
+is needed. The split is by direction of travel: the house broker carries what the site
+**measures**, `lab-mqtt` carries what the lab **generates**.
+
+Still to do here: the per-VEN ACL, so a VEN may publish only below its own `venName`. `lab-mqtt`
+authenticates every client but does not yet restrict topics.
+
+### 6.1a Why not 3.1's native subscriptions?
+
+*(Decided 2026-09-19, the re-decision the 3.1 migration deferred.)*
+
+3.1 ships `/subscriptions` with three notifier transports (`/notifiers/{ws,mqtt,push-mqtt}`), and
+`paho-mqtt` is a hard dependency of the VTN — so "the lab polls because OpenADR gives it nothing
+better" is no longer true, and the question had to be asked again.
+
+The answer is **both, for different jobs**, because they carry different things:
+
+- **Subscriptions carry OpenADR objects.** A notification says a program, event, report, VEN or
+  resource was created, updated or deleted. That is exactly what the BFF polls the VTN for today,
+  so subscriptions could replace *that* polling and cut the "≤ 10 s after create/edit" latency in
+  §1 to near zero.
+- **They cannot carry VEN internals.** Net grid power, per-asset SoC, the adopted plan, a
+  controller trace entry — none of these are OpenADR objects, and no amount of subscribing makes
+  the VTN aware of them. The side channel in §6.2 exists precisely because the interesting fleet
+  data never reaches the VTN.
+
+So the side channel stays as specified, and native subscriptions become a **later, separate
+improvement to the BFF's VTN-object freshness** — not a replacement for it. Two things to settle
+before adopting them: `experimental-websockets` is currently disabled in our build because
+upstream notes object privacy is unimplemented for it, and the VEN scope set omits
+`write_subscriptions_ven` until a subscription actually exists to write.
 
 ### 6.2 Topics and payloads
 
