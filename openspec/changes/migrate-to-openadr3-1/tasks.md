@@ -212,7 +212,11 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 - [x] 7.1 Journal the migration in `docs/history/project_journal.md` (what, why, issues)
 - [x] 7.2 Key learnings into `docs/reference/KEY_LEARNINGS.md`: the scope alias trap, the `internal-oauth` Dockerfile collision, clientId identity, flat targets
-- [ ] 7.3 Wave mechanism-level facts into `docs/architecture/VTN_ARCHITECTURE.md` and `VEN_ARCHITECTURE.md`; user-observable behaviour into `docs/use-cases/`
+- [x] 7.3a `docs/architecture/VTN_ARCHITECTURE.md` waved: §3 single credential and the scope
+      alias trap, §5 three-step provisioning with `objectType` and the targets-are-the-address
+      rule, the fixture/feature notes, and D-01
+- [ ] 7.3b `VEN_ARCHITECTURE.md` and `docs/use-cases/` — pending, and mostly waiting on the VEN
+      side of the migration (phase 3) actually landing
 - [ ] 7.4 Close GB-50 (or record what remains) now that descriptors are on the wire
 - [x] 7.5 **Re-decided** in `docs/plans/fleet-monitor/phase-0-foundation.md` §6.1a: both, for
       different jobs — subscriptions carry OpenADR objects and can replace the BFF's polling of

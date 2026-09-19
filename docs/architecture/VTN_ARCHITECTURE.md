@@ -62,44 +62,60 @@ Persistent Docker volume required.
 **Authentication:**
 - Token endpoint: `POST /auth/token` (NOT `/oauth/token`)
 - Token TTL: 2,592,000 s (30 days)
-- Fixture users: `any-business`, `ven-manager`, `user-manager`, `business-1`, `ven-1`
+- Fixture user: **`bl-client`** only (`VTN/fixtures/01_bl_client.sql`). Nothing can call
+  `/users` without a token, so exactly one bootstrap credential lives in SQL; every VEN user
+  is created through the API, so the VTN hashes each secret and no password hash is committed.
+- `POST /auth/token` and the whole `/users` tree exist only when the VTN is built with the
+  `internal-oauth` feature, which is **not** an upstream default — see `vtn.Dockerfile`.
 
 **Field names (pass-through, no DTO normalisation):**
 `programName`, `programID`, `createdDateTime`, `venName`, `eventName` — upstream spec names used at all layers.
 
 ---
 
-## 3. BFF — Dual-Credential Pattern
+## 3. BFF — Single Business Credential
 
-The VTN UI never holds OAuth secrets. The BFF (Backend For Frontend) holds two credential sets
-and proxies all API calls.
+The VTN UI never holds OAuth secrets. The BFF (Backend For Frontend) holds one credential and
+proxies all API calls.
 
 ```
 Browser  →  VTN BFF (port 8220)  →  VTN API (port 8200)
 ```
 
-### Why two credentials?
+### One credential, not two
 
-The VTN RBAC enforces role separation:
+OpenADR 3.1 replaced the role model with **scopes carried on the user object**, so a single
+client can hold everything the BFF needs. The 3.0 split (`any-business` for operator work,
+`ven-manager` for VEN administration, because no single role could do both) is gone.
 
-| Role | Credential | Can access |
-|---|---|---|
-| `any-business` | `business-client` | `GET/POST/PUT/DELETE /programs`, `/events`, `/reports` |
-| `ven-manager` | `ven-client` | `GET/POST/PUT/DELETE /vens` |
+`bl-client` holds:
 
-A single credential cannot do both. The BFF uses `any-business` for operator operations
-and `ven-manager` for VEN administration. The UI gets a unified API surface without knowing
-about the split.
+```
+read_all  write_programs  write_events  write_vens_bl  write_reports_bl  write_users
+```
+
+**Scopes are written in full; the aliases are never used.** 3.1 splits three of them by actor —
+`write_vens_bl` / `write_vens_ven`, and the same for reports and subscriptions — and the bare
+`write_vens`, `write_reports` and `write_subscriptions` are aliases for the **VEN** variant.
+The distinction is not privilege level but code path: with `write_vens_bl` the VTN takes
+`clientID` from the request body, while with `write_vens_ven` it overwrites it with the caller's
+own token subject. A BFF granted the alias would therefore create every VEN object owned by
+itself and collide on `ven_client_id_unique` at the second one.
+
+`read_all` and `read_targets` are mutually exclusive branches in every read handler: a `read_all`
+holder bypasses target filtering entirely, which is correct for the BFF and wrong for a VEN.
 
 ### Token management
 
-The BFF holds two `VtnClient` instances, each with its own OAuth token. Tokens are refreshed
-on 401. The UI communicates with the BFF using session-scoped API keys (not OAuth credentials).
+The BFF holds one `VtnClient` with its own OAuth token, refreshed on 401. The UI communicates
+with the BFF using session-scoped API keys (not OAuth credentials).
 
-### Report constraint
+### Reports
 
-`POST /reports` requires the VEN role. Only VENs (not the BFF's `any-business` credential)
-can create reports. The BFF proxies report submissions from the VEN's own API calls.
+VENs submit their own reports with `write_reports_ven`; the BFF holds `write_reports_bl`, which
+is what lets it read and delete reports across the fleet. A report carries `eventID` as its only
+object link — 3.1 removed `programID` — and `clientID`, which the VTN fills in from the token, so
+a report always identifies the VEN that submitted it.
 
 ---
 
@@ -174,42 +190,55 @@ OpenADR Interface reads OadrReportObligation (DueAt)
 
 ## 5. VEN Provisioning Sequence
 
-VENs are provisioned via the VTN admin API. Four steps, three different roles:
+Three steps, one credential (`bl-client`). OpenADR 3.1 carries a user's scopes on the user
+object and sets them in the creation call, so the 3.0 fourth step — attaching a VEN role after
+the credential already existed — is gone.
 
 ```
-Step 1 — Create user account (user-manager role)
+Step 1 — Create the user WITH its scopes
   POST /users
-  body: { "reference": "ven-1", "description": "VEN 1", "roles": [] }
+  body: { "reference": "ven-1-user", "description": "VEN ven-1",
+          "scope": ["read_targets", "read_ven_objects", "write_reports_ven"] }
   → returns { "id": "<user-uuid>" }
 
-Step 2 — Add OAuth credential to user (user-manager role)
-  POST /users/{user-uuid}/credentials
+Step 2 — Add the OAuth credential to that already-scoped user
+  POST /users/{user-uuid}
   body: { "client_id": "ven-1", "client_secret": "ven-1" }
 
-Step 3 — Create VEN entity (ven-manager role)
+Step 3 — Create the VEN object
   POST /vens
-  body: { "venName": "ven-1" }
+  body: { "objectType": "BL_VEN_REQUEST",     ← mandatory discriminator
+          "venName": "ven-1",
+          "clientID": "ven-1",
+          "targets": ["ven-1"] }              ← without this it sees nothing targeted
   → returns { "id": "<ven-uuid>" }
-
-Step 4 — Assign VEN role to user (user-manager role)
-  PUT /users/{user-uuid}
-  body: {                             ← FULL body required (not a patch)
-    "reference": "ven-1",
-    "description": "VEN 1",
-    "roles": [{ "role": "VEN", "id": "<ven-uuid>" }]
-  }
 ```
 
-**Important:** Step 4 is a full-replace PUT. The `roles` array must include all roles,
-not just the new one. The VTN does not support PATCH on users.
+**`objectType` is mandatory.** 3.1 models `VenRequest` as a tagged enum
+(`BL_VEN_REQUEST` / `VEN_VEN_REQUEST`); a body without the tag is rejected with
+*"missing field `objectType`"*. It also selects behaviour: with `write_vens_bl` the VTN takes
+`clientID` from the body, whereas the `_ven` variant derives it from the caller's token.
 
-**VEN identity model:**
-- `ven_id` — stable UUID assigned at `POST /vens`
-- OAuth `client_id` / `client_secret` — used for token acquisition
-- `venName` — human-readable name, used in event `targets` filtering
+**The ordering hazard is gone.** Under 3.0 the role was attached only after the credential
+existed, so a VEN polling for its token could mint one carrying no role and cache it for the
+token's whole lifetime — authorized to nothing, polling successfully, seeing an empty world
+(GB-49). A 3.1 user has its scopes from the moment it exists, so that window cannot occur and
+credentials no longer have to be created last.
 
-**Target filtering:** Programs and events with `targets: [{ type: "VEN_NAME", values: ["ven-1"] }]`
-are visible only to the named VEN(s). Programs/events with `targets: null` are open to all VENs.
+**VEN identity and visibility:**
+- `clientID` — identifies *which VEN object* a caller is. Unique (`ven_client_id_unique`).
+- `targets` — decides *what that VEN can see*. **This is the address, not the clientID.**
+  The VTN intersects an object's `targets` with the union of the VEN's own `targets` and its
+  resources'; a VEN provisioned with an empty list sees only untargeted objects, however
+  precisely a program names its clientID (spec 3.1.1 Definition.md, "VEN created object
+  privacy"). The lab gives each VEN its own `venName` as a target, which is a convention, not a
+  protocol rule.
+- `venName` — human-readable name; also the target string by the convention above.
+- `ven_id` — stable UUID assigned at `POST /vens`.
+
+**Target hiding** is native in 3.1: a VEN sees only its own id in an object's `targets`, never a
+sibling's, while a `read_all` holder sees the full list. An empty `targets` means visible to
+every VEN.
 
 ---
 
@@ -288,12 +317,15 @@ duplicate events. The seed script is idempotent for programs but additive for ev
 
 ## 8. Design Decisions
 
-### D-01: BFF Dual-Credential Pattern
+### D-01: BFF Single Business Credential
 
-**Decision:** BFF holds two OAuth credentials (`any-business` + `ven-manager`).
-**Rationale:** VTN RBAC separates operator operations from VEN management. A single credential
-cannot access both `/programs`+`/events` and `/vens`. The BFF provides a unified surface to
-the browser without exposing secrets.
+**Decision:** the BFF holds one OAuth credential, `bl-client`, with its scopes named in full.
+**Rationale:** 3.1 carries scopes on the user object, so one client can hold both operator and
+VEN-administration rights; the 3.0 dual-credential pattern existed only because RBAC roles could
+not be combined. The scopes are spelled out rather than abbreviated because `write_vens`,
+`write_reports` and `write_subscriptions` are aliases for the *VEN* variants, which select a
+different code path (`clientID` taken from the token instead of the body) rather than a lower
+privilege level.
 
 ### D-02: VTN as Git Submodule
 
