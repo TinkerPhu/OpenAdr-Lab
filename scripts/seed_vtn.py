@@ -477,6 +477,9 @@ def _ensure_dashboard_url_attribute(base, token, ven_name, dashboard_url):
     # and dropping it would fail validation.
     body = {k: v for k, v in ven.items() if k not in ("id", "createdDateTime", "modificationDateTime")}
     body["attributes"] = attributes
+    # A GET response carries no objectType, but the PUT body needs the
+    # discriminator just as the POST does.
+    body["objectType"] = "BL_VEN_REQUEST"
     r = requests.put(f"{base}/vens/{ven_id}", headers=auth_headers(token), json=body, timeout=10)
     r.raise_for_status()
     print(f"  '{ven_name}' DASHBOARD_URL set to {dashboard_url}")
@@ -534,7 +537,15 @@ def provision_vens(base, vens):
         #    write_vens_bl, so the VTN takes clientID from this body; with the
         #    write_vens_ven variant it would instead stamp in our own token
         #    subject and every VEN would collide on ven_client_id_unique.
-        ven_body = {"venName": ven["ven_name"], "clientID": ven["client_id"], "targets": []}
+        # objectType is the discriminator for 3.1's VenRequest enum
+        # (BL_VEN_REQUEST vs VEN_VEN_REQUEST) and is mandatory -- without it the
+        # VTN rejects the body with "missing field `objectType`".
+        ven_body = {
+            "objectType": "BL_VEN_REQUEST",
+            "venName": ven["ven_name"],
+            "clientID": ven["client_id"],
+            "targets": [],
+        }
         # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
         # can label fleet entries (only present on persona fleets).
         # BL-41: DASHBOARD_URL for VENs on a different host than the VTN/UI.
