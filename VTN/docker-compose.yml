@@ -59,10 +59,10 @@ services:
   # runs allow_anonymous for the house. This one carries what the lab generates
   # (3.1 subscription notifiers, fleet telemetry) and authenticates every client.
   #
-  # Published on host port 1884 because the house broker holds 1883; inside the
-  # container it is a plain 1883 listener, so on openadr-net the VTN and the
-  # Node1 VENs reach it by name as lab-mqtt:1883 and only the Node2 fleet needs
-  # the published port.
+  # It listens on 1884 everywhere -- container, docker network and host -- so the
+  # port alone identifies the broker: :1883 is always the house broker, :1884 is
+  # always this one. The VTN and the Node1 VENs reach it by name as
+  # lab-mqtt:1884; the Node2 fleet uses the identical port on the host.
   #
   # The password file is written at start-up from these variables so that no
   # credential is committed to this public repository. Secrets default to the
@@ -72,7 +72,7 @@ services:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "${LAB_MQTT_PORT:-1884}:1883"
+      - "${LAB_MQTT_PORT:-1884}:1884"
     environment:
       MQTT_VTN_USERNAME: ${MQTT_VTN_USERNAME:-openadr-vtn}
       MQTT_VTN_PASSWORD: ${MQTT_VTN_PASSWORD:-openadr-vtn}
@@ -92,7 +92,7 @@ services:
         chmod 0600 /mosquitto/config/pwfile
         exec mosquitto -c /mosquitto/config/mosquitto.conf
     healthcheck:
-      test: mosquitto_sub -h 127.0.0.1 -p 1883 -u "$${MQTT_VTN_USERNAME}" -P "$${MQTT_VTN_PASSWORD}" -t '$$SYS/broker/version' -C 1 -W 3 || exit 1
+      test: mosquitto_sub -h 127.0.0.1 -p 1884 -u "$${MQTT_VTN_USERNAME}" -P "$${MQTT_VTN_PASSWORD}" -t '$$SYS/broker/version' -C 1 -W 3 || exit 1
       interval: 15s
       timeout: 5s
       retries: 5
@@ -126,7 +126,7 @@ services:
       # The lab's own broker, on this same network, so it is addressed by
       # service name -- no host.docker.internal and no extra_hosts entry, which
       # the house broker would have needed since it sits on influxdb_network.
-      MQTT_URL: ${MQTT_URL:-mqtt://lab-mqtt:1883}
+      MQTT_URL: ${MQTT_URL:-mqtt://lab-mqtt:1884}
       MQTT_USERNAME: ${MQTT_VTN_USERNAME:-openadr-vtn}
       MQTT_PASSWORD: ${MQTT_VTN_PASSWORD:-openadr-vtn}
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-openadr-lab/vtn}

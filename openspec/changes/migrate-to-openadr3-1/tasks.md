@@ -10,15 +10,17 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 - [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
 - [x] 0.3a **MQTT posture decided: the lab runs its own broker.** *(Supersedes an earlier
       decision to use the house Mosquitto, now reverted.)* `VTN/docker-compose.yml` gains a
-      `lab-mqtt` service on `openadr-net` (eclipse-mosquitto:2, published on host 1884 because
-      the house broker holds 1883). The VTN addresses it **by service name**,
-      `mqtt://lab-mqtt:1883`, which removes the `host.docker.internal` + `extra_hosts`
+      `lab-mqtt` service on `openadr-net` (eclipse-mosquitto:2). It listens on **1884
+      everywhere** -- container, docker network and host -- so the port alone identifies the
+      broker: `:1883` is always the house one, `:1884` always this one. The VTN addresses it
+      **by service name**, `mqtt://lab-mqtt:1884`, which removes the `host.docker.internal` + `extra_hosts`
       workaround the house broker needed for sitting on `influxdb_network`, and gains a
       `depends_on: service_healthy` since 3.1 panics if the broker is unreachable at startup.
       `allow_anonymous false` with a password file generated at container start from env vars,
       so no credential is committed to this public repo.
       **Verified on Node1 with the real config and start-up command**: valid credential accepted,
-      anonymous refused, wrong password refused. One trap found and fixed in the process — the
+      anonymous refused, wrong password refused, nothing listening on 1883, and the published
+      port reachable over the LAN (the path the Node2 fleet uses). One trap found and fixed in the process — the
       start-up command runs as root while mosquitto drops to the `mosquitto` user, so the pwfile
       needs a `chown` or the broker exits with "Unable to open pwfile".
       The measurement, weather and boiler feeds are untouched and keep using the house broker;
