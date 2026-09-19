@@ -37,50 +37,64 @@ def _check_not_live():
                 )
 
 
+def _delete_all(resource, token):
+    """Delete every object of one collection, returning how many the VTN accepted.
+
+    Always re-reads the FIRST page: deleting a page's rows shifts the remainder
+    down into offsets 0..49, so advancing `skip` by the page size steps straight
+    over them (with 54 programs it once deleted 50 and left 4). The loop ends
+    when a page holds nothing this credential can delete; ids the VTN refuses are
+    remembered so one undeletable row cannot spin it forever.
+    """
+    from features.helpers.api_client import vtn_get, vtn_delete
+    undeletable = set()
+    deleted = 0
+    for _ in range(100):
+        r = vtn_get(f"/{resource}?limit=50&skip=0", token)
+        if not r.ok:
+            break
+        items = [x for x in r.json() if x["id"] not in undeletable]
+        if not items:
+            break
+        for item in items:
+            try:
+                resp = vtn_delete(f"/{resource}/{item['id']}", token)
+                # A failed DELETE is not progress: count only what the VTN
+                # actually removed, so the printed total is the truth.
+                if getattr(resp, "ok", False):
+                    deleted += 1
+                else:
+                    undeletable.add(item["id"])
+            except Exception:
+                undeletable.add(item["id"])
+    return deleted
+
+
 def _cleanup_all_programs():
-    """Delete every program in the test VTN before each feature.
+    """Delete every event and program in the test VTN before each feature.
+
+    Events go first. `event.program_id` references `program(id)` with no
+    ON DELETE CASCADE, so deleting a program that still has events fails on the
+    foreign key -- and because that failure is swallowed, both survive and the
+    next run collides on a duplicate event name (409).
 
     One API pass is enough under OpenADR 3.1. The old second, SQL pass existed
     because 3.0 scoped programs to a business_id, so anything created through
     the BFF/UI was invisible to the API credential and accumulated until it
     caused 409s. 3.1 has no business_id -- one `read_all` credential sees every
-    program -- and the pass would not run anyway: it deleted from `ven_program`
-    and `report.program_id`, both of which the 3.1 migration drops.
+    object -- and that pass could not run anyway: it deleted from `ven_program`
+    and `report.program_id`, both dropped by the 3.1 migration.
     """
-
-    # Phase 1 — API cleanup (programs visible to the bl-client credential).
     try:
-        from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
+        from features.helpers.api_client import get_token_value
         token = get_token_value("bl-client", "bl-client")
-        limit = 50
-        deleted = 0
-        # Always re-read the FIRST page: deleting a page's rows shifts the
-        # remainder down into offsets 0..49, so advancing `skip` by the page
-        # size would step straight over them and leave programs behind (with
-        # 54 programs it deleted 50 and left 4). The loop ends when a page
-        # comes back empty; `passes` only guards against an undeletable row
-        # spinning forever.
-        for _ in range(100):
-            r = vtn_get(f"/programs?limit={limit}&skip=0", token)
-            if not r.ok:
-                break
-            programs = r.json()
-            if not programs:
-                break
-            progressed = False
-            for p in programs:
-                try:
-                    vtn_delete(f"/programs/{p['id']}", token)
-                    deleted += 1
-                    progressed = True
-                except Exception:
-                    pass
-            if not progressed:
-                break
-        if deleted:
-            print(f"Pre-run cleanup: deleted {deleted} programs (API) from test VTN.")
+        events = _delete_all("events", token)
+        programs = _delete_all("programs", token)
+        if events or programs:
+            print(f"Pre-run cleanup: deleted {events} events, {programs} programs from test VTN.")
     except Exception as exc:
-        print(f"Warning: API program cleanup failed: {exc}")
+        print(f"Warning: API cleanup failed: {exc}")
+
 
 def before_all(context):
     """Wait for all services to be reachable before running any tests."""

@@ -100,6 +100,7 @@ def _interval_values(ptype, count):
 
 @given('I create a program "{name}" targeting "{ven}" and save its ID')
 def step_create_targeted_program_save_id(context, name, ven):
+    context.saved_program_targets = [ven]
     context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
         {"programName": name, "targets": [ven]},
@@ -108,6 +109,7 @@ def step_create_targeted_program_save_id(context, name, ven):
 
 @given('I create a program "{name}" targeting both "{ven1}" and "{ven2}" and save its ID')
 def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
+    context.saved_program_targets = [ven1, ven2]
     context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
         {
@@ -122,6 +124,7 @@ def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
 
 @given('I create an open program "{name}" and save its ID')
 def step_create_open_program_save_id(context, name):
+    context.saved_program_targets = []
     context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
         {"programName": name, "targets": []}  # [] = open to every VEN in 3.1,
@@ -133,10 +136,18 @@ def step_create_open_program_save_id(context, name):
 @when('I create a UC event "{name}" with type "{ptype}" priority {pri:d} and {count:d} interval')
 @when('I create a UC event "{name}" with type "{ptype}" priority {pri:d} and {count:d} intervals')
 def step_create_uc_event(context, name, ptype, pri, count):
+    # The event inherits its program's targets. Under 3.0 an event was reachable
+    # only by VENs enrolled in its program, via the ven_program table, so an
+    # untargeted event of a targeted program was private by inheritance. 3.1
+    # dropped that table and filters every object by its *own* targets with no
+    # program join, which makes an untargeted event public -- visible even to a
+    # VEN the program does not name. Carrying the program's targets onto the
+    # event is what "targeted to VEN-1 only" now means on the wire.
     body = {
         "programID": context.saved_program_id,
         "eventName": name,
         "priority": pri,
+        "targets": getattr(context, "saved_program_targets", []),
         "intervals": _build_intervals(ptype, count),
     }
     context.response = vtn_post("/events", context.vtn_token, json=body)
