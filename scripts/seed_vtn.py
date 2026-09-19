@@ -27,6 +27,21 @@ import requests
 
 # ── Demo data ────────────────────────────────────────────────────────────────
 
+# ── The lab profile pointer (D10, GB-50) ─────────────────────────────────────
+#
+# 3.1 removed `programType`, so `attributes` is the only spec-native place left
+# to say which profile a program's payloads follow. It is a namespaced,
+# versioned, additive extension: a spec-only consumer that ignores it still
+# reads every program correctly, which is the condition `wire-contracts` puts
+# on extensions.
+#
+# The value points at the published profile document rather than restating it,
+# so there is one copy of that truth and it is not this file.
+LAB_PROFILE_ATTRIBUTE = {
+    "type": "openadr-lab.profile",
+    "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v1"],
+}
+
 PROGRAMS = [
     {
         "programName": "Summer Peak DR",
@@ -369,11 +384,10 @@ def create_program(base_url, token, prog):
         "intervalPeriod": None,
         "programDescriptions": None,
         "targets": prog.get("targets", []),
+        "attributes": prog.get("attributes") or [LAB_PROFILE_ATTRIBUTE],
     }
     if prog.get("payloadDescriptors"):
         body["payloadDescriptors"] = prog["payloadDescriptors"]
-    if prog.get("attributes"):
-        body["attributes"] = prog["attributes"]
     r = requests.post(
         f"{base_url}/programs",
         headers=auth_headers(token),
@@ -386,11 +400,13 @@ def create_program(base_url, token, prog):
 
 def update_program(base_url, token, program_id, prog):
     """PUT targets/metadata onto an existing program (idempotent re-runs)."""
-    body = {"programName": prog["programName"], "targets": prog.get("targets", [])}
+    body = {
+        "programName": prog["programName"],
+        "targets": prog.get("targets", []),
+        "attributes": prog.get("attributes") or [LAB_PROFILE_ATTRIBUTE],
+    }
     if prog.get("payloadDescriptors"):
         body["payloadDescriptors"] = prog["payloadDescriptors"]
-    if prog.get("attributes"):
-        body["attributes"] = prog["attributes"]
     r = requests.put(
         f"{base_url}/programs/{program_id}",
         headers=auth_headers(token),
@@ -407,12 +423,62 @@ def list_events(base_url, token):
     return r.json()
 
 
+# ── The payload contract (GB-50, `wire-contracts`) ───────────────────────────
+#
+# The one place that says what a number on the wire means. Every event this
+# script creates declares, in `payloadDescriptors`, the quantity and unit of
+# every payload type it carries -- so a reader never has to assume.
+#
+# OpenADR's `Unit` enum has no watt, which is not an oversight to work around:
+# power is kilowatts and energy is kilowatt-hours, and anything emitting watts
+# is emitting a number it cannot declare.
+#
+#   SIMPLE                 dimensionless level (0-3); no unit exists for it
+#   IMPORT/EXPORT_CAPACITY_LIMIT   power, kW, positive at the grid coupling point
+#   CHARGE_STATE_SETPOINT  state of charge, percent
+#   PRICE / EXPORT_PRICE   currency per kWh -- `units` is the denominator
+#   GHG                    emission intensity, g/kWh
+PAYLOAD_CONTRACT = {
+    "SIMPLE": {},
+    "IMPORT_CAPACITY_LIMIT": {"units": "KW"},
+    "EXPORT_CAPACITY_LIMIT": {"units": "KW"},
+    "CHARGE_STATE_SETPOINT": {"units": "PERCENT"},
+    "PRICE": {"units": "KWH", "currency": "EUR"},
+    "EXPORT_PRICE": {"units": "KWH", "currency": "EUR"},
+    "GHG": {"units": "GHG"},
+}
+
+
+def payload_descriptors_for(intervals):
+    """Derive an event's payloadDescriptors from the payloads it actually carries.
+
+    Derived rather than declared beside the data, so the two cannot drift: an
+    event physically cannot go out carrying a payload type it does not declare.
+    An unknown type raises instead of being sent undeclared -- under
+    `wire-contracts` a value whose meaning lives only in the sender's head is
+    the bug this exists to prevent.
+    """
+    seen = []
+    for interval in intervals or []:
+        for payload in interval.get("payloads", []):
+            ptype = payload.get("type")
+            if ptype not in PAYLOAD_CONTRACT:
+                raise ValueError(
+                    f"payload type {ptype!r} has no entry in PAYLOAD_CONTRACT -- "
+                    "add its quantity and unit there before seeding it"
+                )
+            if ptype not in seen:
+                seen.append(ptype)
+    return [{"payloadType": t, **PAYLOAD_CONTRACT[t]} for t in seen]
+
+
 def create_event(base_url, token, program_id, evt):
     """Create an event with full OpenADR fields."""
     body = {
         "programID": program_id,
         "eventName": evt["eventName"],
         "intervals": evt["intervals"],
+        "payloadDescriptors": payload_descriptors_for(evt["intervals"]),
     }
     if evt.get("priority") is not None:
         body["priority"] = evt["priority"]
