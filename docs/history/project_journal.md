@@ -13083,3 +13083,35 @@ This reorders phase 3. Its justification was "restore the fleet"; nothing needs 
 remains genuinely valuable is the contract work — `payloadDescriptors` (GB-50), dropping the dead
 `programID`, making `eventID` structurally required — and descriptor visibility, which the minimal
 DTOs cannot express and which is the real reason to adopt the wire types.
+
+### Phase 6 — the test suite, and what it taught about 3.1 targeting
+
+Migrating the E2E suite was mostly mechanical (one credential, flat targets), with one
+embarrassing miss and one genuine discovery.
+
+The miss: the credential name is **Gherkin text** — `Given I have a VTN token as "any-business"`
+— so migrating the step definitions left 49 call sites across 33 `.feature` files asking for a
+user that no longer existed. Every one failed with a 401 on its first step. A sweep of `.py` and
+`.sh` was not a sweep.
+
+The discovery is worth keeping. Under 3.0, an event was reachable only by VENs enrolled in its
+program, through the `ven_program` table, so an **untargeted** event of a **targeted** program
+was private by inheritance. 3.1 drops that table and filters every object by its own targets with
+no program join — which makes an untargeted event **public**, visible even to a VEN its program
+does not name. Scenarios asserting "targeted to VEN-1 only" failed with *"unexpectedly found on
+VEN-2"*, and they were right to: on the 3.1 wire, targeting a program does not target its events.
+Events now carry their program's targets explicitly.
+
+Two cleanup paths were raw SQL against `ven_program`, `report.program_id` and `business_id` — all
+dropped by the migration. They had been failing silently (`column "program_id" does not exist`)
+and cleaning nothing. Both are API calls now, and the reason they existed at all is gone: 3.0
+scoped programs to a `business_id` that made UI-created programs invisible to the API credential,
+whereas one `read_all` credential in 3.1 sees everything. Deleting events before programs matters
+— `event.program_id` has no `ON DELETE CASCADE`, so a program with events cannot be deleted, and
+that failure being swallowed is what left rows behind to collide on the next run.
+
+`fix/cleanup-delete-accounting` (ef012c7f) is folded in here rather than merged separately, since
+this rewrote the same function.
+
+Result: **276 scenarios passed, 3 failed** in the main pass and **15 passed, 0 failed** isolated;
+the three were the UI-targeting case above, fixed after that run started.
