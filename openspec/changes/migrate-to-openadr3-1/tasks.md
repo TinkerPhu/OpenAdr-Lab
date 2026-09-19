@@ -186,16 +186,18 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 ## 6. Integration tests
 
-- [ ] 6.1 Auth steps: scope-based tokens replacing role-based
-- [ ] 6.2 Provisioning steps: self-registration flow; scenario for happy path **and** 409 idempotency
-- [ ] 6.3 Enrollment steps: flat `targets: ["ven-1"]`
+- [x] 6.1 Auth steps and **feature files** on `bl-client` — the credential is Gherkin text, so 49
+      call sites across 33 `.feature` files had to move with the step definitions
+- [x] 6.2 `tests/provision_ven.py` on the 3.1 three-step flow (user+scopes → credential → VEN
+      object), with a repair path for a VEN whose credential exists but whose object does not
+- [x] 6.3 Enrollment and UC steps on flat targets; events now inherit their program's targets
 - [ ] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
 - [ ] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
 - [ ] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
 - [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
 - [ ] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
-- [ ] 6.9a The test stack's throwaway broker runs anonymous while production now runs
+- [ ] 6.9b The test stack's throwaway broker runs anonymous while production now runs
       `allow_anonymous false`, so an MQTT auth misconfiguration would not be caught by the
       suite. Decide whether the test broker should carry credentials too (fidelity) or stay
       anonymous (the weather-plugin scenarios connect to it anonymously today)
