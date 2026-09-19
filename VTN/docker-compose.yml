@@ -111,10 +111,21 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
       # OAuth — internal provider (HMAC, auto-generated secret)
-      # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one.
+      # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one
+      # (a fresh random secret per restart, which invalidates cached tokens —
+      # clients re-authenticate, so this is noise rather than breakage).
       # OAUTH_TYPE: INTERNAL
       # OAUTH_KEY_TYPE: HMAC
       # OAUTH_BASE64_SECRET: ${OAUTH_BASE64_SECRET:-}
+      #
+      # Mandatory from OpenADR 3.1 on: the VTN panics at startup without it when
+      # using the internal OAuth provider (state.rs:171). It is pure discovery
+      # metadata — served from GET /auth/server to tell a client where to fetch
+      # a token — and plays no part in signing or validating one. So it must be
+      # a URL a *client* can reach, not the in-network service address: the BFF
+      # and the Node1 VENs talk to vtn:3000, but the Node2 fleet reaches the
+      # published port over the LAN, and that is the answer discovery must give.
+      OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://192.168.1.103:8200/auth/token}
       #
       # MQTT — OpenADR 3.1 subscription notifiers (/notifiers/mqtt, push-mqtt).
       # All three of URL/USERNAME/PASSWORD must be set together: a partial set
