@@ -25,7 +25,7 @@ def step_create_targeted_program(context, name, ven_name):
         context.vtn_token,
         json={
             "programName": name,
-            "targets": [{"type": "VEN_NAME", "values": [ven_name]}],
+            "targets": [ven_name],
         },
     )
     context.response.raise_for_status()

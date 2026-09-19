@@ -13,7 +13,7 @@ def step_cleanup_ui_programs(context):
 
     Belt-and-suspenders: _cleanup_all_programs() in before_feature handles
     bulk cleanup, but if the VTN UI created programs under a non-null business_id
-    that is invisible to the any-business API token, they accumulate and cause
+    that is invisible to the bl-client API token, they accumulate and cause
     409 Conflict errors on the next run.  This step runs a targeted SQL delete
     before each scenario so each scenario always starts with a clean slate.
     """
@@ -119,7 +119,7 @@ def step_ui_create_event_with_ip(context, name, prog, ptype, pri, count):
 def step_ui_create_event_with_targets(context, name, prog, ptype, pri, count):
     from features.steps.use_case_steps import _build_intervals
     intervals = _build_intervals(ptype, count)
-    targets = [{"type": "VEN_NAME", "values": ["ven-2"]}]
+    targets = ["ven-2"]
     context.ui.create_event(
         name=name,
         program_name=prog,

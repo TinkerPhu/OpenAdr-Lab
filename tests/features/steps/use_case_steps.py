@@ -102,7 +102,7 @@ def _interval_values(ptype, count):
 def step_create_targeted_program_save_id(context, name, ven):
     context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
-        {"programName": name, "targets": [{"type": "VEN_NAME", "values": [ven]}]},
+        {"programName": name, "targets": [ven]},
     )
 
 
@@ -113,8 +113,8 @@ def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
         {
             "programName": name,
             "targets": [
-                {"type": "VEN_NAME", "values": [ven1]},
-                {"type": "VEN_NAME", "values": [ven2]},
+                ven1,
+                ven2,
             ],
         },
     )
@@ -124,7 +124,7 @@ def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
 def step_create_open_program_save_id(context, name):
     context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
-        {"programName": name, "targets": None},
+        {"programName": name, "targets": []}  # [] = open to every VEN in 3.1,
     )
 
 
@@ -174,7 +174,7 @@ def step_create_uc_event_with_targets(context, name, ptype, pri, count):
         "programID": context.saved_program_id,
         "eventName": name,
         "priority": pri,
-        "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}],
+        "targets": ["ven-2"],
         "intervals": _build_intervals(ptype, count),
     }
     context.response = vtn_post("/events", context.vtn_token, json=body)

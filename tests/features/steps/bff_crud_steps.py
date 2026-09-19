@@ -84,9 +84,9 @@ def step_list_vens(context):
 
 
 def _register_ven(ven_name, attributes):
-    """Register a VEN directly against the VTN (ven-manager scope), idempotent:
+    """Register a VEN directly against the VTN (business scope), idempotent:
     if it already exists, PUT the desired attributes onto it instead."""
-    token = get_token_value("ven-manager", "ven-manager")
+    token = get_token_value("bl-client", "bl-client")
     body = {"venName": ven_name}
     if attributes:
         body["attributes"] = attributes

@@ -33,7 +33,7 @@ wait_for_url() {
 
 get_token() {
     curl -sf -X POST "$VTN_URL/auth/token" \
-        -d "grant_type=client_credentials&client_id=any-business&client_secret=any-business" \
+        -d "grant_type=client_credentials&client_id=bl-client&client_secret=bl-client" \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 }
 
