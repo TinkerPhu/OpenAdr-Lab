@@ -70,21 +70,27 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       seed script rather than fixture SQL, so the VTN hashes each secret itself and no argon2
       hash is hand-maintained (answers 4.3). Scopes `read_targets read_ven_objects
       write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
-- [ ] 1.3 Update `VTN/docker-compose.yml` to mount the new fixtures
-- [ ] 1.3b Drop **only** the `public` schema on `vtn-db-1`; leave `lab_recorder` intact (D1
+- [x] 1.3 Fixture loading wired through `scripts/db_reset.sh` (post-migration psql, not an
+      initdb mount — initdb scripts only run on an empty data dir, and the scoped drop keeps it)
+- [x] 1.3b Drop **only** the `public` schema on `vtn-db-1`; leave `lab_recorder` intact (D1
       scope correction — 1.33M telemetry rows live there and no OpenADR migration touches them).
       **Rehearsed 2026-09-18 on a scratch Postgres**, so the live run is a replay, not a first
       attempt: `DROP SCHEMA public CASCADE` takes 13 objects including the `scope` type and
       `_sqlx_migrations`, a neighbour schema survives untouched, all 10 migrations then replay
       clean, and the fixture applies (and re-applies) with exactly the intended scopes
-- [ ] 1.3a **Back up the VTN database before anything destructive** — `pg_dump` of `vtn-db-1`
+- [x] 1.3a **Back up the VTN database before anything destructive** — `pg_dump` of `vtn-db-1`
       (including the `lab_recorder` schema) to a file outside the repo, verified non-empty and
       restorable. This is a hard gate: no wipe happens until the dump exists.
-- [ ] 1.4 Deploy VTN (⚠️ wipes DB); confirm migrations `20260213100612_openadr_3.1.sql` onward applied
-- [ ] 1.5 **Smoke (D7)**: `POST /auth/token` with `bl-client` returns 200. If this 404s, the build lost `internal-oauth` — stop and fix 0.2
+- [x] 1.4 Deployed 2026-09-19. All 10 migrations applied on the live DB; `lab_recorder` survived
+      the drop intact (1,356,274 rows). Image transferred from Node2 rather than rebuilt (both
+      hosts aarch64); the 3.0 image is kept tagged `vtn-vtn:pre-31-rollback`
+- [x] 1.5 **Smoke (D7) passed**: `POST /auth/token` with `bl-client` → HTTP 200 with a JWT.
+      B-2 closed in the live deployment, not just by inspection
 - [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts
-- [ ] 1.7 Smoke: `GET /programs` with the `bl-client` token returns 200 and an empty array
-- [ ] 1.8 Assert the schema: `targets text[]` on program/event/ven/resource; `ven.client_id NOT NULL` + unique index; no `ven_program`; no role tables
+- [x] 1.7 `GET /programs` with the bl-client token → HTTP 200 `[]`
+- [x] 1.8 Schema asserted on the live DB: `targets` ARRAY on event/program/resource/resource_group/ven;
+      `ven.client_id` text NOT NULL + `ven_client_id_unique`; `event.ends_at` present (P-1);
+      no `ven_program`; zero role tables; `report.program_id`/`ven_id` gone
 
 ## 2. BFF — single credential
 
