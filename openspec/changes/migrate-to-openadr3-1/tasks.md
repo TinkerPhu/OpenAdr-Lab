@@ -7,6 +7,15 @@ writes its failing test before its implementation. Prefer Node2 for builds and t
 Nothing below phase 0 can be verified until the VTN boots with a token endpoint (D7).
 
 - [x] 0.1 In `TinkerPhu/openleadr-rs`: `git fetch upstream`, branch `rebase/openadr3_1` from `upstream/main`
+- [x] 0.2b **Image built and verified on Node2 (2026-09-19, ~51 min cold).** The whole D7 merge
+      is exercised end to end on alpine/musl: `apk add cmake g++ make openssl3-dev libgcc`,
+      `paho-mqtt-sys` compiling the bundled Paho C with SSL, the four cargo-chef stages, and
+      `SQLX_OFFLINE=true` against the regenerated query cache -- no cache miss, so the four
+      replaced entries are correct. Result: `vtn-vtn:latest`, 42.4 MB.
+      **B-2 closed by inspection of the binary**, not by assumption: its route table contains
+      `/auth/token`, `/users`, `/users/{id}` and `/users/{user_id}/{client_id}`, and
+      `write_users` resolves -- all of which exist only under `internal-oauth`. The 3.1 routes
+      are there too (`/subscriptions`, `/notifiers/{ws,mqtt,push-mqtt}`)
 - [x] 0.2 Re-apply **P-3** `vtn.Dockerfile`: keep our 4-stage cargo-chef + BuildKit cache mounts and the fixed runtime `COPY`; take upstream's `rust:1.94-alpine`, dynamic-openssl deps and `RUSTFLAGS`; **keep `--features internal-oauth`** (D7)
 - [x] 0.3a **MQTT posture decided: the lab runs its own broker.** *(Supersedes an earlier
       decision to use the house Mosquitto, now reverted.)* `VTN/docker-compose.yml` gains a
