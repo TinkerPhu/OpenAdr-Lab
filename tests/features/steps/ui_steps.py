@@ -9,31 +9,31 @@ from behave import given, when, then, register_type, use_step_matcher
 
 @given("previous UI test programs are cleaned up")
 def step_cleanup_ui_programs(context):
-    """Delete any lingering ui-uc* programs before each UI UC scenario.
+    """Delete any lingering ui-uc* events and programs before each UI scenario.
 
-    Belt-and-suspenders: _cleanup_all_programs() in before_feature handles
-    bulk cleanup, but if the VTN UI created programs under a non-null business_id
-    that is invisible to the bl-client API token, they accumulate and cause
-    409 Conflict errors on the next run.  This step runs a targeted SQL delete
-    before each scenario so each scenario always starts with a clean slate.
+    Through the API, not SQL. The old raw-SQL version existed because 3.0 scoped
+    programs to a business_id, so a program the VTN UI created could be
+    invisible to the API token and pile up until it caused 409s. 3.1 has no
+    business_id and one `read_all` credential sees everything, so the API can do
+    it -- and the SQL could not: it deleted from `ven_program` and
+    `report.program_id`, both dropped by the 3.1 migration, so every run logged
+    `column "program_id" does not exist` and cleaned nothing.
+
+    Events go first: `event.program_id` has no ON DELETE CASCADE, so a program
+    with events cannot be deleted.
     """
-    dsn = "postgres://openadr:openadr@test-db:5432/openadr"
-    sql = (
-        "DELETE FROM report"
-        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
-        "DELETE FROM event"
-        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
-        "DELETE FROM ven_program"
-        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
-        "DELETE FROM program WHERE program_name LIKE 'ui-uc%';"
-    )
+    from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
     try:
-        result = subprocess.run(
-            ["psql", dsn, "-c", sql],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0 and result.stderr.strip():
-            print(f"[ui-cleanup] SQL warning: {result.stderr[:200]}")
+        token = get_token_value("bl-client", "bl-client")
+        events = vtn_get("/events?limit=50", token).json()
+        programs = vtn_get("/programs?limit=50", token).json()
+        ui_program_ids = {p["id"] for p in programs
+                          if (p.get("programName") or "").startswith("ui-uc")}
+        for e in events:
+            if e.get("programID") in ui_program_ids:
+                vtn_delete(f"/events/{e['id']}", token)
+        for pid in ui_program_ids:
+            vtn_delete(f"/programs/{pid}", token)
     except Exception as exc:
         print(f"[ui-cleanup] cleanup skipped: {exc}")
 
@@ -68,11 +68,13 @@ use_step_matcher("re")
 
 @when('I create a UI program "(?P<name>[^"]+)" targeting both "(?P<ven1>[^"]+)" and "(?P<ven2>[^"]+)"')
 def step_ui_create_program_dual(context, name, ven1, ven2):
+    context.ui_program_targets = [ven1, ven2]
     context.ui.create_program(name, ven_targets=[ven1, ven2])
 
 
 @when('I create a UI program "(?P<name>[^"]+)" targeting "(?P<ven>[^"]+)"')
 def step_ui_create_program_targeted(context, name, ven):
+    context.ui_program_targets = [ven]
     context.ui.create_program(name, ven_targets=[ven])
 
 
@@ -92,11 +94,16 @@ def step_ui_create_open_program(context, name):
 def step_ui_create_event(context, name, prog, ptype, pri, count):
     from features.steps.use_case_steps import _build_intervals
     intervals = _build_intervals(ptype, count)
+    # The event inherits the program's targets. 3.1 filters each object by its
+    # own targets with no program join, so an untargeted event is public --
+    # visible even to a VEN its program does not name, which is what these
+    # "targeted to VEN-N only" scenarios assert against.
     context.ui.create_event(
         name=name,
         program_name=prog,
         priority=pri,
         intervals_json=json.dumps(intervals),
+        targets_json=json.dumps(getattr(context, "ui_program_targets", [])),
     )
 
 
