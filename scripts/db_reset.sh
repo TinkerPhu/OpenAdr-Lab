@@ -6,12 +6,28 @@
 #
 # Usage: bash scripts/db_reset.sh
 #
-# Drops and recreates the `public` schema (openleadr-rs's own tables,
-# SQLx-migrated back in on VTN restart) and the `lab_recorder` schema
-# (Phase 1 BFF recorder, re-created on BFF restart). Reloads the
-# test-credential fixture (ven-manager/any-business/user-manager users) that
-# `provision_vens`/`fleet.sh` authenticate as.
+# Drops and recreates the `public` schema (openleadr-rs's own tables, SQLx-migrated
+# back in on VTN restart) and reloads the credential fixture that the seed script
+# and `fleet.sh` authenticate as.
+#
+# `lab_recorder` is PRESERVED by default. It holds the BFF recorder's history --
+# over a million `reports_received` rows accumulated across months of fleet runs --
+# and nothing regenerates it. No OpenADR migration touches that schema, so a
+# "clean VTN bring-up" has no reason to destroy it. This script used to drop it
+# unconditionally, which made `fleet.sh` and `setup_all.sh --fresh` silently
+# destroy the lab's entire measurement history.
+#
+# Pass --wipe-recorder to drop it as well, when you genuinely want an empty
+# history (a throwaway host, or a recorder schema change).
 set -euo pipefail
+
+wipe_recorder=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --wipe-recorder) wipe_recorder=true; shift ;;
+        *) echo "unknown option: $1 (accepts --wipe-recorder)"; exit 1 ;;
+    esac
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VTN_DIR="$REPO_ROOT/VTN"
@@ -29,9 +45,18 @@ cd "$VTN_DIR"
 echo "Stopping vtn + bff (db stays up) ..."
 docker compose stop vtn bff
 
-echo "Dropping and recreating public + lab_recorder schemas ..."
-docker compose exec -T db psql -U "$PG_USER" "$PG_DB" -c \
-    "DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS lab_recorder CASCADE;"
+echo "Dropping and recreating the public schema ..."
+PUBLIC_RESET_SQL="DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+docker compose exec -T db psql -U "$PG_USER" "$PG_DB" -c "$PUBLIC_RESET_SQL"
+
+if [[ "$wipe_recorder" == true ]]; then
+    ROWS_SQL="SELECT coalesce(sum(n_live_tup), 0) FROM pg_stat_user_tables WHERE schemaname = 'lab_recorder'"
+    rows=$(docker compose exec -T db psql -U "$PG_USER" "$PG_DB" -tAc "$ROWS_SQL" 2>/dev/null | tr -d "[:space:]")
+    echo "--wipe-recorder: dropping lab_recorder (${rows:-unknown} recorded rows, not recoverable) ..."
+    docker compose exec -T db psql -U "$PG_USER" "$PG_DB" -c "DROP SCHEMA IF EXISTS lab_recorder CASCADE;"
+else
+    echo "Preserving lab_recorder (pass --wipe-recorder to drop it too)."
+fi
 
 echo "Starting vtn (re-applies SQLx migrations on boot) ..."
 docker compose up -d vtn
