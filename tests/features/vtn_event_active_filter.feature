@@ -4,7 +4,7 @@ Feature: VTN Event Active Filter
   past events have an end time strictly in the past.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a program named "active-filter-program" and save its ID
 
   Scenario: active=true returns only current events

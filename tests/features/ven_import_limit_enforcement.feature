@@ -7,7 +7,7 @@ Feature: Hard import limits are met at execution (GB-47)
   leaves the plan alone — the reference for measuring the planner.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And the site has no PV, no EV charging, the heater in its band and the battery at 0.8 SoC
 
   Scenario: A VTN capacity limit reaches the limit pass and site import stays under it

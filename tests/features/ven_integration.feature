@@ -2,13 +2,13 @@ Feature: VEN-VTN Integration
   The VEN polls the VTN and reflects programs, events, and sensor data.
 
   Scenario: VEN reflects programs created in VTN
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a program named "ven-poll-program"
     When I wait for the VEN to show program "ven-poll-program"
     Then the VEN program list contains "ven-poll-program"
 
   Scenario: VEN reflects events created in VTN
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a program named "ven-event-program" and save its ID
     And I create an event for the saved program
     When I wait for the VEN to have at least 1 event

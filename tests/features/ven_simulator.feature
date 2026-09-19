@@ -80,7 +80,7 @@ Feature: VEN Simulator
     And the schema for "heater" has control key "heater_temp_max_c"
 
   Scenario: Auto-report submitted for active event
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a program "auto-report-test" targeting "ven-1" and save its ID
     When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201

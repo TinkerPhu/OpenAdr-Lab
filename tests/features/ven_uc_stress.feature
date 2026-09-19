@@ -33,7 +33,7 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
   Scenario: UC-12a — Multi-asset plan with import cap allocates EV within cap
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
-    And I have a VTN token as "any-business"
+    And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 10.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 10.0
@@ -42,7 +42,7 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     And all plan slots have net_import_kw of at most 10.0
 
   Scenario: UC-12b — Plan warnings are accessible when capacity is constrained
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 2.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 2.0

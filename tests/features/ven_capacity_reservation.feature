@@ -4,7 +4,7 @@ Feature: Capacity reservations constrain the planner (WP3.3, §8.10)
   plan's per-slot import cap; deleting the event releases it.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: A 3 kW import reservation binds the planned import cap
     Given I create an open program "reservation-test" and save its ID

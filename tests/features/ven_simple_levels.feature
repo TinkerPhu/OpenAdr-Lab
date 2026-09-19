@@ -6,7 +6,7 @@ Feature: SIMPLE load-shed levels (WP3.2)
   against a 25 kW contractual limit.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: SIMPLE level steps 0 -> 2 -> 0 and the plan follows
     Given I create an open program "simple-level-test" and save its ID

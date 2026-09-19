@@ -3,7 +3,7 @@ Feature: OpenADR Use Cases — Full End-to-End
   VEN reception with correct structure, report submission, and cancellation.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: UC1 - Emergency Load Shed (targeted to VEN-1 only)
     Given I create a program "uc1-e2e-emergency" targeting "ven-1" and save its ID

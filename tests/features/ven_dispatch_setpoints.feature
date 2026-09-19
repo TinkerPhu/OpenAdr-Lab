@@ -4,7 +4,7 @@ Feature: Direct setpoints (WP3.4 — BL-06/BL-24)
   CHARGE_STATE_SETPOINT events create an EvSession targeting the given SoC.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: DISPATCH_SETPOINT steers net site power to the commanded value
     Given I create an open program "dispatch-test" and save its ID

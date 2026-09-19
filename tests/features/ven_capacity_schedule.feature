@@ -7,7 +7,7 @@ Feature: Capacity limits apply when they are scheduled (GB-48)
   intervals.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I create an open program "capacity-schedule-test" and save its ID
 
   Scenario: A limit announced in advance caps only its slots and is not in force yet

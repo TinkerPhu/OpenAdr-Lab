@@ -26,7 +26,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   Scenario: Plan allocates EV to slots given a cheap PRICE event
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
-    And I have a VTN token as "any-business"
+    And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have an EV allocation in slots
@@ -52,7 +52,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   Scenario: Plan has flexibility envelopes for far-horizon unscheduled energy
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
-    And I have a VTN token as "any-business"
+    And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have envelopes

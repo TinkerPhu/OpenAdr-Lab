@@ -3,7 +3,7 @@ Feature: VEN Program Enrollment
   Programs without targets (open) are visible to all VENs.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: Open program is visible to all VENs
     When I create an open program named "enroll-open-test"

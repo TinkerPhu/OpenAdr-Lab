@@ -1,7 +1,7 @@
 Feature: Controller V2 — Page Layout
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
     And I open the VEN-1 controller V2 UI
 
   @ven-ui

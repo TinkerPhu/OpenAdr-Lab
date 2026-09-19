@@ -4,7 +4,7 @@ Feature: Reporter multi-interval resampling (RF-05e)
   time-weighted mean power aggregated over the obligation period.
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   @reporter-resampling @autoretry
   Scenario: Obligation-based report contains multiple intervals

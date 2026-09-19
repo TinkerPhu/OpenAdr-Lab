@@ -7,7 +7,7 @@ Feature: Grid alert events (WP3.1, BL-04)
   OpenADR 3).
 
   Background:
-    Given I have a VTN token as "any-business"
+    Given I have a VTN token as "bl-client"
 
   Scenario: ALERT_GRID_EMERGENCY clamps planned import over its window and recovers on delete
     Given I create an open program "alert-emergency-test" and save its ID
