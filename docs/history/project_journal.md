@@ -13011,3 +13011,44 @@ Phase 1 is prepared but deliberately not deployed. The database half is fully re
 deploying the 3.1 VTN while the VEN still speaks 3.0 would leave 20 VENs unable to connect for as
 long as phase 3 takes — and phase 3 is 14 files and ~184 field sites. The deploy is staged to run
 when the fleet can come back with it.
+
+### Phases 1, 2 and most of 4 — deployed live
+
+The 3.1 VTN is running on Node1. The scoped drop behaved as rehearsed: `public` went, and
+`lab_recorder` came through intact at 1,356,274 rows — the BFF recorder simply logged
+`schema "lab_recorder" already exists, skipping` and carried on appending. The image was moved
+from Node2 with `docker save | docker load` rather than rebuilt (both hosts are aarch64), and
+the 3.0 image is kept tagged `vtn-vtn:pre-31-rollback`.
+
+Four things only the deploy could have found:
+
+- **`OAUTH_TOKEN_URL` is mandatory from 3.1 on.** The VTN panicked in a restart loop immediately
+  after the schema drop. It is pure discovery metadata for `GET /auth/server` and takes no part
+  in signing, so it has to be a URL a *client* can reach. Upstream's dev setup only works because
+  its tracked `.env` supplies one, which a container never sees.
+- **The 3.1 runtime image has no `curl`.** Our health check used it, so Docker marked the VTN
+  unhealthy on every interval while it served `/health` perfectly — and the BFF, which waits via
+  `depends_on: service_healthy`, refused to start. A healthy service blocked by a broken probe.
+  busybox `wget` is present; the test stack carried the identical check.
+- **`objectType` is mandatory on VEN requests.** 3.1 models `VenRequest` as a tagged enum, so a
+  body without `BL_VEN_REQUEST` is a 400. That failure also exposed a flaw in the seed script's
+  own idempotency: it tests the *credential*, so a run that died between creating the credential
+  and the VEN object left that VEN permanently "already provisioned" with no VEN object behind
+  it. VEN-object creation is now its own function, called from the fresh path and from reconcile.
+- **D4 was wrong, and the seed proved it.** "clientId as the privacy address" is not how 3.1
+  targets work. The clientId only resolves *which VEN object* you are; visibility is then the
+  intersection of an object's targets with the union of that VEN's targets and its resources'.
+  Every VEN was provisioned with `targets: []`, so all 20 saw only the untargeted program no
+  matter how precisely a program named their clientId. Each VEN now carries its own name as a
+  target. Upstream quotes the spec for this in `get_ven_targets` — it was there to be read.
+
+With that fixed, target hiding was confirmed live and is worth recording because it is precisely
+the property the retired VEN_NAME patch (P-4) used to provide: `Summer Peak DR` really targets
+`["ven-1", "ven-2"]`, but ven-1 sees `['ven-1']`, ven-2 sees `['ven-2']`, ven-3 does not see the
+program at all, and only the `read_all` business view sees the full list.
+
+A hazard found on the way, unrelated to 3.1 but reachable from `fleet.sh` and
+`setup_all.sh --fresh`: `scripts/db_reset.sh` dropped `lab_recorder` on every run. Its own
+comment called that schema "re-created on BFF restart", which is true of the schema and false of
+the data. It now preserves it by default, and `--wipe-recorder` prints the row count it is about
+to destroy.
