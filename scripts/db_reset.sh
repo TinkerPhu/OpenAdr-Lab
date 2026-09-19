@@ -33,7 +33,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VTN_DIR="$REPO_ROOT/VTN"
 PG_USER="${PG_USER:-openadr}"
 PG_DB="${PG_DB:-openadr}"
-FIXTURE="$REPO_ROOT/openleadr-rs/fixtures/test_user_credentials.sql"
+# OpenADR 3.1: the lab owns this fixture now. Upstream's 3.0
+# fixtures/test_user_credentials.sql is gone -- roles were replaced by scopes carried on
+# the user object. Only the bootstrap business client lives in SQL; the 20 VEN users are
+# created through POST /users by scripts/seed_vtn.py, so no password hash is maintained here.
+FIXTURE="$REPO_ROOT/VTN/fixtures/01_bl_client.sql"
 
 if [[ ! -f "$FIXTURE" ]]; then
     echo "FAIL: fixture file not found at $FIXTURE (is the openleadr-rs submodule checked out?)"
