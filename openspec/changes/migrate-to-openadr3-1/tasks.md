@@ -66,7 +66,7 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 - [x] 1.1 Write fixture SQL for the scope model — `VTN/fixtures/01_bl_client.sql`, every scope
       spelled out, no aliases (D2). Upstream's own `fixtures/users.sql` independently confirms
       the reading: their `bl-client` also uses `write_vens_bl`, not the alias
-- [ ] 1.2 Create the **ven-1 … ven-20** users via `POST /users` + `POST /users/{id}` from the
+- [x] 1.2 Created all 20 VEN users via `POST /users` + `POST /users/{id}` from the
       seed script rather than fixture SQL, so the VTN hashes each secret itself and no argon2
       hash is hand-maintained (answers 4.3). Scopes `read_targets read_ven_objects
       write_reports_ven`, client ids unchanged at `ven-N` (D3, D11)
@@ -86,8 +86,7 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       hosts aarch64); the 3.0 image is kept tagged `vtn-vtn:pre-31-rollback`
 - [x] 1.5 **Smoke (D7) passed**: `POST /auth/token` with `bl-client` → HTTP 200 with a JWT.
       B-2 closed in the live deployment, not just by inspection
-- [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts — blocked
-      until the 20 VEN users exist, which needs the seed-script rewrite (4.1)
+- [x] 1.6 VEN credentials authenticate: ven-1, ven-2, ven-3 and ven-20 all return tokens
 - [x] 1.7 `GET /programs` with the bl-client token → HTTP 200 `[]`
 - [x] 1.8 Schema asserted on the live DB: `targets` ARRAY on event/program/resource/resource_group/ven;
       `ven.client_id` text NOT NULL + `ven_client_id_unique`; `event.ends_at` present (P-1);
@@ -148,14 +147,18 @@ Simulator untouched (D5). `POST /sim/override` stays.
       2026-09-18): `scripts/seed_vtn.py`, `scripts/fleet_status.py`, `scripts/db_reset.sh`,
       `experiments/run_experiment.py` (4 sites), `tests/failure_recovery_test.sh`,
       `tests/features/environment.py`
-- [ ] 4.2 Update `tests/provision_ven.py` for scopes, keeping credentials-last ordering (GB-49)
+- [ ] 4.2 Update `tests/provision_ven.py` for scopes. Credentials-last no longer matters — 3.1
+      sets scopes in the user-creation call, so GB-49's window cannot occur (see 3.4a)
 - [x] 4.3 **Decided: API, with a one-user SQL bootstrap.** Only `bl-client` can live in SQL
       (nothing can call `/users` without a token), so it is the single fixture; every VEN user
       is created through the API. Requires the `internal-oauth` build (D7)
 - [ ] 4.4 Define the GB-50 profile pointer as a namespaced, versioned private `attributes` entry on the program, plus the published profile document it points at (D10)
 - [ ] 4.5 Seed `payloadDescriptors` on programs/events and `reportDescriptors` carrying payload type, units, readingType (`wire-contracts`); no value goes out undeclared
-- [ ] 4.6 Run the seed; verify per-VEN visibility for a targeted and an open program
-- [ ] 4.7 Verify target hiding: a VEN sees only its own id in a program's `targets`, never another VEN's (D8 P-4)
+- [x] 4.6 Seed run live: 3 programs, 10 events, 20 VENs. Per-VEN visibility correct for both a
+      targeted and an open program (see D4's table)
+- [x] 4.7 Target hiding verified live: `Summer Peak DR` targets `['ven-1','ven-2']`, ven-1 sees
+      `['ven-1']`, ven-2 sees `['ven-2']`, ven-3 does not see the program at all, and the
+      `read_all` business view sees the full list
 
 ## 5. UIs
 
