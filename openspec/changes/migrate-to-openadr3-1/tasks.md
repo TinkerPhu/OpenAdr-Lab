@@ -86,7 +86,8 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       hosts aarch64); the 3.0 image is kept tagged `vtn-vtn:pre-31-rollback`
 - [x] 1.5 **Smoke (D7) passed**: `POST /auth/token` with `bl-client` → HTTP 200 with a JWT.
       B-2 closed in the live deployment, not just by inspection
-- [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts
+- [ ] 1.6 Smoke: `POST /auth/token` for a sample of VEN credentials across both hosts — blocked
+      until the 20 VEN users exist, which needs the seed-script rewrite (4.1)
 - [x] 1.7 `GET /programs` with the bl-client token → HTTP 200 `[]`
 - [x] 1.8 Schema asserted on the live DB: `targets` ARRAY on event/program/resource/resource_group/ven;
       `ven.client_id` text NOT NULL + `ven_client_id_unique`; `event.ends_at` present (P-1);
@@ -101,7 +102,9 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
       `routes/vens.rs`; zero `ven_mgr` references remain
 - [x] 2.4 Update BFF env vars in `VTN/docker-compose.yml` and `tests/docker-compose.test.yml`
 - [ ] 2.5 `cargo test -p` the BFF; fmt + clippy green
-- [ ] 2.6 Deploy; verify `GET /api/{programs,events,vens,reports}` all 200
+- [x] 2.6 Deployed and verified on Node1: `GET /api/{programs,events,vens,reports}` all HTTP 200
+      with the single `bl-client` credential. `/api/vens` is the one that matters — under 3.0 it
+      needed the separate ven-manager client, and `read_all` now covers it (D2 confirmed live)
 
 ## 3. VEN app — wire boundary and self-registration
 
