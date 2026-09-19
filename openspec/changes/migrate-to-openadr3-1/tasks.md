@@ -100,7 +100,7 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 - [x] 2.3 Remove dual-client switching — `main.rs` (AppCtx), `recorder.rs` (ven snapshots) and
       `routes/vens.rs`; zero `ven_mgr` references remain
 - [x] 2.4 Update BFF env vars in `VTN/docker-compose.yml` and `tests/docker-compose.test.yml`
-- [ ] 2.5 `cargo test -p` the BFF; fmt + clippy green
+- [x] 2.5 `cargo test -p` the BFF; fmt + clippy green
 - [x] 2.6 Deployed and verified on Node1: `GET /api/{programs,events,vens,reports}` all HTTP 200
       with the single `bl-client` credential. `/api/vens` is the one that matters — under 3.0 it
       needed the separate ven-manager client, and `read_all` now covers it (D2 confirmed live)
@@ -142,12 +142,12 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 ## 4. Seed, provisioning and the profile contract
 
-- [ ] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`.
+- [x] 4.1 Rewrite `scripts/seed_vtn.py`: authenticate as `bl-client`, flat `targets: ["ven-1", …]`.
       Remaining `any-business`/`ven-manager` callers to migrate with it (inventory taken
       2026-09-18): `scripts/seed_vtn.py`, `scripts/fleet_status.py`, `scripts/db_reset.sh`,
       `experiments/run_experiment.py` (4 sites), `tests/failure_recovery_test.sh`,
       `tests/features/environment.py`
-- [ ] 4.2 Update `tests/provision_ven.py` for scopes. Credentials-last no longer matters — 3.1
+- [x] 4.2 Update `tests/provision_ven.py` for scopes. Credentials-last no longer matters — 3.1
       sets scopes in the user-creation call, so GB-49's window cannot occur (see 3.4a)
 - [x] 4.3 **Decided: API, with a one-user SQL bootstrap.** Only `bl-client` can live in SQL
       (nothing can call `/users` without a token), so it is the single fixture; every VEN user
@@ -171,7 +171,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 5.1 Types updated in `VTN/ui/src/api/types.ts` (the types live there, not in `hooks.ts`):
       flat `Targets`, deprecated program fields dropped, report carries `clientID`, event gains
       optional `duration` and optional `intervals`
-- [ ] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
+- [x] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
 - [ ] 5.3 `EventFormDialog.tsx`: flat targets; expose `duration`
 - [x] 5.4 `Vens.tsx`, `Programs.tsx`, `Reports.tsx` updated. The three copies of "which VENs does
       this target" are consolidated into `VTN/ui/src/api/targets.ts`
@@ -196,12 +196,12 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [ ] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
 - [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
-- [ ] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
+- [x] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
 - [ ] 6.9b The test stack's throwaway broker runs anonymous while production now runs
       `allow_anonymous false`, so an MQTT auth misconfiguration would not be caught by the
       suite. Decide whether the test broker should carry credentials too (fidelity) or stay
       anonymous (the weather-plugin scenarios connect to it anonymously today)
-- [ ] 6.10 Carry `fix/cleanup-delete-accounting` (ef012c7f) into the `_cleanup_all_programs`
+- [x] 6.10 Carry `fix/cleanup-delete-accounting` (ef012c7f) into the `_cleanup_all_programs`
       rewrite rather than merging it separately: it counts only DELETEs the VTN accepted and
       tracks undeletable ids, and this phase rewrites that same function for the scope model.
       Merging it to main first would only produce a conflict with the rewrite. Delete the
@@ -209,8 +209,8 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 ## 7. Documentation and close-out
 
-- [ ] 7.1 Journal the migration in `docs/history/project_journal.md` (what, why, issues)
-- [ ] 7.2 Key learnings into `docs/reference/KEY_LEARNINGS.md`: the scope alias trap, the `internal-oauth` Dockerfile collision, clientId identity, flat targets
+- [x] 7.1 Journal the migration in `docs/history/project_journal.md` (what, why, issues)
+- [x] 7.2 Key learnings into `docs/reference/KEY_LEARNINGS.md`: the scope alias trap, the `internal-oauth` Dockerfile collision, clientId identity, flat targets
 - [ ] 7.3 Wave mechanism-level facts into `docs/architecture/VTN_ARCHITECTURE.md` and `VEN_ARCHITECTURE.md`; user-observable behaviour into `docs/use-cases/`
 - [ ] 7.4 Close GB-50 (or record what remains) now that descriptors are on the wire
 - [ ] 7.5 Re-decide the fleet-monitor MQTT question against native subscriptions/notifiers (Q3, proposal Non-Goals)
