@@ -317,7 +317,8 @@ services:
       UI_BASE_URL: "http://test-ui:80"
       VEN_UI_BASE_URL: "http://test-ven-ui:80"
     volumes:
-      - ../openleadr-rs/fixtures:/fixtures:ro
+      # 3.1: the lab's own bootstrap fixture, not upstream's 3.0 test fixtures
+      - ../VTN/fixtures:/fixtures:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       test-vtn:

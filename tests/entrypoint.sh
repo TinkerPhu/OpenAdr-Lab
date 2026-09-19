@@ -9,23 +9,17 @@ echo "Reloading test-ui nginx (refresh upstream DNS)..."
 docker exec openadr-test-test-ui-1 nginx -s reload 2>/dev/null || true
 echo "nginx reloaded."
 
-echo "Loading test fixtures into VTN database..."
-PGPASSWORD=openadr psql -h test-db -U openadr -d openadr \
-  -f /fixtures/test_user_credentials.sql
-echo "Fixtures loaded."
-
-# GB-02/GB-03: the fixture (shared with openleadr-rs's own CI/tests, so left
-# untouched) seeds ven-1 with a legacy literal id "ven-1" and venName
-# "ven-1-name". Clear those rows so ven-1 can be re-provisioned via the API
-# below and get a real UUID id + uniform "ven-1" venName, same as ven-2/ven-3.
-echo "Clearing legacy fixture-seeded ven-1 rows..."
-PGPASSWORD=openadr psql -h test-db -U openadr -d openadr <<'SQL'
-DELETE FROM user_ven WHERE ven_id = 'ven-1';
-DELETE FROM user_credentials WHERE user_id = 'ven-1-user';
-DELETE FROM "user" WHERE id = 'ven-1-user';
-DELETE FROM ven WHERE id = 'ven-1';
-SQL
-echo "Legacy ven-1 rows cleared."
+# OpenADR 3.1: the lab owns this fixture and it seeds exactly one user, the
+# bl-client business credential. Everything else -- the VEN users, their
+# credentials and their VEN objects -- is created through the API below, so the
+# VTN hashes each secret itself and no password hash is maintained in the repo.
+#
+# The legacy ven-1 cleanup that used to live here is gone with 3.0: it deleted
+# from user_ven, a table the 3.1 migration drops, and it existed to undo rows
+# seeded by upstream's shared test fixture, which this stack no longer loads.
+echo "Loading the bl-client fixture into the VTN database..."
+PGPASSWORD=openadr psql -h test-db -U openadr -d openadr -v ON_ERROR_STOP=1 -f /fixtures/01_bl_client.sql
+echo "Fixture loaded."
 
 echo "Provisioning ven-1 via API..."
 python provision_ven.py ven-1
