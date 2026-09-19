@@ -57,7 +57,8 @@ services:
       MQTT_PASSWORD: ""
       MQTT_TOPIC_PREFIX: openadr-lab/vtn
     healthcheck:
-      test: curl --fail http://127.0.0.1:3000/health || exit 1
+      # busybox wget, not curl -- the 3.1 VTN runtime image has no curl.
+      test: wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
       interval: 10s
       timeout: 5s
       retries: 10

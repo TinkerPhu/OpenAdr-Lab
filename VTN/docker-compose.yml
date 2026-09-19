@@ -142,7 +142,11 @@ services:
       MQTT_PASSWORD: ${MQTT_VTN_PASSWORD:-openadr-vtn}
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-openadr-lab/vtn}
     healthcheck:
-      test: curl --fail http://127.0.0.1:3000/health || exit 1
+      # busybox wget, not curl: the 3.1 runtime stage installs only libssl3 and
+      # libgcc, so curl is not in the image and the probe failed with
+      # "curl: not found" while the service itself was serving /health fine.
+      # An unhealthy VTN blocks the BFF, which waits on it via depends_on.
+      test: wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
       interval: 15s
       timeout: 5s
       retries: 5
