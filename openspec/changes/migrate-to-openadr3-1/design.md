@@ -268,7 +268,9 @@ ship by accident.
 ### D8: Fork patch disposition
 
 **Decision**: The fork's four functional patches are carried, adapted or retired individually,
-per the audit in `REVIEW.md` §G-1. None of this was in the previous revision, which mentioned
+per the audit in `REVIEW.md` §G-1. The durable record lives in
+**`docs/reference/FORK_PATCHES.md`**, which survives this change being deleted: a patch is
+removed only when upstream has actually solved it, with the evidence written down. None of this was in the previous revision, which mentioned
 only #372/#374.
 
 The fork diff against the merge base is **14 files, +576/-163**. What it contains:
