@@ -49,9 +49,10 @@ services:
       # notifiers load during state construction. Set explicitly so the value
       # cannot be inherited from openleadr-rs/.env via dotenvy.
       # The test stack has its own throwaway broker on test-net, so use that
-      # rather than the Node1 one; it has no password_file, so empty
-      # credentials connect anonymously.
-      MQTT_URL: mqtt://mosquitto:1883
+      # rather than a real one; it has no password_file, so empty credentials
+      # connect anonymously. Port 1884 keeps the convention that the VTN's
+      # notifier endpoint is always :1884, test or production.
+      MQTT_URL: mqtt://mosquitto:1884
       MQTT_USERNAME: ""
       MQTT_PASSWORD: ""
       MQTT_TOPIC_PREFIX: openadr-lab/vtn

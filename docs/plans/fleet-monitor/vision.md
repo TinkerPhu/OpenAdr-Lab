@@ -24,7 +24,7 @@ needs are in [phase-0-foundation.md](phase-0-foundation.md).
   originally read "one broker — the existing Mosquitto on Node1")*. The house broker keeps
   carrying what the physical site **measures** (`openadr-lab/measurement/<site>/*`,
   `openadr-lab/weather/<site>/*`, alongside the house's own `shellies/`, `hargassner/`,
-  `weconnect/`). A lab-owned broker, `lab-mqtt` on Node1 port 1884, carries what the lab
+  `weconnect/`). A lab-owned broker, `lab-mqtt`, carries what the lab
   **generates**: OpenADR 3.1 subscription notifiers (`openadr-lab/vtn/*`) and fleet telemetry
   (`openadr-lab/fleet/*`). Both keep the `openadr-lab/` root — the line is direction, not prefix.
 
@@ -40,6 +40,11 @@ needs are in [phase-0-foundation.md](phase-0-foundation.md).
   untouched. A relay would only add an invisible failure mode to the one system whose purpose is
   observability. The cost of the split, stated plainly: watching the whole namespace takes two
   subscriptions instead of one.
+
+  **The port identifies the broker**: the house broker is always `:1883`, `lab-mqtt` always
+  `:1884` — inside its container, on the docker network and on the host alike. An address can
+  therefore be read correctly without knowing the topology, and the convention holds in the test
+  stack too, where one throwaway broker listens on both ports rather than blurring them.
 
   It lives on Node1, not Node2, because the 3.1 VTN **panics at startup** if its broker is
   unreachable — putting the broker on the disposable build/test host would make the productive
