@@ -133,7 +133,7 @@ issued, or the VEN caches a scope-less token and goes silently blind (GB-49,
 
 ---
 
-### D4: Flat text[] targets — clientId as the privacy address
+### D4: Flat text[] targets — the VEN's own targets are the address, not its clientId
 
 **Decision**: Program, event, VEN and resource `targets` are `Vec<Target>` (newtype over a
 plain string), non-optional, defaulting to `[]`. An empty array means "open to all VENs".
@@ -146,6 +146,36 @@ plain string), non-optional, defaulting to `[]`. An empty array means "open to a
 
 **Impact**: `TargetMap` and `TargetType` disappear. All code constructing or parsing
 `{type, values}` is removed.
+
+**Correction, proven on the live VTN 2026-09-19.** The earlier wording — "clientId as the
+privacy address" — was wrong, and the seed exposed it: every VEN was provisioned with an empty
+`targets` list, and all 20 then saw *only* the untargeted program, however precisely a program
+named their clientId.
+
+The clientId only resolves **which VEN object** the caller is. Visibility is then decided by
+intersecting an object's `targets` with the union of that VEN's `targets` and its resources' —
+upstream quotes the spec in `get_ven_targets`:
+
+> *4. If a VEN object is not found, return objects that do not have targets…*
+> *6. If the union of the targets of the VEN and its resources is empty, return objects that do
+> not have targets…* — OpenADR 3.1.1 Definition.md, "VEN created object privacy"
+
+So a VEN must **carry a target of its own** to be targetable at all. The lab gives each VEN its
+own name (`targets: ["ven-7"]`), which makes a program targeting `"ven-7"` match. Nothing about
+this is clientId-based; the names coinciding is a lab convention, not a protocol rule.
+
+Observed afterwards, with `Summer Peak DR` really targeting `["ven-1", "ven-2"]`:
+
+| caller | sees |
+|---|---|
+| ven-1 | `Summer Peak DR targets=['ven-1']` + the open program |
+| ven-2 | `Summer Peak DR targets=['ven-2']` + `EV Managed Charging targets=['ven-2']` + open |
+| ven-3 | `EV Managed Charging targets=['ven-3']` + open |
+| ven-20 | the open program only |
+| BFF (`read_all`) | full lists: `['ven-1', 'ven-2']`, `['ven-2', 'ven-3']` |
+
+Each VEN sees only its own id, never a sibling's — 3.1's native target hiding (D8, P-4) doing
+exactly what the retired lab patch did.
 
 **Verified, not assumed** (the previous revision asserted this without citing a query):
 `retrieve_all_with_client_id` in `openleadr-vtn/src/data_source/postgres/event.rs` filters on
