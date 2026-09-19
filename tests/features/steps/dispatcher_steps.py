@@ -71,8 +71,15 @@ def step_inject_base_load(context, kw, alpha):
 
 @when("I clear the base_load_kw inject")
 def step_clear_base_load_inject(context):
-    """Reset the base-load override so subsequent ticks decay back to baseline."""
-    r = ven_post("/sim/inject", json={"base_load_kw": 0.0, "base_load_alpha": None})
+    """Clear the base-load override so the sim returns to its natural base load.
+
+    `null`, not `0.0`. The route takes these as double options
+    (`Option<Option<f64>>`): `null` clears the override, while `0.0` *sets* it to
+    zero, and `SimState::next_offset_kw` then returns `forced_kw -
+    natural_base_kw` every tick -- pinning base load at exactly 0 kW rather than
+    releasing it. The docstring here claimed it reset the override; it did not.
+    """
+    r = ven_post("/sim/inject", json={"base_load_kw": None, "base_load_alpha": None})
     r.raise_for_status()
 
 
