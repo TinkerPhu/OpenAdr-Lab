@@ -1,6 +1,14 @@
-# OpenADR 3 Raspberry Pi Lab
+# OpenADR 3.1 Raspberry Pi Lab
 
-A self-hosted **OpenADR 3 laboratory** for demand-response experimentation: a real VTN,
+> **Protocol: OpenADR 3.1.0** — the current published version of the specification.
+> The lab migrated from 3.0.1 in September 2026 and speaks 3.1 throughout: flat
+> `targets`, `clientID` VEN identity, scope-based authorisation, event-linked reports,
+> and `payloadDescriptors` declaring the quantity and unit of every value its programs
+> and events carry. See [`docs/reference/WIRE_PROFILE.md`](docs/reference/WIRE_PROFILE.md)
+> for the lab's profile, which is stricter than the spec rather than a variant of it —
+> including the one place the VENs' own telemetry does not yet meet it (GB-50).
+
+A self-hosted **OpenADR 3.1 laboratory** for demand-response experimentation: a real VTN,
 a fleet of up to 20 independent VEN agents — each one a small home-energy-management
 system (HEMS) that plans its own day with a MILP optimiser — and a scripted experiment
 harness that measures how those agents react to the VTN's control methods.
@@ -10,7 +18,7 @@ Docker host carrying `ven-4`…`ven-20` (`VEN/scale_out/node2/`).
 
 ## The context
 
-This project is built around the https://github.com/OpenLEADR/openleadr-rs project, and adds infrastructure to experiment and demonstrate. It is close to 100% written by AI which allowed me to get fast progress in short time. 
+This project is built around the https://github.com/OpenLEADR/openleadr-rs project, and adds infrastructure to experiment and demonstrate. The VTN is openleadr-rs at its OpenADR 3.1 mainline, via a [small fork](docs/reference/FORK_PATCHES.md) carrying four lab patches. It is close to 100% written by AI which allowed me to get fast progress in short time. 
 Tests guarantee the expected behaviour, side effects have not been checked, so no warranties for that!
 
 ## What the lab does
@@ -55,7 +63,7 @@ Node1 — Raspberry Pi 4 (Docker)            Node2 — second Docker host
 |  +--------+  +--------+  +---------+  |  |  +-------+     +--------+  |
 |  | DB     |  (+ lab recorder tables)  |  |         |                  |
 |  | :8201  |        openadr-net        |  +---------|------------------+
-|  +--------+                           |            | LAN (OpenADR 3)
+|  +--------+                           |            | LAN (OpenADR 3.1)
 |                                       |<-----------+
 |  VEN Stack                            |
 |  +---------+  +---------+  +---------+|        MQTT broker
@@ -70,7 +78,7 @@ Node1 — Raspberry Pi 4 (Docker)            Node2 — second Docker host
 
 | Component | Technology | Description |
 |---|---|---|
-| VTN | [openleadr-rs](https://github.com/OpenLEADR/openleadr-rs) (Rust) | OpenADR 3 Virtual Top Node |
+| VTN | [openleadr-rs](https://github.com/OpenLEADR/openleadr-rs) (Rust) | OpenADR 3.1 Virtual Top Node |
 | DB | PostgreSQL 16 | VTN persistence (auto-migrated) + lab recorder archive |
 | BFF | Rust (axum) | Backend-for-frontend with dual OAuth credentials |
 | VTN UI | React + MUI + nginx | Operator dashboard (programs, events, VENs, reports) |
@@ -353,6 +361,8 @@ OpenAdr-Lab/
 | [Use Cases](docs/use-cases/SYSTEM-USE-CASES.md) | Use case definitions and test coverage |
 | [Testing Guide](docs/guidelines/TESTING.md) | Test strategy, running tests, and CI setup |
 | [React Guidelines](docs/guidelines/REACT_GUIDELINES.md) | UI development conventions |
+| [Wire Profile](docs/reference/WIRE_PROFILE.md) | What a number on the wire means: payload types, units, sign convention |
+| [Fork Patches](docs/reference/FORK_PATCHES.md) | What this lab carries on top of upstream openleadr-rs, and why |
 | [Key Learnings](docs/reference/KEY_LEARNINGS.md) | Hard-won lessons from implementation |
 | [FAQ](docs/reference/FAQ.md) | Common questions and troubleshooting |
 | [Glossary](docs/reference/GLOSSARY.md) | OpenADR terminology reference |
