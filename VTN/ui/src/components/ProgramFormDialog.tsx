@@ -4,6 +4,7 @@ import {
   FormControlLabel, FormGroup, TextField, Typography,
 } from "@mui/material";
 import type { Program, ProgramInput, Ven } from "../api/types";
+import { targetsOf } from "../api/targets";
 
 type ProgramFormDialogProps = {
   open: boolean;
@@ -15,17 +16,12 @@ type ProgramFormDialogProps = {
 };
 
 function getEnrolledVenNames(program: Program | null): string[] {
-  if (!program?.targets) return [];
-  return program.targets
-    .filter((t) => t.type === "VEN_NAME")
-    .flatMap((t) => t.values);
+  return program ? targetsOf(program) : [];
 }
 
 export function ProgramFormDialog(props: ProgramFormDialogProps) {
   const { open, program, vens, onSubmit, onCancel, loading = false } = props;
   const [name, setName] = useState("");
-  const [longName, setLongName] = useState("");
-  const [programType, setProgramType] = useState("");
   const [descriptionUrl, setDescriptionUrl] = useState("");
   const [selectedVens, setSelectedVens] = useState<string[]>([]);
 
@@ -33,8 +29,6 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- form reset on dialog open; no loop risk
       setName(program?.programName ?? "");
-      setLongName(program?.programLongName ?? "");
-      setProgramType(program?.programType ?? "");
       setDescriptionUrl(program?.programDescriptions?.[0]?.URL ?? "");
       setSelectedVens(getEnrolledVenNames(program));
     }
@@ -50,17 +44,14 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
 
   function handleSubmit() {
     const input: ProgramInput = { programName: name };
-    if (longName.trim()) input.programLongName = longName.trim();
-    if (programType.trim()) input.programType = programType.trim();
     if (descriptionUrl.trim()) {
       input.programDescriptions = [{ URL: descriptionUrl.trim() }];
     } else {
       input.programDescriptions = null;
     }
-    input.targets =
-      selectedVens.length > 0
-        ? selectedVens.map((v) => ({ type: "VEN_NAME", values: [v] }))
-        : null;
+    // 3.1 targets are a flat list of strings and are non-optional: an empty
+    // list is how a program says "open to every VEN", where 3.0 sent null.
+    input.targets = selectedVens;
     onSubmit(input);
   }
 
@@ -76,22 +67,6 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           inputProps={{ "data-testid": "program-name-input" }}
-        />
-        <TextField
-          margin="dense"
-          label="Long Name"
-          fullWidth
-          value={longName}
-          onChange={(e) => setLongName(e.target.value)}
-          inputProps={{ "data-testid": "program-long-name-input" }}
-        />
-        <TextField
-          margin="dense"
-          label="Program Type"
-          fullWidth
-          value={programType}
-          onChange={(e) => setProgramType(e.target.value)}
-          inputProps={{ "data-testid": "program-type-input" }}
         />
         <TextField
           margin="dense"

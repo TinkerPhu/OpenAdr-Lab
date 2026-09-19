@@ -147,7 +147,7 @@ export function EventFormDialog(props: EventFormDialogProps) {
           value={targets}
           onChange={(e) => setTargets(e.target.value)}
           error={!targetsValid}
-          helperText={targetsValid ? 'e.g. [{"type":"VEN_NAME","values":["ven-1"]}]' : "Invalid JSON"}
+          helperText={targetsValid ? 'e.g. ["ven-1", "ven-2"] — empty means every VEN' : "Invalid JSON"}
           inputProps={{ "data-testid": "event-targets-input" }}
         />
         <TextField

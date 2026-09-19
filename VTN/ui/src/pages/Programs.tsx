@@ -11,14 +11,7 @@ import { usePrograms, useVens, useCreateProgram, useUpdateProgram, useDeleteProg
 import { JsonDialog } from "../components/JsonDialog";
 import { ProgramFormDialog } from "../components/ProgramFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-
-function enrollmentLabel(program: Program): string {
-  const venNames = (program.targets ?? [])
-    .filter((t) => t.type === "VEN_NAME")
-    .flatMap((t) => t.values);
-  if (venNames.length === 0) return "Open — all VENs";
-  return venNames.join(", ");
-}
+import { audienceLabel } from "../api/targets";
 
 export function ProgramsPage() {
   const { data: programs = [], dataUpdatedAt } = usePrograms();
@@ -35,7 +28,7 @@ export function ProgramsPage() {
 
   const filtered = useMemo(() => {
     return programs.filter((p) => {
-      const hay = `${p.id} ${p.programName ?? ""} ${p.programLongName ?? ""}`.toLowerCase();
+      const hay = `${p.id} ${p.programName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [programs, query]);
@@ -134,9 +127,8 @@ export function ProgramsPage() {
                   primary={p.programName ?? p.id}
                   secondary={
                     <>
-                      {p.programLongName && <span>{p.programLongName} — </span>}
                       <Chip
-                        label={enrollmentLabel(p)}
+                        label={audienceLabel(p)}
                         size="small"
                         variant="outlined"
                         sx={{ height: 18, fontSize: "0.75rem" }}
