@@ -87,7 +87,15 @@ def _register_ven(ven_name, attributes):
     """Register a VEN directly against the VTN (business scope), idempotent:
     if it already exists, PUT the desired attributes onto it instead."""
     token = get_token_value("bl-client", "bl-client")
-    body = {"venName": ven_name}
+    # 3.1 models VenRequest as a tagged enum, so objectType is mandatory, and a
+    # VEN is identified by its clientID. We hold write_vens_bl, so the VTN takes
+    # clientID from the body rather than stamping in our own token subject.
+    body = {
+        "objectType": "BL_VEN_REQUEST",
+        "venName": ven_name,
+        "clientID": ven_name,
+        "targets": [ven_name],
+    }
     if attributes:
         body["attributes"] = attributes
     r = vtn_post("/vens", token, json=body)
@@ -96,6 +104,7 @@ def _register_ven(ven_name, attributes):
         match = next(v for v in existing if v["venName"] == ven_name)
         put_body = {k: v for k, v in match.items()
                     if k not in ("id", "createdDateTime", "modificationDateTime")}
+        put_body["objectType"] = "BL_VEN_REQUEST"
         put_body["attributes"] = attributes or None
         vtn_put(f"/vens/{match['id']}", token, json=put_body).raise_for_status()
     else:

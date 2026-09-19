@@ -40,16 +40,13 @@ def _check_not_live():
 def _cleanup_all_programs():
     """Delete every program in the test VTN before each feature.
 
-    Two-phase cleanup:
-    1. API phase: delete programs the `bl-client` credential can see
-       (programs with a matching business_id).
-    2. SQL phase: delete orphaned programs with business_id IS NULL — these
-       are created via the BFF/UI layer and are invisible to the API credential,
-       so they accumulate across runs and cause 409 Conflict errors.
-       Only NULL-business_id rows are removed; API-created programs (and their
-       ven_program enrollment records) are left intact.
+    One API pass is enough under OpenADR 3.1. The old second, SQL pass existed
+    because 3.0 scoped programs to a business_id, so anything created through
+    the BFF/UI was invisible to the API credential and accumulated until it
+    caused 409s. 3.1 has no business_id -- one `read_all` credential sees every
+    program -- and the pass would not run anyway: it deleted from `ven_program`
+    and `report.program_id`, both of which the 3.1 migration drops.
     """
-    import subprocess
 
     # Phase 1 — API cleanup (programs visible to the bl-client credential).
     try:
@@ -84,36 +81,6 @@ def _cleanup_all_programs():
             print(f"Pre-run cleanup: deleted {deleted} programs (API) from test VTN.")
     except Exception as exc:
         print(f"Warning: API program cleanup failed: {exc}")
-
-    # Phase 2 — SQL cleanup.
-    # Two passes:
-    # a) Programs with business_id IS NULL (created via BFF/UI layer, invisible to API credentials).
-    # b) Programs whose names match the ui_use_cases.feature hardcoded names — belt-and-suspenders
-    #    for runs where the UI credential gave the programs a non-null business_id.
-    try:
-        dsn = "postgres://openadr:openadr@test-db:5432/openadr"
-        sql = (
-            "DELETE FROM report"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
-            "    OR program_name LIKE 'ui-uc%');"
-            "DELETE FROM event"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
-            "    OR program_name LIKE 'ui-uc%');"
-            "DELETE FROM ven_program"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
-            "    OR program_name LIKE 'ui-uc%');"
-            "DELETE FROM program WHERE business_id IS NULL OR program_name LIKE 'ui-uc%';"
-        )
-        result = subprocess.run(
-            ["psql", dsn, "-c", sql],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0 and result.stderr:
-            print(f"SQL cleanup warning: {result.stderr[:200]}")
-    except Exception as exc:
-        print(f"Warning: SQL fallback cleanup failed: {exc}")
-
-
 
 def before_all(context):
     """Wait for all services to be reachable before running any tests."""
