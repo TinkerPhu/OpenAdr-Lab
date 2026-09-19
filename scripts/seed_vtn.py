@@ -287,7 +287,7 @@ VENS_TO_PROVISION = [
     {"ven_name": "ven-3", "client_id": "ven-3", "client_secret": "ven-3", "user_ref": "ven-3-user"},
     # BL-41: ven-4 runs on a second physical host (Node2), so it advertises its
     # own reachable origin via the DASHBOARD_URL attribute instead of relying
-    # on same-host Docker DNS (see _ensure_dashboard_url_attribute below).
+    # on same-host Docker DNS (see _reconcile_ven below).
     {"ven_name": "ven-4", "client_id": "ven-4", "client_secret": "ven-4", "user_ref": "ven-4-user",
      "dashboard_url": "http://192.168.1.104:8211"},
     # ven-5..ven-13: 9 more VENs on Node2 (same LAN-reachability reasoning as
@@ -454,35 +454,47 @@ def delete_event(base_url, token, event_id):
     r.raise_for_status()
 
 
-def _ensure_dashboard_url_attribute(base, token, ven_name, dashboard_url):
-    """BL-41: set/replace the DASHBOARD_URL attribute on an already-provisioned
-    VEN. PUT /vens/{id} is a full-content replace, so this reads the current
-    attributes first and merges the DASHBOARD_URL entry in, preserving any
-    existing attribute (e.g. PERSONA)."""
+def _reconcile_ven(base, token, spec):
+    """Bring an already-provisioned VEN object in line with its spec.
+
+    One reconcile step rather than one helper per field: a VEN carries both the
+    targets that decide what it can see and the attributes the UI reads, and
+    PUT /vens/{id} is a whole-body replace, so they have to be written together
+    anyway. Splitting them would mean two reads and two races.
+    """
     r = requests.get(f"{base}/vens", headers=auth_headers(token),
-                      params={"venName": ven_name}, timeout=10)
+                     params={"venName": spec["ven_name"]}, timeout=10)
     r.raise_for_status()
-    matches = [v for v in r.json() if v["venName"] == ven_name]
+    matches = [v for v in r.json() if v["venName"] == spec["ven_name"]]
     if not matches:
-        print(f"  WARNING: VEN '{ven_name}' not found — cannot set DASHBOARD_URL")
+        print(f"  WARNING: VEN '{spec['ven_name']}' not found — cannot reconcile")
         return
     ven = matches[0]
     ven_id = ven["id"]
-    attributes = [a for a in (ven.get("attributes") or []) if a.get("type") != "DASHBOARD_URL"]
-    attributes.append({"type": "DASHBOARD_URL", "values": [dashboard_url]})
+
+    wanted_targets = [spec["ven_name"]]
+    attributes = [a for a in (ven.get("attributes") or [])
+                  if a.get("type") not in ("DASHBOARD_URL", "PERSONA")]
+    if spec.get("persona"):
+        attributes.append({"type": "PERSONA", "values": [spec["persona"]]})
+    if spec.get("dashboard_url"):
+        attributes.append({"type": "DASHBOARD_URL", "values": [spec["dashboard_url"]]})
+
+    if ven.get("targets") == wanted_targets and (ven.get("attributes") or []) == attributes:
+        return  # already correct, nothing to write
 
     # A Ven is BlVenRequest flattened with id/createdDateTime/
     # modificationDateTime; PUT /vens/{id} takes the request body only, so drop
     # the VTN-provisioned fields. clientID stays: it is part of the body in 3.1
-    # and dropping it would fail validation.
+    # and dropping it would fail validation. A GET response carries no
+    # objectType, but the PUT body needs the discriminator just as POST does.
     body = {k: v for k, v in ven.items() if k not in ("id", "createdDateTime", "modificationDateTime")}
-    body["attributes"] = attributes
-    # A GET response carries no objectType, but the PUT body needs the
-    # discriminator just as the POST does.
     body["objectType"] = "BL_VEN_REQUEST"
+    body["targets"] = wanted_targets
+    body["attributes"] = attributes or None
     r = requests.put(f"{base}/vens/{ven_id}", headers=auth_headers(token), json=body, timeout=10)
     r.raise_for_status()
-    print(f"  '{ven_name}' DASHBOARD_URL set to {dashboard_url}")
+    print(f"  '{spec['ven_name']}' reconciled (targets={wanted_targets})")
 
 
 VEN_SCOPES = ["read_targets", "read_ven_objects", "write_reports_ven"]
@@ -513,9 +525,8 @@ def provision_vens(base, vens):
             timeout=10,
         )
         if r.ok:
-            print(f"VEN '{ven['ven_name']}' already provisioned — skipping.")
-            if ven.get("dashboard_url"):
-                _ensure_dashboard_url_attribute(base, token, ven["ven_name"], ven["dashboard_url"])
+            print(f"VEN '{ven['ven_name']}' already provisioned — reconciling.")
+            _reconcile_ven(base, token, ven)
             continue
 
         print(f"Provisioning VEN '{ven['ven_name']}' ...")
@@ -540,11 +551,20 @@ def provision_vens(base, vens):
         # objectType is the discriminator for 3.1's VenRequest enum
         # (BL_VEN_REQUEST vs VEN_VEN_REQUEST) and is mandatory -- without it the
         # VTN rejects the body with "missing field `objectType`".
+        #
+        # The VEN carries its own name as a target. This is what makes targeting
+        # work at all: the clientID only says *which* VEN object you are, and
+        # visibility is then decided by intersecting an object's targets with
+        # the union of this VEN's targets and its resources' (OpenADR 3.1.1
+        # Definition.md, "VEN created object privacy", steps 4 and 6 -- quoted
+        # in openleadr-vtn/src/data_source/postgres/mod.rs::get_ven_targets).
+        # A VEN provisioned with no targets therefore sees only untargeted
+        # objects, however precisely a program names its clientID.
         ven_body = {
             "objectType": "BL_VEN_REQUEST",
             "venName": ven["ven_name"],
             "clientID": ven["client_id"],
-            "targets": [],
+            "targets": [ven["ven_name"]],
         }
         # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
         # can label fleet entries (only present on persona fleets).
