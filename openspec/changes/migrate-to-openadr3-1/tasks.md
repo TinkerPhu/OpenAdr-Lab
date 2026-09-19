@@ -173,7 +173,12 @@ Simulator untouched (D5). `POST /sim/override` stays.
       flat `Targets`, deprecated program fields dropped, report carries `clientID`, event gains
       optional `duration` and optional `intervals`
 - [x] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
-- [ ] 5.3 `EventFormDialog.tsx`: flat targets; expose `duration`
+- [x] 5.3a `EventFormDialog.tsx`: flat targets done (helper text and JSON shape).
+- [ ] 5.3b Exposing 3.1's **top-level** event `duration` is deliberately deferred to phase 3.
+      The form's existing Duration field is `intervalPeriod.duration`, a different thing.
+      Surfacing the new one before `event_timing.rs` honours it (3.2) would let an operator
+      create duration-only events the fleet mis-times — `no-half-built-features` cuts against
+      shipping the producer before the consumer.
 - [x] 5.4 `Vens.tsx`, `Programs.tsx`, `Reports.tsx` updated. The three copies of "which VENs does
       this target" are consolidated into `VTN/ui/src/api/targets.ts`
 - [x] 5.5 `VEN/ui` types, `Programs.tsx`, `Reports.tsx`, `EventDetailPanel.tsx` updated
@@ -217,7 +222,12 @@ Simulator untouched (D5). `POST /sim/override` stays.
       rule, the fixture/feature notes, and D-01
 - [ ] 7.3b `VEN_ARCHITECTURE.md` and `docs/use-cases/` — pending, and mostly waiting on the VEN
       side of the migration (phase 3) actually landing
-- [ ] 7.4 Close GB-50 (or record what remains) now that descriptors are on the wire
+- [x] 7.4 GB-50 status recorded in `docs/BACKLOG.md`: the **outbound** half is resolved and
+      verified live (every event declares payload type and units; programs point at
+      `docs/reference/WIRE_PROFILE.md#v1`). The **VEN's own emissions** remain open and are
+      the substance of phase 3 — `reportDescriptors`/`reportIntervals` undeclared, and
+      `reporter.rs` still multiplying to watts, a unit the profile forbids because OpenADR
+      cannot declare it.
 - [x] 7.5 **Re-decided** in `docs/plans/fleet-monitor/phase-0-foundation.md` §6.1a: both, for
       different jobs — subscriptions carry OpenADR objects and can replace the BFF's polling of
       them; they cannot carry VEN internals, which is what the side channel exists for
