@@ -56,6 +56,11 @@ services:
       MQTT_USERNAME: ""
       MQTT_PASSWORD: ""
       MQTT_TOPIC_PREFIX: openadr-lab/vtn
+      # Mandatory from 3.1 on: the VTN panics at startup without it when using
+      # the internal OAuth provider. It is discovery metadata served from
+      # GET /auth/server and plays no part in signing, so inside the test
+      # network the in-stack address is the right answer.
+      OAUTH_TOKEN_URL: http://test-vtn:3000/auth/token
     healthcheck:
       # busybox wget, not curl -- the 3.1 VTN runtime image has no curl.
       test: wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
