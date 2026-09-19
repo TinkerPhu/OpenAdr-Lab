@@ -9,23 +9,20 @@ const mockPrograms = [
   {
     id: "p1",
     programName: "Program Alpha",
-    programLongName: "Alpha Long Name",
     programDescriptions: [{ URL: "https://example.com/alpha" }],
-    targets: [{ type: "VEN_NAME", values: ["ven-1"] }, { type: "VEN_NAME", values: ["ven-2"] }],
+    targets: ["ven-1", "ven-2"],
     createdDateTime: "2026-01-01",
   },
   {
     id: "p2",
     programName: "Program Beta",
-    programLongName: null,
-    targets: null,
+    targets: [],
     createdDateTime: "2026-01-02",
   },
   {
     id: "p3",
     programName: "Program Gamma",
-    programLongName: null,
-    targets: [{ type: "VEN_NAME", values: ["ven-3"] }],
+    targets: ["ven-3"],
     createdDateTime: "2026-01-03",
   },
 ];
@@ -152,7 +149,7 @@ describe("ProgramsPage", () => {
     expect(createMock).toHaveBeenCalledWith(
       {
         programName: "New Program",
-        targets: [{ type: "VEN_NAME", values: ["ven-1"] }],
+        targets: ["ven-1"],
         programDescriptions: null,
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
@@ -169,7 +166,7 @@ describe("ProgramsPage", () => {
       {
         programName: "Program with URL",
         programDescriptions: [{ URL: "https://example.com/test" }],
-        targets: null,
+        targets: [],
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
@@ -179,8 +176,15 @@ describe("ProgramsPage", () => {
     renderPrograms();
     await userEvent.click(screen.getByTestId("edit-program-p1"));
     expect(screen.getByTestId("program-name-input")).toHaveValue("Program Alpha");
-    expect(screen.getByTestId("program-long-name-input")).toHaveValue("Alpha Long Name");
     expect(screen.getByTestId("program-description-url-input")).toHaveValue("https://example.com/alpha");
+    // programLongName is gone in 3.1; the enrolment pre-fill is the thing worth
+    // asserting in its place, and it exercises the flat-target read path.
+    // the testid sits on the MUI wrapper, so assert on the input it contains
+    const venBox = (name: string) =>
+      screen.getByTestId(`ven-checkbox-${name}`).querySelector("input");
+    expect(venBox("ven-1")).toBeChecked();
+    expect(venBox("ven-2")).toBeChecked();
+    expect(venBox("ven-3")).not.toBeChecked();
   });
 
   it("opens confirm dialog on delete click", async () => {
@@ -208,31 +212,6 @@ describe("ProgramsPage", () => {
     await userEvent.click(screen.getByTestId("program-form-submit"));
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: "p1", input: expect.objectContaining({ programName: "Renamed Alpha" }) }),
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
-  });
-
-  it("saves updated programLongName on edit", async () => {
-    renderPrograms();
-    await userEvent.click(screen.getByTestId("edit-program-p1"));
-    const longNameInput = screen.getByTestId("program-long-name-input");
-    await userEvent.clear(longNameInput);
-    await userEvent.type(longNameInput, "New Long Name");
-    await userEvent.click(screen.getByTestId("program-form-submit"));
-    expect(updateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "p1", input: expect.objectContaining({ programLongName: "New Long Name" }) }),
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
-  });
-
-  it("saves updated programType on edit", async () => {
-    renderPrograms();
-    await userEvent.click(screen.getByTestId("edit-program-p1"));
-    const typeInput = screen.getByTestId("program-type-input");
-    await userEvent.type(typeInput, "PRICING_TARIFF");
-    await userEvent.click(screen.getByTestId("program-form-submit"));
-    expect(updateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "p1", input: expect.objectContaining({ programType: "PRICING_TARIFF" }) }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
@@ -281,10 +260,7 @@ describe("ProgramsPage", () => {
       expect.objectContaining({
         id: "p1",
         input: expect.objectContaining({
-          targets: [
-            { type: "VEN_NAME", values: ["ven-2"] },
-            { type: "VEN_NAME", values: ["ven-3"] },
-          ],
+          targets: ["ven-2", "ven-3"],
         }),
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
@@ -301,7 +277,7 @@ describe("ProgramsPage", () => {
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "p1",
-        input: expect.objectContaining({ targets: null }),
+        input: expect.objectContaining({ targets: [] }),
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );

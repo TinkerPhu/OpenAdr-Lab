@@ -19,7 +19,7 @@ export function ReportsPage() {
 
   const filtered = useMemo(() => {
     return reports.filter((r) => {
-      const hay = `${r.id} ${r.clientName ?? ""} ${r.reportName ?? ""} ${r.programID ?? ""} ${r.eventID ?? ""}`.toLowerCase();
+      const hay = `${r.id} ${r.clientName ?? ""} ${r.reportName ?? ""} ${r.clientID ?? ""} ${r.eventID ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [reports, query]);
@@ -63,7 +63,7 @@ export function ReportsPage() {
             <TableRow>
               <TableCell>Client Name</TableCell>
               <TableCell>Report Name</TableCell>
-              <TableCell>Program ID</TableCell>
+              <TableCell>Client ID</TableCell>
               <TableCell>Event ID</TableCell>
               <TableCell>Created</TableCell>
               <TableCell align="right">Actions</TableCell>
@@ -80,7 +80,7 @@ export function ReportsPage() {
               >
                 <TableCell>{r.clientName ?? "—"}</TableCell>
                 <TableCell>{r.reportName ?? "—"}</TableCell>
-                <TableCell sx={{ fontFamily: "monospace" }}>{r.programID ?? "—"}</TableCell>
+                <TableCell sx={{ fontFamily: "monospace" }}>{r.clientID ?? "—"}</TableCell>
                 <TableCell sx={{ fontFamily: "monospace" }}>{r.eventID ?? "—"}</TableCell>
                 <TableCell>{r.createdDateTime ?? "—"}</TableCell>
                 <TableCell align="right">

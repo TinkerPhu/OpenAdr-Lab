@@ -8,16 +8,14 @@ import type { Program, Ven } from "../api/types";
 import { useVens, useDeleteVen, usePrograms } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { targets } from "../api/targets";
 
 function enrolledProgramNames(ven: Ven, programs: Program[]): string[] {
   const venName = ven.venName ?? ven.id;
   return programs
-    .filter((p) => {
-      if (!p.targets) return false; // open programs don't count as "enrolled"
-      return p.targets.some(
-        (t) => t.type === "VEN_NAME" && t.values.includes(venName),
-      );
-    })
+    // Open programs don't count as "enrolled" -- this column answers "who was
+    // this VEN explicitly given?", not "what can it see?".
+    .filter((p) => targets(p, venName))
     .map((p) => p.programName ?? p.id);
 }
 

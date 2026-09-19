@@ -42,8 +42,9 @@ export type EventLogEntry = {
 export type Program = {
   id: string;
   programName?: string | null;
-  programLongName?: string | null;
-  programType?: string | null;
+  /** valuesMap list; 3.1's replacement for the dropped programType. */
+  attributes?: unknown[] | null;
+  targets?: string[] | null;
   createdDateTime?: string | null;
   [key: string]: unknown;
 };
@@ -69,16 +70,21 @@ export type VtnEvent = {
   programID?: string | null;
   eventName?: string | null;
   priority?: number | null;
+  /** New in 3.1: an event-level duration, independent of `intervals`. */
+  duration?: string | null;
   intervalPeriod?: IntervalPeriod | null;
-  targets?: TargetEntry[] | null;
+  /** 3.1: a flat list of target strings; empty means every VEN. */
+  targets?: string[] | null;
   createdDateTime?: string | null;
+  /** Optional in 3.1: an event may declare a duration and no intervals. */
   intervals?: Interval[];
   [key: string]: unknown;
 };
 
 export type Report = {
   id: string;
-  programID?: string | null;
+  /** VTN-provisioned in 3.1; 3.0's programID is gone. */
+  clientID?: string | null;
   eventID?: string | null;
   clientName?: string | null;
   reportName?: string | null;

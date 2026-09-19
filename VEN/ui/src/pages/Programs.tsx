@@ -10,7 +10,7 @@ export function ProgramsPage() {
 
   const filtered = useMemo(() => {
     return programs.filter((p) => {
-      const hay = `${p.id} ${p.programName ?? ""} ${p.programLongName ?? ""}`.toLowerCase();
+      const hay = `${p.id} ${p.programName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [programs, query]);
@@ -56,7 +56,10 @@ export function ProgramsPage() {
               <ListItemText
                 primary={p.programName ?? p.id}
                 secondary={
-                  [p.programLongName, p.programType].filter(Boolean).join(" — ") || p.id
+                  // 3.1 dropped programLongName and programType; the audience is
+                  // the useful thing to show in their place.
+                  (p.targets?.length ? `targets: ${p.targets.join(", ")}` : "open — all VENs") +
+                  ` · ${p.id}`
                 }
               />
             </ListItem>

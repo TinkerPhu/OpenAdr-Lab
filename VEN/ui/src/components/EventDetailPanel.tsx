@@ -99,8 +99,9 @@ export function EventDetailPanel(props: EventDetailPanelProps) {
             <Box>
               <Typography variant="subtitle2">Targets</Typography>
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {/* 3.1 targets are plain strings, not {type, values} entries. */}
                 {targets.map((t, i) => (
-                  <Chip key={i} label={`${t.type}: ${t.values.join(", ")}`} size="small" variant="outlined" />
+                  <Chip key={i} label={t} size="small" variant="outlined" />
                 ))}
               </Stack>
             </Box>
