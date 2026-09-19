@@ -2123,3 +2123,28 @@ The tell was in the script's own comment — `lab_recorder` was described as "re
 restart", which is true of the *schema* and false of the *data*. Scope a destructive default to
 the thing being reset, make the wider blast radius an explicit flag, and print what is about to
 be lost; an operation that cannot be undone should not be reachable by a flag named `--fresh`.
+
+## In OpenADR 3.1, targeting a program does not target its events (2026-09-19)
+
+3.0 gated event visibility through program enrollment: the `ven_program` table meant a VEN saw an
+event only if it was enrolled in the event's program, so an event with no targets of its own was
+still private — it inherited the program's audience. 3.1 drops that table and filters **every
+object by its own targets, with no program join**. An untargeted event is therefore *public*: any
+VEN can read it, including one the parent program does not name. The lab found this because BDD
+scenarios asserting "targeted to VEN-1 only" started failing with "unexpectedly found on VEN-2",
+and they were correct — the objects really had become visible fleet-wide. Anything that should be
+private must now say so on itself. The related trap is that a VEN with an empty `targets` list
+matches nothing but untargeted objects, however precisely a program names its clientID: the
+clientID only resolves *which* VEN object the caller is, and visibility is the intersection of the
+object's targets with the union of that VEN's targets and its resources' (spec 3.1.1
+Definition.md, "VEN created object privacy", quoted in upstream's `get_ven_targets`).
+
+## A credential name in Gherkin is a call site your code sweep will miss (2026-09-19)
+
+Migrating the test suite to a new VTN credential looked done after the step definitions, helpers
+and shell scripts were updated — a grep across `.py` and `.sh` came back clean. The suite then
+failed 34 scenarios with 401s, because the credential is *parameter text in the feature files*:
+`Given I have a VTN token as "any-business"` appeared 49 times across 33 `.feature` files, and
+the step simply passes what the scenario says. Declarative test text is executable configuration:
+when renaming anything a step takes as a parameter — a credential, a hostname, a payload type —
+the `.feature` files are call sites too.
