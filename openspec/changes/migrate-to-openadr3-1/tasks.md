@@ -162,13 +162,21 @@ Simulator untouched (D5). `POST /sim/override` stays.
 
 ## 5. UIs
 
-- [ ] 5.1 `VTN/ui/src/api/hooks.ts`: `targets: string[]`; drop deprecated program fields; report `eventID` not `programID`
+- [x] 5.1 Types updated in `VTN/ui/src/api/types.ts` (the types live there, not in `hooks.ts`):
+      flat `Targets`, deprecated program fields dropped, report carries `clientID`, event gains
+      optional `duration` and optional `intervals`
 - [ ] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
 - [ ] 5.3 `EventFormDialog.tsx`: flat targets; expose `duration`
-- [ ] 5.4 `Vens.tsx` (clientID column), `Programs.tsx` (flat targets), `Reports.tsx` (eventID)
-- [ ] 5.5 `VEN/ui`: same type updates; `Programs.tsx`, `Reports.tsx`
-- [ ] 5.6 `npm run build` + `npm test` + eslint clean, both UIs
-- [ ] 5.7 Deploy both; smoke-test in browser
+- [x] 5.4 `Vens.tsx`, `Programs.tsx`, `Reports.tsx` updated. The three copies of "which VENs does
+      this target" are consolidated into `VTN/ui/src/api/targets.ts`
+- [x] 5.5 `VEN/ui` types, `Programs.tsx`, `Reports.tsx`, `EventDetailPanel.tsx` updated
+- [x] 5.6 VTN UI 69/69, VEN UI 652/652; both typecheck, build and lint with 0 errors
+- [x] 5.7 VTN UI deployed on Node1 and serving; audiences render correctly from live data.
+      Proved the fix end to end against the live VTN: a program created the way the 3.1 form now
+      builds it returns HTTP 200, and the old `{type: VEN_NAME, values: [...]}` shape returns
+      HTTP 400 -- the break the UI would otherwise have shipped
+- [ ] 5.7a Deploy the VEN UI (built and tested, not yet rolled to the fleet) and browser
+      smoke-test both
 
 ## 6. Integration tests
 
