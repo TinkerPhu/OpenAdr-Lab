@@ -41,7 +41,7 @@ def _cleanup_all_programs():
     """Delete every program in the test VTN before each feature.
 
     Two-phase cleanup:
-    1. API phase: delete programs the `any-business` credential can see
+    1. API phase: delete programs the `bl-client` credential can see
        (programs with a matching business_id).
     2. SQL phase: delete orphaned programs with business_id IS NULL — these
        are created via the BFF/UI layer and are invisible to the API credential,
@@ -51,10 +51,10 @@ def _cleanup_all_programs():
     """
     import subprocess
 
-    # Phase 1 — API cleanup (programs visible to any-business credential).
+    # Phase 1 — API cleanup (programs visible to the bl-client credential).
     try:
         from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
-        token = get_token_value("any-business", "any-business")
+        token = get_token_value("bl-client", "bl-client")
         limit = 50
         deleted = 0
         # Always re-read the FIRST page: deleting a page's rows shifts the
@@ -251,7 +251,7 @@ def before_scenario(context, scenario):
         context.ui.open()
         # UI scenarios reuse API verification steps that need a VTN token
         from features.helpers.api_client import get_token_value
-        context.vtn_token = get_token_value("any-business", "any-business")
+        context.vtn_token = get_token_value("bl-client", "bl-client")
 
     if _is_ven_ui(scenario):
         if context._pw is None:
@@ -279,7 +279,7 @@ def before_scenario(context, scenario):
         from features.helpers.ui import VenUi
         context.ven_ui = VenUi(context.browser_page)
         from features.helpers.api_client import get_token_value
-        context.vtn_token = get_token_value("any-business", "any-business")
+        context.vtn_token = get_token_value("bl-client", "bl-client")
 
 
 def _cleanup_vtn_resources(context):
@@ -291,7 +291,7 @@ def _cleanup_vtn_resources(context):
     """
     try:
         from features.helpers.api_client import vtn_delete, get_token_value
-        token = get_token_value("any-business", "any-business")
+        token = get_token_value("bl-client", "bl-client")
 
         event_ids: set = set()
         for attr in ("rate_event_id", "planner_event_id", "schedule_event_id", "capacity_event_id"):
