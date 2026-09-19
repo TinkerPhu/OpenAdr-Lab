@@ -467,7 +467,12 @@ def _reconcile_ven(base, token, spec):
     r.raise_for_status()
     matches = [v for v in r.json() if v["venName"] == spec["ven_name"]]
     if not matches:
-        print(f"  WARNING: VEN '{spec['ven_name']}' not found — cannot reconcile")
+        # The credential exists but the VEN object does not -- a partially
+        # provisioned VEN, which is what a run that failed midway leaves behind.
+        # Testing the credential alone would call this "already provisioned"
+        # and skip it forever, so create the missing half here.
+        print(f"  '{spec['ven_name']}' has a credential but no VEN object — creating it")
+        _create_ven_object(base, token, spec)
         return
     ven = matches[0]
     ven_id = ven["id"]
@@ -548,38 +553,44 @@ def provision_vens(base, vens):
         #    write_vens_bl, so the VTN takes clientID from this body; with the
         #    write_vens_ven variant it would instead stamp in our own token
         #    subject and every VEN would collide on ven_client_id_unique.
-        # objectType is the discriminator for 3.1's VenRequest enum
-        # (BL_VEN_REQUEST vs VEN_VEN_REQUEST) and is mandatory -- without it the
-        # VTN rejects the body with "missing field `objectType`".
-        #
-        # The VEN carries its own name as a target. This is what makes targeting
-        # work at all: the clientID only says *which* VEN object you are, and
-        # visibility is then decided by intersecting an object's targets with
-        # the union of this VEN's targets and its resources' (OpenADR 3.1.1
-        # Definition.md, "VEN created object privacy", steps 4 and 6 -- quoted
-        # in openleadr-vtn/src/data_source/postgres/mod.rs::get_ven_targets).
-        # A VEN provisioned with no targets therefore sees only untargeted
-        # objects, however precisely a program names its clientID.
-        ven_body = {
-            "objectType": "BL_VEN_REQUEST",
-            "venName": ven["ven_name"],
-            "clientID": ven["client_id"],
-            "targets": [ven["ven_name"]],
-        }
-        # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
-        # can label fleet entries (only present on persona fleets).
-        # BL-41: DASHBOARD_URL for VENs on a different host than the VTN/UI.
-        attributes = []
-        if ven.get("persona"):
-            attributes.append({"type": "PERSONA", "values": [ven["persona"]]})
-        if ven.get("dashboard_url"):
-            attributes.append({"type": "DASHBOARD_URL", "values": [ven["dashboard_url"]]})
-        if attributes:
-            ven_body["attributes"] = attributes
-        r = requests.post(f"{base}/vens", headers=auth_headers(token), json=ven_body, timeout=10)
-        r.raise_for_status()
-        ven_id = r.json()["id"]
-        print(f"  '{ven['ven_name']}' provisioned (user={user_id}, ven={ven_id})")
+        _create_ven_object(base, token, ven)
+        print(f"  '{ven['ven_name']}' provisioned (user={user_id})")
+
+
+def _create_ven_object(base, token, ven):
+    """Create the VEN object for an already-scoped, already-credentialed user."""
+    # objectType is the discriminator for 3.1's VenRequest enum (BL_VEN_REQUEST
+    # vs VEN_VEN_REQUEST) and is mandatory -- without it the VTN rejects the
+    # body with "missing field `objectType`".
+    #
+    # The VEN carries its own name as a target. This is what makes targeting
+    # work at all: the clientID only says *which* VEN object you are, and
+    # visibility is then decided by intersecting an object's targets with the
+    # union of this VEN's targets and its resources' (OpenADR 3.1.1
+    # Definition.md, "VEN created object privacy", steps 4 and 6 -- quoted in
+    # openleadr-vtn/src/data_source/postgres/mod.rs::get_ven_targets). A VEN
+    # provisioned with no targets sees only untargeted objects, however
+    # precisely a program names its clientID.
+    ven_body = {
+        "objectType": "BL_VEN_REQUEST",
+        "venName": ven["ven_name"],
+        "clientID": ven["client_id"],
+        "targets": [ven["ven_name"]],
+    }
+    # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown can
+    # label fleet entries (only present on persona fleets).
+    # BL-41: DASHBOARD_URL for VENs on a different host than the VTN/UI.
+    attributes = []
+    if ven.get("persona"):
+        attributes.append({"type": "PERSONA", "values": [ven["persona"]]})
+    if ven.get("dashboard_url"):
+        attributes.append({"type": "DASHBOARD_URL", "values": [ven["dashboard_url"]]})
+    if attributes:
+        ven_body["attributes"] = attributes
+
+    r = requests.post(f"{base}/vens", headers=auth_headers(token), json=ven_body, timeout=10)
+    r.raise_for_status()
+    print(f"  '{ven['ven_name']}' VEN object created (ven={r.json()['id']})")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
