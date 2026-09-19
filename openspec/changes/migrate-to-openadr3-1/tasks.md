@@ -152,8 +152,14 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 4.3 **Decided: API, with a one-user SQL bootstrap.** Only `bl-client` can live in SQL
       (nothing can call `/users` without a token), so it is the single fixture; every VEN user
       is created through the API. Requires the `internal-oauth` build (D7)
-- [ ] 4.4 Define the GB-50 profile pointer as a namespaced, versioned private `attributes` entry on the program, plus the published profile document it points at (D10)
-- [ ] 4.5 Seed `payloadDescriptors` on programs/events and `reportDescriptors` carrying payload type, units, readingType (`wire-contracts`); no value goes out undeclared
+- [x] 4.4 Profile pointer live: every program carries `openadr-lab.profile` in `attributes`,
+      pointing at `docs/reference/WIRE_PROFILE.md#v1` (written)
+- [x] 4.5a Event `payloadDescriptors` live and verified on the wire: IMPORT/EXPORT_CAPACITY_LIMIT
+      declare `KW`, PRICE/EXPORT_PRICE `KWH`+`EUR`, CHARGE_STATE_SETPOINT `PERCENT`, GHG `GHG`,
+      SIMPLE none. Derived from the payloads each event carries, so an undeclared type raises
+      rather than being sent
+- [ ] 4.5b `reportDescriptors`/`reportIntervals` on the VEN's side still undeclared — the
+      remaining half of GB-50, and it needs the VEN change (3.6)
 - [x] 4.6 Seed run live: 3 programs, 10 events, 20 VENs. Per-VEN visibility correct for both a
       targeted and an open program (see D4's table)
 - [x] 4.7 Target hiding verified live: `Summer Peak DR` targets `['ven-1','ven-2']`, ven-1 sees
