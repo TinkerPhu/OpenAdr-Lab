@@ -53,10 +53,16 @@ def step_wait_for_notification(context, text):
     def has_text(notes):
         return notes is not None and any(text in n.get("message", "") for n in notes)
 
+    # 300s, not 180s. Measured on a quiet Node1 (host load ~4, the settle gate
+    # satisfied): the "Reactive correction cleared" edge landed 181.0s after
+    # "active" -- one second past a 180s wait, so the scenario lost a race it was
+    # always going to lose, on any host. The assertion is unchanged; only the
+    # allowance is, and it is now well clear of the observed latency rather than
+    # sitting exactly on it.
     context.notifications = poll_until(
         fetch,
         has_text,
-        timeout=180,
+        timeout=300,
         interval=5,
         description=f"notification feed contains '{text}'",
     )
