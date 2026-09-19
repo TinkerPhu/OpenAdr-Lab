@@ -44,6 +44,17 @@ services:
     environment:
       RUST_LOG: info
       DATABASE_URL: postgres://openadr:openadr@test-db:5432/openadr
+      # OpenADR 3.1 subscription notifiers. All three must be set together or
+      # the VTN panics, and so it does if the broker is unreachable, because
+      # notifiers load during state construction. Set explicitly so the value
+      # cannot be inherited from openleadr-rs/.env via dotenvy.
+      # The test stack has its own throwaway broker on test-net, so use that
+      # rather than the Node1 one; it has no password_file, so empty
+      # credentials connect anonymously.
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: ""
+      MQTT_PASSWORD: ""
+      MQTT_TOPIC_PREFIX: openadr-lab/vtn
     healthcheck:
       test: curl --fail http://127.0.0.1:3000/health || exit 1
       interval: 10s
@@ -52,6 +63,8 @@ services:
       start_period: 30s
     depends_on:
       test-db:
+        condition: service_healthy
+      mosquitto:
         condition: service_healthy
     networks:
       - test-net
