@@ -13052,3 +13052,34 @@ A hazard found on the way, unrelated to 3.1 but reachable from `fleet.sh` and
 comment called that schema "re-created on BFF restart", which is true of the schema and false of
 the data. It now preserves it by default, and `--wipe-recorder` prints the row count it is about
 to destroy.
+
+### The fleet was never down
+
+Having deployed the VTN, BFF and seed, the working assumption going into phase 3 was that the
+20 VENs were dead until their wire types were migrated — 14 files and ~184 field sites. Before
+starting that, a look at an actual VEN log settled it in one line:
+
+```
+poll success  resource=events  count=9
+poll success  resource=reports count=3
+```
+
+The unmodified 3.0 VEN runs against the 3.1 VTN. All 20 poll and submit reports, the Node1 three
+report `vtn_connection: ok`, and event targeting is correct per VEN. The only errors in the whole
+window were historical: 401s before the seed created the credentials, then FK-violation 409s for
+a few minutes while VENs still referenced event ids the seed had just replaced. Both cleared
+themselves.
+
+It works because the hand-rolled DTOs are lenient precisely where 3.1 changed. `OadrEvent` has no
+`targets` field at all, so flat targets are ignored rather than mis-parsed; `intervals` carries
+`#[serde(default)]`, so 3.1 making it optional costs nothing; and `programID` in the report body
+is an unknown field the VTN drops. The one field that had to be right, `eventID`, already was.
+
+Worth being blunt about: the minimal-DTO design, which the `dto` rule would normally frown on for
+not passing upstream names through, is the reason a major protocol migration did not interrupt the
+fleet. It survived by describing less than it could have.
+
+This reorders phase 3. Its justification was "restore the fleet"; nothing needs restoring. What
+remains genuinely valuable is the contract work — `payloadDescriptors` (GB-50), dropping the dead
+`programID`, making `eventID` structurally required — and descriptor visibility, which the minimal
+DTOs cannot express and which is the real reason to adopt the wire types.

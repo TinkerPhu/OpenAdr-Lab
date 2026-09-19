@@ -415,6 +415,37 @@ conclusion about quantities and units survives the migration unchanged.
 18 `VEN_NAME` references. Node2 has its own docker host lock and its own checkout; a migration
 plan that doesn't mention it leaves 17 VENs on a schema the VTN no longer serves.
 
+### D12a: The VEN already works on 3.1 — phase 3 is a quality investment, not a restoration
+
+**Observed 2026-09-19, after the phase 1/2/4 deploy**: the unmodified 3.0 VEN runs against the
+3.1 VTN. All 20 VENs poll events and reports successfully, all 20 submit reports, the three
+Node1 VENs report `vtn_connection: ok`, and per-VEN event targeting is correct (ven-1 sees 9
+events, ven-3 and ven-20 see 5).
+
+It works because the hand-rolled DTOs are lenient in exactly the places 3.1 changed:
+`OadrEvent` has **no `targets` field at all**, so flat targets are simply ignored; `intervals`
+carries `#[serde(default)]`, so an absent list is an empty one; and `programID` in the report
+body is an unknown field the VTN drops rather than rejects. The one thing that had to be right —
+`eventID` — already was.
+
+So the earlier framing of phase 3 as "14 files, ~184 field sites, and the fleet is down until
+it lands" was wrong on both counts. Nothing is down, and none of that churn is required to keep
+it running.
+
+What phase 3 is actually for, then:
+
+- **`payloadDescriptors` (GB-50)** — the contract work. Unchanged in importance.
+- **Removing `programID` from the report body** — dead weight the VTN ignores today.
+- **Making `eventID` structurally required** rather than accidentally present.
+- **Descriptor visibility**, which the minimal DTOs cannot express at all.
+
+That reorders the work: the contract (D10, GB-50) is the valuable part, and the wire-type
+adoption below is the means to it, not an end in itself. Sequence it accordingly — and note
+that a 184-site refactor whose justification was "restore the fleet" now needs a different
+justification, which is descriptor visibility.
+
+---
+
 ### D12: The VEN adopts `openleadr-wire` types
 
 **Decision**: The VEN depends on the submodule's `openleadr-wire` crate instead of its
