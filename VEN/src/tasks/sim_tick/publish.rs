@@ -165,6 +165,7 @@ mod tests {
             eventName: None,
             priority: None,
             createdDateTime: None,
+            duration: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
