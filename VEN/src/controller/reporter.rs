@@ -13,8 +13,8 @@ use crate::controller::report_intervals::{
     build_net_site_power_ts, build_soc_intervals,
 };
 use crate::controller::vtn_port::{
-    OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
-    OadrReportResource,
+    EventTypeName, OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval,
+    OadrReportPayload, OadrReportResource,
 };
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::capacity_curve::CapacityCurve;
@@ -104,11 +104,15 @@ pub fn build_measurement_report(
     // Which direction this event asks about. `SIMPLE` is a shed *level*, not a
     // measurement, so it is the one arm that does not report a quantity.
     let payload_type = event
+        .content
         .intervals
-        .first()
+        .iter()
+        .flatten()
+        .next()
         .and_then(|iv| iv.payloads.first())
-        .map(|p| p.r#type.as_str())
-        .unwrap_or("SIMPLE");
+        .map(|p| p.value_type.wire_name())
+        .unwrap_or_else(|| "SIMPLE".to_string());
+    let payload_type = payload_type.as_str();
     let power_kw = match payload_type {
         "EXPORT_CAPACITY_LIMIT" => grid_net_export_kw,
         _ => grid_net_import_kw,
@@ -173,7 +177,7 @@ pub fn build_measurement_report(
         payloads,
     }];
     let report = OadrReportBody {
-        eventID: Some(event_id.clone()),
+        eventID: Some(event_id.to_string()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
         payloadDescriptors: crate::controller::report_payload::descriptors_for(&intervals),
@@ -185,7 +189,7 @@ pub fn build_measurement_report(
 
     debug!(
         report_name = report.reportName.as_deref().unwrap_or(""),
-        event_id,
+        event_id = %event_id,
         payload_type,
         payloads = report.resources[0].intervals[0].payloads.len(),
         "built measurement report"
@@ -212,7 +216,8 @@ pub fn build_measurement_reports_for_active_events(
         }
         // Skip events with reportDescriptors — those are handled by the obligation loop
         let has_descriptors = event
-            .reportDescriptors
+            .content
+            .report_descriptors
             .as_ref()
             .is_some_and(|arr| !arr.is_empty());
         if has_descriptors {
@@ -454,12 +459,12 @@ mod tests {
     // active regardless), and a missing duration is open-ended (was one year).
     #[test]
     fn event_is_active_uses_the_event_level_period() {
-        let event: OadrEvent = serde_json::from_value(serde_json::json!({
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!({
             "id": "e", "programID": "p",
             "intervalPeriod": {"start": "2023-11-14T22:13:20Z", "duration": "PT1H"},
             "intervals": [{"id": 0, "payloads": []}]
         }))
-        .unwrap();
+        .remove(0);
         assert!(event_is_active(&event, ts(0)));
         assert!(event_is_active(&event, ts(3599)));
         assert!(
@@ -467,10 +472,10 @@ mod tests {
             "ended with its event-level period"
         );
         assert!(!event_is_active(&event, ts(-1)), "not yet started");
-        let untimed: OadrEvent = serde_json::from_value(serde_json::json!({
+        let untimed = crate::controller::vtn_port::events_from_json(serde_json::json!({
             "id": "u", "programID": "p", "intervals": [{"id": 0, "payloads": []}]
         }))
-        .unwrap();
+        .remove(0);
         assert!(event_is_active(&untimed, ts(0)), "in force while listed");
     }
 
@@ -839,18 +844,12 @@ mod tests {
 
     #[test]
     fn measurement_report_fields_match_event() {
-        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
-        let event = OadrEvent {
-            intervals: vec![OadrInterval {
-                intervalPeriod: None,
-                payloads: vec![OadrPayload {
-                    r#type: "USAGE".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            ..OadrEvent::test_event("evt-001", "prog-001")
-        };
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-001",
+            "programID": "prog-001",
+            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
+        }]))
+        .remove(0);
         // Two samples: a single reading is a power, and energy over an interval
         // cannot be stated from it (see `report_window`).
         let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 3.0), (60, 3.0)])]
@@ -889,17 +888,12 @@ mod tests {
     /// omitted and logged instead.
     #[test]
     fn measurement_report_omits_usage_when_the_window_is_zero_length() {
-        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
-        let event = OadrEvent {
-            intervals: vec![OadrInterval {
-                payloads: vec![OadrPayload {
-                    r#type: "IMPORT_CAPACITY_LIMIT".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            ..OadrEvent::test_event("evt-nowindow", "prog-001")
-        };
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-nowindow",
+            "programID": "prog-001",
+            "intervals": [{"payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": []}]}]
+        }]))
+        .remove(0);
         let asset_samples: HashMap<_, _> =
             [make_samples("site", &[(0, 3.0)])].into_iter().collect();
         let report =
@@ -916,18 +910,12 @@ mod tests {
 
     #[test]
     fn measurement_report_includes_ev_soc_when_available() {
-        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
-        let event = OadrEvent {
-            intervals: vec![OadrInterval {
-                intervalPeriod: None,
-                payloads: vec![OadrPayload {
-                    r#type: "USAGE".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            ..OadrEvent::test_event("evt-002", "prog-001")
-        };
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-002",
+            "programID": "prog-001",
+            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
+        }]))
+        .remove(0);
         let asset_samples: HashMap<_, _> = [make_ev_samples("ev", &[(0, 7.0, 0.5)])]
             .into_iter()
             .collect();
@@ -964,25 +952,13 @@ mod tests {
 
     #[test]
     fn active_events_skips_events_with_report_descriptors() {
-        use crate::controller::vtn_port::{OadrInterval, OadrPayload, OadrReportDescriptor};
-        let event = OadrEvent {
-            intervals: vec![OadrInterval {
-                intervalPeriod: None,
-                payloads: vec![OadrPayload {
-                    r#type: "USAGE".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            reportDescriptors: Some(vec![OadrReportDescriptor {
-                payloadType: "USAGE".to_string(),
-                readingType: None,
-                frequency: Some(900),
-                historical: None,
-                ..Default::default()
-            }]),
-            ..OadrEvent::test_event("evt-003", "prog-001")
-        };
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-003",
+            "programID": "prog-001",
+            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}],
+            "reportDescriptors": [{"payloadType": "USAGE", "frequency": 900}]
+        }]))
+        .remove(0);
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let reports = build_measurement_reports_for_active_events(
             &[event],
@@ -1003,18 +979,12 @@ mod tests {
 
     #[test]
     fn build_measurement_report_domain_only() {
-        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
-        let event = OadrEvent {
-            intervals: vec![OadrInterval {
-                intervalPeriod: None,
-                payloads: vec![OadrPayload {
-                    r#type: "USAGE".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            ..OadrEvent::test_event("evt-sc004", "prog-001")
-        };
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-sc004",
+            "programID": "prog-001",
+            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
+        }]))
+        .remove(0);
         let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 1.0), (60, 3.0)])]
             .into_iter()
             .collect();

@@ -642,7 +642,16 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_events_paginates_independently_of_programs() {
         let items: Vec<_> = (0..75)
-            .map(|i| json!({"id": format!("e{i}"), "programID": "prog-a"}))
+            .map(|i| {
+                json!({
+                    "id": format!("e{i}"),
+                    "programID": "prog-a",
+                    // Required by 3.1; a VTN that omitted them would have its
+                    // events refused, which is what `partition_valid` reports.
+                    "createdDateTime": "2026-01-01T00:00:00Z",
+                    "modificationDateTime": "2026-01-01T00:00:00Z"
+                })
+            })
             .collect();
         let base_url = spawn_test_vtn(items).await;
         let client = make_client(base_url);

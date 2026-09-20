@@ -177,10 +177,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_vtn_returns_configured_events() {
-        let event = OadrEvent::test_event("e1", "p1");
+        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "e1", "programID": "p1"
+        }]))
+        .remove(0);
         let mock = MockVtn::new().with_events(vec![event]);
         let events = mock.fetch_events().await.unwrap().items;
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].id, "e1");
+        assert_eq!(events[0].id.as_str(), "e1");
     }
 }

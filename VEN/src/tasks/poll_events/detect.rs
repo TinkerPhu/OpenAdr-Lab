@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::controller;
-use crate::controller::vtn_port::OadrEvent;
+use crate::controller::vtn_port::{EventTypeName, OadrEvent, PayloadValues};
 use crate::entities;
 use crate::tasks::poll_signals;
 
@@ -55,33 +55,38 @@ pub(crate) fn detect_event_changes(
     };
 
     let current_ids: std::collections::HashSet<String> =
-        events.iter().map(|e| e.id.clone()).collect();
+        events.iter().map(|e| e.id.to_string()).collect();
 
     let mut trace_events = Vec::new();
     let mut event_records = Vec::new();
 
     // OpenAdrArrived — events that are new this tick
     for evt in events {
-        if prev_ids.contains(&evt.id) {
+        if prev_ids.contains(evt.id.as_str()) {
             continue;
         }
 
-        let name = evt.eventName.as_deref().unwrap_or(&evt.id).to_string();
-        let (signal_type, value, interval_n) = evt
-            .intervals
+        let name = evt
+            .content
+            .event_name
+            .clone()
+            .unwrap_or_else(|| evt.id.to_string());
+        let intervals = evt.content.intervals.as_deref().unwrap_or_default();
+        let (signal_type, value, interval_n) = intervals
             .first()
             .and_then(|iv| iv.payloads.first())
             .map(|p| {
-                let sig = p.r#type.clone();
-                let val = p.values.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let n = evt.intervals.len() as u32;
-                (sig, val, n)
+                let sig = p.value_type.wire_name();
+                // `numeric()`, not a `Number` match: SIMPLE's values are
+                // `Integer` on the wire and would otherwise read as 0.0.
+                let val = p.numeric().unwrap_or(0.0);
+                (sig, val, intervals.len() as u32)
             })
             .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
 
         event_records.push(entities::history::EventReceived {
             received_at: now,
-            event_id: evt.id.clone(),
+            event_id: evt.id.to_string(),
             event_type: signal_type.clone(),
             payload_json: serde_json::to_string(evt).unwrap_or_default(),
         });
@@ -148,7 +153,7 @@ mod event_poll_tests {
     }
 
     fn make_event(id: &str, name: &str, signal_type: &str, value: f64) -> OadrEvent {
-        serde_json::from_value(serde_json::json!({
+        crate::controller::vtn_port::events_from_json(serde_json::json!({
             "id": id,
             "programID": "test-program",
             "eventName": name,
@@ -157,7 +162,7 @@ mod event_poll_tests {
                 "payloads": [{"type": signal_type, "values": [value]}]
             }]
         }))
-        .unwrap()
+        .remove(0)
     }
 
     fn empty_ids() -> std::collections::HashSet<String> {
@@ -231,7 +236,7 @@ mod event_poll_tests {
     // (c) tariff count changes → RateChange emitted
     #[test]
     fn tariff_count_change_emits_rate_change() {
-        let events = vec![serde_json::from_value::<OadrEvent>(serde_json::json!({
+        let events = crate::controller::vtn_port::events_from_json(serde_json::json!({
             "id": "ev1",
             "programID": "prog",
             "eventName": "Price Event",
@@ -240,8 +245,7 @@ mod event_poll_tests {
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "PRICE", "values": [0.25]}]
             }]
-        }))
-        .unwrap()];
+        }));
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
         let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
@@ -259,7 +263,7 @@ mod event_poll_tests {
     // (d) import limit changes → CapacityChange emitted
     #[test]
     fn import_limit_change_emits_capacity_change() {
-        let events = vec![serde_json::from_value::<OadrEvent>(serde_json::json!({
+        let events = crate::controller::vtn_port::events_from_json(serde_json::json!({
             "id": "ev1",
             "programID": "prog",
             "eventName": "Capacity Event",
@@ -268,8 +272,7 @@ mod event_poll_tests {
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]
             }]
-        }))
-        .unwrap()];
+        }));
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen
         let prev_limit: Option<f64> = None;
