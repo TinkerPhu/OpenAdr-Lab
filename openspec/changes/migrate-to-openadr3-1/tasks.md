@@ -135,6 +135,22 @@ Simulator untouched (D5). `POST /sim/override` stays.
             inverts BL-02, so write the inversion test with a `None` present *first*; and
             `GET /events` serves stored events straight to the VEN UI, so `"PT1H"` becomes
             `"P0Y0M0DT1H0M0S"` and timestamps gain `+00:00` (5.7b).
+            The field map, read off the wire source so it is not re-derived:
+            `id` → `Event.id: EventId`; `createdDateTime` → `Event.created_date_time:
+            DateTime<Utc>` (required); everything else moves behind `Event.content`
+            (`EventRequest`, `#[serde(flatten)]`, so the JSON stays flat):
+            `programID` → `content.program_id: ProgramId`, `eventName` →
+            `content.event_name`, `priority` → `content.priority: Priority`,
+            `duration` → `content.duration: Option<Duration>`, `intervalPeriod` →
+            `content.interval_period`, `intervals` → `content.intervals:
+            Option<Vec<EventInterval>>` (note: Option, not Vec), `reportDescriptors`
+            → `content.report_descriptors`, `payloadDescriptors` →
+            `content.payload_descriptors`, `targets` → `content.targets: Vec<Target>`
+            (a newtype over `Identifier`, so it serialises as a plain string but
+            validates `^[a-zA-Z0-9_-]{1,128}$`).
+            Already prepared on the DTO side: `OadrPayload::numeric` is the single
+            reader of a payload's value, so the `Number`/`Integer` split costs one
+            function rather than four.
             Swap the event types — `OadrEvent`/`OadrInterval`/`OadrIntervalPeriod`/
             `OadrPayload` → wire `Event`/`EventInterval`/`IntervalPeriod`/`EventValuesMap`. This is
             where most of the 184 sites are and where the churn is mechanical but wide: fields move
