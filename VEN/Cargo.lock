@@ -2740,6 +2740,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64",
  "chrono",
  "good_lp",
  "libc",

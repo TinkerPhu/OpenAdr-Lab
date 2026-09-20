@@ -65,4 +65,6 @@ pub mod reporter;
 pub mod user_request;
 
 // ── Observability ─────────────────────────────────────────────────────────────
+/// GB-49: what the VTN actually granted this VEN, read from its own token.
+pub mod token_scopes;
 pub mod trace;

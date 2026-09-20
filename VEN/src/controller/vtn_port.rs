@@ -29,6 +29,11 @@ pub trait VtnPort: Send + Sync {
     /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
     /// propagated from the VTN HTTP response.
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
+    /// GB-49: `Some(reason)` when the last token this client obtained lacked
+    /// VEN scopes. `None` means correctly provisioned, or no token fetched yet.
+    async fn scope_warning(&self) -> Option<String> {
+        None
+    }
 }
 
 // ── OadrProgram ───────────────────────────────────────────────────────────────

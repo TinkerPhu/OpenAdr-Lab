@@ -31,7 +31,18 @@ impl AppState {
     pub async fn wire_rejections(&self) -> BTreeMap<String, String> {
         self.wire_rejections.read().await.clone()
     }
+
+    /// GB-49: record (or clear) that this VEN's own token lacks VEN scopes.
+    /// Stored alongside the wire rejections because it is the same class of
+    /// fault -- something is wrong with what the VTN is giving us, and every
+    /// request still returns 200.
+    pub async fn set_scope_warning(&self, warning: Option<String>) {
+        self.set_wire_rejections(SCOPE_KEY, warning).await;
+    }
 }
+
+/// The `wire_rejections` key GB-49's finding is filed under.
+const SCOPE_KEY: &str = "token-scopes";
 
 #[cfg(test)]
 mod tests {

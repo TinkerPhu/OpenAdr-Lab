@@ -49,6 +49,10 @@ pub(crate) fn spawn_event_poll(
                         &notifier, &state, now, "events", &outcome,
                     )
                     .await;
+                    // GB-49: a token without VEN scopes polls an empty world
+                    // with every request succeeding. Surface it where the other
+                    // "the VTN is giving us something wrong" findings live.
+                    state.set_scope_warning(vtn.scope_warning().await).await;
                     let events = outcome.items;
                     info!(resource = "events", count = events.len(), "poll success");
 
