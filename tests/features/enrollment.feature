@@ -31,7 +31,7 @@ Feature: VEN Program Enrollment
   # exactly like working target filtering.
   Scenario: A VEN sees only itself in a shared object's target list
     Given I have a VTN token as "bl-client"
-    When I create a program named "target-hiding-test" targeting "ven-1" and "ven-2"
+    When I create a program named "target-hiding-test" targeting both "ven-1" and "ven-2"
     Then reading it as "ven-1" shows targets exactly "ven-1"
     And reading it as "ven-2" shows targets exactly "ven-2"
     And reading it as "bl-client" shows targets "ven-1" and "ven-2"

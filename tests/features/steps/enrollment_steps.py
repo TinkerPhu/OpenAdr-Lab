@@ -72,7 +72,7 @@ def step_ven2_has_program(context, name):
     assert name in names, f"'{name}' not in VEN-2 programs: {names}"
 
 
-@when('I create a program named "{name}" targeting "{ven_a}" and "{ven_b}"')
+@when('I create a program named "{name}" targeting both "{ven_a}" and "{ven_b}"')
 def step_create_two_target_program(context, name, ven_a, ven_b):
     context.response = vtn_post(
         "/programs",
