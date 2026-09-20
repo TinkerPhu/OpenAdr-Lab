@@ -2148,3 +2148,59 @@ failed 34 scenarios with 401s, because the credential is *parameter text in the 
 the step simply passes what the scenario says. Declarative test text is executable configuration:
 when renaming anything a step takes as a parameter — a credential, a hostname, a payload type —
 the `.feature` files are call sites too.
+
+## A wrong writer and a wrong reader cancel out, and hide each other (2026-09-20)
+
+This lab expressed its persistent tariffs as `event.intervalPeriod.duration = "P9999Y"`. OpenADR
+3.1 defines that field as the default duration of *one interval* (User Guide 572); the control
+that repeats an interval sequence is `event.duration` (647). So the seeder was writing the wrong
+field — and it worked, because `rate_schedule` was reading the same wrong field to decide when to
+loop.
+
+Neither half is visible on its own. The tariffs repeated, the UI looked right, the tests passed.
+Fixing only the reader would have stopped the import, export and GHG tariffs repeating across the
+live fleet; fixing only the writer would have done the same. They had to move in one commit.
+
+The general shape: when a producer and a consumer in the same codebase share a misreading of a
+spec, the system is self-consistent and the bug is invisible to every test that exercises both.
+Only reading the spec catches it — and then the fix is necessarily atomic across both sides.
+
+## A field that is mandatory on the wire is not mandatory in your own cache (2026-09-20)
+
+`interval.id` is required by the 3.1 schema, so making the VEN's DTO field mandatory looked like
+straightforward conformance. It broke the first restart after deploy:
+
+    failed to load persisted state: missing field `id` at line 34 column 9
+
+The same struct reads the VEN's own persisted state, written before the field existed. A rule
+about *what a peer may send* had been applied to something we wrote ourselves, and the VEN
+silently restarted from an empty cache.
+
+Before making any serde field mandatory, ask what else deserializes that type. If the answer
+includes your own persistence, the constraint is also a constraint on every state file already on
+disk. Conformance belongs in the wire types, which are used only for wire traffic.
+
+## A warning that fires every time is a design error, not an alert (2026-09-20)
+
+The VEN was changed to omit a `USAGE` payload rather than state energy it could not derive, with a
+warning when it did. On the first deploy that warning fired 24 times in a few minutes: the
+timer-driven report path holds a single point-in-time sample per asset, so the "span of the
+samples" it derived its window from never existed, and the VEN had quietly stopped reporting usage
+altogether.
+
+The fail-visible branch was right; what it revealed was that the window for a *periodic* report is
+its cadence, not anything measurable from the samples. An always-firing warning is not a warning —
+it is the code telling you the normal path is wrong.
+
+## Docker Compose v5 `run --build` drops transitive dependencies (2026-09-20)
+
+`docker compose run --build --rm <svc>` on Compose v5.3.1 aborts with
+
+    <svc> is missing dependency <dep>
+
+for a dependency that is defined, healthy, and starts fine under `up -d`. Splitting the command —
+`docker compose build <svc>` then `docker compose run --rm <svc>` — resolves it.
+
+Worth recognising quickly because the message names a real service and reads like a compose-file
+error, so the instinct is to go looking for the missing definition. It cost two full suite runs
+before the pattern (it only happens with `--build`, and only on a cold stack) was visible.
