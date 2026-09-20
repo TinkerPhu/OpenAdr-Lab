@@ -87,8 +87,13 @@ services:
       - ../openleadr-rs/fixtures:/fixtures:ro
     environment:
       PGPASSWORD: openadr
+    # `users.sql` is what upstream's own CI loads (.github/workflows/checks.yml).
+    # 3.1 renamed the old `test_user_credentials.sql` out of existence, so this
+    # was failing with "No such file or directory" before any test ran.
+    # ON_ERROR_STOP so a fixture that half-applies fails loudly rather than
+    # leaving the suite to fail later on missing rows.
     command: >
-      sh -c "psql -h db -U openadr -d openadr -f /fixtures/test_user_credentials.sql"
+      sh -c "psql -v ON_ERROR_STOP=1 -h db -U openadr -d openadr -f /fixtures/users.sql"
 
   cargo-test:
     build:
