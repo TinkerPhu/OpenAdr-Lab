@@ -15,6 +15,24 @@ def step_list_bff_reports(context):
     context.response = bff_get("/api/reports")
 
 
+@when("I wait for the fleet to have reported")
+def step_wait_for_any_report(context):
+    """Reports arrive on the VEN's own cadence, so the contract assertions wait
+    for something to assert against rather than pass vacuously on an empty list."""
+
+    def fetch():
+        context.response = bff_get("/api/reports")
+        return context.response.json()
+
+    poll_until(
+        fetch,
+        lambda body: isinstance(body, list) and len(body) > 0,
+        timeout=120,
+        interval=3,
+        description="at least one report on the VTN",
+    )
+
+
 @then("the response is a JSON array")
 def step_response_is_array(context):
     data = context.response.json()
@@ -144,3 +162,76 @@ def step_report_status(context, status):
         f"Expected {status}, got {context.report_response.status_code}: "
         f"{context.report_response.text[:200]}"
     )
+
+
+def _reports(context):
+    """The reports asserted against by the wire-contract steps.
+
+    Deliberately not "skip if empty": a scenario that silently passes when
+    there is nothing to check is the same failure it exists to catch. The
+    fleet reports continuously, so the list being empty means we asked too
+    early, which is what the waiting step is for.
+    """
+    data = context.response.json()
+    assert isinstance(data, list), f"expected array, got {type(data).__name__}"
+    assert data, (
+        "no reports on the VTN — the wire contract cannot be checked against "
+        "nothing; use the waiting step before these assertions"
+    )
+    return data
+
+
+def _payloads_of(report, payload_type):
+    """Every (interval, payload) pair of the given type, across all resources."""
+    for resource in report.get("resources") or []:
+        for interval in resource.get("intervals") or []:
+            for payload in interval.get("payloads") or []:
+                if payload.get("type") == payload_type:
+                    yield interval, payload
+
+
+@then('every report omits "{field}"')
+def step_reports_omit_field(context, field):
+    for r in _reports(context):
+        assert field not in r, (
+            f"report {r.get('id')} still carries '{field}'; 3.1 removed it "
+            f"({sorted(r.keys())})"
+        )
+
+
+@then("every report names its event")
+def step_reports_name_their_event(context):
+    for r in _reports(context):
+        assert r.get("eventID"), (
+            f"report {r.get('id')} has no eventID — in 3.1 that is a report's "
+            "only link to the object it reports on"
+        )
+
+
+@then('every USAGE payload is declared as "{units}"')
+def step_usage_declared(context, units):
+    for r in _reports(context):
+        if not any(True for _ in _payloads_of(r, "USAGE")):
+            continue
+        descriptors = r.get("payloadDescriptors") or []
+        usage = next((d for d in descriptors if d.get("payloadType") == "USAGE"), None)
+        assert usage is not None, (
+            f"report {r.get('id')} sends USAGE with no payloadDescriptor — its "
+            "unit would live only in the reader's head (GB-50)"
+        )
+        assert usage.get("units") == units, (
+            f"report {r.get('id')} declares USAGE as {usage.get('units')!r}, "
+            f"expected {units!r}"
+        )
+
+
+@then("every USAGE interval states the window it covers")
+def step_usage_interval_has_window(context):
+    for r in _reports(context):
+        for interval, _payload in _payloads_of(r, "USAGE"):
+            period = interval.get("intervalPeriod") or {}
+            assert period.get("start") and period.get("duration"), (
+                f"report {r.get('id')} interval {interval.get('id')} carries "
+                "USAGE without an intervalPeriod — USAGE is energy *over an "
+                f"interval*, so it cannot be read without one (got {period!r})"
+            )
