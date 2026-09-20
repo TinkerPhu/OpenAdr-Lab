@@ -204,3 +204,36 @@ def step_all_paged_programs_listed(context, count, prefix):
         f"{len(missing)} of {count} '{prefix}' programs missing from the list "
         f"(listed {len(listed)} objects) — the list is truncated at a page boundary"
     )
+
+
+@then("no two VENs share a clientID")
+def step_ven_client_ids_are_distinct(context):
+    """R5: `write_vens` aliases to the `_ven` variant, which overwrites the
+    body's clientID with the caller's token subject. The symptom is a
+    collision on ven_client_id_unique during provisioning, but a partially
+    provisioned fleet can still be left with duplicates."""
+    vens = context.response.json()
+    assert isinstance(vens, list), f"expected array, got {type(vens).__name__}"
+    assert vens, "no VENs registered — nothing to check identity against"
+    seen = {}
+    for v in vens:
+        cid = v.get("clientID")
+        assert cid, f"VEN {v.get('venName') or v.get('id')} has no clientID"
+        assert cid not in seen, (
+            f"VENs {seen[cid]!r} and {v.get('venName')!r} both claim clientID "
+            f"{cid!r} — an object addressed to one reaches the other"
+        )
+        seen[cid] = v.get("venName")
+
+
+@then("no VEN is identified by the provisioning client")
+def step_no_ven_uses_the_business_client_id(context):
+    """The failure the alias produces: every VEN stamped with the business
+    client's own subject instead of its own credential."""
+    vens = context.response.json()
+    for v in vens:
+        assert v.get("clientID") != "bl-client", (
+            f"VEN {v.get('venName')!r} is identified as the provisioning client "
+            "('bl-client') — it was created with the write_vens alias, which "
+            "overwrites clientID with the caller's token subject"
+        )

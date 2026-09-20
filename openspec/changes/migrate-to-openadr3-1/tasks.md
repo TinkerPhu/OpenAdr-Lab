@@ -155,7 +155,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
       still go through it, and that no new copy appeared. `report_intervals.rs` builds outgoing
       report intervals and is a different concept — leave it alone (D9)
 - [ ] 3.4 `vtn.rs`: `POST /vens` self-registration on startup with `VenVenRequest`; treat 409 as already-registered, log INFO (R4)
-- [ ] 3.4a Fold **GB-49** in here rather than fixing it twice: after obtaining a token, decode
+- [x] 3.4a Fold **GB-49** in here rather than fixing it twice: after obtaining a token, decode
       its `scope`/`roles` claim and fail the health check if the expected VEN scopes are absent,
       instead of polling successfully and seeing an empty world. Doing this against 3.0 roles
       first would mean rewriting it for scopes immediately afterwards
@@ -221,7 +221,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 6.2 `tests/provision_ven.py` on the 3.1 three-step flow (user+scopes → credential → VEN
       object), with a repair path for a VEN whose credential exists but whose object does not
 - [x] 6.3 Enrollment and UC steps on flat targets; events now inherit their program's targets
-- [ ] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
+- [x] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
 - [ ] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
 - [ ] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
 - [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
