@@ -156,9 +156,15 @@ def build_events():
             {
                 "eventName": "tou-pricing-day-ahead",
                 "priority": None,
+                # Persistent tariff: the 24-hour sequence repeats indefinitely.
+                # The spec expresses that with event.duration (User Guide 647,
+                # "loop reports | See event.duration='P9999Y'"), not with
+                # intervalPeriod.duration -- which only supplies a default
+                # duration for intervals that declare none (User Guide 572),
+                # and is overridden here by every interval anyway.
+                "duration": "P9999Y",
                 "intervalPeriod": {
                     "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "P9999Y",
                 },
                 "intervals": [
                     {
@@ -220,9 +226,15 @@ def build_events():
             {
                 "eventName": "tou-export-pricing-day-ahead",
                 "priority": None,
+                # Persistent tariff: the 24-hour sequence repeats indefinitely.
+                # The spec expresses that with event.duration (User Guide 647,
+                # "loop reports | See event.duration='P9999Y'"), not with
+                # intervalPeriod.duration -- which only supplies a default
+                # duration for intervals that declare none (User Guide 572),
+                # and is overridden here by every interval anyway.
+                "duration": "P9999Y",
                 "intervalPeriod": {
                     "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "P9999Y",
                 },
                 "intervals": [
                     {
@@ -247,9 +259,15 @@ def build_events():
             {
                 "eventName": "tou-ghg-intensity-day-ahead",
                 "priority": None,
+                # Persistent tariff: the 24-hour sequence repeats indefinitely.
+                # The spec expresses that with event.duration (User Guide 647,
+                # "loop reports | See event.duration='P9999Y'"), not with
+                # intervalPeriod.duration -- which only supplies a default
+                # duration for intervals that declare none (User Guide 572),
+                # and is overridden here by every interval anyway.
+                "duration": "P9999Y",
                 "intervalPeriod": {
                     "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "P9999Y",
                 },
                 "intervals": [
                     {
@@ -482,6 +500,11 @@ def create_event(base_url, token, program_id, evt):
     }
     if evt.get("priority") is not None:
         body["priority"] = evt["priority"]
+    # 3.1 event.duration: the control that repeats or truncates the interval
+    # sequence (User Guide 647). This is NOT intervalPeriod.duration, which is
+    # only the default duration of a single interval (User Guide 572).
+    if evt.get("duration"):
+        body["duration"] = evt["duration"]
     if evt.get("intervalPeriod"):
         body["intervalPeriod"] = evt["intervalPeriod"]
     if evt.get("targets"):

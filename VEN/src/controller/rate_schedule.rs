@@ -6,9 +6,8 @@
 //! `openadr_interface.rs`'s existing test module (re-exported here via `pub use`
 //! at that file's top), so this split touches no test code.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 
-use crate::common::parse_iso8601_duration_secs;
 use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -39,24 +38,19 @@ struct Candidate<'a> {
 }
 
 /// Shared interval-collection core for both `parse_rate_snapshots` and
-/// `parse_capacity_schedule` — same priority and cycle-looping semantics,
-/// differing only in which OpenADR payload types are collected. Extracted so the
-/// two callers don't duplicate the looping/priority logic (generic-over-bespoke).
+/// `parse_capacity_schedule` — same priority semantics, differing only in which
+/// OpenADR payload types are collected. Extracted so the two callers don't
+/// duplicate the priority logic (one-concept-one-function).
 ///
-/// Supports looping events: when `event.intervalPeriod.duration` exceeds the total
-/// span of all intervals, the interval set is repeated (offset by one cycle each time)
-/// to cover [now − 1 cycle … now + 3 days]. This implements the OpenADR 3 spec's
-/// "persistent daily prices" pattern (`event.intervalPeriod.duration = "P9999Y"`).
+/// Looping is *not* done here. `event_timing::timed_intervals` is the one place
+/// that applies `event.duration`, the spec's control for repeating a sequence
+/// ("persistent daily prices", `event.duration = "P9999Y"`, User Guide 647).
 ///
 /// GB-45: the result is non-overlapping and already priority-resolved (see
 /// `resolve_segments`), so every consumer — tick-time cost, history sampler,
 /// planner tariff series, planned capacity limits — reads the same value for the
 /// same instant without a resolution rule of its own.
-fn collect_interval_groups(
-    events: &[OadrEvent],
-    now: DateTime<Utc>,
-    payload_types: &[&str],
-) -> Vec<IntervalGroup> {
+fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<IntervalGroup> {
     let mut candidates: Vec<Candidate> = Vec::new();
 
     // ── BL-02: priority order ───────────────────────────────────────────────
@@ -103,45 +97,22 @@ fn collect_interval_groups(
             continue;
         }
 
-        // ── Determine looping offsets ─────────────────────────────────────────
-        // Only a fully bounded interval set can repeat; an open-ended one
-        // already covers everything after its start.
-        let offsets: Vec<i64> = if base.iter().all(|(t, _)| t.is_bounded()) {
-            let first_start = base.iter().map(|(t, _)| t.start).min().unwrap();
-            let last_end = base.iter().map(|(t, _)| t.end).max().unwrap();
-            let cycle_secs = (last_end - first_start).num_seconds();
-            let event_dur_secs = event
-                .intervalPeriod
-                .as_ref()
-                .and_then(|ip| ip.duration.as_deref())
-                .map(parse_iso8601_duration_secs)
-                .unwrap_or(cycle_secs);
-            if cycle_secs > 0 && event_dur_secs > cycle_secs {
-                let elapsed = (now - first_start).num_seconds().max(0);
-                let n = elapsed / cycle_secs; // index of the cycle that contains now
-                let from = n.saturating_sub(1); // one cycle back for "most recent past" fallback
-                let ahead = (3 * 86400i64) / cycle_secs + 2; // cycles needed to cover 3 days ahead
-                let to = (from + ahead).min(from + 10); // hard cap: at most 11 cycles total
-                (from..=to).map(|k| k * cycle_secs).collect()
-            } else {
-                vec![0i64]
-            }
-        } else {
-            vec![0i64]
-        };
-
-        // ── Expand into candidates for each offset ────────────────────────────
-        for &offset in &offsets {
-            let shift = Duration::seconds(offset);
-            for (t, payloads) in &base {
-                candidates.push(Candidate {
-                    start: t.start + shift,
-                    end: t.end + shift,
-                    rank,
-                    event_id: &event.id,
-                    payloads: payloads.clone(),
-                });
-            }
+        // Looping already happened: `timed_intervals` is the one place that
+        // applies `event.duration`, the spec's control for repeating or
+        // truncating an interval sequence (User Guide 647). A second expansion
+        // used to live here, keyed on `event.intervalPeriod.duration` -- which
+        // the spec defines as the *default duration of one interval* (User
+        // Guide 572), not an event span. It therefore both duplicated the
+        // shared rule and read the wrong field to do it, and an event
+        // declaring both got expanded twice (GB-48's shape).
+        for (t, payloads) in &base {
+            candidates.push(Candidate {
+                start: t.start,
+                end: t.end,
+                rank,
+                event_id: &event.id,
+                payloads: payloads.clone(),
+            });
         }
     }
 
@@ -193,8 +164,8 @@ fn resolve_segments(candidates: &[Candidate<'_>]) -> Vec<IntervalGroup> {
 /// Parse all rate snapshots from a slice of OpenADR events.
 /// Handles PRICE, EXPORT_PRICE, GHG payload types per event interval.
 /// Multiple payload types for the same interval are merged into one TariffSnapshot.
-pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<TariffSnapshot> {
-    collect_interval_groups(events, now, &["PRICE", "EXPORT_PRICE", "GHG"])
+pub fn parse_rate_snapshots(events: &[OadrEvent]) -> Vec<TariffSnapshot> {
+    collect_interval_groups(events, &["PRICE", "EXPORT_PRICE", "GHG"])
         .into_iter()
         .filter_map(|(interval_start, interval_end, payloads)| {
             let value = |t: &str| payloads.get(t).map(|v| v.value);
@@ -223,27 +194,23 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
 /// IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT payload types per event interval.
 /// The single source for "which limit applies when" (GB-48): read it through
 /// `entities::capacity::tightest_capacity_limit`.
-pub fn parse_capacity_schedule(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<CapacitySnapshot> {
-    collect_interval_groups(
-        events,
-        now,
-        &["IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"],
-    )
-    .into_iter()
-    .filter_map(|(interval_start, interval_end, payloads)| {
-        let import = payloads.get("IMPORT_CAPACITY_LIMIT");
-        let export = payloads.get("EXPORT_CAPACITY_LIMIT");
-        if import.is_none() && export.is_none() {
-            return None;
-        }
-        Some(CapacitySnapshot {
-            interval_start,
-            interval_end,
-            import_limit_kw: import.map(|v| v.value),
-            export_limit_kw: export.map(|v| v.value),
-            import_limit_event_id: import.map(|v| v.event_id.clone()),
-            export_limit_event_id: export.map(|v| v.event_id.clone()),
+pub fn parse_capacity_schedule(events: &[OadrEvent]) -> Vec<CapacitySnapshot> {
+    collect_interval_groups(events, &["IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"])
+        .into_iter()
+        .filter_map(|(interval_start, interval_end, payloads)| {
+            let import = payloads.get("IMPORT_CAPACITY_LIMIT");
+            let export = payloads.get("EXPORT_CAPACITY_LIMIT");
+            if import.is_none() && export.is_none() {
+                return None;
+            }
+            Some(CapacitySnapshot {
+                interval_start,
+                interval_end,
+                import_limit_kw: import.map(|v| v.value),
+                export_limit_kw: export.map(|v| v.value),
+                import_limit_event_id: import.map(|v| v.event_id.clone()),
+                export_limit_event_id: export.map(|v| v.event_id.clone()),
+            })
         })
-    })
-    .collect()
+        .collect()
 }
