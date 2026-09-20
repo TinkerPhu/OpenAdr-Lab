@@ -12,11 +12,12 @@ use serde::{Deserialize, Serialize};
 /// emergency directive should unlock. No such directive is wired in yet; today this is settable
 /// via `SimInjectState` (manual/test/demo) or automatically by the deviation arbiter's heater
 /// lever (`controller::arbiter`) once enabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeaterEmergencyMode {
     /// Normal operation: comfort band enforced as today (emergency heat at temp_min_c,
     /// forced off at temp_max_c).
+    #[default]
     Normal,
     /// Emergency curtailment: suppress the forced-on emergency heat at temp_min_c,
     /// letting the tank drift toward ambient. temp_max_c ceiling is unaffected.
@@ -37,11 +38,5 @@ impl HeaterEmergencyMode {
         } else {
             Self::Normal
         }
-    }
-}
-
-impl Default for HeaterEmergencyMode {
-    fn default() -> Self {
-        Self::Normal
     }
 }

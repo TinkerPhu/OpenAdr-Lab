@@ -83,6 +83,40 @@ pub fn partition_valid<T: DeserializeOwned>(items: &[serde_json::Value]) -> Fetc
     }
 }
 
+/// How many of these objects the strict OpenADR 3.1 wire types would accept.
+///
+/// Measurement only: the result is logged and counted, never used. Adopting
+/// `openleadr_wire::event::Event` for the poll loop means a VTN object this
+/// VEN previously tolerated can start being refused -- ids outside
+/// `^[a-zA-Z0-9_-]{1,128}$`, a missing `createdDateTime`, an `intervalPeriod`
+/// without a `start`, a negative `priority`. Whether the live VTN actually
+/// sends any of those is a question about deployments, not about types, so it
+/// is answered with evidence from a running fleet before the poll loop is made
+/// to depend on the answer.
+///
+/// Remove this once the migration has landed: it is scaffolding, not a feature.
+pub fn shadow_parse_events(items: &[serde_json::Value]) {
+    let outcome = partition_valid::<openleadr_wire::event::Event>(items);
+    metrics::counter!("wire_shadow_parse_total", "outcome" => "accepted")
+        .increment(outcome.items.len() as u64);
+    if outcome.rejected.is_empty() {
+        return;
+    }
+    metrics::counter!("wire_shadow_parse_total", "outcome" => "rejected")
+        .increment(outcome.rejected.len() as u64);
+    tracing::info!(
+        rejected = outcome.rejected.len(),
+        accepted = outcome.items.len(),
+        detail = %outcome
+            .rejected
+            .iter()
+            .map(|r| r.describe())
+            .collect::<Vec<_>>()
+            .join("; "),
+        "shadow parse: the strict 3.1 types would refuse these events (measurement only,          nothing was dropped)"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -510,6 +510,7 @@ impl VtnPort for VtnClient {
 
     async fn fetch_events(&self) -> Result<FetchOutcome<OadrEvent>> {
         let items = self.get_json_paginated("/events?active=true").await?;
+        crate::controller::wire_reject::shadow_parse_events(&items);
         Ok(partition_valid(&items))
     }
 

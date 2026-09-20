@@ -32,6 +32,32 @@ thing that can be forgotten — it raises before anything is sent.
 | `EXPORT_PRICE` | price per energy | `KWH` + `currency: EUR` | `units` is the denominator |
 | `GHG` | emission intensity | `GHG` | grams CO₂e per kWh |
 
+### What a report value means
+
+The table above is what this lab *sends in events*. Reports are the other
+direction, and carry their own `payloadDescriptors`, derived from the payloads
+present by `controller::report_payload::descriptors_for` in the VEN:
+
+| report payload type | quantity | `units` |
+|---|---|---|
+| `USAGE`, `USAGE_FORECAST`, `BASELINE`, `DELTA_USAGE` | energy over the interval | `KWH` |
+| `IMPORT_RESERVATION_CAPACITY`, `EXPORT_RESERVATION_CAPACITY` | power | `KW` |
+| `STORAGE_MAX_CHARGE_POWER`, `STORAGE_MAX_DISCHARGE_POWER` | power | `KW` |
+| `STORAGE_CHARGE_LEVEL` | state of charge | `PERCENT` |
+| `OPERATING_STATE`, `DATA_QUALITY` | a label, not a measurement | — |
+| `SIMPLE` | 0–3 shed level | — |
+
+`USAGE` is **energy over an interval**, not instantaneous power — the spec says
+so in its payload-type table, and it is why a report interval always states the
+window its value covers. Until 2026-09-20 this lab sent watts under it, and
+`experiments/kpi.py` multiplied by the interval duration to undo that. Both
+halves are fixed; `kpi.py` now reads `units` from the report and applies the
+watt reading only to rows that declare nothing, saying so when it does.
+
+A payload type absent from the table above is not "dimensionless" — it is one
+this lab has not decided the meaning of. The VEN logs it and sends it
+undeclared rather than inventing a unit.
+
 ### Power is kW and energy is kWh, always
 
 OpenADR's `Unit` enum has no watt. That is not a gap to work around: a value in watts is a value

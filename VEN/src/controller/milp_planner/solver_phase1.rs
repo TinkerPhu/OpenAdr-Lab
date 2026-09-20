@@ -296,11 +296,11 @@ pub(crate) fn read_solve_output<S: Solution>(
     };
 
     let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.shiftable_loads.len()];
-    for (s, sv) in pool.shiftable.iter().enumerate() {
-        for t in 0..n {
+    for (row, sv) in p_shiftable_kw.iter_mut().zip(pool.shiftable.iter()) {
+        for (t, slot_kw) in row.iter_mut().enumerate() {
             for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
                 if t >= j && t < j + sv.duration_slots {
-                    p_shiftable_kw[s][t] += sv.power_kw * solution.value(sv.y_shift[ji]);
+                    *slot_kw += sv.power_kw * solution.value(sv.y_shift[ji]);
                 }
             }
         }
