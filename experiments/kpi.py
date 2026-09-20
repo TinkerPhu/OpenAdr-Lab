@@ -366,7 +366,17 @@ def _parse_iso8601_duration_hours(s):
 
 
 def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=None):
-    """Sum a VEN's `report_type` report intervals (values in W) into kWh,
+    """Sum a VEN's `report_type` report intervals into kWh.
+
+    The unit comes from the report's own `payloadDescriptors` rather than from
+    an assumption here -- that assumption ("values in W") was half of GB-50.
+    A report that declares `KWH` is already energy and is summed as-is; one
+    with no descriptor predates the 2026-09-20 cutover, carries watts, and is
+    converted with the interval duration, which is what this function used to
+    do unconditionally. The fallback is reported in the returned notes so a KPI
+    computed from pre-cutover data is never silently mixed with post-cutover.
+
+    Sums intervals
     restricted to rows whose `received_at` falls in [t_from, t_to). `event_ids`
     (when given), further restricts to reports whose payload's `eventID`
     belongs to this run's own events -- Node1's VTN is shared with other
@@ -380,6 +390,7 @@ def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=
         return None
     total_kwh = 0.0
     found = False
+    legacy_watts = False
     with open(csv_path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             received = row.get("received_at", "")
@@ -397,6 +408,9 @@ def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=
                 continue
             if event_ids is not None and payload.get("eventID") not in event_ids:
                 continue
+            units = _declared_units(payload, report_type)
+            if units is None:
+                legacy_watts = True
             for resource in payload.get("resources", []):
                 for interval in resource.get("intervals", []):
                     period = interval.get("intervalPeriod") or {}
@@ -408,8 +422,33 @@ def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type, event_ids=
                         if not values or not isinstance(values[0], (int, float)):
                             continue
                         found = True
-                        total_kwh += (values[0] / 1000.0) * duration_h
+                        if units == "KWH":
+                            total_kwh += values[0]
+                        elif units == "KW":
+                            total_kwh += values[0] * duration_h
+                        else:
+                            # Undeclared: pre-cutover rows carried watts.
+                            total_kwh += (values[0] / 1000.0) * duration_h
+    if legacy_watts:
+        print(
+            f"  note: {report_type} rows without payloadDescriptors were read as "
+            "watts (pre-2026-09-20 format)",
+            file=sys.stderr,
+        )
     return total_kwh if found else None
+
+
+def _declared_units(report, report_type):
+    """The `units` this report declares for `report_type`, or None.
+
+    `wire-contracts`: read the declaration that accompanies a value rather than
+    assuming one. A conformant peer may omit it -- then the caller applies the
+    documented default and says so.
+    """
+    for d in report.get("payloadDescriptors") or []:
+        if d.get("payloadType") == report_type:
+            return d.get("units")
+    return None
 
 
 def event_impact_kwh(csv_path, t_from, t_to, ven_name, event_ids=None):
@@ -677,6 +716,36 @@ def _self_check():
             writer.writerows(rows)
         impact = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
         assert impact == 0.25, f"expected 0.25, got {impact}"
+
+        # Scenario 1b: the same run expressed the 3.1 way -- values already in
+        # kWh, declared as KWH -- must give the identical answer. This is the
+        # GB-50 cutover: the number changes unit on the wire, the KPI does not.
+        def declared(report_id, offset_s, payload_type, kwh):
+            r = row(report_id, offset_s, payload_type, 0.0, "PT15M")
+            payload = json.loads(r["payload_json"])
+            payload["payloadDescriptors"] = [
+                {"payloadType": payload_type, "units": "KWH"}
+            ]
+            payload["resources"][0]["intervals"][0]["payloads"][0]["values"] = [kwh]
+            r["payload_json"] = json.dumps(payload)
+            return r
+
+        rows_31 = [
+            declared("baseline-report", 60, "BASELINE", 0.5),
+            declared("usage-report", 90, "USAGE", 0.25),
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows_31[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows_31)
+        impact_31 = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
+        assert impact_31 == 0.25, f"expected 0.25 from declared kWh, got {impact_31}"
+
+        # Restore the pre-cutover rows for the scenarios that follow.
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
 
         # Scenario 2: no BASELINE rows archived -> None, not a computed value.
         rows2 = [row("usage-report", 90, "USAGE", 1000.0, "PT15M")]

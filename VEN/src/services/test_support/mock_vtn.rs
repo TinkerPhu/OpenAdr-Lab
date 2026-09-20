@@ -133,6 +133,7 @@ mod tests {
             clientName: "ven-1".to_string(),
             reportName: Some("ven-status".to_string()),
             resources: vec![],
+            payloadDescriptors: Vec::new(),
         };
         mock.upsert_report(body).await.unwrap();
         assert_eq!(mock.submitted().len(), 1);
@@ -150,6 +151,7 @@ mod tests {
             clientName: "ven-1".to_string(),
             reportName: Some("test".to_string()),
             resources: vec![],
+            payloadDescriptors: Vec::new(),
         };
         let result = mock.upsert_report(body).await;
         assert!(result.is_err());
@@ -164,6 +166,7 @@ mod tests {
             clientName: "ven-1".to_string(),
             reportName: Some("test".to_string()),
             resources: vec![],
+            payloadDescriptors: Vec::new(),
         };
         let err = mock.upsert_report(body).await.unwrap_err();
         let vtn_err = err

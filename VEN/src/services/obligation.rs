@@ -445,6 +445,7 @@ mod tests {
             clientName: "ven-1".to_string(),
             reportName: Some("x".to_string()),
             resources: vec![],
+            payloadDescriptors: Vec::new(),
         };
         let result = vtn.upsert_report(body).await;
         assert!(result.is_err());
