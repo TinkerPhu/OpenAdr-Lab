@@ -144,8 +144,8 @@ def step_response_echoes_report(context):
     assert body.get("reportName") == submitted["reportName"], f"reportName mismatch: {body}"
 
 
-@when("I POST to VEN-1 reports with a body missing programID")
-def step_post_missing_program_id(context):
+@when("I POST to VEN-1 reports with a body missing eventID")
+def step_post_missing_event_id(context):
     payload = {
         "clientName": "ven-1",
         "reportName": "TELEMETRY_USAGE",
@@ -235,3 +235,16 @@ def step_usage_interval_has_window(context):
                 "USAGE without an intervalPeriod — USAGE is energy *over an "
                 f"interval*, so it cannot be read without one (got {period!r})"
             )
+
+
+@then("the VEN report submission response is a client error")
+def step_report_is_client_error(context):
+    """The VEN forwards to the VTN, which refuses the body, and the VEN surfaces
+    that as a 4xx or a 502 carrying the VTN's reason. Either is a refusal; what
+    matters is that an unidentifiable report does not quietly succeed."""
+    status = context.report_response.status_code
+    body = context.report_response.text[:300]
+    assert status >= 400, f"expected a refusal, got {status}: {body}"
+    assert "eventID" in body or status == 422, (
+        f"the refusal should say which field was missing, got {status}: {body}"
+    )
