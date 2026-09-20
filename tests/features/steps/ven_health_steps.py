@@ -58,3 +58,15 @@ def step_ven_health_field_becomes(context, field, expected, timeout):
         description=f"health field '{field}' == {expected_value!r}",
     )
     assert body[field] == expected_value
+
+
+@then('the VEN health component "{name}" is "{expected}"')
+def step_ven_health_component_is(context, name, expected):
+    body = context.ven_response.json()
+    component = body["components"].get(name)
+    assert component is not None, f"Missing component '{name}' in {body['components']}"
+    actual = component["status"]
+    assert actual == expected, (
+        f"Expected component '{name}' to be '{expected}', got '{actual}'"
+        f" (detail: {component.get('detail')!r})"
+    )

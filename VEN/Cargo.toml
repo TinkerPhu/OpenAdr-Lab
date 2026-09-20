@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# OpenADR 3.1 wire types, from this lab's fork of openleadr-rs. A git dependency
+# rather than a path one: every Docker build context here is rooted at `VEN/`
+# (see VEN/docker-compose.yml, tests/docker-compose.test.yml, scale_out/node2/),
+# so `../openleadr-rs` is outside all of them. Default features pull no sqlx.
+openleadr-wire = { git = "https://github.com/TinkerPhu/openleadr-rs.git", rev = "da565b445cab8eb0e04e8476c756e2a3e009d312" }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }

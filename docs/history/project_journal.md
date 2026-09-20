@@ -13115,3 +13115,57 @@ this rewrote the same function.
 
 Result: **276 scenarios passed, 3 failed** in the main pass and **15 passed, 0 failed** isolated;
 the three were the UI-targeting case above, fixed after that run started.
+
+## 2026-09-20 — The VEN's own side of the wire (branch 045-ven-wire-types)
+
+The 3.1 migration left the VTN conformant and the VEN still describing the protocol to itself.
+Reviewing that gap turned up three live bugs that had nothing to do with which types we use, and
+they are the more interesting part of this work.
+
+**One malformed event blinded the VEN to every good one.** `fetch_events` and `fetch_programs`
+ended in `collect::<Result<Vec<_>>>()`, so the first unparseable object failed the whole poll and
+the VEN carried on with stale capacity limits, prices and dispatch windows. `fetch_reports` did
+the opposite — `filter_map(..ok())`, dropping bad objects without a word. Neither surfaced
+anything. What makes this more than theoretical is `experiments/run_experiment.py`, which POSTs
+hand-built event JSON: one malformed seeded event would have flattened an entire experiment's
+KPIs and reported them as a *result* rather than a failure. `controller::wire_reject` is the
+single answer both call sites now use, with the refusal visible on `/health` and in notifications.
+
+**`reportDescriptors.frequency` was read in the wrong unit.** The VEN treated it as seconds; 3.1
+defines it as the number of intervals that elapse between reports. A VTN asking for a report every
+2 intervals of a PT15M sequence was getting one every 2 seconds. The existing test asserted the
+bug (`frequency: 900` → 900 seconds), which is a good reminder that a passing test only pins
+whatever it was written to believe.
+
+**Intervals were expanded twice, and the two errors were cancelling out.** `rate_schedule`
+re-expanded the interval set on top of the expansion `event_timing::timed_intervals` had already
+done — GB-48's shape exactly — and keyed it on `event.intervalPeriod.duration`, which the spec
+defines as the default duration of *one interval* (User Guide 572), not an event span. The
+looping control is `event.duration` (User Guide 647). But this lab's own seeder expressed its
+persistent tariffs the same wrong way, so deleting the duplicate reader alone would have stopped
+the import, export and GHG tariffs repeating on the live fleet. A wrong writer propped up by a
+wrong reader is invisible until you fix exactly one of them; both moved in the same commit.
+
+**GB-50's outbound half.** The VEN emitted watts under `USAGE`, a payload type the spec defines as
+"Energy usage over an interval", and emitted no `payloadDescriptors` at all — wrong quantity,
+wrong unit, undeclared — while `kpi.py` carried a `/1000 x duration` compensation to undo it. The
+fix is structural rather than arithmetic: `controller::report_payload` has no constructor that
+takes a bare number, so a value whose quantity nobody decided cannot be built, and descriptors are
+derived from the payloads present so an undeclared payload is not something to remember. Ten
+`* 1000.0` conversions collapsed into one `energy_from_power_kw`.
+
+Two consequences were only visible once the types forced the question. A report now carries an
+`intervalPeriod`, because energy over an interval needs the interval stated — and its window is
+the span of the samples, deliberately not "oldest sample until now", which would have stretched it
+across wall-clock hours the VEN has no measurements for and invented the energy. With a single
+sample there is no span at all, so `USAGE` is omitted and logged rather than sent as a power.
+
+**Key learning, and the reason this branch is sequenced the way it is.** Every one of these was a
+bug in what the code *believed*, not in what it computed, and each was held in place by something
+else that believed the same wrong thing — a test, a seeder, a downstream script. The type
+migration was the occasion for finding them, not the fix for any of them. Adopting
+`openleadr-wire` buys "you cannot forget a field exists"; it does not buy conformance, and
+claiming otherwise would have justified doing the risky half first. So the emit side, where we
+construct the objects and cannot be refused, went first, and the inbound side waits behind a
+shadow parse that measures — against the live fleet — whether the strict types would actually
+refuse anything the VTN sends, instead of guessing.
