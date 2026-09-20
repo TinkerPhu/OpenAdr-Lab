@@ -12,7 +12,13 @@
 //! each one that did not, so it can be surfaced. Rejecting silently is the same
 //! failure as accepting silently.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use serde::de::DeserializeOwned;
+
+/// Latches once the shadow parse has judged a non-empty batch cleanly, so the
+/// "all good" line is stated once rather than on every poll.
+static CLEAN_BATCH_REPORTED: AtomicBool = AtomicBool::new(false);
 
 /// One object the VTN sent that we could not parse.
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +106,15 @@ pub fn shadow_parse_events(items: &[serde_json::Value]) {
     metrics::counter!("wire_shadow_parse_total", "outcome" => "accepted")
         .increment(outcome.items.len() as u64);
     if outcome.rejected.is_empty() {
+        // Say so once, the first time there is actually something to judge.
+        // A silent shadow parse is indistinguishable from one that never ran,
+        // and "no evidence" would then read as "evidence of no problem".
+        if !outcome.items.is_empty() && !CLEAN_BATCH_REPORTED.swap(true, Ordering::Relaxed) {
+            tracing::info!(
+                accepted = outcome.items.len(),
+                "shadow parse: the strict 3.1 types accept every event this VTN serves"
+            );
+        }
         return;
     }
     metrics::counter!("wire_shadow_parse_total", "outcome" => "rejected")
