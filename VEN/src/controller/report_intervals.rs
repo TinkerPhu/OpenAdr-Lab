@@ -35,7 +35,7 @@ pub(crate) fn build_forecast_intervals(
                 .iter()
                 .enumerate()
                 .map(|(i, slot)| {
-                    let net_w = (slot.net_import_kw - slot.net_export_kw) * 1000.0;
+                    let net_kw = slot.net_import_kw - slot.net_export_kw;
                     let slot_s = (slot.end - slot.start).num_seconds().max(0) as u64;
                     OadrReportInterval {
                         id: i,
@@ -43,10 +43,11 @@ pub(crate) fn build_forecast_intervals(
                             slot.start,
                             format_iso8601_duration(slot_s),
                         )),
-                        payloads: vec![OadrReportPayload {
-                            r#type: payload_type.to_string(),
-                            values: vec![serde_json::Value::from(net_w)],
-                        }],
+                        payloads: vec![OadrReportPayload::energy_from_power_kw(
+                            payload_type,
+                            net_kw,
+                            slot_s,
+                        )],
                     }
                 })
                 .collect()
@@ -100,10 +101,8 @@ pub(crate) fn build_capacity_forecast_intervals(
             OadrReportInterval {
                 id: i,
                 intervalPeriod: Some(OadrIntervalPeriod::window(start, duration_iso)),
-                payloads: vec![OadrReportPayload {
-                    r#type: payload_type.to_string(),
-                    values: vec![serde_json::Value::from(magnitude_kw * 1000.0)],
-                }],
+                // A capacity curve states a power limit, not consumption.
+                payloads: vec![OadrReportPayload::power_kw(payload_type, magnitude_kw)],
             }
         })
         .collect()
@@ -180,14 +179,12 @@ pub(crate) fn build_baseline_report_intervals(
                 id: i,
                 intervalPeriod: Some(OadrIntervalPeriod::window(ts, duration_iso)),
                 payloads: vec![
-                    OadrReportPayload {
-                        r#type: "BASELINE".to_string(),
-                        values: vec![serde_json::Value::from(baseline_kw * 1000.0)],
-                    },
-                    OadrReportPayload {
-                        r#type: "DATA_QUALITY".to_string(),
-                        values: vec![serde_json::Value::from("HEURISTIC")],
-                    },
+                    OadrReportPayload::energy_from_power_kw(
+                        "BASELINE",
+                        baseline_kw,
+                        interval_width.num_seconds().max(0) as u64,
+                    ),
+                    OadrReportPayload::state("DATA_QUALITY", "HEURISTIC"),
                 ],
             }
         })
@@ -292,7 +289,7 @@ mod tests {
     use crate::entities::capacity_curve::{CapacityCurveStep, CommitmentDirection};
 
     #[test]
-    fn build_capacity_forecast_intervals_one_per_step_watts_and_durations() {
+    fn build_capacity_forecast_intervals_one_per_step_kw_and_durations() {
         let start = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
         let curve = CapacityCurve {
             direction: CommitmentDirection::Export,
@@ -318,10 +315,8 @@ mod tests {
             intervals[0].payloads[0].r#type,
             "STORAGE_MAX_DISCHARGE_POWER"
         );
-        assert_eq!(
-            intervals[0].payloads[0].values[0],
-            serde_json::json!(5000.0)
-        );
+        // A charge/discharge limit is a power: kW, because `Unit` has no watt.
+        assert_eq!(intervals[0].payloads[0].values[0], serde_json::json!(5.0));
         assert_eq!(
             intervals[0].intervalPeriod.as_ref().unwrap().duration,
             Some("PT1H".to_string())
@@ -392,9 +387,11 @@ mod tests {
                 .find(|p| p.r#type == "BASELINE")
                 .expect("BASELINE payload present");
             let val = baseline.values[0].as_f64().unwrap();
+            // 2 kW heuristic across a PT15M interval = 0.5 kWh. BASELINE is
+            // energy over the interval, like USAGE it is compared against.
             assert!(
-                (val - 2000.0).abs() < 1.0,
-                "expected 2000 W (2 kW heuristic), got {val}"
+                (val - 0.5).abs() < 1e-6,
+                "expected 0.5 kWh (2 kW over PT15M), got {val}"
             );
         }
     }
@@ -428,8 +425,8 @@ mod tests {
             .as_f64()
             .unwrap();
         assert!(
-            (val - 2000.0).abs() < 1.0,
-            "expected 2000 W (1.5+0.5 kW), got {val}"
+            (val - 0.5).abs() < 1e-6,
+            "expected 0.5 kWh (1.5+0.5 kW over PT15M), got {val}"
         );
     }
 

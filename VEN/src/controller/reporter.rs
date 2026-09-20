@@ -5,7 +5,7 @@
 ///   - Obligation-driven measurement reports: multi-interval reports resampled onto a
 ///     report obligation's interval grid.
 use chrono::{DateTime, Duration, Utc};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::common::Aggregation;
 use crate::controller::report_intervals::{
@@ -86,6 +86,25 @@ fn operating_state(
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV samples are available.
 ///
 /// Returns None if the event has no id or programID.
+/// The window a timer-driven report covers: the span of the samples it is built
+/// from, clipped to `now`.
+///
+/// Deliberately the *samples'* span rather than "earliest sample until now":
+/// stale samples would otherwise stretch the window to hours of wall clock the
+/// VEN has no measurements for, and the energy stated over it would be
+/// invented. `None` when the samples give no span -- a single reading is a
+/// power, and there is no honest way to state it as energy.
+fn report_window(
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    now: DateTime<Utc>,
+) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    let mut times = asset_samples.values().flat_map(|v| v.iter()).map(|s| s.ts);
+    let first = times.next()?;
+    let (start, end) = times.fold((first, first), |(lo, hi), t| (lo.min(t), hi.max(t)));
+    let end = end.min(now);
+    (start < end).then_some((start, end))
+}
+
 pub fn build_measurement_report(
     event: &OadrEvent,
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
@@ -100,37 +119,45 @@ pub fn build_measurement_report(
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
 
-    let net_import_w = grid_net_import_kw * 1000.0;
-
-    // Extract the primary payload type from the event's first interval
+    // Which direction this event asks about. `SIMPLE` is a shed *level*, not a
+    // measurement, so it is the one arm that does not report a quantity.
     let payload_type = event
         .intervals
         .first()
         .and_then(|iv| iv.payloads.first())
         .map(|p| p.r#type.as_str())
         .unwrap_or("SIMPLE");
-
-    let (report_type, report_value) = match payload_type {
-        "IMPORT_CAPACITY_LIMIT" => ("USAGE", net_import_w),
-        "EXPORT_CAPACITY_LIMIT" => {
-            // grid_net_export_kw is only consumed in this arm
-            ("USAGE", grid_net_export_kw * 1000.0)
-        }
-        "PRICE" => ("USAGE", net_import_w),
-        "SIMPLE" => ("SIMPLE", 1.0),
-        _ => ("USAGE", net_import_w),
+    let power_kw = match payload_type {
+        "EXPORT_CAPACITY_LIMIT" => grid_net_export_kw,
+        _ => grid_net_import_kw,
     };
 
-    let mut payloads = vec![
-        OadrReportPayload {
-            r#type: report_type.to_string(),
-            values: vec![serde_json::Value::from(report_value)],
-        },
-        OadrReportPayload {
-            r#type: "OPERATING_STATE".to_string(),
-            values: vec![serde_json::Value::from(op_state)],
-        },
-    ];
+    // The window this report covers, which is what makes its value expressible:
+    // `USAGE` is energy *over an interval* (spec, payload type table), so
+    // without a window there is no energy to state. Derived from the samples we
+    // actually hold rather than assumed.
+    let window = report_window(asset_samples, now);
+
+    let mut payloads = vec![OadrReportPayload::state("OPERATING_STATE", op_state)];
+    if payload_type == "SIMPLE" {
+        payloads.insert(0, OadrReportPayload::level("SIMPLE", 1.0));
+    } else if let Some((start, end)) = window {
+        payloads.insert(
+            0,
+            OadrReportPayload::energy_from_power_kw(
+                "USAGE",
+                power_kw,
+                (end - start).num_seconds().max(0) as u64,
+            ),
+        );
+    } else {
+        // Fail visibly rather than substitute silently: one sample is a power
+        // reading, not an energy, and we will not send it as one.
+        warn!(
+            event_id = %event_id,
+            "no measurement window for this report; omitting USAGE rather than              sending a power value under an energy payload type"
+        );
+    }
 
     // Add EV SoC if available
     if let Some(soc) = asset_samples
@@ -138,29 +165,39 @@ pub fn build_measurement_report(
         .and_then(|v| v.last())
         .and_then(|s| s.soc)
     {
-        payloads.push(OadrReportPayload {
-            r#type: "STORAGE_CHARGE_LEVEL".to_string(),
-            values: vec![serde_json::Value::from(format!("{:.1}", soc * 100.0))],
-        });
+        payloads.push(OadrReportPayload::percent(
+            "STORAGE_CHARGE_LEVEL",
+            soc * 100.0,
+        ));
     }
 
+    let intervals = vec![OadrReportInterval {
+        id: 0,
+        intervalPeriod: window.map(|(start, end)| {
+            OadrIntervalPeriod::window(
+                start,
+                format_iso8601_duration((end - start).num_seconds().max(0) as u64),
+            )
+        }),
+        payloads,
+    }];
     let report = OadrReportBody {
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
+        payloadDescriptors: crate::controller::report_payload::descriptors_for(&intervals),
         resources: vec![OadrReportResource {
             resourceName: resource_name,
-            intervals: vec![OadrReportInterval {
-                id: 0,
-                intervalPeriod: None,
-                payloads,
-            }],
+            intervals,
         }],
     };
 
     debug!(
         report_name = report.reportName.as_deref().unwrap_or(""),
-        event_id, report_type, report_value, "built measurement report"
+        event_id,
+        payload_type,
+        payloads = report.resources[0].intervals[0].payloads.len(),
+        "built measurement report"
     );
     Some(report)
 }
@@ -285,39 +322,25 @@ pub fn build_measurement_report_for_obligation(
             // this arm reads the right field for this payload type at all is
             // a separate, still-open question -- only the sign bug is fixed
             // here.)
-            let up_w = site_envelope.map(|e| e.up_kw.abs() * 1000.0).unwrap_or(0.0);
+            let up_kw = site_envelope.map(|e| e.up_kw.abs()).unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,
                 payloads: vec![
-                    OadrReportPayload {
-                        r#type: "IMPORT_RESERVATION_CAPACITY".to_string(),
-                        values: vec![serde_json::Value::from(up_w)],
-                    },
-                    OadrReportPayload {
-                        r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from(op_state)],
-                    },
+                    OadrReportPayload::power_kw("IMPORT_RESERVATION_CAPACITY", up_kw),
+                    OadrReportPayload::state("OPERATING_STATE", op_state),
                 ],
             }]
         }
         "EXPORT_RESERVATION_CAPACITY" => {
             // down_kw is signed now too -- same magnitude conversion as above.
-            let down_w = site_envelope
-                .map(|e| e.down_kw.abs() * 1000.0)
-                .unwrap_or(0.0);
+            let down_kw = site_envelope.map(|e| e.down_kw.abs()).unwrap_or(0.0);
             vec![OadrReportInterval {
                 id: 0,
                 intervalPeriod: None,
                 payloads: vec![
-                    OadrReportPayload {
-                        r#type: "EXPORT_RESERVATION_CAPACITY".to_string(),
-                        values: vec![serde_json::Value::from(down_w)],
-                    },
-                    OadrReportPayload {
-                        r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from(op_state)],
-                    },
+                    OadrReportPayload::power_kw("EXPORT_RESERVATION_CAPACITY", down_kw),
+                    OadrReportPayload::state("OPERATING_STATE", op_state),
                 ],
             }]
         }
@@ -349,32 +372,31 @@ pub fn build_measurement_report_for_obligation(
                 .iter()
                 .enumerate()
                 .map(|(i, &(ts, value_kw))| {
-                    let value_w = match payload_type.as_str() {
-                        "EXPORT_CAPACITY_LIMIT" => (-value_kw).max(0.0) * 1000.0,
-                        "IMPORT_CAPACITY_LIMIT" => value_kw.max(0.0) * 1000.0,
-                        _ => value_kw.max(0.0) * 1000.0, // USAGE, PRICE, SIMPLE, etc.
+                    // Which direction of flow the requesting payload type asks
+                    // about. Everything else reports import.
+                    let directed_kw = match payload_type.as_str() {
+                        "EXPORT_CAPACITY_LIMIT" => (-value_kw).max(0.0),
+                        _ => value_kw.max(0.0),
                     };
-                    let report_type = if payload_type == "SIMPLE" {
-                        "SIMPLE"
+                    // `USAGE` is energy *over the interval*, so the resampled
+                    // mean power is multiplied by the interval it covers. This
+                    // used to be sent as instantaneous watts, which is what
+                    // `kpi.py` compensated for with its own `x duration`.
+                    let value = if payload_type == "SIMPLE" {
+                        OadrReportPayload::level("SIMPLE", directed_kw)
                     } else {
-                        "USAGE"
+                        OadrReportPayload::energy_from_power_kw(
+                            "USAGE",
+                            directed_kw,
+                            obligation.interval_duration_s,
+                        )
                     };
                     OadrReportInterval {
                         id: i,
-                        intervalPeriod: Some(OadrIntervalPeriod {
-                            start: Some(ts.to_rfc3339()),
-                            duration: Some(duration_iso.clone()),
-                            ..Default::default()
-                        }),
+                        intervalPeriod: Some(OadrIntervalPeriod::window(ts, duration_iso.clone())),
                         payloads: vec![
-                            OadrReportPayload {
-                                r#type: report_type.to_string(),
-                                values: vec![serde_json::Value::from(value_w)],
-                            },
-                            OadrReportPayload {
-                                r#type: "OPERATING_STATE".to_string(),
-                                values: vec![serde_json::Value::from(op_state)],
-                            },
+                            value,
+                            OadrReportPayload::state("OPERATING_STATE", op_state),
                         ],
                     }
                 })
@@ -391,6 +413,7 @@ pub fn build_measurement_report_for_obligation(
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
+        payloadDescriptors: crate::controller::report_payload::descriptors_for(&intervals),
         resources: vec![OadrReportResource {
             resourceName: resource_name,
             intervals,
@@ -668,8 +691,8 @@ mod tests {
             let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
             let val = usage.values[0].as_f64().unwrap();
             assert!(
-                (val - 3000.0).abs() < 1.0,
-                "export should be ~3000 W, got {val}"
+                (val - 0.75).abs() < 1e-6,
+                "export should be ~0.75 kWh (3 kW over PT15M), got {val}"
             );
         }
     }
@@ -766,7 +789,7 @@ mod tests {
         .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
-        assert!((val - 5000.0).abs() < 1.0, "expected 5000 W, got {val}");
+        assert!((val - 5.0).abs() < 1e-6, "expected 5 kW, got {val}");
         assert_eq!(iv.payloads[0].r#type, "IMPORT_RESERVATION_CAPACITY");
     }
 
@@ -794,7 +817,7 @@ mod tests {
         .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
-        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+        assert!((val - 3.0).abs() < 1e-6, "expected 3 kW, got {val}");
         assert_eq!(iv.payloads[0].r#type, "EXPORT_RESERVATION_CAPACITY");
     }
 
@@ -835,8 +858,11 @@ mod tests {
             }],
             ..OadrEvent::test_event("evt-001", "prog-001")
         };
-        let asset_samples: HashMap<_, _> =
-            [make_samples("site", &[(0, 3.0)])].into_iter().collect();
+        // Two samples: a single reading is a power, and energy over an interval
+        // cannot be stated from it (see `report_window`).
+        let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 3.0), (60, 3.0)])]
+            .into_iter()
+            .collect();
         let report =
             build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
                 .unwrap();
@@ -852,10 +878,45 @@ mod tests {
         assert_eq!(report.resources[0].resourceName, "ven-1-meter");
         let iv = &report.resources[0].intervals[0];
         assert_eq!(iv.id, 0);
-        assert!(iv.intervalPeriod.is_none());
+        // The window is what makes the value expressible: USAGE is energy
+        // *over an interval*, so the report has to say which interval.
+        assert!(iv.intervalPeriod.is_some());
         let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
         let val = usage.values[0].as_f64().unwrap();
-        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+        assert!(
+            (val - 0.05).abs() < 1e-6,
+            "expected 0.05 kWh (3 kW over the 1-minute sample span), got {val}"
+        );
+        assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
+    }
+
+    /// A single reading is an instantaneous power. `USAGE` is energy over an
+    /// interval, so with no window the VEN omits the payload rather than
+    /// sending a power value under an energy payload type.
+    #[test]
+    fn measurement_report_omits_usage_when_there_is_no_measurement_window() {
+        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
+        let event = OadrEvent {
+            intervals: vec![OadrInterval {
+                payloads: vec![OadrPayload {
+                    r#type: "IMPORT_CAPACITY_LIMIT".to_string(),
+                    values: vec![],
+                }],
+                ..Default::default()
+            }],
+            ..OadrEvent::test_event("evt-nowindow", "prog-001")
+        };
+        let asset_samples: HashMap<_, _> =
+            [make_samples("site", &[(0, 3.0)])].into_iter().collect();
+        let report =
+            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
+                .unwrap();
+        let iv = &report.resources[0].intervals[0];
+        assert!(
+            !iv.payloads.iter().any(|p| p.r#type == "USAGE"),
+            "a power reading must not be sent as energy"
+        );
+        // The report is still made: operating state is still knowable.
         assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
     }
 
@@ -885,8 +946,8 @@ mod tests {
             .iter()
             .find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
         assert!(soc_payload.is_some(), "expected SoC payload for EV");
-        let soc_str = soc_payload.unwrap().values[0].as_str().unwrap();
-        let soc_pct: f64 = soc_str.parse().unwrap();
+        // A percentage is a number with a declared unit, not a formatted string.
+        let soc_pct = soc_payload.unwrap().values[0].as_f64().unwrap();
         assert!((soc_pct - 50.0).abs() < 0.2, "expected ~50%, got {soc_pct}");
     }
 
@@ -972,7 +1033,10 @@ mod tests {
             .find(|p| p.r#type == "USAGE")
             .unwrap();
         let val = usage.values[0].as_f64().unwrap();
-        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+        assert!(
+            (val - 0.05).abs() < 1e-6,
+            "expected 0.05 kWh (3 kW over the 1-minute sample span), got {val}"
+        );
     }
 
     // ── USAGE_FORECAST (WP3.6, §8.8) ────────────────────────────────
@@ -1060,10 +1124,13 @@ mod tests {
         assert_eq!(intervals.len(), 2, "one interval per plan slot");
         let v0 = intervals[0].payloads[0].values[0].as_f64().unwrap();
         let v1 = intervals[1].payloads[0].values[0].as_f64().unwrap();
-        assert!((v0 - 2000.0).abs() < 1.0, "slot 0 net 2 kW import = 2000 W");
         assert!(
-            (v1 - (-1500.0)).abs() < 1.0,
-            "slot 1 net 1.5 kW export = -1500 W"
+            (v0 - 2.0 / 12.0).abs() < 1e-6,
+            "slot 0 net 2 kW over a 5-minute slot"
+        );
+        assert!(
+            (v1 - (-1.5 / 12.0)).abs() < 1e-6,
+            "slot 1 net 1.5 kW export over a 5-minute slot"
         );
         assert_eq!(intervals[0].payloads[0].r#type, "USAGE_FORECAST");
         assert!(
@@ -1100,7 +1167,10 @@ mod tests {
         assert_eq!(intervals.len(), 2, "one interval per plan slot");
         assert_eq!(intervals[0].payloads[0].r#type, "USAGE");
         let v0 = intervals[0].payloads[0].values[0].as_f64().unwrap();
-        assert!((v0 - 2000.0).abs() < 1.0, "forecast value from plan slot 0");
+        assert!(
+            (v0 - 2.0 / 12.0).abs() < 1e-6,
+            "forecast value from plan slot 0, in kWh"
+        );
     }
 
     #[test]
@@ -1166,8 +1236,8 @@ mod tests {
                 .expect("BASELINE payload present");
             let val = baseline.values[0].as_f64().unwrap();
             assert!(
-                (val - 1000.0).abs() < 1.0,
-                "expected 1000 W (1 kW heuristic), got {val} — measured power was 5 kW, \
+                (val - 0.25).abs() < 1e-6,
+                "expected 0.25 kWh (1 kW heuristic over PT15M), got {val} — measured power was 5 kW, \
                  so this would fail if BASELINE fell through to the measured path"
             );
         }

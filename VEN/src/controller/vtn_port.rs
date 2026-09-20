@@ -218,6 +218,12 @@ pub struct OadrReportBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reportName: Option<String>,
     pub resources: Vec<OadrReportResource>,
+    /// What this report's values mean. Mandatory here even though the spec
+    /// marks it optional: no value leaves this lab whose quantity and unit are
+    /// not declared on the wire (`wire-contracts`). Derived, never hand-set --
+    /// see `controller::report_payload::descriptors_for`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payloadDescriptors: Vec<crate::controller::report_payload::OadrReportPayloadDescriptor>,
 }
 
 /// A named resource (site meter, individual asset) within a report.
@@ -351,6 +357,7 @@ mod tests {
     #[test]
     fn test_oadr_report_body_round_trips_with_event_id() {
         let body = OadrReportBody {
+            payloadDescriptors: Vec::new(),
             eventID: Some("evt-abc".to_string()),
             clientName: "ven-1".to_string(),
             reportName: Some("auto-ven-1-evt-abc".to_string()),
@@ -416,6 +423,7 @@ mod tests {
     #[test]
     fn test_oadr_report_body_absent_event_id_not_serialized() {
         let body = OadrReportBody {
+            payloadDescriptors: Vec::new(),
             eventID: None,
             clientName: "ven-1".to_string(),
             reportName: Some("status-ven-1".to_string()),
@@ -432,6 +440,7 @@ mod tests {
     #[test]
     fn test_oadr_report_body_absent_report_name_not_serialized() {
         let body = OadrReportBody {
+            payloadDescriptors: Vec::new(),
             eventID: Some("evt-1".to_string()),
             clientName: "ven-1".to_string(),
             reportName: None,

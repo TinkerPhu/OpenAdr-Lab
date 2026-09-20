@@ -761,6 +761,7 @@ mod tests {
             clientName: "test-ven".into(),
             reportName: report_name.map(str::to_string),
             resources: vec![],
+            payloadDescriptors: Vec::new(),
         }
     }
 

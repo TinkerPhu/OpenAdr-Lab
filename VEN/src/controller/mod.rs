@@ -58,6 +58,7 @@ pub mod timeline;
 // ── Monitoring & reporting ────────────────────────────────────────────────────
 pub mod monitor;
 pub(crate) mod report_intervals;
+pub mod report_payload;
 pub mod reporter;
 
 // ── User requests ─────────────────────────────────────────────────────────────
