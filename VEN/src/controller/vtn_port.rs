@@ -163,6 +163,22 @@ pub struct OadrPayload {
     pub values: Vec<serde_json::Value>,
 }
 
+impl OadrPayload {
+    /// This payload's first value as a number, when it has one.
+    ///
+    /// The one place a payload value is turned into an `f64`. Four call sites
+    /// each did their own `values.first()?.as_f64()`, which is four places to
+    /// get it wrong when the value type changes -- and it is about to: the
+    /// strict wire types model a payload value as an enum with *separate*
+    /// `Number` and `Integer` variants, and `EventType::Simple`'s declared
+    /// kind is `Integer`. A reader matching only `Number` would silently drop
+    /// every SIMPLE window, which is the failure mode this whole branch keeps
+    /// running into. With one reader, that is one function to change.
+    pub fn numeric(&self) -> Option<f64> {
+        self.values.first()?.as_f64()
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct OadrReportDescriptor {
     pub payloadType: String,
