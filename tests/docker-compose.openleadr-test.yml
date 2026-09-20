@@ -34,6 +34,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # Throwaway broker. From 3.1 the VTN connects to MQTT at startup and exits
+  # 101 if it cannot -- and because openleadr-rs tracks a `.env` carrying
+  # MQTT_URL=mqtt://localhost:1883, read through dotenvy, "no broker
+  # configured" does not mean "no broker attempted". Anonymous is fine for a
+  # throwaway; :1884 keeps the convention that the VTN's notifier endpoint is
+  # always :1884, test or production.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto-test.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: mosquitto_pub -h 127.0.0.1 -p 1884 -t healthcheck -m ping -q 0 || exit 1
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
   vtn:
     build:
       context: ../openleadr-rs
@@ -41,11 +57,23 @@ services:
     environment:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
       RUST_LOG: warn
+      MQTT_URL: mqtt://mosquitto:1884
+      MQTT_USERNAME: ""
+      MQTT_PASSWORD: ""
+      MQTT_TOPIC_PREFIX: openadr-lab/vtn
+      # Mandatory from 3.1 on: the VTN panics at startup without it when using
+      # the internal OAuth provider. Discovery metadata only -- it plays no
+      # part in signing -- so the in-stack address is the right answer here.
+      OAUTH_TOKEN_URL: http://vtn:3000/auth/token
     depends_on:
       db:
         condition: service_healthy
+      mosquitto:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:3000/health"]
+      # busybox wget, not curl -- the 3.1 VTN runtime image has no curl, so a
+      # curl healthcheck never turns healthy and every dependant times out.
+      test: wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
       interval: 10s
       timeout: 5s
       retries: 10
