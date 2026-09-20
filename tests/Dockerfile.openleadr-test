@@ -23,4 +23,9 @@ COPY . .
 ENV SQLX_OFFLINE=true
 ENV RUST_BACKTRACE=1
 ENV CARGO_BUILD_JOBS=4
-CMD ["cargo", "test", "--workspace"]
+# `internal-oauth` is not a default feature, and the VTN's own test code uses
+# what it gates -- `JwtManager::create`, `Scope::WriteUsers` -- so `cargo test
+# --workspace` on the default feature set does not compile. It is also the
+# feature set the shipped image is built with (openleadr-rs/vtn.Dockerfile),
+# so testing without it would exercise a different binary than we deploy.
+CMD ["cargo", "test", "--workspace", "--features", "openleadr-vtn/internal-oauth"]
