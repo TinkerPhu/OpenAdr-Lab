@@ -224,7 +224,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
 - [ ] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
 - [x] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
-- [ ] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
+- [x] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
 - [x] 6.9 Fix the `VEN_NAME` env-var vs target-type distinction wherever a step touched it (R6)
 - [ ] 6.9b The test stack's throwaway broker runs anonymous while production now runs
