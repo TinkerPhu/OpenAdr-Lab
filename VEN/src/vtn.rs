@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::StatusCode;
+use tracing::warn;
 
 const TOKEN_EXPIRY_MARGIN_S: u64 = 60;
 // WP2.2 (Phase 2): openleadr-rs collection GETs cap at 50/page regardless of
@@ -26,6 +27,9 @@ pub struct VtnClient {
     client_secret: String,
     ven_name: String,
     token: Arc<tokio::sync::RwLock<Option<Token>>>,
+    /// GB-49: set when the last token lacked VEN scopes. Read through
+    /// `VtnPort::scope_warning` so the health route can surface it.
+    scope_warning: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -191,6 +195,7 @@ impl VtnClient {
             client_secret,
             ven_name,
             token: Arc::new(tokio::sync::RwLock::new(None)),
+            scope_warning: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -267,6 +272,19 @@ impl VtnClient {
             expires_in_secs,
         };
         let access = token.access_token.clone();
+        // GB-49: a VEN granted no scopes authenticates fine and then polls an
+        // empty world -- every request 200, every list empty, nothing saying
+        // why. Read our own grant rather than infer it from silence.
+        let missing = crate::controller::token_scopes::missing_ven_scopes(&access);
+        if !missing.is_empty() {
+            warn!(
+                missing = ?missing,
+                "{}",
+                crate::controller::token_scopes::describe_missing(&missing)
+            );
+        }
+        *self.scope_warning.write().await = (!missing.is_empty())
+            .then(|| crate::controller::token_scopes::describe_missing(&missing));
         *self.token.write().await = Some(token);
         Ok(access)
     }
@@ -523,6 +541,10 @@ impl VtnPort for VtnClient {
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
         // Delegates to the inherent method which handles 409 upsert semantics.
         self.upsert_report(body).await
+    }
+
+    async fn scope_warning(&self) -> Option<String> {
+        self.scope_warning.read().await.clone()
     }
 }
 
