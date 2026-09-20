@@ -33,6 +33,10 @@ pub struct HealthComponents {
     vtn_connection: HealthComponent,
     storage: HealthComponent,
     planner: HealthComponent,
+    /// Degraded when the VTN's last poll carried an object we refused. A
+    /// rejection the operator cannot see is the same failure as accepting the
+    /// object silently, so it belongs on `/health`, not only in the log.
+    wire_conformance: HealthComponent,
 }
 
 #[derive(Serialize)]
@@ -66,6 +70,7 @@ fn build_health_response(
     storage_ok: bool,
     planner_ok: bool,
     comms_loss_debounce_s: Option<u64>,
+    wire_rejections: &std::collections::BTreeMap<String, String>,
     now: DateTime<Utc>,
 ) -> HealthResponse {
     let vtn_detail = vtn
@@ -77,10 +82,21 @@ fn build_health_response(
         vtn_connection: component(vtn.connected, vtn_detail),
         storage: component(storage_ok, None),
         planner: component(planner_ok, None),
+        wire_conformance: component(
+            wire_rejections.is_empty(),
+            Some(
+                wire_rejections
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            ),
+        ),
     };
     let status = if components.vtn_connection.status == "ok"
         && components.storage.status == "ok"
         && components.planner.status == "ok"
+        && components.wire_conformance.status == "ok"
     {
         "ok"
     } else {
@@ -110,11 +126,13 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
     let vtn = ctx.state.vtn_connection_status().await;
     let storage_ok = ctx.state.storage_ok().await;
     let plan = ctx.state.active_plan().await;
+    let wire_rejections = ctx.state.wire_rejections().await;
     Json(build_health_response(
         &vtn,
         storage_ok,
         plan_is_ok(plan.as_ref()),
         ctx.comms_loss_debounce_s,
+        &wire_rejections,
         Utc::now(),
     ))
 }
@@ -248,7 +266,14 @@ mod tests {
 
     #[test]
     fn health_reports_degraded_vtn_component_after_failure() {
-        let resp = build_health_response(&degraded_vtn(), true, true, None, Utc::now());
+        let resp = build_health_response(
+            &degraded_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            Utc::now(),
+        );
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.vtn_connection.status, "degraded");
         assert!(resp.components.vtn_connection.detail.is_some());
@@ -258,16 +283,63 @@ mod tests {
 
     #[test]
     fn health_all_ok_when_every_component_healthy() {
-        let resp = build_health_response(&healthy_vtn(), true, true, None, Utc::now());
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            Utc::now(),
+        );
         assert_eq!(resp.status, "ok");
         assert_eq!(resp.components.ven_process.status, "ok");
         assert_eq!(resp.components.vtn_connection.status, "ok");
         assert!(resp.components.vtn_connection.detail.is_none());
     }
 
+    /// A refused object the operator cannot see is the same failure as one we
+    /// accepted silently, so a rejection has to reach `/health`, not just the log.
+    #[test]
+    fn health_wire_conformance_degraded_when_the_vtn_sent_a_refused_object() {
+        let rejections = std::collections::BTreeMap::from([(
+            "events".to_string(),
+            "VTN sent 1 malformed event object(s), ignored: evt-9: bad priority".to_string(),
+        )]);
+        let resp = build_health_response(&healthy_vtn(), true, true, None, &rejections, Utc::now());
+        assert_eq!(resp.status, "degraded");
+        assert_eq!(resp.components.wire_conformance.status, "degraded");
+        let detail = resp
+            .components
+            .wire_conformance
+            .detail
+            .expect("a rejection must say which object was refused");
+        assert!(detail.contains("evt-9"), "got {detail}");
+    }
+
+    #[test]
+    fn health_wire_conformance_ok_when_every_object_parsed() {
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            Utc::now(),
+        );
+        assert_eq!(resp.components.wire_conformance.status, "ok");
+        assert!(resp.components.wire_conformance.detail.is_none());
+    }
+
     #[test]
     fn health_storage_degraded_when_storage_not_ok() {
-        let resp = build_health_response(&healthy_vtn(), false, true, None, Utc::now());
+        let resp = build_health_response(
+            &healthy_vtn(),
+            false,
+            true,
+            None,
+            &Default::default(),
+            Utc::now(),
+        );
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.storage.status, "degraded");
     }
@@ -281,7 +353,8 @@ mod tests {
     #[test]
     fn health_server_time_echoes_the_injected_clock() {
         let now = Utc::now();
-        let resp = build_health_response(&healthy_vtn(), true, true, None, now);
+        let resp =
+            build_health_response(&healthy_vtn(), true, true, None, &Default::default(), now);
         assert_eq!(resp.server_time, now);
     }
 
@@ -292,7 +365,14 @@ mod tests {
 
     #[test]
     fn health_comms_loss_active_false_when_profile_has_no_comms_loss_section() {
-        let resp = build_health_response(&degraded_vtn(), true, true, None, Utc::now());
+        let resp = build_health_response(
+            &degraded_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            Utc::now(),
+        );
         assert!(!resp.comms_loss_active);
     }
 
@@ -302,7 +382,7 @@ mod tests {
         let mut vtn = healthy_vtn();
         vtn.connected = false;
         vtn.last_success_ts = Some(now - chrono::Duration::seconds(120));
-        let resp = build_health_response(&vtn, true, true, Some(60), now);
+        let resp = build_health_response(&vtn, true, true, Some(60), &Default::default(), now);
         assert!(resp.comms_loss_active);
     }
 

@@ -4,6 +4,7 @@ use reqwest::StatusCode;
 use std::sync::{Arc, Mutex};
 
 use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
+use crate::controller::wire_reject::FetchOutcome;
 use crate::vtn::VtnHttpError;
 
 /// Test double for VtnPort. Configurable responses; records upsert calls for assertions.
@@ -77,18 +78,28 @@ impl MockVtn {
     }
 }
 
+/// A mock hands back objects that are already typed, so nothing can have been
+/// refused. Rejection behaviour is covered where it lives (`wire_reject`) and
+/// at the task layer, not by every mock-driven test.
+fn all_valid<T>(items: Vec<T>) -> FetchOutcome<T> {
+    FetchOutcome {
+        items,
+        rejected: Vec::new(),
+    }
+}
+
 #[async_trait]
 impl VtnPort for MockVtn {
-    async fn fetch_programs(&self) -> Result<Vec<OadrProgram>> {
-        Ok(self.programs.clone())
+    async fn fetch_programs(&self) -> Result<FetchOutcome<OadrProgram>> {
+        Ok(all_valid(self.programs.clone()))
     }
 
-    async fn fetch_events(&self) -> Result<Vec<OadrEvent>> {
-        Ok(self.events.clone())
+    async fn fetch_events(&self) -> Result<FetchOutcome<OadrEvent>> {
+        Ok(all_valid(self.events.clone()))
     }
 
-    async fn fetch_reports(&self) -> Result<Vec<OadrReport>> {
-        Ok(self.reports.clone())
+    async fn fetch_reports(&self) -> Result<FetchOutcome<OadrReport>> {
+        Ok(all_valid(self.reports.clone()))
     }
 
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
@@ -178,7 +189,7 @@ mod tests {
             reportDescriptors: None,
         };
         let mock = MockVtn::new().with_events(vec![event]);
-        let events = mock.fetch_events().await.unwrap();
+        let events = mock.fetch_events().await.unwrap().items;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "e1");
     }

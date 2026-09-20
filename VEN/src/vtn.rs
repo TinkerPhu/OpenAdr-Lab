@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
+use crate::controller::wire_reject::{partition_valid, FetchOutcome};
 
 #[derive(Clone)]
 pub struct VtnClient {
@@ -489,7 +490,7 @@ impl VtnClient {
     /// Search own reports (filtered by client_name) for a matching reportName.
     async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
         let reports = VtnPort::fetch_reports(self).await?;
-        for r in &reports {
+        for r in &reports.items {
             if r.reportName.as_deref() == Some(report_name) {
                 return Ok(r.id.clone());
             }
@@ -502,31 +503,20 @@ impl VtnClient {
 
 #[async_trait]
 impl VtnPort for VtnClient {
-    async fn fetch_programs(&self) -> Result<Vec<OadrProgram>> {
+    async fn fetch_programs(&self) -> Result<FetchOutcome<OadrProgram>> {
         let items = self.get_json_paginated("/programs").await?;
-        items
-            .iter()
-            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
-            .collect()
+        Ok(partition_valid(&items))
     }
 
-    async fn fetch_events(&self) -> Result<Vec<OadrEvent>> {
+    async fn fetch_events(&self) -> Result<FetchOutcome<OadrEvent>> {
         let items = self.get_json_paginated("/events?active=true").await?;
-        items
-            .iter()
-            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
-            .collect()
+        Ok(partition_valid(&items))
     }
 
-    async fn fetch_reports(&self) -> Result<Vec<OadrReport>> {
+    async fn fetch_reports(&self) -> Result<FetchOutcome<OadrReport>> {
         let path = format!("/reports?clientName={}", self.ven_name);
         let items = self.get_json_paginated(&path).await?;
-        // Skip items without an `id` (can't deserialize) — everything else,
-        // including absent reportName, is preserved via OadrReport's flatten.
-        Ok(items
-            .iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect())
+        Ok(partition_valid(&items))
     }
 
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
@@ -597,7 +587,7 @@ mod tests {
         let base_url = spawn_test_vtn(items).await;
         let client = make_client(base_url);
 
-        let programs = client.fetch_programs().await.unwrap();
+        let programs = client.fetch_programs().await.unwrap().items;
         assert_eq!(programs.len(), 120);
         assert_eq!(programs[0].id, "p0");
         assert_eq!(programs[119].id, "p119");
@@ -608,7 +598,7 @@ mod tests {
         let base_url = spawn_test_vtn(vec![]).await;
         let client = make_client(base_url);
 
-        let programs = client.fetch_programs().await.unwrap();
+        let programs = client.fetch_programs().await.unwrap().items;
         assert!(programs.is_empty());
     }
 
@@ -622,7 +612,7 @@ mod tests {
         let base_url = spawn_test_vtn(items).await;
         let client = make_client(base_url);
 
-        let programs = client.fetch_programs().await.unwrap();
+        let programs = client.fetch_programs().await.unwrap().items;
         assert_eq!(programs.len(), 50);
     }
 
@@ -634,7 +624,7 @@ mod tests {
         let base_url = spawn_test_vtn(items).await;
         let client = make_client(base_url);
 
-        let events = client.fetch_events().await.unwrap();
+        let events = client.fetch_events().await.unwrap().items;
         assert_eq!(events.len(), 75);
     }
 

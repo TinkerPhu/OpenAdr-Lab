@@ -12,14 +12,19 @@ use serde::{Deserialize, Serialize};
 
 // ── Port trait ─────────────────────────────────────────────────────────────────
 
+use crate::controller::wire_reject::FetchOutcome;
+
 #[async_trait]
 pub trait VtnPort: Send + Sync {
-    async fn fetch_programs(&self) -> Result<Vec<OadrProgram>>;
-    async fn fetch_events(&self) -> Result<Vec<OadrEvent>>;
+    /// Each fetch returns the objects that parsed *and* a record of any the VTN
+    /// sent that we refused, so a caller can surface them. One malformed object
+    /// costs only itself -- see `controller::wire_reject`.
+    async fn fetch_programs(&self) -> Result<FetchOutcome<OadrProgram>>;
+    async fn fetch_events(&self) -> Result<FetchOutcome<OadrEvent>>;
     /// Returns full-fidelity typed reports: `id`/`reportName` accessed by field,
     /// every other VTN field preserved verbatim in `extra` (serde flatten) so
     /// state storage and the GET /reports route stay wire-shape pass-through.
-    async fn fetch_reports(&self) -> Result<Vec<OadrReport>>;
+    async fn fetch_reports(&self) -> Result<FetchOutcome<OadrReport>>;
     /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
     /// propagated from the VTN HTTP response.
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;

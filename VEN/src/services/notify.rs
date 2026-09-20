@@ -217,6 +217,45 @@ pub async fn notify_outage_edge(
     now_ok
 }
 
+/// Surface objects the VTN sent that we refused.
+///
+/// Rejecting silently is the same failure as accepting silently, so every
+/// fetcher routes its outcome through here: a warning in the log, a counter, a
+/// `/health` entry, and one deduplicated user notification. The good objects in
+/// the same poll are unaffected -- one malformed object costs only itself.
+pub async fn notify_wire_rejections<T>(
+    notifier: &Notifier,
+    state: &AppState,
+    now: DateTime<Utc>,
+    resource: &'static str,
+    outcome: &crate::controller::wire_reject::FetchOutcome<T>,
+) {
+    let Some(summary) = outcome.rejection_summary(resource) else {
+        // Fully conformant poll: clear any standing rejection for this resource.
+        state.set_wire_rejections(resource, None).await;
+        return;
+    };
+    warn!(resource, rejected = outcome.rejected.len(), "{summary}");
+    metrics::counter!("wire_rejected_total", "resource" => resource)
+        .increment(outcome.rejected.len() as u64);
+    state
+        .set_wire_rejections(resource, Some(summary.clone()))
+        .await;
+    notifier
+        .notify(
+            state,
+            now,
+            UserNotificationSeverity::Warn,
+            summary,
+            None,
+            None,
+            // One notification per resource per dedup window: a VTN that keeps
+            // re-sending the same bad object must not flood the feed.
+            Some(format!("wire-reject-{resource}")),
+        )
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -41,12 +41,17 @@ pub(crate) fn spawn_event_poll(
         loop {
             use crate::services::notify::notify_outage_edge as outage_edge;
             match vtn.fetch_events().await {
-                Ok(events) => {
+                Ok(outcome) => {
                     vtn_ok = outage_edge(&notifier, &state, Utc::now(), vtn_ok, true).await;
                     counter!("poll_success_total", "resource" => "events").increment(1);
+                    let now = Utc::now();
+                    crate::services::notify::notify_wire_rejections(
+                        &notifier, &state, now, "events", &outcome,
+                    )
+                    .await;
+                    let events = outcome.items;
                     info!(resource = "events", count = events.len(), "poll success");
 
-                    let now = Utc::now();
                     let changes = detect_event_changes(
                         &events,
                         &prev_event_ids,
