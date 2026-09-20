@@ -140,10 +140,10 @@ Simulator untouched (D5). `POST /sim/override` stays.
       its `scope`/`roles` claim and fail the health check if the expected VEN scopes are absent,
       instead of polling successfully and seeing an empty world. Doing this against 3.0 roles
       first would mean rewriting it for scopes immediately afterwards
-- [ ] 3.5 `controller/reporter.rs`: set `eventID` from the triggering event; drop `programID`
-- [ ] 3.6 Declare `reportIntervals` on every report descriptor we emit — answer Q4 rather than inheriting the default (`wire-contracts`)
-- [ ] 3.7 Add `client_id` to the VEN YAML profiles (all 20) and `CLIENT_ID` to both compose files
-- [ ] 3.8 `wsl cargo test -p ven-app -j 2` green; fmt + clippy; `scripts/audit_file_sizes.py` passes
+- [x] 3.5 `controller/reporter.rs`: set `eventID` from the triggering event; drop `programID`
+- [x] 3.6 Declare `reportIntervals` on every report descriptor we emit — answer Q4 rather than inheriting the default (`wire-contracts`)
+- [x] 3.7 Add `client_id` to the VEN YAML profiles (all 20) and `CLIENT_ID` to both compose files
+- [x] 3.8 `wsl cargo test -p ven-app -j 2` green; fmt + clippy; `scripts/audit_file_sizes.py` passes
 - [ ] 3.9 Deploy VENs on Node1 and Node2; verify each self-registered with **its own** `clientID`, not `bl-client` (R5)
 
 ## 4. Seed, provisioning and the profile contract
@@ -164,7 +164,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
       declare `KW`, PRICE/EXPORT_PRICE `KWH`+`EUR`, CHARGE_STATE_SETPOINT `PERCENT`, GHG `GHG`,
       SIMPLE none. Derived from the payloads each event carries, so an undeclared type raises
       rather than being sent
-- [ ] 4.5b `reportDescriptors`/`reportIntervals` on the VEN's side still undeclared — the
+- [x] 4.5b `reportDescriptors`/`reportIntervals` on the VEN's side still undeclared — the
       remaining half of GB-50, and it needs the VEN change (3.6)
 - [x] 4.6 Seed run live: 3 programs, 10 events, 20 VENs. Per-VEN visibility correct for both a
       targeted and an open program (see D4's table)
@@ -179,7 +179,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
       optional `duration` and optional `intervals`
 - [x] 5.2 `ProgramFormDialog.tsx`: remove `programType`/`country`/`bindingEvents`/`localPrice`/`retailerName`; surface `attributes` including the profile pointer (D10, `ui-transparency`)
 - [x] 5.3a `EventFormDialog.tsx`: flat targets done (helper text and JSON shape).
-- [ ] 5.3b Exposing 3.1's **top-level** event `duration` is deliberately deferred to phase 3.
+- [x] 5.3b Exposing 3.1's **top-level** event `duration` is deliberately deferred to phase 3.
       The form's existing Duration field is `intervalPeriod.duration`, a different thing.
       Surfacing the new one before `event_timing.rs` honours it (3.2) would let an operator
       create duration-only events the fleet mis-times — `no-half-built-features` cuts against

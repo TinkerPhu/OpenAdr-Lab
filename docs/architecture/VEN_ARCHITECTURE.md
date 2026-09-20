@@ -126,12 +126,30 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 
 **Internal → VTN report generation** (`controller/reporter.rs`):
 
+Every value a report carries declares its own quantity and unit.
+`controller/report_payload.rs` is the single authority: a payload is built by
+naming its quantity (`energy_kwh`, `energy_from_power_kw`, `power_kw`,
+`percent`, `level`, `state`), so there is no constructor that takes a bare
+number and a value whose quantity nobody decided cannot be sent; and
+`descriptors_for` derives the report's `payloadDescriptors` from the payloads
+actually present, so an undeclared payload is not something anyone has to
+remember. The quantity table is in `docs/reference/WIRE_PROFILE.md`, whose
+machine-readable half is `quantity_of`.
+
+`USAGE` is **energy over the interval**, not instantaneous power — the spec
+defines it that way — which is why every report interval states the window its
+value covers, and why a report built from a single sample omits `USAGE`
+entirely rather than send a power reading as an energy. Power is kW and energy
+is kWh throughout, because OpenADR's `Unit` enum has no watt: a watt value is
+one that cannot be declared on the wire.
+
+
 | Report obligation | Source | Status |
 |---|---|---|
-| `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`) | ✅ implemented |
+| `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`), converted to **kWh** across that interval | ✅ implemented |
 | `STORAGE_CHARGE_LEVEL` | Point-in-time SoC (EV/battery) sampled at each obligation interval end | ✅ implemented |
 | `OPERATING_STATE` | Derived from sample freshness (`reporter.rs::operating_state`: fresh ≤ 120 s → ACTIVE, stale → UNAVAILABLE) — site-level mirror of the `DeviceResponsiveness` vocabulary | ✅ implemented |
-| `IMPORT_RESERVATION_CAPACITY` / `EXPORT_RESERVATION_CAPACITY` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
+| `IMPORT_RESERVATION_CAPACITY` / `EXPORT_RESERVATION_CAPACITY` | Live `SiteFlexibilityEnvelope` up/down kW, declared `KW`. Whether these arms read the right envelope field at all is open — see R-76 | ✅ implemented |
 | `DEMAND` | — | ❌ not built |
 | `USAGE_FORECAST` | Plan-slot forecasts served at their native slot boundaries, descriptor-driven via the obligation machinery; `reportDescriptor.historical: false` on any usage-family payload also requests the forecast path | ✅ implemented |
 | `BASELINE` (WP5.4) | The event-blind heuristic forecast (`AssetHeuristics::sample_kw`, summed across assets) sampled on the obligation's interval grid — the counterfactual "what if no event" value, submitted alongside `USAGE` so `experiments/kpi.py`'s `event_impact_kwh` can quantify an event's actual impact. Each interval carries a `DATA_QUALITY` payload tagged `"HEURISTIC"` (the forecast's provenance, not a computed confidence score — see `docs/history/project_journal.md`'s WP5.4 entry for the design rationale) | ✅ implemented |
