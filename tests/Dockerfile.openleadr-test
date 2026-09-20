@@ -13,7 +13,11 @@
 # version its own vtn.Dockerfile uses, so the test image and the shipped image
 # do not compile the submodule with different compilers.
 FROM rust:1.94-alpine
-RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
+# cmake is not optional from 3.1 on: `paho-mqtt-sys` cmake-builds the bundled
+# Paho C library, and without it the build script exits 101 after the whole
+# dependency tree has compiled -- a ~20 minute wait for a missing package.
+# openleadr-rs's own vtn.Dockerfile installs the same set.
+RUN apk add --no-cache alpine-sdk cmake g++ make openssl-dev openssl-libs-static
 WORKDIR /app
 COPY . .
 ENV SQLX_OFFLINE=true
