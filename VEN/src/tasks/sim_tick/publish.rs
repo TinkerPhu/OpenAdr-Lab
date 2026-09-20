@@ -160,21 +160,15 @@ mod tests {
 
     fn active_event() -> OadrEvent {
         OadrEvent {
-            id: "evt-1".to_string(),
-            programID: "prog-1".to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
                 payloads: vec![OadrPayload {
                     r#type: "SIMPLE".to_string(),
                     values: vec![],
                 }],
+                ..Default::default()
             }],
-            reportDescriptors: None,
+            ..OadrEvent::test_event("evt-1", "prog-1")
         }
     }
 

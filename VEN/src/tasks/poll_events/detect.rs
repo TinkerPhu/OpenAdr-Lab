@@ -153,6 +153,7 @@ mod event_poll_tests {
             "programID": "test-program",
             "eventName": name,
             "intervals": [{
+                "id": 0,
                 "payloads": [{"type": signal_type, "values": [value]}]
             }]
         }))
@@ -235,6 +236,7 @@ mod event_poll_tests {
             "programID": "prog",
             "eventName": "Price Event",
             "intervals": [{
+                "id": 0,
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "PRICE", "values": [0.25]}]
             }]
@@ -262,6 +264,7 @@ mod event_poll_tests {
             "programID": "prog",
             "eventName": "Capacity Event",
             "intervals": [{
+                "id": 0,
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]
             }]

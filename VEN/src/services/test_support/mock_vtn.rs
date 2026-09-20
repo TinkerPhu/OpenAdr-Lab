@@ -129,7 +129,6 @@ mod tests {
     async fn test_mock_vtn_records_submitted_report() {
         let mock = MockVtn::new();
         let body = OadrReportBody {
-            programID: "prog-1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
             reportName: Some("ven-status".to_string()),
@@ -147,7 +146,6 @@ mod tests {
     async fn test_mock_vtn_returns_configured_error() {
         let mock = MockVtn::new().with_upsert_error("vtn unavailable");
         let body = OadrReportBody {
-            programID: "prog-1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
             reportName: Some("test".to_string()),
@@ -162,7 +160,6 @@ mod tests {
     async fn mock_vtn_returns_configured_status_error_downcastable() {
         let mock = MockVtn::new().with_upsert_error_status(StatusCode::NOT_FOUND, "gone");
         let body = OadrReportBody {
-            programID: "prog-1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
             reportName: Some("test".to_string()),
@@ -177,17 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_vtn_returns_configured_events() {
-        let event = OadrEvent {
-            id: "e1".into(),
-            programID: "p1".into(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
-            intervals: vec![],
-            reportDescriptors: None,
-        };
+        let event = OadrEvent::test_event("e1", "p1");
         let mock = MockVtn::new().with_events(vec![event]);
         let events = mock.fetch_events().await.unwrap().items;
         assert_eq!(events.len(), 1);
