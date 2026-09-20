@@ -1,8 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::controller::event_timing::{timed_intervals, TimedInterval};
-use crate::controller::vtn_port::{OadrEvent, OadrPayload};
+use crate::controller::vtn_port::{OadrEvent, OadrPayload, OadrReportDescriptor};
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
@@ -167,6 +168,50 @@ pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTim
 // Report obligation extraction
 // ---------------------------------------------------------------------------
 
+/// When no interval of the event gives us a span to count in.
+const DEFAULT_REPORT_CADENCE_S: u64 = 3600;
+
+/// How often this descriptor asks for a report, in seconds.
+///
+/// OpenADR 3.1 counts *intervals*, not seconds: `frequency` is "number of
+/// intervals that elapse between reports", `-1` (and absent) meaning "same as
+/// `numIntervals`", and `numIntervals` `-1` meaning every interval of the
+/// event. Reading `frequency` as a second count -- as this did until now --
+/// turned a VTN asking for a report every 4 intervals into one every 4
+/// seconds. That is the `wire-contracts` failure in miniature: a number whose
+/// unit lived only in the reader's head.
+///
+/// The span of one interval comes from `event_timing`, the one place that
+/// decides when an interval runs.
+fn report_cadence_secs(event: &OadrEvent, d: &OadrReportDescriptor) -> u64 {
+    let intervals = timed_intervals(event);
+    let Some(first) = intervals.first().filter(|i| i.is_bounded()) else {
+        // A conformant peer may leave an event's timing open; say so rather
+        // than pretend we derived a cadence (`wire-contracts`: accept
+        // explicitly, and surface the default you applied).
+        debug!(
+            event_id = %event.id,
+            payload_type = %d.payloadType,
+            default_s = DEFAULT_REPORT_CADENCE_S,
+            "event declares no bounded interval; applying the profile default report cadence"
+        );
+        return DEFAULT_REPORT_CADENCE_S;
+    };
+    let span_s = (first.end - first.start).num_seconds().max(1) as u64;
+
+    // `frequency` > 0 counts intervals directly. Otherwise it defers to
+    // `numIntervals`, and `numIntervals` <= 0 means "every interval", i.e. one
+    // report covering the whole declared sequence.
+    let n_intervals = match d.frequency {
+        Some(f) if f > 0 => f as u64,
+        _ => match d.numIntervals {
+            Some(n) if n > 0 => n as u64,
+            _ => intervals.len().max(1) as u64,
+        },
+    };
+    span_s.saturating_mul(n_intervals)
+}
+
 /// Extract report obligations from event reportDescriptors.
 /// Deduplicates by (event_id, payload_type).
 pub fn extract_report_obligations(
@@ -206,12 +251,7 @@ pub fn extract_report_obligations(
                 .unwrap_or("DIRECT_READ")
                 .to_string();
 
-            // interval duration: from descriptor.frequency (seconds) or default 3600
-            let interval_duration_s: u64 = descriptor
-                .frequency
-                .filter(|&f| f > 0)
-                .map(|f| f as u64)
-                .unwrap_or(3600);
+            let interval_duration_s = report_cadence_secs(event, descriptor);
 
             let due_at = now + Duration::seconds(interval_duration_s as i64);
 
@@ -1577,26 +1617,80 @@ mod tests {
         assert!(obligations.is_empty());
     }
 
+    /// Four 15-minute intervals; the VTN asks for a report every 2 of them.
+    ///
+    /// This previously read `frequency` as a *second* count, so "every 2
+    /// intervals" became "every 2 seconds" -- a VEN hammering the VTN roughly
+    /// 900x more often than asked. 3.1 defines the field as a number of
+    /// intervals ("-1 indicates same as numIntervals").
     #[test]
-    fn test_extract_report_obligations_frequency_field() {
-        let events = json!([
-            {
-                "id": "evt-1",
-                "programID": "prog-1",
-                "reportDescriptors": [
-                    {"payloadType": "USAGE", "readingType": "DIRECT_READ", "frequency": 900}
-                ],
-                "intervals": []
-            }
-        ]);
+    fn report_cadence_counts_intervals_not_seconds() {
+        let events = quarter_hourly_event(json!({
+            "payloadType": "USAGE", "readingType": "DIRECT_READ", "frequency": 2
+        }));
         let now = Utc::now();
-        let obligations = extract_report_obligations(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-            &[],
-        );
+        let obligations = extract_report_obligations(&events, now, &[]);
         assert_eq!(obligations.len(), 1);
-        assert_eq!(obligations[0].interval_duration_s, 900);
-        assert_eq!(obligations[0].due_at, now + Duration::seconds(900));
+        assert_eq!(
+            obligations[0].interval_duration_s, 1800,
+            "2 intervals x PT15M = 1800s, not 2s"
+        );
+        assert_eq!(obligations[0].due_at, now + Duration::seconds(1800));
+    }
+
+    /// Absent `frequency` defers to `numIntervals`.
+    #[test]
+    fn report_cadence_without_frequency_uses_num_intervals() {
+        let events = quarter_hourly_event(json!({
+            "payloadType": "USAGE", "numIntervals": 3
+        }));
+        let obligations = extract_report_obligations(&events, Utc::now(), &[]);
+        assert_eq!(obligations[0].interval_duration_s, 2700);
+    }
+
+    /// Neither declared: one report covering every interval the event lists.
+    #[test]
+    fn report_cadence_defaults_to_the_whole_declared_sequence() {
+        let events = quarter_hourly_event(json!({"payloadType": "USAGE"}));
+        let obligations = extract_report_obligations(&events, Utc::now(), &[]);
+        assert_eq!(obligations[0].interval_duration_s, 3600, "4 x PT15M");
+    }
+
+    /// An event with no bounded interval gives nothing to count, so the
+    /// documented profile default applies -- and is logged as applied.
+    #[test]
+    fn report_cadence_falls_back_when_the_event_declares_no_timing() {
+        let events = json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "reportDescriptors": [{"payloadType": "USAGE", "frequency": 2}],
+            "intervals": []
+        }]);
+        let events = serde_json::from_value::<Vec<OadrEvent>>(events).unwrap();
+        let obligations = extract_report_obligations(&events, Utc::now(), &[]);
+        assert_eq!(obligations[0].interval_duration_s, 3600);
+    }
+
+    /// Four contiguous PT15M intervals starting at a fixed instant.
+    fn quarter_hourly_event(descriptor: serde_json::Value) -> Vec<OadrEvent> {
+        let intervals: Vec<_> = (0..4)
+            .map(|i| {
+                json!({
+                    "id": i,
+                    "intervalPeriod": {
+                        "start": format!("2026-01-01T0{}:{}:00Z", i / 4, (i % 4) * 15),
+                        "duration": "PT15M"
+                    },
+                    "payloads": [{"type": "USAGE", "values": [1.0]}]
+                })
+            })
+            .collect();
+        serde_json::from_value(json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "reportDescriptors": [descriptor],
+            "intervals": intervals
+        }]))
+        .unwrap()
     }
 }

@@ -757,7 +757,6 @@ mod tests {
 
     fn report_body(report_name: Option<&str>) -> crate::controller::vtn_port::OadrReportBody {
         crate::controller::vtn_port::OadrReportBody {
-            programID: "prog-1".into(),
             eventID: Some("evt-1".into()),
             clientName: "test-ven".into(),
             reportName: report_name.map(str::to_string),

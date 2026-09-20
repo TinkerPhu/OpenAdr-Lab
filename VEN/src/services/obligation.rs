@@ -441,7 +441,6 @@ mod tests {
         use crate::controller::vtn_port::OadrReportBody;
         let vtn = MockVtn::new().with_upsert_error("network error");
         let body = OadrReportBody {
-            programID: "p1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
             reportName: Some("x".to_string()),

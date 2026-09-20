@@ -39,10 +39,10 @@ pub(crate) fn build_forecast_intervals(
                     let slot_s = (slot.end - slot.start).num_seconds().max(0) as u64;
                     OadrReportInterval {
                         id: i,
-                        intervalPeriod: Some(OadrIntervalPeriod {
-                            start: Some(slot.start.to_rfc3339()),
-                            duration: Some(format_iso8601_duration(slot_s)),
-                        }),
+                        intervalPeriod: Some(OadrIntervalPeriod::window(
+                            slot.start,
+                            format_iso8601_duration(slot_s),
+                        )),
                         payloads: vec![OadrReportPayload {
                             r#type: payload_type.to_string(),
                             values: vec![serde_json::Value::from(net_w)],
@@ -99,10 +99,7 @@ pub(crate) fn build_capacity_forecast_intervals(
             };
             OadrReportInterval {
                 id: i,
-                intervalPeriod: Some(OadrIntervalPeriod {
-                    start: Some(start.to_rfc3339()),
-                    duration: Some(duration_iso),
-                }),
+                intervalPeriod: Some(OadrIntervalPeriod::window(start, duration_iso)),
                 payloads: vec![OadrReportPayload {
                     r#type: payload_type.to_string(),
                     values: vec![serde_json::Value::from(magnitude_kw * 1000.0)],
@@ -181,10 +178,7 @@ pub(crate) fn build_baseline_report_intervals(
             let baseline_kw: f64 = heuristics.values().map(|h| h.sample_kw(ts)).sum();
             OadrReportInterval {
                 id: i,
-                intervalPeriod: Some(OadrIntervalPeriod {
-                    start: Some(ts.to_rfc3339()),
-                    duration: Some(duration_iso.to_string()),
-                }),
+                intervalPeriod: Some(OadrIntervalPeriod::window(ts, duration_iso)),
                 payloads: vec![
                     OadrReportPayload {
                         r#type: "BASELINE".to_string(),
@@ -256,10 +250,7 @@ pub(crate) fn build_soc_intervals(
 
             OadrReportInterval {
                 id: i,
-                intervalPeriod: Some(OadrIntervalPeriod {
-                    start: Some(ts.to_rfc3339()),
-                    duration: Some(duration_iso.to_string()),
-                }),
+                intervalPeriod: Some(OadrIntervalPeriod::window(*ts, duration_iso)),
                 payloads: vec![
                     OadrReportPayload {
                         r#type: "STORAGE_CHARGE_LEVEL".to_string(),

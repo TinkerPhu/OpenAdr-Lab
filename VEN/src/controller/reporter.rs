@@ -95,7 +95,6 @@ pub fn build_measurement_report(
     now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
     let event_id = &event.id;
-    let program_id = &event.programID;
     let op_state = operating_state(asset_samples, now);
 
     let report_name = format!("auto-{}-{}", ven_name, event_id);
@@ -146,7 +145,6 @@ pub fn build_measurement_report(
     }
 
     let report = OadrReportBody {
-        programID: program_id.clone(),
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
@@ -249,7 +247,8 @@ pub fn build_measurement_report_for_obligation(
     now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
     let op_state = operating_state(asset_samples, now);
-    let program_id = obligation.program_id.as_deref()?;
+    // 3.1 reports carry no programID, so an obligation without one is no longer
+    // a reason to skip building the report -- this used to `?`-return here.
     let event_id = &obligation.event_id;
 
     let report_name = format!("ob-{}-{}-{}", ven_name, event_id, obligation.payload_type);
@@ -365,6 +364,7 @@ pub fn build_measurement_report_for_obligation(
                         intervalPeriod: Some(OadrIntervalPeriod {
                             start: Some(ts.to_rfc3339()),
                             duration: Some(duration_iso.clone()),
+                            ..Default::default()
                         }),
                         payloads: vec![
                             OadrReportPayload {
@@ -388,7 +388,6 @@ pub fn build_measurement_report_for_obligation(
 
     let interval_count = intervals.len();
     let report = OadrReportBody {
-        programID: program_id.to_string(),
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
@@ -826,28 +825,27 @@ mod tests {
     fn measurement_report_fields_match_event() {
         use crate::controller::vtn_port::{OadrInterval, OadrPayload};
         let event = OadrEvent {
-            id: "evt-001".to_string(),
-            programID: "prog-001".to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
                 payloads: vec![OadrPayload {
                     r#type: "USAGE".to_string(),
                     values: vec![],
                 }],
+                ..Default::default()
             }],
-            reportDescriptors: None,
+            ..OadrEvent::test_event("evt-001", "prog-001")
         };
         let asset_samples: HashMap<_, _> =
             [make_samples("site", &[(0, 3.0)])].into_iter().collect();
         let report =
             build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
                 .unwrap();
-        assert_eq!(report.programID, "prog-001");
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("programID"),
+            "3.1 removed programID from reports; eventID is the only object link"
+        );
         assert_eq!(report.eventID.as_deref(), Some("evt-001"));
         assert_eq!(report.clientName, "ven-1");
         assert_eq!(report.reportName.as_deref(), Some("auto-ven-1-evt-001"));
@@ -865,21 +863,15 @@ mod tests {
     fn measurement_report_includes_ev_soc_when_available() {
         use crate::controller::vtn_port::{OadrInterval, OadrPayload};
         let event = OadrEvent {
-            id: "evt-002".to_string(),
-            programID: "prog-001".to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
                 payloads: vec![OadrPayload {
                     r#type: "USAGE".to_string(),
                     values: vec![],
                 }],
+                ..Default::default()
             }],
-            reportDescriptors: None,
+            ..OadrEvent::test_event("evt-002", "prog-001")
         };
         let asset_samples: HashMap<_, _> = [make_ev_samples("ev", &[(0, 7.0, 0.5)])]
             .into_iter()
@@ -912,26 +904,22 @@ mod tests {
     fn active_events_skips_events_with_report_descriptors() {
         use crate::controller::vtn_port::{OadrInterval, OadrPayload, OadrReportDescriptor};
         let event = OadrEvent {
-            id: "evt-003".to_string(),
-            programID: "prog-001".to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
                 payloads: vec![OadrPayload {
                     r#type: "USAGE".to_string(),
                     values: vec![],
                 }],
+                ..Default::default()
             }],
             reportDescriptors: Some(vec![OadrReportDescriptor {
                 payloadType: "USAGE".to_string(),
                 readingType: None,
                 frequency: Some(900),
                 historical: None,
+                ..Default::default()
             }]),
+            ..OadrEvent::test_event("evt-003", "prog-001")
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let reports = build_measurement_reports_for_active_events(
@@ -954,21 +942,15 @@ mod tests {
     fn build_measurement_report_domain_only() {
         use crate::controller::vtn_port::{OadrInterval, OadrPayload};
         let event = OadrEvent {
-            id: "evt-sc004".to_string(),
-            programID: "prog-001".to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
                 payloads: vec![OadrPayload {
                     r#type: "USAGE".to_string(),
                     values: vec![],
                 }],
+                ..Default::default()
             }],
-            reportDescriptors: None,
+            ..OadrEvent::test_event("evt-sc004", "prog-001")
         };
         let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 1.0), (60, 3.0)])]
             .into_iter()
@@ -977,7 +959,12 @@ mod tests {
             build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now());
         assert!(report.is_some(), "expected Some(report)");
         let report = report.unwrap();
-        assert_eq!(report.programID, "prog-001");
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("programID"),
+            "3.1 removed programID from reports; eventID is the only object link"
+        );
         assert_eq!(report.clientName, "ven-1");
         let usage = report.resources[0].intervals[0]
             .payloads
