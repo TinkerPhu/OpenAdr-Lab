@@ -85,7 +85,7 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
                     .payloads
                     .iter()
                     .filter(|p| payload_types.contains(&p.r#type.as_str()))
-                    .filter_map(|p| Some((p.r#type.clone(), p.values.first()?.as_f64()?)))
+                    .filter_map(|p| Some((p.r#type.clone(), p.numeric()?)))
                     .collect();
                 (t, payloads)
             })

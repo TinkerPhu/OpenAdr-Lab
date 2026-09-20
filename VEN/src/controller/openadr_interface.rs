@@ -34,7 +34,7 @@ pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCap
             .flat_map(|e| &e.intervals)
             .flat_map(|i| &i.payloads)
             .filter(|p| p.r#type == payload_type)
-            .filter_map(|p| p.values.first()?.as_f64())
+            .filter_map(|p| p.numeric())
             .reduce(f64::min)
     };
     let found_any = [
@@ -142,7 +142,7 @@ pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
     timed_payloads(events, &["DISPATCH_SETPOINT"])
         .filter_map(|(event, timed, payload)| {
             Some(DispatchWindow {
-                setpoint_kw: payload.values.first()?.as_f64()?,
+                setpoint_kw: payload.numeric()?,
                 start: timed.start,
                 end: timed.end,
                 event_id: event.id.clone(),
@@ -156,7 +156,7 @@ pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
 /// results are dropped.
 pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTime<Utc>, String)> {
     timed_payloads(events, &["CHARGE_STATE_SETPOINT"]).find_map(|(event, timed, payload)| {
-        let raw = payload.values.first()?.as_f64()?;
+        let raw = payload.numeric()?;
         let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
         (0.0..=1.0)
             .contains(&target_soc)
