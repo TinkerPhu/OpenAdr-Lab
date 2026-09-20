@@ -25,6 +25,22 @@ pub(crate) fn samples_to_power_ts(
 /// Planned net site power per future plan slot at the plan's native slot
 /// boundaries, payload-typed as `payload_type`. Empty when no plan is adopted
 /// yet (caller re-arms and retries next cycle).
+/// One forecast value, expressed in whatever quantity `payload_type` carries.
+///
+/// Plan slots are power; a payload type the contract calls energy is
+/// integrated over the slot, one the contract calls power is stated as-is.
+/// Anything else falls back to energy, which is what the usage family -- the
+/// overwhelmingly common forecast request -- wants, and is logged by
+/// `descriptors_for` as undeclared so it cannot pass unnoticed.
+fn forecast_payload(payload_type: &str, net_kw: f64, slot_s: u64) -> OadrReportPayload {
+    match crate::controller::report_payload::quantity_of(payload_type) {
+        Some(crate::controller::report_payload::Quantity::PowerKw) => {
+            OadrReportPayload::power_kw(payload_type, net_kw)
+        }
+        _ => OadrReportPayload::energy_from_power_kw(payload_type, net_kw, slot_s),
+    }
+}
+
 pub(crate) fn build_forecast_intervals(
     active_plan: Option<&Plan>,
     payload_type: &str,
@@ -43,11 +59,12 @@ pub(crate) fn build_forecast_intervals(
                             slot.start,
                             format_iso8601_duration(slot_s),
                         )),
-                        payloads: vec![OadrReportPayload::energy_from_power_kw(
-                            payload_type,
-                            net_kw,
-                            slot_s,
-                        )],
+                        // A forecast is served for whatever payload type the
+                        // VTN asked about, so the quantity comes from the
+                        // contract rather than from an assumption that every
+                        // forecast is energy: `historical: false` on a
+                        // reservation-capacity request asks for a power.
+                        payloads: vec![forecast_payload(payload_type, net_kw, slot_s)],
                     }
                 })
                 .collect()

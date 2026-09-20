@@ -126,9 +126,11 @@ impl OadrReportPayload {
     /// the contract. A mismatch is a bug in this crate, not a peer's doing, so
     /// it fails the test suite rather than being silently corrected.
     fn checked(payload_type: &str, q: Quantity, value: serde_json::Value) -> Self {
-        debug_assert_eq!(
-            quantity_of(payload_type),
-            Some(q),
+        // Only a type the contract has an opinion about can be got wrong. For
+        // one it has not decided on there is nothing to check against, and
+        // `descriptors_for` reports it as undeclared rather than guessing.
+        debug_assert!(
+            quantity_of(payload_type).is_none_or(|known| known == q),
             "payload type {payload_type} is not a {q:?} — see controller::report_payload"
         );
         Self {
