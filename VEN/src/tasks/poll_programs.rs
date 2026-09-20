@@ -22,15 +22,26 @@ pub(crate) fn spawn_program_poll(
     vtn: Arc<dyn VtnPort>,
     secs: u64,
     startup_delay_s: u64,
+    notifier: crate::services::notify::Notifier,
 ) -> tokio::task::JoinHandle<()> {
     let backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
     spawn_backoff_poll(startup_delay_s, backoff, move |backoff| {
         let state = state.clone();
         let vtn = vtn.clone();
+        let notifier = notifier.clone();
         Box::pin(async move {
             match vtn.fetch_programs().await {
-                Ok(programs) => {
+                Ok(outcome) => {
                     counter!("poll_success_total", "resource" => "programs").increment(1);
+                    crate::services::notify::notify_wire_rejections(
+                        &notifier,
+                        &state,
+                        chrono::Utc::now(),
+                        "programs",
+                        &outcome,
+                    )
+                    .await;
+                    let programs = outcome.items;
                     info!(
                         resource = "programs",
                         count = programs.len(),

@@ -26,9 +26,11 @@ mod flexibility_history;
 mod grid_signals;
 mod heuristics;
 mod obligations;
+mod openadr_objects;
 mod report_submissions;
 mod site_headroom_forecast;
 mod task_status;
+mod wire_health;
 
 pub use arbiter::ArbiterDiagnostics;
 pub use connection::VtnConnectionStatus;
@@ -147,6 +149,9 @@ pub struct AppState {
     /// WP-T1: VTN reachability, written by `tasks::poll_events`, read by
     /// `GET /health` and `GET /vtn/status`.
     pub vtn_connection: Arc<RwLock<VtnConnectionStatus>>,
+    /// Objects the VTN sent that we refused, keyed by resource. See
+    /// `state/wire_health.rs`.
+    pub wire_rejections: Arc<RwLock<std::collections::BTreeMap<String, String>>>,
     /// WP-T1: whether the last state-persist write succeeded, written by
     /// `tasks::state_persist`, read by `GET /health`.
     pub storage_ok: Arc<RwLock<bool>>,
@@ -209,6 +214,7 @@ impl AppState {
             ))),
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
+            wire_rejections: Arc::new(RwLock::new(std::collections::BTreeMap::new())),
             storage_ok: Arc::new(RwLock::new(true)),
             task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
             event_log: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
@@ -290,37 +296,12 @@ impl AppState {
             .collect()
     }
 
-    pub async fn set_programs(&self, programs: Vec<OadrProgram>) {
-        self.polling.write().await.programs = programs;
-    }
-
-    pub async fn set_events(&self, mut events: Vec<OadrEvent>, max_keep: usize) {
-        events.truncate(max_keep);
-        self.polling.write().await.events = events;
-    }
-
-    pub async fn set_reports(&self, reports: Vec<OadrReport>) {
-        self.polling.write().await.reports = reports;
-    }
-
     pub async fn update_sensor(&self, sensor: SensorSnapshot) {
         self.ctrl_sim.write().await.sensor = sensor;
     }
 
     pub async fn update_sim(&self, sim: SimSnapshot) {
         self.ctrl_sim.write().await.sim = Some(sim);
-    }
-
-    pub async fn programs(&self) -> Vec<OadrProgram> {
-        self.polling.read().await.programs.clone()
-    }
-
-    pub async fn events(&self) -> Vec<OadrEvent> {
-        self.polling.read().await.events.clone()
-    }
-
-    pub async fn reports(&self) -> Vec<OadrReport> {
-        self.polling.read().await.reports.clone()
     }
 
     pub async fn sensor(&self) -> SensorSnapshot {

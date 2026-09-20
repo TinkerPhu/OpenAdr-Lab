@@ -222,8 +222,9 @@ async fn main() -> anyhow::Result<()> {
     .round() as u64;
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), resolved_poll.programs_secs);
+        let n = notifier.clone();
         tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, state.clone(), move || {
-            tasks::spawn_program_poll(s.clone(), v.clone(), secs, poll_jitter_s)
+            tasks::spawn_program_poll(s.clone(), v.clone(), secs, poll_jitter_s, n.clone())
         });
     }
     {
@@ -249,8 +250,9 @@ async fn main() -> anyhow::Result<()> {
     }
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), resolved_poll.reports_secs);
+        let n = notifier.clone();
         tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, state.clone(), move || {
-            tasks::spawn_report_poll(s.clone(), v.clone(), secs, poll_jitter_s)
+            tasks::spawn_report_poll(s.clone(), v.clone(), secs, poll_jitter_s, n.clone())
         });
     }
 
