@@ -53,6 +53,24 @@ wait_for_load_to_settle() {
   done
 }
 
+# Structural gate before the expensive passes. `--dry-run` resolves every step
+# in every feature without touching the stack, so an undefined or misspelled
+# step is reported in seconds instead of forty minutes into a run -- and an
+# overlapping step pattern (behave resolves those by registration order rather
+# than erroring) shows up as the wrong definition being bound.
+echo "=== Resolving step definitions (dry run) ==="
+if ! python -m behave --dry-run --format null --no-summary > /tmp/dryrun.out 2>&1; then
+  echo "step definitions do not resolve — not starting the suite:"
+  tail -30 /tmp/dryrun.out
+  exit 1
+fi
+if grep -qiE "undefined|ambiguous" /tmp/dryrun.out; then
+  echo "undefined or ambiguous steps — not starting the suite:"
+  grep -iE "undefined|ambiguous" /tmp/dryrun.out | head -20
+  exit 1
+fi
+echo "  OK — every step resolves"
+
 wait_for_load_to_settle "main pass"
 
 # Run main suite first, excluding timing-sensitive @isolated scenarios.
