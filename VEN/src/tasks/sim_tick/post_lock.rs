@@ -35,6 +35,7 @@ pub(crate) async fn clear_inject_fields(
 pub(crate) async fn maybe_run_measurement_reports(
     mut report_counter: u64,
     report_every_ticks: u64,
+    tick_s: u64,
     state: &AppState,
     sim_snap: &SimSnapshot,
     vtn: &dyn VtnPort,
@@ -48,7 +49,20 @@ pub(crate) async fn maybe_run_measurement_reports(
     report_counter += 1;
     if report_counter >= report_every_ticks {
         report_counter = 0;
-        super::publish::run_measurement_reports(state, sim_snap, vtn, ven_name, now, history).await;
+        // The window this report covers: one reporting cadence. The timer
+        // path holds a single point-in-time snapshot, so it has no sample span
+        // of its own -- without this it could state no energy at all.
+        let report_interval_s = report_every_ticks.saturating_mul(tick_s).max(1);
+        super::publish::run_measurement_reports(
+            state,
+            sim_snap,
+            vtn,
+            ven_name,
+            now,
+            report_interval_s,
+            history,
+        )
+        .await;
     }
     report_counter
 }
@@ -78,6 +92,7 @@ pub(crate) async fn maybe_persist_sim_state(
 pub(crate) async fn run_periodic_reports_and_persist(
     report_counter: u64,
     report_every_ticks: u64,
+    tick_s: u64,
     persist_counter: u64,
     persist_every_ticks: u64,
     state: &AppState,
@@ -93,6 +108,7 @@ pub(crate) async fn run_periodic_reports_and_persist(
         maybe_run_measurement_reports(
             report_counter,
             report_every_ticks,
+            tick_s,
             state,
             sim_snap,
             vtn,

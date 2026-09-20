@@ -199,6 +199,7 @@ pub(crate) async fn tick_once(
     super::post_lock::run_periodic_reports_and_persist(
         report_counter,
         report_every_ticks,
+        tick_s,
         persist_counter,
         persist_every_ticks,
         &state,

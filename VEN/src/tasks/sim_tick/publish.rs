@@ -99,6 +99,7 @@ pub(crate) async fn run_measurement_reports(
     vtn: &dyn VtnPort,
     ven_name: &str,
     now: DateTime<Utc>,
+    report_interval_s: u64,
     history: Option<Arc<dyn HistoryPort>>,
 ) {
     use crate::controller::reporter::AssetReportSample;
@@ -123,6 +124,7 @@ pub(crate) async fn run_measurement_reports(
     let reports = controller::reporter::build_measurement_reports_for_active_events(
         &events,
         &asset_samples,
+        report_interval_s,
         grid_net_import_kw,
         grid_net_export_kw,
         ven_name,
@@ -201,6 +203,7 @@ mod tests {
             &vtn,
             "ven-1",
             now,
+            60,
             Some(history.clone()),
         )
         .await;
@@ -225,7 +228,7 @@ mod tests {
         let vtn = MockVtn::new();
         let now = Utc::now();
 
-        run_measurement_reports(&state, &empty_sim_snap(now), &vtn, "ven-1", now, None).await;
+        run_measurement_reports(&state, &empty_sim_snap(now), &vtn, "ven-1", now, 60, None).await;
 
         assert_eq!(
             vtn.submitted().len(),

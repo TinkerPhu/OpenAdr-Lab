@@ -86,28 +86,10 @@ fn operating_state(
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV samples are available.
 ///
 /// Returns None if the event has no id or programID.
-/// The window a timer-driven report covers: the span of the samples it is built
-/// from, clipped to `now`.
-///
-/// Deliberately the *samples'* span rather than "earliest sample until now":
-/// stale samples would otherwise stretch the window to hours of wall clock the
-/// VEN has no measurements for, and the energy stated over it would be
-/// invented. `None` when the samples give no span -- a single reading is a
-/// power, and there is no honest way to state it as energy.
-fn report_window(
-    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
-    now: DateTime<Utc>,
-) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
-    let mut times = asset_samples.values().flat_map(|v| v.iter()).map(|s| s.ts);
-    let first = times.next()?;
-    let (start, end) = times.fold((first, first), |(lo, hi), t| (lo.min(t), hi.max(t)));
-    let end = end.min(now);
-    (start < end).then_some((start, end))
-}
-
 pub fn build_measurement_report(
     event: &OadrEvent,
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    report_interval_s: u64,
     grid_net_import_kw: f64,
     grid_net_export_kw: f64,
     ven_name: &str,
@@ -134,9 +116,18 @@ pub fn build_measurement_report(
 
     // The window this report covers, which is what makes its value expressible:
     // `USAGE` is energy *over an interval* (spec, payload type table), so
-    // without a window there is no energy to state. Derived from the samples we
-    // actually hold rather than assumed.
-    let window = report_window(asset_samples, now);
+    // without a window there is no energy to state.
+    //
+    // It is the *reporting cadence*, not a span across the samples: this path
+    // holds one point-in-time snapshot per asset, so there is no sample span to
+    // measure, and deriving the window from the samples meant every report
+    // omitted USAGE entirely (found on ven-1 during the staged roll). The
+    // snapshot's power is taken as the mean across the interval, which is the
+    // best this path can claim; the obligation path does a real time-weighted
+    // mean, and R-85 has the timer path retired once the standing monitoring
+    // event exists.
+    let window =
+        (report_interval_s > 0).then(|| (now - Duration::seconds(report_interval_s as i64), now));
 
     let mut payloads = vec![OadrReportPayload::state("OPERATING_STATE", op_state)];
     if payload_type == "SIMPLE" {
@@ -206,6 +197,7 @@ pub fn build_measurement_report(
 pub fn build_measurement_reports_for_active_events(
     events: &[OadrEvent],
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    report_interval_s: u64,
     grid_net_import_kw: f64,
     grid_net_export_kw: f64,
     ven_name: &str,
@@ -235,6 +227,7 @@ pub fn build_measurement_reports_for_active_events(
             if let Some(report) = build_measurement_report(
                 event,
                 asset_samples,
+                report_interval_s,
                 grid_net_import_kw,
                 grid_net_export_kw,
                 ven_name,
@@ -864,7 +857,7 @@ mod tests {
             .into_iter()
             .collect();
         let report =
-            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
+            build_measurement_report(&event, &asset_samples, 60, 3.0, 0.0, "ven-1", Utc::now())
                 .unwrap();
         assert!(
             !serde_json::to_string(&report)
@@ -890,11 +883,12 @@ mod tests {
         assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
     }
 
-    /// A single reading is an instantaneous power. `USAGE` is energy over an
-    /// interval, so with no window the VEN omits the payload rather than
-    /// sending a power value under an energy payload type.
+    /// A zero-length window carries no energy. Reporting `0 kWh` for it would
+    /// state a measurement that was never taken -- indistinguishable, to the
+    /// VTN, from a site that genuinely drew nothing -- so the payload is
+    /// omitted and logged instead.
     #[test]
-    fn measurement_report_omits_usage_when_there_is_no_measurement_window() {
+    fn measurement_report_omits_usage_when_the_window_is_zero_length() {
         use crate::controller::vtn_port::{OadrInterval, OadrPayload};
         let event = OadrEvent {
             intervals: vec![OadrInterval {
@@ -909,7 +903,7 @@ mod tests {
         let asset_samples: HashMap<_, _> =
             [make_samples("site", &[(0, 3.0)])].into_iter().collect();
         let report =
-            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
+            build_measurement_report(&event, &asset_samples, 0, 3.0, 0.0, "ven-1", Utc::now())
                 .unwrap();
         let iv = &report.resources[0].intervals[0];
         assert!(
@@ -938,7 +932,7 @@ mod tests {
             .into_iter()
             .collect();
         let report =
-            build_measurement_report(&event, &asset_samples, 0.0, 0.0, "ven-1", Utc::now())
+            build_measurement_report(&event, &asset_samples, 60, 0.0, 0.0, "ven-1", Utc::now())
                 .unwrap();
         let iv = &report.resources[0].intervals[0];
         let soc_payload = iv
@@ -956,8 +950,15 @@ mod tests {
     #[test]
     fn active_events_returns_empty_for_no_events() {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let reports =
-            build_measurement_reports_for_active_events(&[], &empty, 0.0, 0.0, "ven-1", Utc::now());
+        let reports = build_measurement_reports_for_active_events(
+            &[],
+            &empty,
+            60,
+            0.0,
+            0.0,
+            "ven-1",
+            Utc::now(),
+        );
         assert!(reports.is_empty());
     }
 
@@ -986,6 +987,7 @@ mod tests {
         let reports = build_measurement_reports_for_active_events(
             &[event],
             &empty,
+            60,
             0.0,
             0.0,
             "ven-1",
@@ -1017,7 +1019,7 @@ mod tests {
             .into_iter()
             .collect();
         let report =
-            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now());
+            build_measurement_report(&event, &asset_samples, 60, 3.0, 0.0, "ven-1", Utc::now());
         assert!(report.is_some(), "expected Some(report)");
         let report = report.unwrap();
         assert!(
