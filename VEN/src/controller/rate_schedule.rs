@@ -8,7 +8,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::vtn_port::OadrEvent;
+use crate::controller::vtn_port::{EventTypeName, OadrEvent, PayloadValues};
 use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -62,17 +62,17 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
     // Each event's position in this order is its rank in `resolve_segments`.
     let mut ordered: Vec<&OadrEvent> = events.iter().collect();
     ordered.sort_by(|a, b| {
-        let pa = a.priority.unwrap_or(i64::MAX);
-        let pb = b.priority.unwrap_or(i64::MAX);
-        pb.cmp(&pa).then_with(|| {
-            let created = |e: &OadrEvent| {
-                e.createdDateTime
-                    .as_deref()
-                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                    .unwrap_or(DateTime::<Utc>::MIN_UTC)
-            };
-            created(a).cmp(&created(b))
-        })
+        // Plain ascending on `Priority`, which already *is* this ordering:
+        // its `Ord` puts `UNSPECIFIED` below every number and reverses the
+        // rest, so ascending gives "lowest priority first, highest last".
+        // This used to be `unwrap_or(i64::MAX)` then `pb.cmp(&pa)`; carrying
+        // that shape across would have silently inverted BL-02.
+        a.content
+            .priority
+            .cmp(&b.content.priority)
+            // `createdDateTime` is required on the wire, so there is no
+            // absent-value default to pick here any more.
+            .then_with(|| a.created_date_time.cmp(&b.created_date_time))
     });
 
     for (rank, event) in ordered.into_iter().enumerate() {
@@ -84,8 +84,13 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
                     .interval
                     .payloads
                     .iter()
-                    .filter(|p| payload_types.contains(&p.r#type.as_str()))
-                    .filter_map(|p| Some((p.r#type.clone(), p.numeric()?)))
+                    .filter_map(|p| {
+                        let name = p.value_type.wire_name();
+                        payload_types
+                            .contains(&name.as_str())
+                            .then(|| Some((name, p.numeric()?)))
+                            .flatten()
+                    })
                     .collect();
                 (t, payloads)
             })
@@ -110,7 +115,7 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
                 start: t.start,
                 end: t.end,
                 rank,
-                event_id: &event.id,
+                event_id: event.id.as_str(),
                 payloads: payloads.clone(),
             });
         }

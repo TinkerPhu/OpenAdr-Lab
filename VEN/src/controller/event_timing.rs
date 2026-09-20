@@ -118,38 +118,46 @@ pub fn timed_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
 /// declares no duration or nothing to anchor it to. Unlike the looping-only
 /// reading, this is returned whether it falls before or after the sequence ends.
 fn event_window_end(event: &OadrEvent, base: &[TimedInterval<'_>]) -> Option<DateTime<Utc>> {
-    let duration = event.duration.as_deref()?;
+    let duration = event.content.duration.as_ref()?;
     let first = base.first()?;
     if !first.is_bounded() {
         return None;
     }
-    let secs = crate::common::parse_iso8601_duration_secs(duration);
+    // A typed duration, so no string to misparse -- and in particular no
+    // `unwrap_or(3600)` for a string that does not start with `P`, which is
+    // what `common::parse_iso8601_duration_secs` did for this until 3.1b.
+    // Months and years are resolved against the interval's own start, which is
+    // the only point at which they have a length.
     first
         .start
-        .checked_add_signed(chrono::Duration::seconds(secs))
+        .checked_add_signed(duration.to_chrono_at_datetime(first.start))
 }
 
 /// The interval list exactly as the event declares it, before any looping.
 fn base_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
-    let parse_start = |s: Option<&str>| s.and_then(|s| s.parse::<DateTime<Utc>>().ok());
-    let event_period = event.intervalPeriod.as_ref();
-    let default_duration = event_period.and_then(|p| p.duration.as_deref());
+    let event_period = event.content.interval_period.as_ref();
+    let default_duration = event_period.and_then(|p| p.duration.as_ref());
     // Where the next interval starts unless it says otherwise.
-    let mut cursor = event_period.and_then(|p| parse_start(p.start.as_deref()));
+    let mut cursor = event_period.map(|p| p.start);
 
     event
+        .content
         .intervals
         .iter()
+        .flatten()
         .map(|interval| {
-            let own = interval.intervalPeriod.as_ref();
-            let start = own.and_then(|p| parse_start(p.start.as_deref())).or(cursor);
-            let duration = own.and_then(|p| p.duration.as_deref()).or(default_duration);
+            let own = interval.interval_period.as_ref();
+            // `start` is non-optional on the wire type, so an interval that
+            // declares a period declares a start -- the `(None, _)` arm below
+            // is now reachable only when *neither* the interval nor the event
+            // declares one at all.
+            let start = own.map(|p| p.start).or(cursor);
+            let duration = own.and_then(|p| p.duration.as_ref()).or(default_duration);
             let (start, end) = match (start, duration) {
                 (None, _) => (OPEN_START, OPEN_END),
                 (Some(start), None) => (start, OPEN_END),
                 (Some(start), Some(d)) => {
-                    let secs = crate::common::parse_iso8601_duration_secs(d);
-                    let end = start.checked_add_signed(chrono::Duration::seconds(secs));
+                    let end = start.checked_add_signed(d.to_chrono_at_datetime(start));
                     (start, end.unwrap_or(OPEN_END))
                 }
             };
@@ -169,8 +177,12 @@ mod tests {
     use chrono::TimeZone;
     use serde_json::json;
 
+    /// Every timing fixture routes through here, so the fields 3.1 requires
+    /// but no timing test is about (`id`, `createdDateTime`,
+    /// `modificationDateTime`, `interval.id`) are filled in one place rather
+    /// than spelled out eighteen times.
     fn event(value: serde_json::Value) -> OadrEvent {
-        serde_json::from_value(value).unwrap()
+        crate::controller::vtn_port::events_from_json(value).remove(0)
     }
 
     fn at(h: u32, m: u32) -> DateTime<Utc> {
@@ -249,7 +261,13 @@ mod tests {
             "id": "dur-only", "programID": "p",
             "intervalPeriod": {"start": "2023-02-10T10:00:00Z", "duration": "PT1H"},
             "intervals": [
-                {"id": 0, "intervalPeriod": {"duration": "PT15M"}, "payloads": []},
+                // The wire `IntervalPeriod` requires `start`, so "own duration,
+                // inherited start" is stated as an interval period that repeats
+                // the cursor's start rather than omitting it. Same meaning, and
+                // the only form this stack can carry -- see R-87.
+                {"id": 0,
+                 "intervalPeriod": {"start": "2023-02-10T10:00:00Z", "duration": "PT15M"},
+                 "payloads": []},
                 {"id": 1, "payloads": []}
             ]
         }));
@@ -281,12 +299,16 @@ mod tests {
         assert!(!t[0].is_bounded());
     }
 
+    /// A duration alone cannot place an interval in time. Since 3.1b the
+    /// *shape* that used to express this -- an `intervalPeriod` carrying a
+    /// duration and no `start` -- cannot be built at all: the wire type makes
+    /// `start` mandatory even though the schema does not (R-87). What remains
+    /// reachable, and what this now pins, is an event with no interval period
+    /// anywhere: nothing to anchor the interval to, so it is open at both ends.
     #[test]
-    fn timed_intervals_untimed_even_with_an_event_duration() {
-        // A duration alone cannot place an interval in time.
+    fn timed_intervals_are_untimed_when_nothing_anchors_them() {
         let e = event(json!({
-            "id": "dur-no-start", "programID": "p",
-            "intervalPeriod": {"duration": "PT1H"},
+            "id": "no-anchor", "programID": "p",
             "intervals": [limit_interval(0, 2.0)]
         }));
         let t = timed_intervals(&e);

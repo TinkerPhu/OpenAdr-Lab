@@ -44,80 +44,22 @@ pub struct OadrProgram {
     pub programName: String,
 }
 
-// ── OadrEvent and nested types ────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct OadrEvent {
-    pub id: String,
-    pub programID: String,
-    #[serde(default)]
-    pub eventName: Option<String>,
-    /// OpenADR 3 priority — lower numbers are higher priority (0 = highest). Optional.
-    #[serde(default)]
-    pub priority: Option<i64>,
-    /// OpenADR 3 event creation timestamp (ISO 8601), used to break priority ties. Optional.
-    #[serde(default)]
-    pub createdDateTime: Option<String>,
-    /// OpenADR 3.1 event-level duration. When it exceeds the sum of the interval
-    /// durations the interval sequence repeats to fill it, and `"P9999Y"` means
-    /// loop indefinitely (User Guide, "Looping intervals"). 3.0 expressed the
-    /// same thing through `intervalPeriod.duration`, which still works.
-    #[serde(default)]
-    pub duration: Option<String>,
-    /// Event-level interval period — used for looping price events (e.g. duration = "P9999Y").
-    #[serde(default)]
-    pub intervalPeriod: Option<OadrIntervalPeriod>,
-    #[serde(default)]
-    pub intervals: Vec<OadrInterval>,
-    #[serde(default)]
-    pub reportDescriptors: Option<Vec<OadrReportDescriptor>>,
-    /// 3.1 targets: a flat list of strings, replacing 3.0's typed objects. The
-    /// VTN filters on these and redacts them per caller, so what arrives here is
-    /// already this VEN's view; it is carried so the UI can show who an event
-    /// addresses. Empty (or absent) means every VEN.
-    #[serde(default)]
-    pub targets: Option<Vec<String>>,
-    /// What the event's payload values mean -- quantity, unit, currency. Under
-    /// `wire-contracts` a value whose unit is only in the reader's head is a
-    /// bug, so this is read rather than assumed.
-    #[serde(default)]
-    pub payloadDescriptors: Option<Vec<OadrEventPayloadDescriptor>>,
-}
-
-/// Declares the meaning of one payload type carried by an event.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct OadrEventPayloadDescriptor {
-    pub payloadType: String,
-    /// Unit of measure, e.g. `"KWH"`, `"KW"`, `"PERCENT"`. Absent means the
-    /// payload type's own definition applies.
-    #[serde(default)]
-    pub units: Option<String>,
-    /// Currency for price payloads, e.g. `"EUR"`.
-    #[serde(default)]
-    pub currency: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct OadrInterval {
-    /// Required by the spec (`interval.required: [id, payloads]`). Carried so
-    /// a report can name the interval it reports on -- dropping it made that
-    /// impossible to express.
-    ///
-    /// `default` despite being required, deliberately: this struct is also how
-    /// the VEN's own persisted state is read back, and state written before
-    /// the field existed has no `id`. Making it mandatory here refused our own
-    /// cache on the first restart after deploy -- applying a rule about what a
-    /// *peer* may send to something we wrote ourselves. Conformance is the
-    /// wire types' job (`openleadr_wire::EventInterval`, exercised today by
-    /// `wire_reject::shadow_parse_events`); this DTO's job is to stop dropping
-    /// the field.
-    #[serde(default)]
-    pub id: i64,
-    #[serde(default)]
-    pub intervalPeriod: Option<OadrIntervalPeriod>,
-    #[serde(default)]
-    pub payloads: Vec<OadrPayload>,
-}
+// ── Event types: the wire crate's, not ours ───────────────────────────────────
+//
+// These were hand-rolled here until 3.1b. The problem with describing a
+// protocol to yourself is that the description silently drops whatever it does
+// not mention -- which is how `event.duration`, `targets`, `payloadDescriptors`
+// and `randomizeStart` all came to be missing at once. A type from the wire
+// crate cannot forget a field, because the field is in the type.
+//
+// Aliased to the old names so call sites keep reading in this project's
+// vocabulary (`dto` rule: upstream field names, one word per concept).
+// `OadrIntervalPeriod` below stays ours: it is the *report* side, which we
+// construct rather than parse.
+pub use openleadr_wire::event::{
+    Event as OadrEvent, EventInterval as OadrInterval, EventType, EventValuesMap as OadrPayload,
+};
+pub use openleadr_wire::values_map::Value as PayloadValue;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct OadrIntervalPeriod {
@@ -154,73 +96,127 @@ impl OadrIntervalPeriod {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct OadrPayload {
-    /// Payload type, e.g. "PRICE", "EXPORT_PRICE", "GHG", "MAX_POWER"
-    pub r#type: String,
-    /// Mixed-type array depending on payload type; internal use only.
-    #[serde(default)]
-    pub values: Vec<serde_json::Value>,
+/// What a payload type is called on the wire.
+///
+/// `EventType` gets its spelling from serde's `SCREAMING_SNAKE_CASE` rename,
+/// so serde is asked for it rather than a second table being maintained beside
+/// it -- the kind of duplicate that drifts silently. The `Private(_)` variant
+/// carries its own string and round-trips unchanged.
+pub trait EventTypeName {
+    fn wire_name(&self) -> String;
 }
 
-impl OadrPayload {
-    /// This payload's first value as a number, when it has one.
-    ///
-    /// The one place a payload value is turned into an `f64`. Four call sites
-    /// each did their own `values.first()?.as_f64()`, which is four places to
-    /// get it wrong when the value type changes -- and it is about to: the
-    /// strict wire types model a payload value as an enum with *separate*
-    /// `Number` and `Integer` variants, and `EventType::Simple`'s declared
-    /// kind is `Integer`. A reader matching only `Number` would silently drop
-    /// every SIMPLE window, which is the failure mode this whole branch keeps
-    /// running into. With one reader, that is one function to change.
-    pub fn numeric(&self) -> Option<f64> {
-        self.values.first()?.as_f64()
+impl EventTypeName for openleadr_wire::report::ReportType {
+    fn wire_name(&self) -> String {
+        wire_name_of(self)
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct OadrReportDescriptor {
-    pub payloadType: String,
-    #[serde(default)]
-    pub readingType: Option<String>,
-    /// Number of *intervals* that elapse between reports -- not seconds.
-    /// `-1` (and absent) means "same as `numIntervals`".
-    #[serde(default)]
-    pub frequency: Option<i64>,
-    /// Number of intervals a single report covers. `-1` (and absent) means
-    /// every interval of the event.
-    #[serde(default)]
-    pub numIntervals: Option<i64>,
-    /// Spec default true (historical data); false requests a forecast.
-    #[serde(default)]
-    pub historical: Option<bool>,
+impl EventTypeName for openleadr_wire::report::ReadingType {
+    fn wire_name(&self) -> String {
+        wire_name_of(self)
+    }
 }
 
-/// A minimal event for tests; set the fields the test is actually about with
-/// `..OadrEvent::test_event(id, program_id)`.
-///
-/// Exists because adding a protocol field the VEN must carry previously meant
-/// editing every fixture by hand -- churn expensive enough that "just add the
-/// field" kept losing to "leave it out", which is how `event.duration` and
-/// `randomizeStart` came to be silently dropped in the first place.
-#[cfg(test)]
-impl OadrEvent {
-    pub fn test_event(id: &str, program_id: &str) -> Self {
-        Self {
-            id: id.to_string(),
-            programID: program_id.to_string(),
-            eventName: None,
-            priority: None,
-            createdDateTime: None,
-            duration: None,
-            intervalPeriod: None,
-            intervals: Vec::new(),
-            reportDescriptors: None,
-            targets: None,
-            payloadDescriptors: None,
+/// Ask serde for a wire spelling, once, for every enum that has one.
+fn wire_name_of<T: serde::Serialize + std::fmt::Debug>(v: &T) -> String {
+    match serde_json::to_value(v) {
+        Ok(serde_json::Value::String(s)) => s,
+        other => {
+            debug_assert!(false, "{v:?} did not serialise to a string: {other:?}");
+            String::new()
         }
     }
+}
+
+impl EventTypeName for EventType {
+    fn wire_name(&self) -> String {
+        wire_name_of(self)
+    }
+}
+
+/// `OadrPayload::numeric` used to live here as an inherent method. The type is
+/// now the wire crate's `EventValuesMap`, so it becomes an extension trait --
+/// same single reader, same reason for existing.
+pub trait PayloadValues {
+    /// This payload's first value as a number, when it has one.
+    ///
+    /// The one place a payload value becomes an `f64`. It matters more now
+    /// than it did as a DTO method: the wire value is an enum with *separate*
+    /// `Number` and `Integer` variants, and `EventType::Simple`'s declared kind
+    /// is `Integer`. A reader matching only `Number` drops every SIMPLE window
+    /// silently -- exactly the class of failure this migration keeps finding.
+    fn numeric(&self) -> Option<f64>;
+
+    /// This payload's first value as text, when it is text.
+    ///
+    /// The alert payload types carry a human-readable message here; every
+    /// other type carries a number, and asking for text from one of those
+    /// returns `None` rather than a stringified number.
+    fn text(&self) -> Option<&str>;
+}
+
+impl PayloadValues for OadrPayload {
+    fn numeric(&self) -> Option<f64> {
+        match self.values.first()? {
+            PayloadValue::Number(n) => Some(*n),
+            // `Integer` is not an afterthought: `EventType::Simple`'s declared
+            // value kind *is* Integer, so a reader that only matched `Number`
+            // would drop every load-shed level and say nothing.
+            PayloadValue::Integer(i) => Some(*i as f64),
+            _ => None,
+        }
+    }
+
+    fn text(&self) -> Option<&str> {
+        match self.values.first()? {
+            PayloadValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+/// Build events for tests from the JSON a fixture actually cares about.
+///
+/// The wire `Event` requires `id`, `createdDateTime` and `modificationDateTime`
+/// -- fields no test is about, and which the lenient DTO did not have. Rather
+/// than spell them out in ~30 fixtures (and in every fixture written after
+/// this), they are merged in where absent. A fixture that *does* care about one
+/// states it and keeps it: this fills gaps, it does not overwrite.
+///
+/// `createdDateTime` defaults to `MIN_UTC` deliberately. That is the value the
+/// old DTO path fell back to when the field was absent, so priority
+/// tie-breaking in `rate_schedule` behaves as it always did for fixtures that
+/// do not set it.
+#[cfg(test)]
+pub fn events_from_json(value: serde_json::Value) -> Vec<OadrEvent> {
+    use serde_json::{json, Value};
+
+    let epoch = "0001-01-01T00:00:00Z";
+    let mut arr = match value {
+        Value::Array(a) => a,
+        one => vec![one],
+    };
+    for (i, ev) in arr.iter_mut().enumerate() {
+        let Some(obj) = ev.as_object_mut() else {
+            continue;
+        };
+        obj.entry("id").or_insert_with(|| json!(format!("evt-{i}")));
+        obj.entry("createdDateTime").or_insert_with(|| json!(epoch));
+        obj.entry("modificationDateTime")
+            .or_insert_with(|| json!(epoch));
+        obj.entry("programID").or_insert_with(|| json!("prog-test"));
+        // `interval.id` is required by the schema and is never what a timing
+        // or payload fixture is about; number them in declaration order.
+        if let Some(Value::Array(intervals)) = obj.get_mut("intervals") {
+            for (n, iv) in intervals.iter_mut().enumerate() {
+                if let Some(io_) = iv.as_object_mut() {
+                    io_.entry("id").or_insert_with(|| json!(n));
+                }
+            }
+        }
+    }
+    serde_json::from_value(Value::Array(arr)).expect("test fixture is not a valid 3.1 event")
 }
 
 // ── OadrReport ────────────────────────────────────────────────────────────────
@@ -294,6 +290,8 @@ mod tests {
         let json = r#"{
             "id": "evt-001",
             "programID": "prog-001",
+            "createdDateTime": "2026-01-01T00:00:00Z",
+            "modificationDateTime": "2026-01-01T00:00:00Z",
             "eventName": "test-event",
             "intervals": [
                 {
@@ -307,27 +305,48 @@ mod tests {
             ]
         }"#;
         let event: OadrEvent = serde_json::from_str(json).expect("deserialization failed");
-        assert_eq!(event.id, "evt-001");
-        assert_eq!(event.programID, "prog-001");
-        assert_eq!(event.eventName.as_deref(), Some("test-event"));
-        assert_eq!(event.intervals.len(), 1);
-        let period = event.intervals[0].intervalPeriod.as_ref().unwrap();
-        assert_eq!(period.start.as_deref(), Some("2026-01-01T00:00:00Z"));
-        assert_eq!(period.duration.as_deref(), Some("PT1H"));
-        let payload = &event.intervals[0].payloads[0];
-        assert_eq!(payload.r#type, "PRICE");
-        let desc = &event.reportDescriptors.as_ref().unwrap()[0];
-        assert_eq!(desc.payloadType, "USAGE");
+        assert_eq!(event.id.as_str(), "evt-001");
+        assert_eq!(event.content.program_id.as_str(), "prog-001");
+        assert_eq!(event.content.event_name.as_deref(), Some("test-event"));
+        let intervals = event.content.intervals.as_ref().unwrap();
+        assert_eq!(intervals.len(), 1);
+        let period = intervals[0].interval_period.as_ref().unwrap();
+        assert_eq!(period.start.to_rfc3339(), "2026-01-01T00:00:00+00:00");
+        assert_eq!(
+            period.duration.as_ref().unwrap().to_string(),
+            "P0Y0M0DT1H0M0S"
+        );
+        let payload = &intervals[0].payloads[0];
+        assert_eq!(payload.value_type.wire_name(), "PRICE");
+        let desc = &event.content.report_descriptors.as_ref().unwrap()[0];
+        assert_eq!(desc.payload_type.wire_name(), "USAGE");
+    }
+
+    /// 3.1 makes `createdDateTime` and `modificationDateTime` required, so an
+    /// event that omits them is refused rather than defaulted. That is the
+    /// point of the strict types: the VEN stops inventing values a peer did
+    /// not send. `wire_reject` makes a refusal cost only that object.
+    #[test]
+    fn an_event_missing_required_timestamps_is_refused() {
+        let json = r#"{ "id": "evt-002", "programID": "prog-001" }"#;
+        let err = serde_json::from_str::<OadrEvent>(json)
+            .expect_err("3.1 requires createdDateTime and modificationDateTime");
+        assert!(
+            err.to_string().contains("createdDateTime")
+                || err.to_string().contains("created_date_time"),
+            "got {err}"
+        );
     }
 
     #[test]
-    fn test_oadr_event_absent_optional_fields_are_none() {
-        let json = r#"{ "id": "evt-002", "programID": "prog-001" }"#;
-        let event: OadrEvent = serde_json::from_str(json).expect("deserialization failed");
-        assert_eq!(event.id, "evt-002");
-        assert!(event.eventName.is_none());
-        assert!(event.intervals.is_empty());
-        assert!(event.reportDescriptors.is_none());
+    fn optional_fields_stay_absent_when_the_event_omits_them() {
+        let event = events_from_json(serde_json::json!([{
+            "id": "evt-002", "programID": "prog-001"
+        }]))
+        .remove(0);
+        assert!(event.content.event_name.is_none());
+        assert!(event.content.intervals.is_none());
+        assert!(event.content.report_descriptors.is_none());
     }
 
     #[test]
@@ -338,8 +357,15 @@ mod tests {
             "unknownFieldFromFutureVersion": "ignored",
             "anotherUnknown": 42
         }"#;
-        let event: OadrEvent = serde_json::from_str(json).expect("unknown fields must be ignored");
-        assert_eq!(event.id, "evt-003");
+        let event = events_from_json(serde_json::json!({
+            "id": "evt-003",
+            "programID": "prog-001",
+            "unknownFieldFromFutureVersion": "ignored",
+            "anotherUnknown": 42
+        }))
+        .remove(0);
+        assert_eq!(event.id.as_str(), "evt-003");
+        let _ = json;
     }
 
     #[test]

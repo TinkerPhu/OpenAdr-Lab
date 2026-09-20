@@ -156,22 +156,17 @@ mod tests {
     //! `HistoryPort` is configured.
     use super::*;
     use crate::controller::simulator_port::GridSnapshot;
-    use crate::controller::vtn_port::{OadrEvent, OadrInterval, OadrPayload};
+    use crate::controller::vtn_port::OadrEvent;
     use crate::services::test_support::mock_history_port::MockHistoryPort;
     use crate::services::test_support::mock_vtn::MockVtn;
 
     fn active_event() -> OadrEvent {
-        OadrEvent {
-            intervals: vec![OadrInterval {
-                intervalPeriod: None,
-                payloads: vec![OadrPayload {
-                    r#type: "SIMPLE".to_string(),
-                    values: vec![],
-                }],
-                ..Default::default()
-            }],
-            ..OadrEvent::test_event("evt-1", "prog-1")
-        }
+        crate::controller::vtn_port::events_from_json(serde_json::json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "intervals": [{"payloads": [{"type": "SIMPLE", "values": []}]}]
+        }]))
+        .remove(0)
     }
 
     fn empty_sim_snap(now: DateTime<Utc>) -> SimSnapshot {

@@ -3,10 +3,11 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::controller::event_timing::{timed_intervals, TimedInterval};
-use crate::controller::vtn_port::{OadrEvent, OadrPayload, OadrReportDescriptor};
+use crate::controller::vtn_port::{EventTypeName, OadrEvent, OadrPayload, PayloadValues};
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
+use openleadr_wire::report::ReportDescriptor as WireReportDescriptor;
 
 // Rate/capacity-schedule parsing lives in `rate_schedule.rs` (split out to stay under the
 // VEN/src/ 500-production-line cap) — re-exported here so call sites and this file's own
@@ -31,9 +32,9 @@ pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCap
     let strictest = |payload_type: &str| {
         events
             .iter()
-            .flat_map(|e| &e.intervals)
+            .flat_map(|e| e.content.intervals.iter().flatten())
             .flat_map(|i| &i.payloads)
-            .filter(|p| p.r#type == payload_type)
+            .filter(|p| p.value_type.wire_name() == payload_type)
             .filter_map(|p| p.numeric())
             .reduce(f64::min)
     };
@@ -86,7 +87,7 @@ fn timed_payloads<'a>(
                 .interval
                 .payloads
                 .iter()
-                .filter(move |p| payload_types.contains(&p.r#type.as_str()))
+                .filter(move |p| payload_types.contains(&p.value_type.wire_name().as_str()))
                 .map(move |p| (event, timed, p))
         })
     })
@@ -97,16 +98,11 @@ fn timed_payloads<'a>(
 pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
     timed_payloads(events, &["ALERT_GRID_EMERGENCY", "ALERT_BLACK_START"])
         .map(|(event, timed, payload)| AlertWindow {
-            alert_type: payload.r#type.clone(),
+            alert_type: payload.value_type.wire_name(),
             start: timed.start,
             end: timed.end,
-            event_id: event.id.clone(),
-            message: payload
-                .values
-                .first()
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
+            event_id: event.id.to_string(),
+            message: payload.text().unwrap_or("").to_string(),
         })
         .collect()
 }
@@ -117,16 +113,15 @@ pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
 pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
     timed_payloads(events, &["SIMPLE"])
         .filter_map(|(event, timed, payload)| {
-            let level = payload
-                .values
-                .first()
-                .and_then(|v| v.as_f64())
-                .filter(|v| (1.0..=3.0).contains(v))? as u8;
+            // `numeric()` deliberately, not a `Number` match: SIMPLE's
+            // declared value kind is `Integer`, so matching only `Number`
+            // would drop every load-shed level silently.
+            let level = payload.numeric().filter(|v| (1.0..=3.0).contains(v))? as u8;
             Some(SimpleWindow {
                 level,
                 start: timed.start,
                 end: timed.end,
-                event_id: event.id.clone(),
+                event_id: event.id.to_string(),
             })
         })
         .collect()
@@ -145,7 +140,7 @@ pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
                 setpoint_kw: payload.numeric()?,
                 start: timed.start,
                 end: timed.end,
-                event_id: event.id.clone(),
+                event_id: event.id.to_string(),
             })
         })
         .collect()
@@ -160,7 +155,7 @@ pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTim
         let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
         (0.0..=1.0)
             .contains(&target_soc)
-            .then(|| (target_soc, timed.end, event.id.clone()))
+            .then(|| (target_soc, timed.end, event.id.to_string()))
     })
 }
 
@@ -183,7 +178,7 @@ const DEFAULT_REPORT_CADENCE_S: u64 = 3600;
 ///
 /// The span of one interval comes from `event_timing`, the one place that
 /// decides when an interval runs.
-fn report_cadence_secs(event: &OadrEvent, d: &OadrReportDescriptor) -> u64 {
+fn report_cadence_secs(event: &OadrEvent, d: &WireReportDescriptor) -> u64 {
     let intervals = timed_intervals(event);
     let Some(first) = intervals.first().filter(|i| i.is_bounded()) else {
         // A conformant peer may leave an event's timing open; say so rather
@@ -191,7 +186,7 @@ fn report_cadence_secs(event: &OadrEvent, d: &OadrReportDescriptor) -> u64 {
         // explicitly, and surface the default you applied).
         debug!(
             event_id = %event.id,
-            payload_type = %d.payloadType,
+            payload_type = %d.payload_type.wire_name(),
             default_s = DEFAULT_REPORT_CADENCE_S,
             "event declares no bounded interval; applying the profile default report cadence"
         );
@@ -202,12 +197,14 @@ fn report_cadence_secs(event: &OadrEvent, d: &OadrReportDescriptor) -> u64 {
     // `frequency` > 0 counts intervals directly. Otherwise it defers to
     // `numIntervals`, and `numIntervals` <= 0 means "every interval", i.e. one
     // report covering the whole declared sequence.
-    let n_intervals = match d.frequency {
-        Some(f) if f > 0 => f as u64,
-        _ => match d.numIntervals {
-            Some(n) if n > 0 => n as u64,
-            _ => intervals.len().max(1) as u64,
-        },
+    // Both are plain `i32` on the wire type with spec defaults of -1, so the
+    // "absent" case and the "-1" case are the same branch rather than two.
+    let n_intervals = if d.frequency > 0 {
+        d.frequency as u64
+    } else if d.num_intervals > 0 {
+        d.num_intervals as u64
+    } else {
+        intervals.len().max(1) as u64
     };
     span_s.saturating_mul(n_intervals)
 }
@@ -222,16 +219,16 @@ pub fn extract_report_obligations(
     let mut result: Vec<OadrReportObligation> = Vec::new();
 
     for event in events {
-        let event_id = event.id.clone();
-        let program_id = Some(event.programID.clone());
+        let event_id = event.id.to_string();
+        let program_id = Some(event.content.program_id.to_string());
 
-        let descriptors = match event.reportDescriptors.as_ref() {
+        let descriptors = match event.content.report_descriptors.as_ref() {
             Some(arr) if !arr.is_empty() => arr,
             _ => continue,
         };
 
         for descriptor in descriptors {
-            let payload_type = descriptor.payloadType.clone();
+            let payload_type = descriptor.payload_type.wire_name();
 
             // Skip if already tracked
             let already_exists = existing
@@ -246,10 +243,10 @@ pub fn extract_report_obligations(
             }
 
             let reading_type = descriptor
-                .readingType
-                .as_deref()
-                .unwrap_or("DIRECT_READ")
-                .to_string();
+                .reading_type
+                .as_ref()
+                .map(|r| r.wire_name())
+                .unwrap_or_else(|| "DIRECT_READ".to_string());
 
             let interval_duration_s = report_cadence_secs(event, descriptor);
 
@@ -266,7 +263,7 @@ pub fn extract_report_obligations(
                 interval_duration_s,
                 fulfilled: false,
                 created_at: now,
-                historical: descriptor.historical.unwrap_or(true),
+                historical: descriptor.historical,
             });
         }
     }
@@ -304,8 +301,7 @@ mod tests {
                 }]
             }]
         }]);
-        let alerts =
-            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "ALERT_GRID_EMERGENCY");
         assert_eq!(alerts[0].event_id, "alert-1");
@@ -326,8 +322,7 @@ mod tests {
                 "payloads": [{ "type": "ALERT_BLACK_START", "values": ["restoring"] }]
             }]
         }]);
-        let alerts =
-            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "ALERT_BLACK_START");
         assert_eq!(alerts[0].start.to_rfc3339(), "2026-03-14T02:00:00+00:00");
@@ -345,8 +340,7 @@ mod tests {
                 "payloads": [{ "type": "PRICE", "values": [0.25] }]
             }]
         }]);
-        let alerts =
-            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
         assert!(alerts.is_empty());
     }
 
@@ -360,7 +354,7 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT15M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [1.5] }] }]
         }]);
-        let w = parse_dispatch_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let w = parse_dispatch_windows(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].setpoint_kw, 1.5);
         assert_eq!((w[0].end - w[0].start).num_minutes(), 15);
@@ -378,7 +372,7 @@ mod tests {
             }])
         };
         let parse = |v| {
-            parse_charge_state_setpoint(&serde_json::from_value::<Vec<OadrEvent>>(make(v)).unwrap())
+            parse_charge_state_setpoint(&crate::controller::vtn_port::events_from_json(make(v)))
         };
         let (soc, end, eid) = parse(json!(0.9)).expect("fraction accepted");
         assert!((soc - 0.9).abs() < 1e-9);
@@ -408,7 +402,7 @@ mod tests {
             }]
         }]);
         let cap = parse_capacity_state(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             Utc::now(),
         );
         assert_eq!(cap.export_subscription_kw, Some(4.0));
@@ -425,8 +419,7 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "SIMPLE", "values": [2] }] }]
         }]);
-        let windows =
-            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].level, 2);
         assert_eq!(windows[0].event_id, "simple-1");
@@ -445,8 +438,7 @@ mod tests {
                 { "id": 2, "payloads": [{ "type": "SIMPLE", "values": ["high"] }] }
             ]
         }]);
-        let windows =
-            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
         assert!(windows.is_empty());
     }
 
@@ -461,8 +453,7 @@ mod tests {
                 "payloads": [{ "type": "PRICE", "values": [0.25] }]
             }]
         }]);
-        let windows =
-            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
         assert!(windows.is_empty());
     }
 
@@ -480,8 +471,7 @@ mod tests {
                 "payloads": [{ "type": "ALERT_GRID_EMERGENCY", "values": ["no window"] }]
             }]
         }]);
-        let alerts =
-            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].start, crate::controller::event_timing::OPEN_START);
         assert_eq!(alerts[0].end, crate::controller::event_timing::OPEN_END);
@@ -492,7 +482,7 @@ mod tests {
     #[test]
     fn test_window_parsers_give_contiguous_intervals_their_own_windows() {
         let events = |payload_type: &str, v0: serde_json::Value, v1: serde_json::Value| {
-            serde_json::from_value::<Vec<OadrEvent>>(json!([{
+            crate::controller::vtn_port::events_from_json(json!([{
                 "id": "multi",
                 "programID": "prog-1",
                 "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
@@ -501,7 +491,6 @@ mod tests {
                     { "id": 1, "payloads": [{ "type": payload_type, "values": [v1] }] }
                 ]
             }]))
-            .unwrap()
         };
         let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let (t0, t30, t60) = (
@@ -571,7 +560,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -599,7 +588,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -650,7 +639,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].co2_g_kwh, Some(280.0));
         assert_eq!(snapshots[1].co2_g_kwh, Some(320.0));
@@ -678,7 +667,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -715,7 +704,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
         // Unlike parse_capacity_state (which collapses to the strictest single value),
         // the schedule keeps both intervals with their own distinct limits.
         assert_eq!(snapshots.len(), 2);
@@ -746,7 +735,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
         assert!(snapshots.is_empty());
     }
 
@@ -782,7 +771,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(
             snapshots.len(),
             1,
@@ -822,7 +811,7 @@ mod tests {
             }
         ]);
         let snapshots =
-            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
         let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let got: Vec<_> = snapshots
             .iter()
@@ -869,7 +858,7 @@ mod tests {
                 ]
             }
         ]);
-        let events = serde_json::from_value::<Vec<OadrEvent>>(events).unwrap();
+        let events = crate::controller::vtn_port::events_from_json(events);
         // GB-48: the limit fields mean "in force now". At 09:00 the 10:00–11:00
         // limit has not started — this test used to expect 5.0 here, which is
         // exactly the bug (a future limit applied now).
@@ -921,10 +910,7 @@ mod tests {
             }
         ]);
         let now = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-        );
+        let cap = parse_capacity_state(&crate::controller::vtn_port::events_from_json(events), now);
         assert_eq!(
             cap.import_limit_kw,
             Some(10.0),
@@ -942,7 +928,7 @@ mod tests {
             "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [10000.0]}]}]
         }]);
         let cap = parse_capacity_state(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             Utc::now(),
         );
         assert_eq!(cap.import_limit_kw, Some(10000.0));
@@ -959,7 +945,7 @@ mod tests {
         ]);
         let now = Utc::now();
         let obligations = extract_report_obligations(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             now,
             &[],
         );
@@ -983,7 +969,7 @@ mod tests {
         ]);
         let now = Utc::now();
         let obligations = extract_report_obligations(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             now,
             &[],
         );
@@ -1008,7 +994,7 @@ mod tests {
             ]
         }]);
         let obligations = extract_report_obligations(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             Utc::now(),
             &[],
         );
@@ -1042,7 +1028,7 @@ mod tests {
             ]
         }]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert_eq!(
             snapshots.len(),
             2,
@@ -1074,7 +1060,7 @@ mod tests {
             ]
         }]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -1111,7 +1097,7 @@ mod tests {
             ]
         }]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -1145,7 +1131,7 @@ mod tests {
             "intervals": intervals
         }]);
         let snapshots =
-            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
 
         assert!(
             snapshots.len() > 24,
@@ -1167,7 +1153,7 @@ mod tests {
         created: Option<&str>,
         price: f64,
     ) -> OadrEvent {
-        serde_json::from_value(json!({
+        crate::controller::vtn_port::events_from_json(json!({
             "id": id,
             "programID": "prog-1",
             "priority": priority,
@@ -1178,7 +1164,7 @@ mod tests {
                 "payloads": [{"type": "PRICE", "values": [price]}]
             }]
         }))
-        .unwrap()
+        .remove(0)
     }
 
     #[test]
@@ -1249,7 +1235,7 @@ mod tests {
             .iter()
             .map(|(t, v)| json!({"type": t, "values": [v]}))
             .collect();
-        serde_json::from_value(json!({
+        crate::controller::vtn_port::events_from_json(json!({
             "id": id,
             "programID": "prog-1",
             "priority": priority,
@@ -1260,7 +1246,7 @@ mod tests {
                 "payloads": payloads
             }]
         }))
-        .unwrap()
+        .remove(0)
     }
 
     fn import_at(
@@ -1465,15 +1451,14 @@ mod tests {
                 })
             })
             .collect();
-        let mut events: Vec<OadrEvent> = serde_json::from_value(json!([{
+        let mut events: Vec<OadrEvent> = crate::controller::vtn_port::events_from_json(json!([{
             "id": "evt-daily",
             "programID": "prog-1",
             "priority": 5,
             "duration": "P9999Y",
             "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": intervals
-        }]))
-        .unwrap();
+        }]));
         events.push(window_event(
             "dr1",
             Some(1),
@@ -1609,7 +1594,7 @@ mod tests {
             historical: true,
         }];
         let obligations = extract_report_obligations(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            &crate::controller::vtn_port::events_from_json(events),
             now,
             &existing,
         );
@@ -1666,7 +1651,7 @@ mod tests {
             "reportDescriptors": [{"payloadType": "USAGE", "frequency": 2}],
             "intervals": []
         }]);
-        let events = serde_json::from_value::<Vec<OadrEvent>>(events).unwrap();
+        let events = crate::controller::vtn_port::events_from_json(events);
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
         assert_eq!(obligations[0].interval_duration_s, 3600);
     }
@@ -1678,19 +1663,18 @@ mod tests {
                 json!({
                     "id": i,
                     "intervalPeriod": {
-                        "start": format!("2026-01-01T0{}:{}:00Z", i / 4, (i % 4) * 15),
+                        "start": format!("2026-01-01T{:02}:{:02}:00Z", i / 4, (i % 4) * 15),
                         "duration": "PT15M"
                     },
                     "payloads": [{"type": "USAGE", "values": [1.0]}]
                 })
             })
             .collect();
-        serde_json::from_value(json!([{
+        crate::controller::vtn_port::events_from_json(json!([{
             "id": "evt-1",
             "programID": "prog-1",
             "reportDescriptors": [descriptor],
             "intervals": intervals
         }]))
-        .unwrap()
     }
 }
