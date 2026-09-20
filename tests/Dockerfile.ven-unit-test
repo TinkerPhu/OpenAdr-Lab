@@ -13,7 +13,9 @@
 #   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
 ###############################################################################
 
-FROM rust:1.90-bookworm
+# Must track VEN/rust-toolchain.toml: `openleadr-wire` sets an MSRV of 1.91, and a base
+# image older than that fails the build with a version error rather than a type error.
+FROM rust:1.91-bookworm
 
 # HiGHS and aws-lc-rs need cmake + clang; bookworm provides them.
 RUN apt-get update \

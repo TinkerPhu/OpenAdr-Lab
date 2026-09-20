@@ -9,7 +9,10 @@
 # on Node1 ARM64); subsequent runs are ~1-2 min.
 ###############################################################################
 
-FROM rust:1.90-alpine
+# Must be >= the openleadr-rs workspace MSRV (1.91) and is kept on the same
+# version its own vtn.Dockerfile uses, so the test image and the shipped image
+# do not compile the submodule with different compilers.
+FROM rust:1.94-alpine
 RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
 WORKDIR /app
 COPY . .
