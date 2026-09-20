@@ -113,10 +113,29 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [ ] 3.1 Adopt `openleadr-wire` in the VEN (D12), **incrementally, events first**. Measured
       2026-09-18: 14 files reference `vtn_port`, with ~184 field-access sites, so this is
       sequenced rather than done in one pass:
-      - [ ] 3.1a Add `openleadr-wire` as a **git** dependency on the fork branch with default
+      - [x] 3.1a Add `openleadr-wire` as a **git** dependency on the fork branch with default
             features (D13 — a path dependency is unreachable from the VEN's `VEN/`-scoped Docker
-            build context; sqlx verified to compile zero times under default features)
-      - [ ] 3.1b Swap the event types first — `OadrEvent`/`OadrInterval`/`OadrIntervalPeriod`/
+            build context; sqlx verified to compile zero times under default features).
+            Done 2026-09-20 (branch 045): rev da565b4, zero sqlx confirmed by `cargo tree`.
+            Toolchain 1.90 → 1.91 (wire's MSRV); `edition` stays 2021.
+      - [x] 3.1a-bis **Shadow parse before committing the poll loop.** `wire_reject::
+            shadow_parse_events` runs the strict `Event` type alongside the DTO parse and
+            logs/counts what it *would* refuse, using nothing. Evidence on the Node2 test
+            stack: batches of up to 7 events, **zero rejections**. Production evidence is
+            what 3.1b waits on — see below. Remove this scaffolding once 3.1b lands.
+      - [ ] 3.1b **Gated on 3.1a-bis's production evidence, deliberately.** The strict types can
+            refuse an object the VEN tolerates today, and whether the live VTN sends such an
+            object is a question about this deployment, not about types. Three things found
+            during 3.1a that this step must handle, each verified in the wire source:
+            `EventType::Simple`'s `expected_value_kind()` is `Integer`, so a naive
+            `Value::Number` match drops **every** SIMPLE window silently (one shared
+            `numeric()` helper, not a second code path); `Priority`'s `Ord` already encodes
+            "lower number wins, None last", so today's `unwrap_or(i64::MAX)` + `pb.cmp(&pa)`
+            collapses to a plain ascending `cmp` — copying the old shape across silently
+            inverts BL-02, so write the inversion test with a `None` present *first*; and
+            `GET /events` serves stored events straight to the VEN UI, so `"PT1H"` becomes
+            `"P0Y0M0DT1H0M0S"` and timestamps gain `+00:00` (5.7b).
+            Swap the event types — `OadrEvent`/`OadrInterval`/`OadrIntervalPeriod`/
             `OadrPayload` → wire `Event`/`EventInterval`/`IntervalPeriod`/`EventValuesMap`. This is
             where most of the 184 sites are and where the churn is mechanical but wide: fields move
             behind `.content` and go snake_case (`event.programID` → `event.content.program_id`)
