@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1.90-bookworm AS builder
+# Must track VEN/rust-toolchain.toml: `openleadr-wire` sets an MSRV of 1.91, and a base
+# image older than that fails the build with a version error rather than a type error.
+FROM rust:1.91-bookworm AS builder
 WORKDIR /app
 
 # HiGHS bindings build native C++ code via cmake + bindgen (needs libclang).
