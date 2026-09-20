@@ -27,6 +27,7 @@ mod grid_signals;
 mod heuristics;
 mod obligations;
 mod openadr_objects;
+mod persistence;
 mod report_submissions;
 mod site_headroom_forecast;
 mod task_status;
@@ -177,14 +178,6 @@ pub struct AppState {
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
 pub const NOTIFICATION_RING_CAP: usize = 200;
-
-#[derive(Serialize, Deserialize)]
-struct PersistedVenState {
-    programs: Vec<OadrProgram>,
-    events: Vec<OadrEvent>,
-    reports: Vec<OadrReport>,
-    sensor: SensorSnapshot,
-}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -510,37 +503,6 @@ impl AppState {
     pub async fn set_ev_settings(&self, s: EvSettings) {
         self.hems.write().await.ev_settings = s;
     }
-
-    pub async fn load_from_json(&self, json: &str) -> anyhow::Result<()> {
-        let parsed: PersistedVenState = serde_json::from_str(json)?;
-        {
-            let mut p = self.polling.write().await;
-            p.programs = parsed.programs;
-            p.events = parsed.events;
-            p.reports = parsed.reports;
-        }
-        {
-            let mut cs = self.ctrl_sim.write().await;
-            cs.sensor = parsed.sensor;
-        }
-        Ok(())
-    }
-
-    pub async fn to_json(&self) -> anyhow::Result<String> {
-        // Acquire each lock separately (INVARIANT: no guard held across a second lock acquisition).
-        let (programs, events, reports) = {
-            let p = self.polling.read().await;
-            (p.programs.clone(), p.events.clone(), p.reports.clone())
-        };
-        let sensor = self.ctrl_sim.read().await.sensor.clone();
-        let state = PersistedVenState {
-            programs,
-            events,
-            reports,
-            sensor,
-        };
-        Ok(serde_json::to_string_pretty(&state)?)
-    }
 }
 
 #[cfg(test)]
@@ -736,6 +698,57 @@ mod tests {
         let programs = state2.programs().await;
         assert_eq!(programs.len(), 1);
         assert_eq!(programs[0].id, "p1");
+    }
+
+    /// A state file written by an older build can carry a section this build
+    /// no longer accepts. Losing that section is unavoidable; losing the ones
+    /// beside it is not, and used to happen because the whole file was parsed
+    /// as one value.
+    ///
+    /// This is the same failure that `controller::wire_reject` exists for, on
+    /// our own data instead of a peer's: one unusable object costing everything
+    /// around it.
+    #[tokio::test]
+    async fn load_from_json_keeps_the_sections_it_can_still_read() {
+        let state = AppState::new();
+        // `events` here is shaped like a state file from a build whose event
+        // type had different requirements -- unreadable now.
+        let stale = serde_json::json!({
+            "programs": [{"id": "p1", "programName": "TestProgram"}],
+            "events": [{"totally": "unexpected", "shape": 42}],
+            "reports": [],
+            "sensor": {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "ts": "2026-01-01T00:00:00Z",
+                "temperature_c": 21.5,
+                "power_w": null,
+                "voltage_v": null,
+                "raw": {}
+            }
+        })
+        .to_string();
+
+        state.load_from_json(&stale).await.expect("partial restore");
+
+        let programs = state.programs().await;
+        assert_eq!(programs.len(), 1, "programs must survive unreadable events");
+        assert_eq!(programs[0].id, "p1");
+        assert!(
+            state.events().await.is_empty(),
+            "the unreadable section is dropped"
+        );
+        assert_eq!(
+            state.sensor().await.temperature_c,
+            Some(21.5),
+            "the sensor reading must survive too — it sits beside the events,              not inside them"
+        );
+    }
+
+    /// Only a file that is not JSON at all is an error worth failing on.
+    #[tokio::test]
+    async fn load_from_json_errors_only_when_the_file_is_not_json() {
+        let state = AppState::new();
+        assert!(state.load_from_json("this is not json").await.is_err());
     }
 
     fn make_obligation(event_id: &str, due_at: DateTime<Utc>) -> OadrReportObligation {
