@@ -206,9 +206,15 @@ fi
 # ── 2. openleadr-rs Cargo Tests ─────────────────────────────────────────────
 
 if $RUN_RUST; then
+    # `run --build` is deliberately split into `build` then `run`: on Docker
+    # Compose v5.3.1 the combined form fails to resolve a service's *transitive*
+    # dependencies, aborting with "<svc> is missing dependency <dep>" before
+    # anything starts -- even though the dependency is defined and healthy. It
+    # cost two full suite runs to recognise, because the message names a real
+    # service and reads like a compose-file error rather than a compose bug.
     header "3. openleadr-rs Cargo Tests (docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
-        RUST_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
+        RUST_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.openleadr-test.yml build cargo-test 2>&1 && docker compose -f tests/docker-compose.openleadr-test.yml run --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
         if run_docker_cmd "$RUST_CMD"; then
             pass "openleadr-rs cargo tests"
         else
@@ -231,7 +237,7 @@ if $RUN_COVERAGE; then
             run_docker_cmd "cd $DOCKER_DIR && git pull --recurse-submodules" 2>&1
         fi
         echo "  Building and running instrumented coverage build (first run ~20 min; separate cache from the normal unit-test build)..."
-        COV_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-coverage 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.ven-unit-test.yml down 2>&1; exit \$RESULT"
+        COV_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.ven-unit-test.yml build ven-coverage 2>&1 && docker compose -f tests/docker-compose.ven-unit-test.yml run --rm ven-coverage 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.ven-unit-test.yml down 2>&1; exit \$RESULT"
         if run_docker_cmd "$COV_CMD"; then
             pass "VEN coverage report generated"
             echo "  Report: $DOCKER_DIR/coverage/ven/tarpaulin-report.html (+ .json) on $_DOCKER_LABEL"
@@ -259,7 +265,7 @@ if $RUN_E2E; then
         # compose run` reuses already-running dependencies rather than recreating them —
         # so a stale retained MQTT reading or cached measurement state can silently carry
         # into this run otherwise (see real_measurement_mqtt.feature flakiness).
-        E2E_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml run --build --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        E2E_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml build test-runner 2>&1 && docker compose -f tests/docker-compose.test.yml run --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
         if run_docker_cmd "$E2E_CMD"; then
             pass "E2E behave tests"
         else
@@ -277,7 +283,7 @@ if $RUN_RESILIENCE; then
     if can_reach_docker; then
         echo "  Building and running resilience tests..."
         # Pre-run teardown: same interrupted-prior-run rationale as the E2E suite above.
-        RES_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        RES_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml build test-runner 2>&1 && docker compose -f tests/docker-compose.test.yml run --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
         if run_docker_cmd "$RES_CMD"; then
             pass "Resilience tests"
         else
