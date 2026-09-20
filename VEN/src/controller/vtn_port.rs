@@ -99,8 +99,19 @@ pub struct OadrEventPayloadDescriptor {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct OadrInterval {
-    /// Required by the spec. Carried so a report can name the interval it is
-    /// reporting on -- dropping it made that impossible to express.
+    /// Required by the spec (`interval.required: [id, payloads]`). Carried so
+    /// a report can name the interval it reports on -- dropping it made that
+    /// impossible to express.
+    ///
+    /// `default` despite being required, deliberately: this struct is also how
+    /// the VEN's own persisted state is read back, and state written before
+    /// the field existed has no `id`. Making it mandatory here refused our own
+    /// cache on the first restart after deploy -- applying a rule about what a
+    /// *peer* may send to something we wrote ourselves. Conformance is the
+    /// wire types' job (`openleadr_wire::EventInterval`, exercised today by
+    /// `wire_reject::shadow_parse_events`); this DTO's job is to stop dropping
+    /// the field.
+    #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub intervalPeriod: Option<OadrIntervalPeriod>,
