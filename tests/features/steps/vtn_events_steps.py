@@ -143,3 +143,45 @@ def step_event_list_contains(context, name):
 def step_event_list_not_contains(context, name):
     names = [e.get("eventName") for e in context.event_list]
     assert name not in names, f"Expected '{name}' NOT in event list, but found it: {names}"
+
+
+@when(
+    "I list events for the saved program with active=true, skip {skip:d} and limit {limit:d}"
+)
+def step_list_events_active_paged(context, skip, limit):
+    """P-1: `active` has to be applied in SQL, before OFFSET/LIMIT. Filtering
+    after paging silently returns short pages with a 200."""
+    context.response = vtn_get(
+        "/events",
+        context.vtn_token,
+        params={
+            "programID": context.saved_program_id,
+            "active": "true",
+            "skip": skip,
+            "limit": limit,
+        },
+    )
+    context.response.raise_for_status()
+    context.event_list = context.response.json()
+
+
+@then("the event list has exactly {count:d} event")
+@then("the event list has exactly {count:d} events")
+def step_event_list_has_exactly(context, count):
+    names = [e.get("eventName") for e in context.event_list]
+    assert len(context.event_list) == count, (
+        f"expected a full page of {count}, got {len(context.event_list)}: {names}. "
+        "A short page here is the filter-after-paging bug P-1 fixes."
+    )
+
+
+@then("no event in the list has ended")
+def step_no_event_in_list_has_ended(context):
+    """The fixture names past events `*-past-*`, so a past event appearing in an
+    active-filtered page is directly visible rather than inferred from times."""
+    leaked = [
+        e.get("eventName")
+        for e in context.event_list
+        if "past" in (e.get("eventName") or "")
+    ]
+    assert not leaked, f"active=true returned events whose window has ended: {leaked}"
