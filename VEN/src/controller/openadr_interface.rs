@@ -50,7 +50,7 @@ pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCap
         return OadrCapacityState::default();
     }
 
-    let schedule = parse_capacity_schedule(events, now);
+    let schedule = parse_capacity_schedule(events);
     let import = tightest_capacity_limit(&schedule, Import, now, now);
     let export = tightest_capacity_limit(&schedule, Export, now, now);
     OadrCapacityState {
@@ -530,10 +530,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -560,10 +558,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -613,10 +609,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].co2_g_kwh, Some(280.0));
         assert_eq!(snapshots[1].co2_g_kwh, Some(320.0));
@@ -643,10 +637,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -682,10 +674,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         // Unlike parse_capacity_state (which collapses to the strictest single value),
         // the schedule keeps both intervals with their own distinct limits.
         assert_eq!(snapshots.len(), 2);
@@ -715,10 +705,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert!(snapshots.is_empty());
     }
 
@@ -753,10 +741,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(
             snapshots.len(),
             1,
@@ -795,10 +781,8 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            Utc::now(),
-        );
+        let snapshots =
+            parse_capacity_schedule(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let got: Vec<_> = snapshots
             .iter()
@@ -995,13 +979,14 @@ mod tests {
     #[test]
     fn test_parse_rate_snapshots_no_loop_when_duration_equals_cycle() {
         // event.intervalPeriod.duration == sum of intervals → no looping
-        let now: DateTime<Utc> = "2026-03-17T12:00:00Z".parse().unwrap();
         let events = json!([{
             "id": "evt-noloop",
             "programID": "prog-1",
+            // event.duration exactly equal to the interval span: the sequence
+            // reaches the window's end, so there is nothing to repeat.
+            "duration": "PT2H",
             "intervalPeriod": {
-                "start": "2026-03-17T00:00:00Z",
-                "duration": "PT2H"
+                "start": "2026-03-17T00:00:00Z"
             },
             "intervals": [
                 {
@@ -1016,10 +1001,8 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(
             snapshots.len(),
             2,
@@ -1035,7 +1018,8 @@ mod tests {
         let events = json!([{
             "id": "evt-loop",
             "programID": "prog-1",
-            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": [
                 {
                     "id": 0,
@@ -1049,10 +1033,8 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -1073,7 +1055,8 @@ mod tests {
         let events = json!([{
             "id": "evt-loop",
             "programID": "prog-1",
-            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": [
                 {
                     "id": 0,
@@ -1087,10 +1070,8 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -1119,13 +1100,12 @@ mod tests {
         let events = json!([{
             "id": "evt-daily",
             "programID": "prog-1",
-            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": intervals
         }]);
-        let snapshots = parse_rate_snapshots(
-            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
-            now,
-        );
+        let snapshots =
+            parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
 
         assert!(
             snapshots.len() > 24,
@@ -1163,7 +1143,6 @@ mod tests {
 
     #[test]
     fn test_parse_rate_snapshots_higher_priority_wins_regardless_of_order() {
-        let now = Utc::now();
         let high = price_event("evt-high", Some(1), Some("2026-01-01T00:00:00Z"), 0.50);
         let low = price_event("evt-low", Some(5), Some("2026-01-01T00:00:00Z"), 0.10);
 
@@ -1171,7 +1150,7 @@ mod tests {
             vec![high.clone(), low.clone()],
             vec![low.clone(), high.clone()],
         ] {
-            let snapshots = parse_rate_snapshots(&events, now);
+            let snapshots = parse_rate_snapshots(&events);
             assert_eq!(snapshots.len(), 1);
             assert_eq!(
                 snapshots[0].import_tariff_eur_kwh,
@@ -1183,12 +1162,11 @@ mod tests {
 
     #[test]
     fn test_parse_rate_snapshots_equal_priority_newer_created_wins() {
-        let now = Utc::now();
         let newer = price_event("evt-new", Some(2), Some("2026-02-01T08:00:00Z"), 0.40);
         let older = price_event("evt-old", Some(2), Some("2026-01-15T08:00:00Z"), 0.20);
 
         // older last in the array — would win under naive last-write-wins
-        let snapshots = parse_rate_snapshots(&[newer, older], now);
+        let snapshots = parse_rate_snapshots(&[newer, older]);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(
             snapshots[0].import_tariff_eur_kwh,
@@ -1199,12 +1177,11 @@ mod tests {
 
     #[test]
     fn test_parse_rate_snapshots_absent_priority_sorts_last() {
-        let now = Utc::now();
         let explicit = price_event("evt-p5", Some(5), Some("2026-01-01T00:00:00Z"), 0.30);
         let none = price_event("evt-none", None, Some("2026-02-01T00:00:00Z"), 0.99);
 
         // None-priority event last in the array — would win under naive last-write-wins
-        let snapshots = parse_rate_snapshots(&[explicit, none], now);
+        let snapshots = parse_rate_snapshots(&[explicit, none]);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(
             snapshots[0].import_tariff_eur_kwh,
@@ -1286,12 +1263,11 @@ mod tests {
 
     #[test]
     fn parse_rate_snapshots_intra_hour_high_priority_splits_hour() {
-        let now = ts("2026-08-31T04:00:00Z");
         for events in [
             day_ahead_and_intra_hour(),
             day_ahead_and_intra_hour().into_iter().rev().collect(),
         ] {
-            let snaps = parse_rate_snapshots(&events, now);
+            let snaps = parse_rate_snapshots(&events);
             assert_eq!(
                 segments(&snaps),
                 vec![
@@ -1307,7 +1283,6 @@ mod tests {
     #[test]
     fn parse_rate_snapshots_earlier_start_lower_priority_loses() {
         // S-2 of the 2026-08-31 fleet run: hourly TOU from 05:00, scenario window from 05:29.
-        let now = ts("2026-08-31T04:00:00Z");
         let events = vec![
             window_event(
                 "tou",
@@ -1326,7 +1301,7 @@ mod tests {
                 &[("PRICE", 0.10)],
             ),
         ];
-        let snaps = parse_rate_snapshots(&events, now);
+        let snaps = parse_rate_snapshots(&events);
         assert_eq!(import_at(&snaps, "2026-08-31T05:28:59Z"), Some(0.09));
         for minute in 29..59 {
             assert_eq!(
@@ -1340,7 +1315,6 @@ mod tests {
 
     #[test]
     fn parse_rate_snapshots_partial_overlap_equal_priority_newer_wins() {
-        let now = ts("2026-02-01T09:00:00Z");
         let older = window_event(
             "old",
             Some(2),
@@ -1361,7 +1335,7 @@ mod tests {
             vec![older.clone(), newer.clone()],
             vec![newer.clone(), older.clone()],
         ] {
-            let snaps = parse_rate_snapshots(&events, now);
+            let snaps = parse_rate_snapshots(&events);
             assert_eq!(
                 segments(&snaps),
                 vec![
@@ -1387,7 +1361,6 @@ mod tests {
 
     #[test]
     fn parse_rate_snapshots_absent_priority_ranks_lowest_on_partial_overlap() {
-        let now = ts("2026-02-01T09:00:00Z");
         let none = window_event(
             "none",
             None,
@@ -1404,7 +1377,7 @@ mod tests {
             "PT1H",
             &[("PRICE", 0.30)],
         );
-        let snaps = parse_rate_snapshots(&[p9, none], now);
+        let snaps = parse_rate_snapshots(&[p9, none]);
         assert_eq!(import_at(&snaps, "2026-02-01T10:15:00Z"), Some(0.99));
         assert_eq!(import_at(&snaps, "2026-02-01T10:45:00Z"), Some(0.30));
         assert_eq!(import_at(&snaps, "2026-02-01T11:15:00Z"), Some(0.30));
@@ -1412,7 +1385,6 @@ mod tests {
 
     #[test]
     fn parse_rate_snapshots_resolves_each_payload_type_independently() {
-        let now = ts("2026-02-01T09:00:00Z");
         let price_only = window_event(
             "p1",
             Some(1),
@@ -1429,7 +1401,7 @@ mod tests {
             "PT1H",
             &[("PRICE", 0.09), ("GHG", 300.0)],
         );
-        let snaps = parse_rate_snapshots(&[price_only, price_ghg], now);
+        let snaps = parse_rate_snapshots(&[price_only, price_ghg]);
         let at = |s: &str| {
             let t = ts(s);
             let snap = crate::entities::tariff_snapshot::tariff_at(&snaps, t).expect("covered");
@@ -1444,7 +1416,6 @@ mod tests {
     fn parse_rate_snapshots_output_never_overlaps() {
         // Looping hourly day-ahead price (P9999Y) plus two short DR prices, one straddling
         // an hour boundary: the published schedule must be sorted and non-overlapping.
-        let now: DateTime<Utc> = ts("2026-01-03T14:30:00Z");
         let intervals: Vec<serde_json::Value> = (0u32..24)
             .map(|h| {
                 json!({
@@ -1458,7 +1429,8 @@ mod tests {
             "id": "evt-daily",
             "programID": "prog-1",
             "priority": 5,
-            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "duration": "P9999Y",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": intervals
         }]))
         .unwrap();
@@ -1479,7 +1451,7 @@ mod tests {
             &[("PRICE", 77.0)],
         ));
 
-        let snaps = parse_rate_snapshots(&events, now);
+        let snaps = parse_rate_snapshots(&events);
         for w in snaps.windows(2) {
             assert!(
                 w[0].interval_end <= w[1].interval_start,
@@ -1500,7 +1472,6 @@ mod tests {
 
     #[test]
     fn parse_capacity_schedule_short_high_priority_limit_splits_longer_one() {
-        let now = ts("2026-09-09T12:00:00Z");
         let events = vec![
             window_event(
                 "env",
@@ -1519,7 +1490,7 @@ mod tests {
                 &[("IMPORT_CAPACITY_LIMIT", 2.0)],
             ),
         ];
-        let got: Vec<_> = parse_capacity_schedule(&events, now)
+        let got: Vec<_> = parse_capacity_schedule(&events)
             .into_iter()
             .map(|c| (c.interval_start, c.interval_end, c.import_limit_kw))
             .collect();
@@ -1548,7 +1519,7 @@ mod tests {
     #[test]
     fn parse_rate_snapshots_planner_series_agrees_with_tick_lookup() {
         use crate::entities::tariff_snapshot::TariffTimeSeries;
-        let snaps = parse_rate_snapshots(&day_ahead_and_intra_hour(), ts("2026-08-31T04:00:00Z"));
+        let snaps = parse_rate_snapshots(&day_ahead_and_intra_hour());
         let series = TariffTimeSeries::from_snapshots(&snaps);
         for at in [
             "2026-08-31T05:10:00Z",
