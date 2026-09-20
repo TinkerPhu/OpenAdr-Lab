@@ -52,6 +52,35 @@ describe("getEventStatus", () => {
     expect(getEventStatus(event, now)).toBe("completed");
   });
 
+  // Since the VEN adopted the OpenADR wire types it re-serialises durations in
+  // the fully expanded form. A parser that only matched the compact spelling
+  // returned 0, which reads as "no duration" — so every event rendered as if
+  // it never ended.
+  it("parses the expanded P0Y0M0DT1H0M0S spelling the wire types emit", () => {
+    const event = makeEvent({
+      intervalPeriod: { start: "2026-02-08T11:00:00Z", duration: "P0Y0M0DT1H0M0S" },
+    });
+    expect(getEventStatus(event, new Date("2026-02-08T11:30:00Z"))).toBe("active");
+    expect(getEventStatus(event, new Date("2026-02-08T12:01:00Z"))).toBe("completed");
+  });
+
+  it("reads M as months before T and as minutes after it", () => {
+    const event = makeEvent({
+      intervalPeriod: { start: "2026-02-08T11:00:00Z", duration: "P0Y0M0DT0H30M0S" },
+    });
+    // 30 *minutes*: still running at 11:20, over by 11:40. Read as 30 months
+    // this would be active for years.
+    expect(getEventStatus(event, new Date("2026-02-08T11:20:00Z"))).toBe("active");
+    expect(getEventStatus(event, new Date("2026-02-08T11:40:00Z"))).toBe("completed");
+  });
+
+  it("treats the spec's P9999Y infinity as still running", () => {
+    const event = makeEvent({
+      intervalPeriod: { start: "2026-02-08T11:00:00Z", duration: "P9999Y" },
+    });
+    expect(getEventStatus(event, new Date("2030-01-01T00:00:00Z"))).toBe("active");
+  });
+
   it("parses P1DT2H30M duration", () => {
     const now = new Date("2026-02-09T13:29:00Z");
     const event = makeEvent({
