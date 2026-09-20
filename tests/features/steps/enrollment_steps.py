@@ -70,3 +70,47 @@ def step_ven2_has_program(context, name):
     progs = _ven_programs(VEN2_BASE_URL)
     names = [p.get("programName") for p in progs]
     assert name in names, f"'{name}' not in VEN-2 programs: {names}"
+
+
+@when('I create a program named "{name}" targeting "{ven_a}" and "{ven_b}"')
+def step_create_two_target_program(context, name, ven_a, ven_b):
+    context.response = vtn_post(
+        "/programs",
+        context.vtn_token,
+        json={"programName": name, "targets": [ven_a, ven_b]},
+    )
+    context.response.raise_for_status()
+    context.shared_program_name = name
+
+
+def _targets_seen_as(context, user):
+    """The target list of `context.shared_program_name` as `user` sees it."""
+    from features.helpers.api_client import get_token_value, vtn_get
+
+    token = get_token_value(user, user)
+    programs = vtn_get("/programs", token).json()
+    match = [
+        p for p in programs if p.get("programName") == context.shared_program_name
+    ]
+    assert match, (
+        f"{user} cannot see program {context.shared_program_name!r} at all — "
+        "target filtering, not target hiding, is what failed"
+    )
+    return sorted(match[0].get("targets") or [])
+
+
+@then('reading it as "{user}" shows targets exactly "{expected}"')
+def step_targets_exactly(context, user, expected):
+    seen = _targets_seen_as(context, user)
+    assert seen == [expected], (
+        f"{user} sees targets {seen} — it must see only itself, or it learns "
+        "which other VENs this object addresses"
+    )
+
+
+@then('reading it as "{user}" shows targets "{a}" and "{b}"')
+def step_targets_both(context, user, a, b):
+    seen = _targets_seen_as(context, user)
+    assert seen == sorted([a, b]), (
+        f"{user} holds read_all and should see the unredacted list, got {seen}"
+    )
