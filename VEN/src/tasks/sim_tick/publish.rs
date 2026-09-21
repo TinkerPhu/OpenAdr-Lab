@@ -31,6 +31,8 @@ pub(crate) async fn publish_sim_tick_result(
     dt_s: f64,
     now: DateTime<Utc>,
     pv_co2_g_kwh: f64,
+    telemetry: &dyn crate::controller::telemetry_port::TelemetryPort,
+    ven_name: &str,
 ) -> SimSnapshot {
     // Update sensor snapshot (backward compat)
     state.update_sensor(sensor).await;
@@ -85,6 +87,15 @@ pub(crate) async fn publish_sim_tick_result(
     // `controller::capacity_headroom`'s module doc for why this is a
     // separate computation, not derived from `forecast`.
     state.set_capacity_curves(capacity_curves).await;
+
+    // The live fleet feed. Fire-and-forget by design: a fleet view going dark
+    // is an observability problem, and making the tick wait on a broker would
+    // turn it into an operational one (fleet-monitor phase 0 §6.2).
+    telemetry
+        .publish_telemetry(crate::controller::telemetry_port::telemetry_body(
+            ven_name, &sim_snap,
+        ))
+        .await;
 
     sim_snap
 }

@@ -36,6 +36,9 @@ pub struct AppCtx {
     pub notifier: services::notify::Notifier,
     /// WP4.2 (BL-19): per-asset user-settings persistence (comfort curves).
     pub settings: Option<Arc<dyn controller::SettingsPort>>,
+    /// Fleet telemetry publisher, so `/health` can say whether the live feed
+    /// is reaching the broker. `NoTelemetry` when this VEN does not publish.
+    pub telemetry: Arc<dyn controller::telemetry_port::TelemetryPort>,
     /// Weather forecast plugin port (docs/architecture/weather_forecast.md).
     /// Always present — `NoopWeatherPort` when no MQTT broker is configured,
     /// so consumers never need `Option<Arc<dyn WeatherForecastPort>>`.
