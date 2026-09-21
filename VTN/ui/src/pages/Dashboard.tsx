@@ -1,5 +1,6 @@
 import { Grid, Paper, Stack, Typography } from "@mui/material";
 import { useHealth, usePrograms, useEvents, useVens, useReports } from "../api/hooks";
+import { formatAge } from "../utils/relativeTime";
 
 export function DashboardPage() {
   const health = useHealth();
@@ -32,6 +33,13 @@ export function DashboardPage() {
                     ` (${health.data.recorder.consecutiveFailures} failed attempt${
                       health.data.recorder.consecutiveFailures === 1 ? "" : "s"
                     })`}
+                </Typography>
+              )}
+              {health.data.fleet.enabled && (
+                <Typography variant="body2" data-testid="dash-health-fleet">
+                  Fleet: {health.data.fleet.connected ? "connected" : "disconnected"},{" "}
+                  {health.data.fleet.vensOnline}/{health.data.fleet.vensKnown} VENs live, last
+                  message {formatAge(health.data.fleet.lastMessageAt, new Date())}
                 </Typography>
               )}
             </Stack>
