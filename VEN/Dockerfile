@@ -3,7 +3,11 @@
 # Must track VEN/rust-toolchain.toml: `openleadr-wire` sets an MSRV of 1.91, and a base
 # image older than that fails the build with a version error rather than a type error.
 FROM rust:1.91-bookworm AS builder
-WORKDIR /app
+# The container mirrors the repo: /repo/VEN beside /repo/lab-core, so
+# VEN/Cargo.toml's `path = "../lab-core"` resolves here exactly as it does on
+# disk. Building from a flattened /app would leave that path pointing outside
+# the image.
+WORKDIR /repo/VEN
 
 # HiGHS bindings build native C++ code via cmake + bindgen (needs libclang).
 RUN apt-get update \
@@ -28,12 +32,12 @@ RUN apt-get update \
 # edit to it rebuilt HiGHS from scratch. Its manifest rarely changes; its
 # source changes land in the cheap layer below.
 COPY VEN/Cargo.toml VEN/Cargo.lock ./
-COPY lab-core/Cargo.toml ./lab-core/Cargo.toml
-RUN mkdir -p src lab-core/src     && echo 'fn main() {}' > src/main.rs     && : > lab-core/src/lib.rs
-RUN cargo build --release     && rm -rf src lab-core/src target/release/deps/ven_app* target/release/deps/lab_core*
+COPY lab-core/Cargo.toml /repo/lab-core/Cargo.toml
+RUN mkdir -p src /repo/lab-core/src     && echo 'fn main() {}' > src/main.rs     && : > /repo/lab-core/src/lib.rs
+RUN cargo build --release     && rm -rf src /repo/lab-core/src         target/release/deps/ven_app* target/release/deps/lab_core*
 
 # Build the actual application
-COPY lab-core/src ./lab-core/src
+COPY lab-core/src /repo/lab-core/src
 COPY VEN/src ./src
 COPY VEN/profiles ./profiles
 RUN cargo build --release
@@ -55,7 +59,7 @@ RUN groupadd -g ${gid} ${group} && \
     useradd -u ${uid} -g ${group} -s /bin/sh -M ${user}
 
 WORKDIR /app
-COPY --from=builder --chown=nonroot:nonroot /app/target/release/ven-app /app/ven-app
+COPY --from=builder --chown=nonroot:nonroot /repo/VEN/target/release/ven-app /app/ven-app
 RUN chmod 755 /app/ven-app
 
 # Persistence volume mount point
