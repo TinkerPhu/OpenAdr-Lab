@@ -9,6 +9,14 @@ export type HealthResponse = {
     vtn_connection: HealthComponentStatus;
     storage: HealthComponentStatus;
     planner: HealthComponentStatus;
+    /** Whether the VTN's last poll carried an object this VEN refused. */
+    wire_conformance?: HealthComponentStatus;
+    /**
+     * Live fleet telemetry. Absent when this VEN does not publish at all,
+     * which is a normal deployment rather than a fault — and the reason this
+     * is optional rather than always present.
+     */
+    fleet_telemetry?: HealthComponentStatus;
   };
   /** Server clock (ISO 8601) — lets a client detect/correct for its own clock skew. */
   server_time: string;

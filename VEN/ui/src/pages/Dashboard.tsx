@@ -174,6 +174,29 @@ export function DashboardPage() {
             Health
           </Typography>
           <Typography data-testid="dash-health-value">{healthStatus}</Typography>
+          {/*
+            Name what is actually wrong. The card used to show only the
+            overall word, so a degraded component was visible as "degraded"
+            with no way to tell which -- and `fleet_telemetry` deliberately
+            does not change the overall status (a fleet view going dark is an
+            observability problem, not an operational one), so it would not
+            have shown here at all.
+          */}
+          <Stack spacing={0.25} mt={1}>
+            {Object.entries(health.data?.components ?? {})
+              .filter(([, c]) => c && c.status !== "ok")
+              .map(([name, c]) => (
+                <Typography
+                  key={name}
+                  variant="body2"
+                  color="warning.main"
+                  data-testid={`dash-health-component-${name}`}
+                >
+                  {name.replace(/_/g, " ")}
+                  {c.detail ? `: ${c.detail}` : ""}
+                </Typography>
+              ))}
+          </Stack>
         </Paper>
       </Grid>
 
