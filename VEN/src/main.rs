@@ -17,6 +17,7 @@ mod simulator;
 mod state;
 mod tasks;
 mod vtn;
+mod vtn_reports;
 mod weather;
 
 use config::Config;
