@@ -6,22 +6,35 @@ from features.helpers.api_client import vtn_post, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 
 
-@given('I create an event for the saved program with a reportDescriptor frequency of {freq_s:d} seconds')
-def step_create_event_with_report_descriptor(context, freq_s):
+@given('I create an event for the saved program reporting every {secs:d} seconds')
+def step_create_event_with_report_descriptor(context, secs):
+    """See `reporting_out_steps.step_create_event_with_typed_descriptor`:
+    3.1's `frequency` counts intervals, not seconds, so a cadence of N seconds
+    is an interval of N seconds with `frequency: 1`."""
+    from datetime import datetime, timedelta, timezone
+
+    start = (datetime.now(timezone.utc) - timedelta(seconds=secs)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     r = vtn_post(
         "/events",
         context.vtn_token,
         json={
             "programID": context.saved_program_id,
             "eventName": "resample-event",
+            "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
             "intervals": [
-                {"id": 0, "payloads": [{"type": "PRICE", "values": [0.25]}]},
+                {
+                    "id": 0,
+                    "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
+                    "payloads": [{"type": "PRICE", "values": [0.25]}],
+                },
             ],
             "reportDescriptors": [
                 {
                     "payloadType": "USAGE",
                     "readingType": "DIRECT_READ",
-                    "frequency": freq_s,
+                    "frequency": 1,
                     "repeat": 1,
                 }
             ],
