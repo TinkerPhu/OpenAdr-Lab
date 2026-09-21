@@ -157,6 +157,54 @@ Run `python3 scripts/seed_vtn.py --vtn-url http://Node1:8200 --demo-cancel` to c
 
 ---
 
+## 9. Reading a Report This Lab Sent
+**Description:**
+Anyone consuming this lab's reports — the VTN UI, `experiments/kpi.py`, a third
+party — needs to know what the numbers mean. From 2026-09-20 they say so
+themselves.
+
+**What changed for a reader:**
+- Every report carries `payloadDescriptors` declaring each payload type's
+  `units`. It is optional in OpenADR and mandatory here.
+- `USAGE` is **energy over the interval, in kWh**, and the interval states the
+  window it covers. It used to be instantaneous watts with no window, which is
+  what `kpi.py` compensated for by multiplying by duration.
+- `STORAGE_CHARGE_LEVEL` is a number in `PERCENT`, not a formatted string.
+- `programID` is gone; `eventID` is a report's only object link.
+
+**Reading it correctly:**
+Take the unit from the report's own `payloadDescriptors` rather than assuming
+one. A report with no descriptor predates the cutover and carries watts;
+`kpi.py` applies that default and says on stderr when it did, so a KPI computed
+across the cutover is never silently mixed.
+
+**What to test:**
+- `tests/features/ven_reporting_out.feature` — "A report on the wire declares
+  what its values mean"
+- `experiments/kpi.py --self-check` — the same run expressed both ways gives
+  the same answer
+
+---
+
+## 10. A VEN That Was Given Nothing
+**Description:**
+A VEN whose VTN user exists but carries no scopes authenticates perfectly and
+then sees an empty world: every request returns 200, every list comes back
+empty. Indistinguishable, from outside, from a quiet grid.
+
+**What the VEN does now:**
+Reads the scopes from its own access token and reports the missing ones on
+`GET /health` (`wire_conformance`) and as a notification, instead of polling
+successfully for ever. Same surface shows an object the VTN sent that this VEN
+refused — both are "something is wrong with what we are being given, and every
+request still succeeds".
+
+**What to test:**
+- `tests/features/ven_health.feature` — health exposes wire conformance
+- `VEN/src/controller/token_scopes.rs` unit tests
+
+---
+
 ## Notes
 If the system can reliably handle all use cases above, it already matches the majority of real-world OpenADR deployments. More complex scenarios (stacked markets, transactive energy, multi-program arbitration) typically build on these fundamentals.
 
