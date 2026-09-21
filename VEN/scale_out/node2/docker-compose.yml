@@ -34,6 +34,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-4"
       CLIENT_SECRET: "ven-4"
       VEN_NAME: "ven-4"
@@ -69,6 +77,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-5"
       CLIENT_SECRET: "ven-5"
       VEN_NAME: "ven-5"
@@ -101,6 +117,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-6"
       CLIENT_SECRET: "ven-6"
       VEN_NAME: "ven-6"
@@ -133,6 +157,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-7"
       CLIENT_SECRET: "ven-7"
       VEN_NAME: "ven-7"
@@ -165,6 +197,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-8"
       CLIENT_SECRET: "ven-8"
       VEN_NAME: "ven-8"
@@ -197,6 +237,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-9"
       CLIENT_SECRET: "ven-9"
       VEN_NAME: "ven-9"
@@ -229,6 +277,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-10"
       CLIENT_SECRET: "ven-10"
       VEN_NAME: "ven-10"
@@ -261,6 +317,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-11"
       CLIENT_SECRET: "ven-11"
       VEN_NAME: "ven-11"
@@ -293,6 +357,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-12"
       CLIENT_SECRET: "ven-12"
       VEN_NAME: "ven-12"
@@ -325,6 +397,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-13"
       CLIENT_SECRET: "ven-13"
       VEN_NAME: "ven-13"
@@ -357,6 +437,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-14"
       CLIENT_SECRET: "ven-14"
       VEN_NAME: "ven-14"
@@ -389,6 +477,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-15"
       CLIENT_SECRET: "ven-15"
       VEN_NAME: "ven-15"
@@ -421,6 +517,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-16"
       CLIENT_SECRET: "ven-16"
       VEN_NAME: "ven-16"
@@ -453,6 +557,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-17"
       CLIENT_SECRET: "ven-17"
       VEN_NAME: "ven-17"
@@ -485,6 +597,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-18"
       CLIENT_SECRET: "ven-18"
       VEN_NAME: "ven-18"
@@ -517,6 +637,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-19"
       CLIENT_SECRET: "ven-19"
       VEN_NAME: "ven-19"
@@ -549,6 +677,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      # Live fleet telemetry (phase 0 §6.2). Over the LAN to the same broker
+      # Node1's VENs reach by service name -- :1884 is the lab broker on the
+      # container network, the docker network and the host alike, so the port
+      # alone says which broker is meant.
+      FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-20"
       CLIENT_SECRET: "ven-20"
       VEN_NAME: "ven-20"

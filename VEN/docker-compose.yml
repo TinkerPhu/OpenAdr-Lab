@@ -26,6 +26,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
+      # Live fleet telemetry (phase 0 §6.2). The lab's own broker, by service
+      # name from inside the VTN stack's network. Unset would mean "this VEN
+      # is not part of a monitored fleet", which is why the variable exists at
+      # all rather than a boolean.
+      FLEET_MQTT_HOST: "lab-mqtt"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-1"
       CLIENT_SECRET: "ven-1"
       VEN_NAME: "ven-1"
@@ -72,6 +80,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
+      # Live fleet telemetry (phase 0 §6.2). The lab's own broker, by service
+      # name from inside the VTN stack's network. Unset would mean "this VEN
+      # is not part of a monitored fleet", which is why the variable exists at
+      # all rather than a boolean.
+      FLEET_MQTT_HOST: "lab-mqtt"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-2"
       CLIENT_SECRET: "ven-2"
       VEN_NAME: "ven-2"
@@ -106,6 +122,14 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
+      # Live fleet telemetry (phase 0 §6.2). The lab's own broker, by service
+      # name from inside the VTN stack's network. Unset would mean "this VEN
+      # is not part of a monitored fleet", which is why the variable exists at
+      # all rather than a boolean.
+      FLEET_MQTT_HOST: "lab-mqtt"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       CLIENT_ID: "ven-3"
       CLIENT_SECRET: "ven-3"
       VEN_NAME: "ven-3"
