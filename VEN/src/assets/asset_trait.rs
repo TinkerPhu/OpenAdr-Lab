@@ -4,12 +4,12 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor};
 use crate::assets::HistoryPoint;
-use crate::common::TimeSeries;
 use crate::entities::asset::{AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
+use lab_core::time_series::TimeSeries;
 
 pub use super::max_power::{Trajectory, TrajectoryPoint};
 

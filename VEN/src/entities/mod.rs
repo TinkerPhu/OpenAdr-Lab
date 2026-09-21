@@ -18,7 +18,6 @@ pub mod ring_buffer;
 pub mod sim_inject;
 pub mod solar;
 pub mod tariff_snapshot;
-pub mod time_window;
 pub mod timeline;
 pub mod user_request;
 pub mod weather;

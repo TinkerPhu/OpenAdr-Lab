@@ -3,9 +3,9 @@
 //! surface a stable plan warning (which WP4.3 turns into a notification).
 
 use super::*;
-use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::stale_rates::apply_stale_rate_policy;
 use crate::entities::design_vocabulary::StaleRatePolicy;
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// 6 h horizon in 12 × 1800 s slots; policy + percentile injectable.
 fn make_profile_6h(policy: StaleRatePolicy, pctl: f64) -> Profile {

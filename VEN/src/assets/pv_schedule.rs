@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::common::{Interpolation, TimeSeries};
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 use super::pv::{PvInverter, PvPowerInputs, PvState};
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};

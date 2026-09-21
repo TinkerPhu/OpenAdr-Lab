@@ -13,9 +13,9 @@ use tokio_stream::StreamExt;
 
 use crate::entities::asset::PlanTrigger;
 use crate::entities::history::LedgerPeriod;
-use crate::entities::time_window::TimeWindow;
 use crate::entities::PlannerObjective;
 use crate::AppCtx;
+use lab_core::time_window::TimeWindow;
 
 /// GET /plan — returns the active Plan (null until Stage 3).
 pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {

@@ -6,10 +6,10 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
     RequestResolvable,
 };
-use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::BatteryParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// Minimum time a direction's max rate must be sustainable to be reported as
 /// available power (see `Battery::capability_inner`).

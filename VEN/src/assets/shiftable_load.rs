@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
 };
-use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, ShiftableLoadMilpContext, ShiftableLoadScalars,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// Shiftable-load config: fixed power, non-interruptible once started, hard
 /// `[earliest_start, latest_end]` window. See design.md D1/D2 of the

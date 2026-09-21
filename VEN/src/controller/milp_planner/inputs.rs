@@ -1,7 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
-use crate::common::TimeSeries;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::{
@@ -11,7 +10,8 @@ use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
-use crate::entities::time_window::TimeWindow;
+use lab_core::time_series::TimeSeries;
+use lab_core::time_window::TimeWindow;
 
 use super::types::*;
 

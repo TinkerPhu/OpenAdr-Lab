@@ -21,7 +21,7 @@ pub(crate) fn apply_dispatch_override(
     live_pv_kw: Option<f64>,
     live_base_load_kw: Option<f64>,
 ) {
-    use crate::entities::time_window::{any_covering, covering};
+    use lab_core::time_window::{any_covering, covering};
     if any_covering(alert_windows, now) {
         return;
     }

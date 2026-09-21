@@ -7,7 +7,6 @@
 use chrono::{DateTime, Duration, Utc};
 use tracing::{debug, warn};
 
-use crate::common::Aggregation;
 use crate::controller::report_intervals::{
     build_baseline_report_intervals, build_capacity_forecast_intervals, build_forecast_intervals,
     build_net_site_power_ts, build_soc_intervals,
@@ -20,7 +19,8 @@ use crate::entities::capacity::OadrReportObligation;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
-use crate::entities::time_window::TimeWindow;
+use lab_core::time_series::Aggregation;
+use lab_core::time_window::TimeWindow;
 
 // ---------------------------------------------------------------------------
 // Domain-side sample type — extracted at the infra boundary by callers.
@@ -46,7 +46,7 @@ pub struct AssetReportSample {
 /// Returns true if `event` has at least one interval that is currently active
 /// (interval timing: the shared rule, `controller::event_timing`).
 fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
-    crate::controller::event_timing::timed_intervals(event)
+    lab_core::event_timing::timed_intervals(event)
         .iter()
         .any(|t| t.covers(now))
 }
@@ -496,7 +496,7 @@ mod tests {
     // active regardless), and a missing duration is open-ended (was one year).
     #[test]
     fn event_is_active_uses_the_event_level_period() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!({
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": "e", "programID": "p",
             "intervalPeriod": {"start": "2023-11-14T22:13:20Z", "duration": "PT1H"},
             "intervals": [{"id": 0, "payloads": []}]
@@ -509,7 +509,7 @@ mod tests {
             "ended with its event-level period"
         );
         assert!(!event_is_active(&event, ts(-1)), "not yet started");
-        let untimed = crate::controller::vtn_port::events_from_json(serde_json::json!({
+        let untimed = lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": "u", "programID": "p", "intervals": [{"id": 0, "payloads": []}]
         }))
         .remove(0);
@@ -1015,7 +1015,7 @@ mod tests {
 
     #[test]
     fn measurement_report_fields_match_event() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-001",
             "programID": "prog-001",
             "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
@@ -1059,7 +1059,7 @@ mod tests {
     /// omitted and logged instead.
     #[test]
     fn measurement_report_omits_usage_when_the_window_is_zero_length() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-nowindow",
             "programID": "prog-001",
             "intervals": [{"payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": []}]}]
@@ -1081,7 +1081,7 @@ mod tests {
 
     #[test]
     fn measurement_report_includes_ev_soc_when_available() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-002",
             "programID": "prog-001",
             "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
@@ -1123,7 +1123,7 @@ mod tests {
 
     #[test]
     fn active_events_skips_events_with_report_descriptors() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-003",
             "programID": "prog-001",
             "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}],
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn build_measurement_report_domain_only() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-sc004",
             "programID": "prog-001",
             "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]

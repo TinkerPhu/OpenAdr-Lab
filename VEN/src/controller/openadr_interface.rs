@@ -2,11 +2,11 @@ use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::controller::event_timing::{timed_intervals, TimedInterval};
 use crate::controller::vtn_port::{EventTypeName, OadrEvent, OadrPayload, PayloadValues};
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
+use lab_core::event_timing::{timed_intervals, TimedInterval};
 use openleadr_wire::report::ReportDescriptor as WireReportDescriptor;
 
 // Rate/capacity-schedule parsing lives in `rate_schedule.rs` (split out to stay under the
@@ -318,7 +318,7 @@ mod tests {
                 }]
             }]
         }]);
-        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
+        let alerts = parse_alert_windows(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "ALERT_GRID_EMERGENCY");
         assert_eq!(alerts[0].event_id, "alert-1");
@@ -339,7 +339,7 @@ mod tests {
                 "payloads": [{ "type": "ALERT_BLACK_START", "values": ["restoring"] }]
             }]
         }]);
-        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
+        let alerts = parse_alert_windows(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "ALERT_BLACK_START");
         assert_eq!(alerts[0].start.to_rfc3339(), "2026-03-14T02:00:00+00:00");
@@ -357,7 +357,7 @@ mod tests {
                 "payloads": [{ "type": "PRICE", "values": [0.25] }]
             }]
         }]);
-        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
+        let alerts = parse_alert_windows(&lab_core::test_fixtures::events_from_json(events));
         assert!(alerts.is_empty());
     }
 
@@ -371,7 +371,7 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT15M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [1.5] }] }]
         }]);
-        let w = parse_dispatch_windows(&crate::controller::vtn_port::events_from_json(events));
+        let w = parse_dispatch_windows(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].setpoint_kw, 1.5);
         assert_eq!((w[0].end - w[0].start).num_minutes(), 15);
@@ -388,9 +388,8 @@ mod tests {
                 "intervals": [{ "id": 0, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [val] }] }]
             }])
         };
-        let parse = |v| {
-            parse_charge_state_setpoint(&crate::controller::vtn_port::events_from_json(make(v)))
-        };
+        let parse =
+            |v| parse_charge_state_setpoint(&lab_core::test_fixtures::events_from_json(make(v)));
         let (soc, end, eid) = parse(json!(0.9)).expect("fraction accepted");
         assert!((soc - 0.9).abs() < 1e-9);
         assert_eq!(eid, "cs-1");
@@ -419,7 +418,7 @@ mod tests {
             }]
         }]);
         let cap = parse_capacity_state(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             Utc::now(),
         );
         assert_eq!(cap.export_subscription_kw, Some(4.0));
@@ -436,7 +435,7 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "SIMPLE", "values": [2] }] }]
         }]);
-        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
+        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].level, 2);
         assert_eq!(windows[0].event_id, "simple-1");
@@ -455,7 +454,7 @@ mod tests {
                 { "id": 2, "payloads": [{ "type": "SIMPLE", "values": ["high"] }] }
             ]
         }]);
-        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
+        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
         assert!(windows.is_empty());
     }
 
@@ -470,7 +469,7 @@ mod tests {
                 "payloads": [{ "type": "PRICE", "values": [0.25] }]
             }]
         }]);
-        let windows = parse_simple_windows(&crate::controller::vtn_port::events_from_json(events));
+        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
         assert!(windows.is_empty());
     }
 
@@ -488,10 +487,10 @@ mod tests {
                 "payloads": [{ "type": "ALERT_GRID_EMERGENCY", "values": ["no window"] }]
             }]
         }]);
-        let alerts = parse_alert_windows(&crate::controller::vtn_port::events_from_json(events));
+        let alerts = parse_alert_windows(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(alerts.len(), 1);
-        assert_eq!(alerts[0].start, crate::controller::event_timing::OPEN_START);
-        assert_eq!(alerts[0].end, crate::controller::event_timing::OPEN_END);
+        assert_eq!(alerts[0].start, lab_core::event_timing::OPEN_START);
+        assert_eq!(alerts[0].end, lab_core::event_timing::OPEN_END);
     }
 
     // GB-48: intervals without their own period follow each other (User Guide
@@ -499,7 +498,7 @@ mod tests {
     #[test]
     fn test_window_parsers_give_contiguous_intervals_their_own_windows() {
         let events = |payload_type: &str, v0: serde_json::Value, v1: serde_json::Value| {
-            crate::controller::vtn_port::events_from_json(json!([{
+            lab_core::test_fixtures::events_from_json(json!([{
                 "id": "multi",
                 "programID": "prog-1",
                 "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
@@ -576,8 +575,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -604,8 +602,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -655,8 +652,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].co2_g_kwh, Some(280.0));
         assert_eq!(snapshots[1].co2_g_kwh, Some(320.0));
@@ -683,8 +679,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -720,8 +715,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
         // Unlike parse_capacity_state (which collapses to the strictest single value),
         // the schedule keeps both intervals with their own distinct limits.
         assert_eq!(snapshots.len(), 2);
@@ -751,8 +745,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
         assert!(snapshots.is_empty());
     }
 
@@ -787,8 +780,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(
             snapshots.len(),
             1,
@@ -827,8 +819,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots =
-            parse_capacity_schedule(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
         let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let got: Vec<_> = snapshots
             .iter()
@@ -875,7 +866,7 @@ mod tests {
                 ]
             }
         ]);
-        let events = crate::controller::vtn_port::events_from_json(events);
+        let events = lab_core::test_fixtures::events_from_json(events);
         // GB-48: the limit fields mean "in force now". At 09:00 the 10:00–11:00
         // limit has not started — this test used to expect 5.0 here, which is
         // exactly the bug (a future limit applied now).
@@ -927,7 +918,7 @@ mod tests {
             }
         ]);
         let now = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(&crate::controller::vtn_port::events_from_json(events), now);
+        let cap = parse_capacity_state(&lab_core::test_fixtures::events_from_json(events), now);
         assert_eq!(
             cap.import_limit_kw,
             Some(10.0),
@@ -945,7 +936,7 @@ mod tests {
             "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [10000.0]}]}]
         }]);
         let cap = parse_capacity_state(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             Utc::now(),
         );
         assert_eq!(cap.import_limit_kw, Some(10000.0));
@@ -962,7 +953,7 @@ mod tests {
         ]);
         let now = Utc::now();
         let obligations = extract_report_obligations(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             now,
             &[],
         );
@@ -986,7 +977,7 @@ mod tests {
         ]);
         let now = Utc::now();
         let obligations = extract_report_obligations(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             now,
             &[],
         );
@@ -1011,7 +1002,7 @@ mod tests {
             ]
         }]);
         let obligations = extract_report_obligations(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             Utc::now(),
             &[],
         );
@@ -1044,8 +1035,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert_eq!(
             snapshots.len(),
             2,
@@ -1076,8 +1066,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -1113,8 +1102,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -1147,8 +1135,7 @@ mod tests {
             "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": intervals
         }]);
-        let snapshots =
-            parse_rate_snapshots(&crate::controller::vtn_port::events_from_json(events));
+        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
 
         assert!(
             snapshots.len() > 24,
@@ -1170,7 +1157,7 @@ mod tests {
         created: Option<&str>,
         price: f64,
     ) -> OadrEvent {
-        crate::controller::vtn_port::events_from_json(json!({
+        lab_core::test_fixtures::events_from_json(json!({
             "id": id,
             "programID": "prog-1",
             "priority": priority,
@@ -1252,7 +1239,7 @@ mod tests {
             .iter()
             .map(|(t, v)| json!({"type": t, "values": [v]}))
             .collect();
-        crate::controller::vtn_port::events_from_json(json!({
+        lab_core::test_fixtures::events_from_json(json!({
             "id": id,
             "programID": "prog-1",
             "priority": priority,
@@ -1468,7 +1455,7 @@ mod tests {
                 })
             })
             .collect();
-        let mut events: Vec<OadrEvent> = crate::controller::vtn_port::events_from_json(json!([{
+        let mut events: Vec<OadrEvent> = lab_core::test_fixtures::events_from_json(json!([{
             "id": "evt-daily",
             "programID": "prog-1",
             "priority": 5,
@@ -1612,7 +1599,7 @@ mod tests {
             historical: true,
         }];
         let obligations = extract_report_obligations(
-            &crate::controller::vtn_port::events_from_json(events),
+            &lab_core::test_fixtures::events_from_json(events),
             now,
             &existing,
         );
@@ -1650,7 +1637,7 @@ mod tests {
     /// `docs/reference/WIRE_PROFILE.md` rather than left implicit.
     #[test]
     fn open_intervals_lets_the_ven_choose_its_own_grid() {
-        let events = crate::controller::vtn_port::events_from_json(json!([{
+        let events = lab_core::test_fixtures::events_from_json(json!([{
             "id": "evt-standing",
             "programID": "fleet-monitoring",
             "duration": "P1Y",
@@ -1689,7 +1676,7 @@ mod tests {
                 })
             })
             .collect();
-        crate::controller::vtn_port::events_from_json(json!([{
+        lab_core::test_fixtures::events_from_json(json!([{
             "id": "evt-1",
             "programID": "prog-1",
             "reportDescriptors": [descriptor],
@@ -1746,7 +1733,7 @@ mod tests {
             "reportDescriptors": [{"payloadType": "USAGE", "frequency": 2}],
             "intervals": []
         }]);
-        let events = crate::controller::vtn_port::events_from_json(events);
+        let events = lab_core::test_fixtures::events_from_json(events);
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
         assert_eq!(obligations[0].submit_every_s, 3600);
     }
@@ -1765,7 +1752,7 @@ mod tests {
                 })
             })
             .collect();
-        crate::controller::vtn_port::events_from_json(json!([{
+        lab_core::test_fixtures::events_from_json(json!([{
             "id": "evt-1",
             "programID": "prog-1",
             "reportDescriptors": [descriptor],
