@@ -28,7 +28,11 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
     case "OpenAdrArrived":
       return (
         <span>
-          <b>{entry.event_name}</b> · {entry.signal_type} · {entry.value} (interval {entry.interval})
+          <b>{entry.event_name}</b>
+          {/* The id is what a reaction trace is keyed on, so it has to be
+              readable here and not only in the JSON behind the row. */}
+          {entry.event_id && <> · <code>{entry.event_id}</code></>}
+          {" · "}{entry.signal_type} · {entry.value} (interval {entry.interval})
         </span>
       );
     case "OpenAdrExpired":

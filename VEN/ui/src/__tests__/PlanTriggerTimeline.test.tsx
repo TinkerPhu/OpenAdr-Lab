@@ -40,6 +40,8 @@ function makeOpenAdrArrived(): TraceEntry {
   return {
     type: "OpenAdrArrived",
     ts: "2026-04-04T09:45:00Z",
+    event_id: "ev-9f3",
+    modification_date_time: "2026-04-04T09:44:00+00:00",
     event_name: "SummerPeakDR",
     signal_type: "PRICE",
     value: 2.0,
@@ -94,6 +96,17 @@ describe("PlanTriggerTimeline", () => {
     render(<PlanTriggerTimeline events={[makeCapacityChange()]} />);
     const chip = screen.getByTestId("trigger-chip-0");
     expect(chip.textContent).toMatch(/5|Cap/);
+  });
+
+  /* Names are not unique and an edited event keeps its name, so the id and
+   * the version are what a reaction can actually be traced to. */
+  it("shows the event id and version it acted on", async () => {
+    const user = userEvent.setup();
+    render(<PlanTriggerTimeline events={[makeOpenAdrArrived()]} />);
+    await user.click(screen.getByTestId("trigger-chip-0"));
+    const popover = screen.getByTestId("trigger-popover");
+    expect(popover).toHaveTextContent("ev-9f3");
+    expect(popover).toHaveTextContent("2026-04-04T09:44:00+00:00");
   });
 
   it("shows event_name in OpenAdrArrived chip", () => {

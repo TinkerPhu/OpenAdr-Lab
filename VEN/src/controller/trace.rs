@@ -21,6 +21,20 @@ pub struct AssetTimelinePoint {
 pub enum ControllerEvent {
     OpenAdrArrived {
         ts: DateTime<Utc>,
+        /// The VTN's own object id. `event_name` cannot identify an event --
+        /// the VTN does not enforce unique names -- and a reaction trace that
+        /// cannot say *which* event was acted on says nothing (§6.3).
+        ///
+        /// `#[serde(default)]` because this also reads back trace rows written
+        /// before the field existed: a requirement on new records is not a
+        /// requirement on an old cache.
+        #[serde(default)]
+        event_id: String,
+        /// The event *version* the VEN saw, verbatim from the VTN. An edited
+        /// event keeps its id and its name while changing what it says, so
+        /// without this "the VEN acted on event X" is still ambiguous.
+        #[serde(default)]
+        modification_date_time: Option<String>,
         event_name: String,
         signal_type: String,
         value: f64,
@@ -28,6 +42,10 @@ pub enum ControllerEvent {
     },
     OpenAdrExpired {
         ts: DateTime<Utc>,
+        #[serde(default)]
+        event_id: String,
+        /// The name of a vanished event is not knowable -- it is gone from the
+        /// list we read names from -- so this repeats the id.
         event_name: String,
     },
     RateChange {

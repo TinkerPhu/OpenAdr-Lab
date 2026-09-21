@@ -164,8 +164,12 @@ export type SimInjectState = {
 };
 
 export type TraceEntry =
-  | { type: "OpenAdrArrived";   ts: string; event_name: string; signal_type: string; value: number; interval: number }
-  | { type: "OpenAdrExpired";   ts: string; event_name: string }
+  // `event_id` and `modification_date_time` identify the event *version* the
+  // VEN acted on: names are not unique and an edited event keeps its name.
+  // Both are optional here because trace rows written before the fields
+  // existed are still read back.
+  | { type: "OpenAdrArrived";   ts: string; event_id?: string; modification_date_time?: string | null; event_name: string; signal_type: string; value: number; interval: number }
+  | { type: "OpenAdrExpired";   ts: string; event_id?: string; event_name: string }
   | { type: "RateChange";       ts: string; interval_start: string; import_eur_kwh: number; export_eur_kwh: number }
   | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
   | { type: "PlanCycle";        ts: string; trigger_reason: string; total_slots: number }
