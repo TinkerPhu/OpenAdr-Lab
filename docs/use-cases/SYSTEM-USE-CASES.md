@@ -205,6 +205,46 @@ request still succeeds".
 
 ---
 
+## 11. Watching the Whole Fleet Right Now
+**Description:**
+An operator who has just published a capacity limit to twenty sites wants to
+see them react. Reports answer that eventually — they describe intervals that
+have *closed*, on the report cadence — which is the right shape for a record
+and the wrong shape for a live view.
+
+**What the lab does:**
+Every VEN also publishes its own state to the lab broker
+(`openadr-lab/fleet/<venName>/telemetry`, the tick cadence, QoS 0 and
+retained), and the BFF holds the latest message per VEN and serves it at
+`GET /api/fleet/power`.
+
+The two sources stay distinct on purpose. Reports are the record: durable,
+spec-shaped, exact. Telemetry is the live feed: lossy, a few seconds old at
+worst, and never the thing anything is *measured* by. Nothing a VEN publishes
+here can change what it does — instructions arrive as OpenADR events, where
+the spec's targeting and priority rules apply.
+
+**Reading it correctly:**
+- Power is signed: import positive, export negative. A fleet sum that clamped
+  it would be wrong by exactly the export.
+- A VEN that has said nothing contributes `null`, not zero, and the response
+  reports `contributingVens` beside `knownVens` so a partial sum can be judged
+  rather than trusted.
+- `state` is `online`/`offline`, and `offline` is published by the broker's
+  last-will when a VEN dies without saying goodbye. It is the only way to tell
+  "gone" from "quiet".
+
+**Where it is visible:**
+The VTN UI dashboard health card shows the feed's state, how many VENs are
+live out of how many are known, and the age of the last message. The VEN UI
+diagnostics shows that VEN's own publisher.
+
+**What to test:**
+- `tests/features/fleet_telemetry.feature`
+- `VTN/bff/src/fleet.rs` and `VEN/src/controller/telemetry_port.rs` unit tests
+
+---
+
 ## Notes
 If the system can reliably handle all use cases above, it already matches the majority of real-world OpenADR deployments. More complex scenarios (stacked markets, transactive energy, multi-program arbitration) typically build on these fundamentals.
 

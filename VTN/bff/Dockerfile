@@ -2,16 +2,24 @@ FROM rust:1.90-alpine AS base
 RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
 
 FROM base AS builder
-WORKDIR /app
+# The container mirrors the repo: /repo/VTN/bff beside /repo/lab-core, so
+# Cargo.toml's `path = "../../lab-core"` resolves here exactly as it does on
+# disk. The build context is therefore the repo root, not VTN/bff.
+WORKDIR /repo/VTN/bff
 
-# Cache dependencies by copying manifests first
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs
-RUN cargo build --release && rm -rf src target/release/deps/vtn_bff*
-
-# Build the actual application
-COPY src ./src
+# Cache dependency compilation by building against stubs first. This layer is
+# reused whenever only source changes.
+COPY VTN/bff/Cargo.toml VTN/bff/Cargo.lock ./
+COPY lab-core/Cargo.toml /repo/lab-core/Cargo.toml
+RUN mkdir src && echo 'fn main() {}' > src/main.rs     && mkdir -p /repo/lab-core/src && echo '' > /repo/lab-core/src/lib.rs
 RUN cargo build --release
+
+# Build the actual application. The stub artifacts must go, including the
+# `.rlib` -- deleting only `deps/lab_core*` once left a stale stub satisfying
+# the dependency, and the failure surfaced much later than the cause.
+COPY lab-core/src /repo/lab-core/src
+COPY VTN/bff/src ./src
+RUN cargo clean --release -p lab-core -p vtn-bff && cargo build --release
 
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates curl
@@ -24,7 +32,7 @@ RUN addgroup -g ${gid} ${group} && \
     adduser -u ${uid} -G ${group} -s /bin/sh -D ${user}
 
 WORKDIR /app
-COPY --from=builder --chown=nonroot:nonroot /app/target/release/vtn-bff /app/vtn-bff
+COPY --from=builder --chown=nonroot:nonroot /repo/VTN/bff/target/release/vtn-bff /app/vtn-bff
 RUN chmod 755 /app/vtn-bff
 
 EXPOSE 8090

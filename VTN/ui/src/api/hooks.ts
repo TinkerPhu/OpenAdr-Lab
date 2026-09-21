@@ -13,6 +13,36 @@ export function useHealth() {
   });
 }
 
+/**
+ * The fleet's live state. Refetched on roughly the publish cadence — faster
+ * would show the same message twice, slower would make a dashboard lag the
+ * thing it is watching.
+ */
+export function useFleetPower() {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "power"],
+    queryFn: () => api.fleetPower(),
+    refetchInterval: 5_000,
+  });
+}
+
+/**
+ * The fleet's last `minutes` of stored telemetry.
+ *
+ * `from` is derived once per query rather than per render, so the window does
+ * not shift under the chart between refetches.
+ */
+export function useFleetHistory(minutes: number, stepSeconds: number) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "history", minutes, stepSeconds],
+    queryFn: () =>
+      api.fleetHistory(new Date(Date.now() - minutes * 60_000).toISOString(), stepSeconds),
+    refetchInterval: 30_000,
+  });
+}
+
 export function usePrograms() {
   const { api } = useBffContext();
   return useQuery({
