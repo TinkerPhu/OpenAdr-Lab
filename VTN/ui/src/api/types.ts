@@ -7,11 +7,32 @@ export type RecorderStatus = {
   lastError: string | null;
 };
 
+/**
+ * The live fleet feed (fleet-monitor phase 0 §7).
+ *
+ * `enabled` and `connected` are deliberately separate: a deployment without a
+ * broker is a configuration, a configured broker that cannot be reached is a
+ * fault, and one boolean cannot tell them apart.
+ *
+ * `vensKnown` counts every VEN that has ever spoken; `vensOnline` excludes the
+ * ones whose last-will has fired. A VEN that died is still known, so the two
+ * numbers together say what the feed is worth.
+ */
+export type FleetStatus = {
+  enabled: boolean;
+  connected: boolean;
+  lastMessageAt: string | null;
+  lastError: string | null;
+  vensKnown: number;
+  vensOnline: number;
+};
+
 export type HealthStatus = {
   time: string;
   bff: { ok: boolean; version: string };
   vtn: { reachable: boolean; authOk: boolean };
   recorder: RecorderStatus;
+  fleet: FleetStatus;
 };
 
 /**

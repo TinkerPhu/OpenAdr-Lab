@@ -16,6 +16,14 @@ const mockHealth = {
     consecutiveFailures: 0,
     lastError: null,
   },
+  fleet: {
+    enabled: true,
+    connected: true,
+    lastMessageAt: "2026-01-01T00:00:00Z",
+    lastError: null,
+    vensKnown: 20,
+    vensOnline: 19,
+  },
 };
 
 const mockPrograms = [
@@ -110,5 +118,34 @@ describe("DashboardPage", () => {
     } as ReturnType<typeof useHealth>);
     renderDashboard();
     expect(screen.queryByTestId("dash-health-recorder")).not.toBeInTheDocument();
+  });
+
+  it("renders the fleet feed with how many VENs are live", () => {
+    renderDashboard();
+    const row = screen.getByTestId("dash-health-fleet");
+    expect(row).toHaveTextContent("connected");
+    expect(row).toHaveTextContent("19/20");
+  });
+
+  /* A feed that is configured but unreachable is a fault; one that is not
+   * configured is a deployment choice. Only the first is worth showing. */
+  it("shows the fleet feed as disconnected when the broker is unreachable", async () => {
+    const { useHealth } = await import("../api/hooks");
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: { ...mockHealth, fleet: { ...mockHealth.fleet, connected: false } },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-fleet")).toHaveTextContent("disconnected");
+  });
+
+  it("does not render the fleet feed when this deployment has none", async () => {
+    const { useHealth } = await import("../api/hooks");
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: { ...mockHealth, fleet: { ...mockHealth.fleet, enabled: false } },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.queryByTestId("dash-health-fleet")).not.toBeInTheDocument();
   });
 });
