@@ -30,8 +30,8 @@ name: ven-unit-test
 services:
   ven-unit-test:
     build:
-      context: ../VEN
-      dockerfile: ../tests/Dockerfile.ven-unit-test
+      context: ..
+      dockerfile: tests/Dockerfile.ven-unit-test
     volumes:
       - ven-cargo-registry:/usr/local/cargo/registry
       - ven-cargo-git:/usr/local/cargo/git
@@ -44,8 +44,8 @@ services:
 
   ven-coverage:
     build:
-      context: ../VEN
-      dockerfile: ../tests/Dockerfile.ven-coverage
+      context: ..
+      dockerfile: tests/Dockerfile.ven-coverage
     volumes:
       - ven-coverage-cargo-registry:/usr/local/cargo/registry
       - ven-coverage-cargo-git:/usr/local/cargo/git

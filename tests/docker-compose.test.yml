@@ -100,8 +100,8 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-1:
     build:
-      context: ../VEN
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -140,8 +140,8 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-2:
     build:
-      context: ../VEN
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -172,8 +172,8 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-no-pv:
     build:
-      context: ../VEN
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -205,8 +205,8 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-penalty:
     build:
-      context: ../VEN
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"

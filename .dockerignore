@@ -8,6 +8,16 @@ Thumbs.db
 *.swp
 *.swo
 target/
+# The VEN build context is the repo root (lab-core is a path dependency beside
+# VEN/), so these have to be excluded by full path -- a bare `target/` matches
+# only the context root.
+**/target/
+**/node_modules/
+VEN/data/
+VEN/ui/dist/
+# The VEN takes openleadr-wire as a git dependency, so the submodule checkout
+# is not part of its build -- and it is large.
+openleadr-rs/
 debug/
 release/
 *.rlib
