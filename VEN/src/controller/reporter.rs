@@ -288,8 +288,8 @@ pub fn build_measurement_report_for_obligation(
 
     let report_name = format!("ob-{}-{}-{}", ven_name, event_id, obligation.payload_type);
     let resource_name = format!("{}-meter", ven_name);
-    let interval_width = Duration::seconds(obligation.interval_duration_s as i64);
-    let duration_iso = format_iso8601_duration(obligation.interval_duration_s);
+    let interval_width = Duration::seconds(obligation.interval_width_s as i64);
+    let duration_iso = format_iso8601_duration(obligation.interval_width_s);
 
     // Build net site power TimeSeries (sum all assets' power_kw)
     let net_power_ts = build_net_site_power_ts(asset_samples);
@@ -397,14 +397,34 @@ pub fn build_measurement_report_for_obligation(
                     // mean power is multiplied by the interval it covers. This
                     // used to be sent as instantaneous watts, which is what
                     // `kpi.py` compensated for with its own `x duration`.
-                    let value = if payload_type == "SIMPLE" {
-                        OadrReportPayload::level("SIMPLE", directed_kw)
-                    } else {
-                        OadrReportPayload::energy_from_power_kw(
+                    // Answer the payload type that was asked for, in the
+                    // quantity the contract says it carries. This arm used to
+                    // hardcode `USAGE` for everything but `SIMPLE`, so a VTN
+                    // requesting `DEMAND` -- real power -- was answered with
+                    // energy under a name it never asked about.
+                    //
+                    // A type the report contract has no opinion on is an
+                    // *event* signal type (IMPORT_CAPACITY_LIMIT and friends)
+                    // used as a report request: "how much did you draw against
+                    // this". That is usage, and stays `USAGE`.
+                    use crate::controller::report_payload::Quantity;
+                    let value = match crate::controller::report_payload::quantity_of(payload_type) {
+                        Some(Quantity::PowerKw) => {
+                            OadrReportPayload::power_kw(payload_type, directed_kw)
+                        }
+                        Some(Quantity::Dimensionless) => {
+                            OadrReportPayload::level(payload_type, directed_kw)
+                        }
+                        Some(Quantity::EnergyKwh) => OadrReportPayload::energy_from_power_kw(
+                            payload_type,
+                            directed_kw,
+                            obligation.interval_width_s,
+                        ),
+                        _ => OadrReportPayload::energy_from_power_kw(
                             "USAGE",
                             directed_kw,
-                            obligation.interval_duration_s,
-                        )
+                            obligation.interval_width_s,
+                        ),
                     };
                     OadrReportInterval {
                         id: i,
@@ -526,7 +546,7 @@ mod tests {
         event_id: &str,
         program_id: &str,
         payload_type: &str,
-        interval_duration_s: u64,
+        interval_width_s: u64,
     ) -> OadrReportObligation {
         OadrReportObligation {
             id: Uuid::new_v4(),
@@ -536,7 +556,8 @@ mod tests {
             reading_type: "DIRECT_READ".to_string(),
             resource_name: None,
             due_at: Utc::now(),
-            interval_duration_s,
+            interval_width_s,
+            submit_every_s: interval_width_s,
             fulfilled: false,
             created_at: Utc::now(),
             historical: true,
@@ -622,7 +643,8 @@ mod tests {
             reading_type: "DIRECT_READ".to_string(),
             resource_name: None,
             due_at: Utc::now(),
-            interval_duration_s: 900,
+            interval_width_s: 900,
+            submit_every_s: 900,
             fulfilled: false,
             created_at: Utc::now(),
             historical: true,
@@ -686,6 +708,50 @@ mod tests {
                 "import should be 0 for export power, got {val}"
             );
         }
+    }
+
+    /// The VEN must answer the payload type it was asked for.
+    ///
+    /// The measured-history arm hardcoded `"USAGE"` for everything that was
+    /// not `SIMPLE`, so a VTN requesting `DEMAND` -- real power, which is what
+    /// a fleet monitor wants -- got `USAGE`, energy, under a name it never
+    /// asked about. Two different quantities, one of them silently wrong.
+    #[test]
+    fn obligation_report_answers_the_payload_type_that_was_requested() {
+        let rows: Vec<(i64, f64)> = (0..=16).map(|i| (i * 60, 2.0)).collect();
+        let asset_samples: HashMap<_, _> = [make_samples("site", &rows)].into_iter().collect();
+        let ob = make_obligation("e1", "p1", "DEMAND", 300);
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            &std::collections::HashMap::new(),
+            None,
+            ts(1200),
+        )
+        .unwrap();
+
+        let iv = &report.resources[0].intervals[0];
+        let demand = iv
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "DEMAND")
+            .expect("a DEMAND request is answered with DEMAND");
+        // Real power in kW, not energy: 2 kW stays 2, it is not multiplied by
+        // the interval length.
+        assert!(
+            (demand.values[0].as_f64().unwrap() - 2.0).abs() < 1e-6,
+            "DEMAND is power in kW, got {:?}",
+            demand.values[0]
+        );
+        let declared = report
+            .payloadDescriptors
+            .iter()
+            .find(|d| d.payloadType == "DEMAND")
+            .expect("and declares what it means");
+        assert_eq!(declared.units.as_deref(), Some("KW"));
     }
 
     /// F-5: the newest bucket is still filling when the report is sent.

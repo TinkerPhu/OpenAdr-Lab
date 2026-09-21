@@ -149,7 +149,16 @@ pub struct OadrReportObligation {
     pub reading_type: String,
     pub resource_name: Option<String>,
     pub due_at: DateTime<Utc>,
-    pub interval_duration_s: u64,
+    /// How long one report interval covers -- the bucket width.
+    ///
+    /// Distinct from `submit_every_s`: 3.1's `frequency` counts intervals
+    /// *between* reports, so a 60 s grid with `frequency: 4` means four 60 s
+    /// intervals carried by one submission every 240 s. These were a single
+    /// number, which made that case report one 240 s bucket -- coarser data
+    /// than the VTN asked for, arriving when it asked for it.
+    pub interval_width_s: u64,
+    /// How long until the next submission is due.
+    pub submit_every_s: u64,
     pub fulfilled: bool,
     pub created_at: DateTime<Utc>,
     /// From `reportDescriptor.historical` (spec default true): true = report

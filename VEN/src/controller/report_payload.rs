@@ -61,6 +61,9 @@ pub fn quantity_of(payload_type: &str) -> Option<Quantity> {
     Some(match payload_type {
         // Spec: "Energy usage over an interval."
         "USAGE" | "USAGE_FORECAST" | "BASELINE" | "DELTA_USAGE" => Quantity::EnergyKwh,
+        // Spec: "Power usage for an interval, i.e. Real Power." The fleet
+        // series: instantaneous site power, signed, not accumulated energy.
+        "DEMAND" => Quantity::PowerKw,
         // Spec: additional import/export capacity requested — a power.
         "IMPORT_RESERVATION_CAPACITY" | "EXPORT_RESERVATION_CAPACITY" => Quantity::PowerKw,
         // A battery's charge/discharge limit is a power, not a consumption.
