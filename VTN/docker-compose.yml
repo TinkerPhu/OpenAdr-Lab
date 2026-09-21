@@ -76,6 +76,12 @@ services:
     environment:
       MQTT_VTN_USERNAME: ${MQTT_VTN_USERNAME:-openadr-vtn}
       MQTT_VTN_PASSWORD: ${MQTT_VTN_PASSWORD:-openadr-vtn}
+      # The fleet's own credential: every VEN publishes its live telemetry
+      # under openadr-lab/fleet/<venName>. One shared credential for now --
+      # a per-VEN ACL, so a VEN may only publish below its own name, is
+      # recorded as still-to-do in the phase 0 plan §6.1.
+      MQTT_FLEET_USERNAME: ${MQTT_FLEET_USERNAME:-openadr-fleet}
+      MQTT_FLEET_PASSWORD: ${MQTT_FLEET_PASSWORD:-openadr-fleet}
     volumes:
       - ./mosquitto/lab-mqtt.conf:/mosquitto/config/mosquitto.conf:ro
       - lab-mqtt-data:/mosquitto/data
@@ -85,6 +91,8 @@ services:
       - |
         set -e
         mosquitto_passwd -c -b /mosquitto/config/pwfile           "$${MQTT_VTN_USERNAME}" "$${MQTT_VTN_PASSWORD}"
+        # -c creates and truncates, so only the first call may use it.
+        mosquitto_passwd -b /mosquitto/config/pwfile           "$${MQTT_FLEET_USERNAME}" "$${MQTT_FLEET_PASSWORD}"
         # The command runs as root, but mosquitto drops to the `mosquitto` user
         # on start; without this chown it cannot read its own password file and
         # exits with 'Unable to open pwfile'.
