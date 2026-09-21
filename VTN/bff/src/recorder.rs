@@ -16,12 +16,9 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgPool;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::vtn_client::VtnClient;
-
-const INITIAL_BACKOFF_S: u64 = 5;
-const MAX_BACKOFF_S: u64 = 300;
 
 /// Observable recorder health (2026-08-10 incident fix) — before this, a
 /// single failed startup DB connection permanently disabled the recorder for
@@ -39,10 +36,6 @@ pub struct RecorderStatus {
 }
 
 pub type SharedRecorderStatus = Arc<RwLock<RecorderStatus>>;
-
-fn next_backoff(current: Duration) -> Duration {
-    (current * 2).min(Duration::from_secs(MAX_BACKOFF_S))
-}
 
 fn mark_connect_failure(status: &mut RecorderStatus, err: &str) {
     status.connected = false;
@@ -363,26 +356,18 @@ async fn record_ven_snapshots(pool: &PgPool, client: &VtnClient) -> Result<u64> 
 /// internal-DNS hiccup during a `vtn-bff` restart) must not permanently
 /// disable the recorder for the rest of the process's lifetime.
 async fn connect_and_init_with_retry(database_url: &str, status: &SharedRecorderStatus) -> PgPool {
-    let mut backoff = Duration::from_secs(INITIAL_BACKOFF_S);
-    loop {
-        let attempt = async {
-            let pool = PgPool::connect(database_url).await?;
+    let pool = crate::db::connect_and_init_with_retry(
+        database_url,
+        "recorder",
+        |pool| async move {
             init_schema(&pool).await?;
-            Ok::<PgPool, anyhow::Error>(pool)
-        };
-        match attempt.await {
-            Ok(pool) => {
-                mark_connect_success(&mut *status.write().await);
-                return pool;
-            }
-            Err(e) => {
-                error!("recorder: connect/init failed, retrying in {backoff:?}: {e:#}");
-                mark_connect_failure(&mut *status.write().await, &format!("{e:#}"));
-                tokio::time::sleep(backoff).await;
-                backoff = next_backoff(backoff);
-            }
-        }
-    }
+            Ok(pool)
+        },
+        |err| async move { mark_connect_failure(&mut *status.write().await, &err) },
+    )
+    .await;
+    mark_connect_success(&mut *status.write().await);
+    pool
 }
 
 /// Spawns the recorder as a self-contained background task: connects (with
@@ -596,22 +581,6 @@ mod tests {
     }
 
     // ── recorder health/reconnect (2026-08-10 incident fix) ─────────────
-
-    #[test]
-    fn test_next_backoff_doubles_until_cap() {
-        assert_eq!(
-            next_backoff(Duration::from_secs(5)),
-            Duration::from_secs(10)
-        );
-        assert_eq!(
-            next_backoff(Duration::from_secs(200)),
-            Duration::from_secs(300)
-        );
-        assert_eq!(
-            next_backoff(Duration::from_secs(300)),
-            Duration::from_secs(300)
-        );
-    }
 
     #[test]
     fn test_mark_connect_failure_sets_disconnected_and_increments_failures() {

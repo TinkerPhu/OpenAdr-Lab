@@ -108,6 +108,18 @@ pub fn apply_message(
     }
 }
 
+/// The site meter reading a fleet view sums, out of one VEN's telemetry body.
+///
+/// One function because two callers need the same answer: the live route and
+/// the telemetry store. A second copy of this path expression is exactly the
+/// shape `one-concept-one-function` exists to stop -- the copies would agree
+/// until the day the VEN renames the field, and then disagree silently.
+///
+/// `None` means the VEN has not said, which is never the same as zero.
+pub fn net_power_w(telemetry: &serde_json::Value) -> Option<f64> {
+    telemetry.get("grid")?.get("net_power_w")?.as_f64()
+}
+
 /// Where the BFF subscribes, and as whom.
 #[derive(Clone, Debug)]
 pub struct FleetMqttConfig {
@@ -147,10 +159,16 @@ impl FleetMqttConfig {
 }
 
 /// Subscribe and keep `state` current until the process ends.
+///
+/// `store` is where the same messages are kept for later. It is optional
+/// because the live view is useful without a database and must not be held
+/// hostage to one — a deployment with no `DATABASE_URL` still gets a fleet
+/// dashboard, just no history.
 pub fn spawn_ingest(
     config: FleetMqttConfig,
     state: FleetState,
     status: Arc<RwLock<FleetIngestStatus>>,
+    store: Option<crate::fleet_store::TelemetryWriter>,
 ) {
     use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 
@@ -193,6 +211,21 @@ pub fn spawn_ingest(
                     if let Some((ven, leaf)) = parse_topic(&root, &p.topic) {
                         let now = Utc::now();
                         apply_message(&mut *state.write().await, ven, leaf, &p.payload, now);
+                        // Store what was stored in the live state, from the
+                        // live state -- so the history cannot end up holding a
+                        // differently-parsed version of the same message.
+                        if let (Some(store), "telemetry") = (&store, leaf) {
+                            if let Some(body) = state
+                                .read()
+                                .await
+                                .get(ven)
+                                .and_then(|v| v.telemetry.as_ref())
+                            {
+                                store.offer(crate::fleet_store::TelemetryRow::from_message(
+                                    ven, body, now,
+                                ));
+                            }
+                        }
                         status.write().await.last_message_at = Some(now);
                     }
                 }
@@ -287,6 +320,27 @@ mod tests {
             now(),
         );
         assert_eq!(state["ven-4"].state.as_deref(), Some("offline"));
+    }
+
+    #[test]
+    fn net_power_w_reads_the_meter_out_of_a_telemetry_body() {
+        let body = serde_json::json!({"grid": {"net_power_w": -2500.0}});
+        assert_eq!(net_power_w(&body), Some(-2500.0));
+    }
+
+    /// Absent, non-numeric or differently shaped bodies all mean "this VEN has
+    /// not said", which a sum must skip rather than read as zero.
+    #[test]
+    fn net_power_w_is_absent_rather_than_zero_when_the_body_does_not_say() {
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({"grid": {}}),
+            serde_json::json!({"grid": {"net_power_w": null}}),
+            serde_json::json!({"grid": {"net_power_w": "2500"}}),
+            serde_json::json!({"grid": 5}),
+        ] {
+            assert_eq!(net_power_w(&body), None, "{body} should not yield a value");
+        }
     }
 
     #[test]

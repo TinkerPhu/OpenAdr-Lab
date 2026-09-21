@@ -1,4 +1,4 @@
-import type { EventInput, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
+import type { EventInput, FleetHistory, FleetLive, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
 import { debugLog } from "../utils/debugLog";
 
 let reqCounter = 0;
@@ -52,6 +52,22 @@ export class BffApi {
   async health(): Promise<HealthStatus> {
     const r = await this.getReq("/api/health");
     if (!r.ok) throw new Error(`health ${r.status}`);
+    return r.json();
+  }
+
+  /** The fleet's latest reading per VEN. */
+  async fleetPower(): Promise<FleetLive> {
+    const r = await this.getReq("/api/fleet/power");
+    if (!r.ok) throw new Error(`fleet power ${r.status}`);
+    return r.json();
+  }
+
+  /** The fleet's stored telemetry over a window. */
+  async fleetHistory(fromIso: string, stepSeconds: number): Promise<FleetHistory> {
+    const r = await this.getReq(
+      `/api/fleet/power?from=${encodeURIComponent(fromIso)}&stepSeconds=${stepSeconds}`,
+    );
+    if (!r.ok) throw new Error(`fleet history ${r.status}`);
     return r.json();
   }
 

@@ -1,7 +1,9 @@
 mod cache;
 mod config;
+mod db;
 mod error;
 mod fleet;
+mod fleet_store;
 mod recorder;
 mod routes;
 mod vtn_client;
@@ -40,6 +42,10 @@ pub struct AppCtx {
     /// The fleet's live state, as the VENs last published it.
     pub fleet: fleet::FleetState,
     pub fleet_status: Arc<tokio::sync::RwLock<fleet::FleetIngestStatus>>,
+    /// The fleet's stored history, once its connection is up.
+    pub fleet_store: fleet_store::SharedPool,
+    /// The queue in front of it, for the count of samples it had to drop.
+    pub fleet_writer: Option<fleet_store::TelemetryWriter>,
 }
 
 async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
@@ -85,6 +91,17 @@ async fn main() -> anyhow::Result<()> {
     let fleet_state: fleet::FleetState = Arc::new(tokio::sync::RwLock::new(Default::default()));
     let fleet_status: Arc<tokio::sync::RwLock<fleet::FleetIngestStatus>> =
         Arc::new(tokio::sync::RwLock::new(Default::default()));
+    // The history behind that feed (D-7). Same gate as the recorder: with no
+    // DATABASE_URL the live view still works, there is simply nothing to look
+    // back at.
+    let (telemetry_writer, fleet_store_pool) = match cfg.database_url.clone() {
+        Some(url) => {
+            let (writer, pool) = fleet_store::spawn(url);
+            (Some(writer), pool)
+        }
+        None => (None, Arc::new(tokio::sync::RwLock::new(None))),
+    };
+
     match fleet::FleetMqttConfig::from_env() {
         Some(cfg) => {
             tracing::info!(
@@ -94,7 +111,12 @@ async fn main() -> anyhow::Result<()> {
                 "fleet ingest: subscribing"
             );
             fleet_status.write().await.enabled = true;
-            fleet::spawn_ingest(cfg, fleet_state.clone(), fleet_status.clone());
+            fleet::spawn_ingest(
+                cfg,
+                fleet_state.clone(),
+                fleet_status.clone(),
+                telemetry_writer.clone(),
+            );
         }
         None => tracing::info!("fleet ingest: no FLEET_MQTT_HOST, not subscribing"),
     }
@@ -107,6 +129,8 @@ async fn main() -> anyhow::Result<()> {
         recorder_status: recorder_status.clone(),
         fleet: fleet_state.clone(),
         fleet_status: fleet_status.clone(),
+        fleet_store: fleet_store_pool,
+        fleet_writer: telemetry_writer.clone(),
     };
 
     // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set. Spawning

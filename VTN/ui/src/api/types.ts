@@ -27,6 +27,46 @@ export type FleetStatus = {
   vensOnline: number;
 };
 
+/**
+ * One VEN's latest telemetry, as the BFF last received it.
+ *
+ * `netPowerW` is signed — import positive, export negative — and is `null`
+ * when that VEN has not said. Null is not zero: a fleet total that treated
+ * silence as "drawing nothing" would be wrong in the way hardest to notice.
+ */
+export type FleetVenLive = {
+  venName: string;
+  netPowerW: number | null;
+  state: string | null;
+  receivedAt: string;
+};
+
+export type FleetLive = {
+  source: "live";
+  vens: FleetVenLive[];
+  fleet: {
+    netPowerW: number;
+    contributingVens: number;
+    knownVens: number;
+  };
+};
+
+export type FleetSample = { ts: string; netPowerW: number };
+
+/**
+ * A window of stored telemetry. `source` says which table answered: `raw` is
+ * the published cadence, `rollup` is 1-minute means once the raw rows have
+ * aged out. Both are true and they are not the same resolution.
+ */
+export type FleetHistory = {
+  source: "raw" | "rollup";
+  from: string;
+  to: string;
+  stepSeconds: number;
+  vens: { venName: string; samples: FleetSample[] }[];
+  fleet: (FleetSample & { contributingVens: number })[];
+};
+
 export type HealthStatus = {
   time: string;
   bff: { ok: boolean; version: string };

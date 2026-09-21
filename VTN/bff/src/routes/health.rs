@@ -45,6 +45,13 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<serde_json::Value> {
             "lastError": fleet.last_error,
             "vensKnown": known,
             "vensOnline": online,
+            // The history behind the feed. `storeConnected` is false until the
+            // first successful connection, and `samplesDropped` counts what the
+            // writer's queue could not take -- a number that should stay at
+            // zero and means something specific if it does not.
+            "storeEnabled": ctx.fleet_writer.is_some(),
+            "storeConnected": ctx.fleet_store.read().await.is_some(),
+            "samplesDropped": ctx.fleet_writer.as_ref().map(|w| w.dropped()).unwrap_or(0),
         }
     }))
 }

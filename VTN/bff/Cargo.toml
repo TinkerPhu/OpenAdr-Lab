@@ -22,4 +22,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Subscribing to the fleet's live telemetry. Same client the VEN publishes
 # with, so both ends of openadr-lab/fleet/ agree about the protocol.
 rumqttc = "0.25"
+# The rules the BFF must not answer differently from the VEN: how a time
+# series is resampled onto a grid, and when an interval runs (D-06). A path
+# dependency, which is why this crate's Docker build context is the repo root.
+lab-core = { path = "../../lab-core" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }

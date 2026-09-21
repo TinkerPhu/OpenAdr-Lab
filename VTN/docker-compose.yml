@@ -180,7 +180,12 @@ services:
   # BFF — Rust axum proxy between UI and VTN
   # ---------------------------------------------------------------------------
   bff:
-    build: ./bff
+    build:
+      # The repo root, because the BFF takes `lab-core` as a path dependency
+      # beside it (D-06) -- a context of ./bff would leave that path pointing
+      # outside the build.
+      context: ..
+      dockerfile: VTN/bff/Dockerfile
     restart: unless-stopped
     ports:
       - "8220:8090"
