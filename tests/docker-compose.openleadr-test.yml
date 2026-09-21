@@ -110,6 +110,18 @@ services:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
       SQLX_OFFLINE: "true"
       RUST_BACKTRACE: "1"
+      # The client integration tests (`openleadr-client/tests/basic-read.rs`)
+      # build an **in-process** VTN, so they need the same environment the vtn
+      # service has -- otherwise `AppState::new` reads openleadr-rs's tracked
+      # `.env`, dials `mqtt://localhost:1883`, finds nothing inside this
+      # container and panics with `Mqtt(TcpTlsConnectFailure)` before the test
+      # body runs. Setting it on the `vtn` service alone is not enough: that is
+      # a different process.
+      MQTT_URL: mqtt://mosquitto:1884
+      MQTT_USERNAME: ""
+      MQTT_PASSWORD: ""
+      MQTT_TOPIC_PREFIX: openadr-lab/vtn
+      OAUTH_TOKEN_URL: http://vtn:3000/auth/token
     volumes:
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
@@ -117,6 +129,8 @@ services:
     depends_on:
       seed:
         condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
     deploy:
       resources:
         limits:
