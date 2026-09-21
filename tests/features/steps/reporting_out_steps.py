@@ -10,15 +10,19 @@ from features.helpers.wait import poll_until
 def step_create_event_with_typed_descriptor(context, ptype, secs):
     """Ask for a report every `secs` seconds, the way 3.1 expresses it.
 
-    `frequency` counts *intervals*, not seconds (spec: "number of intervals
-    that elapse between reports"), so a cadence of N seconds is an event whose
-    intervals are N seconds long with `frequency: 1`. Passing the seconds
-    straight into `frequency` -- which this fixture used to do -- only ever
-    worked because the VEN read the field in the wrong unit too.
+    Three things have to line up, and getting any one wrong makes the report
+    never arrive:
 
-    The interval also needs a real `intervalPeriod`: without one there is no
-    interval length to count, and the VEN applies its documented default
-    cadence of an hour instead.
+    * `frequency` counts *intervals*, not seconds (spec: "number of intervals
+      that elapse between reports"), so the cadence is an interval `secs` long
+      with `frequency: 1`. Passing seconds straight into `frequency` only ever
+      worked because the VEN read the field in the wrong unit too.
+    * the interval needs a real `intervalPeriod`; without one there is no
+      interval length to count and the VEN applies its one-hour default.
+    * the *event* has to outlive the interval. The VEN polls
+      `/events?active=true`, so an event whose window is also `secs` long has
+      already ended by the time it is fetched -- `event.duration` keeps it
+      alive (and repeats the short interval across it, per User Guide 647).
     """
     from datetime import datetime, timedelta, timezone
 
@@ -31,7 +35,11 @@ def step_create_event_with_typed_descriptor(context, ptype, secs):
         json={
             "programID": context.saved_program_id,
             "eventName": f"descriptor-{ptype.lower().replace('_', '-')}",
-            "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
+            # Keeps the event active for an hour while its intervals stay
+            # `secs` long; 3.1 repeats the interval sequence across the
+            # event-level duration (User Guide 647).
+            "duration": "PT1H",
+            "intervalPeriod": {"start": start},
             "intervals": [
                 {
                     "id": 0,
