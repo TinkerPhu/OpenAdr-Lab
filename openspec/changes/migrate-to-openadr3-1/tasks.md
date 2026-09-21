@@ -110,7 +110,7 @@ Nothing below phase 0 can be verified until the VTN boots with a token endpoint 
 
 Simulator untouched (D5). `POST /sim/override` stays.
 
-- [ ] 3.1 Adopt `openleadr-wire` in the VEN (D12), **incrementally, events first**. Measured
+- [x] 3.1 Adopt `openleadr-wire` in the VEN (D12), **incrementally, events first**. Measured
       2026-09-18: 14 files reference `vtn_port`, with ~184 field-access sites, so this is
       sequenced rather than done in one pass:
       - [x] 3.1a Add `openleadr-wire` as a **git** dependency on the fork branch with default
@@ -123,7 +123,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
             logs/counts what it *would* refuse, using nothing. Evidence on the Node2 test
             stack: batches of up to 7 events, **zero rejections**. Production evidence is
             what 3.1b waits on — see below. Remove this scaffolding once 3.1b lands.
-      - [ ] 3.1b **Gated on 3.1a-bis's production evidence, deliberately.** The strict types can
+      - [x] 3.1b **Gated on 3.1a-bis's production evidence, deliberately.** The strict types can
             refuse an object the VEN tolerates today, and whether the live VTN sends such an
             object is a question about this deployment, not about types. Three things found
             during 3.1a that this step must handle, each verified in the wire source:
@@ -155,9 +155,9 @@ Simulator untouched (D5). `POST /sim/override` stays.
             `OadrPayload` → wire `Event`/`EventInterval`/`IntervalPeriod`/`EventValuesMap`. This is
             where most of the 184 sites are and where the churn is mechanical but wide: fields move
             behind `.content` and go snake_case (`event.programID` → `event.content.program_id`)
-      - [ ] 3.1c Update `services/test_support/mock_vtn.rs` fixtures — the wire `Event` requires
+      - [x] 3.1c Update `services/test_support/mock_vtn.rs` fixtures — the wire `Event` requires
             `id`, `createdDateTime` and `modificationDateTime`, which the lenient DTO did not
-      - [ ] 3.1d Reports last: `OadrReportBody` → wire `ReportRequest` — drops `programID`, makes
+      - [x] 3.1d Reports last: `OadrReportBody` → wire `ReportRequest` — drops `programID`, makes
             `eventID` required (R7), and brings `reportIntervals` and payload descriptors with it
 - [x] 3.2 `controller/event_timing.rs` extended for 3.1: `OadrEvent` gains `duration`, and
       `timed_intervals` applies it as **one window that shortens or lengthens** the event
@@ -167,7 +167,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
       Expansion is capped by `MAX_LOOPED_INTERVALS`, since the spec defines `"P9999Y"` as
       infinity and it cannot be materialised. 8 new tests including both spec examples;
       1414 VEN tests green, fmt and clippy clean.
-- [ ] 3.3 Confirm the three callers (`openadr_interface.rs`, `rate_schedule.rs`, `reporter.rs`)
+- [x] 3.3 Confirm the three callers (`openadr_interface.rs`, `rate_schedule.rs`, `reporter.rs`)
       still go through it, and that no new copy appeared. `report_intervals.rs` builds outgoing
       report intervals and is a different concept — leave it alone (D9)
 - [ ] 3.4 `vtn.rs`: `POST /vens` self-registration on startup with `VenVenRequest`; treat 409 as already-registered, log INFO (R4)
@@ -238,7 +238,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
       object), with a repair path for a VEN whose credential exists but whose object does not
 - [x] 6.3 Enrollment and UC steps on flat targets; events now inherit their program's targets
 - [x] 6.4 Report steps: assert `eventID` present, `programID` absent, `clientID` matches the submitting VEN
-- [ ] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
+- [x] 6.5 Scenario: each VEN's `clientID` equals its own credential, never `bl-client` (R5)
 - [x] 6.6 Scenario: `?active=` with pagination returns a correct page (the P-1 regression, at BDD level)
 - [x] 6.7 Scenario: target hiding — a VEN cannot read another VEN's target list
 - [ ] 6.8 Full suite on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` — all four suites green
@@ -260,7 +260,7 @@ Simulator untouched (D5). `POST /sim/override` stays.
 - [x] 7.3a `docs/architecture/VTN_ARCHITECTURE.md` waved: §3 single credential and the scope
       alias trap, §5 three-step provisioning with `objectType` and the targets-are-the-address
       rule, the fixture/feature notes, and D-01
-- [ ] 7.3b `VEN_ARCHITECTURE.md` and `docs/use-cases/` — pending, and mostly waiting on the VEN
+- [x] 7.3b `VEN_ARCHITECTURE.md` and `docs/use-cases/` — pending, and mostly waiting on the VEN
       side of the migration (phase 3) actually landing
 - [x] 7.4 GB-50 status recorded in `docs/BACKLOG.md`: the **outbound** half is resolved and
       verified live (every event declares payload type and units; programs point at
