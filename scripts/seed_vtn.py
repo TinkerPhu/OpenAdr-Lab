@@ -57,6 +57,15 @@ PROGRAMS = [
         # fleet was invisible to the VTN.
         "programName": "fleet-monitoring",
         "targets": [],
+        # §4.1: the program declares the units of every payload its reports
+        # carry. Each report also declares its own (derived from the payloads
+        # present, `controller::report_payload::descriptors_for`), so this is
+        # not the only copy -- it is what lets a consumer know what to expect
+        # from this program before any report has arrived.
+        "payloadDescriptors": [
+            {"payloadType": "DEMAND", "units": "KW"},
+            {"payloadType": "OPERATING_STATE"},
+        ],
     },
     {
         "programName": "Summer Peak DR",
@@ -79,7 +88,52 @@ def build_events():
     tomorrow_14 = (now + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # A year from now. Re-announced on every seed run, so the horizon never
+    # creeps up on the fleet.
+    standing_start = now.replace(microsecond=0)
+
     return {
+        # ── Standing monitoring (fleet-monitor phase 0 §4.1/§5) ──────────────
+        #
+        # Carries no demand-response signal -- its SIMPLE 0 payload means
+        # "normal operation". It exists so the fleet is visible when no DR
+        # event is running at all, which was F-8: reports only existed while
+        # some event asked for them, so an idle fleet was invisible.
+        #
+        # The event runs for a year and therefore cannot supply a report grid
+        # from its own single interval. `OPEN_INTERVALS` is the spec's way of
+        # handing that choice to the VEN (User Guide 745); the lab's 60 s is
+        # written down in docs/reference/WIRE_PROFILE.md.
+        "fleet-monitoring": [
+            {
+                "eventName": "fleet-telemetry",
+                "priority": None,
+                "duration": "P1Y",
+                "intervalPeriod": {
+                    "start": standing_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "duration": "P1Y",
+                },
+                "intervals": [
+                    {
+                        "id": 0,
+                        "payloads": [{"type": "SIMPLE", "values": [0]}],
+                    }
+                ],
+                "reportDescriptors": [
+                    {
+                        # Net site power, signed: import positive, export
+                        # negative. `DEMAND` is the spec's real-power type;
+                        # `USAGE` is energy and would need dividing by the
+                        # interval to get power back out of it.
+                        "payloadType": "DEMAND",
+                        "readingType": "MEAN",
+                        "frequency": 1,
+                        "reportIntervals": "OPEN_INTERVALS",
+                        "historical": True,
+                    }
+                ],
+            },
+        ],
         "Summer Peak DR": [
             # UC1: Emergency Load Shed — max priority, starts soon, 30min
             {
@@ -534,6 +588,10 @@ def create_event(base_url, token, program_id, evt):
         body["intervalPeriod"] = evt["intervalPeriod"]
     if evt.get("targets"):
         body["targets"] = evt["targets"]
+    # What the VTN asks this event's VENs to report back. Only the standing
+    # monitoring event carries these today; DR events are signal-only.
+    if evt.get("reportDescriptors"):
+        body["reportDescriptors"] = evt["reportDescriptors"]
     r = requests.post(
         f"{base_url}/events",
         headers=auth_headers(token),
