@@ -110,6 +110,31 @@ Translates between VTN REST JSON and the internal domain model. The only compone
 knows about OpenADR HTTP, OAuth, and event payload formats. Transport lives in `vtn.rs`
 behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_interface.rs`.
 
+**Inbound events are the wire crate's types, not ours.** `OadrEvent`,
+`OadrInterval` and `OadrPayload` are aliases for `openleadr_wire`'s `Event`,
+`EventInterval` and `EventValuesMap`. The VEN used to describe the protocol to
+itself, and a description silently drops whatever it does not mention — which
+is how `event.duration`, `targets`, `payloadDescriptors` and `randomizeStart`
+came to be missing at once. A type from the wire crate cannot forget a field,
+because the field is in the type.
+
+`OadrIntervalPeriod` and the report body stay the VEN's own. The rule that
+divides them: **migrate a type when we construct it or when its parse must be
+strict; keep a DTO when we only pass it through.** `GET /reports` serves the
+VTN's reports to the UI verbatim, and `OadrReport`'s `#[serde(flatten)] extra`
+is what preserves fields this VEN has never heard of.
+
+Two consequences worth knowing when reading this code:
+
+* A payload value is an enum with separate `Number` and `Integer` variants, and
+  `EventType::Simple`'s declared kind is `Integer`. Read values through
+  `PayloadValues::numeric`, never by matching `Number` — that would drop every
+  load-shed level in silence.
+* An event that omits a field 3.1 requires is *refused*, not defaulted.
+  `controller::wire_reject` makes that refusal cost only the offending object
+  and surface on `/health`. The one place this VEN is stricter than the schema
+  is `intervalPeriod.start` — see R-87 in `docs/reference/TECHNICAL_DEBTS.md`.
+
 **VTN → internal translation:**
 
 | OpenADR EventType | Internal target | Status |
