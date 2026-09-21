@@ -59,6 +59,10 @@ mod tests {
             None,  // comms_loss_config
             100.0, // grid_max_import_kw
             100.0, // grid_max_export_kw
+            // A tick test is about what the tick computes, not about who is
+            // watching: the no-op port is the same one a VEN outside a
+            // monitored fleet runs with.
+            std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
         )
         .await;
         // passes if no panic
@@ -214,6 +218,10 @@ mod tests {
             None,  // comms_loss_config
             100.0, // grid_max_import_kw
             100.0, // grid_max_export_kw
+            // A tick test is about what the tick computes, not about who is
+            // watching: the no-op port is the same one a VEN outside a
+            // monitored fleet runs with.
+            std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
         )
         .await;
 

@@ -52,6 +52,7 @@ pub(crate) fn spawn_sim_tick(
     // (not two params) purely to keep the main.rs call site's line count
     // down -- no semantic reason to keep them paired beyond that.
     (grid_max_import_kw, grid_max_export_kw): (f64, f64),
+    telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -98,6 +99,7 @@ pub(crate) fn spawn_sim_tick(
                 comms_loss_config,
                 grid_max_import_kw,
                 grid_max_export_kw,
+                telemetry.clone(),
             )
             .await;
 

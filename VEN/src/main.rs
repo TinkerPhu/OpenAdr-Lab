@@ -4,6 +4,7 @@ mod config;
 mod controller;
 mod domain_params;
 mod entities;
+mod fleet_telemetry;
 mod history_store;
 mod ids;
 mod measurement;
@@ -182,6 +183,24 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+    // Fleet telemetry: the live side channel a fleet view reads, separate from
+    // the reports the VTN receives (fleet-monitor phase 0 §6). Absent
+    // `FLEET_MQTT_HOST` means this VEN is not part of a monitored fleet --
+    // a normal deployment, so the port becomes a no-op rather than an error.
+    let telemetry_port: Arc<dyn controller::telemetry_port::TelemetryPort> =
+        match fleet_telemetry::FleetMqttConfig::from_env(&cfg.ven_name) {
+            Some(cfg) => {
+                info!(
+                    broker = %cfg.broker_host,
+                    port = cfg.broker_port,
+                    topic_root = %cfg.topic_root,
+                    "fleet telemetry: publishing"
+                );
+                Arc::new(fleet_telemetry::FleetMqttPublisher::spawn(cfg))
+            }
+            None => Arc::new(controller::telemetry_port::NoTelemetry),
+        };
+
     let history_port: Option<Arc<dyn controller::HistoryPort>> =
         store.clone().map(|s| s as Arc<dyn controller::HistoryPort>);
     let settings_port: Option<Arc<dyn controller::SettingsPort>> =
@@ -260,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp, cl) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp, cl, tp) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -279,6 +298,7 @@ async fn main() -> anyhow::Result<()> {
             notifier.clone(),
             history_port.clone(),
             profile.comms_loss,
+            telemetry_port.clone(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -301,6 +321,7 @@ async fn main() -> anyhow::Result<()> {
                 hp.clone(),
                 cl,
                 (grid_max_import_kw, grid_max_export_kw),
+                tp.clone(),
             )
         });
     }
@@ -411,6 +432,7 @@ async fn main() -> anyhow::Result<()> {
     // Build HTTP app and serve
     let sim_schema = Arc::new(simulator::schema_from_params(&asset_params));
     let ctx = AppCtx {
+        telemetry: telemetry_port,
         state,
         vtn,
         metrics_handle: Arc::new(metrics_handle),

@@ -38,6 +38,7 @@ pub(crate) async fn tick_once(
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
+    telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -181,7 +182,7 @@ pub(crate) async fn tick_once(
         .await;
 
     let snap_for_reports = tick_sim_snap.clone();
-    let _sim_snapshot = super::publish::publish_sim_tick_result(
+    let sim_snapshot = super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
@@ -193,6 +194,8 @@ pub(crate) async fn tick_once(
         dt_s,
         now,
         pv_co2_g_kwh,
+        telemetry.as_ref(),
+        &ven_name,
     )
     .await;
 

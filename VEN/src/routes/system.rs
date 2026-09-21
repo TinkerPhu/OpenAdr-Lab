@@ -37,6 +37,16 @@ pub struct HealthComponents {
     /// rejection the operator cannot see is the same failure as accepting the
     /// object silently, so it belongs on `/health`, not only in the log.
     wire_conformance: HealthComponent,
+    /// Whether this VEN's fleet telemetry is reaching the lab broker.
+    ///
+    /// `null` when this VEN does not publish at all -- a VEN outside a
+    /// monitored fleet, which is a normal deployment and must not read as
+    /// degraded. When it *does* publish, a silent feed is worth seeing:
+    /// nothing else would show it, since telemetry is fire-and-forget and a
+    /// dropped publish is deliberately not an error anywhere else
+    /// (`ui-transparency`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fleet_telemetry: Option<HealthComponent>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +81,7 @@ fn build_health_response(
     planner_ok: bool,
     comms_loss_debounce_s: Option<u64>,
     wire_rejections: &std::collections::BTreeMap<String, String>,
+    telemetry_connected: Option<bool>,
     now: DateTime<Utc>,
 ) -> HealthResponse {
     let vtn_detail = vtn
@@ -92,6 +103,12 @@ fn build_health_response(
                     .join(" | "),
             ),
         ),
+        fleet_telemetry: telemetry_connected.map(|connected| {
+            component(
+                connected,
+                Some("not connected to the fleet broker".to_string()),
+            )
+        }),
     };
     let status = if components.vtn_connection.status == "ok"
         && components.storage.status == "ok"
@@ -127,12 +144,19 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
     let storage_ok = ctx.state.storage_ok().await;
     let plan = ctx.state.active_plan().await;
     let wire_rejections = ctx.state.wire_rejections().await;
+    // `None` when this VEN does not publish at all, which must not read as a
+    // failure -- see the field's doc comment.
+    let telemetry_connected = ctx
+        .telemetry
+        .publishes()
+        .then(|| ctx.telemetry.is_connected());
     Json(build_health_response(
         &vtn,
         storage_ok,
         plan_is_ok(plan.as_ref()),
         ctx.comms_loss_debounce_s,
         &wire_rejections,
+        telemetry_connected,
         Utc::now(),
     ))
 }
@@ -272,6 +296,7 @@ mod tests {
             true,
             None,
             &Default::default(),
+            None,
             Utc::now(),
         );
         assert_eq!(resp.status, "degraded");
@@ -289,6 +314,7 @@ mod tests {
             true,
             None,
             &Default::default(),
+            None,
             Utc::now(),
         );
         assert_eq!(resp.status, "ok");
@@ -305,7 +331,15 @@ mod tests {
             "events".to_string(),
             "VTN sent 1 malformed event object(s), ignored: evt-9: bad priority".to_string(),
         )]);
-        let resp = build_health_response(&healthy_vtn(), true, true, None, &rejections, Utc::now());
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &rejections,
+            None,
+            Utc::now(),
+        );
         assert_eq!(resp.status, "degraded");
         assert_eq!(resp.components.wire_conformance.status, "degraded");
         let detail = resp
@@ -324,10 +358,55 @@ mod tests {
             true,
             None,
             &Default::default(),
+            None,
             Utc::now(),
         );
         assert_eq!(resp.components.wire_conformance.status, "ok");
         assert!(resp.components.wire_conformance.detail.is_none());
+    }
+
+    /// A VEN outside a monitored fleet does not publish telemetry, and that
+    /// must not look like a fault: the component is absent rather than
+    /// degraded, and the overall status is untouched.
+    #[test]
+    fn health_omits_fleet_telemetry_when_this_ven_does_not_publish() {
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            None,
+            Utc::now(),
+        );
+        assert!(resp.components.fleet_telemetry.is_none());
+        assert_eq!(resp.status, "ok");
+    }
+
+    /// When it does publish, a silent feed is worth seeing -- nothing else
+    /// would show it, since a dropped publish is deliberately not an error
+    /// anywhere else. It does not degrade the overall status: the VEN's own
+    /// job is unaffected by the fleet view going dark.
+    #[test]
+    fn health_shows_a_disconnected_fleet_feed_without_calling_the_ven_unhealthy() {
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            Some(false),
+            Utc::now(),
+        );
+        let telemetry = resp
+            .components
+            .fleet_telemetry
+            .expect("a publishing VEN reports its feed");
+        assert_eq!(telemetry.status, "degraded");
+        assert_eq!(
+            resp.status, "ok",
+            "the fleet view going dark is an observability problem, not an              operational one"
+        );
     }
 
     #[test]
@@ -338,6 +417,7 @@ mod tests {
             true,
             None,
             &Default::default(),
+            None,
             Utc::now(),
         );
         assert_eq!(resp.status, "degraded");
@@ -353,8 +433,15 @@ mod tests {
     #[test]
     fn health_server_time_echoes_the_injected_clock() {
         let now = Utc::now();
-        let resp =
-            build_health_response(&healthy_vtn(), true, true, None, &Default::default(), now);
+        let resp = build_health_response(
+            &healthy_vtn(),
+            true,
+            true,
+            None,
+            &Default::default(),
+            None,
+            now,
+        );
         assert_eq!(resp.server_time, now);
     }
 
@@ -371,6 +458,7 @@ mod tests {
             true,
             None,
             &Default::default(),
+            None,
             Utc::now(),
         );
         assert!(!resp.comms_loss_active);
@@ -382,7 +470,8 @@ mod tests {
         let mut vtn = healthy_vtn();
         vtn.connected = false;
         vtn.last_success_ts = Some(now - chrono::Duration::seconds(120));
-        let resp = build_health_response(&vtn, true, true, Some(60), &Default::default(), now);
+        let resp =
+            build_health_response(&vtn, true, true, Some(60), &Default::default(), None, now);
         assert!(resp.comms_loss_active);
     }
 
