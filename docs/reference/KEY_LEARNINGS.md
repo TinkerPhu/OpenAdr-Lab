@@ -2204,3 +2204,38 @@ for a dependency that is defined, healthy, and starts fine under `up -d`. Splitt
 Worth recognising quickly because the message names a real service and reads like a compose-file
 error, so the instinct is to go looking for the missing definition. It cost two full suite runs
 before the pattern (it only happens with `--build`, and only on a cold stack) was visible.
+
+## A stale stub can satisfy a dependency and fail forty minutes later (2026-09-22)
+
+The VEN's Dockerfile compiles an empty stub of its path-dependency crate in the layer that
+caches the slow HiGHS C++ build, then deletes the stub's artefacts so the real source compiles
+in the cheap layer below. The deletion used a glob:
+
+    rm -rf target/release/deps/lab_core*
+
+which misses `liblab_core-<hash>.rlib` — the name cargo actually gives a *library*'s rlib. The
+`lib` prefix applies to libraries and not to binaries, so the same pattern that worked for the
+app's own stub silently failed for the crate's.
+
+The stale stub then satisfied the dependency. Cargo saw a fresh-enough artefact, did not rebuild,
+and the build failed on `could not find time_window in lab_core` — **after** every expensive
+step had completed.
+
+`cargo clean --release -p <package>` asks cargo which artefacts belong to a package instead of
+guessing their filenames, and cannot miss one. The general form: when you delete build output by
+pattern, you are re-implementing the build system's own bookkeeping, and only its copy is right.
+
+## A moved test that does not compile is a test that does not run (2026-09-22)
+
+Extracting three modules into a shared crate moved 66 tests with them. The VEN's suite went from
+1443 to 1377 and stayed green, which looked like a clean extraction. It was not: the moved tests
+did not compile in their new home — their fixture helper was still `#[cfg(test)]` in the crate
+they had left — so they were not running at all, and the VEN's green suite said nothing about it.
+
+`cargo test` in the crate you just created is not optional after a move, and the arithmetic is
+the check: 1377 + 66 = 1443, the number before. A test count that merely *drops* after an
+extraction tells you nothing about whether the difference landed somewhere or vanished.
+
+Related: a `#[cfg(test)]` helper is invisible to every other crate's tests, because `cfg(test)`
+is set for the crate being compiled as a test target, not for its dependencies. A fixture builder
+shared across crates has to be ordinary code.
