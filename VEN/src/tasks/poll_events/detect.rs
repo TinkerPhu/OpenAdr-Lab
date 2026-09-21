@@ -153,7 +153,7 @@ mod event_poll_tests {
     }
 
     fn make_event(id: &str, name: &str, signal_type: &str, value: f64) -> OadrEvent {
-        crate::controller::vtn_port::events_from_json(serde_json::json!({
+        lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": id,
             "programID": "test-program",
             "eventName": name,
@@ -236,7 +236,7 @@ mod event_poll_tests {
     // (c) tariff count changes → RateChange emitted
     #[test]
     fn tariff_count_change_emits_rate_change() {
-        let events = crate::controller::vtn_port::events_from_json(serde_json::json!({
+        let events = lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": "ev1",
             "programID": "prog",
             "eventName": "Price Event",
@@ -263,7 +263,7 @@ mod event_poll_tests {
     // (d) import limit changes → CapacityChange emitted
     #[test]
     fn import_limit_change_emits_capacity_change() {
-        let events = crate::controller::vtn_port::events_from_json(serde_json::json!({
+        let events = lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": "ev1",
             "programID": "prog",
             "eventName": "Capacity Event",

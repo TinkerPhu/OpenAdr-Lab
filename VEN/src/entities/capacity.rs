@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entities::time_window::TimeWindow;
+use lab_core::time_window::TimeWindow;
 
 /// Capacity state in force now, derived from the listed OpenADR events
 /// (`controller::openadr_interface::parse_capacity_state`, GB-48).

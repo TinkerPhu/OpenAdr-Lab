@@ -77,7 +77,7 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
 
     for (rank, event) in ordered.into_iter().enumerate() {
         // Interval timing: the one shared rule (`controller::event_timing`).
-        let base: Vec<_> = crate::controller::event_timing::timed_intervals(event)
+        let base: Vec<_> = lab_core::event_timing::timed_intervals(event)
             .into_iter()
             .map(|t| {
                 let payloads: Vec<(String, f64)> = t

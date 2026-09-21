@@ -6,10 +6,10 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
     Thermostat, TickOverridable,
 };
-use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 // HeaterEmergencyMode moved to heater_emergency.rs (Spec A Phase 2a, file-size split).
 pub use super::heater_emergency::HeaterEmergencyMode;

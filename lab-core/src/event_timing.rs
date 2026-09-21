@@ -15,8 +15,10 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::vtn_port::{OadrEvent, OadrInterval};
-use crate::entities::time_window::TimeWindow;
+// The wire crate's own types: this rule reads an OpenADR event, so it takes
+// one rather than a local re-description of one.
+use crate::time_window::TimeWindow;
+pub use openleadr_wire::event::{Event as OadrEvent, EventInterval as OadrInterval};
 
 /// The start of an interval no start could be derived for.
 pub const OPEN_START: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
@@ -182,7 +184,7 @@ mod tests {
     /// `modificationDateTime`, `interval.id`) are filled in one place rather
     /// than spelled out eighteen times.
     fn event(value: serde_json::Value) -> OadrEvent {
-        crate::controller::vtn_port::events_from_json(value).remove(0)
+        crate::test_fixtures::events_from_json(value).remove(0)
     }
 
     fn at(h: u32, m: u32) -> DateTime<Utc> {

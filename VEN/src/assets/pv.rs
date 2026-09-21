@@ -6,10 +6,10 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     TickOverridable, TickOverrides, Trajectory,
 };
-use crate::common::TimeSeries;
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+use lab_core::time_series::TimeSeries;
 
 fn f64_infinity() -> f64 {
     f64::INFINITY

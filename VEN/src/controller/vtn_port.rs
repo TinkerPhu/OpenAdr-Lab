@@ -56,9 +56,7 @@ pub struct OadrProgram {
 // vocabulary (`dto` rule: upstream field names, one word per concept).
 // `OadrIntervalPeriod` below stays ours: it is the *report* side, which we
 // construct rather than parse.
-pub use openleadr_wire::event::{
-    Event as OadrEvent, EventInterval as OadrInterval, EventType, EventValuesMap as OadrPayload,
-};
+pub use openleadr_wire::event::{Event as OadrEvent, EventType, EventValuesMap as OadrPayload};
 pub use openleadr_wire::values_map::Value as PayloadValue;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -174,49 +172,6 @@ impl PayloadValues for OadrPayload {
             _ => None,
         }
     }
-}
-
-/// Build events for tests from the JSON a fixture actually cares about.
-///
-/// The wire `Event` requires `id`, `createdDateTime` and `modificationDateTime`
-/// -- fields no test is about, and which the lenient DTO did not have. Rather
-/// than spell them out in ~30 fixtures (and in every fixture written after
-/// this), they are merged in where absent. A fixture that *does* care about one
-/// states it and keeps it: this fills gaps, it does not overwrite.
-///
-/// `createdDateTime` defaults to `MIN_UTC` deliberately. That is the value the
-/// old DTO path fell back to when the field was absent, so priority
-/// tie-breaking in `rate_schedule` behaves as it always did for fixtures that
-/// do not set it.
-#[cfg(test)]
-pub fn events_from_json(value: serde_json::Value) -> Vec<OadrEvent> {
-    use serde_json::{json, Value};
-
-    let epoch = "0001-01-01T00:00:00Z";
-    let mut arr = match value {
-        Value::Array(a) => a,
-        one => vec![one],
-    };
-    for (i, ev) in arr.iter_mut().enumerate() {
-        let Some(obj) = ev.as_object_mut() else {
-            continue;
-        };
-        obj.entry("id").or_insert_with(|| json!(format!("evt-{i}")));
-        obj.entry("createdDateTime").or_insert_with(|| json!(epoch));
-        obj.entry("modificationDateTime")
-            .or_insert_with(|| json!(epoch));
-        obj.entry("programID").or_insert_with(|| json!("prog-test"));
-        // `interval.id` is required by the schema and is never what a timing
-        // or payload fixture is about; number them in declaration order.
-        if let Some(Value::Array(intervals)) = obj.get_mut("intervals") {
-            for (n, iv) in intervals.iter_mut().enumerate() {
-                if let Some(io_) = iv.as_object_mut() {
-                    io_.entry("id").or_insert_with(|| json!(n));
-                }
-            }
-        }
-    }
-    serde_json::from_value(Value::Array(arr)).expect("test fixture is not a valid 3.1 event")
 }
 
 // ── OadrReport ────────────────────────────────────────────────────────────────
@@ -340,7 +295,7 @@ mod tests {
 
     #[test]
     fn optional_fields_stay_absent_when_the_event_omits_them() {
-        let event = events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-002", "programID": "prog-001"
         }]))
         .remove(0);
@@ -357,7 +312,7 @@ mod tests {
             "unknownFieldFromFutureVersion": "ignored",
             "anotherUnknown": 42
         }"#;
-        let event = events_from_json(serde_json::json!({
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!({
             "id": "evt-003",
             "programID": "prog-001",
             "unknownFieldFromFutureVersion": "ignored",

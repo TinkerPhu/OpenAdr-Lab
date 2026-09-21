@@ -6,10 +6,10 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
-use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::EvParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]

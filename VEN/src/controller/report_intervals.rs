@@ -3,12 +3,12 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::common::{Aggregation, Interpolation, TimeSeries};
 use crate::controller::reporter::{format_iso8601_duration, AssetReportSample};
 use crate::controller::vtn_port::{OadrIntervalPeriod, OadrReportInterval, OadrReportPayload};
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
+use lab_core::time_series::{Aggregation, Interpolation, TimeSeries};
 
 /// Build a `TimeSeries` of `power_kw` from a slice of `AssetReportSample`.
 pub(crate) fn samples_to_power_ts(

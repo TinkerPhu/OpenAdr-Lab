@@ -161,7 +161,7 @@ mod tests {
     use crate::services::test_support::mock_vtn::MockVtn;
 
     fn active_event() -> OadrEvent {
-        crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "evt-1",
             "programID": "prog-1",
             "intervals": [{"payloads": [{"type": "SIMPLE", "values": []}]}]

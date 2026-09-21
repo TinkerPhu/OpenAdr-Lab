@@ -4,7 +4,6 @@
 // `controller::milp_planner`, which remains reachable only through this port.
 use chrono::{DateTime, Utc};
 
-use crate::common::TimeSeries;
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
@@ -13,6 +12,7 @@ use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget,
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
+use lab_core::time_series::TimeSeries;
 
 /// Fully-owned inputs for one planning-cycle solve. Built by the caller
 /// (`PlanningService::solve_plan`) and moved whole into the solver, which may

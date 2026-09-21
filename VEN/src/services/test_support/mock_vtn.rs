@@ -177,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_vtn_returns_configured_events() {
-        let event = crate::controller::vtn_port::events_from_json(serde_json::json!([{
+        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
             "id": "e1", "programID": "p1"
         }]))
         .remove(0);

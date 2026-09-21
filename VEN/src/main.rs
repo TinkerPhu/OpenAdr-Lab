@@ -1,6 +1,5 @@
 mod app_ctx;
 mod assets;
-mod common;
 mod config;
 mod controller;
 mod domain_params;

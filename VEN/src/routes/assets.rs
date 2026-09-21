@@ -122,7 +122,7 @@ pub async fn get_asset_history(
         )
             .into_response(),
         Some(entry) => {
-            use crate::common::{Interpolation, TimeSeries};
+            use lab_core::time_series::{Interpolation, TimeSeries};
             let points = entry.history.slice(timespan, now);
             // Prepend a LOCF boundary point at now-timespan so consumers always
             // get a sample anchored at the start of the requested window.

@@ -20,8 +20,8 @@
 
 use chrono::{DateTime, Datelike, Duration, Utc, Weekday};
 
-use crate::common::TimeSeries;
 use crate::entities::design_vocabulary::StaleRatePolicy;
+use lab_core::time_series::TimeSeries;
 
 fn is_weekend(dt: DateTime<Utc>) -> bool {
     matches!(dt.weekday(), Weekday::Sat | Weekday::Sun)

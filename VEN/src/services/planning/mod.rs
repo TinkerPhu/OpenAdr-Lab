@@ -2,7 +2,6 @@ use chrono::{DateTime, Duration, Utc};
 use std::sync::Arc;
 use tracing::info;
 
-use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 #[cfg(test)]
 use crate::controller::SolverPort;
@@ -21,6 +20,7 @@ use crate::entities::PlannerObjective;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 #[cfg(test)]
 use crate::state::AppState;
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 mod service;
 

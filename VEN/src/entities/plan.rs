@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::entities::asset::PlanTrigger;
 use crate::entities::planner_params::PlannerObjective;
-use crate::entities::time_window::{covering, TimeWindow};
+use lab_core::time_window::{covering, TimeWindow};
 
 /// One zone of a variable-step planning horizon.
 /// Defined here (domain layer) so `PlanningHorizon` can carry zone metadata without

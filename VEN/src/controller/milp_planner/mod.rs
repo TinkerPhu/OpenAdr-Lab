@@ -140,8 +140,8 @@ pub fn run_planner(
     pv_live_forecast_kw: Option<&[f64]>,
     base_load_live_forecast_kw: Option<&[f64]>,
     weather_pv_kw: Option<&[f64]>,
-    diurnal_import_ref: Option<&crate::common::TimeSeries>,
-    diurnal_co2_ref: Option<&crate::common::TimeSeries>,
+    diurnal_import_ref: Option<&lab_core::time_series::TimeSeries>,
+    diurnal_co2_ref: Option<&lab_core::time_series::TimeSeries>,
 ) -> Plan {
     // Guard: MilpVarPool has one named `Option` slot per singleton kind
     // (Battery/EV/Heater — silently overwrites on duplicates); `ShiftableLoad`

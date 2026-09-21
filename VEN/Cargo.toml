@@ -8,6 +8,10 @@ edition = "2021"
 # rather than a path one: every Docker build context here is rooted at `VEN/`
 # (see VEN/docker-compose.yml, tests/docker-compose.test.yml, scale_out/node2/),
 # so `../openleadr-rs` is outside all of them. Default features pull no sqlx.
+# The rules this VEN shares with the VTN's BFF: interval timing and time
+# series. Extracted so two services cannot answer the same question two ways
+# (D-06) -- the failure GB-48 records.
+lab-core = { path = "../lab-core" }
 openleadr-wire = { git = "https://github.com/TinkerPhu/openleadr-rs.git", rev = "da565b445cab8eb0e04e8476c756e2a3e009d312" }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }

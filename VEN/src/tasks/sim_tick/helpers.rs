@@ -134,7 +134,7 @@ pub(crate) fn build_tick_setpoints(
             .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
             .collect(),
     };
-    let alert_active = crate::entities::time_window::any_covering(&ctx.alert_windows, now);
+    let alert_active = lab_core::time_window::any_covering(&ctx.alert_windows, now);
     // A sim-injected import limit stands in only while no VTN limit is in force.
     use crate::entities::capacity_curve::CommitmentDirection::Import;
     let capacity_limit_kw = tightest_capacity_limit(&ctx.capacity_schedule, Import, now, now)

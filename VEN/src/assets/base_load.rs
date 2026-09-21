@@ -8,9 +8,9 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     TickOverridable, TickOverrides,
 };
-use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
+use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// One configured appliance's daily draw: a trapezoidal power pulse
 /// centered on `center_hour` — flat at `amplitude_kw` for the plateau,

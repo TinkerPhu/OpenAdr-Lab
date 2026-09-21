@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::common::{Interpolation, TimeSeries};
-use crate::entities::time_window::{covering, TimeWindow};
+use lab_core::time_series::{Interpolation, TimeSeries};
+use lab_core::time_window::{covering, TimeWindow};
 
 /// A single tariff data point for a time interval (tariff = price per kWh).
 /// Priority-resolved and non-overlapping like the capacity schedule (GB-45);
