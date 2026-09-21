@@ -8,9 +8,9 @@ from features.helpers.wait import poll_until
 
 @given('I create an event for the saved program reporting every {secs:d} seconds')
 def step_create_event_with_report_descriptor(context, secs):
-    """See `reporting_out_steps.step_create_event_with_typed_descriptor`:
-    3.1's `frequency` counts intervals, not seconds, so a cadence of N seconds
-    is an interval of N seconds with `frequency: 1`."""
+    """See `reporting_out_steps.step_create_event_with_typed_descriptor` for
+    why cadence is expressed this way, and why the event needs its own
+    `duration` to outlive its intervals."""
     from datetime import datetime, timedelta, timezone
 
     start = (datetime.now(timezone.utc) - timedelta(seconds=secs)).strftime(
@@ -22,7 +22,11 @@ def step_create_event_with_report_descriptor(context, secs):
         json={
             "programID": context.saved_program_id,
             "eventName": "resample-event",
-            "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
+            # Keeps the event active for an hour while its intervals stay
+            # `secs` long; 3.1 repeats the interval sequence across the
+            # event-level duration (User Guide 647).
+            "duration": "PT1H",
+            "intervalPeriod": {"start": start},
             "intervals": [
                 {
                     "id": 0,
