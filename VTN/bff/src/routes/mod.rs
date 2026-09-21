@@ -1,4 +1,5 @@
 pub mod events;
+pub mod fleet;
 pub mod health;
 pub mod metrics;
 pub mod programs;

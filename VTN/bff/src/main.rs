@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod error;
+mod fleet;
 mod recorder;
 mod routes;
 mod vtn_client;
@@ -36,6 +37,9 @@ pub struct AppCtx {
     pub config: Arc<Config>,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
     pub recorder_status: recorder::SharedRecorderStatus,
+    /// The fleet's live state, as the VENs last published it.
+    pub fleet: fleet::FleetState,
+    pub fleet_status: Arc<tokio::sync::RwLock<fleet::FleetIngestStatus>>,
 }
 
 async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
@@ -75,12 +79,34 @@ async fn main() -> anyhow::Result<()> {
 
     let recorder_status: recorder::SharedRecorderStatus = Arc::new(Default::default());
 
+    // The live fleet feed (fleet-monitor phase 0 §7). Gated on
+    // FLEET_MQTT_HOST exactly as the publishing side is: unset means this
+    // deployment has no fleet feed, which is configuration rather than fault.
+    let fleet_state: fleet::FleetState = Arc::new(tokio::sync::RwLock::new(Default::default()));
+    let fleet_status: Arc<tokio::sync::RwLock<fleet::FleetIngestStatus>> =
+        Arc::new(tokio::sync::RwLock::new(Default::default()));
+    match fleet::FleetMqttConfig::from_env() {
+        Some(cfg) => {
+            tracing::info!(
+                broker = %cfg.broker_host,
+                port = cfg.broker_port,
+                topic = %cfg.subscription(),
+                "fleet ingest: subscribing"
+            );
+            fleet_status.write().await.enabled = true;
+            fleet::spawn_ingest(cfg, fleet_state.clone(), fleet_status.clone());
+        }
+        None => tracing::info!("fleet ingest: no FLEET_MQTT_HOST, not subscribing"),
+    }
+
     let ctx = AppCtx {
         business: business.clone(),
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
         metrics_handle: Arc::new(metrics_handle),
         recorder_status: recorder_status.clone(),
+        fleet: fleet_state.clone(),
+        fleet_status: fleet_status.clone(),
     };
 
     // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set. Spawning
@@ -128,6 +154,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/vens", get(routes::vens::get_vens))
         .route("/api/vens/:id", delete(routes::vens::delete_ven))
         .route("/api/reports", get(routes::reports::get_reports))
+        // The fleet's live state (phase 0 §7). Historical series arrive with
+        // the telemetry store; this is what a dashboard opens with.
+        .route("/api/fleet/power", get(routes::fleet::fleet_power))
         .route("/api/reports/:id", delete(routes::reports::delete_report))
         .route("/api/metrics", get(routes::metrics::get_metrics))
         .route_layer(middleware::from_fn_with_state(
