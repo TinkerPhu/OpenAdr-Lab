@@ -9,7 +9,7 @@ Feature: Reporter multi-interval resampling (RF-05e)
   @reporter-resampling @autoretry
   Scenario: Obligation-based report contains multiple intervals
     Given I create a program named "resample-test" and save its ID
-    And I create an event for the saved program with a reportDescriptor frequency of 5 seconds
+    And I create an event for the saved program reporting every 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to accumulate at least 20 seconds of history
     And I wait for VEN-1 to submit an obligation-driven report for the event

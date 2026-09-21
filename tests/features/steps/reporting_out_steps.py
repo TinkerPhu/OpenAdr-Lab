@@ -6,22 +6,44 @@ from features.helpers.api_client import vtn_post, ven_get, VEN_BASE_URL, HTTP_TI
 from features.helpers.wait import poll_until
 
 
-@given('I create an event for the saved program with a reportDescriptor of type "{ptype}" and frequency {freq_s:d} seconds')
-def step_create_event_with_typed_descriptor(context, ptype, freq_s):
+@given('I create an event for the saved program with a reportDescriptor of type "{ptype}" reporting every {secs:d} seconds')
+def step_create_event_with_typed_descriptor(context, ptype, secs):
+    """Ask for a report every `secs` seconds, the way 3.1 expresses it.
+
+    `frequency` counts *intervals*, not seconds (spec: "number of intervals
+    that elapse between reports"), so a cadence of N seconds is an event whose
+    intervals are N seconds long with `frequency: 1`. Passing the seconds
+    straight into `frequency` -- which this fixture used to do -- only ever
+    worked because the VEN read the field in the wrong unit too.
+
+    The interval also needs a real `intervalPeriod`: without one there is no
+    interval length to count, and the VEN applies its documented default
+    cadence of an hour instead.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    start = (datetime.now(timezone.utc) - timedelta(seconds=secs)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     r = vtn_post(
         "/events",
         context.vtn_token,
         json={
             "programID": context.saved_program_id,
             "eventName": f"descriptor-{ptype.lower().replace('_', '-')}",
+            "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
             "intervals": [
-                {"id": 0, "payloads": [{"type": "PRICE", "values": [0.25]}]},
+                {
+                    "id": 0,
+                    "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
+                    "payloads": [{"type": "PRICE", "values": [0.25]}],
+                },
             ],
             "reportDescriptors": [
                 {
                     "payloadType": ptype,
                     "readingType": "DIRECT_READ",
-                    "frequency": freq_s,
+                    "frequency": 1,
                     "repeat": 1,
                 }
             ],
@@ -109,3 +131,64 @@ def step_history_reports_includes_event(context):
     assert any(r.get("event_id") == context.saved_event_id for r in rows), (
         f"No /history/reports row for event {context.saved_event_id}: {rows}"
     )
+
+
+def _report_for_event(context):
+    """The report this scenario's own event produced."""
+    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
+    matching = [r for r in reports if r.get("eventID") == context.saved_event_id]
+    assert matching, f"no report for event {context.saved_event_id}"
+    return matching[-1]
+
+
+def _usage_payloads(report):
+    """Every (interval, payload) pair of type USAGE, across all resources."""
+    for resource in report.get("resources") or []:
+        for interval in resource.get("intervals") or []:
+            for payload in interval.get("payloads") or []:
+                if payload.get("type") == "USAGE":
+                    yield interval, payload
+
+
+@then('the report for the event omits "{field}"')
+def step_report_omits_field(context, field):
+    report = _report_for_event(context)
+    assert field not in report, (
+        f"report still carries '{field}'; 3.1 removed it ({sorted(report.keys())})"
+    )
+
+
+@then("the report for the event names its event")
+def step_report_names_its_event(context):
+    report = _report_for_event(context)
+    assert report.get("eventID"), (
+        "report has no eventID — in 3.1 that is its only link to the object "
+        "it reports on"
+    )
+
+
+@then('every USAGE payload in the report is declared as "{units}"')
+def step_usage_declared_as(context, units):
+    report = _report_for_event(context)
+    assert any(True for _ in _usage_payloads(report)), "report carries no USAGE payload"
+    descriptors = report.get("payloadDescriptors") or []
+    usage = next((d for d in descriptors if d.get("payloadType") == "USAGE"), None)
+    assert usage is not None, (
+        "report sends USAGE with no payloadDescriptor — its unit would live "
+        "only in the reader's head (GB-50)"
+    )
+    assert usage.get("units") == units, (
+        f"USAGE declared as {usage.get('units')!r}, expected {units!r}"
+    )
+
+
+@then("every USAGE interval in the report states the window it covers")
+def step_usage_interval_states_window(context):
+    report = _report_for_event(context)
+    for interval, _payload in _usage_payloads(report):
+        period = interval.get("intervalPeriod") or {}
+        assert period.get("start") and period.get("duration"), (
+            f"interval {interval.get('id')} carries USAGE without an "
+            "intervalPeriod — USAGE is energy *over an interval*, so it cannot "
+            f"be read without one (got {period!r})"
+        )
