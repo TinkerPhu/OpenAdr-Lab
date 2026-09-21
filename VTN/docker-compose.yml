@@ -118,6 +118,13 @@ services:
     environment:
       RUST_LOG: ${RUST_LOG:-info}
       DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
+      # The fleet's live feed (phase 0 §7). Same broker and credential the
+      # VENs publish with -- the BFF is just another client of it, subscribing
+      # where they publish.
+      FLEET_MQTT_HOST: "lab-mqtt"
+      FLEET_MQTT_PORT: "1884"
+      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
       # OAuth — internal provider (HMAC, auto-generated secret)
       # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one
       # (a fresh random secret per restart, which invalidates cached tokens —
@@ -195,6 +202,8 @@ services:
       start_period: 30s
     depends_on:
       vtn:
+        condition: service_healthy
+      lab-mqtt:
         condition: service_healthy
     networks:
       - openadr-net
