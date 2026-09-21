@@ -92,8 +92,15 @@ services:
     # was failing with "No such file or directory" before any test ran.
     # ON_ERROR_STOP so a fixture that half-applies fails loudly rather than
     # leaving the suite to fail later on missing rows.
+    # Idempotent on purpose. The database volume survives `down` (only `down -v`
+    # removes it, which would also take the cargo caches and turn every run into
+    # a ~25-minute cold build), so this fixture is loaded onto a database that
+    # may already hold it. `users.sql` is plain INSERTs, so a second load fails
+    # the whole script under ON_ERROR_STOP -- psql exit 3, before a single test
+    # compiles. Clearing the two tables it fills makes re-running cheap and
+    # keeps ON_ERROR_STOP meaningful for real failures.
     command: >
-      sh -c "psql -v ON_ERROR_STOP=1 -h db -U openadr -d openadr -f /fixtures/users.sql"
+      sh -c "psql -v ON_ERROR_STOP=1 -h db -U openadr -d openadr -c 'TRUNCATE user_credentials, \"user\" CASCADE' -f /fixtures/users.sql"
 
   cargo-test:
     build:
