@@ -40,7 +40,13 @@ RUN cargo build --release     && rm -rf src /repo/lab-core/src         target/re
 COPY lab-core/src /repo/lab-core/src
 COPY VEN/src ./src
 COPY VEN/profiles ./profiles
-RUN cargo build --release
+# `cargo clean -p` rather than deleting artefacts by glob: the stub layer above
+# compiled an empty `lab-core`, and a glob for `lab_core*` misses the `lib`
+# prefix cargo gives a library's rlib. The stale stub then satisfied the
+# dependency and the real source was never compiled -- a build that succeeded
+# through every expensive step and failed on `could not find time_window`.
+# Asking cargo which artefacts belong to a package cannot miss one.
+RUN cargo clean --release -p lab-core -p ven-app && cargo build --release
 
 FROM debian:bookworm-slim
 RUN apt-get update \
