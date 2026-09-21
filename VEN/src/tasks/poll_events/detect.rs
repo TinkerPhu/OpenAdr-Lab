@@ -93,6 +93,11 @@ pub(crate) fn detect_event_changes(
 
         trace_events.push(controller::trace::ControllerEvent::OpenAdrArrived {
             ts: now,
+            event_id: evt.id.to_string(),
+            // Passed through as the VTN wrote it (`dto`): this is an identity,
+            // and reformatting an identity is how two records of the same
+            // thing stop matching.
+            modification_date_time: Some(evt.modification_date_time.to_rfc3339()),
             event_name: name,
             signal_type,
             value,
@@ -105,6 +110,7 @@ pub(crate) fn detect_event_changes(
         if !current_ids.contains(old_id) {
             trace_events.push(controller::trace::ControllerEvent::OpenAdrExpired {
                 ts: now,
+                event_id: old_id.clone(),
                 event_name: old_id.clone(),
             });
         }
@@ -157,6 +163,7 @@ mod event_poll_tests {
             "id": id,
             "programID": "test-program",
             "eventName": name,
+            "modificationDateTime": "2026-03-21T09:00:00Z",
             "intervals": [{
                 "id": 0,
                 "payloads": [{"type": signal_type, "values": [value]}]
@@ -191,6 +198,49 @@ mod event_poll_tests {
             assert_eq!(signal_type, "PRICE");
             assert!((value - 0.30).abs() < 1e-9);
         }
+    }
+
+    /// §6.3: a reaction trace has to name the event *version* the VEN acted
+    /// on. `event_name` cannot do that -- the VTN does not enforce unique
+    /// names, and an edited event keeps its name while changing what it says.
+    #[test]
+    fn arrived_carries_the_event_id_and_the_version_it_saw() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        let controller::trace::ControllerEvent::OpenAdrArrived {
+            event_id,
+            modification_date_time,
+            ..
+        } = &changes.trace_events[0]
+        else {
+            panic!("expected OpenAdrArrived first");
+        };
+        assert_eq!(event_id, "ev1");
+        assert_eq!(
+            modification_date_time.as_deref(),
+            Some("2026-03-21T09:00:00+00:00"),
+            "the version stamp must be the VTN's own, verbatim"
+        );
+    }
+
+    /// The name of a vanished event is not knowable -- it is gone -- but its
+    /// id is, and the id is what the chain is keyed on.
+    #[test]
+    fn expired_carries_the_event_id() {
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string());
+        let changes = detect_event_changes(&[], &prev_ids, 0, None, ts());
+        let expired = changes
+            .trace_events
+            .iter()
+            .find_map(|e| match e {
+                controller::trace::ControllerEvent::OpenAdrExpired { event_id, .. } => {
+                    Some(event_id)
+                }
+                _ => None,
+            })
+            .expect("expected an OpenAdrExpired");
+        assert_eq!(expired, "ev1");
     }
 
     // (a.1) new event appears → also recorded as an EventReceived history row

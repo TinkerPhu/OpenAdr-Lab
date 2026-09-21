@@ -116,6 +116,14 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" fontWeight="bold">OpenAdrArrived</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">event: {event.event_name}</Typography>
+          {event.event_id && (
+            <Typography variant="caption" display="block">id: {event.event_id}</Typography>
+          )}
+          {event.modification_date_time && (
+            <Typography variant="caption" display="block">
+              version: {event.modification_date_time}
+            </Typography>
+          )}
           <Typography variant="caption" display="block">signal: {event.signal_type} @ {event.value}</Typography>
         </>
       );
