@@ -13169,3 +13169,54 @@ claiming otherwise would have justified doing the risky half first. So the emit 
 construct the objects and cannot be refused, went first, and the inbound side waits behind a
 shadow parse that measures — against the live fleet — whether the strict types would actually
 refuse anything the VTN sends, instead of guessing.
+
+### The VEN's own side, finished (branch 045, 2026-09-21)
+
+The branch closed with all five suites green — 1435 VEN unit tests, 655 VEN UI, 69 VTN UI,
+**284 E2E scenarios plus 15 isolated and 6 resilience**, and 116 openleadr-rs tests — and the
+whole 20-VEN fleet running the result.
+
+**What the wire types actually bought.** Task 3.1b swapped the hand-rolled event DTOs for
+`openleadr-wire`'s. The honest measure of that change is what it *deleted*:
+`common::parse_iso8601_duration_secs`, whose `unwrap_or(3600)` for any string not starting with
+`P` had no callers left; `rate_schedule`'s priority comparator, because `Priority`'s own `Ord`
+already encodes the ordering (copying the old `unwrap_or(i64::MAX)` + reversed compare across
+would have silently inverted BL-02); and `OadrReportDescriptor`. It also caught two things the
+lenient DTO had swallowed — events with no `createdDateTime`, and a fixture timestamp of
+`2026-01-01T00:0:00Z` whose minutes were not zero-padded, in a helper written earlier on this
+same branch.
+
+**Where it made us wrong, recorded as R-87.** The schema gives `intervalPeriod` no `required:`
+list, so `start` is optional; the wire type makes it mandatory and carries upstream's own FIXME
+saying as much. The VEN now refuses an event a conformant peer may legitimately send, which
+`wire-contracts` explicitly forbids. It is not newly introduced — our VTN parses with the same
+types and rejects such events at the API boundary first — but being stricter than the spec is
+the one failure a conformance lab must not have, so it is written down with the fix named rather
+than patched into a shared dependency unattended.
+
+**The staged roll earned its keep twice.** Deploying to ven-1 alone, before the other nineteen,
+caught two regressions no test could have found. Making `interval.id` mandatory was right about
+the spec and wrong about where the rule applies: that struct also reads the VEN's own persisted
+state, so the first restart after deploy refused the cache and started empty. And the timer
+report's window, derived from "the span of the samples", never existed — `sim_tick` holds one
+sample per asset at a single timestamp — so `USAGE` was omitted from every report and the
+warning I had added for that case fired 24 times in minutes. The warning was working; the design
+behind it was wrong. The window of a *periodic* report is its cadence.
+
+**Seven reasons one suite could not run.** `tests/docker-compose.openleadr-test.yml` had not been
+touched since 3.1 landed, and produced "the Rust suite fails" for: no MQTT broker (3.1 dials at
+startup and exits 101, and openleadr-rs ships a tracked `.env` pointing at localhost, so
+"unconfigured" still means "attempted"); no `OAUTH_TOKEN_URL`; a `curl` healthcheck on an image
+with no curl; a fixture 3.1 renamed away; no `cmake`, without which `paho-mqtt-sys` fails *after*
+the whole dependency tree compiles; a non-idempotent seed under `ON_ERROR_STOP`; and finally
+`MQTT_URL` missing from the **cargo-test** service, because `basic-read.rs` builds a VTN
+in-process and configuring the `vtn` service is configuring a different process. Each was
+invisible behind the one before it, because a suite reports only the first thing it hits.
+
+**The learning that generalises.** Three separate bugs on this branch had the same shape: a wrong
+writer and a wrong reader that cancelled out. The tariffs looped because the seeder wrote
+`intervalPeriod.duration` and `rate_schedule` read it; the report cadence worked because the
+fixtures passed seconds into `frequency` and the VEN read seconds; the KPIs came out right
+because the VEN emitted watts and `kpi.py` divided by a thousand. Every one was invisible to
+tests exercising both halves, and every one had to be fixed atomically across both. A test that
+passes because it shares the code's misunderstanding is not evidence of anything.
