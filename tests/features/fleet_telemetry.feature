@@ -20,3 +20,12 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
     When I wait for the fleet feed to have at least 1 VEN
     Then every listed VEN either reports a power value or none at all
     And the fleet sum equals the sum of the reporting VENs
+
+  # The live feed and the store answer the same question at two times. If the
+  # store is silent while VENs are publishing, the history is quietly lying by
+  # omission — which a dashboard cannot show and a reader cannot detect.
+  Scenario: What the fleet published is still there a minute later
+    When I wait for the fleet feed to have at least 1 VEN
+    And I wait for the fleet history of the last 10 minutes to have samples
+    Then the fleet history says which resolution it was drawn at
+    And every history bucket counts the VENs it was summed from

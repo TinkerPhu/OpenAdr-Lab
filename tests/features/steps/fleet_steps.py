@@ -67,3 +67,51 @@ def step_fleet_sum_is_consistent(context):
     assert abs(fleet["netPowerW"] - expected) < 1e-6, (
         f"fleet sum {fleet['netPowerW']} != {expected} from its own VEN list"
     )
+
+
+@when("I wait for the fleet history of the last {minutes:d} minutes to have samples")
+def step_wait_for_fleet_history(context, minutes):
+    """The store writes in batches, so a sample published a moment ago may not
+    be queryable yet. Waiting is the honest way to say "eventually"."""
+    from datetime import datetime, timedelta, timezone
+
+    def fetch():
+        start = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        context.response = bff_get(
+            "/api/fleet/power",
+            params={"from": start.isoformat(), "stepSeconds": 5},
+        )
+        if context.response.status_code != 200:
+            # 503 while the store is still connecting is a normal early state,
+            # not a failure -- keep polling, and let the timeout message carry
+            # the status if it never clears.
+            return {"status": context.response.status_code,
+                    "body": context.response.text[:200]}
+        return context.response.json()
+
+    context.fleet_history = poll_until(
+        fetch,
+        lambda b: len(b.get("fleet") or []) > 0,
+        timeout=120,
+        interval=5,
+        description="stored fleet telemetry",
+    )
+
+
+@then("the fleet history says which resolution it was drawn at")
+def step_history_declares_resolution(context):
+    body = context.fleet_history
+    assert body.get("source") in ("raw", "rollup"), (
+        f"the history must say which table answered it, got {body.get('source')!r}"
+    )
+    assert body.get("stepSeconds"), "the history must state its bucket width"
+
+
+@then("every history bucket counts the VENs it was summed from")
+def step_history_buckets_count_contributors(context):
+    for bucket in context.fleet_history["fleet"]:
+        n = bucket.get("contributingVens")
+        assert isinstance(n, int) and n >= 1, (
+            f"bucket {bucket.get('ts')} carries no contributor count ({n!r}) — "
+            "a total whose membership is unknown cannot be compared with another"
+        )
