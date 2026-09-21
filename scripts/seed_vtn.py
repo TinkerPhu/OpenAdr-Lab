@@ -42,7 +42,22 @@ LAB_PROFILE_ATTRIBUTE = {
     "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v1"],
 }
 
+# How often each VEN reports its own telemetry, and over what interval.
+# `frequency: 1` means "one report per interval" -- 3.1 counts intervals, not
+# seconds. 60 s matches the plan's §5 table; the VEN's sim tick is finer, so
+# each interval is a real mean rather than a sample.
+FLEET_TELEMETRY_INTERVAL_S = 60
+
 PROGRAMS = [
+    {
+        # Standing monitoring program (fleet-monitor phase 0 §4.1). Open to
+        # every VEN, carries no DR signal, and exists so the fleet is visible
+        # when no demand-response event is running at all -- which was F-8:
+        # reports only existed while some event asked for them, so an idle
+        # fleet was invisible to the VTN.
+        "programName": "fleet-monitoring",
+        "targets": [],
+    },
     {
         "programName": "Summer Peak DR",
         "targets": ["ven-1", "ven-2"],
@@ -464,6 +479,16 @@ PAYLOAD_CONTRACT = {
     "PRICE": {"units": "KWH", "currency": "EUR"},
     "EXPORT_PRICE": {"units": "KWH", "currency": "EUR"},
     "GHG": {"units": "GHG"},
+    # Report payload types. `DEMAND` is the spec's real-power type ("Power
+    # usage for an interval, i.e. Real Power"), which is what a fleet view
+    # wants -- `USAGE` is energy and would need dividing by the interval to
+    # get back to power. Declared here because the standing monitoring
+    # program declares them for the reports it asks for.
+    "DEMAND": {"units": "KW"},
+    "USAGE": {"units": "KWH"},
+    "BASELINE": {"units": "KWH"},
+    "STORAGE_CHARGE_LEVEL": {"units": "PERCENT"},
+    "OPERATING_STATE": {},
 }
 
 

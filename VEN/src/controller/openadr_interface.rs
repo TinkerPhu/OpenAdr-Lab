@@ -166,47 +166,63 @@ pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTim
 /// When no interval of the event gives us a span to count in.
 const DEFAULT_REPORT_CADENCE_S: u64 = 3600;
 
-/// How often this descriptor asks for a report, in seconds.
+/// The report interval width this VEN chooses when the VTN leaves it open.
 ///
-/// OpenADR 3.1 counts *intervals*, not seconds: `frequency` is "number of
-/// intervals that elapse between reports", `-1` (and absent) meaning "same as
-/// `numIntervals`", and `numIntervals` `-1` meaning every interval of the
-/// event. Reading `frequency` as a second count -- as this did until now --
-/// turned a VTN asking for a report every 4 intervals into one every 4
-/// seconds. That is the `wire-contracts` failure in miniature: a number whose
-/// unit lived only in the reader's head.
+/// `reportIntervals: OPEN_INTERVALS` means "the VEN is expected to generate
+/// intervals independent of the event's intervals" (User Guide 745). That is
+/// what a standing monitoring event needs: it runs for a year, so its own grid
+/// cannot be the report grid. The spec leaves the choice to the VEN, so the
+/// lab writes its choice down -- `docs/reference/WIRE_PROFILE.md` -- rather
+/// than leaving it implicit.
+pub const OPEN_INTERVAL_WIDTH_S: u64 = 60;
+
+/// How long one report interval covers, and how often to submit.
 ///
-/// The span of one interval comes from `event_timing`, the one place that
-/// decides when an interval runs.
-fn report_cadence_secs(event: &OadrEvent, d: &WireReportDescriptor) -> u64 {
+/// Two numbers, not one. 3.1's `frequency` is the "number of intervals that
+/// elapse between reports", so a 60 s grid with `frequency: 4` means four 60 s
+/// intervals in one submission every 240 s. Reading it as a single number
+/// reported one 240 s bucket instead: coarser than asked for, at the right
+/// moment.
+///
+/// The width comes from the event's own interval grid -- `event_timing`, the
+/// one authority on when an interval runs -- unless the descriptor says
+/// `OPEN_INTERVALS`, in which case it is the VEN's to choose.
+fn report_timing(event: &OadrEvent, d: &WireReportDescriptor) -> (u64, u64) {
+    use openleadr_wire::report::ReportIntervals;
+
     let intervals = timed_intervals(event);
-    let Some(first) = intervals.first().filter(|i| i.is_bounded()) else {
+
+    let width_s = if d.report_intervals == ReportIntervals::OpenIntervals {
+        OPEN_INTERVAL_WIDTH_S
+    } else if let Some(first) = intervals.first().filter(|i| i.is_bounded()) {
+        (first.end - first.start).num_seconds().max(1) as u64
+    } else {
         // A conformant peer may leave an event's timing open; say so rather
-        // than pretend we derived a cadence (`wire-contracts`: accept
-        // explicitly, and surface the default you applied).
+        // than pretend we derived a grid (`wire-contracts`: accept explicitly,
+        // and surface the default you applied).
         debug!(
             event_id = %event.id,
             payload_type = %d.payload_type.wire_name(),
             default_s = DEFAULT_REPORT_CADENCE_S,
-            "event declares no bounded interval; applying the profile default report cadence"
+            "event declares no bounded interval and the descriptor does not              open the grid; applying the profile default report cadence"
         );
-        return DEFAULT_REPORT_CADENCE_S;
+        return (DEFAULT_REPORT_CADENCE_S, DEFAULT_REPORT_CADENCE_S);
     };
-    let span_s = (first.end - first.start).num_seconds().max(1) as u64;
 
-    // `frequency` > 0 counts intervals directly. Otherwise it defers to
-    // `numIntervals`, and `numIntervals` <= 0 means "every interval", i.e. one
-    // report covering the whole declared sequence.
-    // Both are plain `i32` on the wire type with spec defaults of -1, so the
-    // "absent" case and the "-1" case are the same branch rather than two.
+    // Both fields are plain `i32` on the wire type with spec defaults of -1,
+    // so "absent" and "-1" are the same branch rather than two.
     let n_intervals = if d.frequency > 0 {
         d.frequency as u64
     } else if d.num_intervals > 0 {
         d.num_intervals as u64
+    } else if d.report_intervals == ReportIntervals::OpenIntervals {
+        // An open grid has no event interval count to fall back on.
+        1
     } else {
         intervals.len().max(1) as u64
     };
-    span_s.saturating_mul(n_intervals)
+
+    (width_s, width_s.saturating_mul(n_intervals))
 }
 
 /// Extract report obligations from event reportDescriptors.
@@ -248,9 +264,9 @@ pub fn extract_report_obligations(
                 .map(|r| r.wire_name())
                 .unwrap_or_else(|| "DIRECT_READ".to_string());
 
-            let interval_duration_s = report_cadence_secs(event, descriptor);
+            let (interval_width_s, submit_every_s) = report_timing(event, descriptor);
 
-            let due_at = now + Duration::seconds(interval_duration_s as i64);
+            let due_at = now + Duration::seconds(submit_every_s as i64);
 
             result.push(OadrReportObligation {
                 id: Uuid::new_v4(),
@@ -260,7 +276,8 @@ pub fn extract_report_obligations(
                 reading_type,
                 resource_name: None,
                 due_at,
-                interval_duration_s,
+                interval_width_s,
+                submit_every_s,
                 fulfilled: false,
                 created_at: now,
                 historical: descriptor.historical,
@@ -1588,7 +1605,8 @@ mod tests {
             reading_type: "DIRECT_READ".to_string(),
             resource_name: None,
             due_at: now,
-            interval_duration_s: 3600,
+            interval_width_s: 3600,
+            submit_every_s: 3600,
             fulfilled: false,
             created_at: now,
             historical: true,
@@ -1600,6 +1618,83 @@ mod tests {
         );
         // Should not add a duplicate
         assert!(obligations.is_empty());
+    }
+
+    /// A report interval's width and the submission cadence are two different
+    /// numbers, and conflating them gets both wrong.
+    ///
+    /// `frequency` counts intervals *between reports*: with a 60 s grid and
+    /// `frequency: 4`, one submission every 240 s carrying four 60 s
+    /// intervals. The obligation stored a single number for both, so it
+    /// reported one 240 s bucket instead -- coarser data than asked for, at
+    /// the right moment, which is the kind of wrong that looks right on a
+    /// chart.
+    #[test]
+    fn report_width_and_cadence_are_separate_numbers() {
+        let events = minutely_event(json!({
+            "payloadType": "DEMAND", "frequency": 4
+        }));
+        let obligations = extract_report_obligations(&events, Utc::now(), &[]);
+        let ob = &obligations[0];
+        assert_eq!(ob.interval_width_s, 60, "one interval covers 60 s");
+        assert_eq!(
+            ob.submit_every_s, 240,
+            "four of them elapse between reports"
+        );
+    }
+
+    /// A standing monitoring event is one long interval -- a year -- so its
+    /// grid cannot set the report grid. `reportIntervals: OPEN_INTERVALS` is
+    /// the spec's way of saying "the VEN generates intervals independent of
+    /// the event's" (User Guide 745), and the lab's choice is written down in
+    /// `docs/reference/WIRE_PROFILE.md` rather than left implicit.
+    #[test]
+    fn open_intervals_lets_the_ven_choose_its_own_grid() {
+        let events = crate::controller::vtn_port::events_from_json(json!([{
+            "id": "evt-standing",
+            "programID": "fleet-monitoring",
+            "duration": "P1Y",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P1Y"},
+            "intervals": [{
+                "id": 0,
+                "payloads": [{"type": "SIMPLE", "values": [0]}]
+            }],
+            "reportDescriptors": [{
+                "payloadType": "DEMAND",
+                "readingType": "MEAN",
+                "frequency": 1,
+                "reportIntervals": "OPEN_INTERVALS"
+            }]
+        }]));
+        let obligations = extract_report_obligations(&events, Utc::now(), &[]);
+        let ob = &obligations[0];
+        assert_eq!(
+            ob.interval_width_s, OPEN_INTERVAL_WIDTH_S,
+            "a year-long event must not become a year-long report interval"
+        );
+        assert_eq!(ob.submit_every_s, OPEN_INTERVAL_WIDTH_S);
+    }
+
+    /// Four 60-second intervals, for the width/cadence split above.
+    fn minutely_event(descriptor: serde_json::Value) -> Vec<OadrEvent> {
+        let intervals: Vec<_> = (0..4)
+            .map(|i| {
+                json!({
+                    "id": i,
+                    "intervalPeriod": {
+                        "start": format!("2026-01-01T00:{:02}:00Z", i),
+                        "duration": "PT60S"
+                    },
+                    "payloads": [{"type": "DEMAND", "values": [1.0]}]
+                })
+            })
+            .collect();
+        crate::controller::vtn_port::events_from_json(json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "reportDescriptors": [descriptor],
+            "intervals": intervals
+        }]))
     }
 
     /// Four 15-minute intervals; the VTN asks for a report every 2 of them.
@@ -1617,7 +1712,7 @@ mod tests {
         let obligations = extract_report_obligations(&events, now, &[]);
         assert_eq!(obligations.len(), 1);
         assert_eq!(
-            obligations[0].interval_duration_s, 1800,
+            obligations[0].submit_every_s, 1800,
             "2 intervals x PT15M = 1800s, not 2s"
         );
         assert_eq!(obligations[0].due_at, now + Duration::seconds(1800));
@@ -1630,7 +1725,7 @@ mod tests {
             "payloadType": "USAGE", "numIntervals": 3
         }));
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
-        assert_eq!(obligations[0].interval_duration_s, 2700);
+        assert_eq!(obligations[0].submit_every_s, 2700);
     }
 
     /// Neither declared: one report covering every interval the event lists.
@@ -1638,7 +1733,7 @@ mod tests {
     fn report_cadence_defaults_to_the_whole_declared_sequence() {
         let events = quarter_hourly_event(json!({"payloadType": "USAGE"}));
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
-        assert_eq!(obligations[0].interval_duration_s, 3600, "4 x PT15M");
+        assert_eq!(obligations[0].submit_every_s, 3600, "4 x PT15M");
     }
 
     /// An event with no bounded interval gives nothing to count, so the
@@ -1653,7 +1748,7 @@ mod tests {
         }]);
         let events = crate::controller::vtn_port::events_from_json(events);
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
-        assert_eq!(obligations[0].interval_duration_s, 3600);
+        assert_eq!(obligations[0].submit_every_s, 3600);
     }
 
     /// Four contiguous PT15M intervals starting at a fixed instant.

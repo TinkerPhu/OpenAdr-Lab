@@ -58,6 +58,30 @@ A payload type absent from the table above is not "dimensionless" — it is one
 this lab has not decided the meaning of. The VEN logs it and sends it
 undeclared rather than inventing a unit.
 
+### An open report grid is 60 seconds
+
+`reportDescriptor.reportIntervals` says whose grid a report uses. `INTERVALS`
+and `SUB_INTERVALS` take it from the event. `OPEN_INTERVALS` means *"the VEN is
+expected to generate intervals independent of the event's intervals"* (User
+Guide 745) — the spec deliberately leaves the choice to the VEN, so this lab
+writes its choice down instead of leaving it implicit:
+
+**An `OPEN_INTERVALS` descriptor is reported on a 60-second grid.**
+
+This exists for the standing `fleet-telemetry` event, which runs for a year and
+therefore cannot supply a report grid from its own single interval.
+`OPEN_INTERVAL_WIDTH_S` in `controller/openadr_interface.rs` is the one copy of
+this number.
+
+### A report interval's width is not its cadence
+
+`frequency` is *"number of intervals that elapse between reports"*. So a 60-second
+grid with `frequency: 4` is four 60-second intervals carried by one submission
+every 240 seconds — not one 240-second interval every 240 seconds. The two
+numbers are `interval_width_s` and `submit_every_s` on an obligation, and
+conflating them produced data coarser than the VTN asked for, arriving exactly
+when it asked for it.
+
 ### Power is kW and energy is kWh, always
 
 OpenADR's `Unit` enum has no watt. That is not a gap to work around: a value in watts is a value

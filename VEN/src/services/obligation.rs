@@ -57,7 +57,7 @@ impl ObligationService {
                 curves.as_ref(),
                 now,
             );
-            let next_due = now + chrono::Duration::seconds(ob.interval_duration_s as i64);
+            let next_due = now + chrono::Duration::seconds(ob.submit_every_s as i64);
             if let Some(report) = report_opt {
                 match vtn.upsert_report(report).await {
                     Ok(()) => {
@@ -185,7 +185,8 @@ mod tests {
             reading_type: "DIRECT_READ".to_string(),
             resource_name: None,
             due_at,
-            interval_duration_s: 900,
+            interval_width_s: 900,
+            submit_every_s: 900,
             fulfilled: false,
             created_at: due_at,
             historical: true,
