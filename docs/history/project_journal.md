@@ -13220,3 +13220,46 @@ fixtures passed seconds into `frequency` and the VEN read seconds; the KPIs came
 because the VEN emitted watts and `kpi.py` divided by a thousand. Every one was invisible to
 tests exercising both halves, and every one had to be fixed atomically across both. A test that
 passes because it shares the code's misunderstanding is not evidence of anything.
+
+---
+
+## Fleet monitor phase 0 — the live feed gets a memory (2026-09-22)
+
+**What was built.** The BFF now keeps what the fleet publishes. Every telemetry message is
+appended to `lab_recorder.fleet_telemetry` in the VTN's own Postgres (D-7), rolled up to
+1-minute means and trimmed to 7 days raw / 90 days rollup (D-6); `GET /api/fleet/power` answers
+"now" from the live subscription when it is given no window and "then" from the store when it
+is. A Fleet page in the VTN UI reads both, and the dashboard health card shows whether the feed
+is alive at all.
+
+**Why the store is deliberately lossy.** The writer's queue is bounded and offers with
+`try_send`. A slow database therefore costs samples rather than stalling the broker's event
+loop — and the drops are counted and shown on `/api/health`. A gap you can see is survivable in
+a way a silent one is not; this is the same reasoning as the last-will message, which exists so
+that "gone" and "quiet" do not look alike.
+
+**Two decisions that are easy to get subtly wrong.**
+
+The rollup starts from the newest bucket that already exists, not from a fixed lookback window.
+With a lookback, an outage longer than the window would leave raw rows unaggregated and then
+delete them at the retention boundary — data loss that appears only after a separate failure,
+which is the worst kind to find.
+
+A row we stored but could not read a meter value out of never enters a series as a zero. It
+says the VEN was alive, not what it drew. The same distinction runs through the whole feature:
+the live route reports `null` and a `contributingVens` count, and every history bucket carries
+the number of VENs it was summed from — because a fleet losing members mid-window would
+otherwise read as falling demand.
+
+**One rule, one implementation, twice.** `net_power_w` had started to exist in two places (the
+live route and the new store); it is now one function both call. And the connect-with-backoff
+loop that the recorder learned the hard way in the 2026-08-10 incident — where one failed
+startup connection left it dead for nine days — moved into `db.rs` so the next background
+writer inherits the lesson instead of re-learning it.
+
+**The cost of the shared crate, paid a second time.** Resampling comes from `lab-core`, which
+is what the VEN plans on: two services answering "what is this series at 12:05" with different
+arithmetic is exactly the divergence D-06 exists to prevent. That path dependency moved the
+BFF's Docker build context to the repo root, the same change the VEN needed — including the
+`cargo clean -p` that stops a stub `.rlib` from silently satisfying the dependency.
+

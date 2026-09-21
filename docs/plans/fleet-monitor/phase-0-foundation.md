@@ -381,8 +381,14 @@ Each step is test-first and leaves the stack deployable.
    and all 20 VENs are pointed at it. The per-VEN ACL of §6.1 is still open.
 7. **VEN telemetry publisher** (§6.2) ✅ with its `/health` and VEN UI surface. Trace
    correlation fields (§6.3) still open.
-8. **BFF ingest, store, query API, stream** (§7), with the phase 0 UI surface. — next
-9. **BDD**: a scenario that creates an import-limit event and asserts that `/api/fleet/power`
-   (live and report) and `/api/fleet/reactions` show every targeted VEN's reaction.
+8. **BFF ingest, store, query API** (§7) — done: `fleet_telemetry` + the 1-minute rollup with
+   D-6 retention, `GET /api/fleet/power` answering live with no window and from the store with
+   one, and the UI surface (dashboard health card + a Fleet page). `GET /api/fleet/stream`
+   (SSE), `/api/fleet/signals` and `/api/fleet/reactions` are still open, as is the Reports-page
+   `fleet-telemetry` series.
+9. **BDD** — `tests/features/fleet_telemetry.feature` covers the feed being alive, the live sum
+   being over only the VENs that reported, and telemetry still being queryable from the store a
+   minute later. The reaction half (create an import-limit event, assert every targeted VEN's
+   reaction via `/api/fleet/reactions`) waits on §6.3's correlation fields.
 
 Views §1, §2, §5 follow as phase 1 on top of these endpoints.
