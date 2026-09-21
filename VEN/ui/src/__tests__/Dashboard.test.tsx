@@ -154,6 +154,58 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("dash-health-value")).toHaveTextContent("degraded");
   });
 
+  // The overall word alone was not enough: "degraded" with no indication of
+  // which component left an operator guessing.
+  it("names the degraded component, not just the overall status", () => {
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        status: "degraded",
+        components: {
+          ven_process: { status: "ok" },
+          vtn_connection: { status: "ok" },
+          storage: { status: "ok" },
+          planner: { status: "ok" },
+          wire_conformance: {
+            status: "degraded",
+            detail: "VTN sent 1 malformed event object(s), ignored: evt-9",
+          },
+        },
+      },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    const row = screen.getByTestId("dash-health-component-wire_conformance");
+    expect(row).toBeVisible();
+    expect(row).toHaveTextContent("evt-9");
+  });
+
+  // `fleet_telemetry` deliberately does not change the overall status -- the
+  // fleet view going dark is an observability problem, not an operational one
+  // -- so the component list is the only place it can be seen at all.
+  it("shows a dark fleet feed even though the VEN is otherwise healthy", () => {
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        status: "ok",
+        components: {
+          ven_process: { status: "ok" },
+          vtn_connection: { status: "ok" },
+          storage: { status: "ok" },
+          planner: { status: "ok" },
+          fleet_telemetry: {
+            status: "degraded",
+            detail: "not connected to the fleet broker",
+          },
+        },
+      },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-value")).toHaveTextContent("ok");
+    expect(
+      screen.getByTestId("dash-health-component-fleet_telemetry"),
+    ).toHaveTextContent("not connected to the fleet broker");
+  });
+
   it("renders programs card with count", () => {
     renderDashboard();
     expect(screen.getByTestId("dash-programs-card")).toBeVisible();
