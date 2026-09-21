@@ -30,6 +30,12 @@ pub struct VtnClient {
     /// GB-49: set when the last token lacked VEN scopes. Read through
     /// `VtnPort::scope_warning` so the health route can surface it.
     scope_warning: Arc<tokio::sync::RwLock<Option<String>>>,
+    /// F-6: `reportName` -> the VTN's id for it, learned from the first
+    /// create. Steady-state submission is a PUT straight to that id instead of
+    /// POST -> 409 -> paginated name lookup -> PUT. Purely an optimisation:
+    /// every entry is re-derivable, and a wrong one self-heals (see
+    /// `upsert_report`).
+    pub(crate) report_ids: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -125,7 +131,7 @@ impl std::error::Error for VtnHttpError {}
 /// the response is a terminal failure (e.g. `upsert_report`'s speculative
 /// 409, which may still resolve via name-based upsert) — logging here would
 /// fire on every recoverable case, not just real failures.
-fn describe_problem(body: &str) -> String {
+pub(crate) fn describe_problem(body: &str) -> String {
     match serde_json::from_str::<ProblemDetails>(body) {
         Ok(problem) if problem.title.is_some() || problem.detail.is_some() => {
             format!(
@@ -144,7 +150,7 @@ fn describe_problem(body: &str) -> String {
 /// "not `is_success()`" branch in this client so no call site has to
 /// duplicate the parse-or-fallback logic — but NOT for a status a caller may
 /// still recover from (see `describe_problem` for that case).
-fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
+pub(crate) fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
     match serde_json::from_str::<ProblemDetails>(body) {
         Ok(problem) if problem.title.is_some() || problem.detail.is_some() => {
             tracing::error!(
@@ -196,6 +202,7 @@ impl VtnClient {
             ven_name,
             token: Arc::new(tokio::sync::RwLock::new(None)),
             scope_warning: Arc::new(tokio::sync::RwLock::new(None)),
+            report_ids: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
@@ -364,7 +371,11 @@ impl VtnClient {
     }
 
     /// PUT JSON to a VTN endpoint with automatic 401-retry.
-    async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub(crate) async fn put_json(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
@@ -409,7 +420,7 @@ impl VtnClient {
     }
 
     /// POST JSON, returning the raw response (status + body) without error-mapping.
-    async fn post_json_raw(
+    pub(crate) async fn post_json_raw(
         &self,
         path: &str,
         body: &serde_json::Value,
@@ -430,90 +441,6 @@ impl VtnClient {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         Ok((status, text))
-    }
-
-    /// Submit a report with upsert semantics: on 409 Conflict, find the existing
-    /// report by name and update it instead.
-    pub(crate) async fn upsert_report(
-        &self,
-        body: crate::controller::vtn_port::OadrReportBody,
-    ) -> Result<()> {
-        let value = serde_json::to_value(&body).context("serialize report body")?;
-        let (status, text) = self.post_json_raw("/reports", &value).await?;
-
-        if status == StatusCode::CONFLICT {
-            // A VTN 409 here is the expected, steady-state outcome for every
-            // periodic report submission after the first (reporter.rs gives
-            // each report a name stable per event/obligation, so re-submitting
-            // it necessarily 409s and falls through to a name-based PUT) — it
-            // is not proof of a reportName duplicate either way: openleadr-rs
-            // also maps foreign-key violations (e.g. the referenced event was
-            // cascade-deleted) to 409. So this branch must NOT log at ERROR
-            // until it knows recovery actually failed — see `describe_problem`.
-            let vtn_problem = describe_problem(&text);
-            if let Some(name) = body.reportName.as_deref() {
-                match self.find_report_by_name(name).await {
-                    Ok(id) => {
-                        self.update_report(&id, value).await?;
-                        tracing::debug!(
-                            path = "/reports",
-                            report_name = name,
-                            "409 on POST /reports resolved via name-based upsert"
-                        );
-                        return Ok(());
-                    }
-                    Err(lookup_err) => {
-                        tracing::error!(
-                            path = "/reports",
-                            status = status.as_u16(),
-                            report_name = name,
-                            vtn_problem,
-                            "409 on POST /reports and name-based upsert failed"
-                        );
-                        anyhow::bail!(
-                            "409 on POST /reports and upsert of reportName '{name}' failed \
-                             ({lookup_err:#}); VTN said: {vtn_problem}"
-                        )
-                    }
-                }
-            }
-            tracing::error!(
-                path = "/reports",
-                status = status.as_u16(),
-                vtn_problem,
-                "409 on POST /reports without reportName — cannot upsert by name"
-            );
-            anyhow::bail!(
-                "409 on POST /reports without reportName — cannot upsert by name; \
-                 VTN said: {vtn_problem}"
-            );
-        }
-
-        if !status.is_success() {
-            return Err(http_error("/reports", status, &text));
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn update_report(
-        &self,
-        id: &str,
-        body: serde_json::Value,
-    ) -> Result<serde_json::Value> {
-        let path = format!("/reports/{id}");
-        self.put_json(&path, body).await
-    }
-
-    /// Search own reports (filtered by client_name) for a matching reportName.
-    async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
-        let reports = VtnPort::fetch_reports(self).await?;
-        for r in &reports.items {
-            if r.reportName.as_deref() == Some(report_name) {
-                return Ok(r.id.clone());
-            }
-        }
-        anyhow::bail!("no report found with name '{report_name}'")
     }
 }
 
@@ -795,6 +722,133 @@ mod tests {
             resources: vec![],
             payloadDescriptors: Vec::new(),
         }
+    }
+
+    /// A VTN that counts what it is asked to do, so a test can assert the
+    /// *shape* of the traffic rather than just its outcome.
+    #[derive(Default)]
+    struct CallLog {
+        posts: std::sync::atomic::AtomicUsize,
+        puts: std::sync::atomic::AtomicUsize,
+        lists: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CallLog {
+        fn counts(&self) -> (usize, usize, usize) {
+            use std::sync::atomic::Ordering::Relaxed;
+            (
+                self.posts.load(Relaxed),
+                self.puts.load(Relaxed),
+                self.lists.load(Relaxed),
+            )
+        }
+    }
+
+    /// A VTN that creates a report once and then 409s, like the real one.
+    /// `put_ok` false makes it reject the id, standing in for a report that
+    /// has been deleted since we learned it.
+    async fn spawn_counting_vtn(log: Arc<CallLog>, put_ok: bool) -> String {
+        use axum::extract::State;
+        use axum::http::StatusCode;
+
+        async fn token(State(_): State<(Arc<CallLog>, bool)>) -> Json<serde_json::Value> {
+            Json(json!({"access_token": "test-token", "expires_in": 3600}))
+        }
+        async fn post_report(
+            State((log, _)): State<(Arc<CallLog>, bool)>,
+            Json(_): Json<serde_json::Value>,
+        ) -> (StatusCode, Json<serde_json::Value>) {
+            use std::sync::atomic::Ordering::Relaxed;
+            let n = log.posts.fetch_add(1, Relaxed);
+            if n == 0 {
+                (StatusCode::CREATED, Json(json!({"id": "rep-1"})))
+            } else {
+                (
+                    StatusCode::CONFLICT,
+                    Json(json!({"detail": "duplicate reportName"})),
+                )
+            }
+        }
+        async fn put_report(
+            State((log, put_ok)): State<(Arc<CallLog>, bool)>,
+            Json(_): Json<serde_json::Value>,
+        ) -> (StatusCode, Json<serde_json::Value>) {
+            use std::sync::atomic::Ordering::Relaxed;
+            log.puts.fetch_add(1, Relaxed);
+            if put_ok {
+                (StatusCode::OK, Json(json!({"id": "rep-1"})))
+            } else {
+                (StatusCode::NOT_FOUND, Json(json!({"detail": "gone"})))
+            }
+        }
+        async fn list_reports(
+            State((log, _)): State<(Arc<CallLog>, bool)>,
+        ) -> Json<serde_json::Value> {
+            use std::sync::atomic::Ordering::Relaxed;
+            log.lists.fetch_add(1, Relaxed);
+            Json(json!([]))
+        }
+
+        let app = Router::new()
+            .route("/auth/token", post(token))
+            .route("/reports", get(list_reports).post(post_report))
+            .route("/reports/:id", axum::routing::put(put_report))
+            .with_state((log, put_ok));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// F-6: after the first create, a submission is one PUT -- not POST, 409,
+    /// a paginated lookup of our own reports, then PUT.
+    #[tokio::test]
+    async fn upsert_report_reuses_the_id_it_learned() {
+        let log = Arc::new(CallLog::default());
+        let base_url = spawn_counting_vtn(log.clone(), true).await;
+        let client = make_client(base_url);
+
+        client
+            .upsert_report(report_body(Some("TELEMETRY")))
+            .await
+            .unwrap();
+        assert_eq!(log.counts(), (1, 0, 0), "first submission creates");
+
+        for _ in 0..3 {
+            client
+                .upsert_report(report_body(Some("TELEMETRY")))
+                .await
+                .unwrap();
+        }
+        let (posts, puts, lists) = log.counts();
+        assert_eq!(posts, 1, "steady state must not POST again");
+        assert_eq!(puts, 3, "each later submission is exactly one PUT");
+        assert_eq!(lists, 0, "and never a name lookup");
+    }
+
+    /// The cache is an optimisation, so a wrong entry must cost speed and not
+    /// correctness: if the VTN no longer has that id, the report still lands.
+    #[tokio::test]
+    async fn upsert_report_recovers_when_the_cached_id_is_gone() {
+        let log = Arc::new(CallLog::default());
+        let base_url = spawn_counting_vtn(log.clone(), false).await;
+        let client = make_client(base_url);
+
+        // First submission creates and caches `rep-1`.
+        client
+            .upsert_report(report_body(Some("TELEMETRY")))
+            .await
+            .unwrap();
+
+        // Second finds the PUT rejected, forgets the id, and re-creates. This
+        // VTN 409s every POST after the first, so recovery ends in the
+        // name-lookup path -- what matters is that the stale id was dropped.
+        let _ = client.upsert_report(report_body(Some("TELEMETRY"))).await;
+        let (posts, puts, _) = log.counts();
+        assert_eq!(puts, 1, "the stale id was tried once");
+        assert_eq!(posts, 2, "and then a create was attempted");
     }
 
     #[tokio::test]
