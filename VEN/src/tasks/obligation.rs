@@ -27,6 +27,13 @@ pub(crate) fn spawn_obligation_check(
         loop {
             interval.tick().await;
             let now = Utc::now();
+            // Ask the cheap question first. Building a report needs an hour of
+            // every asset's history, which means taking the simulator lock and
+            // copying it; at a 300 s report cadence and a 5 s loop that was
+            // being paid on all sixty ticks in between, on every VEN (F-7).
+            if !state.any_obligation_due(now).await {
+                continue;
+            }
             let asset_samples: HashMap<String, Vec<AssetReportSample>> = {
                 let sim_guard = sim.lock().await;
                 sim_guard

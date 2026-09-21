@@ -371,10 +371,20 @@ pub fn build_measurement_report_for_obligation(
                 .enumerate()
                 .map(|(i, &(ts, value_kw))| {
                     // Which direction of flow the requesting payload type asks
-                    // about. Everything else reports import.
+                    // about. An *_CAPACITY_LIMIT report answers "how much did
+                    // you draw against this limit", so it is one-directional
+                    // and clamped; anything else reports net site power, where
+                    // the sign is the information (F-3).
+                    //
+                    // Clamping everything with `.max(0.0)` was how an
+                    // exporting site reported zero: a fleet sum built from
+                    // those reports was wrong by exactly the export, and
+                    // nothing said so. The spec calls a `USAGE` value "a
+                    // float"; WIRE_PROFILE.md fixes import as positive.
                     let directed_kw = match payload_type.as_str() {
                         "EXPORT_CAPACITY_LIMIT" => (-value_kw).max(0.0),
-                        _ => value_kw.max(0.0),
+                        "IMPORT_CAPACITY_LIMIT" => value_kw.max(0.0),
+                        _ => value_kw,
                     };
                     // `USAGE` is energy *over the interval*, so the resampled
                     // mean power is multiplied by the interval it covers. This
@@ -665,6 +675,40 @@ mod tests {
                 "import should be 0 for export power, got {val}"
             );
         }
+    }
+
+    /// F-3: a site that exports must not report zero.
+    ///
+    /// The value was clamped with `.max(0.0)`, so every interval in which a
+    /// PV or battery site fed the grid read as `0` -- and a fleet sum built
+    /// from those reports was wrong by exactly the export, with nothing
+    /// indicating it. The spec calls a `USAGE` value "a float"; direction is
+    /// carried in the sign, and `docs/reference/WIRE_PROFILE.md` says import
+    /// is positive.
+    #[test]
+    fn obligation_report_keeps_the_sign_of_exported_power() {
+        let asset_samples: HashMap<_, _> = [make_samples("pv", &[(0, -3.0), (900, -3.0)])]
+            .into_iter()
+            .collect();
+        let ob = make_obligation("e1", "p1", "USAGE", 900);
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            &std::collections::HashMap::new(),
+            None,
+            ts(1800),
+        )
+        .unwrap();
+        let iv = &report.resources[0].intervals[0];
+        let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
+        let val = usage.values[0].as_f64().unwrap();
+        assert!(
+            (val - (-0.75)).abs() < 1e-6,
+            "3 kW exported over PT15M is -0.75 kWh, not {val}"
+        );
     }
 
     #[test]

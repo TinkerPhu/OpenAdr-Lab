@@ -59,6 +59,22 @@ impl AppState {
     }
 
     /// Return all unfulfilled obligations whose due_at <= now.
+    /// Whether any obligation is due, without cloning the ones that are.
+    ///
+    /// The obligation loop runs every 5 s on every VEN and needs an hour of
+    /// every asset's history to *build* a report -- a simulator lock and a
+    /// copy. Asking this first means that cost is paid only when there is
+    /// something to report, which at a 300 s cadence is one tick in sixty
+    /// (F-7, `docs/plans/fleet-monitor/phase-0-foundation.md`).
+    pub async fn any_obligation_due(&self, now: DateTime<Utc>) -> bool {
+        self.hems
+            .read()
+            .await
+            .report_obligations
+            .iter()
+            .any(|o| o.is_due(now))
+    }
+
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.hems
             .read()
@@ -73,6 +89,34 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+
+    /// F-7: the loop asks this before locking the simulator and copying an
+    /// hour of history, so "nothing due" has to be answerable cheaply and
+    /// correctly -- a false negative silently stops all reporting.
+    #[tokio::test]
+    async fn any_obligation_due_agrees_with_due_obligations() {
+        let state = AppState::new();
+        let now = Utc::now();
+        assert!(!state.any_obligation_due(now).await, "none registered");
+
+        let due_at = |t| OadrReportObligation {
+            due_at: t,
+            ..make_obligation(uuid::Uuid::new_v4(), "evt")
+        };
+        let future = due_at(now + chrono::Duration::seconds(300));
+        let past = due_at(now - chrono::Duration::seconds(1));
+
+        state.set_report_obligations(vec![future.clone()]).await;
+        assert!(
+            !state.any_obligation_due(now).await,
+            "not due yet: {:?}",
+            state.due_obligations(now).await
+        );
+
+        state.set_report_obligations(vec![future, past]).await;
+        assert!(state.any_obligation_due(now).await);
+        assert_eq!(state.due_obligations(now).await.len(), 1);
+    }
     use super::*;
 
     fn make_obligation(id: uuid::Uuid, event_id: &str) -> OadrReportObligation {
