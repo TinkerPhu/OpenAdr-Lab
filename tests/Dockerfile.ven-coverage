@@ -34,7 +34,10 @@ RUN cargo install cargo-tarpaulin --version "^0.31" --locked
 
 WORKDIR /app
 
-COPY . .
+# Context is the repo root (for `lab-core`, the crate the VEN shares with the
+# BFF), so copy the two crates rather than the whole tree.
+COPY VEN/ ./
+COPY lab-core/ ./lab-core/
 
 # Keep parallelism low to avoid OOM linker failures on Node1
 # (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).

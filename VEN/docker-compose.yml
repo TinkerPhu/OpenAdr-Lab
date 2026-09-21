@@ -18,8 +18,8 @@
 services:
   ven-1:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8211:8080"
@@ -64,8 +64,8 @@ services:
 
   ven-2:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8212:8080"
@@ -98,8 +98,8 @@ services:
 
   ven-3:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8213:8080"

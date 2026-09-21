@@ -26,8 +26,8 @@
 services:
   ven-4:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8211:8080"
@@ -61,8 +61,8 @@ services:
 
   ven-5:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8215:8080"
@@ -93,8 +93,8 @@ services:
 
   ven-6:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8216:8080"
@@ -125,8 +125,8 @@ services:
 
   ven-7:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8217:8080"
@@ -157,8 +157,8 @@ services:
 
   ven-8:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8218:8080"
@@ -189,8 +189,8 @@ services:
 
   ven-9:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8219:8080"
@@ -221,8 +221,8 @@ services:
 
   ven-10:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8220:8080"
@@ -253,8 +253,8 @@ services:
 
   ven-11:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8221:8080"
@@ -285,8 +285,8 @@ services:
 
   ven-12:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8222:8080"
@@ -317,8 +317,8 @@ services:
 
   ven-13:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8223:8080"
@@ -349,8 +349,8 @@ services:
 
   ven-14:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8224:8080"
@@ -381,8 +381,8 @@ services:
 
   ven-15:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8225:8080"
@@ -413,8 +413,8 @@ services:
 
   ven-16:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8226:8080"
@@ -445,8 +445,8 @@ services:
 
   ven-17:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8227:8080"
@@ -477,8 +477,8 @@ services:
 
   ven-18:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8228:8080"
@@ -509,8 +509,8 @@ services:
 
   ven-19:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8229:8080"
@@ -541,8 +541,8 @@ services:
 
   ven-20:
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: VEN/Dockerfile
     restart: unless-stopped
     ports:
       - "8230:8080"
