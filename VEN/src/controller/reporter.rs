@@ -368,6 +368,13 @@ pub fn build_measurement_report_for_obligation(
             resampled
                 .samples
                 .iter()
+                // F-5: drop the bucket still being measured. `resample_uniform`
+                // grids up to `floor_to_grid(last_sample)`, so the newest
+                // bucket is emitted as soon as one sample lands in it and is
+                // reported as if it covered the whole interval -- then
+                // silently replaced by the real value on the next submission.
+                // A report interval has to describe a window that has ended.
+                .filter(|(start, _)| *start + interval_width <= now)
                 .enumerate()
                 .map(|(i, &(ts, value_kw))| {
                     // Which direction of flow the requesting payload type asks
@@ -570,6 +577,10 @@ mod tests {
         .collect();
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
+        // `now` is after the last sample: a VEN reports history it has, and
+        // the fixture previously put samples *after* the reporting instant,
+        // which cannot happen live. With F-5 dropping the still-filling
+        // bucket, that shape produced one interval instead of several.
         let report = build_measurement_report_for_obligation(
             &ob,
             &asset_samples,
@@ -578,7 +589,7 @@ mod tests {
             None,
             &std::collections::HashMap::new(),
             None,
-            ts(1800),
+            ts(3600),
         )
         .unwrap();
 
@@ -673,6 +684,56 @@ mod tests {
             assert!(
                 (val - 0.0).abs() < 1e-9,
                 "import should be 0 for export power, got {val}"
+            );
+        }
+    }
+
+    /// F-5: the newest bucket is still filling when the report is sent.
+    ///
+    /// `resample_uniform` grids up to `floor_to_grid(last_sample)`, so the
+    /// final bucket is emitted as soon as *one* sample lands in it and is
+    /// reported as though it covered the whole interval. The next submission
+    /// silently replaces it with the real value -- so every report's newest
+    /// number is provisional, and nothing on the wire says so.
+    ///
+    /// A report interval must describe an interval that has finished: its
+    /// end must not be in the future.
+    #[test]
+    fn obligation_report_omits_the_interval_still_being_measured() {
+        // Samples every 60 s to t=960 (22:29:20). With 300 s buckets the one
+        // starting 22:25:00 ends at 22:30:00 -- after the newest sample, so it
+        // is still being measured.
+        let rows: Vec<(i64, f64)> = (0..=16).map(|i| (i * 60, 2.0)).collect();
+        let asset_samples: HashMap<_, _> = [make_samples("site", &rows)].into_iter().collect();
+        let ob = make_obligation("e1", "p1", "USAGE", 300);
+        let now = ts(960);
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            &std::collections::HashMap::new(),
+            None,
+            now,
+        )
+        .unwrap();
+
+        for iv in &report.resources[0].intervals {
+            let period = iv
+                .intervalPeriod
+                .as_ref()
+                .expect("interval states its window");
+            let start: DateTime<Utc> = period
+                .start
+                .as_deref()
+                .expect("start")
+                .parse()
+                .expect("rfc3339");
+            let end = start + Duration::seconds(300);
+            assert!(
+                end <= now,
+                "interval [{start}, {end}) has not finished at {now}; a report                  must not describe a window still being measured"
             );
         }
     }
