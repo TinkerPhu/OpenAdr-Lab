@@ -362,15 +362,26 @@ comfortably.
 
 Each step is test-first and leaves the stack deployable.
 
-1. **R-84** BFF pagination consolidation (unblocks correct report/event lists).
-2. **Report fixes** F-3 (signed values), F-6 (cached report id), F-7 (no history copy when
-   nothing is due), F-9/D-5 (delete the timer path). `USAGE` semantics stay put (D-4).
-3. **Descriptor semantics and accumulation** F-4, F-5, D-3 (append + 24 h trim).
-4. **Shared crate** extraction (D-06).
-5. **Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5).
-6. **Broker + compose environment** (§8.1–8.3).
-7. **VEN telemetry publisher** (§6.2) + trace correlation fields (§6.3), with VEN UI diagnostic.
-8. **BFF ingest, store, query API, stream** (§7), with the phase 0 UI surface.
+1. ~~**R-84** BFF pagination consolidation~~ — done 2026-09-18.
+2. **Report fixes** — F-3 (signed values) ✅, F-6 (cached report id) ✅, F-7 (no history copy
+   when nothing is due) ✅. **F-9/D-5 (delete the timer path) is deliberately out of order**:
+   the timer path is the only thing reporting for an event without `reportDescriptors`, so
+   deleting it before the standing event of step 5 exists would leave an idle fleet invisible —
+   the very gap this plan is closing. It now waits on step 5 being verified live.
+   `USAGE`-as-power (D-4) is **obsolete**: the 3.1 migration made `USAGE` energy in kWh and
+   taught `kpi.py` to read the declared unit, so the reason the fleet series is `DEMAND` is now
+   simply that `DEMAND` is the spec's real-power type rather than that `USAGE` was non-spec.
+3. **Descriptor semantics and accumulation** — F-4 ✅ (closed by the 3.1 migration, plus the
+   width-vs-cadence split and `OPEN_INTERVALS` this plan needed), F-5 ✅. D-3 (append + 24 h
+   trim) open.
+4. ~~**Shared crate** extraction (D-06)~~ — done: `lab-core` holds `time_series`, `time_window`
+   and `event_timing`. The VEN's Docker context moved to the repo root for the path dependency.
+5. ~~**Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5)~~ — done.
+6. ~~**Broker + compose environment**~~ — done: the fleet has its own credential on `lab-mqtt`
+   and all 20 VENs are pointed at it. The per-VEN ACL of §6.1 is still open.
+7. **VEN telemetry publisher** (§6.2) ✅ with its `/health` and VEN UI surface. Trace
+   correlation fields (§6.3) still open.
+8. **BFF ingest, store, query API, stream** (§7), with the phase 0 UI surface. — next
 9. **BDD**: a scenario that creates an import-limit event and asserts that `/api/fleet/power`
    (live and report) and `/api/fleet/reactions` show every targeted VEN's reaction.
 
