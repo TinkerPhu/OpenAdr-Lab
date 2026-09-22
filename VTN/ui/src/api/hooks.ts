@@ -43,6 +43,19 @@ export function useFleetHistory(minutes: number, stepSeconds: number) {
   });
 }
 
+/**
+ * The reaction chain for one event. Idle until an event is actually named --
+ * "no event selected" is not a query with an empty answer.
+ */
+export function useFleetReactions(eventId: string) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "reactions", eventId],
+    queryFn: () => api.fleetReactions(eventId),
+    enabled: eventId.trim().length > 0,
+  });
+}
+
 export function usePrograms() {
   const { api } = useBffContext();
   return useQuery({

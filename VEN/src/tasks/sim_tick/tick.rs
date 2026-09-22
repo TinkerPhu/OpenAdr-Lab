@@ -181,9 +181,7 @@ pub(crate) async fn tick_once(
     super::post_lock::clear_inject_fields(&state, cleared_fields, ctx.pv_clear, ctx.base_clear)
         .await;
 
-    // The publish step consumes the snapshot and hands it back, so the reports
-    // below read the same object rather than a clone of it -- one snapshot per
-    // tick, and no way for the two halves to disagree about it.
+    // Publish consumes the snapshot and hands it back: one object per tick.
     let sim_snapshot = super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,

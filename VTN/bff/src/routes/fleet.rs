@@ -154,6 +154,62 @@ async fn history(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionQuery {
+    #[serde(rename = "eventID")]
+    pub event_id: String,
+}
+
+/// `GET /api/fleet/reactions?eventID=…` — who saw one event, and what changed.
+///
+/// `eventID` spelled as OpenADR spells it (`dto`): the same word a caller read
+/// off the event object is the word they pass here.
+pub async fn fleet_reactions(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<ReactionQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if q.event_id.trim().is_empty() {
+        return Err(bad_request("eventID is required"));
+    }
+    let pool = ctx.fleet_store.read().await.clone();
+    let Some(pool) = pool else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "fleet telemetry store is not connected"})),
+        ));
+    };
+
+    let reactions = crate::fleet_reactions::reactions(&pool, &q.event_id)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "fleet reactions query failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "fleet reactions query failed"})),
+            )
+        })?;
+
+    let vens: Vec<_> = reactions
+        .iter()
+        .map(|r| {
+            let mut v = serde_json::to_value(r).unwrap_or_else(|_| json!({}));
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("deltaW".into(), json!(r.delta_w()));
+            }
+            v
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "eventID": q.event_id,
+        // How many VENs said they saw it. The list holds only those, so this
+        // is a count of evidence rather than of the fleet.
+        "vensSeen": vens.len(),
+        "vens": vens,
+    })))
+}
+
 fn bad_request(message: &str) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::BAD_REQUEST, Json(json!({"error": message})))
 }

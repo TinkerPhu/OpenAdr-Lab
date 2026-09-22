@@ -214,6 +214,16 @@ pub fn spawn_ingest(
                         // Store what was stored in the live state, from the
                         // live state -- so the history cannot end up holding a
                         // differently-parsed version of the same message.
+                        if let (Some(store), "trace") = (&store, leaf) {
+                            match serde_json::from_slice::<serde_json::Value>(&p.payload)
+                                .ok()
+                                .and_then(|body| {
+                                    crate::fleet_store::TraceRow::from_message(ven, &body, now)
+                                }) {
+                                Some(row) => store.offer_trace(row),
+                                None => tracing::warn!(ven, "unreadable fleet trace message"),
+                            }
+                        }
                         if let (Some(store), "telemetry") = (&store, leaf) {
                             if let Some(body) = state
                                 .read()

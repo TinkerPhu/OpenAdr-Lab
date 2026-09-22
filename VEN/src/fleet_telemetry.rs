@@ -176,6 +176,22 @@ impl TelemetryPort for FleetMqttPublisher {
         }
     }
 
+    async fn publish_trace(&self, body: serde_json::Value) {
+        let topic = format!("{}/trace", self.topic_root);
+        // QoS 1 and *not* retained, unlike telemetry: a decision is not a
+        // state to catch up on -- a subscriber joining later must not be told
+        // about an event arrival from an hour ago as though it just happened --
+        // but neither is it replaced a few seconds later, so losing one
+        // silently breaks the reaction chain it belongs to (§6.3).
+        if let Err(e) = self
+            .client
+            .publish(&topic, QoS::AtLeastOnce, false, body.to_string())
+            .await
+        {
+            tracing::debug!(topic, error = %e, "fleet trace publish dropped");
+        }
+    }
+
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
     }

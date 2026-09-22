@@ -33,6 +33,14 @@ pub trait TelemetryPort: Send + Sync {
     /// The site's current state: a snapshot, published on the tick cadence.
     async fn publish_telemetry(&self, body: serde_json::Value);
 
+    /// One controller decision, published as it is made.
+    ///
+    /// Separate from telemetry because the two are different kinds of fact and
+    /// want different delivery: a snapshot is replaced by the next one seconds
+    /// later and may be dropped, a decision happens once and a fleet watching
+    /// for "did this VEN see the event" cannot recover a lost one.
+    async fn publish_trace(&self, _body: serde_json::Value) {}
+
     /// Whether this VEN's publisher is connected, for `/health` and the VEN
     /// UI's diagnostics (`ui-transparency`: a feed with no visible surface is
     /// an incomplete implementation).
@@ -94,6 +102,25 @@ pub fn telemetry_body(ven_name: &str, snap: &SimSnapshot) -> serde_json::Value {
     body
 }
 
+/// What a trace message says.
+///
+/// The `ControllerEvent` exactly as `/trace/events` serves it, plus the name
+/// of the VEN that decided it — same rule as `telemetry_body`: one vocabulary
+/// across the fleet channel and the VEN's own routes (`dto`).
+pub fn trace_body(
+    ven_name: &str,
+    event: &crate::controller::trace::ControllerEvent,
+) -> serde_json::Value {
+    let mut body = serde_json::to_value(event).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "controller event is not serialisable");
+        serde_json::json!({})
+    });
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("venName".into(), serde_json::json!(ven_name));
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +146,26 @@ mod tests {
         let body = telemetry_body("ven-7", &snapshot(2500.0));
         assert_eq!(body["venName"], "ven-7");
         assert_eq!(body["grid"]["net_power_w"], 2500.0);
+    }
+
+    /// The `type` tag and the event id are what a reaction chain is assembled
+    /// from, so both have to survive the trip onto the wire intact.
+    #[test]
+    fn trace_body_carries_the_kind_of_decision_and_the_event_it_was_about() {
+        let event = crate::controller::trace::ControllerEvent::OpenAdrArrived {
+            ts: chrono::Utc::now(),
+            event_id: "ev-9f3".into(),
+            modification_date_time: Some("2026-09-22T10:00:00+00:00".into()),
+            event_name: "Peak DR".into(),
+            signal_type: "PRICE".into(),
+            value: 0.3,
+            interval: 4,
+        };
+        let body = trace_body("ven-7", &event);
+        assert_eq!(body["type"], "OpenAdrArrived");
+        assert_eq!(body["event_id"], "ev-9f3");
+        assert_eq!(body["modification_date_time"], "2026-09-22T10:00:00+00:00");
+        assert_eq!(body["venName"], "ven-7");
     }
 
     /// Export is negative and must stay negative: a fleet sum built from

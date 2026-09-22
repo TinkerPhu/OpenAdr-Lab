@@ -44,6 +44,9 @@ const mockHistory = {
 vi.mock("../api/hooks", () => ({
   useFleetPower: vi.fn(() => ({ data: mockLive, isError: false })),
   useFleetHistory: vi.fn(() => ({ data: mockHistory, isError: false })),
+  // The page also hosts the reactions card; it has its own test file, so here
+  // it only has to be idle rather than absent.
+  useFleetReactions: vi.fn(() => ({ data: undefined, isError: false })),
 }));
 
 function renderFleet() {
