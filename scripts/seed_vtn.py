@@ -62,9 +62,21 @@ PROGRAMS = [
         # present, `controller::report_payload::descriptors_for`), so this is
         # not the only copy -- it is what lets a consumer know what to expect
         # from this program before any report has arrived.
+        # `objectType` is mandatory: a program's payloadDescriptors list is a
+        # union of event- and report-shaped descriptors, and the tag is what
+        # says which. These describe what the program's *reports* will carry,
+        # so REPORT_PAYLOAD_DESCRIPTOR. Omitting it is a 400 from the VTN --
+        # found by seeding a real one, not by any test.
         "payloadDescriptors": [
-            {"payloadType": "DEMAND", "units": "KW"},
-            {"payloadType": "OPERATING_STATE"},
+            {
+                "objectType": "REPORT_PAYLOAD_DESCRIPTOR",
+                "payloadType": "DEMAND",
+                "units": "KW",
+            },
+            {
+                "objectType": "REPORT_PAYLOAD_DESCRIPTOR",
+                "payloadType": "OPERATING_STATE",
+            },
         ],
     },
     {
