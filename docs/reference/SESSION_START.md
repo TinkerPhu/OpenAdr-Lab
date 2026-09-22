@@ -20,12 +20,21 @@ Run through this list at the beginning of every Claude Code session before writi
 - [ ] Scan `docs/reference/TECHNICAL_DEBTS.md` — any debt in the area you are about to touch?
 - [ ] Check `specs/` for any active feature spec (tasks not yet marked done)
 
-## 4. Quarterly controls *(do this ~every 3 months, not every session)*
-- [ ] Run architecture invariant checks (from CLAUDE.md `ven-architecture:` section)
-- [ ] Generate Mermaid module diagram and compare to
-      `docs/architecture/module_dependency_graph.md`
-- [ ] Compare `DOCUMENTATION.md` to actual code; update stale sections
-- [ ] Run `cargo audit` and `npm audit`; add findings to BACKLOG.md
+## 4. Recurring controls *(tracked in `jobs.json`, not by memory)*
+
+"~every 3 months" is not a schedule anyone can follow: nothing here knew when the last
+time was. `jobs.json` records each check's interval and when it last ran, and
+`scripts/jobs.py` answers "what is due".
+
+- [ ] `python scripts/jobs.py due` — nothing due prints nothing, so no news is good news
+      (the `SessionStart` hook in `.claude/settings.json` already runs this for you)
+- [ ] `python scripts/jobs.py run` — runs every due check that has a command
+- [ ] `python scripts/jobs.py done <id>` — for the ones only a human can do, once handled
+
+Registered today: the openspec version check (weekly, also covered by CI), the
+`cargo audit` / `npm audit` sweep, the `ven-architecture` invariant greps plus the module
+diagram, and documentation drift. Add a job rather than a checklist line whenever the
+trigger is "time passed" rather than "this commit".
 
 ## 5. Definition of Done *(verify before closing a feature)*
 - [ ] All test suites green (UI unit, Rust unit+integration, E2E BDD)

@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Recurring checks that are not tied to a commit, and so have no natural trigger.",
+    "Read by scripts/jobs.py; surfaced at session start (docs/reference/SESSION_START.md).",
+    "",
+    "`next_due` is the earliest `last_run + interval_days` across all jobs, so a session",
+    "can decide whether anything needs doing by reading one field instead of reasoning",
+    "about every entry. scripts/jobs.py rewrites it; do not maintain it by hand.",
+    "",
+    "`last_run` is state in a tracked file, which is a deliberate trade: the schedule",
+    "travels with the repo and is visible to everyone, at the cost of a one-line diff",
+    "per run. On a merge conflict, keep the LATER timestamp - it is the one that",
+    "actually happened.",
+    "",
+    "A job with no `command` is a human checklist item: jobs.py reports it as due and",
+    "records when it was marked done, but runs nothing."
+  ],
+  "next_due": "2026-09-22T16:08:29Z",
+  "jobs": [
+    {
+      "id": "openspec-version",
+      "description": "Is a newer openspec release out than the one that generated our skills?",
+      "command": "{python} scripts/check_openspec_version.py",
+      "interval_days": 7,
+      "last_run": "2026-09-22T16:08:29Z",
+      "last_status": "ok",
+      "notes": "Also checked by .github/workflows/openspec-version-check.yml, which files an issue. This entry is the local half: it catches the update while someone is actually here to apply it."
+    },
+    {
+      "id": "dependency-audit",
+      "description": "cargo audit and npm audit; findings go to docs/BACKLOG.md with severity",
+      "command": null,
+      "interval_days": 90,
+      "last_run": null,
+      "last_status": null,
+      "notes": "SESSION_START.md §4. No command: cargo audit needs the toolchain and npm audit needs both UIs, and a half-run audit reporting 'ok' would be worse than no audit."
+    },
+    {
+      "id": "architecture-invariants",
+      "description": "Run the ven-architecture grep invariants and regenerate the module diagram",
+      "command": null,
+      "interval_days": 90,
+      "last_run": null,
+      "last_status": null,
+      "notes": "SESSION_START.md §4. The greps are in .claude/CLAUDE.md under ven-architecture:."
+    },
+    {
+      "id": "docs-drift",
+      "description": "Compare DOCUMENTATION.md and docs/architecture/ against the actual code",
+      "command": null,
+      "interval_days": 90,
+      "last_run": null,
+      "last_status": null,
+      "notes": "SESSION_START.md §4."
+    }
+  ]
+}
