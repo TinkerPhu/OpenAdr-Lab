@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::{MeasurementPort, SimulatorPort, WeatherForecastPort};
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::PvForecastParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
@@ -15,7 +15,7 @@ pub(crate) async fn tick_once(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
     ven_name: String,
-    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>,
     data_dir: String,
     _event_tx: PlannerEventTx,
     persist_counter: u64,

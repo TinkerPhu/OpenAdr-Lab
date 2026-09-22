@@ -4,7 +4,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::PlannerEventTx;
@@ -12,6 +12,7 @@ use crate::simulator::SimState;
 use crate::state::AppState;
 
 mod cycle;
+mod cycle_state;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -21,7 +22,7 @@ pub(crate) fn spawn_planning(
     grid_max_export_kw: f64,
     asset_params: Vec<AssetParams>,
     solver: Arc<dyn SolverPort>,
-    mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
+    mut trigger_rx: tokio::sync::watch::Receiver<PlanTriggerSignal>,
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
@@ -40,14 +41,15 @@ pub(crate) fn spawn_planning(
         // First cycle is always Periodic; later cycles are set by the select! below.
         // A local (not borrow()ing the watch channel) prevents stale retained values
         // from mis-classifying timeout cycles as hard triggers, bypassing the gate.
-        let mut wake_trigger = PlanTrigger::Periodic;
+        let mut wake_trigger = PlanTriggerSignal::bare(PlanTrigger::Periodic);
         loop {
             let wall_now = now_fn();
             // Align to the nearest step boundary so all replans within the same window
             // share identical slot grids (gate stability, warm-start prerequisite).
             // wall_now is kept separately for Plan.created_at (gate decay uses real age).
             let now = crate::services::planning::align_to_step(wall_now, planner.plan_step_s);
-            let trigger = wake_trigger.clone();
+            let signal = wake_trigger.clone();
+            let trigger = signal.trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
             // Hard triggers (user action, state change) must not be constrained by the anchor
@@ -71,8 +73,7 @@ pub(crate) fn spawn_planning(
                 &notifier,
                 &weather,
                 weather_pv_params.as_ref(),
-                trigger,
-                &trigger_reason,
+                &signal,
                 wall_now,
                 now,
                 history.clone(),
@@ -84,7 +85,7 @@ pub(crate) fn spawn_planning(
             // This ensures the acceptance gate sees Periodic for routine replans
             // and is only bypassed for genuine event-driven triggers.
             wake_trigger = tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(planner.replan_interval_s)) => PlanTrigger::Periodic,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(planner.replan_interval_s)) => PlanTriggerSignal::bare(PlanTrigger::Periodic),
                 _ = trigger_rx.changed() => trigger_rx.borrow_and_update().clone(),
             };
         }
@@ -97,7 +98,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex, RwLock};
 
-    use crate::entities::asset::PlanTrigger;
+    use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
     use crate::entities::planner_params::{PlannerObjective, PlannerParams};
     use crate::planner_events::PlannerEvent;
     use crate::services::test_support::mock_solver_port::MockSolverPort;
@@ -152,7 +153,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_planning_constructs_without_panic() {
-        let (trigger_tx, trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let (trigger_tx, trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);
         let solver = Arc::new(MockSolverPort::returning(minimal_plan()));

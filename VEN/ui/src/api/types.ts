@@ -185,7 +185,10 @@ export type TraceEntry =
   | { type: "OpenAdrExpired";   ts: string; event_id?: string; event_name: string }
   | { type: "RateChange";       ts: string; interval_start: string; import_eur_kwh: number; export_eur_kwh: number }
   | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
-  | { type: "PlanCycle";        ts: string; trigger_reason: string; total_slots: number }
+  // `event_ids` names the VTN events that caused this replan (empty for a
+  // periodic or local trigger). Optional here because rows written before the
+  // field existed are still read back.
+  | { type: "PlanCycle";        ts: string; trigger_reason: string; event_ids?: string[]; total_slots: number }
   | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string }
   | { type: "DispatchOverride";  ts: string; setpoint_kw: number | null; active: boolean }
   | { type: "ArbiterDecision";   ts: string; pass: string; active_lever: string | null; target_kw: number | null; excess_kw: number | null; unresolved_kw: number };

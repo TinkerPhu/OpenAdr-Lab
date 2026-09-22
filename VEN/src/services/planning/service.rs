@@ -74,6 +74,7 @@ impl PlanningService {
         mut plan: Plan,
         trigger: &PlanTrigger,
         trigger_reason: &str,
+        trigger_event_ids: &[String],
         threshold_eur: f64,
         decay_s: f64,
         gate_switch_penalty_eur: f64,
@@ -147,6 +148,7 @@ impl PlanningService {
         let plan_cycle_event = ControllerEvent::PlanCycle {
             ts: now,
             trigger_reason: trigger_reason.to_string(),
+            event_ids: trigger_event_ids.to_vec(),
             total_slots: slot_count,
         };
         state.push_controller_event(plan_cycle_event).await;

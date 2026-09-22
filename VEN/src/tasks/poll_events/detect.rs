@@ -223,6 +223,38 @@ mod event_poll_tests {
         );
     }
 
+    /// §6.3: a replan has to be attributable to the events that caused it.
+    /// The ids the poll loop sends with the trigger come from these entries,
+    /// so if they are ever dropped here the chain silently degrades to
+    /// "something changed around then".
+    #[test]
+    fn arrived_and_expired_together_carry_every_id_a_replan_was_caused_by() {
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("gone".to_string());
+        let events = vec![make_event("fresh", "New", "PRICE", 0.2)];
+        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+
+        let causes: Vec<String> = changes
+            .trace_events
+            .iter()
+            .filter_map(|e| match e {
+                controller::trace::ControllerEvent::OpenAdrArrived { event_id, .. }
+                | controller::trace::ControllerEvent::OpenAdrExpired { event_id, .. } => {
+                    Some(event_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            causes.contains(&"fresh".to_string()),
+            "the new event: {causes:?}"
+        );
+        assert!(
+            causes.contains(&"gone".to_string()),
+            "the expired one: {causes:?}"
+        );
+    }
+
     /// The name of a vanished event is not knowable -- it is gone -- but its
     /// id is, and the id is what the chain is keyed on.
     #[test]

@@ -15,6 +15,7 @@ const mockReactions = {
       seenReceivedAt: "2026-09-22T10:00:01Z",
       modificationDateTime: "2026-09-22T09:59:00+00:00",
       replannedAt: "2026-09-22T10:00:20Z",
+      replanAttributed: true,
       powerBeforeW: 4000,
       powerAfterW: 1500,
       deltaW: -2500,
@@ -25,6 +26,7 @@ const mockReactions = {
       seenReceivedAt: "2026-09-22T10:00:02Z",
       modificationDateTime: null,
       replannedAt: null,
+      replanAttributed: false,
       powerBeforeW: null,
       powerAfterW: null,
       deltaW: null,
@@ -100,5 +102,12 @@ describe("FleetReactions", () => {
     } as ReturnType<typeof useFleetReactions>);
     renderReactions();
     expect(screen.getByTestId("fleet-reactions-error")).toBeVisible();
+  });
+
+  /* "The VEN said so" and "it happened nearby in time" are different claims,
+   * and only the first answers whether the event worked. */
+  it("says whether a replan was attributed by the VEN or inferred from timing", () => {
+    renderReactions();
+    expect(screen.getByTestId("fleet-reaction-ven-1")).toHaveTextContent("named this event");
   });
 });

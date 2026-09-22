@@ -6,7 +6,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::controller;
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::capacity::{AlertWindow, DispatchWindow, SimpleWindow};
 use crate::state::AppState;
 
@@ -37,7 +37,7 @@ pub(crate) struct SignalPrevs {
 /// where only the latest value survives.
 pub(crate) async fn apply_signal_changes(
     state: &AppState,
-    trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
+    trigger_tx: &tokio::sync::watch::Sender<PlanTriggerSignal>,
     notifier: &crate::services::notify::Notifier,
     signals: ParsedSignals,
     now: DateTime<Utc>,
@@ -69,7 +69,12 @@ pub(crate) async fn apply_signal_changes(
                 .await;
         }
         prevs.alerts = alerts;
-        let _ = trigger_tx.send(PlanTrigger::Alert);
+        // The alert windows name their own events, so the replan they cause
+        // can be attributed to them (§6.3).
+        let _ = trigger_tx.send(PlanTriggerSignal::caused_by(
+            PlanTrigger::Alert,
+            prevs.alerts.iter().map(|w| w.event_id.clone()).collect(),
+        ));
     }
 
     // WP3.2: SIMPLE changes replan as CapacityChange (they constrain the
@@ -79,7 +84,10 @@ pub(crate) async fn apply_signal_changes(
         state.set_simple_windows(simple.clone()).await;
         prevs.simple = simple;
         if !alerts_changed {
-            let _ = trigger_tx.send(PlanTrigger::CapacityChange);
+            let _ = trigger_tx.send(PlanTriggerSignal::caused_by(
+                PlanTrigger::CapacityChange,
+                prevs.simple.iter().map(|w| w.event_id.clone()).collect(),
+            ));
         }
     }
 
@@ -127,7 +135,7 @@ pub(crate) async fn apply_signal_changes(
                     }))
                     .await;
                 prevs.charge_state_session = Some(id);
-                let _ = trigger_tx.send(PlanTrigger::UserRequest);
+                let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
                 session_changed = true;
             }
         }
@@ -136,7 +144,7 @@ pub(crate) async fn apply_signal_changes(
                 let existing = state.ev_session().await;
                 if existing.is_some_and(|s| s.id == created_id) {
                     state.set_ev_session(None).await;
-                    let _ = trigger_tx.send(PlanTrigger::UserRequest);
+                    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
                     session_changed = true;
                 }
             }
@@ -158,7 +166,7 @@ mod tests {
     #[tokio::test]
     async fn test_charge_state_signal_creates_then_clears_its_session() {
         let state = AppState::new();
-        let (tx, _rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let mut prevs = SignalPrevs::default();
 
         // Signal present -> session created.
@@ -192,7 +200,7 @@ mod tests {
     #[tokio::test]
     async fn test_charge_state_disappearance_leaves_user_session_alone() {
         let state = AppState::new();
-        let (tx, _rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let mut prevs = SignalPrevs::default();
 
         // Event-created session, then a USER replaces it with their own.
@@ -233,7 +241,7 @@ mod tests {
         use crate::entities::capacity::AlertWindow;
         use crate::entities::design_vocabulary::UserNotificationSeverity;
         let state = AppState::new();
-        let (tx, _rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let notifier = crate::services::notify::Notifier::new(None);
         let mut prevs = SignalPrevs::default();
 

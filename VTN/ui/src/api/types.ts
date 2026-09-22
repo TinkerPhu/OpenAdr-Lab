@@ -81,6 +81,10 @@ export type VenReaction = {
   seenReceivedAt: string;
   modificationDateTime: string | null;
   replannedAt: string | null;
+  /** True when the VEN's own PlanCycle named this event; false when the time
+   *  window inferred it. An operator judging whether an event worked needs to
+   *  know which of the two they are looking at. */
+  replanAttributed: boolean;
   powerBeforeW: number | null;
   powerAfterW: number | null;
   deltaW: number | null;

@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 
 use crate::controller::MeasurementPort;
 use crate::controller::WeatherForecastPort;
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::planner_params::SimulatorParams;
 use crate::planner_events::PlannerEventTx;
@@ -29,7 +29,7 @@ pub(crate) fn spawn_sim_tick(
     sim: Arc<Mutex<SimState>>,
     sim_params: SimulatorParams,
     ven_name: String,
-    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>,
     data_dir: String,
     event_tx: PlannerEventTx,
     weather: Arc<dyn WeatherForecastPort>,

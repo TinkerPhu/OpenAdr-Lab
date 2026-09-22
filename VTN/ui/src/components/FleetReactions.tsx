@@ -64,9 +64,26 @@ export function FleetReactions() {
                       <TableCell>{v.venName}</TableCell>
                       <TableCell>{new Date(v.seenAt).toLocaleTimeString()}</TableCell>
                       {/* A VEN that saw the event and never replanned is a
-                          real outcome, not missing data. */}
+                          real outcome, not missing data. And a replan the VEN
+                          itself attributed to this event is a different claim
+                          from one we inferred from a 15-minute window — the
+                          table says which, because only the first answers
+                          "did the event work". */}
                       <TableCell>
-                        {v.replannedAt ? new Date(v.replannedAt).toLocaleTimeString() : "never"}
+                        {v.replannedAt ? (
+                          <>
+                            {new Date(v.replannedAt).toLocaleTimeString()}
+                            <Typography
+                              variant="caption"
+                              display="block"
+                              color={v.replanAttributed ? "success.main" : "text.secondary"}
+                            >
+                              {v.replanAttributed ? "named this event" : "inferred from timing"}
+                            </Typography>
+                          </>
+                        ) : (
+                          "never"
+                        )}
                       </TableCell>
                       <TableCell align="right">{formatKw(v.powerBeforeW)}</TableCell>
                       <TableCell align="right">{formatKw(v.powerAfterW)}</TableCell>

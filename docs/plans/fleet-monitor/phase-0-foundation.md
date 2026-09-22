@@ -259,10 +259,10 @@ unique event names. Needed additions:
 - `OpenAdrArrived`: `eventID`, `modificationDateTime` (identifies the event **version** the VEN
   saw), VEN-side `ts`.
 - `PlanCycle`: the triggering `eventID`(s) when the trigger is `RateChange`/`CapacityChange`/
-  `Alert`. **Still open** — the trigger reaches the planner as a formatted string, so carrying
-  ids means widening `PlanTrigger` itself. Until then `/api/fleet/reactions` reports the first
-  plan cycle within 15 minutes of the VEN seeing the event, which is a correlation rather than
-  a causal link, and says so.
+  `Alert`. ✅ 2026-09-23. `PlanTrigger` itself is unchanged — it is matched in 150-odd places
+  that do not care why — and the cause travels beside it in `PlanTriggerSignal`.
+  `/api/fleet/reactions` now prefers the VEN's own attribution and falls back to the
+  15-minute window only for cycles that name nothing, reporting which of the two it used.
 - `OpenAdrExpired`: `eventID`.
 
 Chain assembled by the BFF: VTN `createdDateTime`/`modificationDateTime` → VEN `OpenAdrArrived`

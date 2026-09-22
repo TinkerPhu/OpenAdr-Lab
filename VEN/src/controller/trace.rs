@@ -62,6 +62,18 @@ pub enum ControllerEvent {
     PlanCycle {
         ts: DateTime<Utc>,
         trigger_reason: String,
+        /// The VTN events that caused this replan, when it was event-driven.
+        /// Empty for a periodic cycle or a local one (user request, asset
+        /// state) — which is a fact about the trigger, not missing data.
+        ///
+        /// Without this, "did this VEN replan because of event X" can only be
+        /// answered by proximity in time, and §6.3's chain was reporting a
+        /// coincidence with a respectable name.
+        ///
+        /// `#[serde(default)]` because trace rows written before this field
+        /// existed are still read back.
+        #[serde(default)]
+        event_ids: Vec<String>,
         total_slots: usize,
     },
     RequestTransition {

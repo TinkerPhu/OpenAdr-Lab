@@ -13,7 +13,7 @@ use super::{SessionDetail, UserRequestWithSession};
 use crate::controller::user_request::{
     ComfortRateParams, CreateUserRequestParams, RequestDeadlineParams,
 };
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::design_vocabulary::UserRequestMode;
 use crate::entities::device_session::ShiftableLoad;
@@ -285,7 +285,9 @@ pub async fn post_requests(
                 },
             )
             .await;
-        let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+        let _ = ctx
+            .trigger_tx
+            .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
         info!(
             request_id = %user_req.id,
             session_id = ?user_req.session_id,
@@ -366,7 +368,9 @@ pub async fn post_requests(
                         },
                     )
                     .await;
-                let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+                let _ = ctx
+                    .trigger_tx
+                    .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
                 (
                     StatusCode::CREATED,
                     Json(serde_json::to_value(user_req).unwrap_or_default()),
@@ -398,7 +402,9 @@ pub async fn post_requests(
                         },
                     )
                     .await;
-                let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+                let _ = ctx
+                    .trigger_tx
+                    .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
                 (
                     StatusCode::CREATED,
                     Json(serde_json::to_value(user_req).unwrap_or_default()),
@@ -440,7 +446,9 @@ pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> 
                     },
                 )
                 .await;
-            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            let _ = ctx
+                .trigger_tx
+                .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
             info!(request_id = %id, "user request cancelled");
             axum::http::StatusCode::NO_CONTENT.into_response()
         }

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::device_session::{BaselineOverride, BaselineSlot};
 use crate::AppCtx;
 
@@ -53,13 +53,17 @@ pub async fn post_baseline_override(
         "baseline override set"
     );
     ctx.state.set_baseline_override(Some(ovr.clone())).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    let _ = ctx
+        .trigger_tx
+        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     (StatusCode::CREATED, Json(ovr))
 }
 
 /// DELETE /baseline-override — clear the baseline override.
 pub async fn delete_baseline_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.state.set_baseline_override(None).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    let _ = ctx
+        .trigger_tx
+        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     StatusCode::NO_CONTENT
 }

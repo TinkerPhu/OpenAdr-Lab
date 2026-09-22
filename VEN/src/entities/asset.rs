@@ -265,6 +265,37 @@ pub enum PlanTrigger {
     ResidualThreshold,
 }
 
+/// A trigger, and what caused it.
+///
+/// The kind alone cannot answer "did this VEN replan *because of* that event"
+/// — §6.3's reaction chain needs the event ids, and a fleet view that reports
+/// "the first plan cycle within 15 minutes" is reporting a coincidence with a
+/// respectable name. Carried alongside the kind rather than inside it: the
+/// variants are matched in 150-odd places that do not care why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanTriggerSignal {
+    pub trigger: PlanTrigger,
+    /// The VTN event ids behind this trigger, when it came from events at all.
+    /// Empty for periodic cycles, user requests and asset state changes —
+    /// which is a fact about those triggers, not missing data.
+    pub event_ids: Vec<String>,
+}
+
+impl PlanTriggerSignal {
+    /// A trigger with no event behind it.
+    pub fn bare(trigger: PlanTrigger) -> Self {
+        Self {
+            trigger,
+            event_ids: Vec::new(),
+        }
+    }
+
+    /// A trigger caused by specific VTN events.
+    pub fn caused_by(trigger: PlanTrigger, event_ids: Vec<String>) -> Self {
+        Self { trigger, event_ids }
+    }
+}
+
 /// One point on the comfort/value curve (§2.7).
 /// MaxMarginalPrice is a priority bid, not the actual price paid.
 #[derive(Debug, Clone, Serialize, Deserialize)]

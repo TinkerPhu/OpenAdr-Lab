@@ -22,7 +22,7 @@ mod weather;
 
 use config::Config;
 use domain_params::build_domain_params;
-use entities::asset::PlanTrigger;
+use entities::asset::{PlanTrigger, PlanTriggerSignal};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::Profile;
@@ -56,7 +56,8 @@ async fn main() -> anyhow::Result<()> {
 
     // PlanTrigger watch channel — event poll and dispatcher send triggers;
     // planning loop receives them for reactive replanning.
-    let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+    let (trigger_tx, trigger_rx) =
+        tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
     let trigger_tx = Arc::new(trigger_tx);
 
     // Optional: load persisted state
