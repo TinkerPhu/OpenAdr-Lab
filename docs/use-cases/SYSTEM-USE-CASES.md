@@ -239,9 +239,22 @@ The VTN UI dashboard health card shows the feed's state, how many VENs are
 live out of how many are known, and the age of the last message. The VEN UI
 diagnostics shows that VEN's own publisher.
 
+**Asking what the fleet did about one event:**
+`GET /api/fleet/reactions?eventID=…` lists every VEN that said it saw that
+event, when it saw it, when it next replanned, and its mean site power over
+the minute before and the minute after. The VTN UI's Fleet page takes an event
+id and shows the same table.
+
+It deliberately draws no conclusion about whether a VEN "reacted". The numbers
+are reported and the judgement is the operator's: a threshold decided in the
+BFF would be a second opinion about a site's own behaviour, and wrong
+differently for every asset mix in the fleet. A VEN that published no power in
+one of the two windows shows a dash, never a zero.
+
 **What to test:**
 - `tests/features/fleet_telemetry.feature`
-- `VTN/bff/src/fleet.rs` and `VEN/src/controller/telemetry_port.rs` unit tests
+- `VTN/bff/src/fleet.rs`, `VTN/bff/src/fleet_reactions.rs` and
+  `VEN/src/controller/telemetry_port.rs` unit tests
 
 ---
 

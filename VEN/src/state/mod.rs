@@ -163,6 +163,15 @@ pub struct AppState {
     /// `notifications` (see `state/event_log.rs`).
     pub event_log: Arc<RwLock<crate::entities::ring_buffer::RingBuffer<EventLogEntry>>>,
     pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
+    /// Live controller-trace decisions, for anything watching rather than
+    /// polling `/trace/events`. The fleet trace publisher is the first such
+    /// subscriber (phase 0 §6.2); the ring above remains the record.
+    ///
+    /// A broadcast, not a direct call into the publisher: a decision the
+    /// controller makes is a fact about the controller, and it must not become
+    /// slower or fallible because something is listening to it.
+    pub controller_trace_tx:
+        tokio::sync::broadcast::Sender<crate::controller::trace::ControllerEvent>,
     /// WP-T5 (G-5): bounded ring of report submission outcomes, newest last.
     pub report_submissions: Arc<
         RwLock<
@@ -214,6 +223,7 @@ impl AppState {
                 event_log::EVENT_LOG_RING_CAP,
             ))),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
+            controller_trace_tx: tokio::sync::broadcast::channel(64).0,
             report_submissions: Arc::new(RwLock::new(
                 crate::entities::ring_buffer::RingBuffer::new(
                     report_submissions::REPORT_SUBMISSION_RING_CAP,
@@ -310,11 +320,22 @@ impl AppState {
     }
 
     pub async fn push_controller_event(&self, event: crate::controller::trace::ControllerEvent) {
+        // Broadcast is fire-and-forget and ignores "no subscribers": the ring
+        // is the record, and a listener's absence is not the controller's
+        // problem.
+        let _ = self.controller_trace_tx.send(event.clone());
         self.ctrl_sim
             .write()
             .await
             .controller_trace
             .push_event(event);
+    }
+
+    /// Subscribe to controller decisions as they are made.
+    pub fn subscribe_controller_trace(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::controller::trace::ControllerEvent> {
+        self.controller_trace_tx.subscribe()
     }
 
     pub async fn inject_state(&self) -> SimInjectState {

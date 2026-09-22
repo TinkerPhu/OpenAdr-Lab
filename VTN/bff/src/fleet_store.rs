@@ -83,6 +83,56 @@ impl TelemetryRow {
     }
 }
 
+/// One controller decision a VEN published, as it is stored.
+///
+/// `event_id` is lifted out of the body into its own column because it is what
+/// every reaction question is asked by ("what did the fleet do about event
+/// X"), and a JSON path in a WHERE clause is the wrong shape for that.
+#[derive(Clone, Debug)]
+pub struct TraceRow {
+    pub ven_name: String,
+    pub ts: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+    pub kind: String,
+    pub event_id: Option<String>,
+    pub payload: Value,
+}
+
+impl TraceRow {
+    /// Build a row from a published decision, or `None` if it is not one.
+    ///
+    /// A body with no `type` is not a controller event; storing it as one with
+    /// an empty kind would put a row in the table that no query can mean.
+    pub fn from_message(
+        ven_name: &str,
+        payload: &Value,
+        received_at: DateTime<Utc>,
+    ) -> Option<Self> {
+        let kind = payload.get("type").and_then(Value::as_str)?.to_string();
+        let ts = payload
+            .get("ts")
+            .and_then(Value::as_str)
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| t.with_timezone(&Utc))
+            .unwrap_or(received_at);
+        Some(Self {
+            ven_name: ven_name.to_string(),
+            ts,
+            received_at,
+            kind,
+            // Absent on decisions that are not about one event (a periodic
+            // plan cycle, an arbiter pass). Null, not "", so a query for a
+            // specific event cannot accidentally match them.
+            event_id: payload
+                .get("event_id")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+            payload: payload.clone(),
+        })
+    }
+}
+
 /// The write side of the store, held by the ingest task.
 ///
 /// A clone-able queue handle rather than the pool itself, so ingest cannot
@@ -90,6 +140,7 @@ impl TelemetryRow {
 #[derive(Clone)]
 pub struct TelemetryWriter {
     tx: mpsc::Sender<TelemetryRow>,
+    trace_tx: mpsc::Sender<TraceRow>,
     dropped: Arc<AtomicU64>,
 }
 
@@ -105,6 +156,20 @@ impl TelemetryWriter {
             // log, not enough to become the problem.
             if n % 1000 == 1 {
                 warn!(dropped = n, "fleet telemetry store queue full, dropping");
+            }
+        }
+    }
+
+    /// Queue one decision, or drop it.
+    ///
+    /// Dropping here costs more than dropping a telemetry sample -- a decision
+    /// happens once -- which is why it shares the same counter: the number
+    /// being non-zero is the signal, and the log line says which queue.
+    pub fn offer_trace(&self, row: TraceRow) {
+        if self.trace_tx.try_send(row).is_err() {
+            let n = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % 1000 == 1 {
+                warn!(dropped = n, "fleet trace store queue full, dropping");
             }
         }
     }
@@ -154,6 +219,27 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    // No natural key here: two decisions of the same kind at the same instant
+    // are two decisions, not one. An id column keeps them both.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS lab_recorder.fleet_trace (
+            id BIGSERIAL PRIMARY KEY,
+            ven_name TEXT NOT NULL,
+            ts TIMESTAMPTZ NOT NULL,
+            received_at TIMESTAMPTZ NOT NULL,
+            kind TEXT NOT NULL,
+            event_id TEXT,
+            payload_json JSONB NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS fleet_trace_event_idx
+         ON lab_recorder.fleet_trace (event_id, ts)",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -165,8 +251,10 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
 /// recorder learned in the 2026-08-10 incident, for the same reason.
 pub fn spawn(database_url: String) -> (TelemetryWriter, SharedPool) {
     let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
+    let (trace_tx, trace_rx) = mpsc::channel(QUEUE_CAPACITY);
     let writer = TelemetryWriter {
         tx,
+        trace_tx,
         dropped: Arc::new(AtomicU64::new(0)),
     };
     let shared: SharedPool = Arc::new(tokio::sync::RwLock::new(None));
@@ -185,6 +273,7 @@ pub fn spawn(database_url: String) -> (TelemetryWriter, SharedPool) {
         info!("fleet telemetry store connected");
         *task_pool.write().await = Some(pool.clone());
         tokio::spawn(retention_loop(pool.clone()));
+        tokio::spawn(trace_write_loop(pool.clone(), trace_rx));
         write_loop(pool, rx).await;
     });
     (writer, shared)
@@ -216,6 +305,51 @@ async fn write_loop(pool: PgPool, mut rx: mpsc::Receiver<TelemetryRow>) {
             warn!(rows = batch.len(), error = %e, "fleet telemetry insert failed");
         }
     }
+}
+
+async fn trace_write_loop(pool: PgPool, mut rx: mpsc::Receiver<TraceRow>) {
+    let mut batch: Vec<TraceRow> = Vec::with_capacity(MAX_BATCH);
+    while let Some(first) = rx.recv().await {
+        batch.clear();
+        batch.push(first);
+        while batch.len() < MAX_BATCH {
+            match rx.try_recv() {
+                Ok(row) => batch.push(row),
+                Err(_) => break,
+            }
+        }
+        if let Err(e) = insert_trace_batch(&pool, &batch).await {
+            warn!(rows = batch.len(), error = %e, "fleet trace insert failed");
+        }
+    }
+}
+
+async fn insert_trace_batch(pool: &PgPool, rows: &[TraceRow]) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&str> = rows.iter().map(|r| r.ven_name.as_str()).collect();
+    let ts: Vec<DateTime<Utc>> = rows.iter().map(|r| r.ts).collect();
+    let received: Vec<DateTime<Utc>> = rows.iter().map(|r| r.received_at).collect();
+    let kinds: Vec<&str> = rows.iter().map(|r| r.kind.as_str()).collect();
+    let event_ids: Vec<Option<String>> = rows.iter().map(|r| r.event_id.clone()).collect();
+    let payloads: Vec<Value> = rows.iter().map(|r| r.payload.clone()).collect();
+
+    sqlx::query(
+        "INSERT INTO lab_recorder.fleet_trace
+            (ven_name, ts, received_at, kind, event_id, payload_json)
+         SELECT * FROM UNNEST($1::text[], $2::timestamptz[], $3::timestamptz[],
+                              $4::text[], $5::text[], $6::jsonb[])",
+    )
+    .bind(&names)
+    .bind(&ts)
+    .bind(&received)
+    .bind(&kinds)
+    .bind(&event_ids)
+    .bind(&payloads)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn insert_batch(pool: &PgPool, rows: &[TelemetryRow]) -> Result<()> {
@@ -291,6 +425,14 @@ pub async fn run_retention(pool: &PgPool) -> Result<()> {
         .execute(pool)
         .await?
         .rows_affected();
+
+    // Decisions are rare next to samples, so they keep the long retention:
+    // "what did the fleet do about that event last month" is a question worth
+    // being able to answer.
+    sqlx::query("DELETE FROM lab_recorder.fleet_trace WHERE ts < $1")
+        .bind(Utc::now() - Duration::days(ROLLUP_RETENTION_DAYS))
+        .execute(pool)
+        .await?;
 
     if rolled + raw + rollup > 0 {
         info!(

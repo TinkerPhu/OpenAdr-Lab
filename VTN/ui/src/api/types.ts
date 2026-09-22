@@ -67,6 +67,31 @@ export type FleetHistory = {
   fleet: (FleetSample & { contributingVens: number })[];
 };
 
+/**
+ * One VEN's part of an event's reaction chain (§6.3).
+ *
+ * There is deliberately no "reacted" flag: the numbers are reported and the
+ * judgement is the reader's. A threshold decided here would be a second
+ * opinion about a site's own behaviour, and wrong differently for every asset
+ * mix in the fleet.
+ */
+export type VenReaction = {
+  venName: string;
+  seenAt: string;
+  seenReceivedAt: string;
+  modificationDateTime: string | null;
+  replannedAt: string | null;
+  powerBeforeW: number | null;
+  powerAfterW: number | null;
+  deltaW: number | null;
+};
+
+export type FleetReactions = {
+  eventID: string;
+  vensSeen: number;
+  vens: VenReaction[];
+};
+
 export type HealthStatus = {
   time: string;
   bff: { ok: boolean; version: string };

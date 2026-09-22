@@ -259,7 +259,10 @@ unique event names. Needed additions:
 - `OpenAdrArrived`: `eventID`, `modificationDateTime` (identifies the event **version** the VEN
   saw), VEN-side `ts`.
 - `PlanCycle`: the triggering `eventID`(s) when the trigger is `RateChange`/`CapacityChange`/
-  `Alert`.
+  `Alert`. **Still open** — the trigger reaches the planner as a formatted string, so carrying
+  ids means widening `PlanTrigger` itself. Until then `/api/fleet/reactions` reports the first
+  plan cycle within 15 minutes of the VEN seeing the event, which is a correlation rather than
+  a causal link, and says so.
 - `OpenAdrExpired`: `eventID`.
 
 Chain assembled by the BFF: VTN `createdDateTime`/`modificationDateTime` → VEN `OpenAdrArrived`
@@ -383,9 +386,10 @@ Each step is test-first and leaves the stack deployable.
    correlation fields (§6.3) still open.
 8. **BFF ingest, store, query API** (§7) — done: `fleet_telemetry` + the 1-minute rollup with
    D-6 retention, `GET /api/fleet/power` answering live with no window and from the store with
-   one, and the UI surface (dashboard health card + a Fleet page). `GET /api/fleet/stream`
-   (SSE), `/api/fleet/signals` and `/api/fleet/reactions` are still open, as is the Reports-page
-   `fleet-telemetry` series.
+   one, `GET /api/fleet/reactions?eventID=` over the `fleet_trace` table, and the UI surface
+   (dashboard health card + a Fleet page with live table, last-hour sparkline and reactions).
+   `GET /api/fleet/stream` (SSE) and `/api/fleet/signals` are still open, as is the
+   Reports-page `fleet-telemetry` series.
 9. **BDD** — `tests/features/fleet_telemetry.feature` covers the feed being alive, the live sum
    being over only the VENs that reported, and telemetry still being queryable from the store a
    minute later. The reaction half (create an import-limit event, assert every targeted VEN's

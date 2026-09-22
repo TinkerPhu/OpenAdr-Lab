@@ -4,15 +4,12 @@ import {
 import { useFleetHistory, useFleetPower } from "../api/hooks";
 import { Sparkline } from "../components/Sparkline";
 import { formatAge } from "../utils/relativeTime";
+import { formatKw } from "../utils/power";
+import { FleetReactions } from "../components/FleetReactions";
 
 /** The window the page opens on. Long enough to contain a dispatch window. */
 const HISTORY_MINUTES = 60;
 const HISTORY_STEP_S = 60;
-
-/** kW, because that is the unit everything else in this lab states power in. */
-function kw(watts: number | null): string {
-  return watts === null ? "—" : `${(watts / 1000).toFixed(2)} kW`;
-}
 
 export function FleetPage() {
   const live = useFleetPower();
@@ -31,7 +28,7 @@ export function FleetPage() {
         {live.data && (
           <>
             <Typography variant="h4" data-testid="fleet-total">
-              {kw(live.data.fleet.netPowerW)}
+              {formatKw(live.data.fleet.netPowerW)}
             </Typography>
             {/* The sum is only as complete as the VENs behind it, and saying
                 so is what lets a reader judge it rather than trust it. */}
@@ -66,6 +63,8 @@ export function FleetPage() {
         )}
       </Paper>
 
+      <FleetReactions />
+
       <Paper sx={{ p: 2 }} data-testid="fleet-vens-card">
         <Typography variant="h6">VENs</Typography>
         <Table size="small">
@@ -81,7 +80,7 @@ export function FleetPage() {
             {live.data?.vens.map((v) => (
               <TableRow key={v.venName} data-testid={`fleet-ven-${v.venName}`}>
                 <TableCell>{v.venName}</TableCell>
-                <TableCell align="right">{kw(v.netPowerW)}</TableCell>
+                <TableCell align="right">{formatKw(v.netPowerW)}</TableCell>
                 {/* `offline` is the broker's last will, published on a VEN's
                     behalf when it died without saying goodbye — the only way
                     to tell "gone" from "quiet". */}

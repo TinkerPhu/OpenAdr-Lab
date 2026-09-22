@@ -201,6 +201,15 @@ async fn main() -> anyhow::Result<()> {
             None => Arc::new(controller::telemetry_port::NoTelemetry),
         };
 
+    // Controller decisions on the fleet channel (§6.2). Spawned here rather
+    // than inside the controller because a decision must not become slower or
+    // fallible for being watched.
+    tasks::fleet_trace::spawn(
+        state.subscribe_controller_trace(),
+        telemetry_port.clone(),
+        cfg.ven_name.clone(),
+    );
+
     let history_port: Option<Arc<dyn controller::HistoryPort>> =
         store.clone().map(|s| s as Arc<dyn controller::HistoryPort>);
     let settings_port: Option<Arc<dyn controller::SettingsPort>> =

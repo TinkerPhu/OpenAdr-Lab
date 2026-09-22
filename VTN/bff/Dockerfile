@@ -1,4 +1,7 @@
-FROM rust:1.90-alpine AS base
+# 1.91, not 1.90: `lab-core` pulls in openleadr-wire, whose MSRV is 1.91, and
+# an older base fails with a toolchain error rather than a type error. Must
+# track the VEN's own Dockerfile, which depends on the same crate.
+FROM rust:1.91-alpine AS base
 RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
 
 FROM base AS builder
