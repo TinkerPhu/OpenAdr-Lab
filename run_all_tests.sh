@@ -119,6 +119,8 @@ if [[ $# -gt 0 ]]; then
             --coverage)   RUN_COVERAGE=true ;;
             --help|-h)
                 echo "Usage: bash run_all_tests.sh [--local] [--e2e] [--resilience] [--rust] [--coverage]"
+                echo "  --local runs on this machine: both UI suites and the VEN's Rust"
+                echo "          tests (the latter in WSL; skipped loudly without it)."
                 echo "  No flags = run all except --coverage (opt-in only). Flags can be combined."
                 exit 0 ;;
             *) echo "Unknown flag: $arg"; exit 1 ;;
@@ -198,7 +200,7 @@ if $RUN_LOCAL; then
     header "1. VEN UI Unit Tests (vitest)"
     if command -v npm &> /dev/null; then
         VEN_UI_DIR="$SCRIPT_DIR/VEN/ui"
-        if [[ -d "$VEN_UI_DIR/node_modules" ]]; then
+        if [[ -d "$SCRIPT_DIR/node_modules" ]]; then
             if (cd "$VEN_UI_DIR" && npm test 2>&1); then
                 pass "VEN UI unit tests"
             else
@@ -206,7 +208,7 @@ if $RUN_LOCAL; then
             fi
         else
             echo "  node_modules not found — running npm install first..."
-            (cd "$VEN_UI_DIR" && npm install && npm test 2>&1) && pass "VEN UI unit tests" || fail "VEN UI unit tests"
+            (cd "$SCRIPT_DIR" && npm install && cd "$VEN_UI_DIR" && npm test 2>&1) && pass "VEN UI unit tests" || fail "VEN UI unit tests"
         fi
     else
         skip "VEN UI unit tests (npm not found)"
@@ -215,7 +217,7 @@ if $RUN_LOCAL; then
     header "2. VTN UI Unit Tests (vitest)"
     if command -v npm &> /dev/null; then
         VTN_UI_DIR="$SCRIPT_DIR/VTN/ui"
-        if [[ -d "$VTN_UI_DIR/node_modules" ]]; then
+        if [[ -d "$SCRIPT_DIR/node_modules" ]]; then
             if (cd "$VTN_UI_DIR" && npm test 2>&1); then
                 pass "VTN UI unit tests"
             else
@@ -223,14 +225,40 @@ if $RUN_LOCAL; then
             fi
         else
             echo "  node_modules not found — running npm install first..."
-            (cd "$VTN_UI_DIR" && npm install && npm test 2>&1) && pass "VTN UI unit tests" || fail "VTN UI unit tests"
+            (cd "$SCRIPT_DIR" && npm install && cd "$VTN_UI_DIR" && npm test 2>&1) && pass "VTN UI unit tests" || fail "VTN UI unit tests"
         fi
     else
         skip "VTN UI unit tests (npm not found)"
     fi
 fi
 
-# ── 2. openleadr-rs Cargo Tests ─────────────────────────────────────────────
+# ── 3. VEN Rust unit+integration ────────────────────────────────────────────
+#
+# These were never part of this script, so "all suites green" meant all suites
+# except the VEN's own 1400 — a branch that touched Rust late could sail
+# through. They run in WSL because native Windows cargo lacks cmake/HiGHS
+# (CLAUDE.md `local-rust`), under the same lock every other WSL build takes.
+
+if $RUN_LOCAL; then
+    header "3. VEN Rust unit+integration (wsl)"
+    if command -v wsl &> /dev/null; then
+        # /c/DriveD/... (Git Bash) -> /mnt/c/DriveD/... (WSL)
+        WSL_VEN_DIR=$(echo "$SCRIPT_DIR/VEN" | sed "s|^/\([a-z]\)/|/mnt/\1/|")
+        bash "$SCRIPT_DIR/scripts/wsl_lock.sh" acquire -m "run_all_tests.sh: ven-app tests" -l 30 > /dev/null
+        if wsl bash -lc "cd $WSL_VEN_DIR && cargo test -j 2 -p ven-app" 2>&1 | tail -20; then
+            pass "VEN Rust unit+integration"
+        else
+            fail "VEN Rust unit+integration"
+        fi
+        bash "$SCRIPT_DIR/scripts/wsl_lock.sh" release > /dev/null
+    else
+        # Loudly, not silently: on a host without WSL this suite is simply not
+        # covered, and the summary should say so rather than imply otherwise.
+        skip "VEN Rust unit+integration (no wsl — run: cargo test -p ven-app)"
+    fi
+fi
+
+# ── 4. openleadr-rs Cargo Tests ─────────────────────────────────────────────
 
 if $RUN_RUST; then
     # `run --build` is deliberately split into `build` then `run`: on Docker
@@ -244,7 +272,7 @@ if $RUN_RUST; then
     # depends_on graph, so building only the runner leaves every other service
     # on whatever image it happened to have. That produced a green-looking E2E
     # run against VEN images eleven hours stale.
-    header "3. openleadr-rs Cargo Tests (docker: $_DOCKER_LABEL)"
+    header "4. openleadr-rs Cargo Tests (docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
         RUST_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.openleadr-test.yml build 2>&1 && docker compose -f tests/docker-compose.openleadr-test.yml run --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
         if run_docker_cmd "$RUST_CMD"; then
@@ -284,7 +312,7 @@ fi
 # ── 3. E2E Behave Tests ─────────────────────────────────────────────────────
 
 if $RUN_E2E; then
-    header "4. E2E Integration Tests (behave, docker: $_DOCKER_LABEL)"
+    header "5. E2E Integration Tests (behave, docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
         if ! $_DOCKER_IS_LOCAL; then
             echo "  Syncing latest code to $_DOCKER_LABEL..."
@@ -311,7 +339,7 @@ fi
 # ── 4. Resilience Tests ─────────────────────────────────────────────────────
 
 if $RUN_RESILIENCE; then
-    header "5. Resilience / Failure Recovery Tests (docker: $_DOCKER_LABEL)"
+    header "6. Resilience / Failure Recovery Tests (docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
         echo "  Building and running resilience tests..."
         # Pre-run teardown: same interrupted-prior-run rationale as the E2E suite above.
