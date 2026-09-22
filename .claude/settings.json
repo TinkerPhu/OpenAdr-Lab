@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python scripts/jobs.py due --quiet",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
