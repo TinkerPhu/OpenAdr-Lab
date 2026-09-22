@@ -5,11 +5,6 @@ from features.helpers.api_client import bff_get
 from features.helpers.wait import poll_until
 
 
-@when("I GET BFF health")
-def step_get_bff_health(context):
-    context.response = bff_get("/api/health")
-
-
 @then("the BFF health shows the fleet feed connected")
 def step_bff_health_fleet_connected(context):
     body = context.response.json()
