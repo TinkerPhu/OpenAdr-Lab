@@ -85,7 +85,7 @@ def gen_profile(rng, persona=None):
 
     return {
         "assets": assets,
-        "simulator": {"tick_s": 1, "persist_every_s": 15, "report_interval_s": 60},
+        "simulator": {"tick_s": 1, "persist_every_s": 15},
         "planner": {
             "plan_zones": [
                 {"step_s": 300, "slots": 96},

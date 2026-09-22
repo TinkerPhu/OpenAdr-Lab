@@ -138,7 +138,6 @@ impl Default for PlannerParams {
 pub struct SimulatorParams {
     pub tick_s: u64,
     pub persist_every_s: u64,
-    pub report_interval_s: u64,
 }
 
 impl Default for SimulatorParams {
@@ -146,7 +145,6 @@ impl Default for SimulatorParams {
         Self {
             tick_s: 1,
             persist_every_s: 15,
-            report_interval_s: 60,
         }
     }
 }

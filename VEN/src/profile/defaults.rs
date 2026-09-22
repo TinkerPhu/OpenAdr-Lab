@@ -169,7 +169,6 @@ impl Default for SimulatorConfig {
         Self {
             tick_s: default_tick(),
             persist_every_s: default_persist_every(),
-            report_interval_s: default_report_interval(),
         }
     }
 }
@@ -179,9 +178,6 @@ pub(super) fn default_tick() -> u64 {
 }
 pub(super) fn default_persist_every() -> u64 {
     15
-}
-pub(super) fn default_report_interval() -> u64 {
-    60
 }
 
 pub(super) fn default_max_import_kw() -> f64 {

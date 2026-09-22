@@ -362,6 +362,4 @@ pub struct SimulatorConfig {
     pub tick_s: u64,
     #[serde(default = "super::defaults::default_persist_every")]
     pub persist_every_s: u64,
-    #[serde(default = "super::defaults::default_report_interval")]
-    pub report_interval_s: u64,
 }
