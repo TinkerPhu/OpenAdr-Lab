@@ -44,17 +44,25 @@ def step_pin_pv_forecast_zero(context):
 
 @when('I wait for a user notification containing "{text}"')
 def step_wait_for_notification(context, text):
-    # Only notifications that arrive from here on count. The ring is cumulative
-    # and survives between scenarios, so matching against all of it lets a
-    # second run of the same scenario "pass" in 0.1s on the *previous* run's
-    # notifications -- observed 2026-09-22: three consecutive 0.1s passes of a
-    # scenario that injects a 3 kW deviation and waits for two edges, none of
-    # which exercised anything. Ids rather than timestamps: the VEN's clock and
-    # the runner's are not the same clock.
-    already = set()
+    # Only a notification raised from here on counts. The ring is cumulative and
+    # survives between scenarios, so matching against all of it lets a re-run
+    # "pass" in 0.1s on the previous run's notifications -- observed
+    # 2026-09-22: three consecutive 0.1s passes of a scenario that injects 3 kW
+    # and waits for two edges, none of which exercised anything.
+    #
+    # "New" cannot mean "a new id", though: the notifier deduplicates by
+    # `dedup_key`, so raising the same notification again increments `count` and
+    # advances `last_seen_at` on the *existing* entry. An id-based check was the
+    # first fix here and it turned the false pass into a false failure -- the
+    # edge fired, the ring said so, and the step never saw it. The fingerprint
+    # below is what actually changes when a notification is raised again.
+    def fingerprint(note):
+        return (note.get("id"), note.get("count"), note.get("last_seen_at"))
+
+    before = set()
     r = ven_get("/notifications")
     if r.ok:
-        already = {n.get("id") for n in r.json()}
+        before = {fingerprint(n) for n in r.json()}
 
     def fetch():
         r = ven_get("/notifications")
@@ -64,7 +72,7 @@ def step_wait_for_notification(context, text):
 
     def has_text(notes):
         return notes is not None and any(
-            text in n.get("message", "") and n.get("id") not in already for n in notes
+            text in n.get("message", "") and fingerprint(n) not in before for n in notes
         )
 
     # 300s, not 180s. Measured on a quiet Node1 (host load ~4, the settle gate
