@@ -96,6 +96,31 @@ export type FleetReactions = {
   vens: VenReaction[];
 };
 
+/**
+ * One interval of one event, as it applied to one VEN.
+ *
+ * `payloadType` is spelled as OpenADR spells it, so a reader can grep from a
+ * chart label straight to the wire (`dto`). `value` is null for payload types
+ * that carry no number — never 0, which would be a claim about the signal.
+ */
+export type SignalBand = {
+  from: string;
+  to: string;
+  eventID: string;
+  eventName: string | null;
+  payloadType: string;
+  value: number | null;
+};
+
+export type FleetSignals = {
+  from: string;
+  to: string;
+  vens: { venName: string; bands: SignalBand[] }[];
+  /** Events the BFF could not read. Surfaced because fewer bands than expected
+   *  should not be indistinguishable from a quiet grid. */
+  rejectedEvents: number;
+};
+
 export type HealthStatus = {
   time: string;
   bff: { ok: boolean; version: string };

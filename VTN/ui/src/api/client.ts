@@ -1,4 +1,4 @@
-import type { EventInput, FleetHistory, FleetLive, FleetReactions, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
+import type { EventInput, FleetHistory, FleetLive, FleetReactions, FleetSignals, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
 import { debugLog } from "../utils/debugLog";
 
 let reqCounter = 0;
@@ -75,6 +75,14 @@ export class BffApi {
   async fleetReactions(eventId: string): Promise<FleetReactions> {
     const r = await this.getReq(`/api/fleet/reactions?eventID=${encodeURIComponent(eventId)}`);
     if (!r.ok) throw new Error(`fleet reactions ${r.status}`);
+    return r.json();
+  }
+
+  /** What each VEN was being told over a window. */
+  async fleetSignals(fromIso: string, toIso?: string): Promise<FleetSignals> {
+    const to = toIso ? `&to=${encodeURIComponent(toIso)}` : "";
+    const r = await this.getReq(`/api/fleet/signals?from=${encodeURIComponent(fromIso)}${to}`);
+    if (!r.ok) throw new Error(`fleet signals ${r.status}`);
     return r.json();
   }
 

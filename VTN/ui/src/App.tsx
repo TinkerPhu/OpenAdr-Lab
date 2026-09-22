@@ -11,6 +11,7 @@ import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
 import { VensPage } from "./pages/Vens";
 import { FleetPage } from "./pages/Fleet";
+import { SignalsPage } from "./pages/Signals";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { debugLog } from "./utils/debugLog";
@@ -132,6 +133,9 @@ export default function App() {
             <Button component={Link} to="/fleet" data-testid="nav-fleet">
               Fleet
             </Button>
+            <Button component={Link} to="/signals" data-testid="nav-signals">
+              Signals
+            </Button>
             <Button component={Link} to="/reports" data-testid="nav-reports">
               Reports
             </Button>
@@ -146,6 +150,7 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/vens" element={<VensPage />} />
             <Route path="/fleet" element={<FleetPage />} />
+            <Route path="/signals" element={<SignalsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/metrics" element={<MetricsPage />} />
           </Routes>

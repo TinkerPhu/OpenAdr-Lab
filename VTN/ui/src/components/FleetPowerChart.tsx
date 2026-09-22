@@ -6,7 +6,7 @@ import { mergeTimestampedSeries } from "@lab/charts/mergeSeries";
 import type { NamedSample } from "@lab/charts/mergeSeries";
 import { tightSpanDomain, formatPowerTick } from "@lab/charts/axisDomain";
 import { EmptyState } from "@lab/charts/EmptyState";
-import type { FleetHistory } from "../api/types";
+import type { FleetHistory, FleetSignals } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 
 /** The series key the fleet total is drawn under. Prefixed so it can never
@@ -34,10 +34,15 @@ const toKw = (watts: number) => watts / 1000;
  */
 export function FleetPowerChart({
   history,
+  signals,
   windowMinutes,
   nowMs,
 }: {
   history: FleetHistory;
+  /** Bands for what the fleet was being *told*, drawn behind the curves. A
+   *  dip means something different depending on whether a limit was in force,
+   *  and the chart should not make the reader guess. */
+  signals?: FleetSignals;
   windowMinutes: number;
   nowMs: number;
 }) {
@@ -86,6 +91,26 @@ export function FleetPowerChart({
     return { rows, series, values };
   }, [history]);
 
+  // Zones are shared across VENs on purpose: twenty overlapping shaded bands
+  // would be a wall of grey. This shades the windows in which *any* targeted
+  // VEN was under a signal, which is the question the overlay answers —
+  // "was something in force here" — with the per-VEN detail a click away in
+  // the reactions table.
+  const zones = useMemo(() => {
+    if (!signals) return [];
+    const seen = new Set<string>();
+    const out: { from: string; to: string; step_s: number }[] = [];
+    for (const ven of signals.vens) {
+      for (const band of ven.bands) {
+        const key = `${band.from}|${band.to}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ from: band.from, to: band.to, step_s: 0 });
+      }
+    }
+    return out;
+  }, [signals]);
+
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -112,6 +137,7 @@ export function FleetPowerChart({
         ]}
         series={series}
         nowMs={nowMs}
+        zones={zones}
         referenceAxisId={AXIS_ID}
         xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
         interactiveLegend

@@ -51,3 +51,14 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
     Then the fleet chart has a line for every reporting VEN
     And hiding a VEN in the legend removes its line
 
+  # §1: the power curves say what a site did; this says what it was told. A dip
+  # at 09:15 means something different depending on whether a limit was in
+  # force, and only the two together answer that.
+  Scenario: The fleet's signals resolve to per-VEN bands
+    Given I have a VTN token as "bl-client"
+    And I create an open program "fleet-signal-test" and save its ID
+    And I create an IMPORT_CAPACITY_LIMIT event with limit 2.5 kW for the saved program
+    When I wait for the fleet signals of the last 10 minutes to include the saved event
+    Then the signal band names its payload type and value
+    And no event was left unread
+

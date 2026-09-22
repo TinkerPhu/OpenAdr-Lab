@@ -54,6 +54,7 @@ vi.mock("../api/hooks", () => ({
   // The page also hosts the reactions card; it has its own test file, so here
   // it only has to be idle rather than absent.
   useFleetReactions: vi.fn(() => ({ data: undefined, isError: false })),
+  useFleetSignals: vi.fn(() => ({ data: undefined, isError: false })),
 }));
 
 function renderFleet() {

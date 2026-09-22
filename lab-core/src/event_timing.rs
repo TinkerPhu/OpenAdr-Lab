@@ -49,6 +49,38 @@ impl TimedInterval<'_> {
     }
 }
 
+/// An enum's name exactly as it appears on the wire.
+///
+/// Derived from its own `Serialize`, so the name can never drift from what is
+/// actually sent — writing the strings out by hand is how a match arm and a
+/// payload end up disagreeing about `IMPORT_CAPACITY_LIMIT`. Shared because
+/// the VEN matches on these names and the BFF labels bands with them.
+pub fn wire_name<T: serde::Serialize + std::fmt::Debug>(v: &T) -> String {
+    match serde_json::to_value(v) {
+        Ok(serde_json::Value::String(s)) => s,
+        other => {
+            debug_assert!(false, "{v:?} did not serialise to a string: {other:?}");
+            String::new()
+        }
+    }
+}
+
+/// A payload's first value as a number.
+///
+/// `Integer` is matched as well as `Number` and that is not an afterthought:
+/// `EventType::Simple`'s declared value kind *is* Integer, so a reader that
+/// only matched `Number` drops every load-shed level and says nothing about
+/// it. Lives here because both the VEN (deciding what to do) and the BFF
+/// (drawing what was asked) need the same answer, and two copies of this match
+/// is exactly how one of them ends up silently ignoring SIMPLE.
+pub fn numeric_value(value: &openleadr_wire::values_map::Value) -> Option<f64> {
+    match value {
+        openleadr_wire::values_map::Value::Number(n) => Some(*n),
+        openleadr_wire::values_map::Value::Integer(i) => Some(*i as f64),
+        _ => None,
+    }
+}
+
 /// How many intervals `event.duration` may expand to. The spec defines `"P9999Y"`
 /// as infinity "as agreed to by communicating parties" (User Guide 8.x), so an
 /// indefinitely repeating tariff cannot be materialised; expansion stops here.

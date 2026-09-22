@@ -435,8 +435,9 @@ Each step is test-first and leaves the stack deployable.
    D-6 retention, `GET /api/fleet/power` answering live with no window and from the store with
    one, `GET /api/fleet/reactions?eventID=` over the `fleet_trace` table, and the UI surface
    (dashboard health card + a Fleet page with live table, last-hour sparkline and reactions).
-   `GET /api/fleet/stream` (SSE) and `/api/fleet/signals` are still open, as is the
-   Reports-page `fleet-telemetry` series.
+   `/api/fleet/signals` ✅ 2026-09-23, with the §1 timeline page and the band overlay on the
+   fleet chart. `GET /api/fleet/stream` (SSE) is still open, as is the Reports-page
+   `fleet-telemetry` series.
 **Deployed live 2026-09-22 04:20-05:00 UTC** and verified against the real fleet: 20/20 VENs
 publishing status, telemetry and trace on `lab-mqtt`; the BFF subscribed with its store
 connected and no samples dropped; `/api/fleet/power` summing 20 signed readings, its history

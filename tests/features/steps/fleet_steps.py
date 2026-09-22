@@ -187,3 +187,59 @@ def step_hiding_a_ven_removes_its_line(context):
         "is decorative if it does not change what is drawn"
     )
 
+
+@when("I wait for the fleet signals of the last {minutes:d} minutes to include the saved event")
+def step_wait_for_signal_band(context, minutes):
+    """The VEN has to have published at least once for the BFF to know it
+    exists, so the band appears a moment after the event does."""
+    from datetime import datetime, timedelta, timezone
+
+    event_id = context.rate_event_id
+
+    def fetch():
+        start = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        context.response = bff_get("/api/fleet/signals", params={"from": start.isoformat()})
+        if context.response.status_code != 200:
+            return {"status": context.response.status_code,
+                    "body": context.response.text[:200]}
+        return context.response.json()
+
+    def has_band(body):
+        return any(
+            b.get("eventID") == event_id
+            for ven in body.get("vens", [])
+            for b in ven.get("bands", [])
+        )
+
+    context.fleet_signals = poll_until(
+        fetch, has_band, timeout=120, interval=5,
+        description=f"a signal band for event {event_id}",
+    )
+
+
+@then("the signal band names its payload type and value")
+def step_band_names_its_payload(context):
+    event_id = context.rate_event_id
+    bands = [
+        b
+        for ven in context.fleet_signals["vens"]
+        for b in ven["bands"]
+        if b["eventID"] == event_id
+    ]
+    assert bands, "no band for the saved event"
+    band = bands[0]
+    assert band["payloadType"] == "IMPORT_CAPACITY_LIMIT", (
+        f"the band must say what it carries, got {band['payloadType']!r}"
+    )
+    assert band["value"] == 2.5, f"the band must carry the limit's value, got {band['value']!r}"
+    assert band["from"] < band["to"], "a band must span forwards in time"
+
+
+@then("no event was left unread")
+def step_no_event_left_unread(context):
+    rejected = context.fleet_signals.get("rejectedEvents")
+    assert rejected == 0, (
+        f"{rejected} event(s) could not be parsed — the overlay is incomplete and "
+        "a shorter list of bands would look like a quieter grid"
+    )
+
