@@ -12,7 +12,7 @@
 //! interval containing it has finished. The two are different jobs and this is
 //! deliberately the lossy one — QoS 0, retained, no delivery guarantee.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,6 +31,8 @@ pub struct FleetMqttConfig {
     /// Topic root, `openadr-lab/fleet/<ven_name>`.
     pub topic_root: String,
     pub client_id: String,
+    /// Seconds between telemetry samples (D-1).
+    pub telemetry_every_s: i64,
 }
 
 impl FleetMqttConfig {
@@ -68,8 +70,32 @@ impl FleetMqttConfig {
             password: non_empty("FLEET_MQTT_PASSWORD"),
             topic_root: format!("{root}/fleet/{ven_name}"),
             client_id: format!("ven-fleet-{ven_name}"),
+            // D-1: 5 s, and deliberately not tied to the sim tick. The tick is
+            // 1 s in production, so publishing per tick is five times the
+            // broker traffic and five times the store growth for a fleet view
+            // nobody watches at that resolution.
+            telemetry_every_s: get("FLEET_TELEMETRY_EVERY_S")
+                .and_then(|v| v.parse().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(5),
         })
     }
+}
+
+/// Whether enough time has passed since the last sample.
+///
+/// `i64::MIN` means nothing has been published yet, so the first tick after
+/// startup always counts. Split out from the atomic bookkeeping around it
+/// because the arithmetic -- including the clock going backwards -- is the part
+/// worth pinning with tests.
+fn cadence_reached(last_ms: i64, now_ms: i64, every_ms: i64) -> bool {
+    if last_ms == i64::MIN {
+        return true;
+    }
+    // A clock that jumped backwards would otherwise stop telemetry until real
+    // time caught up. Publishing is the safer answer: a sample slightly too
+    // soon costs one row, a silent feed costs the view.
+    now_ms < last_ms || now_ms - last_ms >= every_ms
 }
 
 /// Publishes to the lab broker; reconnects on its own.
@@ -77,6 +103,10 @@ pub struct FleetMqttPublisher {
     client: AsyncClient,
     topic_root: String,
     connected: Arc<AtomicBool>,
+    telemetry_every_ms: i64,
+    /// When the last sample went out, as epoch milliseconds. `i64::MIN` means
+    /// "never", so the first tick after startup always publishes.
+    last_sample_ms: AtomicI64,
 }
 
 impl FleetMqttPublisher {
@@ -137,6 +167,8 @@ impl FleetMqttPublisher {
             client,
             topic_root: config.topic_root,
             connected,
+            telemetry_every_ms: config.telemetry_every_s * 1000,
+            last_sample_ms: AtomicI64::new(i64::MIN),
         };
         publisher.announce_online();
         publisher
@@ -190,6 +222,22 @@ impl TelemetryPort for FleetMqttPublisher {
         {
             tracing::debug!(topic, error = %e, "fleet trace publish dropped");
         }
+    }
+
+    /// True at most once per configured interval.
+    ///
+    /// Claims the slot as it answers (compare-and-swap) rather than answering
+    /// and leaving the caller to record it: a check that does not claim is a
+    /// check two callers can both pass.
+    fn sample_due(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let now_ms = now.timestamp_millis();
+        let last = self.last_sample_ms.load(Ordering::Relaxed);
+        if !cadence_reached(last, now_ms, self.telemetry_every_ms) {
+            return false;
+        }
+        self.last_sample_ms
+            .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
     }
 
     fn is_connected(&self) -> bool {
@@ -246,6 +294,55 @@ mod tests {
         .unwrap();
         assert!(c.username.is_none());
         assert!(c.password.is_none());
+    }
+
+    /// The tick is the site's simulation step and telemetry is an observation
+    /// cadence. D-1 fixes the second at 5 s; production ticks at 1 s.
+    #[test]
+    fn config_defaults_to_the_five_second_telemetry_cadence() {
+        let c = FleetMqttConfig::from_vars("ven-1", vars(&[("FLEET_MQTT_HOST", "lab-mqtt")]))
+            .expect("host is set");
+        assert_eq!(c.telemetry_every_s, 5);
+    }
+
+    #[test]
+    fn telemetry_cadence_is_configurable_and_rejects_nonsense() {
+        let with = |v: &str| {
+            FleetMqttConfig::from_vars(
+                "ven-1",
+                vars(&[
+                    ("FLEET_MQTT_HOST", "lab-mqtt"),
+                    ("FLEET_TELEMETRY_EVERY_S", v),
+                ]),
+            )
+            .unwrap()
+            .telemetry_every_s
+        };
+        assert_eq!(with("30"), 30);
+        // A zero or negative interval would mean "publish every tick", which
+        // is the behaviour this exists to stop -- so it falls back.
+        assert_eq!(with("0"), 5);
+        assert_eq!(with("-1"), 5);
+        assert_eq!(with("soon"), 5);
+    }
+
+    #[test]
+    fn cadence_publishes_the_first_sample_immediately() {
+        assert!(cadence_reached(i64::MIN, 1_000, 5_000));
+    }
+
+    #[test]
+    fn cadence_holds_a_sample_back_until_the_interval_has_passed() {
+        assert!(!cadence_reached(1_000, 2_000, 5_000));
+        assert!(!cadence_reached(1_000, 5_999, 5_000));
+        assert!(cadence_reached(1_000, 6_000, 5_000));
+    }
+
+    /// A clock that jumped backwards must not silence the feed until real time
+    /// catches up: one extra row is cheaper than a dark fleet view.
+    #[test]
+    fn cadence_publishes_when_the_clock_goes_backwards() {
+        assert!(cadence_reached(10_000, 1_000, 5_000));
     }
 
     #[test]
