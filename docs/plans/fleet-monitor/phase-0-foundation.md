@@ -294,7 +294,13 @@ Postgres range with a retention job.
 
 ### UI surface in phase 0
 
-No fleet views yet, but no feed may be invisible: the VTN UI Dashboard's health card gains
+**Updated 2026-09-22:** §2's fleet-power view landed here rather than in phase 1. The
+query API arrived with the store, the Fleet page already fetched the per-VEN series and
+drew only the sum, and an operator opening the page could not see which site had moved —
+so the view was the missing half of something already built, not future work. It draws
+from live telemetry only; `?source=report` is still open.
+
+Beyond that, no fleet views yet, but no feed may be invisible: the VTN UI Dashboard's health card gains
 "Fleet MQTT: connected, N/20 VENs live, last message Xs ago", and the Reports page shows the
 `DEMAND`/`USAGE` series of `fleet-telemetry` with their source badge. The VEN UI Diagnostics
 shows its own fleet-publisher status (connected / last publish).

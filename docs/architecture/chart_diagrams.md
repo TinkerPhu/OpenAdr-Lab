@@ -1,17 +1,19 @@
-# Chart/Diagram Architecture (VEN UI)
+# Chart/Diagram Architecture
 
-Every chart in `VEN/ui` (Controller tab, History tab, Devices comfort-curve editor, Raw
-Diagnostics page) is built from one shared kit of primitives plus three named
-compositions, all under `VEN/ui/src/components/charts/`. VTN UI has no charts.
+Every chart in this lab is built from one shared kit of primitives plus a few named
+compositions. The kit lives at the repo root in `ui-charts/`, imported by **both** UIs as
+`@lab/charts/*`; the compositions that know about a specific domain stay with the app
+that owns that domain.
 
 ## Directory layout
 
 ```
-VEN/ui/src/components/charts/
+ui-charts/src/                 shared by both UIs (imported as @lab/charts/*)
   chartLayout.ts          sizing constants
   axisDomain.ts            axis-domain flooring, rounded Y ticks, X-axis tick generation
   unitFormat.ts             per-physical-unit tooltip/tick formatting
   mergeSeries.ts            the cursor-correctness data model
+  types.ts                  ZoneDef, COLOR_NOW — chart concepts, not app concepts
   NowLine.tsx                the "NOW" reference line
   ZoneShading.tsx            zone background shading
   tooltipStyle.ts            shared tooltip container styling
@@ -19,15 +21,37 @@ VEN/ui/src/components/charts/
   useLegendToggle.ts          local per-series show/hide state for interactive legends
   ChartLegend.tsx             shared checkbox-per-entry legend row
   TimeSeriesChart.tsx        composition 1: multi-axis line/step, time X-axis
-  StackedTimeSeriesChart.tsx composition 2: stacked areas + net-value tooltip
-  CurveChart.tsx             composition 3: non-temporal X-axis
   testUtils/
     assertTooltipMatchesData.ts  regression helper for the cursor-correctness invariant
+
+VEN/ui/src/components/charts/   VEN-specific compositions
+  StackedTimeSeriesChart.tsx composition 2: stacked areas + net-value tooltip (asset colours)
+  CurveChart.tsx             composition 3: non-temporal X-axis (comfort rates)
+
+VTN/ui/src/components/
+  FleetPowerChart.tsx        one line per VEN plus the fleet total, on TimeSeriesChart
 ```
 
+### Why a shared package, and how it resolves
+
+The VTN UI's fleet view needed exactly what the VEN UI already had — a multi-series time
+chart with a toggling legend and correct tooltips. Copying it would have put 880 lines of
+subtle axis and tooltip logic in two places; writing a second one would have put the same
+concept there twice. Both are what `one-concept-one-function` exists to prevent, so the
+generic half moved out to `ui-charts/` and the VEN UI imports it like any other caller.
+
+The repo is an **npm workspace** (root `package.json`, one `package-lock.json`, one hoisted
+`node_modules`) purely to make that resolve: shared *source* outside an app's directory has
+no `node_modules` on its own resolution path, so without hoisting each app would have to
+hand-map `react`/`recharts`/`@mui/material` for both `tsc` and Vite — four tables, and a
+second React copy the first time one drifted. Hoisting answers it once, and both UI Docker
+images therefore build from the repo root.
+
 Series/asset colors live in `VEN/ui/src/components/controller/types.ts`
-(`ASSET_COLORS`, `SERIES_COLORS`) rather than under `charts/`, since they're consumed
-by non-chart controller UI too (asset labels, legends).
+(`ASSET_COLORS`, `SERIES_COLORS`) rather than in the shared kit, since they're consumed
+by non-chart controller UI too (asset labels, legends). Per-VEN fleet colours are the VTN
+UI's own `utils/venColor.ts`, derived from the VEN name so a site keeps its colour when
+another drops out of the window.
 
 ## Why: the cursor-correctness invariant
 

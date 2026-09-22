@@ -40,6 +40,7 @@ export function ChartLegend({ entries, isHidden, toggle, interactive }: ChartLeg
         return (
           <label
             key={entry.key}
+            data-testid={`legend-entry-${entry.key}`}
             style={{
               display: "flex",
               alignItems: "center",

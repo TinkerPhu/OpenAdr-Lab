@@ -13349,3 +13349,38 @@ BDD suites cover the code on both sides of a seam; nothing covers the seam itsel
 answer is not more tests but a deploy that is *verified* rather than declared done — which is
 what the health-then-wire-then-report sweep above now is.
 
+## One chart implementation, and the workspace that made it resolve (2026-09-22)
+
+The VTN UI needed per-VEN power curves. It had no chart library at all; the VEN UI had a
+mature recharts kit — axis snapping, a toggling legend, tooltip styling, and the
+`mergeSeries` fold that exists because recharts resolves tooltips by array index. Copying
+it would have put 880 lines of subtle logic in two places. So the generic half moved to
+`ui-charts/` at the repo root and both UIs import it as `@lab/charts/*`;
+`StackedTimeSeriesChart` and `CurveChart` stayed with the VEN because asset colours and
+comfort rates are VEN concepts.
+
+**The alias route failed on its own terms, and that is the lesson.** Sharing TypeScript
+*source* across two Vite apps looked like a one-line `resolve.alias`. It is not: shared
+source outside an app's directory has no `node_modules` on its resolution path, so
+`react`, `recharts` and `@mui/material` had to be hand-mapped — first in both tsconfigs,
+and then Vite wanted the same table again in both vite configs. Four places encoding
+"where React lives", any one of which could drift into a second React copy in the bundle,
+which fails at runtime rather than at build time. The signal was the shape of the fix, not
+its size: when a workaround has to be repeated per tool per app, the tool-level mechanism
+is the answer. npm workspaces hoist to one root `node_modules`, which answers `tsc` and
+Vite at once and makes the single React copy structural. Both UI images therefore build
+from the repo root, as `VEN/` and `VTN/bff/` already did for `lab-core`.
+
+**What the move was allowed to change: nothing.** 660 VEN UI tests passed before and after.
+Two of them only passed after a second fix, and they are the interesting ones: `vi.mock()`
+takes its specifier as a plain string, so the import rewrite never saw it, and those two
+tests were mocking a path that no longer existed — silently exercising the real chart
+instead of the stub, and failing on an empty `propsCalls`. A rename that a compiler cannot
+check is a rename that needs a grep of its own.
+
+**The chart itself.** One line per VEN plus the total, folded into a single
+timestamp-keyed row array, on the grid `lab-core` already resampled every VEN onto — the
+same shared rule on both sides of the wire, which is what makes the series addable rather
+than merely adjacent. Colour comes from a hash of the VEN name so a site keeps its colour
+when a neighbour drops out of the window; the total is deliberately off that wheel.
+
