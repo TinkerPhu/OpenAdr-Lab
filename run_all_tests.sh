@@ -177,7 +177,8 @@ fi
 # shared directory is covered without anyone remembering this comment exists.
 if ! $_DOCKER_IS_LOCAL; then
     header "Pre-flight: $_DOCKER_LABEL checkout completeness"
-    NEEDED=$(grep -rhoE '^COPY +[^ ]+' "$SCRIPT_DIR"/VEN/Dockerfile "$SCRIPT_DIR"/VTN/bff/Dockerfile                  "$SCRIPT_DIR"/VEN/ui/Dockerfile "$SCRIPT_DIR"/VTN/ui/Dockerfile 2>/dev/null              | awk '{print $2}' | grep -v '^--' | cut -d/ -f1 | sort -u)
+    NEEDED=$(grep -rhoE '^COPY +[^ ]+' "$SCRIPT_DIR"/VEN/Dockerfile "$SCRIPT_DIR"/VTN/bff/Dockerfile                  "$SCRIPT_DIR"/VEN/ui/Dockerfile "$SCRIPT_DIR"/VTN/ui/Dockerfile 2>/dev/null              | awk '{print $2}' | grep -v '^--' | cut -d/ -f1 | sort -u | tr '
+' ' ')
     MISSING=$(run_docker_cmd "cd $DOCKER_DIR && for p in $NEEDED; do [ -e \"\$p\" ] || echo \"\$p\"; done" 2>/dev/null)
     if [[ -n "$MISSING" ]]; then
         echo -e "${RED}${BOLD}ABORT${NC}: $_DOCKER_LABEL's checkout is missing paths the builds copy:"
@@ -188,8 +189,7 @@ if ! $_DOCKER_IS_LOCAL; then
         echo "    ssh $_DOCKER_LABEL \"cd $DOCKER_DIR && git sparse-checkout add <dir> \""
         exit 4
     fi
-    echo "  OK — every path the builds copy is present: $(echo $NEEDED | tr '
-' ' ')"
+    echo "  OK — every path the builds copy is present: $NEEDED"
 fi
 
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────

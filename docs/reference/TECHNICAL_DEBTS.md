@@ -167,3 +167,32 @@ update `docs/history/project_journal.md` and remove the item from this register 
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
 - [ ] 1.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
+
+## R-88 — the deviation arbiter's release edge is unbounded by its cause
+
+**Where:** `VEN/src/controller/arbiter.rs::reconcile`, surfaced by
+`tests/features/isolated/reactive_correction_notifications.feature`.
+
+`reconcile` carries the dead-beat correctors' own last-applied setpoint forward as the
+baseline rather than the plan's per-slot allocation — deliberately, and the code says why:
+otherwise a tick where the lever does not fire silently reverts the correction and
+re-creates the deviation it just resolved.
+
+The consequence is not written down anywhere: **removing the disturbance does not end the
+correction.** The still-corrected battery now deviates from plan in the opposite
+direction, so the arbiter keeps correcting its own correction until it converges. Observed
+on 2026-09-22 with a 3 kW base-load inject: `Reactive correction active` at 19:28:41,
+`cleared` at 19:28:43 (before the inject was removed), `active` again at 19:28:54 (after it
+was removed), then held for the full 300 s wait.
+
+**Why it is debt rather than a bug:** the behaviour may well be correct dead-beat control
+converging, and the feature is disabled by default. What is wrong is that nothing states
+the release is unbounded, so a test — and presumably an operator — assumes "cause gone,
+correction gone". That assumption is what made this scenario intermittently red for weeks
+and read as a load problem.
+
+**To resolve:** decide and document the release semantics (a convergence bound, a maximum
+engagement, or an explicit "releases when its own correction has decayed"), then let the
+scenario assert that stated behaviour instead of a presumed one. Until then the scenario
+asserts only what BL-37 was about: that both edges reach `GET /notifications` during the
+scenario.
