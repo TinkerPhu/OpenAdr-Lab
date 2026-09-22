@@ -239,6 +239,16 @@ The VTN UI dashboard health card shows the feed's state, how many VENs are
 live out of how many are known, and the age of the last message. The VEN UI
 diagnostics shows that VEN's own publisher.
 
+The Fleet page (`/fleet`) draws **one line per VEN plus the fleet total** on a
+shared time axis, over a window you pick (15 min / 1 h / 6 h / 24 h). The
+legend toggles individual VENs in and out, which is how you isolate two sites
+worth comparing out of twenty. Each VEN keeps the same colour across refreshes
+because it is derived from the name, not from position in the list.
+
+The curves come from the **live telemetry** the BFF stored — lossy by design,
+5 s resolution — not from the VTN's reports. The chart says which resolution
+it drew (raw samples, or 1-minute means once the raw rows have aged out).
+
 **Asking what the fleet did about one event:**
 `GET /api/fleet/reactions?eventID=…` lists every VEN that said it saw that
 event, when it saw it, when it next replanned, and its mean site power over

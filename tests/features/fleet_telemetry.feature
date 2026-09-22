@@ -41,3 +41,13 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
     When I wait for the fleet to report a reaction to the saved event
     Then each reacting VEN names the event version it saw
 
+  # The operator-facing half: a number tells you the fleet drew 10 kW, a line
+  # per VEN tells you which site moved when the limit landed. That is the
+  # question the page exists to answer, and only a browser can check it.
+  @ui
+  Scenario: The fleet page draws a line for every VEN that is reporting
+    Given I open the VTN UI
+    When I navigate to the Fleet page
+    Then the fleet chart has a line for every reporting VEN
+    And hiding a VEN in the legend removes its line
+

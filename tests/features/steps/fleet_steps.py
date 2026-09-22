@@ -144,3 +144,46 @@ def step_reaction_names_the_version(context):
             "an edited event keeps its id, so without this the trace is ambiguous"
         )
 
+
+@when("I navigate to the Fleet page")
+def step_navigate_fleet(context):
+    context.ui.page.click('[data-testid="nav-fleet"]')
+    context.ui.page.wait_for_selector('[data-testid="fleet-total-card"]', timeout=30000)
+
+
+@then("the fleet chart has a line for every reporting VEN")
+def step_fleet_chart_has_a_line_per_ven(context):
+    page = context.ui.page
+    # The chart draws from the stored history, which the store writes a little
+    # after the live feed shows a VEN -- so wait for the chart rather than
+    # asserting against whatever happens to be rendered first.
+    page.wait_for_selector('[data-testid="fleet-power-chart"]', timeout=60000)
+
+    reporting = [
+        v["venName"]
+        for v in bff_get("/api/fleet/power").json()["vens"]
+        if v.get("netPowerW") is not None
+    ]
+    assert reporting, "no VEN is reporting, so this scenario would assert nothing"
+
+    legend = page.locator('[data-testid^="legend-entry-"]')
+    labels = {legend.nth(i).inner_text().strip() for i in range(legend.count())}
+    context.fleet_legend_labels = labels
+    missing = [name for name in reporting if name not in labels]
+    assert not missing, f"reporting VENs missing from the chart legend: {missing} (legend: {labels})"
+    assert "fleet total" in labels, f"the fleet total is not drawn: {labels}"
+
+
+@then("hiding a VEN in the legend removes its line")
+def step_hiding_a_ven_removes_its_line(context):
+    page = context.ui.page
+    name = sorted(n for n in context.fleet_legend_labels if n != "fleet total")[0]
+    before = page.locator('[data-testid="fleet-power-chart"] .recharts-line').count()
+    page.click(f'[data-testid="legend-toggle-{name}"]')
+    page.wait_for_timeout(500)
+    after = page.locator('[data-testid="fleet-power-chart"] .recharts-line').count()
+    assert after == before - 1, (
+        f"toggling {name} off left {after} lines, expected {before - 1} — the legend "
+        "is decorative if it does not change what is drawn"
+    )
+
