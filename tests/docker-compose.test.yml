@@ -118,6 +118,10 @@ services:
       # call themselves "ven-1", and three publishers on one VEN's topic would
       # make the feed say whatever arrived last.
       FLEET_MQTT_HOST: "mosquitto"
+      # Overridable so a scenario can be run against the per-tick cadence the
+      # publisher used before D-1 landed, without rebuilding from another
+      # commit. Defaults to the production value.
+      FLEET_TELEMETRY_EVERY_S: "${FLEET_TELEMETRY_EVERY_S:-5}"
       WEATHER_MQTT_HOST: "mosquitto"
       WEATHER_MQTT_SITE_ID: "ven-1"
       PV_MEASUREMENT_MQTT_HOST: "mosquitto"
