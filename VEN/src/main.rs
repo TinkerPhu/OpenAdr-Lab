@@ -288,12 +288,11 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, hp, cl, tp) = (
+        let (s, sim, sp, vn, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, sn, cl, tp) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
             cfg.ven_name.clone(),
-            vtn_port.clone(),
             trigger_tx.clone(),
             data_dir.clone(),
             planner_event_tx.clone(),
@@ -305,7 +304,6 @@ async fn main() -> anyhow::Result<()> {
             base_load_measurement.clone(),
             base_load_measurement_enabled,
             notifier.clone(),
-            history_port.clone(),
             profile.comms_loss,
             telemetry_port.clone(),
         );
@@ -315,7 +313,6 @@ async fn main() -> anyhow::Result<()> {
                 sim.clone(),
                 sp.clone(),
                 vn.clone(),
-                v.clone(),
                 tx.clone(),
                 dd.clone(),
                 etx.clone(),
@@ -327,7 +324,6 @@ async fn main() -> anyhow::Result<()> {
                 blm.clone(),
                 blme,
                 sn.clone(),
-                hp.clone(),
                 cl,
                 (grid_max_import_kw, grid_max_export_kw),
                 tp.clone(),

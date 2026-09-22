@@ -6,10 +6,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::controller;
-use crate::controller::history_port::record_report_sent;
-use crate::controller::HistoryPort;
 use crate::controller::SimSnapshot;
-use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
@@ -102,146 +99,9 @@ pub(crate) async fn publish_sim_tick_result(
     sim_snap
 }
 
-/// R-43 (design.md D3): `history`, when present, receives one `ReportSent`
-/// row per report the VTN accepts. `report_type` is taken from `reportName`
-/// (best-available identifier at this call site — timer-driven reports don't
-/// carry a single obligation payload_type).
-pub(crate) async fn run_measurement_reports(
-    state: &AppState,
-    sim_snap: &SimSnapshot,
-    vtn: &dyn VtnPort,
-    ven_name: &str,
-    now: DateTime<Utc>,
-    report_interval_s: u64,
-    history: Option<Arc<dyn HistoryPort>>,
-) {
-    use crate::controller::reporter::AssetReportSample;
-    let events = state.events().await;
-
-    let asset_samples: std::collections::HashMap<String, Vec<AssetReportSample>> = sim_snap
-        .assets
-        .iter()
-        .map(|(id, asset)| {
-            let sample = AssetReportSample {
-                ts: sim_snap.ts,
-                power_kw: asset.power_kw,
-                soc: asset.values.get("soc").copied(),
-            };
-            (id.clone(), vec![sample])
-        })
-        .collect();
-
-    let grid_net_import_kw = sim_snap.grid.net_power_w.max(0.0) / 1000.0;
-    let grid_net_export_kw = (-sim_snap.grid.net_power_w).max(0.0) / 1000.0;
-
-    let reports = controller::reporter::build_measurement_reports_for_active_events(
-        &events,
-        &asset_samples,
-        report_interval_s,
-        grid_net_import_kw,
-        grid_net_export_kw,
-        ven_name,
-        now,
-    );
-    for report in reports {
-        let report_name = report.reportName.clone().unwrap_or_default();
-        let event_id = report.eventID.clone().unwrap_or_default();
-        match vtn.upsert_report(report).await {
-            Ok(()) => {
-                record_report_sent(history.clone(), report_name, event_id, now).await;
-            }
-            Err(e) => error!("measurement report submission failed: {e:#}"),
-        }
-    }
-}
-
 pub(crate) async fn persist_sim_state(sim: &Arc<Mutex<SimState>>, data_dir: &str) {
     let sim_clone = { sim.lock().await.clone() };
     if let Err(e) = crate::simulator::persist::save(&sim_clone, data_dir).await {
         error!("sim persist failed: {e:#}");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    //! R-43: `run_measurement_reports` must append a `ReportSent` row for
-    //! every report the VTN accepts, and stay a no-op (not an error) when no
-    //! `HistoryPort` is configured.
-    use super::*;
-    use crate::controller::simulator_port::GridSnapshot;
-    use crate::controller::vtn_port::OadrEvent;
-    use crate::services::test_support::mock_history_port::MockHistoryPort;
-    use crate::services::test_support::mock_vtn::MockVtn;
-
-    fn active_event() -> OadrEvent {
-        lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-1",
-            "programID": "prog-1",
-            "intervals": [{"payloads": [{"type": "SIMPLE", "values": []}]}]
-        }]))
-        .remove(0)
-    }
-
-    fn empty_sim_snap(now: DateTime<Utc>) -> SimSnapshot {
-        SimSnapshot {
-            ts: now,
-            grid: GridSnapshot {
-                net_power_w: 1000.0,
-                voltage_v: 230.0,
-                import_kwh: 0.0,
-                export_kwh: 0.0,
-                import_limit_kw: f64::MAX,
-                export_limit_kw: -f64::MAX,
-            },
-            assets: std::collections::HashMap::new(),
-        }
-    }
-
-    #[tokio::test]
-    async fn run_measurement_reports_appends_a_report_sent_row() {
-        let state = AppState::new();
-        state.set_events(vec![active_event()], 500).await;
-        let vtn = MockVtn::new();
-        let history: Arc<dyn HistoryPort> = Arc::new(MockHistoryPort::new());
-        let now = Utc::now();
-
-        run_measurement_reports(
-            &state,
-            &empty_sim_snap(now),
-            &vtn,
-            "ven-1",
-            now,
-            60,
-            Some(history.clone()),
-        )
-        .await;
-
-        assert_eq!(vtn.submitted().len(), 1, "one measurement report submitted");
-        let page = history
-            .query_reports(
-                now - chrono::Duration::seconds(1),
-                now + chrono::Duration::seconds(1),
-                100,
-                0,
-            )
-            .unwrap();
-        assert_eq!(page.rows.len(), 1, "one ReportSent row appended");
-        assert_eq!(page.rows[0].event_id, "evt-1");
-    }
-
-    #[tokio::test]
-    async fn run_measurement_reports_no_history_port_is_a_no_op_not_a_panic() {
-        let state = AppState::new();
-        state.set_events(vec![active_event()], 500).await;
-        let vtn = MockVtn::new();
-        let now = Utc::now();
-
-        run_measurement_reports(&state, &empty_sim_snap(now), &vtn, "ven-1", now, 60, None).await;
-
-        assert_eq!(
-            vtn.submitted().len(),
-            1,
-            "report still submitted even without a HistoryPort"
-        );
     }
 }

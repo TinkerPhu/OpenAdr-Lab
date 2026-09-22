@@ -3,9 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::controller::{
-    HistoryPort, MeasurementPort, SimulatorPort, VtnPort, WeatherForecastPort,
-};
+use crate::controller::{MeasurementPort, SimulatorPort, WeatherForecastPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::PvForecastParams;
 use crate::planner_events::PlannerEventTx;
@@ -17,14 +15,11 @@ pub(crate) async fn tick_once(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
     ven_name: String,
-    vtn: Arc<dyn VtnPort>,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     _event_tx: PlannerEventTx,
     persist_counter: u64,
     persist_every_ticks: u64,
-    report_counter: u64,
-    report_every_ticks: u64,
     tick_s: u64,
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
@@ -34,12 +29,11 @@ pub(crate) async fn tick_once(
     base_load_measurement: Arc<dyn MeasurementPort>,
     base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
-    history: Option<Arc<dyn HistoryPort>>,
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
     telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
-) -> (u64, u64) {
+) -> u64 {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
 
@@ -182,7 +176,7 @@ pub(crate) async fn tick_once(
         .await;
 
     // Publish consumes the snapshot and hands it back: one object per tick.
-    let sim_snapshot = super::publish::publish_sim_tick_result(
+    super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
@@ -199,22 +193,8 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    super::post_lock::run_periodic_reports_and_persist(
-        report_counter,
-        report_every_ticks,
-        tick_s,
-        persist_counter,
-        persist_every_ticks,
-        &state,
-        &sim_snapshot,
-        vtn.as_ref(),
-        &ven_name,
-        now,
-        history,
-        &sim,
-        &data_dir,
-    )
-    .await
+    super::post_lock::run_periodic_persist(persist_counter, persist_every_ticks, &sim, &data_dir)
+        .await
 }
 
 #[cfg(test)]

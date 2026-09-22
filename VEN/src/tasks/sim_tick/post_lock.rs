@@ -5,9 +5,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use chrono::{DateTime, Utc};
-
-use crate::controller::{HistoryPort, SimSnapshot, VtnPort};
 use crate::simulator::SimState;
 use crate::state::AppState;
 
@@ -29,44 +26,6 @@ pub(crate) async fn clear_inject_fields(
     }
 }
 
-/// PHASE 6 counter wrapper: runs `publish::run_measurement_reports` only
-/// every `report_every_ticks`, returning the updated counter.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn maybe_run_measurement_reports(
-    mut report_counter: u64,
-    report_every_ticks: u64,
-    tick_s: u64,
-    state: &AppState,
-    sim_snap: &SimSnapshot,
-    vtn: &dyn VtnPort,
-    ven_name: &str,
-    now: DateTime<Utc>,
-    history: Option<Arc<dyn HistoryPort>>,
-) -> u64 {
-    if report_every_ticks == 0 {
-        return report_counter;
-    }
-    report_counter += 1;
-    if report_counter >= report_every_ticks {
-        report_counter = 0;
-        // The window this report covers: one reporting cadence. The timer
-        // path holds a single point-in-time snapshot, so it has no sample span
-        // of its own -- without this it could state no energy at all.
-        let report_interval_s = report_every_ticks.saturating_mul(tick_s).max(1);
-        super::publish::run_measurement_reports(
-            state,
-            sim_snap,
-            vtn,
-            ven_name,
-            now,
-            report_interval_s,
-            history,
-        )
-        .await;
-    }
-    report_counter
-}
-
 /// PHASE 7 counter wrapper: runs `publish::persist_sim_state` only every
 /// `persist_every_ticks`, returning the updated counter.
 pub(crate) async fn maybe_persist_sim_state(
@@ -83,40 +42,17 @@ pub(crate) async fn maybe_persist_sim_state(
     persist_counter
 }
 
-/// PHASES 6+7 combined: periodic measurement reports, then periodic persist —
-/// folded into one call so `tick.rs` only carries one call site for both. Run
-/// concurrently via `tokio::join!`: the two wrappers touch disjoint state (VTN
-/// report submission vs. sim-state disk persist), so a tick that crosses both
-/// counters' thresholds pays the max of the two latencies, not their sum.
-#[allow(clippy::too_many_arguments)] // one param per already-independent tick input; see context.rs's TickContext precedent for the alternative
-pub(crate) async fn run_periodic_reports_and_persist(
-    report_counter: u64,
-    report_every_ticks: u64,
-    tick_s: u64,
+/// PHASE 7: periodic sim-state persist.
+///
+/// Was "reports, then persist": the timer-driven report path it also ran is
+/// gone (D-5/F-9). Reporting is the obligation loop's job now — a VTN that
+/// wants reports asks for them with `reportDescriptors`, and the standing
+/// fleet-monitoring event is what keeps an idle fleet visible.
+pub(crate) async fn run_periodic_persist(
     persist_counter: u64,
     persist_every_ticks: u64,
-    state: &AppState,
-    sim_snap: &SimSnapshot,
-    vtn: &dyn VtnPort,
-    ven_name: &str,
-    now: DateTime<Utc>,
-    history: Option<Arc<dyn HistoryPort>>,
     sim: &Arc<Mutex<SimState>>,
     data_dir: &str,
-) -> (u64, u64) {
-    let (report_counter, persist_counter) = tokio::join!(
-        maybe_run_measurement_reports(
-            report_counter,
-            report_every_ticks,
-            tick_s,
-            state,
-            sim_snap,
-            vtn,
-            ven_name,
-            now,
-            history,
-        ),
-        maybe_persist_sim_state(persist_counter, persist_every_ticks, sim, data_dir),
-    );
-    (persist_counter, report_counter)
+) -> u64 {
+    maybe_persist_sim_state(persist_counter, persist_every_ticks, sim, data_dir).await
 }

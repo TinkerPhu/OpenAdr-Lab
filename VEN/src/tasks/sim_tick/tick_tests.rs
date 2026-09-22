@@ -3,10 +3,8 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex};
 
-    use crate::controller::VtnPort;
     use crate::entities::asset::PlanTrigger;
     use crate::planner_events::PlannerEvent;
-    use crate::services::test_support::mock_vtn::MockVtn;
     use crate::simulator::SimState;
     use crate::state::AppState;
     use crate::tasks::sim_tick::tick::tick_once;
@@ -32,20 +30,15 @@ mod tests {
         let trigger_tx = Arc::new(trigger_tx);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);
-        let vtn: Arc<dyn VtnPort> = Arc::new(MockVtn::new());
-
-        let (_pc, _rc) = tick_once(
+        let _pc = tick_once(
             AppState::new(),
             sim,
             "test-ven".to_string(),
-            vtn,
             trigger_tx,
             "/tmp".to_string(),
             event_tx,
             0,   // persist_counter
             100, // persist_every_ticks — no persist this tick
-            0,   // report_counter
-            100, // report_every_ticks — no report this tick
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
@@ -55,7 +48,6 @@ mod tests {
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             crate::services::notify::Notifier::new(None),
-            None,  // history
             None,  // comms_loss_config
             100.0, // grid_max_import_kw
             100.0, // grid_max_export_kw
@@ -179,7 +171,6 @@ mod tests {
         let trigger_tx = Arc::new(trigger_tx);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);
-        let vtn: Arc<dyn VtnPort> = Arc::new(MockVtn::new());
         let state = AppState::new();
 
         let now = chrono::Utc::now();
@@ -193,16 +184,13 @@ mod tests {
         inject.pv_irradiance = Some(1.0);
         state.set_inject_state(inject).await;
 
-        let (_pc, _rc) = tick_once(
+        let _pc = tick_once(
             state.clone(),
             sim,
             "test-ven".to_string(),
-            vtn,
             trigger_tx,
             "/tmp".to_string(),
             event_tx,
-            0,
-            100,
             0,
             100,
             1,
@@ -214,7 +202,6 @@ mod tests {
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             crate::services::notify::Notifier::new(None),
-            None,  // history
             None,  // comms_loss_config
             100.0, // grid_max_import_kw
             100.0, // grid_max_export_kw

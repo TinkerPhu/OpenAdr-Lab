@@ -74,7 +74,6 @@ assets:
 simulator:
   tick_s: 1
   persist_every_s: 15
-  report_interval_s: 60
 
 planner:
   mip_gap_target: 0.06          # GB-40: heater-bearing VEN, loosened from the 0.02

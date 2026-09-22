@@ -1,5 +1,7 @@
 """Step definitions for reporter multi-interval resampling (RF-05e)."""
 
+import time
+
 import requests
 from behave import given, when, then
 from features.helpers.api_client import vtn_post, VEN_BASE_URL, HTTP_TIMEOUT
@@ -93,23 +95,24 @@ def step_wait_ven1_obligation_report_for_event(context):
     context.ven1_reports = matching
 
 
-@when("I wait for VEN-1 to submit at least {count:d} timer-driven report for the event")
-@when("I wait for VEN-1 to submit at least {count:d} timer-driven reports for the event")
-def step_wait_ven1_timer_reports_for_event(context, count):
+@then("VEN-1 submits no report for the event within {seconds:d} seconds")
+def step_no_report_for_event(context, seconds):
+    """D-5: an event that asked for nothing gets nothing.
+
+    Waits the full window rather than checking once — "no report yet" and "no
+    report ever" look identical at t=0, and only the second is the contract.
+    """
     event_id = context.saved_event_id
-
-    def fetch():
+    deadline = time.time() + seconds
+    while time.time() < deadline:
         reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
-        return [r for r in reports if r.get("eventID") == event_id]
-
-    matching = poll_until(
-        fetch,
-        lambda rs: len(rs) >= count,
-        timeout=90,
-        interval=3,
-        description=f"VEN-1 has >= {count} reports for event {event_id}",
-    )
-    context.ven1_reports = matching
+        matching = [r for r in reports if r.get("eventID") == event_id]
+        assert not matching, (
+            f"VEN-1 reported for event {event_id}, which carries no reportDescriptors — "
+            "the timer-driven path was removed in D-5/F-9 and nothing else should report "
+            f"unprompted: {matching[:1]}"
+        )
+        time.sleep(5)
 
 
 @then("the latest VEN-1 report for the event has multiple intervals")

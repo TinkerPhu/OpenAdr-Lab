@@ -334,7 +334,7 @@ shows its own fleet-publisher status (connected / last publish).
 | D-2 | `DEMAND` unit | **kW**, declared in `payloadDescriptors`; W stays the internal field unit (§5) |
 | D-3 | Report accumulation | **one report object per VEN** per (event, payloadType): stable id, intervals appended by `PUT`, trimmed to a bounded window — **120 intervals, not 24 h**, see below (§5) |
 | D-4 | Migrate `USAGE` to energy in this phase | **No** — `exp-*` reports and `experiments/kpi.py` stay as they are; the unit fix is its own change (`docs/BACKLOG_OpenADR_Cert.md` §6) |
-| D-5 | Keep the timer report path | **No** — deleted once the standing monitoring event exists (resolves R-85 / F-9) |
+| D-5 | Keep the timer report path | **No** — deleted 2026-09-22, once the standing monitoring event was verified live (resolves R-85 / F-9) |
 | D-6 | Retention | raw telemetry 7 days, 1-min rollup 90 days |
 | D-7 | Where telemetry is stored | **The existing Postgres instance** (`vtn-db-1`), schema `lab_recorder` — see below |
 
@@ -411,7 +411,9 @@ Each step is test-first and leaves the stack deployable.
 
 1. ~~**R-84** BFF pagination consolidation~~ — done 2026-09-18.
 2. **Report fixes** — F-3 (signed values) ✅, F-6 (cached report id) ✅, F-7 (no history copy
-   when nothing is due) ✅. **F-9/D-5 (delete the timer path) is deliberately out of order**:
+   when nothing is due) ✅, F-9/D-5 ✅ (timer path deleted 2026-09-22, once the standing event
+   was confirmed reporting on the live fleet). Its original ordering note, kept because the
+   reasoning still explains why it waited: **F-9/D-5 was deliberately out of order** —
    the timer path is the only thing reporting for an event without `reportDescriptors`, so
    deleting it before the standing event of step 5 exists would leave an idle fleet invisible —
    the very gap this plan is closing. It now waits on step 5 being verified live.

@@ -5,22 +5,20 @@
 ///   - Obligation-driven measurement reports: multi-interval reports resampled onto a
 ///     report obligation's interval grid.
 use chrono::{DateTime, Duration, Utc};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::controller::report_intervals::{
     build_baseline_report_intervals, build_capacity_forecast_intervals, build_forecast_intervals,
     build_net_site_power_ts, build_soc_intervals,
 };
 use crate::controller::vtn_port::{
-    EventTypeName, OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval,
-    OadrReportPayload, OadrReportResource,
+    OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload, OadrReportResource,
 };
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use lab_core::time_series::Aggregation;
-use lab_core::time_window::TimeWindow;
 
 // ---------------------------------------------------------------------------
 // Domain-side sample type — extracted at the infra boundary by callers.
@@ -42,14 +40,6 @@ pub struct AssetReportSample {
 // ---------------------------------------------------------------------------
 // Interval activity detection
 // ---------------------------------------------------------------------------
-
-/// Returns true if `event` has at least one interval that is currently active
-/// (interval timing: the shared rule, `controller::event_timing`).
-fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
-    lab_core::event_timing::timed_intervals(event)
-        .iter()
-        .any(|t| t.covers(now))
-}
 
 // ---------------------------------------------------------------------------
 // Measurement report (timer-driven, T046)
@@ -76,174 +66,6 @@ fn operating_state(
         Some(_) => "UNRESPONSIVE",
         None => "OFFLINE",
     }
-}
-
-/// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
-///
-/// The report includes:
-///   - Net site import power (grid_net_import_kw, pre-computed by the caller).
-///   - OPERATING_STATE derived from sample freshness (see `operating_state`).
-///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV samples are available.
-///
-/// Returns None if the event has no id or programID.
-pub fn build_measurement_report(
-    event: &OadrEvent,
-    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
-    report_interval_s: u64,
-    grid_net_import_kw: f64,
-    grid_net_export_kw: f64,
-    ven_name: &str,
-    now: DateTime<Utc>,
-) -> Option<OadrReportBody> {
-    let event_id = &event.id;
-    let op_state = operating_state(asset_samples, now);
-
-    let report_name = format!("auto-{}-{}", ven_name, event_id);
-    let resource_name = format!("{}-meter", ven_name);
-
-    // Which direction this event asks about. `SIMPLE` is a shed *level*, not a
-    // measurement, so it is the one arm that does not report a quantity.
-    let payload_type = event
-        .content
-        .intervals
-        .iter()
-        .flatten()
-        .next()
-        .and_then(|iv| iv.payloads.first())
-        .map(|p| p.value_type.wire_name())
-        .unwrap_or_else(|| "SIMPLE".to_string());
-    let payload_type = payload_type.as_str();
-    let power_kw = match payload_type {
-        "EXPORT_CAPACITY_LIMIT" => grid_net_export_kw,
-        _ => grid_net_import_kw,
-    };
-
-    // The window this report covers, which is what makes its value expressible:
-    // `USAGE` is energy *over an interval* (spec, payload type table), so
-    // without a window there is no energy to state.
-    //
-    // It is the *reporting cadence*, not a span across the samples: this path
-    // holds one point-in-time snapshot per asset, so there is no sample span to
-    // measure, and deriving the window from the samples meant every report
-    // omitted USAGE entirely (found on ven-1 during the staged roll). The
-    // snapshot's power is taken as the mean across the interval, which is the
-    // best this path can claim; the obligation path does a real time-weighted
-    // mean, and R-85 has the timer path retired once the standing monitoring
-    // event exists.
-    let window =
-        (report_interval_s > 0).then(|| (now - Duration::seconds(report_interval_s as i64), now));
-
-    let mut payloads = vec![OadrReportPayload::state("OPERATING_STATE", op_state)];
-    if payload_type == "SIMPLE" {
-        payloads.insert(0, OadrReportPayload::level("SIMPLE", 1.0));
-    } else if let Some((start, end)) = window {
-        payloads.insert(
-            0,
-            OadrReportPayload::energy_from_power_kw(
-                "USAGE",
-                power_kw,
-                (end - start).num_seconds().max(0) as u64,
-            ),
-        );
-    } else {
-        // Fail visibly rather than substitute silently: one sample is a power
-        // reading, not an energy, and we will not send it as one.
-        warn!(
-            event_id = %event_id,
-            "no measurement window for this report; omitting USAGE rather than              sending a power value under an energy payload type"
-        );
-    }
-
-    // Add EV SoC if available
-    if let Some(soc) = asset_samples
-        .get("ev")
-        .and_then(|v| v.last())
-        .and_then(|s| s.soc)
-    {
-        payloads.push(OadrReportPayload::percent(
-            "STORAGE_CHARGE_LEVEL",
-            soc * 100.0,
-        ));
-    }
-
-    let intervals = vec![OadrReportInterval {
-        id: 0,
-        intervalPeriod: window.map(|(start, end)| {
-            OadrIntervalPeriod::window(
-                start,
-                format_iso8601_duration((end - start).num_seconds().max(0) as u64),
-            )
-        }),
-        payloads,
-    }];
-    let report = OadrReportBody {
-        eventID: Some(event_id.to_string()),
-        clientName: ven_name.to_string(),
-        reportName: Some(report_name),
-        payloadDescriptors: crate::controller::report_payload::descriptors_for(&intervals),
-        resources: vec![OadrReportResource {
-            resourceName: resource_name,
-            intervals,
-        }],
-    };
-
-    debug!(
-        report_name = report.reportName.as_deref().unwrap_or(""),
-        event_id = %event_id,
-        payload_type,
-        payloads = report.resources[0].intervals[0].payloads.len(),
-        "built measurement report"
-    );
-    Some(report)
-}
-
-/// Build measurement reports for all currently active events (timer-driven entry point).
-pub fn build_measurement_reports_for_active_events(
-    events: &[OadrEvent],
-    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
-    report_interval_s: u64,
-    grid_net_import_kw: f64,
-    grid_net_export_kw: f64,
-    ven_name: &str,
-    now: DateTime<Utc>,
-) -> Vec<OadrReportBody> {
-    let mut seen = std::collections::HashSet::new();
-    let mut reports = Vec::new();
-
-    for event in events {
-        if !event_is_active(event, now) {
-            continue;
-        }
-        // Skip events with reportDescriptors — those are handled by the obligation loop
-        let has_descriptors = event
-            .content
-            .report_descriptors
-            .as_ref()
-            .is_some_and(|arr| !arr.is_empty());
-        if has_descriptors {
-            debug!(
-                event_id = %event.id,
-                "timer-driven: skipping event with reportDescriptors"
-            );
-            continue;
-        }
-        if seen.insert(event.id.clone()) {
-            debug!(event_id = %event.id, "timer-driven: building single-interval report");
-            if let Some(report) = build_measurement_report(
-                event,
-                asset_samples,
-                report_interval_s,
-                grid_net_import_kw,
-                grid_net_export_kw,
-                ven_name,
-                now,
-            ) {
-                reports.push(report);
-            }
-        }
-    }
-
-    reports
 }
 
 // ---------------------------------------------------------------------------
@@ -489,31 +311,6 @@ mod tests {
     // Fixed-epoch timestamp helper for deterministic tests.
     fn ts(offset_s: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000 + offset_s, 0).unwrap()
-    }
-
-    // GB-48: activity comes from the shared interval timing — an interval
-    // without its own period takes the event-level one (it used to count as
-    // active regardless), and a missing duration is open-ended (was one year).
-    #[test]
-    fn event_is_active_uses_the_event_level_period() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!({
-            "id": "e", "programID": "p",
-            "intervalPeriod": {"start": "2023-11-14T22:13:20Z", "duration": "PT1H"},
-            "intervals": [{"id": 0, "payloads": []}]
-        }))
-        .remove(0);
-        assert!(event_is_active(&event, ts(0)));
-        assert!(event_is_active(&event, ts(3599)));
-        assert!(
-            !event_is_active(&event, ts(3600)),
-            "ended with its event-level period"
-        );
-        assert!(!event_is_active(&event, ts(-1)), "not yet started");
-        let untimed = lab_core::test_fixtures::events_from_json(serde_json::json!({
-            "id": "u", "programID": "p", "intervals": [{"id": 0, "payloads": []}]
-        }))
-        .remove(0);
-        assert!(event_is_active(&untimed, ts(0)), "in force while listed");
     }
 
     /// Build `(id, Vec<AssetReportSample>)` from `(offset_s, power_kw)` pairs.
@@ -1009,177 +806,6 @@ mod tests {
             .as_f64()
             .unwrap();
         assert_eq!(val, 0.0, "expected 0.0 W when no envelope");
-    }
-
-    // ── build_measurement_report ────────────────────────────────────
-
-    #[test]
-    fn measurement_report_fields_match_event() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-001",
-            "programID": "prog-001",
-            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
-        }]))
-        .remove(0);
-        // Two samples: a single reading is a power, and energy over an interval
-        // cannot be stated from it (see `report_window`).
-        let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 3.0), (60, 3.0)])]
-            .into_iter()
-            .collect();
-        let report =
-            build_measurement_report(&event, &asset_samples, 60, 3.0, 0.0, "ven-1", Utc::now())
-                .unwrap();
-        assert!(
-            !serde_json::to_string(&report)
-                .unwrap()
-                .contains("programID"),
-            "3.1 removed programID from reports; eventID is the only object link"
-        );
-        assert_eq!(report.eventID.as_deref(), Some("evt-001"));
-        assert_eq!(report.clientName, "ven-1");
-        assert_eq!(report.reportName.as_deref(), Some("auto-ven-1-evt-001"));
-        assert_eq!(report.resources[0].resourceName, "ven-1-meter");
-        let iv = &report.resources[0].intervals[0];
-        assert_eq!(iv.id, 0);
-        // The window is what makes the value expressible: USAGE is energy
-        // *over an interval*, so the report has to say which interval.
-        assert!(iv.intervalPeriod.is_some());
-        let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
-        let val = usage.values[0].as_f64().unwrap();
-        assert!(
-            (val - 0.05).abs() < 1e-6,
-            "expected 0.05 kWh (3 kW over the 1-minute sample span), got {val}"
-        );
-        assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
-    }
-
-    /// A zero-length window carries no energy. Reporting `0 kWh` for it would
-    /// state a measurement that was never taken -- indistinguishable, to the
-    /// VTN, from a site that genuinely drew nothing -- so the payload is
-    /// omitted and logged instead.
-    #[test]
-    fn measurement_report_omits_usage_when_the_window_is_zero_length() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-nowindow",
-            "programID": "prog-001",
-            "intervals": [{"payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": []}]}]
-        }]))
-        .remove(0);
-        let asset_samples: HashMap<_, _> =
-            [make_samples("site", &[(0, 3.0)])].into_iter().collect();
-        let report =
-            build_measurement_report(&event, &asset_samples, 0, 3.0, 0.0, "ven-1", Utc::now())
-                .unwrap();
-        let iv = &report.resources[0].intervals[0];
-        assert!(
-            !iv.payloads.iter().any(|p| p.r#type == "USAGE"),
-            "a power reading must not be sent as energy"
-        );
-        // The report is still made: operating state is still knowable.
-        assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
-    }
-
-    #[test]
-    fn measurement_report_includes_ev_soc_when_available() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-002",
-            "programID": "prog-001",
-            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
-        }]))
-        .remove(0);
-        let asset_samples: HashMap<_, _> = [make_ev_samples("ev", &[(0, 7.0, 0.5)])]
-            .into_iter()
-            .collect();
-        let report =
-            build_measurement_report(&event, &asset_samples, 60, 0.0, 0.0, "ven-1", Utc::now())
-                .unwrap();
-        let iv = &report.resources[0].intervals[0];
-        let soc_payload = iv
-            .payloads
-            .iter()
-            .find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
-        assert!(soc_payload.is_some(), "expected SoC payload for EV");
-        // A percentage is a number with a declared unit, not a formatted string.
-        let soc_pct = soc_payload.unwrap().values[0].as_f64().unwrap();
-        assert!((soc_pct - 50.0).abs() < 0.2, "expected ~50%, got {soc_pct}");
-    }
-
-    // ── build_measurement_reports_for_active_events ────────────────
-
-    #[test]
-    fn active_events_returns_empty_for_no_events() {
-        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let reports = build_measurement_reports_for_active_events(
-            &[],
-            &empty,
-            60,
-            0.0,
-            0.0,
-            "ven-1",
-            Utc::now(),
-        );
-        assert!(reports.is_empty());
-    }
-
-    #[test]
-    fn active_events_skips_events_with_report_descriptors() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-003",
-            "programID": "prog-001",
-            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}],
-            "reportDescriptors": [{"payloadType": "USAGE", "frequency": 900}]
-        }]))
-        .remove(0);
-        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let reports = build_measurement_reports_for_active_events(
-            &[event],
-            &empty,
-            60,
-            0.0,
-            0.0,
-            "ven-1",
-            Utc::now(),
-        );
-        assert!(
-            reports.is_empty(),
-            "events with reportDescriptors should be skipped"
-        );
-    }
-
-    // ── SC-004: build_measurement_report callable without SimState ─
-
-    #[test]
-    fn build_measurement_report_domain_only() {
-        let event = lab_core::test_fixtures::events_from_json(serde_json::json!([{
-            "id": "evt-sc004",
-            "programID": "prog-001",
-            "intervals": [{"payloads": [{"type": "USAGE", "values": []}]}]
-        }]))
-        .remove(0);
-        let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 1.0), (60, 3.0)])]
-            .into_iter()
-            .collect();
-        let report =
-            build_measurement_report(&event, &asset_samples, 60, 3.0, 0.0, "ven-1", Utc::now());
-        assert!(report.is_some(), "expected Some(report)");
-        let report = report.unwrap();
-        assert!(
-            !serde_json::to_string(&report)
-                .unwrap()
-                .contains("programID"),
-            "3.1 removed programID from reports; eventID is the only object link"
-        );
-        assert_eq!(report.clientName, "ven-1");
-        let usage = report.resources[0].intervals[0]
-            .payloads
-            .iter()
-            .find(|p| p.r#type == "USAGE")
-            .unwrap();
-        let val = usage.values[0].as_f64().unwrap();
-        assert!(
-            (val - 0.05).abs() < 1e-6,
-            "expected 0.05 kWh (3 kW over the 1-minute sample span), got {val}"
-        );
     }
 
     // ── USAGE_FORECAST (WP3.6, §8.8) ────────────────────────────────
