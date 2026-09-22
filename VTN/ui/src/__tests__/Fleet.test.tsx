@@ -41,6 +41,13 @@ const mockHistory = {
   ],
 };
 
+// The chart has its own test file; here it only has to not be recharts.
+vi.mock("../components/FleetPowerChart", () => ({
+  FleetPowerChart: ({ windowMinutes }: { windowMinutes: number }) => (
+    <div data-testid="fleet-chart-stub">{windowMinutes}</div>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useFleetPower: vi.fn(() => ({ data: mockLive, isError: false })),
   useFleetHistory: vi.fn(() => ({ data: mockHistory, isError: false })),
@@ -94,10 +101,16 @@ describe("FleetPage", () => {
     expect(screen.getByTestId("fleet-ven-ven-3")).toHaveTextContent("offline");
   });
 
-  it("names the resolution of the history it drew", () => {
+  it("draws the per-VEN chart over the selected window", () => {
     renderFleet();
-    expect(screen.getByTestId("fleet-history-source")).toHaveTextContent("raw samples");
-    expect(screen.getByTestId("fleet-history-source")).toHaveTextContent("60s");
+    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("60");
+  });
+
+  /* The window picker is what makes "did it react" and "what did today look
+   * like" the same page rather than two. */
+  it("offers the operator a window to choose", async () => {
+    renderFleet();
+    expect(screen.getByTestId("fleet-window-select")).toBeInTheDocument();
   });
 
   /* A store that is not connected is not an empty hour. Saying so beats an

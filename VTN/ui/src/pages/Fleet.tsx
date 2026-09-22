@@ -1,19 +1,32 @@
+import { useState } from "react";
 import {
-  Alert, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
+  Alert, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
+  TextField, Typography,
 } from "@mui/material";
 import { useFleetHistory, useFleetPower } from "../api/hooks";
-import { Sparkline } from "../components/Sparkline";
+import { FleetPowerChart } from "../components/FleetPowerChart";
+import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
 import { formatKw } from "../utils/power";
-import { FleetReactions } from "../components/FleetReactions";
 
-/** The window the page opens on. Long enough to contain a dispatch window. */
-const HISTORY_MINUTES = 60;
-const HISTORY_STEP_S = 60;
+/**
+ * Windows an operator actually asks for, each with a bucket width that keeps
+ * the point count near 200 — fine enough to see a reaction, coarse enough that
+ * a day does not arrive as 17 000 points per VEN.
+ */
+const WINDOWS = [
+  { minutes: 15, stepSeconds: 5, label: "15 min" },
+  { minutes: 60, stepSeconds: 60, label: "1 hour" },
+  { minutes: 360, stepSeconds: 300, label: "6 hours" },
+  { minutes: 1440, stepSeconds: 900, label: "24 hours" },
+];
 
 export function FleetPage() {
+  const [windowIndex, setWindowIndex] = useState(1);
+  const chosen = WINDOWS[windowIndex];
+
   const live = useFleetPower();
-  const history = useFleetHistory(HISTORY_MINUTES, HISTORY_STEP_S);
+  const history = useFleetHistory(chosen.minutes, chosen.stepSeconds);
   const now = new Date();
 
   return (
@@ -40,26 +53,35 @@ export function FleetPage() {
       </Paper>
 
       <Paper sx={{ p: 2 }} data-testid="fleet-history-card">
-        <Typography variant="h6">Last hour</Typography>
+        <Stack direction="row" spacing={2} alignItems="center" mb={1}>
+          <Typography variant="h6">Per-VEN power</Typography>
+          <TextField
+            select
+            size="small"
+            value={windowIndex}
+            onChange={(e) => setWindowIndex(Number(e.target.value))}
+            inputProps={{ "data-testid": "fleet-window-select" }}
+            sx={{ minWidth: 120 }}
+          >
+            {WINDOWS.map((w, i) => (
+              <MenuItem key={w.minutes} value={i}>
+                {w.label}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Stack>
+
         {history.isError && (
           <Alert severity="info" data-testid="fleet-history-error">
             No stored history — the telemetry store is not connected.
           </Alert>
         )}
         {history.data && (
-          <>
-            <Sparkline
-              samples={history.data.fleet.map((s) => ({ ts: s.ts, value: s.netPowerW }))}
-              label={`Fleet power over the last ${HISTORY_MINUTES} minutes`}
-            />
-            {/* A 1-minute rollup and a 5-second raw series are both true and
-                not the same resolution; a reader comparing two windows has to
-                be told which one they have. */}
-            <Typography variant="caption" data-testid="fleet-history-source">
-              {history.data.source === "raw" ? "raw samples" : "1-minute means"}, {" "}
-              {history.data.stepSeconds}s buckets
-            </Typography>
-          </>
+          <FleetPowerChart
+            history={history.data}
+            windowMinutes={chosen.minutes}
+            nowMs={now.getTime()}
+          />
         )}
       </Paper>
 
