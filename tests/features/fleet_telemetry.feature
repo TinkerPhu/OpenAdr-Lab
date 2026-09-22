@@ -29,3 +29,15 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
     And I wait for the fleet history of the last 10 minutes to have samples
     Then the fleet history says which resolution it was drawn at
     And every history bucket counts the VENs it was summed from
+
+  # The chain §6.3 describes: the VTN publishes an event, the VEN says it saw
+  # that exact version of it, and the BFF can answer "who saw this" afterwards.
+  # Without the id on the trace entry this question has no answer at all —
+  # event names are not unique, and an edited event keeps its name.
+  Scenario: The fleet can be asked who saw a particular event
+    Given I have a VTN token as "bl-client"
+    And I create an open program "fleet-reaction-test" and save its ID
+    And I create an IMPORT_CAPACITY_LIMIT event with limit 3.0 kW for the saved program
+    When I wait for the fleet to report a reaction to the saved event
+    Then each reacting VEN names the event version it saw
+

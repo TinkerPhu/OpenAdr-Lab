@@ -115,3 +115,37 @@ def step_history_buckets_count_contributors(context):
             f"bucket {bucket.get('ts')} carries no contributor count ({n!r}) — "
             "a total whose membership is unknown cannot be compared with another"
         )
+
+
+@when("I wait for the fleet to report a reaction to the saved event")
+def step_wait_for_reaction(context):
+    """The chain needs three things to line up: the VEN polls the event, it
+    publishes the decision, and the BFF writes it. Each is seconds, so this
+    waits rather than asserts on the first try."""
+    event_id = context.rate_event_id
+
+    def fetch():
+        context.response = bff_get("/api/fleet/reactions", params={"eventID": event_id})
+        if context.response.status_code != 200:
+            return {"status": context.response.status_code,
+                    "body": context.response.text[:200]}
+        return context.response.json()
+
+    context.reactions = poll_until(
+        fetch,
+        lambda b: (b.get("vensSeen") or 0) >= 1,
+        timeout=120,
+        interval=5,
+        description=f"a VEN reaction to event {event_id}",
+    )
+
+
+@then("each reacting VEN names the event version it saw")
+def step_reaction_names_the_version(context):
+    for ven in context.reactions["vens"]:
+        assert ven.get("seenAt"), f"{ven.get('venName')} reports no time it saw the event"
+        assert ven.get("modificationDateTime"), (
+            f"{ven.get('venName')} did not say which version of the event it acted on — "
+            "an edited event keeps its id, so without this the trace is ambiguous"
+        )
+
