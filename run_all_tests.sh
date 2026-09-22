@@ -165,6 +165,33 @@ if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COV
     echo "  OK — ${FLEET_COUNT} fleet VEN(s) resident, ${AVAIL_MB} MB available (floor ${MIN_AVAILABLE_MEM_MB} MB)"
 fi
 
+# ── Pre-flight: does the host's checkout hold what the builds copy? ──────────
+#
+# The docker hosts use sparse-checkout, so a *new top-level directory* does not
+# arrive on a `git pull` — it simply is not there, and the build fails deep in
+# buildkit with `"/<dir>": not found` after minutes of unrelated layers. This
+# has now cost a full suite run twice: once when `lab-core` was added, once when
+# `ui-charts` was. Both times the code was correct and the checkout was not.
+#
+# The list is derived from the Dockerfiles rather than written down, so the next
+# shared directory is covered without anyone remembering this comment exists.
+if ! $_DOCKER_IS_LOCAL; then
+    header "Pre-flight: $_DOCKER_LABEL checkout completeness"
+    NEEDED=$(grep -rhoE '^COPY +[^ ]+' "$SCRIPT_DIR"/VEN/Dockerfile "$SCRIPT_DIR"/VTN/bff/Dockerfile                  "$SCRIPT_DIR"/VEN/ui/Dockerfile "$SCRIPT_DIR"/VTN/ui/Dockerfile 2>/dev/null              | awk '{print $2}' | grep -v '^--' | cut -d/ -f1 | sort -u)
+    MISSING=$(run_docker_cmd "cd $DOCKER_DIR && for p in $NEEDED; do [ -e \"\$p\" ] || echo \"\$p\"; done" 2>/dev/null)
+    if [[ -n "$MISSING" ]]; then
+        echo -e "${RED}${BOLD}ABORT${NC}: $_DOCKER_LABEL's checkout is missing paths the builds copy:"
+        for p in $MISSING; do echo "    $p"; done
+        echo ""
+        echo "  Almost certainly sparse-checkout: a new top-level directory does not"
+        echo "  arrive on a pull. Fix it on the host and re-run:"
+        echo "    ssh $_DOCKER_LABEL \"cd $DOCKER_DIR && git sparse-checkout add <dir> \""
+        exit 4
+    fi
+    echo "  OK — every path the builds copy is present: $(echo $NEEDED | tr '
+' ' ')"
+fi
+
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────
 
 if $RUN_LOCAL; then
