@@ -7,7 +7,7 @@ import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useHistoryPlans } from "../api/hooks";
-import { niceAxis, tickFormatterForStep } from "../components/charts/axisDomain";
+import { niceAxis, tickFormatterForStep } from "@lab/charts/axisDomain";
 import type { PlanHistorySample, WarningKind } from "../api/types";
 
 /** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */

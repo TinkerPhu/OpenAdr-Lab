@@ -1,11 +1,11 @@
 import { Box, FormControl, InputLabel, MenuItem, Select } from "@mui/material";
 import { SERIES_COLORS, type AssetTimelinePoint } from "../controller/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
-import { formatPowerValue } from "../charts/unitFormat";
-import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
-import { EmptyState } from "../charts/EmptyState";
-import { TimeSeriesChart } from "../charts/TimeSeriesChart";
-import type { TimestampedRow } from "../charts/mergeSeries";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "@lab/charts/axisDomain";
+import { formatPowerValue } from "@lab/charts/unitFormat";
+import { DIAGNOSTIC_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { EmptyState } from "@lab/charts/EmptyState";
+import { TimeSeriesChart } from "@lab/charts/TimeSeriesChart";
+import type { TimestampedRow } from "@lab/charts/mergeSeries";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useLegendToggle } from "../components/charts/useLegendToggle";
+import { useLegendToggle } from "@lab/charts/useLegendToggle";
 
 describe("useLegendToggle", () => {
   it("starts with nothing hidden", () => {

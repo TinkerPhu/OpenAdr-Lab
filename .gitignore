@@ -59,3 +59,5 @@ openspec/changes/pv-self-consumption-reward/*
 **/.openspec.yaml
 .obsidian/*
 
+# npm workspace root: dependencies hoist here from VEN/ui and VTN/ui
+/node_modules/

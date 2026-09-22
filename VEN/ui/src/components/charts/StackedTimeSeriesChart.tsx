@@ -1,4 +1,4 @@
-import { CELL_CHART_HEIGHT } from "./chartLayout";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import {
   ComposedChart,
   Area,
@@ -14,13 +14,13 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../controller/types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../controller/types";
 import type { ZoneDef } from "../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis } from "./axisDomain";
-import { formatSignedPowerValue } from "./unitFormat";
-import { renderNowLine } from "./NowLine";
-import { renderZoneShading } from "./ZoneShading";
-import { TOOLTIP_BOX_STYLE } from "./tooltipStyle";
-import { useLegendToggle } from "./useLegendToggle";
-import { ChartLegend, type ChartLegendEntry } from "./ChartLegend";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis } from "@lab/charts/axisDomain";
+import { formatSignedPowerValue } from "@lab/charts/unitFormat";
+import { renderNowLine } from "@lab/charts/NowLine";
+import { renderZoneShading } from "@lab/charts/ZoneShading";
+import { TOOLTIP_BOX_STYLE } from "@lab/charts/tooltipStyle";
+import { useLegendToggle } from "@lab/charts/useLegendToggle";
+import { ChartLegend, type ChartLegendEntry } from "@lab/charts/ChartLegend";
 
 const COLOR_GRID_LINE = SERIES_COLORS.grid_line;
 const GRID_LEGEND_KEY = "grid";

@@ -1,5 +1,5 @@
 import { ReferenceArea } from "recharts";
-import type { ZoneDef } from "../../api/types";
+import type { ZoneDef } from "./types";
 
 /**
  * Zone background shading, shared by every time-series chart. Returns an array of

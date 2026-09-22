@@ -686,7 +686,9 @@ export type FlexibilityEnvelope = {
 // ─── Timeline zones ───────────────────────────────────────────────────────────
 
 /** A planning zone returned by GET /timeline/all. */
-export type ZoneDef = { from: string; to: string; step_s: number };
+// Lives in the shared chart package now (both UIs shade time bands the same
+// way); re-exported here so every existing importer is unaffected.
+export type { ZoneDef } from "@lab/charts/types";
 
 // ─── Planner SSE events (Plan E) ──────────────────────────────────────────────
 

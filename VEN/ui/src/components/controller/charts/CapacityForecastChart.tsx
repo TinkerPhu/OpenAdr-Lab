@@ -1,20 +1,20 @@
 import { Stack, Typography } from "@mui/material";
 import type { CapacityCurve, CapacityCurvesResponse } from "../../../api/types";
-import type { NamedSample, TimestampedRow } from "../../charts/mergeSeries";
+import type { NamedSample, TimestampedRow } from "@lab/charts/mergeSeries";
 import {
   mergeTimestampedSeries,
   locfFillKeys,
   clipRowsToWindow,
   ensureNonEmptyRows,
-} from "../../charts/mergeSeries";
+} from "@lab/charts/mergeSeries";
 import {
   minSpanDomain,
   MIN_POWER_SPAN_KW,
   formatPowerTick,
-} from "../../charts/axisDomain";
-import { formatPowerValue, formatEnergyKwh } from "../../charts/unitFormat";
-import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
-import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
+} from "@lab/charts/axisDomain";
+import { formatPowerValue, formatEnergyKwh } from "@lab/charts/unitFormat";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
 
 interface CapacityForecastChartProps {

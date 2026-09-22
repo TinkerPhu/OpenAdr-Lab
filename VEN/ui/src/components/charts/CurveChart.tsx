@@ -9,10 +9,10 @@ import {
 } from "recharts";
 import { Box } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
-import { CELL_CHART_HEIGHT } from "./chartLayout";
-import { EmptyState } from "./EmptyState";
-import { formatTariffEurKwh, formatCo2IntensityGKwh } from "./unitFormat";
-import { niceAxis, tickFormatterForStep } from "./axisDomain";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { EmptyState } from "@lab/charts/EmptyState";
+import { formatTariffEurKwh, formatCo2IntensityGKwh } from "@lab/charts/unitFormat";
+import { niceAxis, tickFormatterForStep } from "@lab/charts/axisDomain";
 
 type CurvePoint = { fillPct: number; bidEurKwh: number; co2GKwh: number };
 

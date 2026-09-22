@@ -7,10 +7,10 @@ import {
   MIN_POWER_SPAN_KW,
   MIN_TARIFF_SPAN_EUR_KWH,
   roundedTimeTicks,
-} from "../../charts/axisDomain";
-import { formatTariffEurKwh, formatPowerValue } from "../../charts/unitFormat";
-import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
-import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
+} from "@lab/charts/axisDomain";
+import { formatTariffEurKwh, formatPowerValue } from "@lab/charts/unitFormat";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { clipToWindow, carryForwardLastKnown, ensureNonEmpty, formatTs } from "./tariffChartShared";
 
 interface TariffEnvelopeChartProps {

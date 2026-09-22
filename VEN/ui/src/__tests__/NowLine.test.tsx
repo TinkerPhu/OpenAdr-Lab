@@ -4,7 +4,7 @@
  * the chart's SVG cuts it off (measured on the live page: 9 px above the surface).
  */
 import { describe, it, expect } from "vitest";
-import { renderNowLine, renderTimeMarkerLine } from "../components/charts/NowLine";
+import { renderNowLine, renderTimeMarkerLine } from "@lab/charts/NowLine";
 
 type MarkerProps = { x: number; yAxisId: string; stroke: string; label?: unknown };
 const propsOf = (el: ReturnType<typeof renderNowLine>) => el.props as MarkerProps;

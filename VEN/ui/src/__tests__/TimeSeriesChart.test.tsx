@@ -57,8 +57,8 @@ vi.mock("recharts", () => ({
   },
 }));
 
-import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "../components/charts/TimeSeriesChart";
-import type { TimestampedRow } from "../components/charts/mergeSeries";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "@lab/charts/TimeSeriesChart";
+import type { TimestampedRow } from "@lab/charts/mergeSeries";
 
 const data: TimestampedRow[] = [
   { ts: 1000, values: { power: 1, cost: 0.1 } },

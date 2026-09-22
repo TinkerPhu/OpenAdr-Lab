@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "../components/charts/mergeSeries";
-import { assertTooltipMatchesData } from "../components/charts/testUtils/assertTooltipMatchesData";
+import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "@lab/charts/mergeSeries";
+import { assertTooltipMatchesData } from "@lab/charts/testUtils/assertTooltipMatchesData";
 
 describe("mergeTimestampedSeries", () => {
   it("merges a base series with extra named samples into one timestamp-keyed array", () => {
