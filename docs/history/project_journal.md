@@ -13308,3 +13308,44 @@ and behave's dry-run gate refused the entire suite rather than run it — which 
 and was entirely correct. `one-concept-one-function` applies to step definitions as much as to
 domain code, and a grep across `tests/features/steps/` for the step text takes ten seconds.
 
+## Fleet monitor phase 0 — deployed, and what only deployment found (2026-09-22)
+
+The branch went to the live lab: `lab-mqtt` recreated with the fleet credential, the BFF
+rebuilt and subscribed, all twenty VENs rebuilt and recreated, and the `fleet-monitoring`
+program with its standing `fleet-telemetry` event seeded on the live VTN. Verified on the real
+fleet rather than in a test stack: 20/20 VENs publishing status, telemetry and trace;
+`/api/fleet/power` summing twenty signed readings and answering history from the store;
+`/api/fleet/reactions` naming every VEN and the event *version* it acted on within ~15 s of the
+event being created; and the VTN holding an accumulating `DEMAND` report in `KW` carrying
+`eventID`, no `programID`, and a descriptor for every payload type present.
+
+**Three defects surfaced that no suite could have caught**, each for the same structural reason:
+the thing that was wrong lived in a place tests do not look.
+
+1. **`FLEET_MQTT_*` was on the `vtn` service instead of the `bff`.** The VTN has no idea what
+   those variables are; the BFF would have started, found no `FLEET_MQTT_HOST`, taken the
+   documented "this deployment has no fleet feed" path and logged one info line. The whole
+   feature dead in production with every test green, because the test stack sets it on
+   `test-bff` correctly. A feature gated on the *absence* of configuration fails silently by
+   construction — which is the price of that design and worth paying, but it means the deploy
+   check (`/api/health` showing `fleet.enabled`) is not optional.
+
+2. **Telemetry published on every sim tick.** D-1 says 5 s; `tick_s` is 1 s in production. The
+   first live minute put 862 rows into Postgres from seventeen VENs — five times the budgeted
+   storage and broker traffic. The tick is the site's simulation step and telemetry is an
+   observation cadence; coupling them makes every sim-rate change a change in how fast the
+   monitor grows. After the fix: 219 rows a minute from twenty VENs, which is the 5 s the
+   decision asked for.
+
+3. **The `fleet-monitoring` program could never have been seeded.** A program's
+   `payloadDescriptors` is a tagged union of event- and report-shaped descriptors, and the VTN
+   answers 400 without `objectType`. Nothing in the E2E stack seeds that program, and the wire
+   types the VEN itself uses are the concrete per-kind structs, which carry no tag — so the one
+   place the union is ever parsed is a real VTN.
+
+**The pattern.** All three sat in the seam between code and deployment: compose environment, a
+constant that only matters at production tick rates, and a seed script run by hand. Unit and
+BDD suites cover the code on both sides of a seam; nothing covers the seam itself. The practical
+answer is not more tests but a deploy that is *verified* rather than declared done — which is
+what the health-then-wire-then-report sweep above now is.
+

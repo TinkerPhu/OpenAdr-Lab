@@ -420,14 +420,23 @@ Each step is test-first and leaves the stack deployable.
 5. ~~**Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5)~~ — done.
 6. ~~**Broker + compose environment**~~ — done: the fleet has its own credential on `lab-mqtt`
    and all 20 VENs are pointed at it. The per-VEN ACL of §6.1 is still open.
-7. **VEN telemetry publisher** (§6.2) ✅ with its `/health` and VEN UI surface. Trace
-   correlation fields (§6.3) still open.
+7. **VEN telemetry publisher** (§6.2) ✅ with its `/health` and VEN UI surface, its own 5 s
+   cadence (D-1), and the §6.3 correlation fields on `OpenAdrArrived`/`OpenAdrExpired`. The
+   `PlanCycle` triggering-event ids remain open.
 8. **BFF ingest, store, query API** (§7) — done: `fleet_telemetry` + the 1-minute rollup with
    D-6 retention, `GET /api/fleet/power` answering live with no window and from the store with
    one, `GET /api/fleet/reactions?eventID=` over the `fleet_trace` table, and the UI surface
    (dashboard health card + a Fleet page with live table, last-hour sparkline and reactions).
    `GET /api/fleet/stream` (SSE) and `/api/fleet/signals` are still open, as is the
    Reports-page `fleet-telemetry` series.
+**Deployed live 2026-09-22 04:20-05:00 UTC** and verified against the real fleet: 20/20 VENs
+publishing status, telemetry and trace on `lab-mqtt`; the BFF subscribed with its store
+connected and no samples dropped; `/api/fleet/power` summing 20 signed readings, its history
+answering from `fleet_telemetry`; `/api/fleet/reactions` naming all 20 VENs and the event
+version each acted on, within ~15 s of the event being created; and the VTN holding an
+accumulating `DEMAND` report in `KW` with `eventID`, no `programID`, and both payload types
+declared. Three defects only the deployment could find are recorded in the journal.
+
 9. **BDD** — `tests/features/fleet_telemetry.feature` covers the feed being alive, the live sum
    being over only the VENs that reported, and telemetry still being queryable from the store a
    minute later. The reaction half (create an import-limit event, assert every targeted VEN's
