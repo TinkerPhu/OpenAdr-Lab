@@ -280,8 +280,9 @@ services:
   # ---------------------------------------------------------------------------
   test-ui:
     build:
-      context: ../VTN/ui
-      dockerfile: Dockerfile
+      # Repo root: npm workspace + the shared ui-charts/ source.
+      context: ..
+      dockerfile: VTN/ui/Dockerfile
     volumes:
       - ./nginx-test.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
@@ -300,8 +301,9 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-ui:
     build:
-      context: ../VEN/ui
-      dockerfile: Dockerfile
+      # Repo root: npm workspace + the shared ui-charts/ source.
+      context: ..
+      dockerfile: VEN/ui/Dockerfile
       args:
         VITE_VEN_1_URL: "http://test-ven-1:8080"
         VITE_VEN_2_URL: "http://test-ven-2:8080"
