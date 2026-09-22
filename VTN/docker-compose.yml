@@ -220,7 +220,11 @@ services:
   # UI — React + nginx operator console
   # ---------------------------------------------------------------------------
   ui:
-    build: ./ui
+    build:
+      # Repo root: this UI is an npm workspace and imports ui-charts/ (D-06's
+      # move applied to the UIs).
+      context: ..
+      dockerfile: VTN/ui/Dockerfile
     restart: unless-stopped
     ports:
       - "8221:80"

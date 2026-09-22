@@ -15,6 +15,7 @@ target/
 **/node_modules/
 VEN/data/
 VEN/ui/dist/
+VTN/ui/dist/
 # The VEN takes openleadr-wire as a git dependency, so the submodule checkout
 # is not part of its build -- and it is large.
 openleadr-rs/
