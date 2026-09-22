@@ -3,7 +3,7 @@ import {
   Alert, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
   TextField, Typography,
 } from "@mui/material";
-import { useFleetHistory, useFleetPower } from "../api/hooks";
+import { useFleetHistory, useFleetPower, useFleetSignals } from "../api/hooks";
 import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
@@ -27,6 +27,7 @@ export function FleetPage() {
 
   const live = useFleetPower();
   const history = useFleetHistory(chosen.minutes, chosen.stepSeconds);
+  const signals = useFleetSignals(chosen.minutes);
   const now = new Date();
 
   return (
@@ -71,6 +72,12 @@ export function FleetPage() {
           </TextField>
         </Stack>
 
+        {signals.data && signals.data.rejectedEvents > 0 && (
+          <Alert severity="warning" data-testid="fleet-signals-rejected">
+            {signals.data.rejectedEvents} event(s) could not be read — the shaded windows
+            below may be incomplete.
+          </Alert>
+        )}
         {history.isError && (
           <Alert severity="info" data-testid="fleet-history-error">
             No stored history — the telemetry store is not connected.
@@ -79,6 +86,7 @@ export function FleetPage() {
         {history.data && (
           <FleetPowerChart
             history={history.data}
+            signals={signals.data}
             windowMinutes={chosen.minutes}
             nowMs={now.getTime()}
           />

@@ -210,6 +210,84 @@ pub async fn fleet_reactions(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalsQuery {
+    pub from: DateTime<Utc>,
+    pub to: Option<DateTime<Utc>>,
+}
+
+/// `GET /api/fleet/signals?from&to` — what each VEN was being told, and when.
+///
+/// The companion to `/api/fleet/power`: that says what a site did, this says
+/// what it was asked to do. Drawn together, a dip at 09:15 stops being
+/// ambiguous between "a limit landed" and "somebody boiled a kettle".
+///
+/// Resolved with `lab-core`'s interval rule — the same one the VEN plans
+/// against, so a band drawn here and the limit actually applied there cannot
+/// disagree about when interval *i* runs.
+pub async fn fleet_signals(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<SignalsQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let to = q.to.unwrap_or_else(Utc::now);
+    if to <= q.from {
+        return Err(bad_request("`to` must be after `from`"));
+    }
+
+    let raw = ctx
+        .business
+        .get_all_pages("/events", None)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "fleet signals: could not list events");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "could not read events from the VTN"})),
+            )
+        })?;
+
+    // One malformed event costs only itself. The alternative — failing the
+    // whole request — turns one bad object into "the fleet had no signals",
+    // which is the more dangerous answer because it looks like a quiet grid.
+    let mut events = Vec::new();
+    let mut rejected = 0usize;
+    for row in raw {
+        match serde_json::from_value::<lab_core::event_timing::OadrEvent>(row) {
+            Ok(ev) => events.push(ev),
+            Err(e) => {
+                rejected += 1;
+                tracing::warn!(error = %e, "fleet signals: unreadable event skipped");
+            }
+        }
+    }
+
+    // Every VEN the feed knows about, so a targeted VEN that has published
+    // nothing still shows its bands rather than vanishing.
+    let ven_names: Vec<String> = ctx.fleet.read().await.keys().cloned().collect();
+
+    let vens: Vec<_> = ven_names
+        .iter()
+        .map(|name| {
+            let bands: Vec<_> = events
+                .iter()
+                .flat_map(|ev| crate::fleet_signals::bands_for_ven(ev, name, q.from, to))
+                .collect();
+            json!({ "venName": name, "bands": bands })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "from": q.from,
+        "to": to,
+        "vens": vens,
+        // Said out loud rather than folded into an empty result: an operator
+        // seeing fewer bands than expected needs to know whether the VTN sent
+        // something this BFF could not read.
+        "rejectedEvents": rejected,
+    })))
+}
+
 fn bad_request(message: &str) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::BAD_REQUEST, Json(json!({"error": message})))
 }

@@ -261,10 +261,27 @@ BFF would be a second opinion about a site's own behaviour, and wrong
 differently for every asset mix in the fleet. A VEN that published no power in
 one of the two windows shows a dash, never a zero.
 
+**Seeing what the fleet was told:**
+`GET /api/fleet/signals?from&to` resolves the VTN's events into per-VEN bands —
+"ven-3 was under a 3 kW import limit from 09:10 to 09:40" — using the same
+interval rule (`lab-core`) the VEN plans against, so a band drawn here and the
+limit actually applied there cannot disagree about when an interval runs.
+
+The Fleet page shades those windows behind the power curves, because a dip at
+09:15 means something different depending on whether a limit was in force. The
+Signals page (`/signals`) draws them per VEN as a timeline: one row per site,
+one block per interval, coloured by payload type. A VEN under nothing is absent
+rather than an empty row — it was not targeted, and listing it would imply it
+was.
+
+An event the BFF cannot parse is counted and shown, because fewer bands than
+the VTN sent must not look like a quiet grid.
+
 **What to test:**
 - `tests/features/fleet_telemetry.feature`
-- `VTN/bff/src/fleet.rs`, `VTN/bff/src/fleet_reactions.rs` and
-  `VEN/src/controller/telemetry_port.rs` unit tests
+- `VTN/bff/src/fleet.rs`, `VTN/bff/src/fleet_reactions.rs`,
+  `VTN/bff/src/fleet_signals.rs` and `VEN/src/controller/telemetry_port.rs`
+  unit tests
 
 ---
 

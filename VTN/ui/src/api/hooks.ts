@@ -56,6 +56,16 @@ export function useFleetReactions(eventId: string) {
   });
 }
 
+/** The signal bands over the same window the power chart is drawing. */
+export function useFleetSignals(minutes: number) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "signals", minutes],
+    queryFn: () => api.fleetSignals(new Date(Date.now() - minutes * 60_000).toISOString()),
+    refetchInterval: 30_000,
+  });
+}
+
 export function usePrograms() {
   const { api } = useBffContext();
   return useQuery({

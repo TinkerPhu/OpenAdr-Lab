@@ -117,15 +117,10 @@ impl EventTypeName for openleadr_wire::report::ReadingType {
 }
 
 /// Ask serde for a wire spelling, once, for every enum that has one.
-fn wire_name_of<T: serde::Serialize + std::fmt::Debug>(v: &T) -> String {
-    match serde_json::to_value(v) {
-        Ok(serde_json::Value::String(s)) => s,
-        other => {
-            debug_assert!(false, "{v:?} did not serialise to a string: {other:?}");
-            String::new()
-        }
-    }
-}
+// The rule moved to `lab_core::event_timing::wire_name` when the BFF needed
+// the same answer for its signal bands; this stays as the local name every
+// caller here already uses.
+use lab_core::event_timing::wire_name as wire_name_of;
 
 impl EventTypeName for EventType {
     fn wire_name(&self) -> String {

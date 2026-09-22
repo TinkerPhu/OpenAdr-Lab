@@ -4,6 +4,7 @@ mod db;
 mod error;
 mod fleet;
 mod fleet_reactions;
+mod fleet_signals;
 mod fleet_store;
 mod recorder;
 mod routes;
@@ -183,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
         // the telemetry store; this is what a dashboard opens with.
         .route("/api/fleet/power", get(routes::fleet::fleet_power))
         .route("/api/fleet/reactions", get(routes::fleet::fleet_reactions))
+        .route("/api/fleet/signals", get(routes::fleet::fleet_signals))
         .route("/api/reports/:id", delete(routes::reports::delete_report))
         .route("/api/metrics", get(routes::metrics::get_metrics))
         .route_layer(middleware::from_fn_with_state(
