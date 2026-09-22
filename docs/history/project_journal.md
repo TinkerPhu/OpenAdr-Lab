@@ -13263,3 +13263,48 @@ arithmetic is exactly the divergence D-06 exists to prevent. That path dependenc
 BFF's Docker build context to the repo root, the same change the VEN needed — including the
 `cargo clean -p` that stops a stub `.rlib` from silently satisfying the dependency.
 
+## Fleet monitor phase 0 — the reaction chain, and reports that remember (2026-09-22)
+
+**What was built.** Two things that together answer "did the fleet do anything about that
+event". Each VEN now publishes its controller decisions to
+`openadr-lab/fleet/<ven>/trace`, carrying the event id and the `modificationDateTime` of the
+version it acted on; the BFF stores them and `GET /api/fleet/reactions?eventID=` joins them
+against the telemetry to list who saw the event, when they next replanned, and what their power
+did either side of it. Separately, a report now accumulates its intervals instead of replacing
+them (D-3), so the series the VTN holds is more than the last submission's two intervals.
+
+**Why the trace goes through a broadcast channel.** The publisher subscribes; the code that
+makes decisions does not call it. A decision is a fact about the controller, and it must not
+become slower or fallible because something is listening — the same reason the event log has a
+channel rather than a hook. Trace messages are QoS 1 and *not* retained, the opposite of
+telemetry on both counts: a decision happens once, so losing one silently breaks the chain it
+belongs to, but replaying an hour-old arrival to a late subscriber would be a lie about when it
+happened.
+
+**What the reactions endpoint refuses to decide.** Whether a VEN "reacted". It reports the
+numbers and leaves the judgement to the operator. A threshold invented in the BFF would be a
+second opinion about a site's own behaviour (`asset-competence-assurance`) and wrong differently
+for every asset mix in the fleet. The same instinct runs through the whole feature: a window in
+which a VEN published nothing is a dash, never a zero.
+
+**D-3 changed shape once the arithmetic was done.** The recorded decision said a 24 h window.
+At the fleet grid — 60 s intervals, `frequency: 1` — that is ~1440 intervals, ~200 KB of JSON,
+PUT every minute, per VEN: megabytes a minute into the Pi, for a series the BFF's telemetry
+store already keeps at full resolution. The bound became a count (120 intervals) rather than a
+duration, which bounds the thing that actually needs bounding and holds for whatever grid an
+event asks for. The deviation is written into the plan next to the original decision rather than
+buried in a constant.
+
+**The near-miss worth remembering.** Accumulation changes the interval set *after* the reporter
+has derived `payloadDescriptors` from that submission's intervals. A payload type present only
+in a carried-forward interval therefore went out undeclared — GB-50 verbatim, reintroduced by
+the commit that added accumulation, one branch after the migration that fixed it. The general
+shape: **a transform applied after a contract was computed invalidates the contract.** The fix
+re-derives the descriptors from what is actually being sent; the test that catches it was
+verified by disabling the fix, not by assuming.
+
+**And a smaller one.** The new BDD step `I GET BFF health` already existed in another step file,
+and behave's dry-run gate refused the entire suite rather than run it — which cost a build cycle
+and was entirely correct. `one-concept-one-function` applies to step definitions as much as to
+domain code, and a grep across `tests/features/steps/` for the step text takes ten seconds.
+
