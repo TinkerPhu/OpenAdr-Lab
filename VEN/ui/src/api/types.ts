@@ -111,6 +111,19 @@ export type ReportSubmission = {
   error: string | null;
 };
 
+/**
+ * How many intervals one report currently carries (D-3).
+ *
+ * Visible because this window is what the VTN's copy of the report contains:
+ * stuck at one means accumulation is not happening, pinned at `maxIntervals`
+ * means it is trimming the oldest away.
+ */
+export type ReportWindow = {
+  reportName: string;
+  intervals: number;
+  maxIntervals: number;
+};
+
 export type SensorSnapshot = {
   id: string;
   ts: string;

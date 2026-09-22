@@ -48,6 +48,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route("/reports/:id", put(reports::put_report))
         .route("/reports/submissions", get(reports::get_report_submissions))
+        .route("/reports/windows", get(reports::get_report_windows))
         .route("/sim", get(sim::get_sim))
         .route("/sim/schema", get(sim::get_sim_schema))
         .route("/sim/reset/:asset_id", post(sim::post_sim_reset))

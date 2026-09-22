@@ -29,6 +29,7 @@ mod obligations;
 mod openadr_objects;
 mod persistence;
 mod report_submissions;
+mod report_windows;
 mod site_headroom_forecast;
 mod task_status;
 mod wire_health;
@@ -163,6 +164,9 @@ pub struct AppState {
     /// `notifications` (see `state/event_log.rs`).
     pub event_log: Arc<RwLock<crate::entities::ring_buffer::RingBuffer<EventLogEntry>>>,
     pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
+    /// D-3: what each report has already told the VTN, so a submission adds to
+    /// the series rather than replacing it (`state/report_windows.rs`).
+    pub report_windows: Arc<RwLock<report_windows::ReportWindows>>,
     /// Live controller-trace decisions, for anything watching rather than
     /// polling `/trace/events`. The fleet trace publisher is the first such
     /// subscriber (phase 0 §6.2); the ring above remains the record.
@@ -223,6 +227,7 @@ impl AppState {
                 event_log::EVENT_LOG_RING_CAP,
             ))),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
+            report_windows: Arc::new(RwLock::new(Default::default())),
             controller_trace_tx: tokio::sync::broadcast::channel(64).0,
             report_submissions: Arc::new(RwLock::new(
                 crate::entities::ring_buffer::RingBuffer::new(

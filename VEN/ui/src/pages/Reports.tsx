@@ -8,7 +8,7 @@ import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
 import type { Report, ReportSubmission, VtnEvent } from "../api/types";
 import {
-  useReports, useReportSubmissions, useSubmitReport, useUpdateReport, useEvents, usePrograms,
+  useReports, useReportSubmissions, useReportWindows, useSubmitReport, useUpdateReport, useEvents, usePrograms,
   useObligations,
 } from "../api/hooks";
 import { useVenContext } from "../App";
@@ -73,6 +73,7 @@ export function ReportsPage() {
   const { data: events = [] } = useEvents();
   const { data: programs = [] } = usePrograms();
   const { data: obligations = [] } = useObligations();
+  const { data: reportWindows = [] } = useReportWindows();
   // eslint-disable-next-line react-hooks/purity -- intentional: captures wall time for the overdue check below
   const nowMs = Date.now();
   const submitMut = useSubmitReport();
@@ -212,6 +213,43 @@ export function ReportsPage() {
               <TableRow>
                 <TableCell colSpan={5} align="center" data-testid="obligations-empty">
                   No pending obligations
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* D-3: what each report is currently carrying. A `PUT` replaces the
+          object on the VTN, so the series it holds is exactly this window --
+          stuck at 1 means accumulation is not happening, and pinned at the cap
+          means the oldest intervals are being trimmed away. */}
+      <TableContainer component={Paper}>
+        <Table size="small" data-testid="report-windows-table">
+          <TableHead>
+            <TableRow>
+              <TableCell colSpan={2}>
+                <Typography variant="subtitle1">Accumulated Report Intervals</Typography>
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Report</TableCell>
+              <TableCell align="right">Intervals carried</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {reportWindows.map((w) => (
+              <TableRow key={w.reportName} data-testid={`report-window-${w.reportName}`}>
+                <TableCell sx={{ fontFamily: "monospace" }}>{w.reportName}</TableCell>
+                <TableCell align="right">
+                  {w.intervals} / {w.maxIntervals}
+                </TableCell>
+              </TableRow>
+            ))}
+            {reportWindows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={2} align="center" data-testid="report-windows-empty">
+                  No report is accumulating yet
                 </TableCell>
               </TableRow>
             )}
