@@ -1,5 +1,5 @@
 import type {
-  VtnEvent, Program, Report, ReportSubmission, SensorSnapshot, SimSnapshot, TraceEntry,
+  VtnEvent, Program, Report, ReportSubmission, ReportWindow, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
@@ -181,6 +181,12 @@ export class VenApi {
   async reportSubmissions(): Promise<ReportSubmission[]> {
     const r = await this.getReq("/reports/submissions");
     if (!r.ok) throw new Error(`report submissions ${r.status}`);
+    return r.json();
+  }
+
+  async reportWindows(): Promise<ReportWindow[]> {
+    const r = await this.getReq("/reports/windows");
+    if (!r.ok) throw new Error(`report windows ${r.status}`);
     return r.json();
   }
 

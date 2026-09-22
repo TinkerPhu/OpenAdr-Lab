@@ -41,6 +41,10 @@ const mockObligations = [
 
 let mockSubmissions: unknown[] = [];
 
+let mockReportWindows: unknown[] = [
+  { reportName: "ob-ven-1-evt-1-DEMAND", intervals: 37, maxIntervals: 120 },
+];
+
 const mutateMock = vi.fn();
 const updateMutateMock = vi.fn();
 
@@ -48,6 +52,7 @@ vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
   useReportSubmissions: () => ({ data: mockSubmissions }),
+  useReportWindows: () => ({ data: mockReportWindows }),
   useEvents: () => ({ data: mockEvents }),
   usePrograms: () => ({ data: mockPrograms }),
   useObligations: () => ({ data: mockObligations }),
@@ -272,5 +277,23 @@ describe("buildExampleResources", () => {
     expect(result[0].intervals[0].payloads).toHaveLength(2);
     expect(result[0].intervals[0].payloads[0].values[0]).toBe(1);
     expect(result[0].intervals[1].payloads[0].values[0]).toBe(1);
+  });
+
+  /* D-3: this window *is* what the VTN's copy of the report contains, since a
+   * PUT replaces the object. A reader must be able to see it rather than
+   * infer it from the reports themselves. */
+  it("shows how many intervals each report is carrying", () => {
+    renderReports();
+    const row = screen.getByTestId("report-window-ob-ven-1-evt-1-DEMAND");
+    expect(row).toHaveTextContent("37 / 120");
+  });
+
+  it("says so when nothing is accumulating yet, rather than showing an empty table", () => {
+    mockReportWindows = [];
+    renderReports();
+    expect(screen.getByTestId("report-windows-empty")).toBeVisible();
+    mockReportWindows = [
+      { reportName: "ob-ven-1-evt-1-DEMAND", intervals: 37, maxIntervals: 120 },
+    ];
   });
 });

@@ -326,11 +326,32 @@ shows its own fleet-publisher status (connected / last publish).
 |---|---|---|
 | D-1 | Telemetry cadence | 5 s default, configurable per VEN via profile/env |
 | D-2 | `DEMAND` unit | **kW**, declared in `payloadDescriptors`; W stays the internal field unit (§5) |
-| D-3 | Report accumulation | **one report object per VEN** per (event, payloadType): stable id, intervals appended by `PUT`, trimmed to a 24 h window (§5) |
+| D-3 | Report accumulation | **one report object per VEN** per (event, payloadType): stable id, intervals appended by `PUT`, trimmed to a bounded window — **120 intervals, not 24 h**, see below (§5) |
 | D-4 | Migrate `USAGE` to energy in this phase | **No** — `exp-*` reports and `experiments/kpi.py` stay as they are; the unit fix is its own change (`docs/BACKLOG_OpenADR_Cert.md` §6) |
 | D-5 | Keep the timer report path | **No** — deleted once the standing monitoring event exists (resolves R-85 / F-9) |
 | D-6 | Retention | raw telemetry 7 days, 1-min rollup 90 days |
 | D-7 | Where telemetry is stored | **The existing Postgres instance** (`vtn-db-1`), schema `lab_recorder` — see below |
+
+### D-3 revised: bound the interval count, not the window's duration
+
+Implementing this exposed arithmetic the original decision was made without. The fleet
+monitoring event's grid is 60 s with `frequency: 1`, so a 24 h window is ~1440 intervals —
+roughly 200 KB of JSON, `PUT` every minute, per VEN. Across twenty VENs that is megabytes a
+minute into the Pi, for a series the BFF's telemetry store already keeps at full resolution.
+
+So the bound is a count (`MAX_REPORT_INTERVALS = 120`, two hours at that grid) rather than a
+duration. It bounds the quantity that actually needs bounding — the request size — and it holds
+for whatever grid an event asks for. Raising it raises every `PUT` in direct proportion.
+
+Nothing is persisted: after a restart the window refills from empty and the VTN's copy of the
+report shrinks before growing back. The durable record of every interval is the BFF recorder's
+archive of each report version (GB-36), and the bound is small enough that refilling takes
+minutes.
+
+Forecast obligations (`historical: false`) are **not** accumulated. A forecast says what the VEN
+now expects and each submission supersedes the last one whole; accumulating it would leave
+intervals from a forecast the VEN has since changed its mind about sitting in the same array as
+the current one, indistinguishable from it.
 
 ### D-7: Postgres, not a second database
 
@@ -375,8 +396,8 @@ Each step is test-first and leaves the stack deployable.
    taught `kpi.py` to read the declared unit, so the reason the fleet series is `DEMAND` is now
    simply that `DEMAND` is the spec's real-power type rather than that `USAGE` was non-spec.
 3. **Descriptor semantics and accumulation** — F-4 ✅ (closed by the 3.1 migration, plus the
-   width-vs-cadence split and `OPEN_INTERVALS` this plan needed), F-5 ✅. D-3 (append + 24 h
-   trim) open.
+   width-vs-cadence split and `OPEN_INTERVALS` this plan needed), F-5 ✅, D-3 ✅ (append +
+   bounded trim — see the revised decision below; the bound is a count, not 24 h).
 4. ~~**Shared crate** extraction (D-06)~~ — done: `lab-core` holds `time_series`, `time_window`
    and `event_timing`. The VEN's Docker context moved to the repo root for the path dependency.
 5. ~~**Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5)~~ — done.

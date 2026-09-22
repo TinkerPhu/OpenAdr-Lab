@@ -23,6 +23,31 @@ pub async fn get_report_submissions(State(ctx): State<AppCtx>) -> impl IntoRespo
     Json(ctx.state.report_submissions().await)
 }
 
+/// GET /reports/windows — how many intervals each report currently carries
+/// (D-3), newest-named first.
+///
+/// The accumulated window decides what the VTN's copy of a report contains, so
+/// it is state a reader must be able to see rather than infer from the reports
+/// themselves (`ui-transparency`). A window stuck at one interval means
+/// accumulation is not happening; one pinned at the cap means it is trimming.
+pub async fn get_report_windows(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    let mut windows: Vec<_> = ctx
+        .state
+        .report_window_sizes()
+        .await
+        .into_iter()
+        .map(|(report_name, intervals)| {
+            serde_json::json!({
+                "reportName": report_name,
+                "intervals": intervals,
+                "maxIntervals": crate::controller::report_accumulator::MAX_REPORT_INTERVALS,
+            })
+        })
+        .collect();
+    windows.sort_by(|a, b| a["reportName"].as_str().cmp(&b["reportName"].as_str()));
+    Json(windows)
+}
+
 /// Build the submission-outcome record from an upsert/update result. Kept
 /// pure (no I/O) so the accepted/rejected branching is unit-testable without
 /// standing up a VTN HTTP stand-in.

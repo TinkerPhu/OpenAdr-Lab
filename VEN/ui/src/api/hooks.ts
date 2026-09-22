@@ -160,6 +160,15 @@ export function useUpdateReport() {
 }
 
 /** WP-T5 (G-5): recent report submission outcomes, for the per-row status chip. */
+export function useReportWindows() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["reportWindows", api.baseUrl],
+    queryFn: () => api.reportWindows(),
+    refetchInterval: 30_000,
+  });
+}
+
 export function useReportSubmissions() {
   const { api } = useVenContext();
   return useQuery({

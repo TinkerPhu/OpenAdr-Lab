@@ -58,7 +58,21 @@ impl ObligationService {
                 now,
             );
             let next_due = now + chrono::Duration::seconds(ob.submit_every_s as i64);
-            if let Some(report) = report_opt {
+            if let Some(mut report) = report_opt {
+                // D-3: a measurement report sends the whole remembered
+                // window, not only what closed since the last submission. A
+                // `PUT` replaces the object on the VTN, so sending just the
+                // new intervals would leave the series two intervals wide for
+                // ever.
+                //
+                // A *forecast* report is the opposite: it says what the VEN now
+                // expects, and every submission supersedes the last one whole.
+                // Accumulating it would leave intervals from a forecast the VEN
+                // has since changed its mind about sitting in the same array as
+                // the current one, indistinguishable from it.
+                if ob.historical {
+                    accumulate_report_window(state, &mut report, now).await;
+                }
                 match vtn.upsert_report(report).await {
                     Ok(()) => {
                         state.rearm_obligation(ob.id, next_due).await;
@@ -116,6 +130,28 @@ impl ObligationService {
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
+
+/// Replace each resource's freshly-closed intervals with its accumulated
+/// window (D-3).
+///
+/// Keyed per report *and* resource: two resources of one report are two
+/// series, and merging them would put one asset's values into the other's.
+async fn accumulate_report_window(
+    state: &AppState,
+    report: &mut crate::controller::vtn_port::OadrReportBody,
+    now: DateTime<Utc>,
+) {
+    let Some(report_name) = report.reportName.clone() else {
+        // Without a stable name there is nothing to accumulate against: every
+        // submission would create a new report anyway.
+        return;
+    };
+    for resource in report.resources.iter_mut() {
+        let key = format!("{report_name}/{}", resource.resourceName);
+        let fresh = std::mem::take(&mut resource.intervals);
+        resource.intervals = state.accumulate_report_intervals(&key, fresh, now).await;
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -252,6 +288,110 @@ mod tests {
             1,
             "not due yet — no second report submitted"
         );
+    }
+
+    /// D-3: a `PUT` replaces the report on the VTN, so each submission has to
+    /// carry the whole window. Sending only what closed since last time leaves
+    /// the series permanently two intervals wide, which is the shape a reader
+    /// cannot tell from "this VEN only ran for two minutes".
+    #[tokio::test]
+    async fn measurement_reports_accumulate_their_intervals_across_submissions() {
+        let state = AppState::new();
+        let vtn = MockVtn::new();
+        let first = ts(1800);
+        state
+            .add_obligations(vec![make_due_obligation(first)])
+            .await;
+
+        ObligationService::check_and_report(&state, make_samples(), &vtn, "test-ven", first, None)
+            .await
+            .unwrap();
+        let first_count = vtn.submitted()[0].resources[0].intervals.len();
+        assert!(first_count >= 1);
+
+        // The second submission sees only the samples that arrived since --
+        // which is what the live sample buffer hands it, and the whole reason
+        // the window has to be remembered here.
+        let second = first + chrono::Duration::seconds(1800);
+        let mut samples = HashMap::new();
+        samples.insert(
+            "asset-1".to_string(),
+            vec![
+                AssetReportSample {
+                    ts: ts(1800),
+                    power_kw: 2.0,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(2700),
+                    power_kw: 3.0,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(3600),
+                    power_kw: 4.0,
+                    soc: None,
+                },
+            ],
+        );
+        ObligationService::check_and_report(&state, samples, &vtn, "test-ven", second, None)
+            .await
+            .unwrap();
+
+        let submitted = vtn.submitted();
+        assert_eq!(submitted.len(), 2);
+        let second_intervals = &submitted[1].resources[0].intervals;
+        assert_eq!(
+            second_intervals.len(),
+            first_count + 1,
+            "the second submission must carry the earlier interval as well as              the newly closed one, not replace it"
+        );
+        let earliest = submitted[0].resources[0].intervals[0]
+            .intervalPeriod
+            .as_ref()
+            .and_then(|p| p.start.clone());
+        assert_eq!(
+            second_intervals[0]
+                .intervalPeriod
+                .as_ref()
+                .and_then(|p| p.start.clone()),
+            earliest,
+            "the window still starts where the first submission started"
+        );
+    }
+
+    /// A forecast says what the VEN now expects, and each submission
+    /// supersedes the last one whole. Accumulating it would leave intervals
+    /// from a forecast the VEN has changed its mind about sitting in the same
+    /// array as the current one, indistinguishable from it.
+    #[tokio::test]
+    async fn forecast_reports_are_not_accumulated() {
+        let state = AppState::new();
+        let now = ts(1800);
+        let mut ob = make_due_obligation(now);
+        ob.payload_type = "USAGE_FORECAST".to_string();
+        ob.historical = false;
+        state.add_obligations(vec![ob]).await;
+
+        ObligationService::check_and_report(
+            &state,
+            make_samples(),
+            &vtn_for_forecast(),
+            "test-ven",
+            now,
+            None,
+        )
+        .await
+        .ok();
+
+        assert!(
+            state.report_window_sizes().await.is_empty(),
+            "a forecast obligation must not open an accumulation window"
+        );
+    }
+
+    fn vtn_for_forecast() -> MockVtn {
+        MockVtn::new()
     }
 
     #[tokio::test]
