@@ -2239,3 +2239,27 @@ extraction tells you nothing about whether the difference landed somewhere or va
 Related: a `#[cfg(test)]` helper is invisible to every other crate's tests, because `cfg(test)`
 is set for the crate being compiled as a test target, not for its dependencies. A fixture builder
 shared across crates has to be ordinary code.
+
+## A transform after the contract invalidates the contract (2026-09-22)
+
+The VEN builds a report's `payloadDescriptors` from the intervals it just built. Adding interval
+accumulation (D-3) changed the interval set *after* that, so a payload type present only in a
+carried-forward interval travelled undeclared — GB-50 reintroduced, one branch after the
+migration that fixed it.
+
+The general rule: when a declaration describes a payload, anything that changes the payload
+afterwards has to re-derive the declaration. Look for this shape whenever a pipeline gains a
+step between "describe" and "send" — accumulation, filtering, merging, resampling, redaction.
+The structural defence is to derive the contract at the boundary that sends, not at the point
+that builds.
+
+Related: the test for it was confirmed by disabling the fix and watching it fail. A test written
+after the fix, never seen red, proves only that it compiles.
+
+## `one-concept-one-function` includes BDD step definitions (2026-09-22)
+
+A new `@when("I GET BFF health")` duplicated one already defined in another step file. behave
+refuses the whole suite on an ambiguous step, so the cost was a full build-and-deploy cycle for
+a ten-second grep. Before adding a step, grep `tests/features/steps/` for its text — and prefer
+reusing the existing step over rewording the feature to avoid it.
+
