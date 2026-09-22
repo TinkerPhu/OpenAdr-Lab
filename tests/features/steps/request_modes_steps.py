@@ -44,6 +44,18 @@ def step_pin_pv_forecast_zero(context):
 
 @when('I wait for a user notification containing "{text}"')
 def step_wait_for_notification(context, text):
+    # Only notifications that arrive from here on count. The ring is cumulative
+    # and survives between scenarios, so matching against all of it lets a
+    # second run of the same scenario "pass" in 0.1s on the *previous* run's
+    # notifications -- observed 2026-09-22: three consecutive 0.1s passes of a
+    # scenario that injects a 3 kW deviation and waits for two edges, none of
+    # which exercised anything. Ids rather than timestamps: the VEN's clock and
+    # the runner's are not the same clock.
+    already = set()
+    r = ven_get("/notifications")
+    if r.ok:
+        already = {n.get("id") for n in r.json()}
+
     def fetch():
         r = ven_get("/notifications")
         if not r.ok:
@@ -51,7 +63,9 @@ def step_wait_for_notification(context, text):
         return r.json()
 
     def has_text(notes):
-        return notes is not None and any(text in n.get("message", "") for n in notes)
+        return notes is not None and any(
+            text in n.get("message", "") and n.get("id") not in already for n in notes
+        )
 
     # 300s, not 180s. Measured on a quiet Node1 (host load ~4, the settle gate
     # satisfied): the "Reactive correction cleared" edge landed 181.0s after
