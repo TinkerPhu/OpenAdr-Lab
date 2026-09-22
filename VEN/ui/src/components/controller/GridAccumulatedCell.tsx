@@ -7,12 +7,12 @@ import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
-} from "../charts/chartLayout";
+} from "@lab/charts/chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { ZoneDef } from "../../api/types";
-import { formatSignedPowerValue } from "../charts/unitFormat";
+import { formatSignedPowerValue } from "@lab/charts/unitFormat";
 
 /** Discover all asset IDs present in the timelines (everything except "grid"). */
 function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {

@@ -1,9 +1,9 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { SimSnapshot } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, niceAxis } from "../charts/axisDomain";
-import { formatPowerValue } from "../charts/unitFormat";
-import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, niceAxis } from "@lab/charts/axisDomain";
+import { formatPowerValue } from "@lab/charts/unitFormat";
+import { DIAGNOSTIC_CHART_HEIGHT } from "@lab/charts/chartLayout";
 
 interface SimProfileChartProps {
   data: SimSnapshot;

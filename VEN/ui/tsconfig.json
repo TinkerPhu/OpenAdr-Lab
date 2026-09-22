@@ -15,7 +15,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vitest/globals", "vite/client"]
+    "types": ["vitest/globals", "vite/client"],
+    "baseUrl": ".",
+    // `@lab/charts` is the shared chart source at ui-charts/. Its own bare
+    // imports (react, recharts, MUI) need no mapping: the npm workspace root
+    // hoists them to /node_modules, which is on the resolution path from
+    // anywhere in the repo. That hoisting is also what guarantees one copy of
+    // React in the bundle.
+    "paths": { "@lab/charts/*": ["../../ui-charts/src/*"] }
   },
-  "include": ["src"]
+  "include": ["src", "../../ui-charts/src"]
 }

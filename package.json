@@ -1,0 +1,14 @@
+{
+  "name": "openadr-lab-ui",
+  "private": true,
+  "version": "0.0.0",
+  "description": "npm workspace root. Exists so the two UIs and the chart source they share resolve their dependencies from one hoisted node_modules — nothing is published from here, and no application code lives here.",
+  "workspaces": [
+    "VEN/ui",
+    "VTN/ui"
+  ],
+  "scripts": {
+    "test": "npm test --workspace VEN/ui && npm test --workspace VTN/ui",
+    "build": "npm run build --workspace VEN/ui && npm run build --workspace VTN/ui"
+  }
+}

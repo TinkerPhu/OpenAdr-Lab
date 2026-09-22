@@ -6,10 +6,10 @@ import {
   MIN_CO2_RATE_SPAN_G_H,
   MIN_COST_RATE_SPAN_EUR_H,
   roundedTimeTicks,
-} from "../../charts/axisDomain";
-import { formatCo2RateGH, formatCostRateEurH } from "../../charts/unitFormat";
-import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
-import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../../charts/TimeSeriesChart";
+} from "@lab/charts/axisDomain";
+import { formatCo2RateGH, formatCostRateEurH } from "@lab/charts/unitFormat";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { clipToWindow, ensureNonEmpty, formatTs } from "./tariffChartShared";
 
 interface GridRatesChartProps {

@@ -10,7 +10,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import type { ZoneDef } from "../../api/types";
+import type { ZoneDef } from "./types";
 import { renderNowLine } from "./NowLine";
 import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "./tooltipStyle";

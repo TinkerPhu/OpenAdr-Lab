@@ -13,7 +13,9 @@ export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string
 // ─── Shared UI colors ─────────────────────────────────────────────────────────
 
 /** NOW reference line / label across all timeline charts. */
-export const COLOR_NOW = "#f44336";
+// Moved to the shared chart package with NowLine; re-exported so the
+// controller components that already import it here keep working.
+export { COLOR_NOW } from "@lab/charts/types";
 
 /** Fallback color for unknown/unregistered asset IDs. */
 export const COLOR_ASSET_FALLBACK = "#888";

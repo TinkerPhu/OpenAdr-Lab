@@ -1,5 +1,5 @@
 import { ReferenceLine } from "recharts";
-import { COLOR_NOW } from "../controller/types";
+import { COLOR_NOW } from "./types";
 
 /**
  * A vertical time marker (now, a commitment start, ...), shared by every time-series chart.

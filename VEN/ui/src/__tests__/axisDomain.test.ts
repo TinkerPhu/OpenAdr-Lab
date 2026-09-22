@@ -8,7 +8,7 @@ import {
   roundedTimeTicks,
   niceAxis,
   tickFormatterForStep,
-} from "../components/charts/axisDomain";
+} from "@lab/charts/axisDomain";
 
 describe("minSpanDomain", () => {
   it("expands a near-zero toggling series to the minimum span, centered on the data", () => {

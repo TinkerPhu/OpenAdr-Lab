@@ -8,7 +8,7 @@ import {
   formatTariffEurKwh,
   formatSocPct,
   formatTemperatureC,
-} from "../components/charts/unitFormat";
+} from "@lab/charts/unitFormat";
 
 describe("canonical per-unit formatting", () => {
   it("power: Watts below 1kW, kW at/above, matching the axis-tick rule exactly", () => {
