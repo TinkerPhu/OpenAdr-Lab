@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
@@ -42,28 +42,22 @@ pub(super) async fn run_plan_cycle(
     notifier: &crate::services::notify::Notifier,
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
-    trigger: PlanTrigger,
-    trigger_reason: &str,
+    // The kind and its cause together: two parameters for one fact invited
+    // them to disagree, and the reason string is derived rather than passed.
+    signal: &PlanTriggerSignal,
     wall_now: DateTime<Utc>,
     now: DateTime<Utc>,
     history: Option<Arc<dyn HistoryPort>>,
 ) {
-    let rates = state.planned_tariffs().await;
+    let trigger = signal.trigger.clone();
+    let reason = format!("{trigger:?}");
+    let (trigger_reason, trigger_event_ids) = (reason.as_str(), signal.event_ids.as_slice());
+    // One read of the world, before anything is solved against it.
+    let st = super::cycle_state::read_cycle_state(state, active_objective).await;
     let capacity = state.capacity_state().await;
     let capacity_schedule = state.planned_capacity_limits().await;
     let alert_windows = state.alert_windows().await;
     let simple_windows = state.simple_windows().await;
-
-    let ev_sess = state.ev_session().await;
-    let heat_tgt = state.heater_target().await;
-    let shift_loads = state.shiftable_loads().await;
-    let bl_override = state.baseline_override().await;
-    let obj = *active_objective.read().await;
-    // Read inject state BEFORE cloning the sim: the one-shot pv_irradiance
-    // inject is cleared by the sim tick after applying it — reading after the
-    // clone can race that clear and lose the pending value (stale offset=0).
-    let inject_snap = state.inject_state().await;
-    let pv_forecast_override = inject_snap.pv_plan_kw;
     // Clone SimState snapshot so the Mutex is released immediately.
     // MILP solving takes 18-60s on Node1 ARM64; holding the lock would
     // block sim ticks and /capability reads for the entire duration.
@@ -71,12 +65,12 @@ pub(super) async fn run_plan_cycle(
 
     // Patch the clone when pv_irradiance inject is pending and the tick hasn't
     // applied it yet (no-op when the tick ran first — see fn docs).
-    apply_pending_pv_inject(&mut sim_snap, &inject_snap, now);
+    apply_pending_pv_inject(&mut sim_snap, &st.inject_snap, now);
 
     // ── Emit solving_started ──────────────────────────────────────
     let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
     let _ = event_tx.send(PlannerEvent::SolvingStarted {
-        objective: obj,
+        objective: st.obj,
         num_slots,
         triggered_at: now,
     });
@@ -99,7 +93,7 @@ pub(super) async fn run_plan_cycle(
         battery_c_terminal_eur_kwh,
         heater_anchor,
     } = crate::services::planning::build_plan_cycle_inputs(
-        &rates,
+        &st.rates,
         planner,
         asset_params,
         current_plan.as_ref(),
@@ -114,8 +108,8 @@ pub(super) async fn run_plan_cycle(
         n_slots,
         &cum_s,
         now,
-        ev_sess.as_ref(),
-        heat_tgt.as_ref(),
+        st.ev_sess.as_ref(),
+        st.heat_tgt.as_ref(),
         asset_params,
         planner,
         lambda_sw,
@@ -143,12 +137,12 @@ pub(super) async fn run_plan_cycle(
         asset_params.to_vec(),
         now,
         trigger.clone(),
-        ev_sess,
-        heat_tgt,
-        shift_loads,
-        bl_override,
-        Some(obj),
-        pv_forecast_override,
+        st.ev_sess,
+        st.heat_tgt,
+        st.shift_loads,
+        st.bl_override,
+        Some(st.obj),
+        st.pv_forecast_override,
         pv_live_forecast_kw,
         base_load_live_forecast_kw,
         weather,
@@ -180,12 +174,13 @@ pub(super) async fn run_plan_cycle(
         plan,
         &trigger,
         trigger_reason,
+        trigger_event_ids,
         planner.plan_adoption_threshold_eur,
         planner.plan_adoption_decay_s,
         planner.gate_switch_penalty_eur,
         crate::services::planning::heater_stage_size_kw(asset_params),
         solver_ms,
-        obj,
+        st.obj,
         state,
         event_tx,
         wall_now, // gate decay measures real plan age; aligned `now` can lag replan_s

@@ -15,7 +15,9 @@ use crate::entities::sim_inject::SimInjectState;
 /// `arbiter.rs`'s module doc for why (§1's feature-017 postmortem).
 pub(crate) async fn apply_residual_escalation(
     state: &crate::state::AppState,
-    trigger_tx: &std::sync::Arc<tokio::sync::watch::Sender<crate::entities::asset::PlanTrigger>>,
+    trigger_tx: &std::sync::Arc<
+        tokio::sync::watch::Sender<crate::entities::asset::PlanTriggerSignal>,
+    >,
     absorbed_kwh_by_asset: &HashMap<String, f64>,
     now: DateTime<Utc>,
 ) {
@@ -38,7 +40,9 @@ pub(crate) async fn apply_residual_escalation(
         .is_none_or(|last| (now - last).num_seconds() >= controller::arbiter::RESIDUAL_COOLDOWN_S);
     if cooldown_elapsed {
         state.set_last_residual_trigger_at(now).await;
-        let _ = trigger_tx.send(crate::entities::asset::PlanTrigger::ResidualThreshold);
+        let _ = trigger_tx.send(crate::entities::asset::PlanTriggerSignal::bare(
+            crate::entities::asset::PlanTrigger::ResidualThreshold,
+        ));
     }
 }
 

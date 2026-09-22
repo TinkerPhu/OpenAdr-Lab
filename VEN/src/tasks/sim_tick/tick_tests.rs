@@ -3,7 +3,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex};
 
-    use crate::entities::asset::PlanTrigger;
+    use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
     use crate::planner_events::PlannerEvent;
     use crate::simulator::SimState;
     use crate::state::AppState;
@@ -26,7 +26,8 @@ mod tests {
     #[tokio::test]
     async fn tick_once_runs_without_profile() {
         let sim = minimal_sim();
-        let (trigger_tx, _trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let (trigger_tx, _trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let trigger_tx = Arc::new(trigger_tx);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);
@@ -167,7 +168,8 @@ mod tests {
     #[tokio::test]
     async fn deviation_arbiter_absorbs_unplanned_pv_surplus_end_to_end() {
         let sim = battery_pv_sim();
-        let (trigger_tx, _trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let (trigger_tx, _trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let trigger_tx = Arc::new(trigger_tx);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);

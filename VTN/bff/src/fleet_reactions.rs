@@ -26,7 +26,8 @@ use sqlx::PgPool;
 const WINDOW: Duration = Duration::minutes(1);
 
 /// How long after seeing an event a plan cycle still counts as following from
-/// it. Beyond this, the VEN replanned for its own reasons.
+/// it, for VENs old enough not to name the cause in their trace. Beyond this,
+/// the VEN replanned for its own reasons.
 const REPLAN_WINDOW: Duration = Duration::minutes(15);
 
 /// One VEN's part of the chain.
@@ -41,8 +42,13 @@ pub struct VenReaction {
     pub seen_received_at: DateTime<Utc>,
     /// The event *version* the VEN saw, if it said.
     pub modification_date_time: Option<String>,
-    /// The first plan cycle after it saw the event, within `REPLAN_WINDOW`.
+    /// When the VEN replanned because of this event.
     pub replanned_at: Option<DateTime<Utc>>,
+    /// Whether that is the VEN's own word or our inference. `true` means its
+    /// `PlanCycle` named this event id; `false` means we took the first plan
+    /// cycle inside `REPLAN_WINDOW` and are reporting a coincidence. A reader
+    /// deciding whether an event *worked* needs to know which one they have.
+    pub replan_attributed: bool,
     /// Mean site power over the minute before and the minute after. `None`
     /// where the VEN published nothing in that window — which is a real
     /// answer, and not the same as no change.
@@ -78,16 +84,38 @@ pub async fn reactions(pool: &PgPool, event_id: &str) -> Result<Vec<VenReaction>
 
     let mut out = Vec::with_capacity(seen.len());
     for (ven_name, ts, received_at, payload) in seen {
-        let replanned_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+        // Ask the VEN first: a PlanCycle that names this event id is the VEN
+        // saying "I replanned because of that", which no amount of timestamp
+        // arithmetic can establish.
+        let attributed: Option<DateTime<Utc>> = sqlx::query_scalar(
             "SELECT ts FROM lab_recorder.fleet_trace
-             WHERE ven_name = $1 AND kind = 'PlanCycle' AND ts >= $2 AND ts <= $3
+             WHERE ven_name = $1 AND kind = 'PlanCycle'
+               AND payload_json -> 'event_ids' ? $2
              ORDER BY ts ASC LIMIT 1",
         )
         .bind(&ven_name)
-        .bind(ts)
-        .bind(ts + REPLAN_WINDOW)
+        .bind(event_id)
         .fetch_optional(pool)
         .await?;
+
+        // Only if it did not say: the first cycle inside the window, reported
+        // as the inference it is.
+        let replanned_at = match attributed {
+            Some(ts) => Some(ts),
+            None => {
+                sqlx::query_scalar(
+                    "SELECT ts FROM lab_recorder.fleet_trace
+                     WHERE ven_name = $1 AND kind = 'PlanCycle' AND ts >= $2 AND ts <= $3
+                     ORDER BY ts ASC LIMIT 1",
+                )
+                .bind(&ven_name)
+                .bind(ts)
+                .bind(ts + REPLAN_WINDOW)
+                .fetch_optional(pool)
+                .await?
+            }
+        };
+        let replan_attributed = attributed.is_some();
 
         let power_before_w = mean_power(pool, &ven_name, ts - WINDOW, ts).await?;
         let power_after_w = mean_power(pool, &ven_name, ts, ts + WINDOW).await?;
@@ -101,6 +129,7 @@ pub async fn reactions(pool: &PgPool, event_id: &str) -> Result<Vec<VenReaction>
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
             replanned_at,
+            replan_attributed,
             power_before_w,
             power_after_w,
         });
@@ -143,6 +172,7 @@ mod tests {
             seen_received_at: t("2026-09-22T10:00:01Z"),
             modification_date_time: None,
             replanned_at: None,
+            replan_attributed: false,
             power_before_w: before,
             power_after_w: after,
         }

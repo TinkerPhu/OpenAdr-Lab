@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::assets::ControlDescriptor;
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::planner_params::PlannerObjective;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
@@ -21,7 +21,7 @@ pub struct AppCtx {
     pub state: AppState,
     pub vtn: VtnClient,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
-    pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>,
     /// Pre-computed simulator schema (asset → control descriptors).
     /// Built once at startup from `profile`; route handlers access it without
     /// touching the raw `Profile` type or acquiring any lock.

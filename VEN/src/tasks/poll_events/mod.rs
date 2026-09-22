@@ -11,7 +11,7 @@ use tracing::{error, info};
 
 use crate::controller;
 use crate::controller::VtnPort;
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::state::AppState;
 use crate::tasks::backoff::Backoff;
 use detect::detect_event_changes;
@@ -21,7 +21,7 @@ pub(crate) fn spawn_event_poll(
     state: AppState,
     vtn: Arc<dyn VtnPort>,
     secs: u64,
-    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>,
     notifier: crate::services::notify::Notifier,
     startup_delay_s: u64,
     history: Option<Arc<dyn crate::controller::HistoryPort>>,
@@ -66,6 +66,25 @@ pub(crate) fn spawn_event_poll(
 
                     // Check before the trace_events vec is consumed by the for loop.
                     let any_change = !changes.trace_events.is_empty();
+                    // Same reason, same place: which events moved, so a replan
+                    // can be attributed to them rather than to "something
+                    // changed around then" (§6.3). The trace entries already
+                    // carry the ids, so this reads them rather than
+                    // re-deriving which events were new.
+                    let trigger_causes: Vec<String> = changes
+                        .trace_events
+                        .iter()
+                        .filter_map(|e| match e {
+                            controller::trace::ControllerEvent::OpenAdrArrived {
+                                event_id, ..
+                            }
+                            | controller::trace::ControllerEvent::OpenAdrExpired {
+                                event_id, ..
+                            } => Some(event_id.clone()),
+                            _ => None,
+                        })
+                        .filter(|id| !id.is_empty())
+                        .collect();
 
                     for evt in changes.trace_events {
                         state.push_controller_event(evt).await;
@@ -121,7 +140,14 @@ pub(crate) fn spawn_event_poll(
                     // trigger_tx is a watch channel (latest wins) — don't overwrite
                     // an Alert/CapacityChange trigger sent above with RateChange.
                     if any_change && !signal_trigger_sent {
-                        let _ = trigger_tx.send(PlanTrigger::RateChange);
+                        // Which events moved, so a replan can be attributed to
+                        // them rather than to "something changed around then"
+                        // (§6.3). The trace entries already carry the ids;
+                        // reading them here keeps one source for both.
+                        let _ = trigger_tx.send(PlanTriggerSignal::caused_by(
+                            PlanTrigger::RateChange,
+                            trigger_causes,
+                        ));
                     }
                     super::backoff::record_success(&mut backoff, &state, now).await;
                     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;

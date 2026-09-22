@@ -11,7 +11,7 @@ use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::history::LedgerPeriod;
 use crate::entities::PlannerObjective;
 use crate::AppCtx;
@@ -42,7 +42,9 @@ pub async fn put_plan_objective(
     Json(body): Json<SetObjectiveBody>,
 ) -> impl IntoResponse {
     *ctx.active_objective.write().await = body.objective;
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    let _ = ctx
+        .trigger_tx
+        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     StatusCode::NO_CONTENT
 }
 

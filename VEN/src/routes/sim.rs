@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer};
 use std::net::SocketAddr;
 use tracing::{debug, warn};
 
-use crate::entities::asset::PlanTrigger;
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::sim_inject::SimInjectState;
 use crate::AppCtx;
 
@@ -255,7 +255,9 @@ pub async fn post_sim_inject(
     merge_inject(&mut current, body);
     ctx.state.set_inject_state(current).await;
     if should_replan {
-        let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
+        let _ = ctx
+            .trigger_tx
+            .send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
     }
     axum::http::StatusCode::NO_CONTENT
 }
@@ -266,7 +268,9 @@ pub async fn post_sim_inject(
 /// Useful in tests to request a fresh plan without side-effecting physics
 /// (e.g., after calling `POST /sim/reset` or adjusting an EV session).
 pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
+    let _ = ctx
+        .trigger_tx
+        .send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
     axum::http::StatusCode::NO_CONTENT
 }
 
