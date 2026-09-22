@@ -59,10 +59,21 @@ def step_wait_for_notification(context, text):
     def fingerprint(note):
         return (note.get("id"), note.get("count"), note.get("last_seen_at"))
 
-    before = set()
-    r = ven_get("/notifications")
-    if r.ok:
-        before = {fingerprint(n) for n in r.json()}
+    # The baseline is the ring as it stood at the *scenario's* first wait, not
+    # at this step's. Waiting per-step assumes each edge is caused by the step
+    # immediately before it, and the arbiter does not work that way: it carries
+    # its own last-applied setpoint forward as the baseline
+    # (`controller::arbiter::reconcile`), so removing a disturbance leaves the
+    # correction itself deviating from plan and the lever engages and releases
+    # on its own schedule. Observed 2026-09-22: active at :41, cleared at :43
+    # -- before the inject was cleared -- then active again at :54 and held for
+    # the full 300 s. Per-scenario scoping still cannot pass on an earlier
+    # scenario's notifications, which is the property that matters; it just
+    # stops asserting a causality the design never promised.
+    if not hasattr(context, "notification_baseline"):
+        r = ven_get("/notifications")
+        context.notification_baseline = {fingerprint(n) for n in r.json()} if r.ok else set()
+    before = context.notification_baseline
 
     def fetch():
         r = ven_get("/notifications")
