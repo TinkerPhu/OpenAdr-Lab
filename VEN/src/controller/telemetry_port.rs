@@ -33,6 +33,21 @@ pub trait TelemetryPort: Send + Sync {
     /// The site's current state: a snapshot, published on the tick cadence.
     async fn publish_telemetry(&self, body: serde_json::Value);
 
+    /// Whether a telemetry sample is due now.
+    ///
+    /// The cadence belongs to the publisher, not to the tick loop: the tick is
+    /// the site's simulation step (1 s in production) and telemetry is an
+    /// observation cadence (D-1: 5 s). Coupling them makes every sim-rate
+    /// change a change in broker traffic and in how fast the telemetry store
+    /// grows — which is how this was first written, and the reason 17 VENs put
+    /// 862 rows a minute into Postgres the first time it ran live.
+    ///
+    /// Asked before the snapshot is serialised, so a sample that is not due
+    /// costs nothing.
+    fn sample_due(&self, _now: chrono::DateTime<chrono::Utc>) -> bool {
+        true
+    }
+
     /// One controller decision, published as it is made.
     ///
     /// Separate from telemetry because the two are different kinds of fact and
@@ -74,6 +89,10 @@ impl TelemetryPort for NoTelemetry {
     }
 
     fn publishes(&self) -> bool {
+        false
+    }
+
+    fn sample_due(&self, _now: chrono::DateTime<chrono::Utc>) -> bool {
         false
     }
 }

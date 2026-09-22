@@ -91,11 +91,13 @@ pub(crate) async fn publish_sim_tick_result(
     // The live fleet feed. Fire-and-forget by design: a fleet view going dark
     // is an observability problem, and making the tick wait on a broker would
     // turn it into an operational one (fleet-monitor phase 0 §6.2).
-    telemetry
-        .publish_telemetry(crate::controller::telemetry_port::telemetry_body(
-            ven_name, &sim_snap,
-        ))
-        .await;
+    if telemetry.sample_due(now) {
+        telemetry
+            .publish_telemetry(crate::controller::telemetry_port::telemetry_body(
+                ven_name, &sim_snap,
+            ))
+            .await;
+    }
 
     sim_snap
 }

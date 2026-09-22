@@ -324,13 +324,30 @@ shows its own fleet-publisher status (connected / last publish).
 
 | # | Question | Decision |
 |---|---|---|
-| D-1 | Telemetry cadence | 5 s default, configurable per VEN via profile/env |
+| D-1 | Telemetry cadence | 5 s default, configurable via `FLEET_TELEMETRY_EVERY_S`. Owned by the publisher, **not** the sim tick — see below |
 | D-2 | `DEMAND` unit | **kW**, declared in `payloadDescriptors`; W stays the internal field unit (§5) |
 | D-3 | Report accumulation | **one report object per VEN** per (event, payloadType): stable id, intervals appended by `PUT`, trimmed to a bounded window — **120 intervals, not 24 h**, see below (§5) |
 | D-4 | Migrate `USAGE` to energy in this phase | **No** — `exp-*` reports and `experiments/kpi.py` stay as they are; the unit fix is its own change (`docs/BACKLOG_OpenADR_Cert.md` §6) |
 | D-5 | Keep the timer report path | **No** — deleted once the standing monitoring event exists (resolves R-85 / F-9) |
 | D-6 | Retention | raw telemetry 7 days, 1-min rollup 90 days |
 | D-7 | Where telemetry is stored | **The existing Postgres instance** (`vtn-db-1`), schema `lab_recorder` — see below |
+
+### D-1 in practice: the cadence belongs to the publisher
+
+First written, telemetry went out on every sim tick. `tick_s` is 1 s in production, so the
+first live run put **862 rows a minute** into Postgres from 17 VENs — five times this decision's
+cadence and roughly five times the storage this plan budgeted, with the same multiple on broker
+traffic.
+
+The tick is the site's simulation step; telemetry is an observation cadence. They are different
+things and coupling them makes every sim-rate change a change in how fast the monitor's store
+grows. The gate now lives on the `TelemetryPort` (`sample_due`), asked before the snapshot is
+serialised, so a sample that is not due costs nothing — and a VEN with no broker configured
+answers "never due" rather than building a body to throw away.
+
+Storage at 5 s across 20 VENs is ~345 k rows/day, which is what §7 budgeted. The payload is the
+whole `/sim` snapshot (~2 KB), kept because the phase-1 per-asset views need it; Postgres
+compresses JSONB over 2 KB, and the 7-day retention bounds it either way.
 
 ### D-3 revised: bound the interval count, not the window's duration
 
