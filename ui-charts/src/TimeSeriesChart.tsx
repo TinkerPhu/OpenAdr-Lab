@@ -40,6 +40,10 @@ export interface TimeSeriesAxisSpec {
 export interface TimeSeriesSeriesSpec {
   /** React key AND the `name` recharts reports to the tooltip/legend for this series. */
   key: string;
+  /** Legend text, when the key is not what a reader should see — a fleet chart
+   * needs a reserved key for its total that cannot collide with a VEN's name,
+   * while the legend should still say "fleet total". Defaults to the key. */
+  label?: string;
   axisId: string;
   /** Reads from the single merged `data` row passed to the chart — see mergeSeries.ts.
    * A string dataKey works for plain (non-nested) row shapes; an accessor function is
@@ -247,7 +251,11 @@ export function TimeSeriesChart({
             <Legend
               content={
                 <ChartLegend
-                  entries={visibleSeries.map((s) => ({ key: s.key, label: s.key, color: s.color }))}
+                  entries={visibleSeries.map((s) => ({
+                    key: s.key,
+                    label: s.label ?? s.key,
+                    color: s.color,
+                  }))}
                   isHidden={isHidden}
                   toggle={toggle}
                   interactive={true}
