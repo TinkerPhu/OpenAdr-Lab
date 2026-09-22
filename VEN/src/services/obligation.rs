@@ -151,6 +151,18 @@ async fn accumulate_report_window(
         let fresh = std::mem::take(&mut resource.intervals);
         resource.intervals = state.accumulate_report_intervals(&key, fresh, now).await;
     }
+
+    // Re-derive the descriptors from the intervals that are actually going
+    // out. The reporter computed them from this submission's intervals alone,
+    // and accumulation has just changed the set: a payload type present only
+    // in a carried-forward interval would otherwise travel undeclared, which
+    // is exactly the failure `wire-contracts` exists to prevent (GB-50).
+    let all: Vec<_> = report
+        .resources
+        .iter()
+        .flat_map(|r| r.intervals.iter().cloned())
+        .collect();
+    report.payloadDescriptors = crate::controller::report_payload::descriptors_for(&all);
 }
 
 #[cfg(test)]
@@ -357,6 +369,134 @@ mod tests {
                 .and_then(|p| p.start.clone()),
             earliest,
             "the window still starts where the first submission started"
+        );
+    }
+
+    /// The descriptors say what the values in the report mean, and after
+    /// accumulation the report carries intervals the reporter never saw. A
+    /// payload type present only in a carried-forward interval must still be
+    /// declared -- an undeclared value on the wire is GB-50 exactly.
+    #[tokio::test]
+    async fn accumulated_reports_declare_every_payload_type_they_still_carry() {
+        let state = AppState::new();
+        let vtn = MockVtn::new();
+        let first = ts(1800);
+        state
+            .add_obligations(vec![make_due_obligation(first)])
+            .await;
+
+        ObligationService::check_and_report(&state, make_samples(), &vtn, "test-ven", first, None)
+            .await
+            .unwrap();
+
+        let second = first + chrono::Duration::seconds(1800);
+        let mut samples = HashMap::new();
+        samples.insert(
+            "asset-1".to_string(),
+            vec![
+                AssetReportSample {
+                    ts: ts(1800),
+                    power_kw: 2.0,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(2700),
+                    power_kw: 3.0,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(3600),
+                    power_kw: 4.0,
+                    soc: None,
+                },
+            ],
+        );
+        ObligationService::check_and_report(&state, samples, &vtn, "test-ven", second, None)
+            .await
+            .unwrap();
+
+        let report = &vtn.submitted()[1];
+        for interval in &report.resources[0].intervals {
+            for payload in &interval.payloads {
+                assert!(
+                    report
+                        .payloadDescriptors
+                        .iter()
+                        .any(|d| d.payloadType == payload.r#type),
+                    "{} travels undeclared in the accumulated report",
+                    payload.r#type
+                );
+            }
+        }
+    }
+
+    /// The case the fixture above cannot produce: this submission carries one
+    /// payload type, the window still holds an interval with two. Without
+    /// re-deriving the descriptors, the second type goes out undeclared.
+    #[tokio::test]
+    async fn descriptors_cover_a_payload_type_only_a_carried_forward_interval_has() {
+        use crate::controller::vtn_port::{
+            OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
+            OadrReportResource,
+        };
+
+        let state = AppState::new();
+        let now = ts(3600);
+
+        let mut with_state = OadrReportInterval {
+            id: 0,
+            intervalPeriod: Some(OadrIntervalPeriod {
+                start: Some("2026-09-22T10:00:00+00:00".to_string()),
+                duration: Some("PT15M".to_string()),
+                randomizeStart: None,
+            }),
+            payloads: vec![OadrReportPayload::energy_kwh("USAGE", 1.0)],
+        };
+        with_state
+            .payloads
+            .push(OadrReportPayload::state("OPERATING_STATE", "ACTIVE"));
+        state
+            .accumulate_report_intervals("r/ven-meter", vec![with_state], now)
+            .await;
+
+        let fresh = OadrReportInterval {
+            id: 0,
+            intervalPeriod: Some(OadrIntervalPeriod {
+                start: Some("2026-09-22T10:15:00+00:00".to_string()),
+                duration: Some("PT15M".to_string()),
+                randomizeStart: None,
+            }),
+            payloads: vec![OadrReportPayload::energy_kwh("USAGE", 2.0)],
+        };
+        let mut report = OadrReportBody {
+            eventID: Some("evt-1".to_string()),
+            clientName: "test-ven".to_string(),
+            reportName: Some("r".to_string()),
+            payloadDescriptors: crate::controller::report_payload::descriptors_for(
+                std::slice::from_ref(&fresh),
+            ),
+            resources: vec![OadrReportResource {
+                resourceName: "ven-meter".to_string(),
+                intervals: vec![fresh],
+            }],
+        };
+        assert!(
+            !report
+                .payloadDescriptors
+                .iter()
+                .any(|d| d.payloadType == "OPERATING_STATE"),
+            "precondition: this submission declares only USAGE"
+        );
+
+        accumulate_report_window(&state, &mut report, now).await;
+
+        assert_eq!(report.resources[0].intervals.len(), 2);
+        assert!(
+            report
+                .payloadDescriptors
+                .iter()
+                .any(|d| d.payloadType == "OPERATING_STATE"),
+            "the carried-forward interval's OPERATING_STATE travels undeclared"
         );
     }
 
