@@ -101,22 +101,42 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ---
 
-## Dependency Vulnerabilities — 2026-08-19 (npm rows); 2026-07-16 (cargo rows)
+## Dependency Vulnerabilities — 2026-09-23 (all rows)
 
 > Re-run `cargo audit` and `npm audit` before each release and update this section.
 
-Cargo rows unchanged since the 2026-07-16 `cargo update` (VEN, VTN/bff) pass on
-`fix/review-c3-code` — not re-verified in this update. npm rows re-run 2026-08-19
-after the GB-34 `react-router`/`react-router-dom` v6→v7 migration (`^7.18.0` in
-both `VEN/ui` and `VTN/ui`) closed out the last open finding from the 2026-08-16
-GB-16 pass:
+First run of the `dependency-audit` recurring check (`jobs.json`), and the first
+time every row was re-verified in the same pass rather than carried forward
+from an earlier one. Three fixes landed with it:
+
+- `rustls` 0.23.42 → 0.23.45 (RUSTSEC-2026-0285, medium 5.3) in both lockfiles
+- `h2` 0.4.15 → 0.4.19 (RUSTSEC-2026-0258) in VTN/bff
+- `rumqttc` switched to `default-features = false`, which removes its rustls
+  stack entirely — see below
 
 | Component | cargo/npm audit result |
 |-----------|------------------------|
-| VEN (Rust) | **0 vulnerabilities, 0 warnings** (267 crates) — not re-verified 2026-08-16 |
-| VTN/bff (Rust) | 1 advisory — see below (315 crates) — not re-verified 2026-08-16 |
-| VEN/ui (npm) | **0 vulnerabilities** |
-| VTN/ui (npm) | **0 vulnerabilities** |
+| VEN (Rust) | **0 vulnerabilities**, 1 allowed warning (`chacha20` yanked) — 319 crates |
+| VTN/bff (Rust) | 1 advisory — see below — plus 2 allowed warnings — 367 crates |
+| lab-core (Rust) | **0 vulnerabilities** — 139 crates |
+| npm workspace (VEN/ui + VTN/ui) | **0 vulnerabilities**, with and without dev deps |
+
+### VTN/bff — the rustls-webpki cluster, fixed by not compiling it
+
+`cargo audit` reported four rustls-webpki advisories (RUSTSEC-2026-0049, -0098,
+-0099, -0104) plus the unmaintained `rustls-pemfile` (RUSTSEC-2025-0134). All
+five arrived through `rumqttc` 0.25.1, which is the latest release and pins
+rustls-webpki 0.102.8 — a version predating every one of those fixes. There was
+nothing to upgrade to.
+
+But the BFF speaks plain TCP to `lab-mqtt` on the docker network; `fleet.rs`
+configures no TLS transport at all. The stack was compiled and never executed.
+`rumqttc = { version = "0.25", default-features = false }` removes it, and all
+five findings with it. Worth preferring over an ignore list: an advisory
+suppressed leaves the code present and the reasoning invisible, whereas this
+leaves nothing to suppress. Revisit if the fleet broker ever gets TLS — at
+which point the right move is a rumqttc release that has moved on.
+
 
 ### VTN/bff — RUSTSEC-2023-0071 (`rsa` 0.9.x, Marvin timing side-channel, medium 5.9)
 
@@ -126,6 +146,8 @@ sqlx driver that is never enabled (the BFF pins
 `cargo tree -i rsa` resolves to nothing. Cargo records optional dependencies for all
 features in the lockfile, and `cargo audit` scans the lockfile, hence the hit. No fixed
 `rsa` release exists upstream. Accept and re-check on sqlx upgrades.
+Re-confirmed unreachable 2026-09-23: `cargo tree -i rsa --target all` still
+resolves to nothing.
 
 **Risk context:** Lab/Node1 deployment — not internet-exposed. Re-run both audits before
 any internet-exposed deployment.
