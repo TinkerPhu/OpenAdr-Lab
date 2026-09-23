@@ -426,8 +426,14 @@ Each step is test-first and leaves the stack deployable.
 4. ~~**Shared crate** extraction (D-06)~~ — done: `lab-core` holds `time_series`, `time_window`
    and `event_timing`. The VEN's Docker context moved to the repo root for the path dependency.
 5. ~~**Programs + seeding** (§4) and the `fleet-telemetry` report requests (§5)~~ — done.
-6. ~~**Broker + compose environment**~~ — done: the fleet has its own credential on `lab-mqtt`
-   and all 20 VENs are pointed at it. The per-VEN ACL of §6.1 is still open.
+6. ~~**Broker + compose environment**~~ — done, including the per-VEN ACL of §6.1: each VEN
+   authenticates as its own name with a password derived from one root secret
+   (`scripts/gen_fleet_mqtt_secrets.py`), and `VTN/mosquitto/fleet-acl.conf` pins it to its own
+   subtree. Deployed 2026-09-23 and verified against the live broker by
+   `scripts/test_fleet_acl.sh`: a VEN reaches only its own topic, and the BFF reads the fleet
+   without being able to write to it. Two defects the deployment found — a password that could
+   never arrive through compose interpolation, and a broker healthcheck the new ACL made
+   unanswerable — are in `docs/reference/KEY_LEARNINGS.md`.
 7. **VEN telemetry publisher** (§6.2) ✅ with its `/health` and VEN UI surface, its own 5 s
    cadence (D-1), and the §6.3 correlation fields on `OpenAdrArrived`/`OpenAdrExpired`. The
    `PlanCycle` triggering-event ids remain open.
