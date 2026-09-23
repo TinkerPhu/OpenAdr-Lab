@@ -117,7 +117,18 @@ services:
         chmod 0600 /mosquitto/config/pwfile
         exec mosquitto -c /mosquitto/config/mosquitto.conf
     healthcheck:
-      test: mosquitto_sub -h 127.0.0.1 -p 1884 -u "$${MQTT_VTN_USERNAME}" -P "$${MQTT_VTN_PASSWORD}" -t '$$SYS/broker/version' -C 1 -W 3 || exit 1
+      # Publishing into the VTN's own subtree, not subscribing to
+      # $$SYS/broker/version: the ACL grants openadr-vtn `openadr-lab/vtn/#`
+      # and nothing else, so the old $$SYS probe was accepted as a
+      # subscription, silently delivered nothing, timed out, and marked a
+      # perfectly healthy broker unhealthy -- which then blocked every
+      # service that depends on it.
+      #
+      # This asks only what a healthcheck should ask: is the broker up and
+      # authenticating? It cannot detect a wrong ACL, because a denied
+      # publish is still acknowledged -- that is what
+      # scripts/test_fleet_acl.sh is for.
+      test: mosquitto_pub -h 127.0.0.1 -p 1884 -u "$${MQTT_VTN_USERNAME}" -P "$${MQTT_VTN_PASSWORD}" -t openadr-lab/vtn/healthcheck -m ok || exit 1
       interval: 15s
       timeout: 5s
       retries: 5
