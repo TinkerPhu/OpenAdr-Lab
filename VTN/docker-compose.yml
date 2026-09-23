@@ -98,6 +98,15 @@ services:
       - -c
       - |
         set -e
+        # Start from no file at all. `mosquitto_passwd -c` refuses to write a
+        # pwfile that already exists ("Unable to open file ... File exists"),
+        # and after the first start it always does: `docker restart` and a host
+        # reboot both reuse this container's filesystem, unlike
+        # `up --force-recreate`, which hands it a fresh one. Without this the
+        # broker comes up exactly once and never survives a restart -- which
+        # took the whole lab's broker down for minutes when one was issued, and
+        # would have done the same on the next power cut.
+        rm -f /mosquitto/config/pwfile
         mosquitto_passwd -c -b /mosquitto/config/pwfile           "$${MQTT_VTN_USERNAME}" "$${MQTT_VTN_PASSWORD}"
         # -c creates and truncates, so only the first call may use it.
         mosquitto_passwd -b /mosquitto/config/pwfile           "$${MQTT_BFF_USERNAME}" "$${MQTT_BFF_PASSWORD}"
