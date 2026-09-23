@@ -2326,3 +2326,20 @@ the new ACL does not grant to `openadr-vtn`. Not refused — accepted, served no
 and marked a perfectly healthy broker unhealthy, which then blocked every service behind
 `depends_on`. After narrowing any permission, the things to re-check are the ones nobody thinks
 of as clients: healthchecks, probes, admin tooling.
+
+## Editing a shell script while it is running corrupts the run, not the file (2026-09-23)
+
+A two-hour suite ended with `run_all_tests.sh: line 346: syntax error near unexpected token
+'else'`. The file parses cleanly; `bash -n` passes on the exact commit that produced the error.
+
+Bash reads a script incrementally, by byte offset, as it executes. Inserting fourteen lines into
+the middle of `run_all_tests.sh` while it was running shifted every byte after the insertion
+point, so when bash next read from its saved offset it resumed in the middle of a different
+statement. The script was never wrong; the running interpreter's place in it was.
+
+The results already printed stay valid — this happens after the work, at the next read. But the
+final summary is lost, so the run has to be repeated to get a verdict.
+
+Do not edit a shell script that is currently executing. Copy it, edit the copy, and swap after
+the run — or just wait. The same applies to anything else an interpreter streams rather than
+loads whole.
