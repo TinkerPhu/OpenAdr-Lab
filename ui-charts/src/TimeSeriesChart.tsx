@@ -15,8 +15,8 @@ import { renderNowLine } from "./NowLine";
 import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "./tooltipStyle";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
-import { seriesHasData, type TimestampedRow } from "./mergeSeries";
-import { niceAxis, tickFormatterForStep } from "./axisDomain";
+import { seriesHasData, rowAccessor, type TimestampedRow } from "./mergeSeries";
+import { niceAxis, tickFormatterForStep, tightSpanDomain } from "./axisDomain";
 import { useLegendToggle } from "./useLegendToggle";
 import { ChartLegend } from "./ChartLegend";
 
@@ -35,6 +35,18 @@ export interface TimeSeriesAxisSpec {
   /** Renders with no visible axis line/ticks — carries a series (e.g. SoC, T_tank) whose
    * value should only ever appear in the tooltip, never as its own drawn axis. */
   hidden?: boolean;
+  /** Opt-in: refit the domain to only the series currently *drawn* on this axis,
+   * so toggling a series off in an interactive legend rescales to what is left.
+   * Without it, one outlying series flattens every other into a band a few pixels
+   * tall and hiding it changes nothing, which makes the legend look broken.
+   *
+   * This lives here rather than in the caller because the caller cannot know:
+   * legend visibility is this component's own state. `domain` stays required and
+   * is the fallback for when nothing visible has a value. */
+  autoScale?: boolean;
+  /** Narrowest span `autoScale` will produce, in axis units — stops a flat series
+   * from being rendered as amplified noise. Defaults to the width of `domain`. */
+  autoScaleMinSpan?: number;
 }
 
 export interface TimeSeriesSeriesSpec {
@@ -163,10 +175,35 @@ export function TimeSeriesChart({
   onCursorClick,
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();
+  const visibleSeries = series.filter((s) => seriesHasData(data, s.dataKey));
+  // What is actually drawn: `hide` below uses exactly this condition, so an
+  // auto-scaled axis and the lines on it can never disagree about what is on
+  // screen.
+  const shownSeries = visibleSeries.filter((s) => !(interactiveLegend && isHidden(s.key)));
+
+  const domainFor = (axis: TimeSeriesAxisSpec): [number, number] => {
+    if (!axis.autoScale) return axis.domain;
+    const values: Array<number | null | undefined> = [];
+    for (const s of shownSeries) {
+      if (s.axisId !== axis.id) continue;
+      const read = rowAccessor(s.dataKey);
+      for (const row of data) {
+        const v = read(row);
+        if (typeof v === "number") values.push(v);
+      }
+    }
+    // Nothing drawn on this axis: keep the declared domain rather than collapse
+    // to an arbitrary one, so unchecking every series leaves a readable frame.
+    if (values.length === 0) return axis.domain;
+    return tightSpanDomain(values, axis.autoScaleMinSpan ?? axis.domain[1] - axis.domain[0]);
+  };
+
   // The single Y-axis tick rule for every chart built on this composition: each axis' data
   // domain is snapped to round tick values here, so no caller can forget it (`niceAxis`).
-  const resolvedAxes = axes.map((axis) => ({ axis, nice: axis.hidden ? null : niceAxis(axis.domain) }));
-  const visibleSeries = series.filter((s) => seriesHasData(data, s.dataKey));
+  const resolvedAxes = axes.map((axis) => ({
+    axis,
+    nice: axis.hidden ? null : niceAxis(domainFor(axis)),
+  }));
   const seriesByName = new Map(visibleSeries.map((s) => [s.key, s]));
   const bandsByName = new Map((bands ?? []).map((b) => [b.key, b]));
   const resolveTooltipValue = (value: unknown, name: string): [string, string] => {

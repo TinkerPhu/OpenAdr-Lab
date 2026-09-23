@@ -111,6 +111,24 @@ describe("FleetPowerChart", () => {
     expect(screen.getByTestId("fleet-chart-source")).toHaveTextContent("60s");
   });
 
+  it("gives the curves real vertical room, not a dashboard cell's", () => {
+    chartProps.length = 0;
+    render(<FleetPowerChart history={history()} windowMinutes={60} nowMs={0} />);
+    // Twenty overlapping curves at cell height are a band, not a comparison.
+    expect(chartProps[0].height as number).toBeGreaterThanOrEqual(400);
+  });
+
+  it("lets the kW axis follow whichever curves are still shown", () => {
+    chartProps.length = 0;
+    render(<FleetPowerChart history={history()} windowMinutes={60} nowMs={0} />);
+    const axis = (chartProps[0].axes as Array<Record<string, unknown>>)[0];
+    // The fleet total is the sum of every VEN, so its range dwarfs any single
+    // site's. A fixed shared domain flattens the sites into a few pixels, and
+    // hiding the total would not give them the axis back.
+    expect(axis.autoScale).toBe(true);
+    expect(axis.autoScaleMinSpan).toBe(1);
+  });
+
   it("explains an empty window instead of drawing an empty chart", () => {
     chartProps.length = 0;
     render(

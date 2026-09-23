@@ -535,3 +535,97 @@ describe("TimeSeriesChart — a clickable chart does not select its own text", (
     expect(getByTestId("chart")).not.toHaveStyle({ userSelect: "none" });
   });
 });
+
+/**
+ * An axis that follows the legend.
+ *
+ * Without this, a chart carrying both a large series and a small one renders
+ * the small one as a flat line a few pixels tall, and unchecking the large one
+ * changes nothing — which reads as a broken legend rather than a fixed axis.
+ */
+describe("TimeSeriesChart — autoScale", () => {
+  const wide: TimestampedRow[] = [
+    { ts: 1000, values: { big: 100, small: 1 } },
+    { ts: 2000, values: { big: 200, small: 2 } },
+  ];
+  const wideSeries: TimeSeriesSeriesSpec[] = [
+    { key: "big", axisId: "y", dataKey: (r) => r.values?.big ?? null, color: "#111" },
+    { key: "small", axisId: "y", dataKey: (r) => r.values?.small ?? null, color: "#222" },
+  ];
+  const autoAxis: TimeSeriesAxisSpec[] = [
+    { id: "y", domain: [0, 1000], autoScale: true, autoScaleMinSpan: 1 },
+  ];
+
+  const renderAuto = (axesOverride = autoAxis) =>
+    render(
+      <TimeSeriesChart
+        data={wide}
+        xAxisTickFormatter={() => ""}
+        axes={axesOverride}
+        series={wideSeries}
+        tooltipFormatter={(v, n) => [String(v), n]}
+        interactiveLegend
+      />
+    );
+
+  const latestDomain = () =>
+    ([...yAxes].reverse()[0]?.domain ?? []) as [number, number];
+
+  beforeEach(() => {
+    yAxes.length = 0;
+    lines.length = 0;
+  });
+
+  it("fits the declared domain to the data instead of using it verbatim", () => {
+    renderAuto();
+    const [min, max] = latestDomain();
+    // The declared [0, 1000] is a fallback; the data only reaches 200.
+    expect(max).toBeLessThan(1000);
+    expect(max).toBeGreaterThanOrEqual(200);
+    expect(min).toBeLessThanOrEqual(1);
+  });
+
+  it("rescales to what is left when a series is toggled off", async () => {
+    renderAuto();
+    const before = latestDomain();
+    await userEvent.click(screen.getByTestId("legend-toggle-big"));
+    const after = latestDomain();
+
+    // "small" tops out at 2, so the axis must collapse far below "big"'s 200.
+    expect(after[1]).toBeLessThan(before[1]);
+    expect(after[1]).toBeLessThan(100);
+  });
+
+  it("keeps the declared domain when every series is hidden", async () => {
+    renderAuto();
+    await userEvent.click(screen.getByTestId("legend-toggle-big"));
+    await userEvent.click(screen.getByTestId("legend-toggle-small"));
+    // Not a collapsed or empty axis: an unreadable frame is worse than a wide one.
+    expect(latestDomain()).toEqual([0, 1000]);
+  });
+
+  it("leaves an axis without autoScale exactly as declared", () => {
+    renderAuto([{ id: "y", domain: [0, 1000] }]);
+    expect(latestDomain()).toEqual([0, 1000]);
+  });
+
+  it("honours autoScaleMinSpan so a flat series is not amplified noise", () => {
+    render(
+      <TimeSeriesChart
+        data={[
+          { ts: 1000, values: { flat: 5 } },
+          { ts: 2000, values: { flat: 5 } },
+        ]}
+        xAxisTickFormatter={() => ""}
+        axes={[{ id: "y", domain: [0, 10], autoScale: true, autoScaleMinSpan: 4 }]}
+        series={[
+          { key: "flat", axisId: "y", dataKey: (r) => r.values?.flat ?? null, color: "#333" },
+        ]}
+        tooltipFormatter={(v, n) => [String(v), n]}
+        interactiveLegend
+      />
+    );
+    const [min, max] = latestDomain();
+    expect(max - min).toBeGreaterThanOrEqual(4);
+  });
+});

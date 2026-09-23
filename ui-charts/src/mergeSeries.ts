@@ -29,9 +29,21 @@ export function seriesHasData(
   data: TimestampedRow[],
   dataKey: string | ((row: TimestampedRow) => number | null | undefined)
 ): boolean {
-  const accessor: (row: TimestampedRow) => number | null | undefined =
-    typeof dataKey === "function" ? dataKey : (row) => row.values?.[dataKey];
+  const accessor = rowAccessor(dataKey);
   return data.some((row) => accessor(row) !== null && accessor(row) !== undefined);
+}
+
+/** How a `dataKey` reads one row — the single definition of that rule.
+ *
+ * A string key is a name inside `row.values`, not a top-level field, because
+ * that is where `mergeTimestampedSeries` puts every series. Anything that needs
+ * to read a series' value (presence checks, axis auto-scaling) resolves it
+ * through here, so a second reader cannot quietly disagree about what a string
+ * key means and read `undefined` forever. */
+export function rowAccessor(
+  dataKey: string | ((row: TimestampedRow) => number | null | undefined)
+): (row: TimestampedRow) => number | null | undefined {
+  return typeof dataKey === "function" ? dataKey : (row) => row.values?.[dataKey];
 }
 
 /** One named point to fold into the merged row array — e.g. a forecast sample keyed by
