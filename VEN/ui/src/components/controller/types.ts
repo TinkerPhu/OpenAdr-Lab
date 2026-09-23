@@ -5,6 +5,8 @@
  * The VEN API endpoint GET /rates and type RateSnapshot return tariff data despite the name.
  */
 
+import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF } from "@lab/charts/types";
+
 // ─── Asset identifiers ────────────────────────────────────────────────────────
 
 /** Known physics assets. Dynamic shiftable loads (e.g. "wm") are also valid. */
@@ -39,8 +41,11 @@ export const ASSET_COLORS: Record<string, string> = {
  * different colors depending on which chart draws it.
  */
 export const SERIES_COLORS: Record<string, string> = {
-  import_tariff: "#f44336",
-  export_tariff: "#4caf50",
+  // Defined in the shared chart kit: the VTN's fleet view draws the same two
+  // concepts, and a tariff colour that lives in the VEN app cannot be the
+  // single source of truth for a chart in another app.
+  import_tariff: COLOR_IMPORT_TARIFF,
+  export_tariff: COLOR_EXPORT_TARIFF,
   cost_rate: "#212121",
   co2_rate: "#ff9800",
   grid_line: "#212121",

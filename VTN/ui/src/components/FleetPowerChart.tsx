@@ -7,6 +7,7 @@ import type { NamedSample } from "@lab/charts/mergeSeries";
 import { tightSpanDomain, formatPowerTick } from "@lab/charts/axisDomain";
 import { EmptyState } from "@lab/charts/EmptyState";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { fleetChartWindow, FLEET_AXIS_WIDTH } from "./fleetChartWindow";
 import type { FleetHistory, FleetSignals } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 import { compareVenNames } from "../utils/venOrder";
@@ -109,6 +110,8 @@ export function FleetPowerChart({
   // VEN was under a signal, which is the question the overlay answers —
   // "was something in force here" — with the per-VEN detail a click away in
   // the reactions table.
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+
   const zones = useMemo(() => {
     if (!signals) return [];
     const seen = new Set<string>();
@@ -137,6 +140,13 @@ export function FleetPowerChart({
     <>
       <TimeSeriesChart
         data={rows}
+        // The *requested* window, not the stored extent: without a fixed
+        // domain recharts sizes the x-axis to whatever telemetry happens to
+        // exist, and the tariff chart above could not line up with it. It also
+        // means a gap in telemetry now reads as a gap rather than silently
+        // rescaling time.
+        tMin={tMin}
+        tMax={tMax}
         axes={[
           {
             id: AXIS_ID,
@@ -152,6 +162,7 @@ export function FleetPowerChart({
             // when the domain was fixed -- import above, export below is the
             // shape of a fleet's day -- but it is what was compressing the
             // per-VEN detail this chart exists to show.
+            width: FLEET_AXIS_WIDTH,
             autoScale: true,
             autoScaleMinSpan: MIN_SPAN_KW,
             // Fallback only, for when nothing is drawn: keeps zero in view so an

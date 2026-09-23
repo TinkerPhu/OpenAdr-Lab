@@ -8,7 +8,8 @@ import {
   MIN_TARIFF_SPAN_EUR_KWH,
   roundedTimeTicks,
 } from "@lab/charts/axisDomain";
-import { formatTariffEurKwh, formatPowerValue } from "@lab/charts/unitFormat";
+import { formatPowerValue } from "@lab/charts/unitFormat";
+import { TARIFF_LINE_STYLE } from "@lab/charts/types";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { clipToWindow, carryForwardLastKnown, ensureNonEmpty, formatTs } from "./tariffChartShared";
@@ -79,18 +80,14 @@ export function TariffEnvelopeChart({
       axisId: "tariff",
       dataKey: (row) => row.values?.importPriceEurKwh ?? null,
       color: SERIES_COLORS.import_tariff,
-      strokeDasharray: "5 5",
-      connectNulls: true,
-      formatter: formatTariffEurKwh,
+      ...TARIFF_LINE_STYLE,
     },
     {
       key: "Export tariff [€/kWh]",
       axisId: "tariff",
       dataKey: (row) => row.values?.exportPriceEurKwh ?? null,
       color: SERIES_COLORS.export_tariff,
-      strokeDasharray: "5 5",
-      connectNulls: true,
-      formatter: formatTariffEurKwh,
+      ...TARIFF_LINE_STYLE,
     },
     {
       key: "Import limit [kW]",
