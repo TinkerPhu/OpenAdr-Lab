@@ -141,6 +141,8 @@ impl FleetMqttPublisher {
         let connected = Arc::new(AtomicBool::new(false));
 
         let loop_connected = connected.clone();
+        let announce_client = client.clone();
+        let announce_topic = status_topic.clone();
         let host = config.broker_host.clone();
         let port = config.broker_port;
         tokio::spawn(async move {
@@ -150,6 +152,19 @@ impl FleetMqttPublisher {
                         if !loop_connected.swap(true, Ordering::Relaxed) {
                             info!(host, port, "fleet telemetry broker connected");
                         }
+                        // On EVERY connect, not just the first. A broker
+                        // restart drops us, which makes the broker publish our
+                        // retained last will on our behalf -- correctly, since
+                        // at that instant we really are gone. rumqttc then
+                        // reconnects on its own and telemetry resumes, but the
+                        // retained `offline` stays until something overwrites
+                        // it. Announcing only at start-up left VENs marked
+                        // offline in the fleet view while they were publishing
+                        // every five seconds, which is precisely the
+                        // "gone vs quiet" distinction this topic exists to
+                        // make -- and the one signal an operator would trust
+                        // to call a site dead.
+                        announce_online(announce_client.clone(), announce_topic.clone());
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -170,22 +185,26 @@ impl FleetMqttPublisher {
             telemetry_every_ms: config.telemetry_every_s * 1000,
             last_sample_ms: AtomicI64::new(i64::MIN),
         };
-        publisher.announce_online();
+        // No announce here: ConnAck fires for the first connection too, so
+        // doing it now would both duplicate that and race it -- this runs
+        // before the socket is up, and only rumqttc's queue made it work.
         publisher
     }
+}
 
-    /// Say we are here, retained, so a subscriber that connects later still
-    /// learns this VEN exists. The last will above replaces it if we vanish.
-    fn announce_online(&self) {
-        let client = self.client.clone();
-        let topic = format!("{}/status", self.topic_root);
-        tokio::spawn(async move {
-            let body = serde_json::json!({"state": "online"}).to_string();
-            if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, true, body).await {
-                warn!(topic, error = %e, "could not announce fleet status");
-            }
-        });
-    }
+/// Say we are here, retained, so a subscriber that connects later still learns
+/// this VEN exists. The last will replaces it if we vanish.
+///
+/// Spawned rather than awaited: the caller is inside the event-loop poll, and
+/// `publish` hands the packet to that same loop. Awaiting it there would wait
+/// on the task doing the waiting.
+fn announce_online(client: AsyncClient, topic: String) {
+    tokio::spawn(async move {
+        let body = serde_json::json!({"state": "online"}).to_string();
+        if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, true, body).await {
+            warn!(topic, error = %e, "could not announce fleet status");
+        }
+    });
 }
 
 #[async_trait]
