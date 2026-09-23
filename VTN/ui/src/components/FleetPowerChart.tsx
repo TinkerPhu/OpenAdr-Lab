@@ -6,6 +6,7 @@ import { mergeTimestampedSeries } from "@lab/charts/mergeSeries";
 import type { NamedSample } from "@lab/charts/mergeSeries";
 import { tightSpanDomain, formatPowerTick } from "@lab/charts/axisDomain";
 import { EmptyState } from "@lab/charts/EmptyState";
+import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import type { FleetHistory, FleetSignals } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 
@@ -14,6 +15,15 @@ import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 export const FLEET_KEY = "__fleet__";
 
 const AXIS_ID = "kw";
+
+/** Three times the standard cell height. Twenty overlapping curves need the
+ *  vertical room to be told apart at all — at cell height they are a band, and
+ *  "which site moved" is unanswerable. */
+const CHART_HEIGHT = CELL_CHART_HEIGHT * 3;
+
+/** Narrowest kW span the axis will scale down to. A fleet sitting still should
+ *  read as sitting still, not as amplified rounding noise. */
+const MIN_SPAN_KW = 1;
 
 /** kW, like everything else in this lab. The API speaks watts. */
 const toKw = (watts: number) => watts / 1000;
@@ -128,10 +138,22 @@ export function FleetPowerChart({
           {
             id: AXIS_ID,
             unit: "kW",
-            // Import above the line and export below is the shape of a fleet's
-            // day, so the domain always spans zero even when every site is
-            // importing.
-            domain: tightSpanDomain([...values, 0], 1),
+            // Fitted to the curves actually on screen, and refitted when one is
+            // toggled off: with twenty VENs plus a total that is their sum, the
+            // total's range is an order of magnitude larger than any single
+            // site's, so a shared fixed domain flattens every VEN into a
+            // few-pixel band. Hiding the total should give the sites the whole
+            // axis, and that only works if the axis follows the legend.
+            //
+            // This gives up the guaranteed zero line. That was worth having
+            // when the domain was fixed -- import above, export below is the
+            // shape of a fleet's day -- but it is what was compressing the
+            // per-VEN detail this chart exists to show.
+            autoScale: true,
+            autoScaleMinSpan: MIN_SPAN_KW,
+            // Fallback only, for when nothing is drawn: keeps zero in view so an
+            // empty-but-framed axis still reads as a power axis.
+            domain: tightSpanDomain([...values, 0], MIN_SPAN_KW),
             tickFormatter: formatPowerTick,
           },
         ]}
@@ -139,6 +161,7 @@ export function FleetPowerChart({
         nowMs={nowMs}
         zones={zones}
         referenceAxisId={AXIS_ID}
+        height={CHART_HEIGHT}
         xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
         interactiveLegend
         testId="fleet-power-chart"
