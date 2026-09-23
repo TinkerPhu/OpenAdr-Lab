@@ -79,10 +79,14 @@ Feature: VEN Simulator
     And the schema for "heater" has control key "heater_temp_min_c"
     And the schema for "heater" has control key "heater_temp_max_c"
 
-  Scenario: Auto-report submitted for active event
+  # The VEN reports for an active event without anyone POSTing a report — the
+  # scenario's original point. It used to be the timer path that did this, for
+  # any active event; since D-5/F-9 that path is gone and the obligation loop
+  # does it for events that *ask*, via reportDescriptors. Same guarantee,
+  # asked for the way the spec asks for it.
+  Scenario: A VEN reports unprompted for an event that asked for reports
     Given I have a VTN token as "bl-client"
-    And I create a program "auto-report-test" targeting "ven-1" and save its ID
-    When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
-    Then the response status is 201
-    When I wait for VEN-1 to show event "auto-report-evt"
-    Then an auto-report for event "auto-report-evt" exists on VEN-1
+    And I create a program named "auto-report-test" and save its ID
+    And I create an event for the saved program reporting every 60 seconds
+    When I wait for VEN-1 to submit an obligation-driven report for the event
+    Then the latest VEN-1 report for the event has exactly 1 interval
