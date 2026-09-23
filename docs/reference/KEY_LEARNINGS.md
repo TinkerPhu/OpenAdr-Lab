@@ -2374,3 +2374,31 @@ And the fourth is the trap in checking the third: verifying a fix by re-running 
 against a persistent stack introduces residue the full suite's teardown would have removed. The
 environment difference that made the isolated run fail was the finding; the environment
 difference that made the *next* isolated run fail was noise. Telling those apart is the work.
+
+## Presence is a fact about a connection, not about a process (2026-09-23)
+
+The fleet view showed ven-1, ven-2 and ven-3 as `offline` while each was publishing telemetry
+every five seconds with a last-message age of four seconds and counting. The view was reading
+the retained status correctly; the status really did say offline.
+
+A VEN announces itself with a retained `{"state":"online"}` and registers a last will of
+`{"state":"offline"}`, so the broker can speak for it when it dies without saying goodbye. That
+pairing is right. What was wrong is that the announce ran once, from the constructor, while the
+last will fires on *every* disconnect. Restart the broker and the sequence is: connection drops,
+the broker publishes the will (correctly — at that instant the VEN is gone), the client
+reconnects on its own, telemetry resumes, and nothing ever overwrites the retained `offline`.
+
+So one broker restart marks an entire fleet permanently dead while every site keeps reporting,
+and it does it to the single signal an operator would trust to call a site down. The split is
+what made it findable: the three VENs that had been running across the restart were offline, the
+seventeen recreated after it were online.
+
+The rule: **anything a peer asserts about itself must be re-asserted on every reconnect, not
+once at start-up.** A retained "I am here" and a last-will "he is gone" are two halves of one
+protocol, and only one half was tied to the connection lifecycle. If a fact is published to
+survive disconnection, its refresh has to be driven by the same event that can invalidate it —
+here, `ConnAck`.
+
+A second defect fell out of the same fix: announcing from the constructor also ran before the
+socket was up, and worked only because rumqttc queues publishes. Binding it to `ConnAck` removed
+a race nobody had noticed, because the correct trigger and the correct moment were the same one.
