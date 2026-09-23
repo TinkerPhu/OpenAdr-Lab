@@ -56,28 +56,40 @@ def save(data: dict) -> None:
     `next_due` is derived, never edited: a cached answer that can disagree with
     the data it summarises is a second source of truth.
     """
-    data["next_due"] = fmt_ts(min(due_at(job) for job in data["jobs"])) if data["jobs"] else None
+    at = now_utc()
+    data["next_due"] = (
+        fmt_ts(min(due_at(job, at) for job in data["jobs"])) if data["jobs"] else None
+    )
     JOBS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def due_at(job: dict) -> datetime:
-    """When this job next comes due.
+def due_at(job: dict, at: datetime) -> datetime:
+    """When this job next comes due, judged against the caller's clock.
 
     A job that has never run is due now, not at some epoch date — the answer to
     "when should this first happen" is "as soon as anyone looks".
+
+    `at` is a parameter rather than a second reading of the clock, and that is
+    the whole point: this used to call `now_utc()` itself, so a never-run job
+    was "due" at a moment strictly later than the `at` it was compared against.
+    Whenever those two readings landed either side of a second boundary, every
+    never-run job silently disappeared from the due list — about one run in
+    twenty, and always in the direction of reporting less work than exists.
+    One clock reading per command, passed down (the project's `determinism`
+    rule, which exists for exactly this).
     """
     last = parse_ts(job.get("last_run"))
     if last is None:
-        return now_utc()
+        return at
     return last + timedelta(days=job["interval_days"])
 
 
 def is_due(job: dict, at: datetime) -> bool:
-    return due_at(job) <= at
+    return due_at(job, at) <= at
 
 
 def describe(job: dict, at: datetime) -> str:
-    when = due_at(job)
+    when = due_at(job, at)
     if when <= at:
         overdue = (at - when).days
         age = "never run" if job.get("last_run") is None else f"{overdue}d overdue"
@@ -87,7 +99,7 @@ def describe(job: dict, at: datetime) -> str:
 
 def cmd_list(data: dict) -> int:
     at = now_utc()
-    for job in sorted(data["jobs"], key=due_at):
+    for job in sorted(data["jobs"], key=lambda j: due_at(j, at)):
         print(describe(job, at))
     return 0
 
@@ -101,7 +113,7 @@ def cmd_due(data: dict, quiet: bool) -> int:
             print(f"No recurring checks due{f' before {nxt[:10]}' if nxt else ''}.")
         return 0
     print(f"{len(due)} recurring check(s) due — see jobs.json:")
-    for job in sorted(due, key=due_at):
+    for job in sorted(due, key=lambda j: due_at(j, at)):
         print(describe(job, at))
         if not job.get("command"):
             print("          (no command — this one is yours; `jobs.py done <id>` when handled)")
@@ -187,7 +199,7 @@ def cmd_done(data: dict, job_id: str) -> int:
             job["last_run"] = fmt_ts(now_utc())
             job["last_status"] = "done by hand"
             save(data)
-            print(f"{job_id}: recorded as done, next due {fmt_ts(due_at(job))[:10]}")
+            print(f"{job_id}: recorded as done, next due {fmt_ts(due_at(job, now_utc()))[:10]}")
             return 0
     print(f"No job with id {job_id!r} in jobs.json", file=sys.stderr)
     return 2
