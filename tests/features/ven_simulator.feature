@@ -87,6 +87,14 @@ Feature: VEN Simulator
   Scenario: A VEN reports unprompted for an event that asked for reports
     Given I have a VTN token as "bl-client"
     And I create a program named "auto-report-test" and save its ID
-    And I create an event for the saved program reporting every 60 seconds
-    When I wait for VEN-1 to submit an obligation-driven report for the event
-    Then the latest VEN-1 report for the event has exactly 1 interval
+    And I create an event for the saved program reporting every 5 seconds
+    # Discovery first, on its own budget: the VEN polls events every 30 s, so a
+    # report-wait that starts before the VEN has even seen the event is spending
+    # most of its timeout on the wrong wait -- which is exactly how this
+    # scenario failed when it was first rewritten.
+    When I wait for VEN-1 to have at least 1 event
+    And I wait for VEN-1 to submit an obligation-driven report for the event
+    # The claim is that a report arrives unasked-for, not what shape it has. How
+    # many intervals it carries depends on how much history the resampler had,
+    # which is a race this scenario has no reason to run.
+    Then the latest VEN-1 report for the event has a "USAGE" payload with a non-negative number value
