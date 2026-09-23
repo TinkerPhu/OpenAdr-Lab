@@ -15,6 +15,13 @@
               T_REPORTS["spawn_report_poll()"]
               T_OBLIG["spawn_obligation_check()"]
               T_PERSIST["spawn_state_persist()"]
+              T_PROGRAMS["spawn_program_poll()"]
+              T_HISTORY["spawn_history_sampler()"]
+              T_HEURISTICS["spawn_heuristics_job()"]
+              T_BACKOFF["spawn_backoff_poll()"]
+              T_PROGRESS["spawn_progress_ticker()"]
+              T_FLEETTRACE["fleet_trace::spawn()\npublishes controller trace"]
+              T_SUPERVISE["supervised_spawn()\nrestarts any loop that dies"]
           end
       end
 
@@ -42,10 +49,13 @@
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
               C_ENVELOPE["site_headroom.rs\ncompute_site_headroom()"]
               C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
+              C_PORT_TELEM["≪trait≫\nTelemetryPort\npublish()\nsample_due(now)"]
+              C_ACCUM["report_accumulator.rs\nappend + bounded trim"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
               C_TIMELINE["timeline.rs\nbuild_asset_timeline()"]
               C_MILP["milp_planner/\nrun_planner()\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
           end
+          RPTWIN["state/report_windows.rs\nper-(event,payload) interval windows"]
           STATE["AppState\nactive_plan\nactive_requests\nev_session\ncapacity_state\ncontroller_trace\ntariff_ledger"]
       end
 
@@ -63,7 +73,9 @@
           end
           VTN_CLIENT["vtn.rs\nVtnClient\nOAuth2 HTTP client"]
           PROFILE["profile.rs\nProfileConfig\nBatteryParams\nEvParams\nHeaterParams"]
-          COMMON["common/mod.rs\nTimeSeries\nInterpolation\nAggregation"]
+          FLEET_PUB["fleet_telemetry.rs\nFleetMqttPublisher\nown 5 s cadence (D-1)"]
+          VTN_REPORTS["vtn_reports.rs\nreport upsert over the VtnPort"]
+          LABCORE["lab-core (shared crate)\ntime_series\ntime_window\nevent_timing"]
       end
 
       subgraph ENTRY["🚀 Entry / Context"]
@@ -96,6 +108,18 @@
       T_OBLIG --> SVC_OBLIG
       T_SIMTICK --> C_DISPATCH
 
+      T_SUPERVISE --> T_PLANNING & T_EVENTS & T_REPORTS & T_OBLIG & T_SIMTICK
+      T_SUPERVISE --> T_PERSIST & T_PROGRAMS & T_HISTORY & T_HEURISTICS
+      T_SIMTICK --> C_PORT_TELEM
+      T_FLEETTRACE --> C_PORT_TELEM
+      FLEET_PUB -. "impl TelemetryPort" .-> C_PORT_TELEM
+      C_REPORTER --> C_ACCUM
+      C_ACCUM --> RPTWIN
+      SVC_OBLIG --> VTN_REPORTS
+      VTN_REPORTS --> C_PORT_VTN
+      C_OAADR --> LABCORE
+      C_REPORTER --> LABCORE
+
       R_HEMS --> SVC_UREQ
       R_HEMS --> SVC_HEMS
 
@@ -118,8 +142,8 @@
       classDef infra fill:#fff8ee,stroke:#996600
       classDef adapter fill:#f5eeff,stroke:#663399
 
-      class C_PORT_SIM,C_PORT_VTN,C_PORT_MILP,ASSETS_MOD port
+      class C_PORT_SIM,C_PORT_VTN,C_PORT_MILP,C_PORT_TELEM,ASSETS_MOD port
       class E_PLAN,E_ASSET,E_CAP,E_SESSION,E_TARIFF,E_PARAMS entity
-      class SIM_STATE,VTN_CLIENT,PROFILE,COMMON,A_BAT,A_EV,A_HTR,A_PV,A_BASE,A_GRID infra
-      class R_HEMS,R_SIM,R_TL,R_ASSETS,R_REPORTS,R_TRACE,T_EVENTS,T_REPORTS,T_OBLIG,T_PERSIST adapter
+      class SIM_STATE,VTN_CLIENT,PROFILE,LABCORE,FLEET_PUB,VTN_REPORTS,A_BAT,A_EV,A_HTR,A_PV,A_BASE,A_GRID infra
+      class R_HEMS,R_SIM,R_TL,R_ASSETS,R_REPORTS,R_TRACE,T_EVENTS,T_REPORTS,T_OBLIG,T_PERSIST,T_PROGRAMS,T_HISTORY,T_HEURISTICS,T_BACKOFF,T_PROGRESS,T_FLEETTRACE,T_SUPERVISE adapter
 
