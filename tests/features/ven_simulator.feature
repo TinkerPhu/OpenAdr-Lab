@@ -94,7 +94,9 @@ Feature: VEN Simulator
     # scenario failed when it was first rewritten.
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to submit an obligation-driven report for the event
-    # The claim is that a report arrives unasked-for, not what shape it has. How
+    # The claim is that a report arrives unasked-for, not what it contains. How
     # many intervals it carries depends on how much history the resampler had,
-    # which is a race this scenario has no reason to run.
-    Then the latest VEN-1 report for the event has a "USAGE" payload with a non-negative number value
+    # and USAGE is *signed* energy -- a site with PV generating legitimately
+    # reports a negative value, as this scenario did at -6.8e-06 kWh. Asserting
+    # a sign here would pin the weather, not the mechanism.
+    Then every interval of the latest report has a "USAGE" payload with a number value
