@@ -32,11 +32,14 @@ services:
     ports:
       - "8211:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-4
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -48,7 +51,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-4"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_4}"
       CLIENT_ID: "ven-4"
       CLIENT_SECRET: "ven-4"
       VEN_NAME: "ven-4"
@@ -82,11 +84,14 @@ services:
     ports:
       - "8215:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-5
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -98,7 +103,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-5"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_5}"
       CLIENT_ID: "ven-5"
       CLIENT_SECRET: "ven-5"
       VEN_NAME: "ven-5"
@@ -129,11 +133,14 @@ services:
     ports:
       - "8216:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-6
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -145,7 +152,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-6"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_6}"
       CLIENT_ID: "ven-6"
       CLIENT_SECRET: "ven-6"
       VEN_NAME: "ven-6"
@@ -176,11 +182,14 @@ services:
     ports:
       - "8217:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-7
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -192,7 +201,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-7"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_7}"
       CLIENT_ID: "ven-7"
       CLIENT_SECRET: "ven-7"
       VEN_NAME: "ven-7"
@@ -223,11 +231,14 @@ services:
     ports:
       - "8218:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-8
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -239,7 +250,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-8"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_8}"
       CLIENT_ID: "ven-8"
       CLIENT_SECRET: "ven-8"
       VEN_NAME: "ven-8"
@@ -270,11 +280,14 @@ services:
     ports:
       - "8219:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-9
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -286,7 +299,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-9"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_9}"
       CLIENT_ID: "ven-9"
       CLIENT_SECRET: "ven-9"
       VEN_NAME: "ven-9"
@@ -317,11 +329,14 @@ services:
     ports:
       - "8220:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-10
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -333,7 +348,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-10"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_10}"
       CLIENT_ID: "ven-10"
       CLIENT_SECRET: "ven-10"
       VEN_NAME: "ven-10"
@@ -364,11 +378,14 @@ services:
     ports:
       - "8221:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-11
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -380,7 +397,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-11"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_11}"
       CLIENT_ID: "ven-11"
       CLIENT_SECRET: "ven-11"
       VEN_NAME: "ven-11"
@@ -411,11 +427,14 @@ services:
     ports:
       - "8222:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-12
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -427,7 +446,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-12"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_12}"
       CLIENT_ID: "ven-12"
       CLIENT_SECRET: "ven-12"
       VEN_NAME: "ven-12"
@@ -458,11 +476,14 @@ services:
     ports:
       - "8223:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-13
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -474,7 +495,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-13"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_13}"
       CLIENT_ID: "ven-13"
       CLIENT_SECRET: "ven-13"
       VEN_NAME: "ven-13"
@@ -505,11 +525,14 @@ services:
     ports:
       - "8224:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-14
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -521,7 +544,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-14"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_14}"
       CLIENT_ID: "ven-14"
       CLIENT_SECRET: "ven-14"
       VEN_NAME: "ven-14"
@@ -552,11 +574,14 @@ services:
     ports:
       - "8225:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-15
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -568,7 +593,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-15"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_15}"
       CLIENT_ID: "ven-15"
       CLIENT_SECRET: "ven-15"
       VEN_NAME: "ven-15"
@@ -599,11 +623,14 @@ services:
     ports:
       - "8226:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-16
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -615,7 +642,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-16"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_16}"
       CLIENT_ID: "ven-16"
       CLIENT_SECRET: "ven-16"
       VEN_NAME: "ven-16"
@@ -646,11 +672,14 @@ services:
     ports:
       - "8227:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-17
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -662,7 +691,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-17"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_17}"
       CLIENT_ID: "ven-17"
       CLIENT_SECRET: "ven-17"
       VEN_NAME: "ven-17"
@@ -693,11 +721,14 @@ services:
     ports:
       - "8228:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-18
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -709,7 +740,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-18"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_18}"
       CLIENT_ID: "ven-18"
       CLIENT_SECRET: "ven-18"
       VEN_NAME: "ven-18"
@@ -740,11 +770,14 @@ services:
     ports:
       - "8229:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-19
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -756,7 +789,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-19"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_19}"
       CLIENT_ID: "ven-19"
       CLIENT_SECRET: "ven-19"
       VEN_NAME: "ven-19"
@@ -787,11 +819,14 @@ services:
     ports:
       - "8230:8080"
     env_file:
-      # Per-VEN broker passwords, written by
-      # scripts/gen_fleet_mqtt_secrets.py. Optional so a bare checkout
-      # still starts; without it this VEN fails to authenticate loudly
-      # rather than falling back to a shared credential quietly.
-      - path: .env.fleet
+      # This VEN's own broker password, written by
+      # scripts/gen_fleet_mqtt_secrets.py --per-ven-dir. One file per VEN
+      # carrying the generic FLEET_MQTT_PASSWORD, because env_file feeds the
+      # container and is NOT a source for ${...} interpolation in the block
+      # below -- a per-VEN variable read that way resolves to empty silently.
+      # Optional so a bare checkout still starts; without it this VEN fails to
+      # authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet.ven-20
         required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
@@ -803,7 +838,6 @@ services:
       FLEET_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
       FLEET_MQTT_PORT: "1884"
       FLEET_MQTT_USERNAME: "ven-20"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_20}"
       CLIENT_ID: "ven-20"
       CLIENT_SECRET: "ven-20"
       VEN_NAME: "ven-20"

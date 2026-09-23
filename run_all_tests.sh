@@ -194,6 +194,20 @@ if ! $_DOCKER_IS_LOCAL; then
     echo "  OK — every path the builds copy is present: $NEEDED"
 fi
 
+# ── Pre-flight: no compose variable that silently becomes empty ──────────
+#
+# Cheap, local, and it runs before anything is built because the failure it
+# catches is invisible at build time and at run time both: a ${VAR} compose
+# cannot resolve becomes "", the container starts, and the wrongness only shows
+# up as a peer refusing it. See scripts/audit_compose_env.py for the deployment
+# this cost.
+header "Pre-flight: compose interpolation"
+if command -v python3 &> /dev/null; then _PY=python3; else _PY=python; fi
+if ! "$_PY" "$SCRIPT_DIR/scripts/audit_compose_env.py"; then
+    echo -e "${RED}${BOLD}ABORT${NC}: fix the compose files above before running the suite."
+    exit 5
+fi
+
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────
 
 if $RUN_LOCAL; then

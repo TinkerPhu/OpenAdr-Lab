@@ -66,4 +66,7 @@ openspec/changes/pv-self-consumption-reward/*
 # Regenerated from the root secret on each host; never committed.
 .env.fleet
 **/.env.fleet
+# ...and the per-VEN files beside it, each holding one VEN's own password.
+.env.fleet.*
+**/.env.fleet.*
 
