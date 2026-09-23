@@ -15,7 +15,7 @@
     "A job with no `command` is a human checklist item: jobs.py reports it as due and",
     "records when it was marked done, but runs nothing."
   ],
-  "next_due": "2026-09-22T16:08:29Z",
+  "next_due": "2026-09-23T09:43:54Z",
   "jobs": [
     {
       "id": "openspec-version",
@@ -37,12 +37,12 @@
     },
     {
       "id": "architecture-invariants",
-      "description": "Run the ven-architecture grep invariants and regenerate the module diagram",
-      "command": null,
+      "description": "Do the VEN's hexagonal dependency rules still hold, and does the module diagram still describe the code?",
+      "command": "{python} scripts/audit_ven_architecture.py",
       "interval_days": 90,
-      "last_run": null,
-      "last_status": null,
-      "notes": "SESSION_START.md §4. The greps are in .claude/CLAUDE.md under ven-architecture:."
+      "last_run": "2026-09-23T09:43:54Z",
+      "last_status": "done by hand",
+      "notes": "The four dependency rules are now scripted (scripts/audit_ven_architecture.py) and run automatically. The module diagram in docs/architecture/module_dependency_graph.md is hand-maintained and is the part that still needs a human pass: compare its nodes against VEN/src/tasks/, the controller ports, and anything new under infra. Its first check (2026-09-23) found it six task loops and the whole fleet-telemetry path behind."
     },
     {
       "id": "docs-drift",
