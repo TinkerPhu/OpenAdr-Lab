@@ -396,7 +396,7 @@ ensures state survives container restarts. DB is not exposed to VENs — only VT
 **Rationale:** One vocabulary across backend, BFF, and UI reduces boilerplate and debugging
 friction. Any translation layer is a future source of bugs and cognitive overhead.
 
-### D-06: VTN Controller Symmetry — shared abstractions staged in VEN/src/common/
+### D-06: VTN Controller Symmetry — shared abstractions, now the `lab-core` crate
 
 **Observation:** A future VTN operator/aggregator controller (fleet flexibility aggregation,
 M&V, event creation optimisation) would need the same foundational abstractions as the VEN
@@ -409,9 +409,19 @@ HEMS controller:
 The planning algorithms themselves are **not** shared — VEN does single-site greedy
 scheduling; a VTN controller would do fleet-level dispatch optimisation across N VENs.
 
-**Decision:** Shared abstractions are introduced as `VEN/src/common/` — a plain Rust module,
-not a separate crate. When a VTN controller is built, `common/` is extracted into a shared
-workspace crate at that point. No API changes are required at extraction time because the
-module boundary is already clean.
+**Decision:** Shared abstractions started as `VEN/src/common/` — a plain Rust module, not a
+separate crate — to be extracted when a second consumer appeared.
+
+**Extracted 2026-09-22**, and the trigger was not a VTN controller but the fleet monitor:
+the BFF had to resample twenty VENs onto one grid, and resolve events into per-VEN bands
+using the same interval-timing rule the VEN plans against. `lab-core/` now holds
+`time_series`, `time_window` and `event_timing`, and both the VEN and the BFF depend on it
+by path. The prediction held: no API changed at extraction time. What it cost instead was
+deployment — both Docker build contexts moved to the repo root for the path dependency, and
+the new top-level directory did not arrive on the docker hosts' sparse checkouts, which
+`run_all_tests.sh` now pre-flights for.
+
+`FlexibilityEnvelope` and the baseline model are still VEN-only; they move if and when a
+second consumer needs them, by the same rule.
 
 See `VEN_ARCHITECTURE.md §1` (target source layout) and `docs/BACKLOG.md RF-05`.

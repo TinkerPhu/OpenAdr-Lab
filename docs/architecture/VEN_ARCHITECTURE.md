@@ -1333,11 +1333,14 @@ silent bugs (e.g. linearly interpolating a tariff implies a continuous ramp, whi
 **LOCF** = Last Observation Carried Forward — the value at time `t` is the most recent value
 at or before `t`. Correct for tariffs and any signal that "takes effect and stays in effect".
 
-### 5.2 Implementation — `common::TimeSeries`
+### 5.2 Implementation — `lab_core::time_series::TimeSeries`
 
-A single reusable abstraction (`VEN/src/common/mod.rs`) backs all three time-series
+A single reusable abstraction (`lab-core/src/time_series.rs`) backs all three time-series
 consumers — tariffs, obligation reports, and timeline resampling — so there is one
-interpolation/aggregation implementation, not one per consumer.
+interpolation/aggregation implementation, not one per consumer. It left `VEN/src/common/`
+for the shared `lab-core` crate when the VTN's BFF needed the same resampling to put a
+fleet's curves on one grid (VTN_ARCHITECTURE.md D-06); the VEN's callers were unchanged
+by the move, which is what the module boundary was for.
 
 ```rust
 struct TimeSeries {

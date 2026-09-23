@@ -333,9 +333,9 @@ The planner integrates user requests as hard constraints (must-meet) or soft con
 
 **Opportunistic EV charging** can be toggled independently: when on, any surplus generation charges the EV even without an explicit user request.
 
-**Interaction between user requests and the deviation absorber:**
+**Interaction between user requests and the deviation arbiter:**
 
-User requests (EV session, heater target, shiftable load) are inputs to the MILP planner — they translate into hard or soft constraints on the resulting `Plan`. The absorber then operates on deviations from that plan. They do not compete:
+User requests (EV session, heater target, shiftable load) are inputs to the MILP planner — they translate into hard or soft constraints on the resulting `Plan`. The arbiter then operates on deviations from that plan. They do not compete:
 
 ```
 User request (POST /ev-session)
@@ -350,15 +350,15 @@ New Plan adopted (EV charging slot already included)
 sim_tick Phase 2: dispatcher reads plan → setpoints include EV charging
         │
         ▼
-sim_tick Phase 3: absorber compares actual vs planned grid import
+sim_tick Phase 3: arbiter compares actual vs planned grid import
                   EV departure guard prevents cutting EV if soc < target
 ```
 
-The absorber respects user intent through the departure guard and through the plan itself (which already scheduled the request). There is no priority conflict because the plan is the single source of truth for all asset targets.
+The arbiter respects user intent through the departure guard and through the plan itself (which already scheduled the request). There is no priority conflict because the plan is the single source of truth for all asset targets.
 
 **Opportunistic loading — current state:** Only the EV has an opportunistic surplus-charging overlay (`apply_surplus_ev_overlay` in `dispatcher.rs`). It activates when no EV session is active, the EV is plugged and below its SoC target, and PV is generating a surplus. This is an explicit opt-in toggle (`PUT /ev-settings`).
 
-**Opportunistic heating / boiler — not yet implemented.** Extending the surplus overlay to the heater (pre-heat when PV surplus is available) would follow the same pattern: a dispatcher-level overlay that fires when no HeaterTarget session is active. The absorber priority list could naturally govern the order (battery → EV → heater), reusing the existing `priority` field in the absorber asset config.
+**Opportunistic heating / boiler — not yet implemented.** Extending the surplus overlay to the heater (pre-heat when PV surplus is available) would follow the same pattern: a dispatcher-level overlay that fires when no HeaterTarget session is active. The arbiter's lever ranking could naturally govern the order (battery → EV → heater), reusing its existing marginal-cost ordering.
 
 > **Reference:** [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md) · [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
@@ -467,7 +467,7 @@ The VEN polls the VTN continuously over authenticated HTTPS.
 
 **Operator motivation profiles — not implemented.** The VEN is hardcoded to minimise import cost (weighted by tariff and CO₂ intensity). The OpenADR concept doc defines operator profiles (cost-optimiser, compliance-driven, comfort-priority, EV fleet, DSO-contracted), but no profile selection mechanism exists in the VEN configuration. All three VEN instances use the same MILP objective structure.
 
-> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md) · [concept_vtn_ven_demand_response_simulation.md](docs/architecture/concept_vtn_ven_demand_response_simulation.md)
+> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md)
 
 ### 2.6 Report Obligations
 *(FR-OA-04)*
@@ -1101,8 +1101,11 @@ The largest domain package. Sub-modules:
 |------------|---------------|
 | `milp_planner/` | HiGHS MILP formulation, two-phase solve, result translation |
 | `dispatcher.rs` | Translate plan allocations → per-asset setpoints each tick |
-| `absorber.rs` | Tier-1 real-time deviation correction; returns residual for Tier-2 escalation |
-| `envelope.rs` | Compute site flexibility envelope |
+| `arbiter.rs`, `arbiter/` | Real-time deviation correction by ranked marginal-cost levers; returns a residual |
+| `site_headroom.rs` | Compute site flexibility envelope |
+| `capacity_headroom.rs` | Per-asset capability aggregated into the site's headroom band |
+| `telemetry_port.rs` | `TelemetryPort` — fleet telemetry publishing with its own cadence |
+| `report_accumulator.rs` | Append report intervals to a bounded per-(event, payload) window |
 | `timeline.rs` | Extrapolate per-asset planned trajectories (SoC, temperature, power) |
 | `reporter.rs` | Compute interval report payloads |
 | `trace.rs` | `ControllerTrace` — 500-entry ring buffer of controller events |
@@ -1110,7 +1113,7 @@ The largest domain package. Sub-modules:
 | `vtn_port.rs` | `VtnPort` trait |
 | `simulator_port.rs` | `SimulatorPort` trait + `SimSnapshot` / `GridSnapshot` types |
 
-**Opportunistic load location:** The opportunistic EV surplus-charging overlay lives in `controller/dispatcher.rs` as `apply_surplus_ev_overlay()`, not in `assets/ev.rs`. This is intentional: the surplus calculation requires knowledge of the full site balance (PV output, base load, existing setpoints) which the dispatcher already computes. The `assets/mod.rs` trait defines a `surplus_charge_kw()` method as a per-asset capability hook, but the orchestration belongs in the dispatcher where the site-level surplus is known. For a heater opportunistic pre-heat overlay, the same pattern applies: add a `surplus_heat_kw()` hook to the heater asset and call it from `dispatcher.rs` after the EV overlay. A separate `surplus_orchestrator` module would only make sense if the logic grows complex (e.g., cross-asset surplus arbitration with priority weights), which at that point could reuse the absorber's priority configuration.
+**Opportunistic load location:** The opportunistic EV surplus-charging overlay lives in `controller/dispatcher.rs` as `apply_surplus_ev_overlay()`, not in `assets/ev.rs`. This is intentional: the surplus calculation requires knowledge of the full site balance (PV output, base load, existing setpoints) which the dispatcher already computes. The `assets/mod.rs` trait defines a `surplus_charge_kw()` method as a per-asset capability hook, but the orchestration belongs in the dispatcher where the site-level surplus is known. For a heater opportunistic pre-heat overlay, the same pattern applies: add a `surplus_heat_kw()` hook to the heater asset and call it from `dispatcher.rs` after the EV overlay. A separate `surplus_orchestrator` module would only make sense if the logic grows complex (e.g., cross-asset surplus arbitration with priority weights), which at that point could reuse the arbiter's lever ranking.
 
 #### `src/services/` — Application services
 Stateless orchestration; calls ports, updates state.
@@ -1609,7 +1612,7 @@ Unit test coverage includes:
 - MILP solver formulation and result parsing
 - Planner acceptance gate
 - Report obligation scheduling
-- Controller absorber dead-band logic
+- Controller arbiter dead-band logic
 
 ### Architecture Invariant Checks
 
