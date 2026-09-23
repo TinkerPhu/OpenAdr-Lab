@@ -5,6 +5,7 @@ import {
 import { useFleetSignals } from "../api/hooks";
 import type { SignalBand } from "../api/types";
 import { venColor } from "../utils/venColor";
+import { byVenName } from "../utils/venOrder";
 
 const WINDOWS = [
   { minutes: 60, label: "1 hour" },
@@ -57,7 +58,12 @@ export function SignalsPage() {
     return { fromMs: Date.parse(signals.data.from), toMs: Date.parse(signals.data.to) };
   }, [signals.data]);
 
-  const venRows = (signals.data?.vens ?? []).filter((v) => v.bands.length > 0);
+  // Same counting order as the Fleet tab: a reader scanning for ven-2 should
+  // find it second in both places, not second here and thirteenth there.
+  const venRows = byVenName(
+    (signals.data?.vens ?? []).filter((v) => v.bands.length > 0),
+    (v) => v.venName,
+  );
 
   return (
     <Stack spacing={2}>

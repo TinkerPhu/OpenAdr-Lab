@@ -8,6 +8,7 @@ import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
 import { formatKw } from "../utils/power";
+import { byVenName } from "../utils/venOrder";
 
 /**
  * Windows an operator actually asks for, each with a bucket width that keeps
@@ -107,7 +108,7 @@ export function FleetPage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {live.data?.vens.map((v) => (
+            {byVenName(live.data?.vens ?? [], (v) => v.venName).map((v) => (
               <TableRow key={v.venName} data-testid={`fleet-ven-${v.venName}`}>
                 <TableCell>{v.venName}</TableCell>
                 <TableCell align="right">{formatKw(v.netPowerW)}</TableCell>

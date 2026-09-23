@@ -9,6 +9,7 @@ import { EmptyState } from "@lab/charts/EmptyState";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import type { FleetHistory, FleetSignals } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
+import { compareVenNames } from "../utils/venOrder";
 
 /** The series key the fleet total is drawn under. Prefixed so it can never
  *  collide with a VEN actually named "fleet". */
@@ -70,9 +71,11 @@ export function FleetPowerChart({
 
     const rows = mergeTimestampedSeries([], samples);
 
-    // Sorted by name so the legend order does not shuffle between refetches as
-    // VENs come and go.
-    const venNames = [...history.vens].map((v) => v.venName).sort();
+    // Sorted so the legend order does not shuffle between refetches as VENs
+    // come and go -- and sorted the way a person counts, since a plain sort
+    // puts ven-10 second and ven-2 two thirds of the way down a twenty-entry
+    // legend.
+    const venNames = history.vens.map((v) => v.venName).sort(compareVenNames);
     const series: TimeSeriesSeriesSpec[] = venNames.map((name) => ({
       key: name,
       axisId: AXIS_ID,
