@@ -147,13 +147,21 @@ def _wait_for_comfort_plan_matching(context, predicate, description):
     request lands can still finish and get stamped with a fresh created_at
     without having read the new request (TOCTOU on wall-clock freshness, not
     plan content). Re-poll /plan itself against the actual assertion so a
-    later cycle that does reflect the request is picked up within budget."""
+    later cycle that does reflect the request is picked up within budget.
+
+    The budget matches the "recomputed after" step above, and has to: what this
+    waits for is another whole plan cycle -- triggered, solved, adopted -- not a
+    faster version of the same thing. Thirty seconds could not cover one on
+    Node2, where a single MILP solve was measured at 26 s while the host also
+    runs the seventeen-VEN fleet, so the step failed on a plan that was merely
+    not finished yet. The assertion it guards is unchanged; only the time it is
+    willing to wait for the cycle it explicitly says it is waiting for."""
     def fetch():
         r = ven_get("/plan")
         return r.json() if r.ok else None
 
     context.comfort_plan = poll_until(
-        fetch, predicate, timeout=30, interval=3, description=description
+        fetch, predicate, timeout=180, interval=3, description=description
     )
 
 
