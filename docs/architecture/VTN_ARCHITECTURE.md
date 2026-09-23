@@ -257,6 +257,51 @@ every VEN.
 | `vtn-bff-1` | 8220 | Rust Axum BFF | dual-credential |
 | `vtn-ui-1` | 8221 | React VTN UI (nginx) | — |
 
+### The lab broker's authorisation model
+
+`lab-mqtt` (`eclipse-mosquitto:2`, host port 1884) carries what the lab
+*generates*: the VTN's OpenADR 3.1 subscription notifiers under
+`openadr-lab/vtn/`, and per-VEN fleet telemetry under `openadr-lab/fleet/`. It
+is deliberately separate from the house broker on :1883, which carries what the
+site *measures*; the port number alone says which is meant, on every network.
+
+`allow_anonymous false`, and every client has its own account:
+
+| Client | May |
+|---|---|
+| `openadr-vtn` | read/write `openadr-lab/vtn/#` |
+| `openadr-bff` | **read** `openadr-lab/fleet/#`, write nothing |
+| `ven-<n>` | read/write `openadr-lab/fleet/ven-<n>/#` only |
+
+The VEN rule is one ACL line — `pattern readwrite openadr-lab/fleet/%u/#` —
+where `%u` is the connecting username, so a twenty-first VEN needs no edit. The
+point of it is that authentication alone only proves a client is *some* known
+client: before this existed, one shared credential meant any VEN could publish
+under any other VEN's name, and a spoofed reading would have been
+indistinguishable from a real one in the fleet view.
+
+The BFF is read-only by the same reasoning: it is a consumer of what the VENs
+say, and a bug in it must not be able to invent a reading.
+
+**Passwords are derived, not kept.** `scripts/gen_fleet_mqtt_secrets.py`
+computes `HMAC-SHA256(root secret, ven name)`, so one secret covers any number
+of VENs and both hosts produce the same password without exchanging anything.
+The root never reaches a container — a VEN holding it could derive every
+sibling's password, which is the attack the ACL exists to stop. Two shapes come
+out of the generator, because the broker and the VENs need different things:
+an aggregate `MQTT_FLEET_PW_VEN_<n>` file the broker's start-up loop turns into
+accounts, and one file per VEN holding the generic `FLEET_MQTT_PASSWORD` the
+VEN itself reads. Both are git-ignored and regenerated rather than copied.
+
+The password file is written at container start from that environment, so no
+credential — hashed or otherwise — is committed to this public repository. The
+ACL file *is* committed: it contains usernames only.
+
+`scripts/test_fleet_acl.sh` verifies the model against a running broker. It
+asks by delivery rather than by exit code, because neither MQTT client can
+report authorisation: a denied publish is still acknowledged, and a wildcard
+subscription is accepted and then filtered per message.
+
 ### Docker Network
 
 - VTN uses Docker network `vtn_openadr-net` (named from compose project `vtn`)
