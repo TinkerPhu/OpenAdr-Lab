@@ -15,7 +15,7 @@
     "A job with no `command` is a human checklist item: jobs.py reports it as due and",
     "records when it was marked done, but runs nothing."
   ],
-  "next_due": "2026-09-23T09:43:54Z",
+  "next_due": "2026-09-29T16:08:29Z",
   "jobs": [
     {
       "id": "openspec-version",
@@ -31,9 +31,9 @@
       "description": "cargo audit and npm audit; findings go to docs/BACKLOG.md with severity",
       "command": null,
       "interval_days": 90,
-      "last_run": null,
-      "last_status": null,
-      "notes": "SESSION_START.md §4. No command: cargo audit needs the toolchain and npm audit needs both UIs, and a half-run audit reporting 'ok' would be worse than no audit."
+      "last_run": "2026-09-23T09:56:21Z",
+      "last_status": "done by hand",
+      "notes": "Run `npm audit` at the workspace root (one lockfile covers both UIs) and `cargo audit` in VEN, VTN/bff and lab-core. Before adding an ignore, check whether the advisory reaches code we actually run: the 2026-09-23 pass cleared five findings by dropping rumqttc's default features, because the BFF has no TLS transport at all. Findings go to docs/BACKLOG.md with severity and the reason anything is accepted."
     },
     {
       "id": "architecture-invariants",
@@ -49,9 +49,9 @@
       "description": "Compare DOCUMENTATION.md and docs/architecture/ against the actual code",
       "command": null,
       "interval_days": 90,
-      "last_run": null,
-      "last_status": null,
-      "notes": "SESSION_START.md §4."
+      "last_run": "2026-09-23T09:56:21Z",
+      "last_status": "done by hand",
+      "notes": "What the first pass (2026-09-23) actually caught, so the next one knows where to look: not broken links but a deleted component described in the present tense — `absorber.rs`, removed twice, still documented as the live deviation mechanism while the arbiter that replaced it went unmentioned. Two cheap sweeps find most of it: (1) extract every file path DOCUMENTATION.md and docs/architecture/ name and check each resolves — remembering that bare names like `reporter.rs` are relative to VEN/src/, so search rather than stat; (2) compare the module tables against `ls VEN/src/controller/` and `VEN/src/tasks/`. docs/history/ is exempt: it is a record, not a description."
     }
   ]
 }
