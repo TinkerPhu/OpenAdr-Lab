@@ -2402,3 +2402,29 @@ here, `ConnAck`.
 A second defect fell out of the same fix: announcing from the constructor also ran before the
 socket was up, and worked only because rumqttc queues publishes. Binding it to `ConnAck` removed
 a race nobody had noticed, because the correct trigger and the correct moment were the same one.
+
+## A start-up command that only works on a fresh filesystem (2026-09-23)
+
+`docker restart` on the lab broker produced an endless restart loop:
+
+    Error: Unable to open file /mosquitto/config/pwfile for writing. File exists.
+
+The container builds its password file at start-up with `mosquitto_passwd -c`, which refuses to
+overwrite. A fresh container has no such file, so `docker compose up --force-recreate` — the only
+way the container had ever been started — worked every time. `docker restart` reuses the existing
+filesystem, finds the file the previous start wrote, and fails.
+
+The danger is not the command that was being typed by hand. It is `restart: unless-stopped`: a
+host reboot or a docker daemon restart replays exactly the failing path, so the lab's only
+authenticated broker would not have come back from a power cut. Nobody would have connected the
+outage to a compose line written weeks earlier.
+
+**A container's start-up script runs on a filesystem that may already have run it.** Anything it
+creates, it must be willing to find already there — `rm -f` first, or `-f`/`--force`, or a
+existence check. The test is not "does it start" but "does it start twice", and
+`up --force-recreate` cannot answer that question because it hands over a clean slate every time.
+
+Found by accident, while restarting the broker to verify something unrelated. That is the second
+time in one day that the *verification* of one fix exposed a defect bigger than the fix (see the
+scenario-isolation entry above): exercising a system in a way nobody routinely does is where
+these live.
