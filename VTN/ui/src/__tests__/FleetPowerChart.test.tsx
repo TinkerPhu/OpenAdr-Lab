@@ -111,6 +111,21 @@ describe("FleetPowerChart", () => {
     expect(screen.getByTestId("fleet-chart-source")).toHaveTextContent("60s");
   });
 
+  it("orders the legend the way a person counts, not the way bytes sort", () => {
+    chartProps.length = 0;
+    const many = history({
+      vens: ["ven-10", "ven-2", "ven-1", "ven-20", "ven-3"].map((venName) => ({
+        venName,
+        samples: [{ ts: "2026-09-22T09:00:00Z", netPowerW: 1000 }],
+      })),
+    });
+    render(<FleetPowerChart history={many} windowMinutes={60} nowMs={0} />);
+
+    // The legend renders in series order, so this is the legend's order.
+    const keys = (chartProps[0].series as Series[]).map((x) => x.key);
+    expect(keys).toEqual(["ven-1", "ven-2", "ven-3", "ven-10", "ven-20", FLEET_KEY]);
+  });
+
   it("gives the curves real vertical room, not a dashboard cell's", () => {
     chartProps.length = 0;
     render(<FleetPowerChart history={history()} windowMinutes={60} nowMs={0} />);
