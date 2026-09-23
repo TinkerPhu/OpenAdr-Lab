@@ -1,6 +1,7 @@
 """Step definitions for reporter multi-interval resampling (RF-05e)."""
 
 import time
+import uuid
 
 import requests
 from behave import given, when, then
@@ -23,7 +24,14 @@ def step_create_event_with_report_descriptor(context, secs):
         context.vtn_token,
         json={
             "programID": context.saved_program_id,
-            "eventName": "resample-event",
+            # Unique per event, because the name is the VTN's uniqueness
+            # constraint and nothing here reads it back. A fixed name means
+            # this step 409s against any test VTN that still holds an event
+            # from an earlier run -- which the before_all cleanup usually but
+            # not always prevents, and which makes re-running a single feature
+            # against a live stack fail for a reason that has nothing to do
+            # with what is being tested.
+            "eventName": f"resample-event-{uuid.uuid4().hex[:8]}",
             # Keeps the event active for an hour while its intervals stay
             # `secs` long; 3.1 repeats the interval sequence across the
             # event-level duration (User Guide 647).
