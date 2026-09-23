@@ -93,6 +93,13 @@ Feature: VEN Simulator
     # most of its timeout on the wrong wait -- which is exactly how this
     # scenario failed when it was first rewritten.
     When I wait for VEN-1 to have at least 1 event
+    # And history before the report, for the same reason: the reporter builds
+    # its intervals by resampling the VEN's own samples, so a VEN that started
+    # moments ago has nothing to put in one. In a full suite run this scenario
+    # is ~270 scenarios deep and the VEN has been running for an hour, which is
+    # why it passes there and timed out when run alone against a fresh stack.
+    # Depending on suite position for that is depending on an accident.
+    And I wait for VEN-1 to accumulate at least 20 seconds of history
     And I wait for VEN-1 to submit an obligation-driven report for the event
     # The claim is that a report arrives unasked-for, not what it contains. How
     # many intervals it carries depends on how much history the resampler had,
