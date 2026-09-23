@@ -2343,3 +2343,34 @@ final summary is lost, so the run has to be repeated to get a verdict.
 Do not edit a shell script that is currently executing. Copy it, edit the copy, and swap after
 the run — or just wait. The same applies to anything else an interpreter streams rather than
 loads whole.
+
+## A scenario that passes in the suite may be passing on its position (2026-09-23)
+
+One rewritten BDD scenario failed four times for four unrelated reasons, and only the first
+looked like a test problem:
+
+1. **An impossible budget.** It waited 60 s for a report, with a 30 s event poll and a 60 s
+   report cadence ahead of it. Most of the wait was spent before the VEN had seen the event.
+2. **A sign the payload does not guarantee.** It asserted `USAGE` non-negative. `USAGE` is signed
+   energy; the site was net-exporting by 6.8e-06 kWh because PV was generating. The assertion
+   pinned the weather at run time, and would have passed every morning and failed every sunny
+   afternoon.
+3. **A dependency on suite position.** Run alone against a fresh stack it timed out entirely — no
+   report at all. In the full suite it reported in 11 s. The reporter builds intervals by
+   resampling the VEN's own samples, and a VEN that started a minute ago has none. It had been
+   passing because ~270 earlier scenarios had left VEN-1 running for an hour.
+4. **A fixed object name.** The shared step hardcoded `eventName: "resample-event"`, which is the
+   VTN's uniqueness constraint, so re-running the feature against a live stack 409'd on creation
+   and pointed the traceback at the step rather than at the leftover object.
+
+The third is the one worth keeping. **Running a scenario in isolation tests something the suite
+cannot: that the scenario means what it says regardless of what ran before it.** A green suite
+proves the scenarios pass *in that order*; it says nothing about which of them are quietly
+relying on state an earlier scenario happened to leave behind. When a scenario has a
+precondition — accumulated history, a warm cache, a learned heuristic — declare it as a step,
+even when the suite would have satisfied it anyway.
+
+And the fourth is the trap in checking the third: verifying a fix by re-running one feature
+against a persistent stack introduces residue the full suite's teardown would have removed. The
+environment difference that made the isolated run fail was the finding; the environment
+difference that made the *next* isolated run fail was noise. Telling those apart is the work.
