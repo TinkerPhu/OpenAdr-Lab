@@ -2263,3 +2263,66 @@ refuses the whole suite on an ambiguous step, so the cost was a full build-and-d
 a ten-second grep. Before adding a step, grep `tests/features/steps/` for its text — and prefer
 reusing the existing step over rewording the feature to avoid it.
 
+
+## A green test that never had a chance to fail (2026-09-23)
+
+`scripts/test_fleet_acl.sh` was run against the live broker to prove the new per-VEN ACL worked.
+It reported one failure and two passes. Both passes were worthless, and the failure was the only
+honest line in the output — it said `python3: command not found`, so the derived password was
+empty, every connection failed authentication, and the two checks that *expected* a denial got
+one for the wrong reason entirely.
+
+With the interpreter fixed, the same two checks flipped to failing — and they were still wrong,
+now in the other direction:
+
+- **A denied publish is still PUBACKed.** MQTT 3.1.1 has no way to say "not allowed", so the
+  broker accepts the message, drops it, and `mosquitto_pub` exits 0. A check on that exit code
+  can never fail.
+- **A wildcard subscription is never refused.** Mosquitto accepts `openadr-lab/fleet/#` from a
+  client that may read only its own row, then filters per message at delivery. `mosquitto_sub`
+  exiting 0 says nothing about authorisation.
+- **And retained state answers `-C 1` first.** With the subscription repointed, the probe still
+  passed — because the broker delivered the client's *own* retained status before the message
+  under test ever arrived.
+
+Three different mechanisms, one shape: the observable being measured was not the property being
+claimed. The rewrite asks the only question that cannot be faked — subscribe as one client,
+publish as another, and check whether it *landed* — and opens with a delivery that is expected
+to succeed. Without that control, every "blocked" below it is equally consistent with a broken
+password, a wrong container name, or an unreachable broker.
+
+**A negative test needs a positive control.** A suite of assertions that something does not
+happen will pass perfectly against a system that is not running at all.
+
+## `env_file:` is not a source for `${...}` (2026-09-23)
+
+Twenty VENs were deployed with an empty broker password by config that reads as obviously right:
+
+    env_file:
+      - path: .env.fleet          # holds MQTT_FLEET_PW_VEN_1=...
+    environment:
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_1}"
+
+Compose interpolates `${...}` from the shell and the project's `.env`, and from nowhere else.
+`env_file` supplies the *container's* environment — which happens after interpolation has
+already resolved. The variable the file defines and the variable four lines below it are not the
+same variable, and the second one becomes `""`.
+
+What made it expensive is that the symptom was indistinguishable from success. The VENs started,
+connected, and were refused with `disconnected: not authorised` — in a broker log already full
+of that exact line, because the shared account they used to share had just been deleted on
+purpose. The rollout looked like it was working.
+
+The fix removes the interpolation rather than correcting it: each VEN gets its own file holding
+the generic name the program actually reads, so there is no name to resolve. `scripts/
+audit_compose_env.py` makes it structural — in our own compose files a `${VAR}` must carry a
+`:-default`, because a value with no sensible default does not belong in a construct that
+silently empties. (`$${VAR}` is exempt: the doubled dollar hands the name to a shell inside the
+container, where `env_file` *is* the right source.)
+
+Tightening authorisation breaks whatever was quietly relying on the old permissiveness, and the
+broker's own healthcheck was the next casualty: it subscribed to `$SYS/broker/version`, which
+the new ACL does not grant to `openadr-vtn`. Not refused — accepted, served nothing, timed out,
+and marked a perfectly healthy broker unhealthy, which then blocked every service behind
+`depends_on`. After narrowing any permission, the things to re-check are the ones nobody thinks
+of as clients: healthchecks, probes, admin tooling.
