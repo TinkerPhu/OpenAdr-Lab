@@ -13384,3 +13384,50 @@ same shared rule on both sides of the wire, which is what makes the series addab
 than merely adjacent. Colour comes from a hash of the VEN name so a site keeps its colour
 when a neighbour drops out of the window; the total is deliberately off that wheel.
 
+
+## One credential per VEN, and three ways a rollout can look like it worked (2026-09-23)
+
+Twenty VENs shared one broker account, which means the fleet view had no way to tell a
+reading from a forgery: any VEN could publish under any other VEN's name. The fix is a
+credential each, derived as `HMAC-SHA256(root secret, ven name)` so one secret covers any
+number of VENs and both hosts agree without exchanging anything, plus a single ACL line —
+`pattern readwrite openadr-lab/fleet/%u/#` — that pins each account to its own subtree. The
+root never reaches a container; a VEN holding it could derive every sibling's password,
+which is precisely the attack being closed.
+
+The code for that was written and committed the day before. Deploying it took most of a
+morning, and every one of the three defects it found presented as success.
+
+**The verification script proved nothing.** Run against the live broker it reported one
+failure and two passes. The failure was `python3: command not found` — so the derived
+password was empty, every connection failed authentication, and the two checks expecting a
+denial got one for entirely the wrong reason. With the interpreter resolved, those two
+checks flipped to *failing*, and were still wrong: a denied publish is PUBACKed and dropped,
+so `mosquitto_pub` exits 0 regardless; a wildcard subscription is never refused, only
+filtered per message at delivery. Repointing it at the exact topic then passed — because the
+broker delivered the client's own *retained* status before the message under test arrived.
+Three mechanisms, one shape: the observable measured was not the property claimed. The
+rewrite asks whether the message *landed*, and opens with a delivery expected to succeed,
+because a suite of "this does not happen" assertions passes perfectly against a system that
+is not running.
+
+**The password could never have arrived.** Compose interpolates `${...}` from the shell and
+the project `.env`, never from the service's own `env_file` — which supplies the container's
+environment, after interpolation has already resolved. So `env_file: .env.fleet` holding
+`MQTT_FLEET_PW_VEN_1`, and `FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_1}"` four lines below
+it, are not the same variable, and the second is `""`. What made it cost an hour is that the
+symptom was the intended one: `disconnected: not authorised`, in a log already full of that
+line because the shared account had just been deleted on purpose. The fix deletes the
+interpolation rather than correcting it — one file per VEN under the generic name the program
+reads — and `scripts/audit_compose_env.py` now refuses any `${VAR}` without a default in our
+own compose files, because a value with no sensible default does not belong in a construct
+that silently empties.
+
+**Tightening authorisation broke the broker's own healthcheck.** It subscribed to
+`$SYS/broker/version`, which the new ACL does not grant `openadr-vtn`. Not refused —
+accepted, served nothing, timed out, and marked a healthy broker unhealthy, which then
+blocked the BFF and UI behind `depends_on`. After narrowing any permission, the clients to
+re-check are the ones nobody thinks of as clients.
+
+Verified on the live fleet: `ven-1` reaches only its own topic, cannot publish as `ven-2`,
+cannot read `ven-2`, and the BFF reads the fleet without being able to write to it.
