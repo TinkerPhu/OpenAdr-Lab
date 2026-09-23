@@ -5,6 +5,7 @@ import {
 } from "@mui/material";
 import { useFleetHistory, useFleetPower, useFleetSignals } from "../api/hooks";
 import { FleetPowerChart } from "../components/FleetPowerChart";
+import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
 import { formatKw } from "../utils/power";
@@ -56,7 +57,7 @@ export function FleetPage() {
 
       <Paper sx={{ p: 2 }} data-testid="fleet-history-card">
         <Stack direction="row" spacing={2} alignItems="center" mb={1}>
-          <Typography variant="h6">Per-VEN power</Typography>
+          <Typography variant="h6">Fleet response</Typography>
           <TextField
             select
             size="small"
@@ -79,6 +80,21 @@ export function FleetPage() {
             below may be incomplete.
           </Alert>
         )}
+        {/* Price above power, on the same axis and the same window, because a
+            dip means something different depending on whether the hour got
+            expensive or a limit landed. */}
+        <Typography variant="subtitle2" color="text.secondary">
+          Tariff
+        </Typography>
+        <FleetTariffChart
+          signals={signals.data}
+          windowMinutes={chosen.minutes}
+          nowMs={now.getTime()}
+        />
+
+        <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+          Per-VEN power
+        </Typography>
         {history.isError && (
           <Alert severity="info" data-testid="fleet-history-error">
             No stored history — the telemetry store is not connected.

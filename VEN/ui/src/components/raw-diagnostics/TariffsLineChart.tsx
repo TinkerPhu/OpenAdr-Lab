@@ -1,7 +1,8 @@
 import type { PlannedRates } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
+import { TARIFF_LINE_STYLE } from "@lab/charts/types";
 import { DIAGNOSTIC_CHART_HEIGHT } from "@lab/charts/chartLayout";
-import { formatTariffEurKwh, formatCo2IntensityGKwh } from "@lab/charts/unitFormat";
+import { formatCo2IntensityGKwh } from "@lab/charts/unitFormat";
 import { EmptyState } from "@lab/charts/EmptyState";
 import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH, MIN_CO2_INTENSITY_SPAN_G_KWH } from "@lab/charts/axisDomain";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
@@ -48,14 +49,18 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
       axisId: "tariff",
       dataKey: (row) => row.values?.import_tariff_eur_kwh ?? null,
       color: SERIES_COLORS.import_tariff,
-      formatter: formatTariffEurKwh,
+      // Dashed like every other tariff in the lab: an announced price is not a
+      // measurement, and this chart used to be the odd one out.
+      ...TARIFF_LINE_STYLE,
     },
     {
       key: "export €/kWh",
       axisId: "tariff",
       dataKey: (row) => row.values?.export_tariff_eur_kwh ?? null,
       color: SERIES_COLORS.export_tariff,
-      formatter: formatTariffEurKwh,
+      // Dashed like every other tariff in the lab: an announced price is not a
+      // measurement, and this chart used to be the odd one out.
+      ...TARIFF_LINE_STYLE,
     },
     {
       key: "CO₂ g/kWh",

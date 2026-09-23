@@ -48,6 +48,12 @@ vi.mock("../components/FleetPowerChart", () => ({
   ),
 }));
 
+vi.mock("../components/FleetTariffChart", () => ({
+  FleetTariffChart: ({ windowMinutes }: { windowMinutes: number }) => (
+    <div data-testid="fleet-tariff-stub">{windowMinutes}</div>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useFleetPower: vi.fn(() => ({ data: mockLive, isError: false })),
   useFleetHistory: vi.fn(() => ({ data: mockHistory, isError: false })),
@@ -109,6 +115,20 @@ describe("FleetPage", () => {
 
   /* The window picker is what makes "did it react" and "what did today look
    * like" the same page rather than two. */
+  it("puts the price above the power it explains", () => {
+    renderFleet();
+    const tariff = screen.getByTestId("fleet-tariff-stub");
+    const power = screen.getByTestId("fleet-chart-stub");
+    // Reading order is the point: the tariff is context for the curves below.
+    expect(tariff.compareDocumentPosition(power)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("moves both charts with one window selector", () => {
+    renderFleet();
+    expect(screen.getByTestId("fleet-tariff-stub")).toHaveTextContent("60");
+    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("60");
+  });
+
   it("offers the operator a window to choose", async () => {
     renderFleet();
     expect(screen.getByTestId("fleet-window-select")).toBeInTheDocument();
