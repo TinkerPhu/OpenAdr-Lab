@@ -23,6 +23,9 @@ services:
     restart: unless-stopped
     ports:
       - "8211:8080"
+    env_file:
+      - path: .env.fleet
+        required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
@@ -32,8 +35,8 @@ services:
       # all rather than a boolean.
       FLEET_MQTT_HOST: "lab-mqtt"
       FLEET_MQTT_PORT: "1884"
-      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
+      FLEET_MQTT_USERNAME: "ven-1"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_1}"
       CLIENT_ID: "ven-1"
       CLIENT_SECRET: "ven-1"
       VEN_NAME: "ven-1"
@@ -77,6 +80,9 @@ services:
     restart: unless-stopped
     ports:
       - "8212:8080"
+    env_file:
+      - path: .env.fleet
+        required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
@@ -86,8 +92,8 @@ services:
       # all rather than a boolean.
       FLEET_MQTT_HOST: "lab-mqtt"
       FLEET_MQTT_PORT: "1884"
-      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
+      FLEET_MQTT_USERNAME: "ven-2"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_2}"
       CLIENT_ID: "ven-2"
       CLIENT_SECRET: "ven-2"
       VEN_NAME: "ven-2"
@@ -119,6 +125,9 @@ services:
     restart: unless-stopped
     ports:
       - "8213:8080"
+    env_file:
+      - path: .env.fleet
+        required: false
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://vtn:3000"
@@ -128,8 +137,8 @@ services:
       # all rather than a boolean.
       FLEET_MQTT_HOST: "lab-mqtt"
       FLEET_MQTT_PORT: "1884"
-      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
+      FLEET_MQTT_USERNAME: "ven-3"
+      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PW_VEN_3}"
       CLIENT_ID: "ven-3"
       CLIENT_SECRET: "ven-3"
       VEN_NAME: "ven-3"

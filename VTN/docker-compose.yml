@@ -76,14 +76,22 @@ services:
     environment:
       MQTT_VTN_USERNAME: ${MQTT_VTN_USERNAME:-openadr-vtn}
       MQTT_VTN_PASSWORD: ${MQTT_VTN_PASSWORD:-openadr-vtn}
-      # The fleet's own credential: every VEN publishes its live telemetry
-      # under openadr-lab/fleet/<venName>. One shared credential for now --
-      # a per-VEN ACL, so a VEN may only publish below its own name, is
-      # recorded as still-to-do in the phase 0 plan §6.1.
-      MQTT_FLEET_USERNAME: ${MQTT_FLEET_USERNAME:-openadr-fleet}
-      MQTT_FLEET_PASSWORD: ${MQTT_FLEET_PASSWORD:-openadr-fleet}
+      # The BFF reads the whole fleet; the ACL makes that read-only.
+      MQTT_BFF_USERNAME: ${MQTT_BFF_USERNAME:-openadr-bff}
+      MQTT_BFF_PASSWORD: ${MQTT_BFF_PASSWORD:-openadr-bff}
+      # Each VEN authenticates as its own name with its own derived password
+      # (§6.1). They arrive as MQTT_FLEET_PW_VEN_<n> from .env.fleet, which
+      # `scripts/gen_fleet_mqtt_secrets.py` writes and git ignores — the root
+      # secret it derives from never reaches a container.
+    env_file:
+      # Per-VEN broker passwords. Optional so a bare checkout still starts:
+      # without it the fleet users simply are not created, and the VENs fail
+      # to authenticate loudly rather than sharing a credential quietly.
+      - path: .env.fleet
+        required: false
     volumes:
       - ./mosquitto/lab-mqtt.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/fleet-acl.conf:/mosquitto/config/fleet-acl.conf:ro
       - lab-mqtt-data:/mosquitto/data
     command:
       - sh
@@ -92,7 +100,16 @@ services:
         set -e
         mosquitto_passwd -c -b /mosquitto/config/pwfile           "$${MQTT_VTN_USERNAME}" "$${MQTT_VTN_PASSWORD}"
         # -c creates and truncates, so only the first call may use it.
-        mosquitto_passwd -b /mosquitto/config/pwfile           "$${MQTT_FLEET_USERNAME}" "$${MQTT_FLEET_PASSWORD}"
+        mosquitto_passwd -b /mosquitto/config/pwfile           "$${MQTT_BFF_USERNAME}" "$${MQTT_BFF_PASSWORD}"
+        # One user per VEN, named after the VEN, so the ACL's `%u` pattern can
+        # pin each to its own subtree. Reads MQTT_FLEET_PW_VEN_<n> from the
+        # environment; a VEN with no entry simply gets no account, which is a
+        # loud failure at its next connect rather than a silent shared login.
+        for var in $$(env | grep -o '^MQTT_FLEET_PW_VEN_[0-9]*'); do
+          n=$${var#MQTT_FLEET_PW_VEN_}
+          eval "pw=\$$$$var"
+          mosquitto_passwd -b /mosquitto/config/pwfile "ven-$$n" "$$pw"
+        done
         # The command runs as root, but mosquitto drops to the `mosquitto` user
         # on start; without this chown it cannot read its own password file and
         # exits with 'Unable to open pwfile'.
@@ -199,8 +216,10 @@ services:
       # has no idea what these variables are).
       FLEET_MQTT_HOST: "lab-mqtt"
       FLEET_MQTT_PORT: "1884"
-      FLEET_MQTT_USERNAME: "${MQTT_FLEET_USERNAME:-openadr-fleet}"
-      FLEET_MQTT_PASSWORD: "${MQTT_FLEET_PASSWORD:-openadr-fleet}"
+      # Its own account, which the ACL grants read-only on the whole fleet:
+      # the BFF consumes what VENs say and must not be able to invent a reading.
+      FLEET_MQTT_USERNAME: "${MQTT_BFF_USERNAME:-openadr-bff}"
+      FLEET_MQTT_PASSWORD: "${MQTT_BFF_PASSWORD:-openadr-bff}"
       RUST_LOG: "info"
     healthcheck:
       test: curl --fail http://127.0.0.1:8090/api/health || exit 1

@@ -61,3 +61,9 @@ openspec/changes/pv-self-consumption-reward/*
 
 # npm workspace root: dependencies hoist here from VEN/ui and VTN/ui
 /node_modules/
+
+# Derived per-VEN broker passwords (scripts/gen_fleet_mqtt_secrets.py).
+# Regenerated from the root secret on each host; never committed.
+.env.fleet
+**/.env.fleet
+
