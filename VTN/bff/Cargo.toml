@@ -21,7 +21,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # MIT/Apache-2.0, no new system dependency (pure-Rust rustls TLS backend).
 # Subscribing to the fleet's live telemetry. Same client the VEN publishes
 # with, so both ends of openadr-lab/fleet/ agree about the protocol.
-rumqttc = "0.25"
+# default-features = false drops rumqttc's rustls stack. The BFF speaks plain
+# TCP to lab-mqtt on the docker network -- there is no TLS transport anywhere in
+# fleet.rs -- so the TLS code was compiled, never executed, and still carried
+# four rustls-webpki advisories (RUSTSEC-2026-0049/0098/0099/0104) that rumqttc
+# 0.25.1, the latest release, pins to a version predating the fixes. Not
+# compiling a stack we do not use is the fix; suppressing the advisories would
+# only have hidden it.
+rumqttc = { version = "0.25", default-features = false }
 # The rules the BFF must not answer differently from the VEN: how a time
 # series is resampled onto a grid, and when an interval runs (D-06). A path
 # dependency, which is why this crate's Docker build context is the repo root.
