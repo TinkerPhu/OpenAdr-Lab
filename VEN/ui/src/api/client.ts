@@ -4,7 +4,7 @@ import type {
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
   CapacityCurvesResponse,
-  EvSettings, UpdateEvSettingsBody,
+  EvSettings, UpdateEvSettingsBody, EvUsageSimState,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
@@ -494,6 +494,14 @@ export class VenApi {
   async putEvSettings(body: UpdateEvSettingsBody): Promise<EvSettings> {
     const r = await this.jsonReq("PUT", "/ev-settings", body);
     if (!r.ok) throw new Error(`PUT /ev-settings ${r.status}`);
+    return r.json();
+  }
+
+  /** null when the EV has no usage-sim configured (the common case — opt-in). */
+  async evUsageSim(): Promise<EvUsageSimState | null> {
+    const r = await this.getReq("/ev-usage-sim");
+    if (r.status === 204) return null;
+    if (!r.ok) throw new Error(`ev-usage-sim ${r.status}`);
     return r.json();
   }
 

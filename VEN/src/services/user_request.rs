@@ -36,6 +36,7 @@ impl UserRequestService {
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             budget_eur: req.budget_eur,
             comfort_rates: req.comfort_rates.clone(),
             created_at: now,
@@ -319,6 +320,7 @@ mod tests {
         let state = AppState::new();
         let ev_session = EvSession {
             mode: Default::default(),
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             id: Uuid::new_v4(),
             target_soc: 0.8,
             departure_time: Utc::now() + chrono::Duration::hours(6),

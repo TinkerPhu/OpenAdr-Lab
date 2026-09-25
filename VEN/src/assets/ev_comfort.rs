@@ -67,6 +67,7 @@ mod tests {
             departure_time: Utc::now() + chrono::Duration::hours(4),
             mode: UserRequestMode::ByDeadline,
             soft_deadline: false,
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             budget_eur: None,
             comfort_rates: rates,
             created_at: Utc::now(),

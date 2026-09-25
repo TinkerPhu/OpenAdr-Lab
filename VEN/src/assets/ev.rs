@@ -2,12 +2,13 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::ev_schedule::usage_sim_seed_tag;
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
-use crate::entities::asset_params::EvParams;
+use crate::entities::asset_params::{EvParams, EvUsageSimParams};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use lab_core::time_series::{Interpolation, TimeSeries};
 
@@ -21,9 +22,8 @@ pub struct EvCharger {
     /// without re-checking the flag.
     pub max_discharge_kw: f64,
     /// Whether the profile declared this EVSE as V2G-capable hardware.
-    /// Kept for diagnostics/transparency; not consulted anywhere else —
-    /// `max_discharge_kw` is already zeroed in `from_params` when this is
-    /// false.
+    /// Kept for diagnostics/transparency; not consulted elsewhere —
+    /// `max_discharge_kw` is already zeroed in `from_params` when false.
     pub v2g_capable: bool,
     pub battery_kwh: f64,
     /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
@@ -47,11 +47,18 @@ pub struct EvCharger {
     /// active (mirrors `EvSession` itself: `tasks/sim_tick/arbiter_glue.rs`
     /// already clears an expired session before this is populated for the
     /// tick, so a departure that's already passed reads as "no session," not
-    /// a stale future timestamp). Set each tick by the sim loop. NOT from
-    /// YAML, not persisted (`#[serde(skip)]`) — refreshed every tick from the
-    /// live session regardless.
+    /// a stale future timestamp). Set each tick by the sim loop; not from
+    /// YAML (`#[serde(skip)]`) — refreshed every tick from the live session.
     #[serde(skip)]
     pub departure_time: Option<DateTime<Utc>>,
+    /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
+    /// `None` (default) means this EV never leaves.
+    #[serde(skip)]
+    pub usage_sim: Option<EvUsageSimParams>,
+    /// Per-EV RNG salt (`ev_schedule::usage_sim_seed_tag`), so identically
+    /// configured EVs don't draw lock-step trips.
+    #[serde(skip)]
+    pub usage_sim_seed_tag: u64,
 }
 
 /// EV mutable state.
@@ -66,6 +73,10 @@ pub struct EvState {
     /// (BL-12 response-delay buffer).
     #[serde(default)]
     pub pending_command_kw: f64,
+    /// Last tick's `is_away_at` (usage-sim) — tracked so the return SoC drop
+    /// applies exactly once (`ev-usage-simulation`).
+    #[serde(default)]
+    pub was_away_by_usage_sim: bool,
 }
 
 impl EvCharger {
@@ -89,6 +100,8 @@ impl EvCharger {
             min_charge_kw: cfg.min_charge_kw,
             response_delay_s: cfg.response_delay_s,
             departure_time: None,
+            usage_sim: cfg.usage_sim.clone(),
+            usage_sim_seed_tag: usage_sim_seed_tag(&cfg.id),
         }
     }
 
@@ -98,6 +111,7 @@ impl EvCharger {
             plugged: true,
             actual_power_kw: cfg.max_charge_kw,
             pending_command_kw: cfg.max_charge_kw,
+            was_away_by_usage_sim: false,
         }
     }
 
@@ -132,6 +146,7 @@ impl EvCharger {
                 plugged: state.plugged,
                 actual_power_kw: applied_kw,
                 pending_command_kw: kw,
+                was_away_by_usage_sim: state.was_away_by_usage_sim,
             },
             applied_kw,
         )
@@ -436,18 +451,16 @@ impl TickOverridable for EvCharger {
     /// arm (design.md Decision D5). The only `TickOverridable` implementor
     /// that touches `state`: plugged-state is `AssetState`, not config.
     fn apply_tick_overrides(&mut self, state: &mut AssetState, overrides: &TickOverrides) {
-        // Behaviour C: ev_plugged — hold override or snap back to profile
-        // default (plugged=true) when released. Without snap-back, releasing
-        // the inject leaves the EV permanently unplugged because there is no
-        // physics to re-plug it.
-        if let AssetState::Ev(s) = state {
-            s.plugged = overrides.ev_plugged_override.unwrap_or(true);
-        }
+        // Refresh first so `is_away_at` below reads this tick's deadline.
+        self.departure_time = overrides.ev_departure_time;
         // Behaviour C: ev_soc_target — override BMS charge ceiling.
         self.soc_target = overrides
             .ev_soc_target_override
             .unwrap_or(self.soc_target_profile);
-        self.departure_time = overrides.ev_departure_time;
+
+        if let AssetState::Ev(s) = state {
+            self.apply_usage_sim_tick(s, overrides.now, overrides.ev_plugged_override);
+        }
     }
 }
 
@@ -552,12 +565,15 @@ mod tests {
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let state = EvState {
             soc,
             plugged,
             actual_power_kw,
             pending_command_kw: actual_power_kw,
+            was_away_by_usage_sim: false,
         };
         (cfg, state)
     }
@@ -775,12 +791,15 @@ mod tests {
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let mut state = EvState {
             soc: 0.01,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         };
         for _ in 0..1000 {
             let (ns, _) = ev.step_inner(&state, -10.0, Duration::seconds(1));

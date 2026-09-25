@@ -34,6 +34,7 @@ def step_ven_running_with_profile(context, profile):
     profile_urls = {
         "no_pv_test": api_client.VEN_NO_PV_BASE_URL,
         "penalty_test": api_client.VEN_PENALTY_TEST_BASE_URL,
+        "usage_sim_test": api_client.VEN_USAGE_SIM_TEST_BASE_URL,
     }
     api_client.VEN_BASE_URL = profile_urls.get(profile, api_client._DEFAULT_VEN_BASE_URL)
     r = ven_get("/health")
@@ -85,6 +86,18 @@ def step_poll_ven_field_eq(context, path, field, expected):
         fetch, check, timeout=15,
         description=f"VEN {path} field '{field}' == {expected}",
     )
+
+
+@when("I poll VEN {path} until it returns 200")
+def step_poll_ven_returns_200(context, path):
+    """Poll a VEN endpoint that may 204 (e.g. no session yet) until it 200s."""
+    context.last_response = poll_until(
+        lambda: ven_get(path),
+        lambda r: r.status_code == 200,
+        timeout=15,
+        description=f"VEN {path} returns 200",
+    )
+    context.last_response_json = context.last_response.json()
 
 
 @when('I poll VEN {path} until it is a non-empty array')
@@ -185,6 +198,13 @@ def step_response_json_field_equals(context, field_path, expected):
     assert abs(val - expected) < 1e-6, (
         f"Field '{field_path}' = {val} != {expected}"
     )
+
+
+@then('the response JSON field "{field_path}" equals "{expected}"')
+def step_response_json_field_equals_string(context, field_path, expected):
+    data = context.last_response_json
+    val = _resolve_nested(data, field_path)
+    assert val == expected, f"Field '{field_path}' = {val!r} != {expected!r}"
 
 
 @then("the response JSON is an array")

@@ -42,12 +42,15 @@ fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetS
         min_charge_kw: 1.4,
         response_delay_s: 10.0,
         departure_time: None,
+        usage_sim: None,
+        usage_sim_seed_tag: 0,
     };
     let state = crate::assets::AssetState::Ev(EvState {
         soc,
         plugged,
         actual_power_kw: setpoint_kw.max(0.0),
         pending_command_kw: setpoint_kw.max(0.0),
+        was_away_by_usage_sim: false,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &ev,

@@ -551,6 +551,7 @@ fn ev_planned_state_soc_populated() {
     }
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -636,6 +637,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 min_charge_kw: 0.0,
                 response_delay_s: 10.0,
                 v2g_capable: false,
+                usage_sim: None,
             }),
             AssetProfile::Pv(PvParams {
                 id: "pv".into(),

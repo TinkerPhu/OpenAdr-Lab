@@ -5,6 +5,25 @@ use uuid::Uuid;
 use crate::entities::asset::ComfortRate;
 use crate::entities::design_vocabulary::UserRequestMode;
 
+/// Who created an `EvSession` (`ev-usage-simulation`) — used only for
+/// precedence, never by the MILP: a real user or VTN request always wins over
+/// one the simulated usage schedule wrote, and the simulated schedule may only
+/// create or refresh a session when none is active or the active one is
+/// already `SimulatedUsage`-origin. No `Default` on purpose (see
+/// `EvSession.origin`'s doc comment) — every construction site must say which
+/// this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EvSessionOrigin {
+    UserRequest,
+    Vtn,
+    SimulatedUsage,
+}
+
+fn default_ev_session_origin() -> EvSessionOrigin {
+    EvSessionOrigin::UserRequest
+}
+
 /// A device-centric EV charging session.
 /// Only carries user intent — sim state (current_soc, plugged) is
 /// injected at solve time from `SimState::ev_state()`.
@@ -19,6 +38,14 @@ pub struct EvSession {
     /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
     #[serde(default)]
     pub soft_deadline: bool,
+    /// Who created this session (`ev-usage-simulation`). No `Default` impl on
+    /// `EvSessionOrigin` itself, so every *Rust* construction site must name
+    /// this explicitly (the compiler enforces it) — the `#[serde(default)]`
+    /// below exists only so a payload from before this field existed still
+    /// deserializes (as `UserRequest`, the pre-existing behavior), the same
+    /// backward-compatibility pattern already used for `mode` below.
+    #[serde(default = "default_ev_session_origin")]
+    pub origin: EvSessionOrigin,
     /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
     #[serde(default)]
     pub mode: UserRequestMode,
@@ -105,6 +132,7 @@ mod tests {
             departure_time: Utc::now(),
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
+            origin: EvSessionOrigin::UserRequest,
             budget_eur: None,
             comfort_rates: vec![],
             created_at: Utc::now(),

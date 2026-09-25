@@ -145,6 +145,7 @@ fn make_profile() -> Profile {
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
                 v2g_capable: false,
+                usage_sim: None,
             }),
             AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),
@@ -234,12 +235,15 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
             min_charge_kw: v("min_charge_kw"),
             response_delay_s: 0.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let state = AssetState::Ev(EvState {
             soc: v("soc"),
             plugged,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         });
         refresh_from_asset(ev, &charger, state);
     }
@@ -468,6 +472,7 @@ fn build_asset_contexts(
                     actual_power_kw: 0.0,
                     plugged,
                     pending_command_kw: 0.0,
+                    was_away_by_usage_sim: false,
                 });
                 let ac = EvCharger::from_params(cfg);
                 ctxs.push(MilpParticipant::build_milp_context(

@@ -8,6 +8,7 @@ import {
 import {
   useRequests,
   useEvSettings,
+  useEvUsageSim,
   usePostRequest,
   useDeleteRequest,
   usePutEvSettings,
@@ -29,6 +30,7 @@ export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: sim } = useSim();
   const { data: evSettings } = useEvSettings();
+  const { data: evUsageSim } = useEvUsageSim();
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
     (arbiterSettings?.deviation_arbiter_enabled ?? false) ||
@@ -64,6 +66,7 @@ export function DevicesPage() {
           <EvCard
             request={evRequest}
             evSettings={evSettings}
+            usageSim={evUsageSim}
             postRequest={postMut.mutateAsync}
             deleteRequest={deleteMut.mutateAsync}
             putEvSettings={putEvMut.mutate}

@@ -121,6 +121,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route("/user-requests/:id", delete(hems::delete_request))
         .route("/ev-session", get(hems::get_ev_session))
+        .route("/ev-usage-sim", get(hems::get_ev_usage_sim))
         .route("/flexibility", get(hems::get_flexibility))
         .route("/flexibility/history", get(hems::get_flexibility_history))
         .route("/flexibility/forecast", get(hems::get_flexibility_forecast))

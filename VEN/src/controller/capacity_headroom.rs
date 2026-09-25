@@ -918,6 +918,7 @@ mod tests {
                 min_charge_kw: 1.4,
                 response_delay_s: 0.0,
                 v2g_capable: false,
+                usage_sim: None,
             })],
             now,
         );
@@ -1278,6 +1279,7 @@ mod tests {
                     min_charge_kw: 1.4,
                     response_delay_s: 0.0,
                     v2g_capable: false,
+                    usage_sim: None,
                 }),
                 AssetParams::Heater(HeaterParams {
                     id: ASSET_HEATER.to_string(),

@@ -51,6 +51,9 @@ pub struct EvParams {
     /// (vehicle-to-grid) discharge. False by default — `max_discharge_kw` is
     /// otherwise inert (see `EvCharger::from_params`).
     pub v2g_capable: bool,
+    /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
+    /// `None` means this EV never leaves — today's behavior, unchanged.
+    pub usage_sim: Option<EvUsageSimParams>,
 }
 
 impl Default for EvParams {
@@ -66,8 +69,36 @@ impl Default for EvParams {
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             v2g_capable: false,
+            usage_sim: None,
         }
     }
+}
+
+/// A profile-configured, opt-in daily leave/return usage pattern for an EV
+/// (`ev-usage-simulation`). See `assets::ev_schedule` for the daily-trip
+/// generation this drives.
+#[derive(Debug, Clone)]
+pub struct EvUsageSimParams {
+    /// If true, the EV's next simulated leave instant is offered to the
+    /// planner in advance (as a simulated-origin charge session) once it
+    /// falls within the planner's horizon.
+    pub plan_ahead: bool,
+    pub weekday: EvUsageDayParams,
+    pub weekend: EvUsageDayParams,
+    /// Floor for the state-of-charge drop applied at return (%, 0-100).
+    pub min_soc_after_drop_pct: f64,
+}
+
+/// One day-type's (weekday or weekend) leave/return schedule.
+#[derive(Debug, Clone)]
+pub struct EvUsageDayParams {
+    pub leave_time: chrono::NaiveTime,
+    pub leave_jitter_min: f64,
+    pub return_time: chrono::NaiveTime,
+    pub return_jitter_min: f64,
+    pub leave_probability: f64,
+    pub soc_drop_pct_mean: f64,
+    pub soc_drop_pct_stddev: f64,
 }
 
 // ── Heater ───────────────────────────────────────────────────────────────────

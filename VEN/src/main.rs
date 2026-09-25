@@ -97,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(0.0);
     let grid_max_import_kw = profile.grid.max_import_kw;
     let grid_max_export_kw = profile.grid.max_export_kw;
+    let plan_horizon_h = profile.planner.plan_horizon_h;
     let vtn = VtnClient::new(
         cfg.vtn_base_url.clone(),
         cfg.client_id.clone(),
@@ -328,6 +329,7 @@ async fn main() -> anyhow::Result<()> {
                 cl,
                 (grid_max_import_kw, grid_max_export_kw),
                 tp.clone(),
+                plan_horizon_h,
             )
         });
     }

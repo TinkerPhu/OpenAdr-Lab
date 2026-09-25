@@ -5,7 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DevicesPage } from "../pages/Devices";
 import type {
-  UserRequestWithSession, EvSettings, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
+  UserRequestWithSession, EvSettings, EvUsageSimState, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
 } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
@@ -135,6 +135,7 @@ const mockArbiterSettingsData = vi.fn((): ArbiterSettings => ({
   limit_enforcement_enabled: true,
 }));
 const mockSimData = vi.fn((): SimSnapshot | undefined => undefined);
+const mockEvUsageSimData = vi.fn((): EvUsageSimState | null => null);
 const mockPostRequest = vi.fn();
 const mockDeleteRequest = vi.fn();
 const mockPutEvSettings = vi.fn();
@@ -161,6 +162,9 @@ vi.mock("../api/hooks", () => ({
   useEvSettings: () => ({
     data: mockEvSettingsData(),
     isLoading: false,
+  }),
+  useEvUsageSim: () => ({
+    data: mockEvUsageSimData(),
   }),
   usePostRequest: () => ({
     mutateAsync: mockPostRequest,
@@ -223,6 +227,7 @@ describe("DevicesPage", () => {
     });
     mockSimData.mockReturnValue(undefined);
     mockArbiterDiagnosticsData.mockReturnValue(emptyArbiterDiagnostics);
+    mockEvUsageSimData.mockReturnValue(null);
   });
 
   // 1. All idle
@@ -635,5 +640,35 @@ describe("DevicesPage", () => {
     mockRequestsData.mockReturnValue([makeEvRequest()]);
     renderPage();
     expect(screen.getByTestId("ev-estimated-cost")).toHaveTextContent("€1.23");
+  });
+
+  // ev-usage-simulation: no section when the EV has no usage-sim configured
+  it("shows no usage-sim section when ev-usage-sim returns nothing (204)", () => {
+    mockEvUsageSimData.mockReturnValue(null);
+    renderPage();
+    expect(screen.queryByTestId("ev-usage-sim-section")).toBeNull();
+  });
+
+  // ev-usage-simulation: plan-ahead chip and next scheduled trip
+  it("shows plan-ahead chip and next scheduled departure when usage-sim is configured", () => {
+    mockEvUsageSimData.mockReturnValue({
+      plan_ahead: true,
+      next_trip: {
+        leave_at: "2026-04-12T08:00:00Z",
+        return_at: "2026-04-12T17:00:00Z",
+        expected_soc_drop_pct: 22,
+      },
+    });
+    renderPage();
+    expect(screen.getByTestId("ev-plan-ahead-chip")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-next-departure-chip")).toHaveTextContent("22%");
+  });
+
+  // ev-usage-simulation: section shown but no chip when plan-ahead is off
+  it("omits the plan-ahead chip when usage-sim is configured but plan-ahead is off", () => {
+    mockEvUsageSimData.mockReturnValue({ plan_ahead: false, next_trip: null });
+    renderPage();
+    expect(screen.getByTestId("ev-usage-sim-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("ev-plan-ahead-chip")).toBeNull();
   });
 });

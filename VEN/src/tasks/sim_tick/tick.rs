@@ -33,6 +33,7 @@ pub(crate) async fn tick_once(
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
     telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
+    plan_horizon_h: u64,
 ) -> u64 {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -69,6 +70,17 @@ pub(crate) async fn tick_once(
         let pre_snap = sim_guard
             .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
             .expect("SimState::snapshot is infallible");
+
+        // ev-usage-simulation: offer the EV's next simulated leave instant to
+        // the planner in advance when plan-ahead is enabled — a no-op for
+        // every EV without it configured, and for one with it disabled.
+        super::usage_sim_plan_ahead::sync_plan_ahead_session(
+            &state,
+            &sim_guard,
+            now,
+            plan_horizon_h,
+        )
+        .await;
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
         let live_pv_kw = sim_guard.peek_pv_kw(

@@ -56,6 +56,7 @@ fn bench_profile(with_heater: bool) -> Profile {
         min_charge_kw: 0.0,
         response_delay_s: 10.0,
         v2g_capable: false,
+        usage_sim: None,
     }));
     assets.push(AssetProfile::Pv(PvParams {
         id: "pv".into(),

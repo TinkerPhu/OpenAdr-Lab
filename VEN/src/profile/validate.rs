@@ -135,6 +135,36 @@ impl Profile {
                             c.max_discharge_kw
                         ));
                     }
+                    if let Some(usage_sim) = &c.usage_sim {
+                        if !(0.0..=100.0).contains(&usage_sim.min_soc_after_drop_pct) {
+                            errors.push(format!(
+                                "ev.usage_sim.min_soc_after_drop_pct must be in [0.0, 100.0], got {}",
+                                usage_sim.min_soc_after_drop_pct
+                            ));
+                        }
+                        for (label, day) in [
+                            ("weekday", &usage_sim.weekday),
+                            ("weekend", &usage_sim.weekend),
+                        ] {
+                            if !(0.0..=1.0).contains(&day.leave_probability) {
+                                errors.push(format!(
+                                    "ev.usage_sim.{label}.leave_probability must be in [0.0, 1.0], got {}",
+                                    day.leave_probability
+                                ));
+                            }
+                            if day.soc_drop_pct_mean < 0.0 {
+                                errors.push(format!(
+                                    "ev.usage_sim.{label}.soc_drop_pct_mean must be ≥ 0.0, got {}",
+                                    day.soc_drop_pct_mean
+                                ));
+                            }
+                            if day.leave_jitter_min < 0.0 || day.return_jitter_min < 0.0 {
+                                errors.push(format!(
+                                    "ev.usage_sim.{label} jitter minutes must be ≥ 0.0"
+                                ));
+                            }
+                        }
+                    }
                 }
                 AssetProfile::Battery(c) => {
                     if !(0.0..1.0).contains(&c.min_soc) {
@@ -550,6 +580,30 @@ spikes:
             "error message should mention 'no assets': {msg}"
         );
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    // ev-usage-simulation: the committed BDD fixture must parse and validate
+    // cleanly — a YAML typo here would otherwise only surface as an opaque
+    // container-startup failure deep in the E2E suite.
+    #[tokio::test]
+    async fn usage_sim_test_fixture_loads_and_validates() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/usage_sim_test.yaml");
+        let profile = Profile::try_load(path)
+            .await
+            .expect("usage_sim_test.yaml must parse");
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        let ev = profile
+            .assets
+            .iter()
+            .find_map(|a| match a {
+                AssetProfile::Ev(c) => Some(c),
+                _ => None,
+            })
+            .expect("profile must declare an ev asset");
+        let usage_sim = ev.usage_sim.as_ref().expect("ev.usage_sim must be set");
+        assert!(usage_sim.plan_ahead, "fixture must enable plan_ahead");
+        assert_eq!(usage_sim.weekday.leave_probability, 1.0);
+        assert_eq!(usage_sim.weekend.leave_probability, 1.0);
     }
 
     fn make_valid_profile() -> Profile {
