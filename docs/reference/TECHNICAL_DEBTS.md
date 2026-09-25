@@ -198,3 +198,25 @@ engagement, or an explicit "releases when its own correction has decayed"), then
 scenario assert that stated behaviour instead of a presumed one. Until then the scenario
 asserts only what BL-37 was about: that both edges reach `GET /notifications` during the
 scenario.
+
+## R-91 — plan-ahead's horizon check ignores `plan_zones`
+
+**Where:** `VEN/src/tasks/sim_tick/usage_sim_plan_ahead.rs::sync_plan_ahead_session`,
+introduced by `ev-usage-simulation`.
+
+Plan-ahead decides whether the EV's next simulated leave falls "within the planner's
+horizon" by reading `profile.planner.plan_horizon_h` directly. But `plan_horizon_h` is
+*ignored by the MILP itself* whenever `plan_zones` is set (`profile/planner.rs`'s own doc
+comment) — the actual solve horizon is then `plan_zones[0].step_s * total_slots`. A profile
+that sets `plan_zones` without also setting `plan_horizon_h` to the matching total gets a
+plan-ahead window that disagrees with what the planner really solves over.
+
+**Why it is debt rather than a bug:** every profile committed so far either omits
+`plan_zones` (default `plan_horizon_h` is exactly right) or sets both consistently
+(`VEN/profiles/usage_sim_test.yaml` does, deliberately, to avoid tripping over this).
+Nothing currently ships the mismatched combination.
+
+**To resolve:** give `Profile`/`PlannerConfig` one method that returns the *effective*
+horizon (`plan_zones`-derived when set, else `plan_horizon_h`) and have both
+`tasks/planning/cycle.rs` and `usage_sim_plan_ahead.rs` call it, instead of the cycle task
+reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always agreed.

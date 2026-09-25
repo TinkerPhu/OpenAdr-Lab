@@ -749,6 +749,22 @@ same override stages each window's command before integrating it, because
 command one window late (covered by `ev.rs`'s
 `simulate_forward_applies_each_window_command_from_its_start`).
 
+**EV usage simulation** (`ev-usage-simulation`) extends the same availability
+primitive with a second, independent source: a profile-configured, opt-in
+daily leave/return trip (`assets::ev_schedule::daily_trip`), deterministic per
+calendar day (seeded like `base_load.rs`'s appliance-noise jitter), with
+weekday/weekend variants and a gaussian SoC drop applied once at return,
+floored at a configured minimum. `EvCharger::is_away_at` is the one place
+that answers "is this EV here right now" — OR-ing the existing
+`EvSession.departure_time` deadline with the currently-active simulated
+trip's window — so both the live tick (`apply_usage_sim_tick`) and
+`simulate_forward`'s forecast ask the same question the same way. An opt-in
+"plan ahead" setting reuses `EvSession` directly rather than adding a second
+planner-facing deadline concept: when enabled, the EV's next simulated leave
+is written as a `SimulatedUsage`-origin session (`tasks::sim_tick::
+usage_sim_plan_ahead`), but only when no real user/VTN session is active — a
+real session always wins and is never touched by the simulated schedule.
+
 ### 3.0d Asset Competence Assurance
 
 Named architectural rule (`asset-competence-assurance`, `.claude/CLAUDE.md`): infrastructure
@@ -1083,6 +1099,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
+| GET | `/ev-usage-sim` | — | `ev-usage-simulation`: read-only `{plan_ahead, next_trip}` diagnostics, `204` when the EV has no usage-sim configured |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
 | GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
 | DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |
