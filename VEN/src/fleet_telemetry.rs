@@ -178,17 +178,17 @@ impl FleetMqttPublisher {
             }
         });
 
-        let publisher = Self {
+        // Nothing is announced here: the ConnAck handler above fires for the
+        // first connection too, so doing it now would both duplicate that and
+        // race it -- this point runs before the socket is up, and the old call
+        // worked only because rumqttc queues publishes.
+        Self {
             client,
             topic_root: config.topic_root,
             connected,
             telemetry_every_ms: config.telemetry_every_s * 1000,
             last_sample_ms: AtomicI64::new(i64::MIN),
-        };
-        // No announce here: ConnAck fires for the first connection too, so
-        // doing it now would both duplicate that and race it -- this runs
-        // before the socket is up, and only rumqttc's queue made it work.
-        publisher
+        }
     }
 }
 
