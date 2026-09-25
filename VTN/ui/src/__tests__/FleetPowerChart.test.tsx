@@ -48,7 +48,7 @@ function history(over: Partial<FleetHistory> = {}): FleetHistory {
 
 function renderChart(h: FleetHistory = history()) {
   chartProps.length = 0;
-  render(<FleetPowerChart history={h} windowMinutes={60} nowMs={Date.parse("2026-09-22T09:01:30Z")} />);
+  render(<FleetPowerChart history={h} windowMinutes={60} tickMinutes={10} nowMs={Date.parse("2026-09-22T09:01:30Z")} />);
   return chartProps[0];
 }
 
@@ -119,7 +119,7 @@ describe("FleetPowerChart", () => {
         samples: [{ ts: "2026-09-22T09:00:00Z", netPowerW: 1000 }],
       })),
     });
-    render(<FleetPowerChart history={many} windowMinutes={60} nowMs={0} />);
+    render(<FleetPowerChart history={many} windowMinutes={60} tickMinutes={10} nowMs={0} />);
 
     // The legend renders in series order, so this is the legend's order.
     const keys = (chartProps[0].series as Series[]).map((x) => x.key);
@@ -128,14 +128,14 @@ describe("FleetPowerChart", () => {
 
   it("gives the curves real vertical room, not a dashboard cell's", () => {
     chartProps.length = 0;
-    render(<FleetPowerChart history={history()} windowMinutes={60} nowMs={0} />);
+    render(<FleetPowerChart history={history()} windowMinutes={60} tickMinutes={10} nowMs={0} />);
     // Twenty overlapping curves at cell height are a band, not a comparison.
     expect(chartProps[0].height as number).toBeGreaterThanOrEqual(400);
   });
 
   it("lets the kW axis follow whichever curves are still shown", () => {
     chartProps.length = 0;
-    render(<FleetPowerChart history={history()} windowMinutes={60} nowMs={0} />);
+    render(<FleetPowerChart history={history()} windowMinutes={60} tickMinutes={10} nowMs={0} />);
     const axis = (chartProps[0].axes as Array<Record<string, unknown>>)[0];
     // The fleet total is the sum of every VEN, so its range dwarfs any single
     // site's. A fixed shared domain flattens the sites into a few pixels, and
@@ -147,7 +147,7 @@ describe("FleetPowerChart", () => {
   it("explains an empty window instead of drawing an empty chart", () => {
     chartProps.length = 0;
     render(
-      <FleetPowerChart history={history({ vens: [], fleet: [] })} windowMinutes={60} nowMs={0} />,
+      <FleetPowerChart history={history({ vens: [], fleet: [] })} windowMinutes={60} tickMinutes={10} nowMs={0} />,
     );
     expect(screen.getByTestId("fleet-chart-empty")).toBeVisible();
     expect(chartProps).toHaveLength(0);

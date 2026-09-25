@@ -124,6 +124,20 @@ interface TimeSeriesChartProps {
    * after zones, before the NOW line, same stacking order every consumer used before
    * migration. */
   extraReferenceAreas?: ReactElement[];
+  /** Elements painted UNDER everything — before the grid, the bands and the
+   * series (e.g. a day/night wash). Recharts paints in child order, so this is
+   * the only way to get a real background: `extraReferenceAreas` above renders
+   * *after* the lines, which is right for an overlay and wrong for a backdrop.
+   * Anything passed here must be a `<ReferenceArea>`/`<ReferenceLine>` so
+   * recharts still sees a type it knows at that position. */
+  backgroundAreas?: ReactElement[];
+  /** Passed straight to recharts' `<XAxis interval>`. Unset keeps its default
+   * `preserveEnd` thinning, which every existing caller relies on to keep a
+   * dense tick array readable. Pass `0` to mean "render exactly the ticks I
+   * gave you" — needed when two stacked charts must label the same instants,
+   * because the default can otherwise drop different members from identical
+   * arrays on plots whose widths differ by a pixel. */
+  xAxisInterval?: number;
   height?: number;
   testId?: string;
   legend?: boolean;
@@ -167,6 +181,8 @@ export function TimeSeriesChart({
   zones,
   tooltipFormatter,
   extraReferenceAreas,
+  backgroundAreas,
+  xAxisInterval,
   height = CELL_CHART_HEIGHT,
   testId,
   legend = true,
@@ -241,6 +257,7 @@ export function TimeSeriesChart({
             })
           }
         >
+          {backgroundAreas}
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
@@ -249,6 +266,7 @@ export function TimeSeriesChart({
             domain={tMin !== undefined && tMax !== undefined ? [tMin, tMax] : ["auto", "auto"]}
             allowDataOverflow
             ticks={xAxisTicks}
+            interval={xAxisInterval}
             tickFormatter={xAxisTickFormatter}
             tick={{ fontSize: 10 }}
           />

@@ -629,3 +629,84 @@ describe("TimeSeriesChart — autoScale", () => {
     expect(max - min).toBeGreaterThanOrEqual(4);
   });
 });
+
+
+/**
+ * Recharts paints in child order, so where an element sits in the tree IS
+ * whether it is a backdrop or an overlay. Nothing about that is visible in a
+ * rendered snapshot, which is why it is asserted directly.
+ */
+describe("TimeSeriesChart — layering", () => {
+  beforeEach(() => {
+    charts.length = 0;
+  });
+
+  type Child = { props?: Record<string, unknown> } | null;
+
+  /** The chart's flattened child list — the order recharts paints in. */
+  const painted = (): Child[] =>
+    [(charts[0].children as unknown)].flat(Infinity) as Child[];
+
+  const paintIndexOf = (testId: string) =>
+    painted().findIndex((el) => el?.props?.["data-testid"] === testId);
+
+  /** Where the first data series sits, which is what "background" is relative to. */
+  const firstSeriesIndex = () =>
+    painted().findIndex((el) => el?.props?.name === "power");
+
+  it("paints backgroundAreas under the data and extraReferenceAreas over it", () => {
+    const bg = <div data-testid="bg" />;
+    const overlay = <div data-testid="overlay" />;
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        tooltipFormatter={(v, n) => [String(v), n]}
+        backgroundAreas={[bg]}
+        extraReferenceAreas={[overlay]}
+      />
+    );
+    const bgAt = paintIndexOf("bg");
+    const overlayAt = paintIndexOf("overlay");
+    const seriesAt = firstSeriesIndex();
+    expect(bgAt).toBeGreaterThanOrEqual(0);
+    expect(overlayAt).toBeGreaterThanOrEqual(0);
+    expect(seriesAt).toBeGreaterThanOrEqual(0);
+    // The claim is about the DATA, not about each other: a backdrop is painted
+    // before the curves, an overlay after them. Comparing the two extras to one
+    // another would still pass with both on the same side of the lines.
+    expect(bgAt).toBeLessThan(seriesAt);
+    expect(overlayAt).toBeGreaterThan(seriesAt);
+  });
+
+  it("leaves the x-axis interval alone unless a caller asks", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        tooltipFormatter={(v, n) => [String(v), n]}
+      />
+    );
+    // Undefined keeps recharts' preserveEnd thinning, which the VEN charts
+    // that hand over 49 hourly ticks depend on.
+    expect(xAxes[xAxes.length - 1].interval).toBeUndefined();
+  });
+
+  it("passes an explicit interval through, so two charts can label the same instants", () => {
+    render(
+      <TimeSeriesChart
+        data={data}
+        xAxisTickFormatter={() => ""}
+        axes={axes}
+        series={series}
+        tooltipFormatter={(v, n) => [String(v), n]}
+        xAxisInterval={0}
+      />
+    );
+    expect(xAxes[xAxes.length - 1].interval).toBe(0);
+  });
+});

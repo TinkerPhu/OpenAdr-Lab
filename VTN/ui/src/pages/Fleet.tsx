@@ -17,10 +17,10 @@ import { byVenName } from "../utils/venOrder";
  * a day does not arrive as 17 000 points per VEN.
  */
 const WINDOWS = [
-  { minutes: 15, stepSeconds: 5, label: "15 min" },
-  { minutes: 60, stepSeconds: 60, label: "1 hour" },
-  { minutes: 360, stepSeconds: 300, label: "6 hours" },
-  { minutes: 1440, stepSeconds: 900, label: "24 hours" },
+  { minutes: 15, stepSeconds: 5, tickMinutes: 5, label: "15 min" },
+  { minutes: 60, stepSeconds: 60, tickMinutes: 10, label: "1 hour" },
+  { minutes: 360, stepSeconds: 300, tickMinutes: 60, label: "6 hours" },
+  { minutes: 1440, stepSeconds: 900, tickMinutes: 180, label: "24 hours" },
 ];
 
 export function FleetPage() {
@@ -76,8 +76,8 @@ export function FleetPage() {
 
         {signals.data && signals.data.rejectedEvents > 0 && (
           <Alert severity="warning" data-testid="fleet-signals-rejected">
-            {signals.data.rejectedEvents} event(s) could not be read — the shaded windows
-            below may be incomplete.
+            {signals.data.rejectedEvents} event(s) could not be read — the tariff below
+            may be incomplete.
           </Alert>
         )}
         {/* Price above power, on the same axis and the same window, because a
@@ -89,6 +89,7 @@ export function FleetPage() {
         <FleetTariffChart
           signals={signals.data}
           windowMinutes={chosen.minutes}
+          tickMinutes={chosen.tickMinutes}
           nowMs={now.getTime()}
         />
 
@@ -103,8 +104,8 @@ export function FleetPage() {
         {history.data && (
           <FleetPowerChart
             history={history.data}
-            signals={signals.data}
             windowMinutes={chosen.minutes}
+            tickMinutes={chosen.tickMinutes}
             nowMs={now.getTime()}
           />
         )}
