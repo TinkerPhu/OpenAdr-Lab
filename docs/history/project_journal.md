@@ -13431,3 +13431,39 @@ re-check are the ones nobody thinks of as clients.
 
 Verified on the live fleet: `ven-1` reaches only its own topic, cannot publish as `ven-2`,
 cannot read `ven-2`, and the BFF reads the fleet without being able to write to it.
+
+## EV usage simulation — the car that leaves (2026-09-26)
+
+The simulator had no way to model an EV that actually leaves: every scenario kept it plugged
+in for the whole run, so fleet experiments could never exercise the one thing that makes EV
+charging hard — the charger has to finish before the car is gone. `ev-usage-simulation` adds
+an opt-in, profile-configured daily leave/return pattern (weekday/weekend leave probability,
+jittered leave/return times including a midnight-crossing return, a gaussian SoC drop applied
+once at return and floored at a configured minimum) plus an opt-in "plan ahead" mode.
+
+The EV asset owns the whole thing itself (asset-competence-assurance, §3.0d): one shared
+predicate, `EvCharger::is_away_at`, answers "is this EV here right now" for both the live tick
+and `simulate_forward`'s multi-day forecast, so the two paths can never disagree about
+availability the way two independent copies eventually would (the recurring shape this
+project keeps finding and fixing). Plan-ahead deliberately does not invent a second
+planner-facing deadline concept — it reuses the existing single `EvSession`/MILP-deadline
+mechanism directly, writing a `SimulatedUsage`-origin session only when no real user/VTN
+session is active. A real session always wins and is never touched by the simulated one; the
+precedence rule needed one new field (`EvSessionOrigin`) threaded through roughly twenty
+existing construction sites, each a compile error until fixed rather than a silent default —
+the whole point of not giving it a `Default` impl.
+
+**The BDD scenario needed more than a feature file.** This is profile-level config, not a
+runtime `/sim/inject` knob, and the shared `test.yaml` profile carries state across many
+unrelated scenarios — adding `usage_sim` there risked side effects nobody would trace back to
+this change. A dedicated `usage_sim_test.yaml` profile and `test-ven-usage-sim` docker-compose
+service (same shape as `no_pv_test`/`penalty_test`) kept it isolated. The trickier question was
+determinism against real wall-clock time: setting `leave_probability: 1.0` on both weekday and
+weekend configs guarantees a trip every calendar day, so the next occurrence is always within
+a 30 h window regardless of what time the CI run happens to start — no time-travel mechanism
+needed. Full E2E run on Node2: 292 scenarios passed, 0 failed.
+
+One gap found along the way, not introduced by this change but newly visible through it:
+plan-ahead's horizon check reads `plan_horizon_h` directly, which the MILP itself ignores
+whenever `plan_zones` is set — recorded as R-91 in `docs/reference/TECHNICAL_DEBTS.md` rather
+than silently worked around.
