@@ -100,6 +100,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     }
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -295,6 +296,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
     }
     let ev_session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),

@@ -34,6 +34,10 @@ metrics-exporter-prometheus = "0.16"
 
 serde_yaml = "0.9"
 rand = "0.8"
+# Gaussian sampling for the EV usage-simulation SoC drop (ev-usage-simulation) —
+# `rand` itself has no distributions beyond uniform. MIT OR Apache-2.0, same
+# `rand` 0.8 generation.
+rand_distr = "0.4"
 good_lp = { version = "1", features = ["highs"], default-features = false }
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"

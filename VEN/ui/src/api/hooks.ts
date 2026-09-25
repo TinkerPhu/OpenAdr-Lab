@@ -550,6 +550,15 @@ export function useEvSettings() {
   });
 }
 
+export function useEvUsageSim() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["ev_usage_sim", api.baseUrl],
+    queryFn: () => api.evUsageSim(),
+    refetchInterval: 30_000,
+  });
+}
+
 export function usePutEvSettings() {
   const { api } = useVenContext();
   const queryClient = useQueryClient();

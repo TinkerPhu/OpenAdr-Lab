@@ -534,6 +534,21 @@ export type EvSettings = {
   paused_by_active_session: boolean;
 };
 
+// ─── EV usage simulation (ev-usage-simulation) ─────────────────────────────
+
+export type EvUsageSimNextTrip = {
+  leave_at: string;
+  return_at: string;
+  expected_soc_drop_pct: number;
+};
+
+/** GET /ev-usage-sim response — undefined/204 when the EV has no usage-sim
+ * configured (the vast majority of profiles; this is opt-in). */
+export type EvUsageSimState = {
+  plan_ahead: boolean;
+  next_trip: EvUsageSimNextTrip | null;
+};
+
 export type UpdateEvSettingsBody = {
   opportunistic_charging_enabled: boolean;
 };

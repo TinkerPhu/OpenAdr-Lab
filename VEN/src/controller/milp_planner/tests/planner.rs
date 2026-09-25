@@ -344,6 +344,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -481,6 +482,7 @@ fn run_planner_ev_must_run_energy_met() {
     let e_core_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -614,6 +616,7 @@ fn make_profile_n48() -> Profile {
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
                 v2g_capable: false,
+                usage_sim: None,
             }),
             AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),
@@ -670,6 +673,7 @@ fn run_planner_n48_full_horizon() {
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(24),
@@ -1300,6 +1304,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
     }
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),

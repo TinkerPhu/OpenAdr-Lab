@@ -1,6 +1,6 @@
 use crate::entities::asset_params::{
-    ApplianceSpikeParams, AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams,
-    PvForecastParams, PvParams,
+    ApplianceSpikeParams, AssetParams, BaseLoadParams, BatteryParams, EvParams, EvUsageDayParams,
+    EvUsageSimParams, HeaterParams, PvForecastParams, PvParams,
 };
 use crate::profile::weather_pv::WeatherPvConfig;
 use serde::Deserialize;
@@ -50,6 +50,28 @@ impl AssetProfile {
                 min_charge_kw: c.min_charge_kw,
                 response_delay_s: c.response_delay_s,
                 v2g_capable: c.v2g_capable,
+                usage_sim: c.usage_sim.as_ref().map(|u| EvUsageSimParams {
+                    plan_ahead: u.plan_ahead,
+                    weekday: EvUsageDayParams {
+                        leave_time: u.weekday.leave_time,
+                        leave_jitter_min: u.weekday.leave_jitter_min,
+                        return_time: u.weekday.return_time,
+                        return_jitter_min: u.weekday.return_jitter_min,
+                        leave_probability: u.weekday.leave_probability,
+                        soc_drop_pct_mean: u.weekday.soc_drop_pct_mean,
+                        soc_drop_pct_stddev: u.weekday.soc_drop_pct_stddev,
+                    },
+                    weekend: EvUsageDayParams {
+                        leave_time: u.weekend.leave_time,
+                        leave_jitter_min: u.weekend.leave_jitter_min,
+                        return_time: u.weekend.return_time,
+                        return_jitter_min: u.weekend.return_jitter_min,
+                        leave_probability: u.weekend.leave_probability,
+                        soc_drop_pct_mean: u.weekend.soc_drop_pct_mean,
+                        soc_drop_pct_stddev: u.weekend.soc_drop_pct_stddev,
+                    },
+                    min_soc_after_drop_pct: u.min_soc_after_drop_pct,
+                }),
             }),
             AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
                 id: c.id.clone(),
@@ -225,6 +247,55 @@ pub struct EvConfig {
     /// are charge-only, so `max_discharge_kw` is otherwise inert.
     #[serde(default = "super::defaults::default_ev_v2g_capable")]
     pub v2g_capable: bool,
+    /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
+    /// `None` (the default) means this EV never leaves — today's behavior,
+    /// unchanged.
+    #[serde(default)]
+    pub usage_sim: Option<EvUsageSimConfig>,
+}
+
+/// A profile-configured, opt-in daily leave/return usage pattern for an EV
+/// (`ev-usage-simulation`). Absent by default; every EV without this section
+/// stays plugged in for the whole run, exactly as before this feature existed.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EvUsageSimConfig {
+    /// If true, the EV's next simulated leave instant is offered to the
+    /// planner in advance (as a simulated-origin charge session) once it
+    /// falls within the planner's horizon. If false, the planner only reacts
+    /// once the EV actually unplugs, exactly like an unannounced departure.
+    #[serde(default)]
+    pub plan_ahead: bool,
+    pub weekday: EvUsageDayConfig,
+    pub weekend: EvUsageDayConfig,
+    /// Floor for the state-of-charge drop applied at return (%, 0-100). SoC
+    /// never drops below this after a trip.
+    #[serde(default = "super::defaults::default_ev_usage_sim_min_soc_after_drop_pct")]
+    pub min_soc_after_drop_pct: f64,
+}
+
+/// One day-type's (weekday or weekend) leave/return schedule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EvUsageDayConfig {
+    /// Nominal instant the EV leaves, local-clock time of day.
+    pub leave_time: chrono::NaiveTime,
+    /// Uniform jitter applied to `leave_time`, in minutes (± this amount).
+    #[serde(default = "super::defaults::default_ev_usage_sim_jitter_min")]
+    pub leave_jitter_min: f64,
+    /// Nominal instant the EV returns, local-clock time of day. Earlier than
+    /// the jittered leave time means the return happens the following
+    /// calendar day.
+    pub return_time: chrono::NaiveTime,
+    /// Uniform jitter applied to `return_time`, in minutes (± this amount).
+    #[serde(default = "super::defaults::default_ev_usage_sim_jitter_min")]
+    pub return_jitter_min: f64,
+    /// Probability \[0.0, 1.0\] the EV leaves at all on a day of this type.
+    #[serde(default = "super::defaults::default_ev_usage_sim_leave_probability")]
+    pub leave_probability: f64,
+    /// Mean state-of-charge drop while away (%, 0-100).
+    pub soc_drop_pct_mean: f64,
+    /// Gaussian jitter (standard deviation) on the SoC drop (%, 0-100).
+    #[serde(default = "super::defaults::default_ev_usage_sim_soc_drop_stddev_pct")]
+    pub soc_drop_pct_stddev: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

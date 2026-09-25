@@ -643,6 +643,7 @@ mod tests {
         state
             .set_ev_session(Some(EvSession {
                 mode: Default::default(),
+                origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
                 id: session_id,
                 target_soc: 0.8,
                 departure_time: Utc::now() + chrono::Duration::hours(2),

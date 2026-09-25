@@ -230,12 +230,15 @@ mod tests {
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let state = crate::assets::AssetState::Ev(EvState {
             soc,
             plugged,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         });
         (
             "ev".to_string(),

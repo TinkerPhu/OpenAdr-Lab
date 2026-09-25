@@ -10,6 +10,7 @@ mod helpers;
 mod post_lock;
 mod publish;
 mod tick;
+mod usage_sim_plan_ahead;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -49,6 +50,10 @@ pub(crate) fn spawn_sim_tick(
     // down -- no semantic reason to keep them paired beyond that.
     (grid_max_import_kw, grid_max_export_kw): (f64, f64),
     telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
+    // ev-usage-simulation: how far ahead plan-ahead may offer the EV's next
+    // simulated leave instant to the planner — the same horizon the MILP
+    // itself solves over (`profile.planner.plan_horizon_h`).
+    plan_horizon_h: u64,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -84,6 +89,7 @@ pub(crate) fn spawn_sim_tick(
                 grid_max_import_kw,
                 grid_max_export_kw,
                 telemetry.clone(),
+                plan_horizon_h,
             )
             .await;
         }

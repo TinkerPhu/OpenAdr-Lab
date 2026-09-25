@@ -569,12 +569,15 @@ mod milp_context_trait_tests {
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
             soc: 0.2,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         });
         let now = Utc::now();
         let session = EvSession {
@@ -583,6 +586,7 @@ mod milp_context_trait_tests {
             departure_time: now + chrono::Duration::hours(2),
             soft_deadline: true,
             mode: UserRequestMode::ByDeadline,
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             budget_eur: None,
             comfort_rates: vec![
                 ComfortRate {
@@ -644,6 +648,8 @@ mod milp_context_trait_tests {
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let cum_s: Vec<i64> = (0..=4).map(|i| i * 300).collect();
         for plugged in [true, false] {
@@ -652,6 +658,7 @@ mod milp_context_trait_tests {
                 plugged,
                 actual_power_kw: 0.0,
                 pending_command_kw: 0.0,
+                was_away_by_usage_sim: false,
             });
             let ctx = EvMilpContext::from_state(
                 &state,
@@ -694,12 +701,15 @@ mod milp_context_trait_tests {
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
+            usage_sim: None,
+            usage_sim_seed_tag: 0,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
             soc: 0.2,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         });
         let now = Utc::now();
         let session = EvSession {
@@ -708,6 +718,7 @@ mod milp_context_trait_tests {
             departure_time: now + chrono::Duration::hours(2),
             soft_deadline: true,
             mode: UserRequestMode::ByDeadline,
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             budget_eur: None,
             comfort_rates: vec![],
             created_at: now,

@@ -21,6 +21,7 @@ import {
 import type {
   CreateUserRequestBody,
   EvSettings,
+  EvUsageSimState,
   UpdateEvSettingsBody,
   UserRequestMode,
   UserRequestWithSession,
@@ -51,6 +52,9 @@ function fmtDate(iso: string): string {
 export type EvCardProps = {
   request: UserRequestWithSession | undefined;
   evSettings: EvSettings | undefined;
+  /** ev-usage-simulation diagnostics; undefined while loading, null when the
+   * EV has no usage-sim configured (the common case). */
+  usageSim: EvUsageSimState | null | undefined;
   postRequest: (body: CreateUserRequestBody) => Promise<unknown>;
   deleteRequest: (id: string) => Promise<unknown>;
   putEvSettings: (body: UpdateEvSettingsBody) => void;
@@ -61,7 +65,7 @@ export type EvCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function EvCard(props: EvCardProps) {
-  const { request, evSettings, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
+  const { request, evSettings, usageSim, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
@@ -165,6 +169,27 @@ export function EvCard(props: EvCardProps) {
           <Chip label="Paused — active charging session" size="small" data-testid="ev-opportunistic-paused-chip" />
         )}
       </CardActions>
+
+      {usageSim && (
+        <>
+          <Divider />
+          <CardActions data-testid="ev-usage-sim-section" sx={{ px: 2, flexDirection: "column", alignItems: "flex-start" }}>
+            {usageSim.plan_ahead && (
+              <Chip label="Plan-ahead active" size="small" color="info" data-testid="ev-plan-ahead-chip" sx={{ mb: 0.5 }} />
+            )}
+            {usageSim.next_trip ? (
+              <Typography variant="body2" color="text.secondary" data-testid="ev-next-departure-chip">
+                Next departure (simulated): {fmtDate(usageSim.next_trip.leave_at)} → back {fmtDate(usageSim.next_trip.return_at)}
+                {" "}(−{usageSim.next_trip.expected_soc_drop_pct.toFixed(0)}% SoC)
+              </Typography>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No trip currently scheduled
+              </Typography>
+            )}
+          </CardActions>
+        </>
+      )}
 
       {/* Plan EV Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} data-testid="ev-dialog">

@@ -33,6 +33,19 @@ pub(super) fn default_ev_v2g_capable() -> bool {
     false
 }
 
+pub(super) fn default_ev_usage_sim_jitter_min() -> f64 {
+    15.0
+}
+pub(super) fn default_ev_usage_sim_leave_probability() -> f64 {
+    1.0
+}
+pub(super) fn default_ev_usage_sim_soc_drop_stddev_pct() -> f64 {
+    2.0
+}
+pub(super) fn default_ev_usage_sim_min_soc_after_drop_pct() -> f64 {
+    5.0
+}
+
 pub(super) fn default_history_enabled() -> bool {
     true
 }

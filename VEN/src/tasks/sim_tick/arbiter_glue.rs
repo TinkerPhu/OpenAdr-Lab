@@ -266,6 +266,7 @@ mod tests {
             departure_time,
             soft_deadline: false,
             mode: Default::default(),
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             budget_eur: None,
             comfort_rates: vec![],
             created_at: ts(0),

@@ -6,7 +6,7 @@ mod battery_milp;
 pub mod ev;
 mod ev_comfort;
 mod ev_milp;
-mod ev_schedule;
+pub(crate) mod ev_schedule;
 pub mod grid;
 pub mod heater;
 mod heater_capabilities;
@@ -378,6 +378,7 @@ mod phase2a_ev_tests {
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
             v2g_capable: true,
+            usage_sim: None,
         }
     }
 
@@ -430,6 +431,7 @@ mod phase2a_ev_tests {
             plugged: false,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
         });
         let result = boxed
             .as_request_resolvable()
@@ -859,6 +861,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
             v2g_capable: true,
+            usage_sim: None,
         };
         exercise_trivial_methods(Box::new(EvCharger::from_params(&params)));
     }
@@ -949,6 +952,7 @@ mod phase2b_asset_type_and_downcast_tests {
                         min_charge_kw: 1.4,
                         response_delay_s: 0.0,
                         v2g_capable: true,
+                        usage_sim: None,
                     },
                 )),
                 AssetType::Ev,
@@ -1212,6 +1216,7 @@ mod phase2b_tick_overridable_tests {
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
             v2g_capable: true,
+            usage_sim: None,
         };
         let mut ev = EvCharger::from_params(&params);
         let mut state = AssetState::Ev(EvCharger::initial_state(&params));
@@ -1243,6 +1248,7 @@ mod phase2b_tick_overridable_tests {
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
             v2g_capable: true,
+            usage_sim: None,
         };
         let mut ev = EvCharger::from_params(&params);
         ev.soc_target = 0.5; // simulate a lingering override from a prior tick

@@ -17,6 +17,7 @@ fn ev_session_with_mode(
         target_soc: 0.3,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         budget_eur: None,
         comfort_rates: vec![],
         mode,
