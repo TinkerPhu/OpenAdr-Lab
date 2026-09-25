@@ -133,6 +133,17 @@ the axis tick):
 | State of charge (%) | Input is a 0–1 fraction; 1 decimal place (`formatSocPct`) |
 | Temperature (°C) | 1 decimal place (`formatTemperatureC`) |
 
+### `DayNightShading.tsx`
+
+`renderDayNightShading(yAxisId, {tMin, tMax, latitudeDeg, longitudeDeg, steps})` washes the plot
+from clear at midday to a modest blue-black at night, sampling real solar elevation
+(`solarPosition.ts`, a port of `VEN/src/entities/solar.rs` — see TECHNICAL_DEBTS R-90) at the
+midpoint of each of ~48 fixed-count bands. Same element-returning idiom as the two below, and it
+must be passed to `TimeSeriesChart`'s **`backgroundAreas`**, not `extraReferenceAreas`: recharts
+paints in child order, so `backgroundAreas` is spliced before the grid and the series while
+`extraReferenceAreas` lands after the lines. A backdrop in the overlay slot paints over the
+curves. `dayNightBands()` is the same calculation without React, which is what the tests read.
+
 ### `NowLine.tsx` / `ZoneShading.tsx`
 
 `renderNowLine(yAxisId, nowMs)` and `renderZoneShading(yAxisId, zones)` are **functions
@@ -193,6 +204,11 @@ genuinely different layout needs.
 `ASSET_COLORS` (per-asset-id) and `SERIES_COLORS` (`import_tariff`, `export_tariff`,
 `cost_rate`, `co2_rate`, `grid_line`, `power`) in `controller/types.ts` are the single
 color source for every chart — no chart selects a color by positional array index.
+
+The two tariff colours and the tariff line style (`COLOR_IMPORT_TARIFF`, `COLOR_EXPORT_TARIFF`,
+`TARIFF_LINE_STYLE`) moved into the shared kit's `types.ts` when the VTN Fleet page grew a tariff
+chart: a colour defining a concept drawn in two apps cannot have its single definition inside one
+of them. `SERIES_COLORS` references them, so every VEN caller is unchanged.
 
 ## The three compositions
 

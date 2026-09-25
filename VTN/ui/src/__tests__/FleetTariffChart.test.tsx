@@ -64,7 +64,7 @@ describe("FleetTariffChart", () => {
   });
 
   const renderChart = (s?: FleetSignals) =>
-    render(<FleetTariffChart signals={s} windowMinutes={120} nowMs={NOW} />);
+    render(<FleetTariffChart signals={s} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
 
   it("draws one tariff for the whole fleet, not one per VEN", () => {
     renderChart(fleet(20));
@@ -146,8 +146,8 @@ describe("the two Fleet charts line up", () => {
 
   it("share tMin, tMax and the y-axis width", () => {
     chartProps.length = 0;
-    render(<FleetTariffChart signals={fleet(20)} windowMinutes={120} nowMs={NOW} />);
-    render(<FleetPowerChart history={history} windowMinutes={120} nowMs={NOW} />);
+    render(<FleetTariffChart signals={fleet(20)} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
+    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
 
     const [tariff, power] = chartProps;
     const expected = fleetChartWindow(NOW, 120);
@@ -158,5 +158,22 @@ describe("the two Fleet charts line up", () => {
     expect(power.tMax).toBe(expected.tMax);
     expect((tariff.axes as Axis[])[0].width).toBe(FLEET_AXIS_WIDTH);
     expect((power.axes as Axis[])[0].width).toBe(FLEET_AXIS_WIDTH);
+
+    // Same tick instants, and pinned with interval 0 — supplying the same array
+    // is not enough on its own, because recharts' default thinning can keep
+    // different members on two plots whose widths differ by a pixel.
+    expect(tariff.xAxisTicks).toEqual(power.xAxisTicks);
+    expect(tariff.xAxisInterval).toBe(0);
+    expect(power.xAxisInterval).toBe(0);
+  });
+
+  it("both wash the plot with the same day/night background", () => {
+    chartProps.length = 0;
+    render(<FleetTariffChart signals={fleet(20)} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
+    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
+    const [tariff, power] = chartProps;
+    const bands = (p: Record<string, unknown>) => (p.backgroundAreas as unknown[]).length;
+    expect(bands(tariff)).toBeGreaterThan(0);
+    expect(bands(tariff)).toBe(bands(power));
   });
 });

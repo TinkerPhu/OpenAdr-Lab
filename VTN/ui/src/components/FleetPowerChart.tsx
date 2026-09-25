@@ -7,8 +7,16 @@ import type { NamedSample } from "@lab/charts/mergeSeries";
 import { tightSpanDomain, formatPowerTick } from "@lab/charts/axisDomain";
 import { EmptyState } from "@lab/charts/EmptyState";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
-import { fleetChartWindow, FLEET_AXIS_WIDTH } from "./fleetChartWindow";
-import type { FleetHistory, FleetSignals } from "../api/types";
+import {
+  fleetChartWindow,
+  fleetChartTicks,
+  FLEET_AXIS_WIDTH,
+  FLEET_TICK_INTERVAL,
+} from "./fleetChartWindow";
+import { renderDayNightShading } from "@lab/charts/DayNightShading";
+import { LAB_LOCATION } from "../utils/labLocation";
+
+import type { FleetHistory } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 import { compareVenNames } from "../utils/venOrder";
 
@@ -46,18 +54,32 @@ const toKw = (watts: number) => watts / 1000;
  */
 export function FleetPowerChart({
   history,
-  signals,
   windowMinutes,
+  tickMinutes,
   nowMs,
 }: {
   history: FleetHistory;
-  /** Bands for what the fleet was being *told*, drawn behind the curves. A
-   *  dip means something different depending on whether a limit was in force,
-   *  and the chart should not make the reader guess. */
-  signals?: FleetSignals;
   windowMinutes: number;
+  /** Tick spacing, chosen per window by the page so both charts agree. */
+  tickMinutes: number;
   nowMs: number;
 }) {
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
+
+  // Memoised: one React element plus one DOM rect per band, rebuilt on every
+  // render otherwise, and this component re-renders on each poll.
+  const dayNight = useMemo(
+    () =>
+      renderDayNightShading(AXIS_ID, {
+        tMin,
+        tMax,
+        latitudeDeg: LAB_LOCATION.latitudeDeg,
+        longitudeDeg: LAB_LOCATION.longitudeDeg,
+      }),
+    [tMin, tMax],
+  );
+
   const { rows, series, values } = useMemo(() => {
     const samples: NamedSample[] = [];
 
@@ -105,28 +127,6 @@ export function FleetPowerChart({
     return { rows, series, values };
   }, [history]);
 
-  // Zones are shared across VENs on purpose: twenty overlapping shaded bands
-  // would be a wall of grey. This shades the windows in which *any* targeted
-  // VEN was under a signal, which is the question the overlay answers —
-  // "was something in force here" — with the per-VEN detail a click away in
-  // the reactions table.
-  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
-
-  const zones = useMemo(() => {
-    if (!signals) return [];
-    const seen = new Set<string>();
-    const out: { from: string; to: string; step_s: number }[] = [];
-    for (const ven of signals.vens) {
-      for (const band of ven.bands) {
-        const key = `${band.from}|${band.to}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push({ from: band.from, to: band.to, step_s: 0 });
-      }
-    }
-    return out;
-  }, [signals]);
-
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -173,8 +173,10 @@ export function FleetPowerChart({
         ]}
         series={series}
         nowMs={nowMs}
-        zones={zones}
         referenceAxisId={AXIS_ID}
+        backgroundAreas={dayNight}
+        xAxisTicks={ticks}
+        xAxisInterval={FLEET_TICK_INTERVAL}
         height={CHART_HEIGHT}
         xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
         interactiveLegend

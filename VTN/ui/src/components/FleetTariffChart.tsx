@@ -8,7 +8,15 @@ import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF, TARIFF_LINE_STYLE } from "@lab/charts/types";
 import type { FleetSignals } from "../api/types";
 import { sharedTariff, tariffRows, IMPORT_KEY, EXPORT_KEY } from "../utils/fleetTariff";
-import { fleetChartWindow, FLEET_AXIS_WIDTH } from "./fleetChartWindow";
+import {
+  fleetChartWindow,
+  fleetChartTicks,
+  FLEET_AXIS_WIDTH,
+  FLEET_TICK_INTERVAL,
+} from "./fleetChartWindow";
+import { renderDayNightShading } from "@lab/charts/DayNightShading";
+import { LAB_LOCATION } from "../utils/labLocation";
+
 
 const AXIS_ID = "tariff";
 
@@ -31,13 +39,30 @@ const CHART_HEIGHT = CELL_CHART_HEIGHT * 2;
 export function FleetTariffChart({
   signals,
   windowMinutes,
+  tickMinutes,
   nowMs,
 }: {
   signals?: FleetSignals;
   windowMinutes: number;
+  /** Tick spacing, chosen per window by the page so both charts agree. */
+  tickMinutes: number;
   nowMs: number;
 }) {
   const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
+
+  // Memoised: one React element plus one DOM rect per band, rebuilt on every
+  // render otherwise, and this component re-renders on each poll.
+  const dayNight = useMemo(
+    () =>
+      renderDayNightShading(AXIS_ID, {
+        tMin,
+        tMax,
+        latitudeDeg: LAB_LOCATION.latitudeDeg,
+        longitudeDeg: LAB_LOCATION.longitudeDeg,
+      }),
+    [tMin, tMax],
+  );
 
   const { rows, values, agreeingVens, dissentingVens, knownVens } = useMemo(() => {
     const shared = sharedTariff(signals);
@@ -113,6 +138,9 @@ export function FleetTariffChart({
         series={series}
         nowMs={nowMs}
         referenceAxisId={AXIS_ID}
+        backgroundAreas={dayNight}
+        xAxisTicks={ticks}
+        xAxisInterval={FLEET_TICK_INTERVAL}
         height={CHART_HEIGHT}
         xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
         interactiveLegend
