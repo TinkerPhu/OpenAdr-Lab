@@ -1,7 +1,32 @@
-# VEN-9: Minimal household — base load only, no controllable assets
+# VEN-9: EV-only household, no PV/battery/heater
 # Runs on a second physical host (VEN/scale_out/node2/ — see that
 # directory's README.md for why), not the primary VTN host.
 assets:
+  - type: ev
+    id: ev
+    max_charge_kw: 11.0
+    initial_soc: 0.40
+    battery_kwh: 50.0
+    soc_target: 0.80
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "07:30:00"
+        leave_jitter_min: 20.0
+        return_time: "17:30:00"
+        return_jitter_min: 20.0
+        leave_probability: 0.9
+        soc_drop_pct_mean: 30.0
+        soc_drop_pct_stddev: 5.0
+      weekend:
+        leave_time: "10:00:00"
+        leave_jitter_min: 60.0
+        return_time: "15:00:00"
+        return_jitter_min: 60.0
+        leave_probability: 0.5
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 3.0
+      min_soc_after_drop_pct: 5.0
   - type: base_load
     id: base_load
     baseline_kw: 0.5
