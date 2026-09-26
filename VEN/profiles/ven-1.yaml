@@ -6,6 +6,25 @@ assets:
     initial_soc: 0.40
     battery_kwh: 60.0
     soc_target: 0.80
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "07:00:00"
+        leave_jitter_min: 15.0
+        return_time: "17:10:00"
+        return_jitter_min: 15.0
+        leave_probability: 0.95
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 3.0
+      weekend:
+        leave_time: "10:00:00"
+        leave_jitter_min: 60.0
+        return_time: "15:00:00"
+        return_jitter_min: 60.0
+        leave_probability: 0.3
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 3.0
+      min_soc_after_drop_pct: 5.0
   - type: pv
     id: pv
     rated_kw: 14.4

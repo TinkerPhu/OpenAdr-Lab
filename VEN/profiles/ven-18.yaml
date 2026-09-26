@@ -9,6 +9,25 @@ assets:
     initial_soc: 0.35
     battery_kwh: 65.0
     soc_target: 0.80
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "08:00:00"
+        leave_jitter_min: 10.0
+        return_time: "17:50:00"
+        return_jitter_min: 10.0
+        leave_probability: 1.0
+        soc_drop_pct_mean: 60.0
+        soc_drop_pct_stddev: 8.0
+      weekend:
+        leave_time: "08:30:00"
+        leave_jitter_min: 30.0
+        return_time: "19:00:00"
+        return_jitter_min: 45.0
+        leave_probability: 0.9
+        soc_drop_pct_mean: 40.0
+        soc_drop_pct_stddev: 6.0
+      min_soc_after_drop_pct: 5.0
   - type: heater
     id: heater
     max_kw: 4.0

@@ -582,6 +582,59 @@ spikes:
         let _ = tokio::fs::remove_file(path).await;
     }
 
+    // ev-usage-simulation: every fleet profile that declares it must parse and
+    // validate cleanly — a YAML typo here would otherwise only surface as an
+    // opaque container-startup failure on Node1/Node2, not at review time.
+    #[tokio::test]
+    async fn all_fleet_ev_usage_sim_profiles_load_and_validate() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("ven-") || !name.ends_with(".yaml") {
+                continue;
+            }
+            let contents = std::fs::read_to_string(&path).unwrap();
+            if !contents.contains("usage_sim:") {
+                continue;
+            }
+            let profile = Profile::try_load(path.to_str().unwrap())
+                .await
+                .unwrap_or_else(|e| panic!("{name} must parse: {e}"));
+            assert!(
+                profile.validate().is_ok(),
+                "{name} must validate: {:?}",
+                profile.validate()
+            );
+            let ev = profile
+                .assets
+                .iter()
+                .find_map(|a| match a {
+                    AssetProfile::Ev(c) => Some(c),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{name} must declare an ev asset"));
+            let usage_sim = ev
+                .usage_sim
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name}: ev.usage_sim must be set"));
+            assert!(
+                usage_sim.weekday.return_time > usage_sim.weekday.leave_time
+                    || usage_sim.weekday.leave_jitter_min > 0.0
+                    || usage_sim.weekday.return_jitter_min > 0.0,
+                "{name}: weekday return_time should be after leave_time (or crossing enabled via jitter)"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 9,
+            "expected at least 9 fleet profiles with usage_sim, found {checked}"
+        );
+    }
+
     // ev-usage-simulation: the committed BDD fixture must parse and validate
     // cleanly — a YAML typo here would otherwise only surface as an opaque
     // container-startup failure deep in the E2E suite.
