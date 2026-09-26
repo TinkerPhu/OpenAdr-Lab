@@ -654,7 +654,10 @@ spikes:
             })
             .expect("profile must declare an ev asset");
         let usage_sim = ev.usage_sim.as_ref().expect("ev.usage_sim must be set");
-        assert!(usage_sim.plan_ahead, "fixture must enable plan_ahead");
+        assert!(
+            usage_sim.engage_charge_planning,
+            "fixture must enable engage_charge_planning"
+        );
         assert_eq!(usage_sim.weekday.leave_probability, 1.0);
         assert_eq!(usage_sim.weekend.leave_probability, 1.0);
     }

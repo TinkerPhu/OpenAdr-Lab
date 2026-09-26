@@ -55,7 +55,7 @@ pub(crate) async fn sync_plan_ahead_session(
     let Some(usage_sim) = &ev.usage_sim else {
         return;
     };
-    if !usage_sim.plan_ahead {
+    if !usage_sim.engage_charge_planning {
         return;
     }
 
@@ -112,10 +112,10 @@ mod tests {
         }
     }
 
-    fn ev_params_with_plan_ahead(plan_ahead: bool) -> EvParams {
+    fn ev_params_with_plan_ahead(engage_charge_planning: bool) -> EvParams {
         EvParams {
             usage_sim: Some(EvUsageSimParams {
-                plan_ahead,
+                engage_charge_planning,
                 weekday: always_leaves_at(8),
                 weekend: always_leaves_at(8),
                 min_soc_after_drop_pct: 5.0,

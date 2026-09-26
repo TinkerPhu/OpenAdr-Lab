@@ -174,7 +174,7 @@ export function EvCard(props: EvCardProps) {
         <>
           <Divider />
           <CardActions data-testid="ev-usage-sim-section" sx={{ px: 2, flexDirection: "column", alignItems: "flex-start" }}>
-            {usageSim.plan_ahead && (
+            {usageSim.engage_charge_planning && (
               <Chip label="Plan-ahead active" size="small" color="info" data-testid="ev-plan-ahead-chip" sx={{ mb: 0.5 }} />
             )}
             {usageSim.next_trip ? (

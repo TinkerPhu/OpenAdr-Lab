@@ -51,7 +51,7 @@ impl AssetProfile {
                 response_delay_s: c.response_delay_s,
                 v2g_capable: c.v2g_capable,
                 usage_sim: c.usage_sim.as_ref().map(|u| EvUsageSimParams {
-                    plan_ahead: u.plan_ahead,
+                    engage_charge_planning: u.engage_charge_planning,
                     weekday: EvUsageDayParams {
                         leave_time: u.weekday.leave_time,
                         leave_jitter_min: u.weekday.leave_jitter_min,
@@ -264,7 +264,7 @@ pub struct EvUsageSimConfig {
     /// falls within the planner's horizon. If false, the planner only reacts
     /// once the EV actually unplugs, exactly like an unannounced departure.
     #[serde(default)]
-    pub plan_ahead: bool,
+    pub engage_charge_planning: bool,
     pub weekday: EvUsageDayConfig,
     pub weekend: EvUsageDayConfig,
     /// Floor for the state-of-charge drop applied at return (%, 0-100). SoC

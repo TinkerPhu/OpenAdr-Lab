@@ -277,7 +277,7 @@ mod usage_sim_tests {
 
     fn usage_cfg(weekday: EvUsageDayParams, weekend: EvUsageDayParams) -> EvUsageSimParams {
         EvUsageSimParams {
-            plan_ahead: false,
+            engage_charge_planning: false,
             weekday,
             weekend,
             min_soc_after_drop_pct: 5.0,

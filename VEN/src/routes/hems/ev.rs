@@ -52,7 +52,7 @@ pub struct NextTrip {
 /// `GET /ev-usage-sim` response body.
 #[derive(Serialize)]
 pub struct EvUsageSimState {
-    pub plan_ahead: bool,
+    pub engage_charge_planning: bool,
     pub next_trip: Option<NextTrip>,
 }
 
@@ -90,7 +90,7 @@ pub async fn get_ev_usage_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
         );
 
     Json(EvUsageSimState {
-        plan_ahead: usage_sim.plan_ahead,
+        engage_charge_planning: usage_sim.engage_charge_planning,
         next_trip: next_trip.map(|trip| NextTrip {
             leave_at: trip.leave_at,
             return_at: trip.return_at,

@@ -545,7 +545,7 @@ export type EvUsageSimNextTrip = {
 /** GET /ev-usage-sim response — undefined/204 when the EV has no usage-sim
  * configured (the vast majority of profiles; this is opt-in). */
 export type EvUsageSimState = {
-  plan_ahead: boolean;
+  engage_charge_planning: boolean;
   next_trip: EvUsageSimNextTrip | null;
 };
 
