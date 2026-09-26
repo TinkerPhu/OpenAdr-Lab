@@ -84,6 +84,14 @@ pub struct EvMilpContext {
     pub soc_init: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0).
     pub a_ev: Vec<bool>,
+    /// `ev-usage-forecast`: exogenous SoC changes the plan must project but
+    /// cannot decide (the drop when the car returns). `None` under
+    /// `usage_sim`/no usage schedule — the pre-forecast behaviour.
+    pub soc_drops: Option<ExogenousSocDrops>,
+    /// `ev-usage-forecast`: set when the charging target cannot be reached
+    /// before the deadline because the car is predicted away for part of the
+    /// window — the core energy was clamped to what the window allows.
+    pub core_unmet_warning: Option<String>,
     /// Last step index that counts toward the core energy sum (None = open horizon).
     pub t_dead_step: Option<usize>,
     /// Maximum charge power [kW].
@@ -268,20 +276,49 @@ pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f6
     HashMap::from([("soc".into(), soc)])
 }
 
+/// Exogenous, decision-independent state-of-charge changes at specific slots
+/// (`ev-usage-forecast`: the drop when the car returns from a predicted trip).
+///
+/// This is the one thing the EV's energy accounting cannot derive from the
+/// plan's own charging decisions — it happens *to* the asset while it is away,
+/// so it is supplied as data rather than inferred.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExogenousSocDrops {
+    /// SoC fraction to subtract at each slot; zero for almost every slot.
+    pub drop_frac_per_slot: Vec<f64>,
+    /// A drop never takes the projected SoC below this fraction.
+    pub floor_frac: f64,
+}
+
 /// SoC trajectory from MILP power schedule over `n+1` steps.
 /// `dt_h[t]` is the slot duration in hours for slot `t`.
-/// Mirrors `EvCharger::soc_trajectory()`.
+///
+/// The single implementation of "integrate EV charge power into a SoC curve"
+/// (R-73: this used to be duplicated by a dead `EvCharger::soc_trajectory`,
+/// consolidated here — this is the copy the planner actually calls).
+///
+/// `drops` applies `ev-usage-forecast`'s exogenous SoC changes on top of the
+/// integrated charging; `None` reproduces the pre-forecast behaviour exactly.
 pub fn ev_soc_trajectory(
     p_ev_kw: &[f64],
     soc_init: f64,
     battery_kwh: f64,
     dt_h: &[f64],
+    drops: Option<&ExogenousSocDrops>,
 ) -> Vec<f64> {
     let n = p_ev_kw.len();
     let mut traj = Vec::with_capacity(n + 1);
     traj.push(soc_init.clamp(0.0, 1.0));
     for t in 0..n {
-        let next = traj[t] + p_ev_kw[t] * dt_h[t] / battery_kwh;
+        let mut next = traj[t] + p_ev_kw[t] * dt_h[t] / battery_kwh;
+        // The drop is floored on its own, matching the live tick's
+        // `apply_return_drop`, so a long trip cannot drive the projection to 0.
+        if let Some(d) = drops {
+            let drop = d.drop_frac_per_slot.get(t).copied().unwrap_or(0.0);
+            if drop > 0.0 {
+                next = (next - drop).max(d.floor_frac);
+            }
+        }
         traj.push(next.clamp(0.0, 1.0));
     }
     traj

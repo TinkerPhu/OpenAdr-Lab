@@ -276,6 +276,39 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VEN-usage-forecast — seventh instance, with ev-usage-forecast configured,
+  # for the forecast BDD scenario (same schedule, disclosed to the planner).
+  # ---------------------------------------------------------------------------
+  test-ven-usage-forecast:
+    build:
+      context: ..
+      dockerfile: VEN/Dockerfile
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      CLIENT_ID: "ven-1"
+      CLIENT_SECRET: "ven-1"
+      VEN_NAME: "ven-1"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/usage_forecast_test.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # BFF — proxies VTN with dual credentials
   # ---------------------------------------------------------------------------
   test-bff:
@@ -369,6 +402,7 @@ services:
       VEN_NO_PV_BASE_URL: "http://test-ven-no-pv:8080"
       VEN_PENALTY_TEST_BASE_URL: "http://test-ven-penalty:8080"
       VEN_USAGE_SIM_TEST_BASE_URL: "http://test-ven-usage-sim:8080"
+      VEN_USAGE_FORECAST_TEST_BASE_URL: "http://test-ven-usage-forecast:8080"
       BFF_BASE_URL: "http://test-bff:8090"
       UI_BASE_URL: "http://test-ui:80"
       VEN_UI_BASE_URL: "http://test-ven-ui:80"
@@ -388,6 +422,8 @@ services:
       test-ven-penalty:
         condition: service_healthy
       test-ven-usage-sim:
+        condition: service_healthy
+      test-ven-usage-forecast:
         condition: service_healthy
       test-bff:
         condition: service_healthy

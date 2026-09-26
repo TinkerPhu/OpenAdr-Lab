@@ -8,15 +8,16 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::assets::ev::EvCharger;
-use crate::assets::ev_schedule::{active_trip_at, daily_trip, UsageTrip};
-use crate::entities::asset_params::EvUsageSimParams;
+use crate::assets::ev_schedule::{active_trip_at, UsageTrip};
+use crate::entities::asset_params::{EvUsageMode, EvUsageSimParams};
 use crate::entities::device_session::{EvSession, EvSessionOrigin};
 use crate::ids::ASSET_EV;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
-/// Looks ahead day by day (bounded by `plan_horizon_h`) for the next
-/// scheduled trip when none is active right now.
+/// Looks ahead (bounded by `plan_horizon_h`) for the next scheduled trip when
+/// none is active right now — a thin wrapper over the shared
+/// `ev_schedule::next_trip_after`, which `usage_forecast` also uses.
 fn next_trip_within_horizon(
     cfg: &EvUsageSimParams,
     seed_tag: u64,
@@ -24,16 +25,7 @@ fn next_trip_within_horizon(
     plan_horizon_h: u64,
 ) -> Option<UsageTrip> {
     let horizon_end = now + Duration::hours(plan_horizon_h as i64);
-    let mut day = now.date_naive();
-    while day.and_time(chrono::NaiveTime::MIN).and_utc() <= horizon_end {
-        if let Some(trip) = daily_trip(cfg, day, seed_tag) {
-            if trip.leave_at > now && trip.leave_at <= horizon_end {
-                return Some(trip);
-            }
-        }
-        day += Duration::days(1);
-    }
-    None
+    crate::assets::ev_schedule::next_trip_after(cfg, seed_tag, now, horizon_end)
 }
 
 /// Writes a simulated-origin `EvSession` for the EV's next scheduled leave
@@ -56,6 +48,13 @@ pub(crate) async fn sync_plan_ahead_session(
         return;
     };
     if !usage_sim.engage_charge_planning {
+        return;
+    }
+    // `ev-usage-forecast` carries the predicted deadline into the MILP directly
+    // (`EvMilpContext::apply_usage_forecast`), so writing a session here would be
+    // a second, competing copy of the same goal. Session-writing is the
+    // `usage_sim` class's mechanism alone.
+    if usage_sim.mode != EvUsageMode::Simulated {
         return;
     }
 
@@ -115,6 +114,7 @@ mod tests {
     fn ev_params_with_plan_ahead(engage_charge_planning: bool) -> EvParams {
         EvParams {
             usage_sim: Some(EvUsageSimParams {
+                mode: EvUsageMode::Simulated,
                 engage_charge_planning,
                 weekday: always_leaves_at(8),
                 weekend: always_leaves_at(8),
@@ -144,6 +144,19 @@ mod tests {
             session.departure_time,
             Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn writes_no_session_under_the_forecast_usage_class() {
+        // `ev-usage-forecast` hands the deadline to the MILP directly; a session
+        // written here would be a second copy of the same goal.
+        let state = AppState::new();
+        let mut params = ev_params_with_plan_ahead(true);
+        params.usage_sim.as_mut().unwrap().mode = EvUsageMode::Forecast;
+        let sim = sim_with(params);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+        sync_plan_ahead_session(&state, &sim, now, 48).await;
+        assert!(state.ev_session().await.is_none());
     }
 
     #[tokio::test]

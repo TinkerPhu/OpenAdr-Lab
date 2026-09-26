@@ -1,6 +1,6 @@
 use crate::entities::asset_params::{
     ApplianceSpikeParams, AssetParams, BaseLoadParams, BatteryParams, EvParams, EvUsageDayParams,
-    EvUsageSimParams, HeaterParams, PvForecastParams, PvParams,
+    EvUsageMode, EvUsageSimParams, HeaterParams, PvForecastParams, PvParams,
 };
 use crate::profile::weather_pv::WeatherPvConfig;
 use serde::Deserialize;
@@ -50,28 +50,40 @@ impl AssetProfile {
                 min_charge_kw: c.min_charge_kw,
                 response_delay_s: c.response_delay_s,
                 v2g_capable: c.v2g_capable,
-                usage_sim: c.usage_sim.as_ref().map(|u| EvUsageSimParams {
-                    engage_charge_planning: u.engage_charge_planning,
-                    weekday: EvUsageDayParams {
-                        leave_time: u.weekday.leave_time,
-                        leave_jitter_min: u.weekday.leave_jitter_min,
-                        return_time: u.weekday.return_time,
-                        return_jitter_min: u.weekday.return_jitter_min,
-                        leave_probability: u.weekday.leave_probability,
-                        soc_drop_pct_mean: u.weekday.soc_drop_pct_mean,
-                        soc_drop_pct_stddev: u.weekday.soc_drop_pct_stddev,
-                    },
-                    weekend: EvUsageDayParams {
-                        leave_time: u.weekend.leave_time,
-                        leave_jitter_min: u.weekend.leave_jitter_min,
-                        return_time: u.weekend.return_time,
-                        return_jitter_min: u.weekend.return_jitter_min,
-                        leave_probability: u.weekend.leave_probability,
-                        soc_drop_pct_mean: u.weekend.soc_drop_pct_mean,
-                        soc_drop_pct_stddev: u.weekend.soc_drop_pct_stddev,
-                    },
-                    min_soc_after_drop_pct: u.min_soc_after_drop_pct,
-                }),
+                // The two YAML keys are mutually exclusive (enforced in
+                // `validate`), so they collapse into one mode-tagged value here.
+                usage_sim: c
+                    .usage_sim
+                    .as_ref()
+                    .map(|u| (EvUsageMode::Simulated, u))
+                    .or_else(|| {
+                        c.usage_forecast
+                            .as_ref()
+                            .map(|u| (EvUsageMode::Forecast, u))
+                    })
+                    .map(|(mode, u)| EvUsageSimParams {
+                        mode,
+                        engage_charge_planning: u.engage_charge_planning,
+                        weekday: EvUsageDayParams {
+                            leave_time: u.weekday.leave_time,
+                            leave_jitter_min: u.weekday.leave_jitter_min,
+                            return_time: u.weekday.return_time,
+                            return_jitter_min: u.weekday.return_jitter_min,
+                            leave_probability: u.weekday.leave_probability,
+                            soc_drop_pct_mean: u.weekday.soc_drop_pct_mean,
+                            soc_drop_pct_stddev: u.weekday.soc_drop_pct_stddev,
+                        },
+                        weekend: EvUsageDayParams {
+                            leave_time: u.weekend.leave_time,
+                            leave_jitter_min: u.weekend.leave_jitter_min,
+                            return_time: u.weekend.return_time,
+                            return_jitter_min: u.weekend.return_jitter_min,
+                            leave_probability: u.weekend.leave_probability,
+                            soc_drop_pct_mean: u.weekend.soc_drop_pct_mean,
+                            soc_drop_pct_stddev: u.weekend.soc_drop_pct_stddev,
+                        },
+                        min_soc_after_drop_pct: u.min_soc_after_drop_pct,
+                    }),
             }),
             AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
                 id: c.id.clone(),
@@ -249,9 +261,16 @@ pub struct EvConfig {
     pub v2g_capable: bool,
     /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
     /// `None` (the default) means this EV never leaves — today's behavior,
-    /// unchanged.
+    /// unchanged. Mutually exclusive with `usage_forecast`.
     #[serde(default)]
     pub usage_sim: Option<EvUsageSimConfig>,
+    /// Same daily leave/return pattern as `usage_sim`, but the schedule is also
+    /// disclosed to the planner as per-slot availability (`ev-usage-forecast`),
+    /// instead of the planner only finding out once the EV has actually left.
+    /// Same config shape — the two differ only in planner disclosure, so they
+    /// share one type. Mutually exclusive with `usage_sim`.
+    #[serde(default)]
+    pub usage_forecast: Option<EvUsageSimConfig>,
 }
 
 /// A profile-configured, opt-in daily leave/return usage pattern for an EV

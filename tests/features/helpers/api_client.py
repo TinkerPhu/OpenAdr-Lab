@@ -16,6 +16,9 @@ VEN_PENALTY_TEST_BASE_URL = os.environ.get(
 VEN_USAGE_SIM_TEST_BASE_URL = os.environ.get(
     "VEN_USAGE_SIM_TEST_BASE_URL", "http://test-ven-usage-sim:8080"
 )
+VEN_USAGE_FORECAST_TEST_BASE_URL = os.environ.get(
+    "VEN_USAGE_FORECAST_TEST_BASE_URL", "http://test-ven-usage-forecast:8080"
+)
 _DEFAULT_VEN_BASE_URL = VEN_BASE_URL
 BFF_BASE_URL = os.environ.get("BFF_BASE_URL", "http://test-bff:8090")
 

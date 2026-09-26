@@ -15,7 +15,31 @@ use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
 
 use super::types::{MilpInputs, MilpLoadMode, SolveOutput};
 
-pub(super) fn unmet_warning(
+/// Every EV "the target was not (fully) planned for" warning this cycle: the
+/// GB-41 soft-deadline skip below, plus `ev-usage-forecast`'s clamped target —
+/// one place, so a reader finds both shapes of the same concept together.
+pub(super) fn ev_warnings(
+    inputs: &MilpInputs,
+    sol: &SolveOutput,
+    ev_session: Option<&EvSession>,
+    ev_cfg: Option<&EvParams>,
+) -> Vec<PlanWarning> {
+    let clamped = inputs.ev_core_unmet_warning.as_ref().map(|msg| PlanWarning {
+        severity: WarningSeverity::Warning,
+        kind: WarningKind::EvCoreEnergyUnmet,
+        message: msg.clone(),
+        suggested_action: Some(
+            "the car is predicted away for part of the charging window — move the departure later or lower the target SoC".to_string(),
+        ),
+    });
+    clamped
+        .into_iter()
+        .chain(soft_deadline_skip(inputs, sol, ev_session, ev_cfg))
+        .collect()
+}
+
+/// GB-41: a `MayRun` session whose core energy the solver declined entirely.
+fn soft_deadline_skip(
     inputs: &MilpInputs,
     sol: &SolveOutput,
     ev_session: Option<&EvSession>,

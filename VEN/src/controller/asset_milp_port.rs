@@ -49,6 +49,12 @@ pub struct EvScalars {
     pub soc_init: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0). len = n.
     pub a_ev: Vec<bool>,
+    /// `ev-usage-forecast`: exogenous SoC changes to project (see
+    /// `EvMilpContext::soc_drops`). `None` when no usage forecast is configured.
+    pub soc_drops: Option<crate::controller::milp_planner::asset_port::ExogenousSocDrops>,
+    /// `ev-usage-forecast`: the clamped-target warning, if any (see
+    /// `EvMilpContext::core_unmet_warning`).
+    pub core_unmet_warning: Option<String>,
     pub t_dead_step: Option<usize>,
     pub p_max_kw: f64,
     pub p_min_kw: f64,

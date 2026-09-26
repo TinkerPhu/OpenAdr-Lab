@@ -21,6 +21,7 @@ import {
 import type {
   CreateUserRequestBody,
   EvSettings,
+  EvUsageMode,
   EvUsageSimState,
   UpdateEvSettingsBody,
   UserRequestMode,
@@ -47,13 +48,31 @@ function fmtDate(iso: string): string {
   });
 }
 
+/** What each usage class means on screen, declared per case beside the case
+ * itself (`declare-dont-branch`) rather than as `if (mode === ...)` chains:
+ * `simulated` runs the trip physically and only tells the planner by writing a
+ * charge session; `forecast` hands the planner the schedule itself. */
+const USAGE_MODE_DISPLAY: Record<EvUsageMode, { label: string; planningChip: string; departurePrefix: string }> = {
+  simulated: {
+    label: "Usage simulated",
+    planningChip: "Charge planning engaged (session)",
+    departurePrefix: "Next departure (simulated)",
+  },
+  forecast: {
+    label: "Usage forecast to planner",
+    planningChip: "Charge planning engaged (forecast)",
+    departurePrefix: "Next departure (forecast)",
+  },
+};
+
 // ── Props ────────────────────────────────────────────────────────────────────
 
 export type EvCardProps = {
   request: UserRequestWithSession | undefined;
   evSettings: EvSettings | undefined;
-  /** ev-usage-simulation diagnostics; undefined while loading, null when the
-   * EV has no usage-sim configured (the common case). */
+  /** ev-usage-simulation / ev-usage-forecast diagnostics; undefined while
+   * loading, null when the EV has no usage schedule configured (the common
+   * case). */
   usageSim: EvUsageSimState | null | undefined;
   postRequest: (body: CreateUserRequestBody) => Promise<unknown>;
   deleteRequest: (id: string) => Promise<unknown>;
@@ -174,12 +193,25 @@ export function EvCard(props: EvCardProps) {
         <>
           <Divider />
           <CardActions data-testid="ev-usage-sim-section" sx={{ px: 2, flexDirection: "column", alignItems: "flex-start" }}>
+            <Chip
+              label={USAGE_MODE_DISPLAY[usageSim.mode].label}
+              size="small"
+              variant="outlined"
+              data-testid="ev-usage-mode-chip"
+              sx={{ mb: 0.5 }}
+            />
             {usageSim.engage_charge_planning && (
-              <Chip label="Plan-ahead active" size="small" color="info" data-testid="ev-plan-ahead-chip" sx={{ mb: 0.5 }} />
+              <Chip
+                label={USAGE_MODE_DISPLAY[usageSim.mode].planningChip}
+                size="small"
+                color="info"
+                data-testid="ev-plan-ahead-chip"
+                sx={{ mb: 0.5 }}
+              />
             )}
             {usageSim.next_trip ? (
               <Typography variant="body2" color="text.secondary" data-testid="ev-next-departure-chip">
-                Next departure (simulated): {fmtDate(usageSim.next_trip.leave_at)} → back {fmtDate(usageSim.next_trip.return_at)}
+                {USAGE_MODE_DISPLAY[usageSim.mode].departurePrefix}: {fmtDate(usageSim.next_trip.leave_at)} → back {fmtDate(usageSim.next_trip.return_at)}
                 {" "}(−{usageSim.next_trip.expected_soc_drop_pct.toFixed(0)}% SoC)
               </Typography>
             ) : (

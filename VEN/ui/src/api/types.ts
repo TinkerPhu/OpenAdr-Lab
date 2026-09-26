@@ -534,7 +534,12 @@ export type EvSettings = {
   paused_by_active_session: boolean;
 };
 
-// ─── EV usage simulation (ev-usage-simulation) ─────────────────────────────
+// ─── EV usage simulation / forecast (ev-usage-simulation, ev-usage-forecast) ──
+
+/** Which usage class the EV profile declared: `simulated` = physics only
+ *  (`usage_sim`), `forecast` = the same schedule also fed to the planner as
+ *  per-slot availability (`usage_forecast`). */
+export type EvUsageMode = "simulated" | "forecast";
 
 export type EvUsageSimNextTrip = {
   leave_at: string;
@@ -542,9 +547,11 @@ export type EvUsageSimNextTrip = {
   expected_soc_drop_pct: number;
 };
 
-/** GET /ev-usage-sim response — undefined/204 when the EV has no usage-sim
- * configured (the vast majority of profiles; this is opt-in). */
+/** GET /ev-usage-sim response — undefined/204 when the EV has no usage
+ * schedule configured (the vast majority of profiles; this is opt-in). Serves
+ * both usage classes, distinguished by `mode`. */
 export type EvUsageSimState = {
+  mode: EvUsageMode;
   engage_charge_planning: boolean;
   next_trip: EvUsageSimNextTrip | null;
 };

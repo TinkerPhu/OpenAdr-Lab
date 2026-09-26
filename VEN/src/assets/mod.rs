@@ -7,6 +7,7 @@ pub mod ev;
 mod ev_comfort;
 mod ev_milp;
 pub(crate) mod ev_schedule;
+mod ev_usage_forecast;
 pub mod grid;
 pub mod heater;
 mod heater_capabilities;

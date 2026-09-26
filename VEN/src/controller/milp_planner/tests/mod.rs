@@ -567,6 +567,8 @@ fn contexts_from_inputs(
                 mode,
                 soc_init: inputs.soc_ev_init.unwrap_or(0.0),
                 a_ev: inputs.a_ev.clone(),
+                soc_drops: None,
+                core_unmet_warning: None,
                 t_dead_step: inputs.t_ev_dead_step,
                 p_max_kw: inputs.p_ev_max_kw,
                 p_min_kw: inputs.p_ev_min_kw,

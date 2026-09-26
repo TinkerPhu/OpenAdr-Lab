@@ -260,3 +260,72 @@ def step_no_slot_exceeds_import_threshold(context, kw):
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# ev-usage-forecast: the plan reflects the EV's own predicted away window
+# ---------------------------------------------------------------------------
+
+def _predicted_trip(context):
+    """The EV's next predicted trip, read from the same diagnostics route the
+    UI shows (`GET /ev-usage-sim`) rather than recomputed here — the asset is
+    the single authority for its own schedule."""
+    resp = ven_get("/ev-usage-sim")
+    assert resp.status_code == 200, f"/ev-usage-sim returned {resp.status_code}"
+    trip = resp.json().get("next_trip")
+    assert trip, "no predicted trip to compare the plan against"
+    leave = datetime.fromisoformat(trip["leave_at"].replace("Z", "+00:00"))
+    back = datetime.fromisoformat(trip["return_at"].replace("Z", "+00:00"))
+    return leave, back
+
+
+def _ev_power_by_slot(context):
+    slots = context.ven_plan.get("slots", [])
+    out = []
+    for slot in slots:
+        start = datetime.fromisoformat(slot["start"].replace("Z", "+00:00"))
+        ev_kw = sum(
+            a.get("power_kw", 0.0)
+            for a in slot.get("allocations", [])
+            if a.get("asset_id") == "ev"
+        )
+        out.append((slot.get("slot_index"), start, ev_kw))
+    return out
+
+
+@then("the plan allocates no EV power while the EV is predicted away")
+def step_no_ev_power_while_away(context):
+    leave, back = _predicted_trip(context)
+    charging_while_away = [
+        (idx, start.isoformat(), kw)
+        for idx, start, kw in _ev_power_by_slot(context)
+        if leave <= start < back and kw > 1e-6
+    ]
+    assert not charging_while_away, (
+        "the plan schedules EV charging inside the predicted away window "
+        f"[{leave.isoformat()}, {back.isoformat()}): {charging_while_away}"
+    )
+
+
+@then("the plan allocates EV power in the home window around the predicted trip")
+def step_ev_power_in_home_window(context):
+    """Wall-clock-independent counterpart to the away-window assertion: the plan
+    must schedule the charge in a window the car is actually home for. Which
+    window that is depends only on whether the predicted trip has already
+    started by the time the suite runs — before the departure when it hasn't,
+    after the return when it has (the car is away right now). Either way the
+    point is the same: charging is planned into home time, not away time.
+    """
+    leave, back = _predicted_trip(context)
+    slots = _ev_power_by_slot(context)
+    now = datetime.now(timezone.utc)
+    if now < leave:
+        window = [(idx, kw) for idx, start, kw in slots if start < leave and kw > 1e-6]
+        where = f"before the predicted departure {leave.isoformat()}"
+    else:
+        window = [(idx, kw) for idx, start, kw in slots if start >= back and kw > 1e-6]
+        where = f"after the predicted return {back.isoformat()}"
+    assert window, (
+        f"the plan schedules no EV charging {where} — engage_charge_planning should "
+        "have placed the charge in the home window"
+    )

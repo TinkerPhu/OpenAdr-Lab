@@ -49,17 +49,21 @@ pub struct NextTrip {
     pub expected_soc_drop_pct: f64,
 }
 
-/// `GET /ev-usage-sim` response body.
+/// `GET /ev-usage-sim` response body. Serves both usage classes — `usage_sim`
+/// and `usage_forecast` share one schedule shape, so they share one diagnostics
+/// response, distinguished by `mode` rather than by a sibling route.
 #[derive(Serialize)]
 pub struct EvUsageSimState {
+    pub mode: crate::entities::asset_params::EvUsageMode,
     pub engage_charge_planning: bool,
     pub next_trip: Option<NextTrip>,
 }
 
-/// GET /ev-usage-sim — read-only diagnostics for `ev-usage-simulation`
-/// (`ui-transparency`): whether plan-ahead is active and the next scheduled
-/// leave/return, or `204 No Content` when the EV has no usage-sim configured
-/// at all, matching `/ev-session`'s existing convention.
+/// GET /ev-usage-sim — read-only diagnostics for `ev-usage-simulation` and
+/// `ev-usage-forecast` (`ui-transparency`): which usage class the profile
+/// declared, whether charge planning is engaged, and the next scheduled
+/// leave/return, or `204 No Content` when the EV has no usage schedule
+/// configured at all, matching `/ev-session`'s existing convention.
 pub async fn get_ev_usage_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
     let sim = ctx.sim.lock().await;
     let Some((_, cfg)) = sim.find_asset(crate::ids::ASSET_EV) else {
@@ -78,18 +82,17 @@ pub async fn get_ev_usage_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
     let next_trip =
         crate::assets::ev_schedule::active_trip_at(usage_sim, ev.usage_sim_seed_tag, now).or_else(
             || {
-                (0..7).find_map(|offset| {
-                    crate::assets::ev_schedule::daily_trip(
-                        usage_sim,
-                        now.date_naive() + chrono::Duration::days(offset),
-                        ev.usage_sim_seed_tag,
-                    )
-                    .filter(|trip| trip.leave_at > now)
-                })
+                crate::assets::ev_schedule::next_trip_after(
+                    usage_sim,
+                    ev.usage_sim_seed_tag,
+                    now,
+                    now + chrono::Duration::days(7),
+                )
             },
         );
 
     Json(EvUsageSimState {
+        mode: usage_sim.mode,
         engage_charge_planning: usage_sim.engage_charge_planning,
         next_trip: next_trip.map(|trip| NextTrip {
             leave_at: trip.leave_at,

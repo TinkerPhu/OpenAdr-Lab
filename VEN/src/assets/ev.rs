@@ -219,23 +219,10 @@ impl EvCharger {
         m
     }
 
-    /// Compute EV SoC trajectory from MILP charge-power schedule.
-    ///
-    /// Returns a `Vec<f64>` of length `n + 1` where index `t` is the SoC at the
-    /// **start** of slot `t` (index `n` is the SoC at the end of the last slot).
-    /// `p_ev_kw[t]` is net charge power (kW) during slot `t`, `dt_h` is slot
-    /// duration in hours.  Values are clamped to `[0.0, 1.0]`.
-    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::ev_soc_trajectory is a separate "Mirrors" reimplementation (the one actually called from results.rs); found while removing AssetConfig, not fixed here (R-73)
-    pub fn soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64> {
-        let n = p_ev_kw.len();
-        let mut traj = Vec::with_capacity(n + 1);
-        traj.push(soc_init.clamp(0.0, 1.0));
-        for t in 0..n {
-            let next = traj[t] + p_ev_kw[t] * dt_h / battery_kwh;
-            traj.push(next.clamp(0.0, 1.0));
-        }
-        traj
-    }
+    // R-73 resolved (`ev-usage-forecast`): the EV SoC-trajectory integrator
+    // that used to live here was a dead duplicate of the one the planner
+    // actually calls. There is now exactly one:
+    // `controller::milp_planner::asset_port::ev_soc_trajectory`.
 
     /// State values for a future MILP time slot given the SoC at the start of
     /// that slot. Returns `{"soc": <0..1>}`.
@@ -485,22 +472,24 @@ impl MilpParticipant for EvCharger {
         _heater_anchor: Vec<Option<f64>>,
         w_ghg_eur_kg: f64,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
-        Box::new(
-            crate::controller::milp_planner::asset_port::EvMilpContext::from_state(
-                state,
-                self,
-                n,
-                cum_s,
-                now,
-                ev_session,
-                ev_min_charge_kw,
-                v_ev_extra_eur_kwh,
-                v_ev_core_eur_kwh,
-                asap_lateness_eur_kwh_h,
-                v_ev_free_charge_eur_kwh,
-                w_ghg_eur_kg,
-            ),
-        )
+        let mut ctx = crate::controller::milp_planner::asset_port::EvMilpContext::from_state(
+            state,
+            self,
+            n,
+            cum_s,
+            now,
+            ev_session,
+            ev_min_charge_kw,
+            v_ev_extra_eur_kwh,
+            v_ev_core_eur_kwh,
+            asap_lateness_eur_kwh_h,
+            v_ev_free_charge_eur_kwh,
+            w_ghg_eur_kg,
+        );
+        // ev-usage-forecast: the asset's own predicted availability, ANDed into
+        // the mask above. No-op unless this EV declared `usage_forecast`.
+        ctx.apply_usage_forecast(self, n, cum_s, now, ev_session);
+        Box::new(ctx)
     }
 }
 
@@ -885,12 +874,15 @@ mod tests {
         );
     }
 
-    // T012: EvCharger::soc_trajectory and future_state_values_at.
+    // T012: the SoC-trajectory integrator (R-73: consolidated into
+    // `asset_port::ev_soc_trajectory`; these tests moved with it, unchanged in
+    // intent — the scalar `dt_h` is now the per-slot slice the planner uses).
     #[test]
     fn soc_trajectory_charges_monotonically() {
+        use crate::controller::milp_planner::asset_port::ev_soc_trajectory;
         // 5 slots of 1 kW charging, 10 kWh battery, dt_h = 1h → each slot +0.1 SoC
         let p_ev = vec![1.0_f64; 5];
-        let traj = EvCharger::soc_trajectory(&p_ev, 0.0, 10.0, 1.0);
+        let traj = ev_soc_trajectory(&p_ev, 0.0, 10.0, &[1.0; 5], None);
         assert_eq!(traj.len(), 6);
         for i in 1..=5 {
             assert!(traj[i] > traj[i - 1], "SoC must increase during charging");
@@ -904,10 +896,70 @@ mod tests {
 
     #[test]
     fn soc_trajectory_clamps_at_one() {
+        use crate::controller::milp_planner::asset_port::ev_soc_trajectory;
         // Over-charge scenario: 1000 slots of 10 kW charging
         let p_ev = vec![10.0_f64; 1000];
-        let traj = EvCharger::soc_trajectory(&p_ev, 0.5, 10.0, 1.0);
+        let traj = ev_soc_trajectory(&p_ev, 0.5, 10.0, &[1.0; 1000], None);
         assert_eq!(*traj.last().unwrap(), 1.0);
+    }
+
+    // ── ev-usage-forecast: exogenous SoC drops in the projected trajectory ──
+
+    #[test]
+    fn soc_trajectory_applies_an_exogenous_drop_at_its_slot() {
+        use crate::controller::milp_planner::asset_port::{ev_soc_trajectory, ExogenousSocDrops};
+        // No charging at all, so the only movement is the drop itself.
+        let p_ev = vec![0.0_f64; 5];
+        let mut drop_frac_per_slot = vec![0.0; 5];
+        drop_frac_per_slot[2] = 0.30; // 30 % consumed while away
+        let drops = ExogenousSocDrops {
+            drop_frac_per_slot,
+            floor_frac: 0.05,
+        };
+        let traj = ev_soc_trajectory(&p_ev, 0.80, 10.0, &[1.0; 5], Some(&drops));
+        assert!((traj[0] - 0.80).abs() < 1e-9, "starts at soc_init");
+        assert!(
+            (traj[2] - 0.80).abs() < 1e-9,
+            "unchanged before the drop slot"
+        );
+        assert!(
+            (traj[3] - 0.50).abs() < 1e-9,
+            "slot 2's drop must show at the following boundary, got {}",
+            traj[3]
+        );
+        assert!((traj[4] - 0.50).abs() < 1e-9, "and then hold");
+    }
+
+    #[test]
+    fn soc_trajectory_floors_an_oversized_exogenous_drop() {
+        use crate::controller::milp_planner::asset_port::{ev_soc_trajectory, ExogenousSocDrops};
+        let p_ev = vec![0.0_f64; 3];
+        let drops = ExogenousSocDrops {
+            drop_frac_per_slot: vec![0.0, 0.90, 0.0], // more than is there
+            floor_frac: 0.05,
+        };
+        let traj = ev_soc_trajectory(&p_ev, 0.20, 10.0, &[1.0; 3], Some(&drops));
+        assert!(
+            (traj[2] - 0.05).abs() < 1e-9,
+            "must floor at min_soc_after_drop, got {}",
+            traj[2]
+        );
+    }
+
+    #[test]
+    fn soc_trajectory_without_drops_matches_none() {
+        use crate::controller::milp_planner::asset_port::{ev_soc_trajectory, ExogenousSocDrops};
+        let p_ev = vec![2.0_f64; 4];
+        let dt = vec![1.0; 4];
+        let zeroed = ExogenousSocDrops {
+            drop_frac_per_slot: vec![0.0; 4],
+            floor_frac: 0.05,
+        };
+        assert_eq!(
+            ev_soc_trajectory(&p_ev, 0.1, 10.0, &dt, None),
+            ev_soc_trajectory(&p_ev, 0.1, 10.0, &dt, Some(&zeroed)),
+            "an all-zero drop vector must be indistinguishable from no drops"
+        );
     }
 
     #[test]

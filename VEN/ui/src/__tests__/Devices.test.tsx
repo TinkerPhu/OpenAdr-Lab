@@ -652,6 +652,7 @@ describe("DevicesPage", () => {
   // ev-usage-simulation: plan-ahead chip and next scheduled trip
   it("shows plan-ahead chip and next scheduled departure when usage-sim is configured", () => {
     mockEvUsageSimData.mockReturnValue({
+      mode: "simulated",
       engage_charge_planning: true,
       next_trip: {
         leave_at: "2026-04-12T08:00:00Z",
@@ -664,9 +665,26 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("ev-next-departure-chip")).toHaveTextContent("22%");
   });
 
+  // ev-usage-forecast: the same section serves the forecast class, labelled for it
+  it("labels the section for the forecast usage class", () => {
+    mockEvUsageSimData.mockReturnValue({
+      mode: "forecast",
+      engage_charge_planning: true,
+      next_trip: {
+        leave_at: "2026-04-12T08:00:00Z",
+        return_at: "2026-04-12T17:00:00Z",
+        expected_soc_drop_pct: 22,
+      },
+    });
+    renderPage();
+    expect(screen.getByTestId("ev-usage-mode-chip")).toHaveTextContent("Usage forecast to planner");
+    expect(screen.getByTestId("ev-plan-ahead-chip")).toHaveTextContent("forecast");
+    expect(screen.getByTestId("ev-next-departure-chip")).toHaveTextContent("Next departure (forecast)");
+  });
+
   // ev-usage-simulation: section shown but no chip when plan-ahead is off
   it("omits the plan-ahead chip when usage-sim is configured but plan-ahead is off", () => {
-    mockEvUsageSimData.mockReturnValue({ engage_charge_planning: false, next_trip: null });
+    mockEvUsageSimData.mockReturnValue({ mode: "simulated", engage_charge_planning: false, next_trip: null });
     renderPage();
     expect(screen.getByTestId("ev-usage-sim-section")).toBeInTheDocument();
     expect(screen.queryByTestId("ev-plan-ahead-chip")).toBeNull();

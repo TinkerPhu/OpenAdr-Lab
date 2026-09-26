@@ -58,6 +58,8 @@ fn base_inputs(n: usize) -> MilpInputs {
         heat_initial_y: 0.0,
         shiftable_loads: vec![],
         soc_ev_init: None,
+        ev_soc_drops: None,
+        ev_core_unmet_warning: None,
     }
 }
 
