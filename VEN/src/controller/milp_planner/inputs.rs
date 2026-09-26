@@ -265,6 +265,8 @@ pub(crate) fn build_milp_inputs(
     let mut v_ev_core = 0.0_f64;
     let mut ev_budget_eur: Option<f64> = None;
     let mut soc_ev_init: Option<f64> = None;
+    let mut ev_soc_drops: Option<super::asset_port::ExogenousSocDrops> = None;
+    let mut ev_core_unmet_warning: Option<String> = None;
 
     let mut milp_loads: Vec<ShiftableLoadMilpContext> = Vec::new();
 
@@ -303,6 +305,8 @@ pub(crate) fn build_milp_inputs(
                 v_ev_core = e.v_core_eur;
                 ev_budget_eur = e.budget_eur;
                 soc_ev_init = Some(e.soc_init);
+                ev_soc_drops = e.soc_drops;
+                ev_core_unmet_warning = e.core_unmet_warning;
             }
             AssetMilpParams::Heater(h) => {
                 heater_mode = h.mode;
@@ -417,5 +421,7 @@ pub(crate) fn build_milp_inputs(
         heat_initial_y: heat_iy,
         shiftable_loads: milp_loads,
         soc_ev_init,
+        ev_soc_drops,
+        ev_core_unmet_warning,
     }
 }

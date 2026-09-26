@@ -211,6 +211,13 @@ pub(crate) struct MilpInputs {
     /// Used to integrate the planned EV charge power into a SoC trajectory for
     /// the timeline API. None when no EV asset is present or EV state is unavailable.
     pub(crate) soc_ev_init: Option<f64>,
+    /// `ev-usage-forecast`: exogenous SoC changes to fold into the EV's
+    /// projected SoC trajectory (see `asset_port::ExogenousSocDrops`).
+    /// None when no EV is present or no usage forecast is configured.
+    pub(crate) ev_soc_drops: Option<super::asset_port::ExogenousSocDrops>,
+    /// `ev-usage-forecast`: the EV's own "target unreachable before departure"
+    /// warning, surfaced as a plan warning. None when nothing was clamped.
+    pub(crate) ev_core_unmet_warning: Option<String>,
 }
 
 /// Internal MILP descriptor for one shiftable load block. Implements

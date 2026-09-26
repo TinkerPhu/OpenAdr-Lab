@@ -1,0 +1,66 @@
+# usage_forecast_test profile: the `ev-usage-forecast` usage class — the same
+# daily leave/return schedule as usage_sim_test, but disclosed to the planner as
+# truthful per-slot availability instead of only simulated physically. With
+# engage_charge_planning on and a guaranteed-daily trip (leave_probability 1.0 on
+# every day type), the plan always has a predicted departure inside the 30h
+# window below, whatever the wall-clock hour the suite runs at.
+assets:
+  - type: ev
+    id: ev
+    max_charge_kw: 7.0
+    initial_soc: 0.50
+    soc_target: 0.90
+    battery_kwh: 60.0
+    usage_forecast:
+      engage_charge_planning: true
+      weekday:
+        leave_time: "08:00:00"
+        leave_jitter_min: 5.0
+        return_time: "17:00:00"
+        return_jitter_min: 5.0
+        leave_probability: 1.0
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 2.0
+      weekend:
+        leave_time: "10:00:00"
+        leave_jitter_min: 5.0
+        return_time: "16:00:00"
+        return_jitter_min: 5.0
+        leave_probability: 1.0
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 2.0
+      min_soc_after_drop_pct: 5.0
+  - type: heater
+    id: heater
+    max_kw: 3.0
+    temp_initial_c: 20.0
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    max_charge_kw: 5.0
+    max_discharge_kw: 5.0
+    initial_soc: 0.50
+    round_trip_efficiency: 0.92
+    min_soc: 0.10
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.5
+
+simulator:
+  tick_s: 1
+  persist_every_s: 10
+
+planner:
+  # Matches plan_horizon_h below exactly, so plan-ahead's own horizon check
+  # (which reads plan_horizon_h regardless of plan_zones) agrees with what the
+  # MILP actually solves over — coarse 1h slots keep the solve fast for CI.
+  plan_zones:
+    - step_s: 3600
+      slots: 30
+  plan_horizon_h: 30
+  replan_interval_s: 20

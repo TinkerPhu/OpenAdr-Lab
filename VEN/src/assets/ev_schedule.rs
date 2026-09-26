@@ -113,6 +113,87 @@ pub fn active_trip_at(
         })
 }
 
+/// Per-slot availability across a planning horizon (`ev-usage-forecast`):
+/// `false` for any slot whose start falls inside a predicted trip's
+/// `[leave_at, return_at)`, `true` otherwise.
+///
+/// `cum_s[t]` is slot `t`'s start as seconds from `now` — the same array the
+/// MILP context builder already receives, so the planner's own grid decides the
+/// resolution. Multiple trips inside one horizon need no special handling: each
+/// slot is asked independently, so any number of away-windows simply appear as
+/// more `false` runs in the returned vector.
+pub fn availability_per_slot(
+    cfg: &EvUsageSimParams,
+    seed_tag: u64,
+    now: DateTime<Utc>,
+    cum_s: &[i64],
+    n: usize,
+) -> Vec<bool> {
+    (0..n)
+        .map(|t| {
+            let ts = now + Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+            active_trip_at(cfg, seed_tag, ts).is_none()
+        })
+        .collect()
+}
+
+/// The next trip starting strictly after `now` and no later than
+/// `horizon_end`, scanning day by day. `None` when the EV is not predicted to
+/// leave again inside that window.
+///
+/// One implementation for both callers that need "when does it next leave":
+/// `usage_sim`'s session-writing path (`tasks::sim_tick::usage_sim_plan_ahead`)
+/// and `usage_forecast`'s in-context deadline (`EvMilpContext`).
+pub fn next_trip_after(
+    cfg: &EvUsageSimParams,
+    seed_tag: u64,
+    now: DateTime<Utc>,
+    horizon_end: DateTime<Utc>,
+) -> Option<UsageTrip> {
+    let mut day = now.date_naive();
+    while day.and_time(chrono::NaiveTime::MIN).and_utc() <= horizon_end {
+        if let Some(trip) = daily_trip(cfg, day, seed_tag) {
+            if trip.leave_at > now && trip.leave_at <= horizon_end {
+                return Some(trip);
+            }
+        }
+        day += Duration::days(1);
+    }
+    None
+}
+
+/// Per-slot exogenous state-of-charge drop, as a SoC fraction, across a
+/// planning horizon (`ev-usage-forecast`). Zero everywhere except the first
+/// slot at or after a predicted trip's `return_at` — the same rule the live
+/// tick applies ("first tick at or after the return instant"), so the plan's
+/// projected SoC and the simulation agree about when the drop lands.
+///
+/// Slot 0 never carries a drop: a return that has already happened is already
+/// reflected in the live SoC the plan starts from, and re-applying it here
+/// would double-count.
+///
+/// Note: if two trips ended inside one slot, only the later one's drop is
+/// counted. That needs slots longer than a day, which no planning grid uses.
+pub fn soc_drop_frac_per_slot(
+    cfg: &EvUsageSimParams,
+    seed_tag: u64,
+    now: DateTime<Utc>,
+    cum_s: &[i64],
+    n: usize,
+) -> Vec<f64> {
+    let mut drops = vec![0.0; n];
+    for (t, drop) in drops.iter_mut().enumerate().take(n).skip(1) {
+        let slot_start = now + Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+        let prev_start = now + Duration::seconds(cum_s.get(t - 1).copied().unwrap_or(0));
+        if let Some(trip) = most_recently_ended_trip(cfg, seed_tag, slot_start) {
+            if trip.return_at > prev_start {
+                *drop = trip.soc_drop_pct / 100.0;
+            }
+        }
+    }
+    drops
+}
+
 /// The most recently ended trip at-or-before `ts`, among the two candidate
 /// leave-days — used to look up the SoC drop to apply at the exact tick a
 /// trip's `return_at` is reached (see `EvCharger::ended_trip_at`).
@@ -277,11 +358,17 @@ mod usage_sim_tests {
 
     fn usage_cfg(weekday: EvUsageDayParams, weekend: EvUsageDayParams) -> EvUsageSimParams {
         EvUsageSimParams {
+            mode: crate::entities::asset_params::EvUsageMode::Simulated,
             engage_charge_planning: false,
             weekday,
             weekend,
             min_soc_after_drop_pct: 5.0,
         }
+    }
+
+    /// Hourly slot grid: `cum_s[t] = t * 3600`.
+    fn hourly_slots(n: usize) -> Vec<i64> {
+        (0..n as i64).map(|t| t * 3600).collect()
     }
 
     // 2026-07-20 is a Monday.
@@ -377,6 +464,116 @@ mod usage_sim_tests {
         assert!(just_after_midnight < trip.return_at);
         let found = active_trip_at(&cfg, 7, just_after_midnight);
         assert_eq!(found, Some(trip));
+    }
+
+    // ── availability_per_slot (ev-usage-forecast) ───────────────────────────
+
+    #[test]
+    fn availability_per_slot_marks_the_trip_window_unavailable() {
+        // Weekday leaves 08:00, returns 17:00, jitter 10 min, probability 1.0.
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap(); // Monday 00:00
+        let avail = availability_per_slot(&cfg, 7, now, &hourly_slots(24), 24);
+        let trip = daily_trip(&cfg, monday(), 7).unwrap();
+
+        for (t, &ok) in avail.iter().enumerate() {
+            let ts = now + Duration::hours(t as i64);
+            let inside = ts >= trip.leave_at && ts < trip.return_at;
+            assert_eq!(ok, !inside, "slot {t} ({ts}) inside={inside}");
+        }
+        // Sanity: the window is neither empty nor the whole horizon.
+        assert!(avail.iter().any(|&a| a), "some slots must be available");
+        assert!(avail.iter().any(|&a| !a), "some slots must be unavailable");
+    }
+
+    #[test]
+    fn availability_per_slot_all_available_when_no_trip_that_day() {
+        let cfg = usage_cfg(day_cfg(8, 17, 0.0), day_cfg(8, 17, 0.0)); // never leaves
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let avail = availability_per_slot(&cfg, 7, now, &hourly_slots(24), 24);
+        assert!(
+            avail.iter().all(|&a| a),
+            "probability 0.0 must leave every slot available, got {avail:?}"
+        );
+    }
+
+    #[test]
+    fn availability_per_slot_reflects_multiple_trips_in_one_horizon() {
+        // 48 h horizon over a daily trip -> two separate away-windows, and the
+        // gap between them must be available (the car comes back in between).
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let avail = availability_per_slot(&cfg, 7, now, &hourly_slots(48), 48);
+
+        // Count transitions available->unavailable: one per trip start.
+        let starts = avail.windows(2).filter(|w| w[0] && !w[1]).count();
+        assert_eq!(
+            starts, 2,
+            "a 48 h horizon over a daily trip must show two departures, got {avail:?}"
+        );
+    }
+
+    #[test]
+    fn availability_per_slot_equals_is_away_at_per_slot() {
+        // Guards against a second copy of the prediction logic: the per-slot
+        // helper must agree with asking `active_trip_at` directly, slot by slot.
+        let cfg = usage_cfg(day_cfg(22, 2, 1.0), day_cfg(22, 2, 1.0)); // midnight-crossing
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let cum_s = hourly_slots(36);
+        let avail = availability_per_slot(&cfg, 7, now, &cum_s, 36);
+        for (t, &ok) in avail.iter().enumerate() {
+            let ts = now + Duration::seconds(cum_s[t]);
+            assert_eq!(
+                ok,
+                active_trip_at(&cfg, 7, ts).is_none(),
+                "slot {t} ({ts}) disagrees with active_trip_at"
+            );
+        }
+    }
+
+    // ── soc_drop_frac_per_slot (ev-usage-forecast) ──────────────────────────
+
+    #[test]
+    fn soc_drop_lands_in_the_first_slot_at_or_after_the_return() {
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let cum_s = hourly_slots(24);
+        let drops = soc_drop_frac_per_slot(&cfg, 7, now, &cum_s, 24);
+        let trip = daily_trip(&cfg, monday(), 7).unwrap();
+
+        let nonzero: Vec<usize> = (0..24).filter(|&t| drops[t] > 0.0).collect();
+        assert_eq!(nonzero.len(), 1, "exactly one drop per returned trip");
+        let t = nonzero[0];
+        let slot_start = now + Duration::hours(t as i64);
+        let prev_start = now + Duration::hours(t as i64 - 1);
+        assert!(
+            trip.return_at > prev_start && trip.return_at <= slot_start,
+            "drop slot {t} must be the first at-or-after return_at {}",
+            trip.return_at
+        );
+        assert!(
+            (drops[t] - trip.soc_drop_pct / 100.0).abs() < 1e-9,
+            "drop must equal the trip's own SoC drop"
+        );
+    }
+
+    #[test]
+    fn soc_drop_is_all_zero_when_no_trip_ends_in_the_horizon() {
+        let cfg = usage_cfg(day_cfg(8, 17, 0.0), day_cfg(8, 17, 0.0)); // never leaves
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let drops = soc_drop_frac_per_slot(&cfg, 7, now, &hourly_slots(24), 24);
+        assert!(drops.iter().all(|&d| d == 0.0), "got {drops:?}");
+    }
+
+    #[test]
+    fn soc_drop_never_lands_in_slot_zero() {
+        // `now` sits just after a return: the live SoC already reflects that
+        // drop, so the plan must not subtract it a second time.
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let trip = daily_trip(&cfg, monday(), 7).unwrap();
+        let now = trip.return_at + Duration::minutes(1);
+        let drops = soc_drop_frac_per_slot(&cfg, 7, now, &hourly_slots(24), 24);
+        assert_eq!(drops[0], 0.0, "slot 0 must never carry a drop");
     }
 
     #[test]

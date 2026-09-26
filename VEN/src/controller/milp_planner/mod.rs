@@ -58,6 +58,7 @@ mod envelopes;
 mod ev_diagnostics;
 mod inputs;
 pub(crate) mod penalty;
+mod planned_state;
 mod results;
 mod solver_duals;
 mod solver_phase1;

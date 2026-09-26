@@ -74,11 +74,29 @@ impl Default for EvParams {
     }
 }
 
+/// Whether the EV's daily usage schedule is only simulated physically, or also
+/// disclosed to the planner as per-slot availability (`ev-usage-forecast`).
+/// Both modes simulate the same physics; they differ only in what the planner
+/// is told. One field rather than two `Option`s, so "both at once" is
+/// structurally impossible below the YAML layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvUsageMode {
+    /// `usage_sim`: physics only. The planner learns nothing in advance (unless
+    /// `engage_charge_planning` writes a session — see `usage_sim_plan_ahead`).
+    Simulated,
+    /// `usage_forecast`: physics, plus the schedule fed to the planner as
+    /// truthful per-slot availability.
+    Forecast,
+}
+
 /// A profile-configured, opt-in daily leave/return usage pattern for an EV
-/// (`ev-usage-simulation`). See `assets::ev_schedule` for the daily-trip
-/// generation this drives.
+/// (`ev-usage-simulation`, `ev-usage-forecast`). See `assets::ev_schedule` for
+/// the daily-trip generation this drives.
 #[derive(Debug, Clone)]
 pub struct EvUsageSimParams {
+    /// Which of the two usage classes the profile declared.
+    pub mode: EvUsageMode,
     /// If true, the EV's next simulated leave instant is offered to the
     /// planner in advance (as a simulated-origin charge session) once it
     /// falls within the planner's horizon.

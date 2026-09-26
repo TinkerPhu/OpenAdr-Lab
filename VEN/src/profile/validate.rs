@@ -135,32 +135,47 @@ impl Profile {
                             c.max_discharge_kw
                         ));
                     }
-                    if let Some(usage_sim) = &c.usage_sim {
-                        if !(0.0..=100.0).contains(&usage_sim.min_soc_after_drop_pct) {
+                    // ev-usage-forecast: the two usage classes are alternatives.
+                    if c.usage_sim.is_some() && c.usage_forecast.is_some() {
+                        errors.push(
+                            "ev declares both usage_sim and usage_forecast — they are \
+                             alternatives (same schedule, different planner disclosure); \
+                             declare exactly one"
+                                .into(),
+                        );
+                    }
+                    // Same bounds for whichever is present — one copy, keyed by
+                    // the section name so the error still names the real field.
+                    let usage = c
+                        .usage_sim
+                        .as_ref()
+                        .map(|u| ("usage_sim", u))
+                        .or_else(|| c.usage_forecast.as_ref().map(|u| ("usage_forecast", u)));
+                    if let Some((section, usage)) = usage {
+                        if !(0.0..=100.0).contains(&usage.min_soc_after_drop_pct) {
                             errors.push(format!(
-                                "ev.usage_sim.min_soc_after_drop_pct must be in [0.0, 100.0], got {}",
-                                usage_sim.min_soc_after_drop_pct
+                                "ev.{section}.min_soc_after_drop_pct must be in [0.0, 100.0], got {}",
+                                usage.min_soc_after_drop_pct
                             ));
                         }
-                        for (label, day) in [
-                            ("weekday", &usage_sim.weekday),
-                            ("weekend", &usage_sim.weekend),
-                        ] {
+                        for (label, day) in
+                            [("weekday", &usage.weekday), ("weekend", &usage.weekend)]
+                        {
                             if !(0.0..=1.0).contains(&day.leave_probability) {
                                 errors.push(format!(
-                                    "ev.usage_sim.{label}.leave_probability must be in [0.0, 1.0], got {}",
+                                    "ev.{section}.{label}.leave_probability must be in [0.0, 1.0], got {}",
                                     day.leave_probability
                                 ));
                             }
                             if day.soc_drop_pct_mean < 0.0 {
                                 errors.push(format!(
-                                    "ev.usage_sim.{label}.soc_drop_pct_mean must be ≥ 0.0, got {}",
+                                    "ev.{section}.{label}.soc_drop_pct_mean must be ≥ 0.0, got {}",
                                     day.soc_drop_pct_mean
                                 ));
                             }
                             if day.leave_jitter_min < 0.0 || day.return_jitter_min < 0.0 {
                                 errors.push(format!(
-                                    "ev.usage_sim.{label} jitter minutes must be ≥ 0.0"
+                                    "ev.{section}.{label} jitter minutes must be ≥ 0.0"
                                 ));
                             }
                         }
@@ -660,6 +675,105 @@ spikes:
         );
         assert_eq!(usage_sim.weekday.leave_probability, 1.0);
         assert_eq!(usage_sim.weekend.leave_probability, 1.0);
+    }
+
+    // ev-usage-forecast: same guard for the forecast class's BDD fixture.
+    #[tokio::test]
+    async fn usage_forecast_test_fixture_loads_and_validates() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/profiles/usage_forecast_test.yaml"
+        );
+        let profile = Profile::try_load(path)
+            .await
+            .expect("usage_forecast_test.yaml must parse");
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        let ev = profile
+            .assets
+            .iter()
+            .find_map(|a| match a {
+                AssetProfile::Ev(c) => Some(c),
+                _ => None,
+            })
+            .expect("profile must declare an ev asset");
+        assert!(
+            ev.usage_sim.is_none(),
+            "the forecast fixture must declare usage_forecast only"
+        );
+        let forecast = ev
+            .usage_forecast
+            .as_ref()
+            .expect("ev.usage_forecast must be set");
+        assert!(
+            forecast.engage_charge_planning,
+            "fixture must enable engage_charge_planning"
+        );
+        assert_eq!(forecast.weekday.leave_probability, 1.0);
+        assert_eq!(forecast.weekend.leave_probability, 1.0);
+        // The mode the planner actually sees must be Forecast, not Simulated.
+        let crate::entities::asset_params::AssetParams::Ev(ev_params) =
+            AssetProfile::Ev(ev.clone()).to_params()
+        else {
+            panic!("ev profile must convert to ev params");
+        };
+        assert_eq!(
+            ev_params.usage_sim.as_ref().map(|u| u.mode),
+            Some(crate::entities::asset_params::EvUsageMode::Forecast)
+        );
+    }
+
+    // ev-usage-forecast: the two usage classes are alternatives, never both.
+    #[test]
+    fn validate_rejects_both_usage_sim_and_usage_forecast_on_one_ev() {
+        let yaml = r#"
+assets:
+  - type: ev
+    id: ev
+    usage_sim:
+      weekday: &day
+        leave_time: "08:00:00"
+        return_time: "17:00:00"
+        soc_drop_pct_mean: 20.0
+      weekend: *day
+    usage_forecast:
+      weekday: *day
+      weekend: *day
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p
+            .validate()
+            .expect_err("declaring both usage_sim and usage_forecast must fail validation");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("usage_sim") && e.contains("usage_forecast")),
+            "error must name both sections, got {errs:?}"
+        );
+    }
+
+    // ev-usage-forecast: either one alone is fine, and the shared numeric bounds
+    // are enforced for whichever is present.
+    #[test]
+    fn validate_accepts_usage_forecast_alone_and_bounds_check_it() {
+        let yaml = r#"
+assets:
+  - type: ev
+    id: ev
+    usage_forecast:
+      weekday: &day
+        leave_time: "08:00:00"
+        return_time: "17:00:00"
+        leave_probability: 4.0
+        soc_drop_pct_mean: 20.0
+      weekend: *day
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p
+            .validate()
+            .expect_err("out-of-range leave_probability must fail even under usage_forecast");
+        assert!(
+            errs.iter().any(|e| e.contains("leave_probability")),
+            "usage_forecast must get the same bounds checks as usage_sim, got {errs:?}"
+        );
     }
 
     fn make_valid_profile() -> Profile {

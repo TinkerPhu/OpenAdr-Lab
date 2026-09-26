@@ -55,6 +55,8 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         heat_initial_y: 0.0,
         shiftable_loads: vec![],
         soc_ev_init: None,
+        ev_soc_drops: None,
+        ev_core_unmet_warning: None,
     }
 }
 
@@ -198,6 +200,72 @@ fn solve_ev_must_run_meets_core() {
     assert!(
         (ev_energy - 4.0).abs() < 1e-2,
         "EV energy {ev_energy:.4} kWh should be ≈ 4.0 kWh"
+    );
+}
+
+#[test]
+fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
+    // `ev-usage-forecast`: a real session's deadline can land inside — or after —
+    // slots the forecast predicts the EV is away for. Availability is physical, so
+    // those slots stay at zero power; the reachable core energy is what the
+    // remaining available slots can deliver. Verify the solve still succeeds and
+    // leaves the masked slots dark.
+    let mut inputs = make_solver_inputs(4, 0.0);
+    // Away for slots 1 and 2; only slot 0 (and slot 3, past the deadline) are home.
+    inputs.a_ev = vec![true, false, false, true];
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    inputs.t_ev_dead_step = Some(2); // deadline inside the away window
+    inputs.p_ev_max_kw = 7.4;
+    inputs.p_ev_min_kw = 0.0;
+    inputs.e_ev_core_kwh = 7.4; // exactly what the single available slot can deliver
+    inputs.e_ev_extra_max_kwh = 20.0;
+
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
+    assert!(result.is_ok(), "solver failed: {:?}", result.err());
+    let out = result.unwrap();
+
+    assert!(
+        out.p_ev_kw[1].abs() < 1e-6 && out.p_ev_kw[2].abs() < 1e-6,
+        "predicted-away slots must stay at zero power, got {:?}",
+        out.p_ev_kw
+    );
+    assert!(
+        (out.p_ev_kw[0] - 7.4).abs() < 1e-2,
+        "the one available pre-deadline slot must carry the whole core energy, got {:?}",
+        out.p_ev_kw
+    );
+}
+
+#[test]
+fn solve_ev_must_run_core_energy_beyond_what_the_available_slots_can_deliver() {
+    // The pathological shape of the test above: the core demand exceeds what the
+    // unmasked pre-deadline slots can physically deliver. Records what the solver
+    // does today so `ev-usage-forecast`'s clamp/warn behavior has a baseline.
+    let mut inputs = make_solver_inputs(4, 0.0);
+    inputs.a_ev = vec![true, false, false, true];
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    inputs.t_ev_dead_step = Some(2);
+    inputs.p_ev_max_kw = 7.4;
+    inputs.p_ev_min_kw = 0.0;
+    inputs.e_ev_core_kwh = 20.0; // unreachable: only 7.4 kWh of window is left
+    inputs.e_ev_extra_max_kwh = 20.0;
+
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
+    assert!(
+        result.is_err(),
+        "an unreachable core demand is infeasible — there is no EV slack variable, \
+         so `apply_usage_forecast` must clamp the core energy to the reachable window \
+         (task 7.1) rather than hand the solver an impossible equality"
     );
 }
 

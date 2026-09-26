@@ -249,6 +249,8 @@ impl EvMilpContext {
             mode: EvMilpMode::MustNotRun,
             soc_init: current_soc,
             a_ev: vec![false; n],
+            soc_drops: None,
+            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: cfg.max_charge_kw,
             p_min_kw: min_charge_kw,
@@ -273,6 +275,8 @@ impl EvMilpContext {
             // Plugged, no session: slots available but no charging obligation.
             return Self {
                 a_ev: vec![true; n],
+                soc_drops: None,
+                core_unmet_warning: None,
                 ..base
             };
         };
@@ -297,6 +301,8 @@ impl EvMilpContext {
             UserRequestMode::Opportunistic | UserRequestMode::AsapFree => Self {
                 mode: EvMilpMode::MustRun, // core = 0 -> only the gated extra term acts
                 a_ev: vec![true; n],
+                soc_drops: None,
+                core_unmet_warning: None,
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
                 free_only: true,
@@ -313,6 +319,8 @@ impl EvMilpContext {
             UserRequestMode::MaxCost => Self {
                 mode: EvMilpMode::MustRun,
                 a_ev: vec![true; n],
+                soc_drops: None,
+                core_unmet_warning: None,
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: BUDGET_CHARGE_REWARD_EUR_KWH,
                 reward_per_slot: true,
@@ -325,6 +333,8 @@ impl EvMilpContext {
             UserRequestMode::ByDeadlineFree => Self {
                 mode: EvMilpMode::MustRun,
                 a_ev: deadline_mask,
+                soc_drops: None,
+                core_unmet_warning: None,
                 t_dead_step: Some(t_dead),
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
@@ -354,6 +364,8 @@ impl EvMilpContext {
                         EvMilpMode::MustRun
                     },
                     a_ev: deadline_mask,
+                    soc_drops: None,
+                    core_unmet_warning: None,
                     t_dead_step: Some(t_dead),
                     e_core_kwh: core_kwh,
                     e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
@@ -406,6 +418,8 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
                 mode,
                 soc_init: self.soc_init,
                 a_ev: self.a_ev.clone(),
+                soc_drops: self.soc_drops.clone(),
+                core_unmet_warning: self.core_unmet_warning.clone(),
                 t_dead_step: self.t_dead_step,
                 p_max_kw: self.p_max_kw,
                 p_min_kw: self.p_min_kw,
@@ -522,11 +536,346 @@ mod milp_context_trait_tests {
         }
     }
 
+    // ── ev-usage-forecast: apply_usage_forecast ──────────────────────
+
+    /// Build an `EvCharger` whose usage schedule is in the given mode, leaving
+    /// 08:00 and returning 17:00 every day with no jitter.
+    fn ev_with_usage(mode: crate::entities::asset_params::EvUsageMode) -> super::EvCharger {
+        use crate::entities::asset_params::{EvUsageDayParams, EvUsageSimParams};
+        use chrono::NaiveTime;
+        let day = EvUsageDayParams {
+            leave_time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            leave_jitter_min: 0.0,
+            return_time: NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+            return_jitter_min: 0.0,
+            leave_probability: 1.0,
+            soc_drop_pct_mean: 20.0,
+            soc_drop_pct_stddev: 0.0,
+        };
+        super::EvCharger {
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            v2g_capable: false,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            soc_target_profile: 0.8,
+            default_charge_kw: 7.4,
+            min_soc: 0.0,
+            min_charge_kw: 0.0,
+            response_delay_s: 0.0,
+            departure_time: None,
+            usage_sim: Some(EvUsageSimParams {
+                mode,
+                engage_charge_planning: false,
+                weekday: day.clone(),
+                weekend: day,
+                min_soc_after_drop_pct: 5.0,
+            }),
+            usage_sim_seed_tag: 0,
+        }
+    }
+
+    #[test]
+    fn apply_usage_forecast_masks_the_predicted_away_window() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{Duration, TimeZone, Timelike, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Forecast);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap(); // Monday 00:00
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n); // starts fully available
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+
+        // 08:00-17:00 away -> slots 8..=16 unavailable, the rest available.
+        for (t, &ok) in ctx.a_ev.iter().enumerate() {
+            let ts = now + Duration::hours(t as i64);
+            let away = (8..17).contains(&ts.hour());
+            assert_eq!(ok, !away, "slot {t} (hour {})", ts.hour());
+        }
+    }
+
+    #[test]
+    fn apply_usage_forecast_is_a_no_op_under_usage_sim_mode() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Simulated); // same schedule, other class
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n);
+        let before = ctx.a_ev.clone();
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        assert_eq!(
+            ctx.a_ev, before,
+            "usage_sim mode must leave the mask exactly as from_state built it"
+        );
+    }
+
+    #[test]
+    fn apply_usage_forecast_never_re_enables_a_masked_slot() {
+        // Composition, not replacement: a slot already false (e.g. past a
+        // session deadline) must stay false even where the EV is predicted home.
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Forecast);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n);
+        ctx.a_ev = vec![false; n]; // everything already ruled out upstream
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        assert!(
+            ctx.a_ev.iter().all(|&a| !a),
+            "AND must never turn an unavailable slot back on"
+        );
+    }
+
+    #[test]
+    fn apply_usage_forecast_records_the_return_drop_for_the_projection() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Forecast);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+
+        let drops = ctx.soc_drops.expect("forecast mode must record drops");
+        assert_eq!(drops.drop_frac_per_slot.len(), n);
+        assert!(
+            (drops.floor_frac - 0.05).abs() < 1e-9,
+            "floor must come from min_soc_after_drop_pct"
+        );
+        // Returns at exactly 17:00 and slot 17 starts at 17:00, so slot 17 is
+        // the first slot "at or after" the return and carries the 20 % drop.
+        let nonzero: Vec<usize> = (0..n)
+            .filter(|&t| drops.drop_frac_per_slot[t] > 0.0)
+            .collect();
+        assert_eq!(
+            nonzero,
+            vec![17],
+            "one drop, in the first slot at or after the return"
+        );
+        assert!((drops.drop_frac_per_slot[17] - 0.20).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_usage_forecast_records_no_drops_under_usage_sim_mode() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Simulated);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        assert!(
+            ctx.soc_drops.is_none(),
+            "usage_sim must not feed drops into the projection"
+        );
+    }
+
+    /// A plugged EV with a `usage_forecast` schedule, built the way the planner
+    /// builds it (no session anywhere), so `engage_charge_planning`'s effect is
+    /// visible end to end.
+    fn ctx_from_state(
+        cfg: &super::EvCharger,
+        n: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+    ) -> EvMilpContext {
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.30,
+            plugged: true,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
+        });
+        let mut ctx = EvMilpContext::from_state(
+            &state, cfg, n, cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+        );
+        ctx.apply_usage_forecast(cfg, n, cum_s, now, None);
+        ctx
+    }
+
+    #[test]
+    fn engage_charge_planning_targets_the_next_predicted_departure() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let mut cfg = ev_with_usage(EvUsageMode::Forecast);
+        cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let ctx = ctx_from_state(&cfg, n, &cum_s, now);
+        assert_eq!(
+            ctx.mode,
+            EvMilpMode::MustRun,
+            "a target must be planned for"
+        );
+        // Departs 08:00 -> deadline is the 08:00 slot.
+        assert_eq!(ctx.t_dead_step, Some(8));
+        // soc 0.30 -> soc_target 0.80 over a 60 kWh pack = 30 kWh.
+        assert!(
+            (ctx.e_core_kwh - 30.0).abs() < 1e-9,
+            "core energy must target soc_target by departure, got {}",
+            ctx.e_core_kwh
+        );
+        assert!(
+            ctx.core_unmet_warning.is_none(),
+            "8 h at 7.4 kW covers 30 kWh — nothing to clamp"
+        );
+    }
+
+    #[test]
+    fn a_target_the_remaining_window_cannot_reach_is_clamped_and_warned_about() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let mut cfg = ev_with_usage(EvUsageMode::Forecast);
+        cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
+        // 06:00: only slots 0 and 1 remain before the 08:00 departure, i.e.
+        // 2 h x 7.4 kW = 14.8 kWh against a 30 kWh target.
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+
+        let ctx = ctx_from_state(&cfg, n, &cum_s, now);
+        assert_eq!(ctx.t_dead_step, Some(2));
+        assert!(
+            (ctx.e_core_kwh - 14.8).abs() < 1e-6,
+            "core energy must be clamped to the reachable 14.8 kWh, got {}",
+            ctx.e_core_kwh
+        );
+        let msg = ctx
+            .core_unmet_warning
+            .as_deref()
+            .expect("an unreachable target must warn, not silently shrink");
+        assert!(
+            msg.contains("14.8 kWh") && msg.contains("30.0 kWh"),
+            "warning must name both the reachable and the needed energy: {msg}"
+        );
+    }
+
+    #[test]
+    fn engage_charge_planning_off_introduces_no_target_but_keeps_availability() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Forecast); // engage_charge_planning: false
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let ctx = ctx_from_state(&cfg, n, &cum_s, now);
+        assert_eq!(ctx.t_dead_step, None, "no deadline may be introduced");
+        assert_eq!(ctx.e_core_kwh, 0.0, "no core obligation may be introduced");
+        // Availability is unconditional — the away window is still masked.
+        assert!(
+            !ctx.a_ev[10],
+            "a predicted-away slot must stay unavailable even with no target"
+        );
+        assert!(ctx.a_ev[0], "and a predicted-home slot must stay available");
+    }
+
+    #[test]
+    fn a_real_session_target_wins_over_the_forecasts() {
+        use crate::entities::asset_params::EvUsageMode;
+        use crate::entities::device_session::{EvSession, EvSessionOrigin};
+        use chrono::{Duration as ChronoDuration, TimeZone, Utc};
+        let mut cfg = ev_with_usage(EvUsageMode::Forecast);
+        cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        // A real request: 40 % by 04:00 — a different target AND deadline than
+        // the forecast's (80 % by 08:00).
+        let session = EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.40,
+            departure_time: now + ChronoDuration::hours(4),
+            soft_deadline: false,
+            mode: crate::entities::design_vocabulary::UserRequestMode::ByDeadline,
+            origin: EvSessionOrigin::UserRequest,
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: now,
+            updated_at: now,
+        };
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.30,
+            plugged: true,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
+        });
+        let mut ctx = EvMilpContext::from_state(
+            &state,
+            &cfg,
+            n,
+            &cum_s,
+            now,
+            Some(&session),
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+        );
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, Some(&session));
+
+        assert_eq!(ctx.t_dead_step, Some(4), "the real session's deadline wins");
+        assert!(
+            (ctx.e_core_kwh - 6.0).abs() < 1e-9,
+            "the real session's target wins (0.40-0.30)*60 = 6 kWh, got {}",
+            ctx.e_core_kwh
+        );
+        // ...but availability is still the forecast's, not the session's guess.
+        assert!(
+            !ctx.a_ev[10],
+            "a predicted-away slot stays unavailable even under a real session"
+        );
+    }
+
+    /// The drops must survive the hop the planner actually uses:
+    /// context -> `milp_params` (EvScalars) -> MilpInputs -> `results.rs`.
+    #[test]
+    fn milp_params_carries_soc_drops_through_to_the_scalars() {
+        use crate::controller::milp_planner::AssetMilpParams;
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Forecast);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        let mut ctx = make_must_run(n);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        let AssetMilpParams::Ev(scalars) =
+            crate::controller::milp_planner::AssetMilpContext::milp_params(&ctx, n, now)
+        else {
+            panic!("expected Ev params");
+        };
+        assert_eq!(
+            scalars.soc_drops, ctx.soc_drops,
+            "milp_params must pass the drops through, not drop them"
+        );
+    }
+
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
             mode: EvMilpMode::MustRun,
             soc_init: 0.0,
             a_ev: vec![true; n],
+            soc_drops: None,
+            core_unmet_warning: None,
             t_dead_step: Some(n - 1),
             p_max_kw: 7.2,
             p_min_kw: 0.0,
@@ -776,6 +1125,8 @@ mod milp_context_trait_tests {
             mode: EvMilpMode::MayRun,
             soc_init: 0.0,
             a_ev: vec![true; 4],
+            soc_drops: None,
+            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
@@ -805,6 +1156,8 @@ mod milp_context_trait_tests {
             mode: EvMilpMode::MustNotRun,
             soc_init: 0.0,
             a_ev: vec![false; 4],
+            soc_drops: None,
+            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
@@ -836,6 +1189,8 @@ mod milp_context_trait_tests {
             mode: EvMilpMode::MayRun,
             soc_init: 0.0,
             a_ev: a_ev.clone(),
+            soc_drops: None,
+            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,

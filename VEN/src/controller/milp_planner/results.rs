@@ -10,11 +10,9 @@ use crate::entities::plan::{
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
-use super::asset_port::{
-    battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state,
-};
 use super::envelopes::build_plan_envelopes;
-use super::ev_diagnostics::unmet_warning as ev_unmet_warning;
+use super::ev_diagnostics::ev_warnings;
+use super::planned_state;
 use super::types::*;
 
 /// Fallback plan returned when the MILP solver fails.
@@ -316,42 +314,7 @@ pub(crate) fn translate_to_plan(
     let soc_trajectory_kwh = sol.e_bat_kwh.clone();
 
     // ── Planned state by asset (T008/T013/T017) ──────────────────────────
-    // Battery SoC forecast — e_bat_kwh[t] is start-of-slot stored energy.
-    if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, battery_cfg) {
-        let capacity_kwh = bat_cfg.capacity_kwh;
-        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and sol.e_bat_kwh[]
-        for t in 0..n {
-            slots[t].planned_state_by_asset.insert(
-                bid.clone(),
-                battery_future_state(sol.e_bat_kwh[t], capacity_kwh),
-            );
-        }
-    }
-    // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
-    if let (Some(ref eid), Some(soc_init), Some(ev_cfg)) = (&ev_id, inputs.soc_ev_init, ev_cfg) {
-        let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, &inputs.dt_h);
-        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and traj[]
-        for t in 0..n {
-            slots[t]
-                .planned_state_by_asset
-                .insert(eid.clone(), ev_future_state_at(traj[t]));
-        }
-    }
-    // Heater T_tank forecast — e_heat_tank_kwh[t] is stored energy above temp_min_c.
-    if let (Some(ref hid), Some(heat_cfg)) = (&heater_id, heat_cfg) {
-        if !sol.e_heat_tank_kwh.is_empty() {
-            let thermal_mass = heat_cfg.thermal_mass_kwh_per_c;
-            let temp_min = heat_cfg.temp_min_c;
-            #[allow(clippy::needless_range_loop)]
-            // t indexes both slots[] and sol.e_heat_tank_kwh[]
-            for t in 0..n {
-                slots[t].planned_state_by_asset.insert(
-                    hid.clone(),
-                    heater_future_state(sol.e_heat_tank_kwh[t], temp_min, thermal_mass),
-                );
-            }
-        }
-    }
+    planned_state::fill_planned_state(&mut slots, n, sol, inputs, battery_cfg, ev_cfg, heat_cfg);
 
     // ── Summary (raw energy economics, no weights) ──────────────────────
     let summary = PlanSummary {
@@ -485,7 +448,7 @@ pub(crate) fn translate_to_plan(
         }
     }
 
-    warnings.extend(ev_unmet_warning(inputs, sol, ev_session, ev_cfg));
+    warnings.extend(ev_warnings(inputs, sol, ev_session, ev_cfg));
     // ── Assemble plan ───────────────────────────────────────────────────
     let envelopes = build_plan_envelopes(
         ev_session,
