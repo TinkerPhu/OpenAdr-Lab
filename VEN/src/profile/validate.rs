@@ -597,11 +597,14 @@ spikes:
         let _ = tokio::fs::remove_file(path).await;
     }
 
-    // ev-usage-simulation: every fleet profile that declares it must parse and
-    // validate cleanly — a YAML typo here would otherwise only surface as an
-    // opaque container-startup failure on Node1/Node2, not at review time.
+    // ev-usage-simulation / ev-usage-forecast: every fleet profile that declares
+    // a usage schedule must parse and validate cleanly — a YAML typo here would
+    // otherwise only surface as an opaque container-startup failure on
+    // Node1/Node2, not at review time. Class-agnostic on purpose: the fleet
+    // switched from `usage_sim` to `usage_forecast` wholesale (2026-09-26) and
+    // may hold a mix again, so this asserts the schedule is sane either way.
     #[tokio::test]
-    async fn all_fleet_ev_usage_sim_profiles_load_and_validate() {
+    async fn all_fleet_ev_usage_schedule_profiles_load_and_validate() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
         let mut checked = 0;
         for entry in std::fs::read_dir(&dir).unwrap() {
@@ -613,7 +616,7 @@ spikes:
                 continue;
             }
             let contents = std::fs::read_to_string(&path).unwrap();
-            if !contents.contains("usage_sim:") {
+            if !contents.contains("usage_sim:") && !contents.contains("usage_forecast:") {
                 continue;
             }
             let profile = Profile::try_load(path.to_str().unwrap())
@@ -635,7 +638,10 @@ spikes:
             let usage_sim = ev
                 .usage_sim
                 .as_ref()
-                .unwrap_or_else(|| panic!("{name}: ev.usage_sim must be set"));
+                .or(ev.usage_forecast.as_ref())
+                .unwrap_or_else(|| {
+                    panic!("{name}: one of ev.usage_sim / ev.usage_forecast must be set")
+                });
             assert!(
                 usage_sim.weekday.return_time > usage_sim.weekday.leave_time
                     || usage_sim.weekday.leave_jitter_min > 0.0
@@ -646,7 +652,7 @@ spikes:
         }
         assert!(
             checked >= 9,
-            "expected at least 9 fleet profiles with usage_sim, found {checked}"
+            "expected at least 9 fleet profiles with a usage schedule, found {checked}"
         );
     }
 
