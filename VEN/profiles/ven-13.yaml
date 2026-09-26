@@ -1,7 +1,32 @@
-# VEN-13: Battery-only household, no PV/EV/heater
+# VEN-13: Battery + EV household, no PV/heater
 # Runs on a second physical host (VEN/scale_out/node2/ — see that
 # directory's README.md for why), not the primary VTN host.
 assets:
+  - type: ev
+    id: ev
+    max_charge_kw: 11.0
+    initial_soc: 0.35
+    battery_kwh: 55.0
+    soc_target: 0.80
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "07:40:00"
+        leave_jitter_min: 20.0
+        return_time: "17:20:00"
+        return_jitter_min: 20.0
+        leave_probability: 0.95
+        soc_drop_pct_mean: 40.0
+        soc_drop_pct_stddev: 6.0
+      weekend:
+        leave_time: "11:00:00"
+        leave_jitter_min: 60.0
+        return_time: "16:00:00"
+        return_jitter_min: 60.0
+        leave_probability: 0.35
+        soc_drop_pct_mean: 20.0
+        soc_drop_pct_stddev: 4.0
+      min_soc_after_drop_pct: 5.0
   - type: battery
     id: battery
     capacity_kwh: 10.0

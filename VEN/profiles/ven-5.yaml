@@ -4,7 +4,7 @@
 assets:
   - type: ev
     id: ev
-    max_charge_kw: 7.4
+    max_charge_kw: 11.0
     initial_soc: 0.35
     battery_kwh: 55.0
     soc_target: 0.80

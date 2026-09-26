@@ -1,5 +1,33 @@
-# VEN-2: Commercial building (Hot Water Tank + PV)
+# VEN-2: Commercial building (Hot Water Tank + PV + staff EV charger)
 assets:
+  - type: ev
+    id: ev
+    max_charge_kw: 11.0
+    initial_soc: 0.50
+    battery_kwh: 55.0
+    soc_target: 0.85
+    # Workplace charger: the car is AWAY from this site overnight (staff
+    # drives it home), the inverse of a home-commuter pattern — a real
+    # midnight-crossing trip (leave 17:30, return 08:00 the next day).
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "17:30:00"
+        leave_jitter_min: 20.0
+        return_time: "08:00:00"
+        return_jitter_min: 20.0
+        leave_probability: 0.9
+        soc_drop_pct_mean: 25.0
+        soc_drop_pct_stddev: 5.0
+      weekend:
+        leave_time: "09:00:00"
+        leave_jitter_min: 60.0
+        return_time: "12:00:00"
+        return_jitter_min: 60.0
+        leave_probability: 0.2
+        soc_drop_pct_mean: 10.0
+        soc_drop_pct_stddev: 2.0
+      min_soc_after_drop_pct: 5.0
   - type: heater
     id: heater
     max_kw: 6.0           # full tier (0 / 3 / 6 kW hardware steps)
