@@ -5,8 +5,8 @@ assets:
     max_charge_kw: 11.0
     initial_soc: 0.30
     battery_kwh: 75.0
-    usage_sim:
-      engage_charge_planning: false
+    usage_forecast:
+      engage_charge_planning: true
       weekday:
         leave_time: "07:10:00"
         leave_jitter_min: 20.0

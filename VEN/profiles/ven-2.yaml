@@ -9,8 +9,8 @@ assets:
     # Workplace charger: the car is AWAY from this site overnight (staff
     # drives it home), the inverse of a home-commuter pattern — a real
     # midnight-crossing trip (leave 17:30, return 08:00 the next day).
-    usage_sim:
-      engage_charge_planning: false
+    usage_forecast:
+      engage_charge_planning: true
       weekday:
         leave_time: "17:30:00"
         leave_jitter_min: 20.0

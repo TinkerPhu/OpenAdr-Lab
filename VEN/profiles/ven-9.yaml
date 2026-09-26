@@ -8,8 +8,8 @@ assets:
     initial_soc: 0.40
     battery_kwh: 50.0
     soc_target: 0.80
-    usage_sim:
-      engage_charge_planning: false
+    usage_forecast:
+      engage_charge_planning: true
       weekday:
         leave_time: "07:30:00"
         leave_jitter_min: 20.0
