@@ -13467,3 +13467,47 @@ One gap found along the way, not introduced by this change but newly visible thr
 plan-ahead's horizon check reads `plan_horizon_h` directly, which the MILP itself ignores
 whenever `plan_zones` is set — recorded as R-91 in `docs/reference/TECHNICAL_DEBTS.md` rather
 than silently worked around.
+
+## EV usage forecast — telling the planner what the car is about to do (2026-09-26)
+
+`ev-usage-simulation` (above) gave the simulator a car that leaves, but deliberately left the
+planner in the dark: with `engage_charge_planning: false` — the whole fleet's setting — the MILP
+only learned about a departure once `plugged` had already flipped, i.e. after the car was gone.
+The question this change answers is the one the user asked next: if a forecast of the EV's
+behaviour existed, however it was produced, could it be fed to the planner the way weather and
+base load already are, and what would that cost?
+
+The answer turned out to be much cheaper than expected, because the plumbing already existed.
+`build_milp_context` already receives `n`, `cum_s` and `now`, which is exactly enough for the EV
+to compute every future slot's real timestamp and sample its own prediction functions — and
+`EvMilpContext.a_ev` is already a *per-slot* availability mask, consumed per slot in the
+constraints, merely filled uniformly by every existing caller. So no new MILP decision
+variable, no new trait method and no new cross-module wiring was needed: `usage_forecast`
+populates an existing array truthfully instead of uniformly. Multi-trip horizons fall out for
+free (pinned by a test with two departures in 48 h), which the session-based mechanism can
+never express: its deadline is one-sided, true-until-departure-then-false-forever, so it cannot
+represent the car coming *back* inside the same solve.
+
+Two things the design got wrong until the code was read:
+
+**There is no EV SoC-balance constraint.** The design said to add the trip's SoC drop as a term
+in one — but the EV MILP has no per-slot SoC variable at all; its constraints are total-energy,
+and the SoC curve is built *after* the solve by `ev_soc_trajectory`. The drop therefore belongs
+in the projection, not the constraint set, which is also why it needed R-73 (two copies of that
+trajectory function) consolidated first rather than extended twice.
+
+**There is no slack on the core-energy equality.** The design assumed "existing solver slack
+absorbs it" for the case where masking strands a deadline. It does not: `ev_energy == e_core +
+e_extra` with `e_extra >= 0` is simply infeasible when the pre-deadline slots are all masked,
+and an infeasible EV takes the whole site solve down with it. That is now pinned by a test that
+asserts the infeasibility rather than assuming it away, and resolved where the fact is known —
+the asset clamps its core energy to what the window can physically deliver and emits an
+`EvCoreEnergyUnmet` plan warning. The clamp is not forecast-only in effect: a real user session
+can be stranded by exactly the same mask, and is clamped identically.
+
+**Two classes, one mechanism per class.** `usage_sim` and `usage_forecast` share every schedule
+field (one mode-tagged params type, so "both at once" is structurally impossible below the YAML
+layer) but not their route to the planner. Gating session-writing to the `Simulated` class was
+the piece that could have silently gone wrong: without it a `usage_forecast` profile would have
+driven the same deadline twice, once through the MILP context and once through an auto-written
+session — two authorities for one goal, the exact shape this project keeps paying for.
