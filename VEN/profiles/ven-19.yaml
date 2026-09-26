@@ -20,7 +20,7 @@ assets:
     # Daytime shopping/errand pattern, not a commute: short trips, mostly
     # short distance (small SoC drop), less than daily on weekdays.
     usage_sim:
-      plan_ahead: false
+      engage_charge_planning: false
       weekday:
         leave_time: "14:00:00"
         leave_jitter_min: 60.0

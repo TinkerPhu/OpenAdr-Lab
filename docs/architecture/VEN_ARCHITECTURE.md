@@ -1099,7 +1099,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
-| GET | `/ev-usage-sim` | — | `ev-usage-simulation`: read-only `{plan_ahead, next_trip}` diagnostics, `204` when the EV has no usage-sim configured |
+| GET | `/ev-usage-sim` | — | `ev-usage-simulation`: read-only `{engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage-sim configured |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
 | GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
 | DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |

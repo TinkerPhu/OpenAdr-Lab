@@ -652,7 +652,7 @@ describe("DevicesPage", () => {
   // ev-usage-simulation: plan-ahead chip and next scheduled trip
   it("shows plan-ahead chip and next scheduled departure when usage-sim is configured", () => {
     mockEvUsageSimData.mockReturnValue({
-      plan_ahead: true,
+      engage_charge_planning: true,
       next_trip: {
         leave_at: "2026-04-12T08:00:00Z",
         return_at: "2026-04-12T17:00:00Z",
@@ -666,7 +666,7 @@ describe("DevicesPage", () => {
 
   // ev-usage-simulation: section shown but no chip when plan-ahead is off
   it("omits the plan-ahead chip when usage-sim is configured but plan-ahead is off", () => {
-    mockEvUsageSimData.mockReturnValue({ plan_ahead: false, next_trip: null });
+    mockEvUsageSimData.mockReturnValue({ engage_charge_planning: false, next_trip: null });
     renderPage();
     expect(screen.getByTestId("ev-usage-sim-section")).toBeInTheDocument();
     expect(screen.queryByTestId("ev-plan-ahead-chip")).toBeNull();

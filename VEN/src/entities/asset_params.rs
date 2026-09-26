@@ -82,7 +82,7 @@ pub struct EvUsageSimParams {
     /// If true, the EV's next simulated leave instant is offered to the
     /// planner in advance (as a simulated-origin charge session) once it
     /// falls within the planner's horizon.
-    pub plan_ahead: bool,
+    pub engage_charge_planning: bool,
     pub weekday: EvUsageDayParams,
     pub weekend: EvUsageDayParams,
     /// Floor for the state-of-charge drop applied at return (%, 0-100).
