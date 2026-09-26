@@ -8,6 +8,27 @@ assets:
     initial_soc: 0.25
     battery_kwh: 45.0
     soc_target: 0.80
+    # Daytime shopping/errand pattern, not a commute: short trips, mostly
+    # short distance (small SoC drop), less than daily on weekdays.
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "11:00:00"
+        leave_jitter_min: 90.0
+        return_time: "14:30:00"
+        return_jitter_min: 60.0
+        leave_probability: 0.5
+        soc_drop_pct_mean: 8.0
+        soc_drop_pct_stddev: 2.0
+      weekend:
+        leave_time: "13:00:00"
+        leave_jitter_min: 60.0
+        return_time: "17:00:00"
+        return_jitter_min: 45.0
+        leave_probability: 0.85
+        soc_drop_pct_mean: 10.0
+        soc_drop_pct_stddev: 2.0
+      min_soc_after_drop_pct: 5.0
   - type: heater
     id: heater
     max_kw: 3.0

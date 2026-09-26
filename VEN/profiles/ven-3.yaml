@@ -5,6 +5,25 @@ assets:
     max_charge_kw: 11.0
     initial_soc: 0.30
     battery_kwh: 75.0
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "07:10:00"
+        leave_jitter_min: 20.0
+        return_time: "17:25:00"
+        return_jitter_min: 20.0
+        leave_probability: 0.9
+        soc_drop_pct_mean: 25.0
+        soc_drop_pct_stddev: 5.0
+      weekend:
+        leave_time: "09:30:00"
+        leave_jitter_min: 45.0
+        return_time: "16:00:00"
+        return_jitter_min: 45.0
+        leave_probability: 0.6
+        soc_drop_pct_mean: 20.0
+        soc_drop_pct_stddev: 4.0
+      min_soc_after_drop_pct: 5.0
   - type: heater
     id: heater
     max_kw: 6.0           # full tier (0 / 3 / 6 kW hardware steps)

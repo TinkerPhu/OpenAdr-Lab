@@ -17,6 +17,25 @@ assets:
     initial_soc: 0.40
     battery_kwh: 40.0
     soc_target: 0.80
+    usage_sim:
+      plan_ahead: false
+      weekday:
+        leave_time: "07:55:00"
+        leave_jitter_min: 15.0
+        return_time: "17:35:00"
+        return_jitter_min: 15.0
+        leave_probability: 0.85
+        soc_drop_pct_mean: 20.0
+        soc_drop_pct_stddev: 4.0
+      weekend:
+        leave_time: "12:00:00"
+        leave_jitter_min: 60.0
+        return_time: "16:00:00"
+        return_jitter_min: 45.0
+        leave_probability: 0.4
+        soc_drop_pct_mean: 15.0
+        soc_drop_pct_stddev: 3.0
+      min_soc_after_drop_pct: 5.0
   - type: base_load
     id: base_load
     baseline_kw: 0.5
