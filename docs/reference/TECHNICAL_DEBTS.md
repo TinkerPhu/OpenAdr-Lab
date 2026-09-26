@@ -214,9 +214,57 @@ plan-ahead window that disagrees with what the planner really solves over.
 **Why it is debt rather than a bug:** every profile committed so far either omits
 `plan_zones` (default `plan_horizon_h` is exactly right) or sets both consistently
 (`VEN/profiles/usage_sim_test.yaml` does, deliberately, to avoid tripping over this).
-Nothing currently ships the mismatched combination.
+Nothing currently ships the mismatched combination. Scope note (`ev-usage-forecast`,
+2026-09-26): this affects the `usage_sim` class only. The `usage_forecast` class derives its
+horizon from the MILP's own `cum_s`, so it cannot disagree with the solve by construction —
+which is also the shape the fix above should aim for.
 
 **To resolve:** give `Profile`/`PlannerConfig` one method that returns the *effective*
 horizon (`plan_zones`-derived when set, else `plan_horizon_h`) and have both
 `tasks/planning/cycle.rs` and `usage_sim_plan_ahead.rs` call it, instead of the cycle task
 reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always agreed.
+
+## R-92 — `engage_charge_planning` can only ever target one departure per solve
+
+**Where:** `VEN/src/assets/ev_usage_forecast.rs::target_next_predicted_departure`,
+`EvMilpContext.t_dead_step`/`e_core_kwh` (`controller/milp_planner/asset_port.rs`),
+introduced by `ev-usage-forecast` (design.md Non-Goals).
+
+`usage_forecast` gives the planner truthful per-slot availability for *every* trip inside the
+horizon — a 30–48 h horizon routinely contains two departures — but the charging *goal* is
+still a single scalar pair (`t_dead_step`, `e_core_kwh`), so only the next departure is
+targeted. The plan is correct (it never charges while the car is away) but not urgent about
+the second trip: a profile that leaves twice in one horizon gets no pre-charge pressure for
+the later one until a replan brings it within "next".
+
+**Why it is debt rather than a bug:** the scalar deadline is pre-existing — `usage_sim`'s
+`engage_charge_planning` and every real user session have the same single-deadline shape, so
+nothing regressed. It only became *visible* here, because availability is now per-slot while
+the goal is not.
+
+**To resolve:** generalize the pair into a list of (deadline step, core energy) obligations in
+`EvScalars`/`MilpInputs` and make the EV constraint set emit one cumulative-energy constraint
+per obligation instead of one. Materially larger than this change; the availability side needs
+no work, it already handles N trips.
+
+## R-93 — the EV MILP still has no per-slot SoC variable
+
+**Where:** `VEN/src/assets/ev_milp.rs` (constraints are total-energy),
+`controller/milp_planner/asset_port.rs::ev_soc_trajectory` (post-solve projection),
+surfaced by `ev-usage-forecast` (design.md Decision 3a, Non-Goals).
+
+The EV is modelled as total energy delivered before a deadline; there is no per-slot SoC
+variable and no SoC-balance constraint, so the projected SoC curve — including
+`ev-usage-forecast`'s trip drops — is reconstructed *after* the solve. The solver therefore
+cannot reason about SoC mid-horizon: it cannot plan the recharge that a predicted *return*
+makes possible, only avoid charging while the car is away.
+
+**Why it is debt rather than a bug:** every shipped behaviour is correct with the projection
+approach; what is missing is planning capability, not correctness. The clamp in
+`clamp_core_to_reachable_energy` exists because of this shape too — with a real SoC balance
+plus slack the shortfall would be expressible in the model instead of pre-clamped.
+
+**To resolve:** add `soc_ev[t]` variables with a balance constraint (charge minus exogenous
+drop, floored at `min_soc`), make the deadline obligation a bound on `soc_ev[t_dead]`, and
+delete the post-solve reconstruction. Pairs naturally with R-92 — both are the same
+"generalize the EV model" work.

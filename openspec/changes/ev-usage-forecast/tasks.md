@@ -106,16 +106,18 @@ no per-slot SoC variable; the projected SoC curve is built after the solve by `e
 
 ## 8. UI transparency
 
-- [ ] 8.1 Extend the existing `/ev-usage-sim`-equivalent diagnostics (or add a sibling route if
+- [x] 8.1 Extend the existing `/ev-usage-sim`-equivalent diagnostics (or add a sibling route if
       `usage_forecast` needs its own, per whether the two config classes can share one response
       shape) so a `usage_forecast`-configured EV's next predicted trip and
       `engage_charge_planning` state are visible in the VEN UI, following the exact pattern
       `ev-usage-simulation` already established (`EvCard.tsx` chips, `api/types.ts`, `api/hooks.ts`)
-      — no new UI paradigm.
+      — no new UI paradigm. Done as one shared response: `/ev-usage-sim` gained a `mode`
+      field (`simulated`/`forecast`) and `EvCard` labels the class from a per-case declaration
+      (`USAGE_MODE_DISPLAY`), no sibling route.
 
 ## 9. BDD scenario and full verification
 
-- [ ] 9.1 Add a BDD scenario demonstrating the actual user-visible outcome this change exists for:
+- [x] 9.1 Add a BDD scenario demonstrating the actual user-visible outcome this change exists for:
       a profile-configured EV with `usage_forecast` + `engage_charge_planning: true` gets a
       charging plan built before its predicted departure — something `usage_sim` alone cannot show
       for a departure it hasn't reached yet. Reuse the `usage_sim_test`-style dedicated test
@@ -128,7 +130,7 @@ no per-slot SoC variable; the projected SoC curve is built after the solve by `e
 
 ## 10. Documentation
 
-- [ ] 10.1 Update `docs/architecture/VEN_ARCHITECTURE.md`'s `ev-usage-simulation` note (§EV
+- [x] 10.1 Update `docs/architecture/VEN_ARCHITECTURE.md`'s `ev-usage-simulation` note (§EV
       departure handling) with `usage_forecast`'s addition, add a `docs/history/project_journal.md`
       entry, and record the deferred multi-deadline generalization (design.md Non-Goals) in
       `docs/reference/TECHNICAL_DEBTS.md` if it isn't already tracked from the prior change. Once

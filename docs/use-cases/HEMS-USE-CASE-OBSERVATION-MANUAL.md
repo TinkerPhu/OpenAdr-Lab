@@ -56,6 +56,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-12 VTN Communication Loss | ⚠️ Partial — requires terminal step | `ssh` stop VTN container | Controller: Plan card warnings |
 | UC-13 VTN Direct Override | ✅ Full (proxy signal) | VTN IMPORT_CAPACITY_LIMIT event | Simulation + Trace |
 | UC-14 Thermal Feedback Loop | ✅ Full | Simulation: ambient_temp_c slider | Simulation HeaterCard + Controller |
+| UC-17 EV That Leaves on a Schedule | ✅ Full | Profile: `usage_forecast:` on the EV asset | Devices: EV card + Controller: EV chart |
 
 > **Two cases not fully observable:**
 > - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the User Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
@@ -820,6 +821,77 @@ unresolved, and when it releases — one row per decision, not per tick.
 Switch **Limit enforcement** off and repeat: the same base-load step now exceeds the limit until
 the planner's next plan accounts for it — the measure of what the planner achieves by itself
 (fleet runs compare both, see `docs/guidelines/FLEET_EXPERIMENT_DESIGN.md`).
+
+---
+
+## UC-17: EV That Leaves on a Schedule (usage forecast)
+
+**Scenario:** The EV isn't plugged in around the clock — it leaves every morning and comes back
+in the evening. The household knows that pattern, so the planner should too: charge before the
+car goes, don't plan charging into hours the car isn't there, and show the SoC dip the trip will
+cause.
+
+**What the controller should do:** every slot the EV is predicted away is bounded to zero
+charging power for the whole plan horizon — including the *return* later in the same horizon —
+and, with `engage_charge_planning` on, the plan charges toward the EV's target SoC ahead of the
+predicted departure without any user request. No charge session is created: the deadline reaches
+the planner directly from the asset.
+
+### Setup
+
+This is profile configuration, not a runtime toggle. On the EV asset of the profile you want to
+observe, declare `usage_forecast:` (the alternative to `usage_sim:` — declaring both is rejected
+at startup), e.g.:
+
+```yaml
+  - type: ev
+    id: ev
+    usage_forecast:
+      engage_charge_planning: true
+      weekday:
+        leave_time: "08:00:00"
+        leave_jitter_min: 15.0
+        return_time: "17:30:00"
+        return_jitter_min: 20.0
+        leave_probability: 0.9
+        soc_drop_pct_mean: 35.0
+        soc_drop_pct_stddev: 8.0
+      weekend: { ... }
+      min_soc_after_drop_pct: 5.0
+```
+
+Restart the VEN so the profile is re-read (profiles are bind-mounted read-only; no rebuild
+needed). `VEN/profiles/usage_forecast_test.yaml` is a ready-made example.
+
+### What to observe
+
+**Devices → EV card:**
+- A chip reading **Usage forecast to planner** (the `usage_sim` class reads *Usage simulated*
+  instead — that is how you tell which class a profile declared)
+- With planning engaged: **Charge planning engaged (forecast)**
+- A line: `Next departure (forecast): <leave> → back <return> (−NN% SoC)`
+
+**Controller → EV chart:**
+- `plan_ev` is non-zero *before* the predicted departure and flat zero across the whole away
+  window — not just up to the departure, which is what a session-carried deadline would show
+- the projected EV SoC trace steps **down** at the return slot by the trip's drop, floored at
+  `min_soc_after_drop_pct`
+
+**Controller → Plan card warnings:**
+- If the remaining time before departure cannot deliver the target, an `EV_CORE_ENERGY_UNMET`
+  warning appears and the plan still solves, charging as far as the window allows — it is never
+  rejected and never fails the solve.
+
+**Raw check:** `GET /ev-usage-sim` → `{mode: "forecast", engage_charge_planning, next_trip}`;
+`GET /ev-session` → `204` (nothing is invented to carry the predicted deadline).
+
+### What you should NOT see
+A `SIMULATED_USAGE`-origin EV session. That is the `usage_sim` class's mechanism; under
+`usage_forecast` the planner is told directly. A real user/VTN request, if you create one, still
+outranks the prediction for the *target and deadline* — but not for availability: the car's
+absence is fact, so those slots stay at zero either way.
+
+**Covered by:** `tests/features/ev_usage_forecast.feature`
 
 ---
 
