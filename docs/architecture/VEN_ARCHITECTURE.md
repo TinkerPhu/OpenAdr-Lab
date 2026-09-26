@@ -765,6 +765,36 @@ is written as a `SimulatedUsage`-origin session (`tasks::sim_tick::
 usage_sim_plan_ahead`), but only when no real user/VTN session is active — a
 real session always wins and is never touched by the simulated schedule.
 
+**EV usage forecast** (`ev-usage-forecast`) is the alternative class to
+`usage_sim`, chosen per EV profile (`usage_forecast:` instead of `usage_sim:`;
+declaring both is a validation error). The schedule fields and the physics are
+identical — what differs is what the planner is told. Under `usage_sim` the MILP
+learns nothing about a future trip except through the session `plan-ahead`
+writes; under `usage_forecast` the EV hands the planner the schedule itself:
+`EvMilpContext::apply_usage_forecast` (`assets/ev_usage_forecast.rs`, called
+from `EvCharger::build_milp_context`) ANDs `ev_schedule::availability_per_slot`
+into the existing per-slot `a_ev` mask, so every predicted-away slot is bounded
+to zero charging power for the whole horizon — including the car's *return*
+inside the same solve, which the session mechanism's one-sided deadline cannot
+express. The trip's SoC drop is carried as `ExogenousSocDrops` into the
+post-solve projection (`asset_port::ev_soc_trajectory`), so the plan's EV SoC
+curve shows the dip the trip will cause rather than a flat hold. With
+`engage_charge_planning`, the target and deadline are set directly on the MILP
+context from the next predicted departure — no `EvSession` is written at all
+(session-writing stays the `usage_sim` class's mechanism), and a real user/VTN
+session always outranks the prediction for the *goal* while the availability
+mask still applies, because availability is fact, not preference.
+
+Because the EV's core-energy constraint is a hard equality with no slack,
+masking can leave a goal that no remaining slot can reach — which would make the
+entire site solve infeasible. `clamp_core_to_reachable_energy` therefore clamps
+the core energy to what the unmasked pre-deadline slots can deliver and records
+`core_unmet_warning`, surfaced as a `WarningKind::EvCoreEnergyUnmet` plan
+warning (`milp_planner::ev_diagnostics::ev_warnings`). The clamp guards a real
+session's target too, which the same mask can strand. Both classes report
+themselves on `GET /ev-usage-sim` via a `mode` field (`simulated` /
+`forecast`), which the VEN UI EV card labels from a per-case declaration.
+
 ### 3.0d Asset Competence Assurance
 
 Named architectural rule (`asset-competence-assurance`, `.claude/CLAUDE.md`): infrastructure
@@ -1099,7 +1129,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
-| GET | `/ev-usage-sim` | — | `ev-usage-simulation`: read-only `{engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage-sim configured |
+| GET | `/ev-usage-sim` | — | `ev-usage-simulation` / `ev-usage-forecast`: read-only `{mode, engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage schedule configured |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
 | GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
 | DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |
