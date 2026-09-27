@@ -666,7 +666,7 @@ export type CapacityCurveStep = {
   power_kw: number;
 };
 
-/** A closed-form sustained-commitment power/duration/energy forecast for one
+/** A closed-form all-in capability forecast — power/duration/energy — for one
  * direction, `GET /flexibility/capacity` — "if the site committed now to
  * sustained max import (or export), how does achievable power step down over
  * elapsed time." Distinct from `SiteFlexibilityForecastSlot` above (which is

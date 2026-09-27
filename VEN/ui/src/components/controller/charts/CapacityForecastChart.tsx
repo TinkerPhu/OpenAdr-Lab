@@ -13,6 +13,7 @@ import {
   formatPowerTick,
 } from "@lab/charts/axisDomain";
 import { formatPowerValue, formatEnergyKwh } from "@lab/charts/unitFormat";
+import { formatExportCapabilityValue } from "./capabilityFormat";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
@@ -36,8 +37,13 @@ function energyKwhTotal(curve: CapacityCurve): number {
 }
 
 /**
- * BL-flexibility-capacity-forecast: renders both sustained-commitment
- * capacity curves (power vs. elapsed time since commitment) as step lines,
+ * BL-flexibility-capacity-forecast: renders both all-in capability curves
+ * (power vs. elapsed time since the anchor) as step lines. Each point is the
+ * INSTANTANEOUS power of the all-in trajectory at that instant, not a level the
+ * site could hold for the whole window — a cycling heater spikes here every time
+ * its relay closes. The energy total below integrates these points, which is the
+ * quantity that integration is correct for.
+ *
  * with each direction's cumulative energy total shown alongside. This is the
  * dedicated Diagnostics-page rendering of the same `GET /flexibility/capacity`
  * data `SiteHeadroomChart` now also overlays (as dashed step-lines, alongside
@@ -89,7 +95,7 @@ export function CapacityForecastChart({ curves, height }: CapacityForecastChartP
 
   const series: TimeSeriesSeriesSpec[] = [
     {
-      key: "Import commitment [kW]",
+      key: "Import capability [kW]",
       axisId: "power",
       dataKey: (row) => row.values?.["importKw"] ?? null,
       color: "#D32F2F",
@@ -98,13 +104,14 @@ export function CapacityForecastChart({ curves, height }: CapacityForecastChartP
       formatter: formatPowerValue,
     },
     {
-      key: "Export commitment [kW]",
+      key: "Export capability [kW]",
       axisId: "power",
       dataKey: (row) => row.values?.["exportKw"] ?? null,
       color: "#2E7D32",
       type: "stepAfter",
       connectNulls: true,
-      formatter: formatPowerValue,
+      // Same reading as the Site Headroom panel's export line.
+      formatter: formatExportCapabilityValue,
     },
   ];
 

@@ -631,7 +631,7 @@ export function useFlexibilityForecast() {
   });
 }
 
-/** Sustained-commitment power/duration/energy capacity curves (both
+/** All-in capability curves — power/duration/energy (both
  * directions), for the "Capacity Forecast" Diagnostics chart. Distinct from
  * `useFlexibilityForecast` above — see `CapacityCurve`'s doc comment. */
 export function useCapacityCurves() {

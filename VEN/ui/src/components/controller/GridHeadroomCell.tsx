@@ -76,7 +76,7 @@ export function GridHeadroomCell({
   const anchoredAtNow = anchoredStartMs !== null && anchoredStartMs <= nowMs;
   const commitmentStartMs = anchored && !anchoredAtNow ? anchoredStartMs : null;
 
-  /** Click a future time to anchor the commitment curves there; click at or before now to
+  /** Click a future time to anchor the capability curves there; click at or before now to
    * put them back at now. No mode to arm first — a cursor mode the user had to find is
    * exactly why this looked broken on the live page. */
   const moveCommitmentStart = (tsMs: number) => setClickedStartMs(tsMs > nowMs ? tsMs : null);
@@ -86,7 +86,7 @@ export function GridHeadroomCell({
       ? "No active plan — commitment curves start now"
       : commitmentStartMs !== null
         ? `Commitment start: ${formatTs(commitmentStartMs)} (plan slot) · click again to move it, or click the past to reset`
-        : "Click a future time to start the commitment curves there";
+        : "Click a future time to start the capability curves there";
 
   return (
     <Paper
