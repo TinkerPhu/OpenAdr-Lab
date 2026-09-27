@@ -40,7 +40,7 @@ its detail. Re-rate in the item, then here.
 
 | Severity | ID | Goal it blocks | One line |
 |---|---|---|---|
-| 🔴 High | GB-41 | reliable system | Four of nine EV VENs charged **nothing** for 24 h with valid sessions; both known solver explanations ruled out. Unexplained silent non-action on the core use case. |
+| 🔴 High | GB-41 | reliable system | **Re-scoped 2026-09-27**: mechanism reproduced offline (comfort-rate core reward below tariff + 0.22 import malus, plus `MayRun`'s all-or-nothing core). Symptom is bypassed on the fleet by `usage_forecast`'s `MustRun`, not fixed — any user soft-deadline request still takes the old path. Remaining: confirm the campaign's `comfort_rates` and decide the product fix. |
 | 🔴 High | GB-50 | VTN stimulus | No quantity/unit contract on the wire: W vs kW contradictions, `USAGE` treated as power where the spec says energy, no `payloadDescriptors`, and a `* duration` fudge in `kpi.py` compensating. Every VTN-facing number and every KPI rests on this. |
 | 🟠 Med-High | R-97 | reliable system | Solves of 20.8 s and 63.6 s against a 60 s per-phase timeout — the mechanism behind GB-38 is one busy host away from recurring. |
 | 🟠 Med-High | R-76 | VTN stimulus | Reservation-capacity reports likely carry swapped or conceptually wrong values, silently; self-consistent tests give no signal. |
