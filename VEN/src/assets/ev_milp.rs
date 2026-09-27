@@ -268,7 +268,15 @@ impl EvMilpContext {
             v_extra_co2_eur_kwh: 0.0,
             v_core_co2_eur: 0.0,
         };
-        if !plugged {
+        // `ev-usage-forecast`: presence for future slots comes from the EV's own
+        // schedule, not the live plug — blanking the horizon here left a mid-trip
+        // VEN with no charging plan at all. `apply_usage_forecast` then ANDs the
+        // prediction in, which is false for every away slot, slot 0 included.
+        let forecast_presence = cfg
+            .usage_sim
+            .as_ref()
+            .is_some_and(|u| u.mode == crate::entities::asset_params::EvUsageMode::Forecast);
+        if !plugged && !forecast_presence {
             return base;
         }
         let Some(session) = ev_session else {
@@ -702,6 +710,83 @@ mod milp_context_trait_tests {
         );
         ctx.apply_usage_forecast(cfg, n, cum_s, now, None);
         ctx
+    }
+
+    /// Regression (found by `ev_usage_forecast.feature` running mid-trip): the
+    /// car being unplugged RIGHT NOW must not blank the whole horizon when the
+    /// EV has a usage forecast — the schedule says when it comes back, and the
+    /// plan has to be able to charge in the slots after that.
+    #[test]
+    fn a_car_that_is_away_now_is_still_plannable_after_its_predicted_return() {
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let mut cfg = ev_with_usage(EvUsageMode::Forecast); // leaves 08:00, returns 17:00
+        cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap(); // mid-trip
+        let n = 24;
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.30,
+            plugged: false, // out driving
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+            was_away_by_usage_sim: true,
+        });
+        let mut ctx = EvMilpContext::from_state(
+            &state, &cfg, n, &cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+        );
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+
+        assert!(
+            !ctx.a_ev[0],
+            "away right now: this slot really is unavailable"
+        );
+        assert!(
+            !ctx.a_ev[4],
+            "16:00 is still inside the predicted trip (returns 17:00)"
+        );
+        assert!(
+            ctx.a_ev[6],
+            "18:00 is after the predicted return — the plan must be able to charge"
+        );
+        assert_eq!(
+            ctx.mode,
+            EvMilpMode::MustRun,
+            "the next departure still sets a target"
+        );
+        assert!(
+            ctx.e_core_kwh > 1.0,
+            "core energy must survive the reachability clamp, got {}",
+            ctx.e_core_kwh
+        );
+    }
+
+    #[test]
+    fn a_car_that_is_away_now_stays_unplannable_under_usage_sim() {
+        // usage_sim tells the planner nothing in advance, so the live plug is
+        // still the only word on availability — today's behaviour, unchanged.
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let cfg = ev_with_usage(EvUsageMode::Simulated);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.30,
+            plugged: false,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+            was_away_by_usage_sim: true,
+        });
+        let mut ctx = EvMilpContext::from_state(
+            &state, &cfg, n, &cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+        );
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        assert!(
+            ctx.a_ev.iter().all(|&a| !a),
+            "no forecast: an unplugged EV contributes nothing"
+        );
     }
 
     #[test]
