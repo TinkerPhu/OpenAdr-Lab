@@ -308,10 +308,10 @@ mod tests {
     #[test]
     fn build_capacity_forecast_intervals_one_per_step_kw_and_durations() {
         let start = chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap();
-        let curve = CapacityCurve {
-            direction: CommitmentDirection::Export,
+        let curve = CapacityCurve::new(
+            CommitmentDirection::Export,
             start,
-            steps: vec![
+            vec![
                 // Export is signed negative in CapacityCurve's internal
                 // convention -- this test confirms build_capacity_forecast_intervals
                 // is exactly where that gets converted back to the unsigned
@@ -325,7 +325,7 @@ mod tests {
                     power_kw: 0.0,
                 },
             ],
-        };
+        );
         let intervals = build_capacity_forecast_intervals(&curve, "STORAGE_MAX_DISCHARGE_POWER");
         assert_eq!(intervals.len(), 2);
         assert_eq!(
