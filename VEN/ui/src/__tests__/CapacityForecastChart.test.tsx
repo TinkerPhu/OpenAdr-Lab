@@ -47,11 +47,6 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
           { elapsed_s: 0, power_kw: 5.0 },
           { elapsed_s: 3600, power_kw: 0.0 },
         ],
-        // Sustained = energy ÷ duration; 5.0 kW held for the whole first hour.
-        sustained: [
-          { elapsed_s: 0, power_kw: 5.0 },
-          { elapsed_s: 3600, power_kw: 5.0 },
-        ],
       },
       export: {
         direction: "export",
@@ -59,10 +54,6 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
         steps: [
           { elapsed_s: 0, power_kw: 4.5 },
           { elapsed_s: 1800, power_kw: 0.0 },
-        ],
-        sustained: [
-          { elapsed_s: 0, power_kw: 4.5 },
-          { elapsed_s: 1800, power_kw: 4.5 },
         ],
       },
     };
@@ -94,13 +85,11 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
     // Both curves' own step points (3600s import, 1800s export) survive the merge —
     // the step function, not a smoothed/interpolated shape.
     const rowAt1800 = data.find((row) => row.ts === startMs + 1_800_000)!;
-    // Sustained: committing through 1800 s means holding what applied for all
-    // of it (4.5 kW export, 5.0 kW import) -- the drop only begins there.
-    expect(exportSeries.dataKey(rowAt1800)).toBe(4.5);
-    expect(importSeries.dataKey(rowAt1800)).toBe(5.0);
+    expect(exportSeries.dataKey(rowAt1800)).toBe(0.0);
+    expect(importSeries.dataKey(rowAt1800)).toBe(5.0); // still holding until 3600s
 
     const rowAt3600 = data.find((row) => row.ts === startMs + 3_600_000)!;
-    expect(importSeries.dataKey(rowAt3600)).toBe(5.0);
+    expect(importSeries.dataKey(rowAt3600)).toBe(0.0);
   });
 
   it("shows each direction's cumulative energy total", () => {
@@ -114,16 +103,11 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
           { elapsed_s: 0, power_kw: 5.0 },
           { elapsed_s: 3600, power_kw: 0.0 },
         ],
-        sustained: [
-          { elapsed_s: 0, power_kw: 5.0 },
-          { elapsed_s: 3600, power_kw: 5.0 },
-        ],
       },
       export: {
         direction: "export",
         start,
         steps: [{ elapsed_s: 0, power_kw: 4.5 }],
-        sustained: [{ elapsed_s: 0, power_kw: 4.5 }],
       },
     };
 

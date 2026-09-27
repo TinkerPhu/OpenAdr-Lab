@@ -63,17 +63,12 @@ export function CapacityForecastChart({ curves, height }: CapacityForecastChartP
     startMs
   );
 
-  // `sustained`, not `steps`, for the plotted commitment (same reasoning as
-  // SiteHeadroomChart): the line says "commitment", so it must be the power
-  // the site can hold for that window, not the all-in trajectory's
-  // instantaneous value. `energyKwhTotal` above still integrates `steps` --
-  // energy is what actually flows, spikes included.
-  const importSamples: NamedSample[] = importCurve.sustained.map((s) => ({
+  const importSamples: NamedSample[] = importCurve.steps.map((s) => ({
     ts: startMs + s.elapsed_s * 1000,
     key: "importKw",
     value: s.power_kw,
   }));
-  const exportSamples: NamedSample[] = exportCurve.sustained.map((s) => ({
+  const exportSamples: NamedSample[] = exportCurve.steps.map((s) => ({
     ts: startMs + s.elapsed_s * 1000,
     key: "exportKw",
     value: s.power_kw,

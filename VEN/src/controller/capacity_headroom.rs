@@ -155,11 +155,11 @@ fn site_capacity_curve_from<'s>(
     }
     events.extend(base_load_capacity_events(sim, t1, t2_max));
 
-    CapacityCurve::new(
+    CapacityCurve {
         direction,
-        t1,
-        merge_events(events, direction, phys_imp_kw, phys_exp_kw),
-    )
+        start: t1,
+        steps: merge_events(events, direction, phys_imp_kw, phys_exp_kw),
+    }
 }
 
 // ─── Capacity Forecast from a future start (t1 = a plan slot, sweep t2) ────

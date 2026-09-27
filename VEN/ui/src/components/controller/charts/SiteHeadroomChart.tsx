@@ -135,21 +135,16 @@ export function SiteHeadroomChart({
   // itself builds, starting exactly at `now` (the endpoint's own `t1`), no samples before
   // it, so LOCF naturally leaves every pre-`now` row without a value (see this
   // component's own doc comment for why that's correct, not a gap to fill).
-  // `sustained`, not `steps`: a commitment is what the site can HOLD for the
-  // window, so it is the energy-based average, not the all-in trajectory's
-  // instantaneous power. The two differ wherever an asset cycles -- a heater
-  // pinned at its tank ceiling blips to full power every few minutes, which
-  // the instantaneous curve rightly shows and a commitment must not promise.
   const capacityStartMs = capacity ? new Date(capacity.import.start).getTime() : null;
   const importCapSamples: NamedSample[] = capacity
-    ? capacity.import.sustained.map((s) => ({
+    ? capacity.import.steps.map((s) => ({
         ts: capacityStartMs! + s.elapsed_s * 1000,
         key: "importCapKw",
         value: s.power_kw,
       }))
     : [];
   const exportCapSamples: NamedSample[] = capacity
-    ? capacity.export.sustained.map((s) => ({
+    ? capacity.export.steps.map((s) => ({
         ts: capacityStartMs! + s.elapsed_s * 1000,
         key: "exportCapKw",
         value: s.power_kw,

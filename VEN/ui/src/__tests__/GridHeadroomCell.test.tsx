@@ -200,19 +200,8 @@ describe("GridHeadroomCell — click moves the commitment start", () => {
     const start = new Date(startMs).toISOString();
     return {
       start,
-      // Single-point curves: the sustained view of a flat curve is the same level.
-      import: {
-        direction: "import",
-        start,
-        steps: [{ elapsed_s: 0, power_kw: 4 }],
-        sustained: [{ elapsed_s: 0, power_kw: 4 }],
-      },
-      export: {
-        direction: "export",
-        start,
-        steps: [{ elapsed_s: 0, power_kw: -3 }],
-        sustained: [{ elapsed_s: 0, power_kw: -3 }],
-      },
+      import: { direction: "import", start, steps: [{ elapsed_s: 0, power_kw: 4 }] },
+      export: { direction: "export", start, steps: [{ elapsed_s: 0, power_kw: -3 }] },
     };
   };
   const perTick = curvesAnchoredAt(nowMs);
