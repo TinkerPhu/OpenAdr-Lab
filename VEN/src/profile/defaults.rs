@@ -107,6 +107,13 @@ pub(super) fn default_heater_max_temp() -> f64 {
     23.0
 }
 
+/// Thermostat deadband, both ends of the band. 3.0 °C is what the floor's
+/// hard-coded `EMERGENCY_HYSTERESIS_C` used before it became configurable, so
+/// this default reproduces the previous behaviour exactly.
+pub(super) fn default_thermostat_delta_c() -> f64 {
+    3.0
+}
+
 pub(super) fn default_asset_id_pv() -> String {
     crate::ids::ASSET_PV.to_string()
 }

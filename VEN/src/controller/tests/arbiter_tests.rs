@@ -96,6 +96,7 @@ fn heater_snap_in(
         temp_min_c_profile: temp_min_c,
         temp_max_c_profile: temp_max_c,
         temp_safety_max_c,
+        thermostat_delta_c: 3.0,
         emergency_mode,
         thermal_mass_kwh_per_c: 2.0,
         k_loss_kw_per_c: 0.1,
@@ -106,6 +107,7 @@ fn heater_snap_in(
         temperature_c: temp_c,
         actual_power_kw: last_kw,
         emergency_latched,
+        ceiling_latched: false,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &heater, state, "heater", last_kw, 0.0,

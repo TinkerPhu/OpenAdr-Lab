@@ -13,6 +13,7 @@ assets:
     temp_initial_c: 20.0
     temp_min_c: 18.0
     temp_max_c: 23.0
+    thermostat_delta_c: 3.0   # deadband at BOTH ends: off at max until max-3, emergency at min until min+3
   - type: pv
     id: pv
     rated_kw: 5.0

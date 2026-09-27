@@ -36,6 +36,7 @@ assets:
     temp_min_c: 18.0
     switching_penalty_eur: 0.05
     temp_max_c: 23.0
+    thermostat_delta_c: 3.0   # deadband at BOTH ends: off at max until max-3, emergency at min until min+3
   - type: base_load
     id: base_load
     baseline_kw: 0.6

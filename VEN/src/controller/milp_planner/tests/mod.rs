@@ -154,6 +154,7 @@ fn make_profile() -> Profile {
                 temp_min_c: 18.0,
                 temp_max_c: 23.0,
                 temp_safety_max_c: 23.0,
+                thermostat_delta_c: 3.0,
                 power_stages: 2,
                 thermal_mass_kwh_per_c: 2.0,
                 k_loss_kw_per_c: 0.1,
@@ -279,6 +280,7 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
             temp_min_c_profile: v("temp_min_c"),
             temp_max_c_profile: v("temp_max_c"),
             temp_safety_max_c: v("temp_safety_max_c"),
+            thermostat_delta_c: 3.0,
             emergency_mode: HeaterEmergencyMode::from_overrides(
                 Some(v("emergency_curtail") > 0.5),
                 Some(v("emergency_absorb") > 0.5),
@@ -292,6 +294,7 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
             temperature_c: temp_c,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
         refresh_from_asset(h, &heater, state);
     }
@@ -318,6 +321,7 @@ fn make_heater_only_profile(
             temp_min_c,
             temp_max_c,
             temp_safety_max_c: temp_max_c,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: thermal_mass,
             k_loss_kw_per_c: 0.1,
@@ -505,6 +509,7 @@ fn build_asset_contexts(
                     temperature_c: temp_c,
                     actual_power_kw,
                     emergency_latched: false,
+                    ceiling_latched: false,
                 });
                 let ac = Heater::from_params(cfg);
                 let c_terminal = cfg

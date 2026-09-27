@@ -40,6 +40,17 @@ impl Profile {
                         h.id, h.power_stages
                     ));
                 }
+                // The deadband is applied at both ends of the band, so a delta
+                // at or beyond the band's own width leaves no room to regulate
+                // in: the ceiling's release point would sit at or below the
+                // floor, where the emergency takes over.
+                let band_c = h.temp_max_c - h.temp_min_c;
+                if h.thermostat_delta_c <= 0.0 || h.thermostat_delta_c >= band_c {
+                    errors.push(format!(
+                        "heater '{}': thermostat_delta_c must be > 0 and < the                          temp_min_c..temp_max_c band ({band_c} °C), got {}",
+                        h.id, h.thermostat_delta_c
+                    ));
+                }
             }
         }
         if self.planner.phase2_epsilon_eur < 0.0 {
@@ -368,6 +379,7 @@ mod tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: None,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             volume_l: None,
             thermal_mass_kwh_per_c: None,
@@ -388,6 +400,7 @@ mod tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: None,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             volume_l: None,
             thermal_mass_kwh_per_c: None,
@@ -595,6 +608,85 @@ spikes:
             "error message should mention 'no assets': {msg}"
         );
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    // thermostat-deadband: the band check must reject a delta that leaves no
+    // room to regulate in, and every shipped heater profile must declare one.
+    #[test]
+    fn validate_rejects_a_thermostat_delta_wider_than_its_own_band() {
+        let yaml = r#"
+assets:
+  - type: heater
+    id: heater
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+    thermostat_delta_c: 5.0
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("must parse");
+        let err = profile
+            .validate()
+            .expect_err("a 5 degC delta on a 5 degC band must fail");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("thermostat_delta_c"),
+            "the error must name the field: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_a_delta_inside_the_band() {
+        let yaml = r#"
+assets:
+  - type: heater
+    id: heater
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+    thermostat_delta_c: 3.0
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("must parse");
+        // This bare YAML trips an unrelated planner rule (phase2_epsilon vs the
+        // switching cost), so assert on this rule alone rather than on is_ok().
+        let msg = format!("{:?}", profile.validate());
+        assert!(
+            !msg.contains("thermostat_delta_c"),
+            "a 3 degC delta inside a 5 degC band must not be flagged: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_heater_profile_declares_a_thermostat_delta_inside_its_band() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".yaml") {
+                continue;
+            }
+            let contents = std::fs::read_to_string(&path).unwrap();
+            if !contents.contains("type: heater") {
+                continue;
+            }
+            assert!(
+                contents.contains("thermostat_delta_c:"),
+                "{name}: every heater profile must declare thermostat_delta_c explicitly"
+            );
+            let profile = Profile::try_load(path.to_str().unwrap())
+                .await
+                .unwrap_or_else(|e| panic!("{name} must parse: {e}"));
+            assert!(
+                profile.validate().is_ok(),
+                "{name} must validate: {:?}",
+                profile.validate()
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 15,
+            "expected at least 15 heater profiles, found {checked}"
+        );
     }
 
     // ev-usage-simulation / ev-usage-forecast: every fleet profile that declares

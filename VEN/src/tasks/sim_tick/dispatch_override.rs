@@ -167,6 +167,7 @@ mod dispatch_override_tests {
             temp_min_c_profile: 20.0,
             temp_max_c_profile: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -177,6 +178,7 @@ mod dispatch_override_tests {
             temperature_c: 19.0, // below temp_min_c: emergency heat is forced on
             actual_power_kw: 3.0,
             emergency_latched: true,
+            ceiling_latched: false,
         });
         crate::services::test_support::asset_snapshots::snapshot_from_asset(
             &heater, state, "heater", 3.0, 0.0,

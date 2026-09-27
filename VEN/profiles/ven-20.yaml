@@ -10,6 +10,7 @@ assets:
     temp_initial_c: 58.0
     temp_min_c: 40.0
     temp_max_c: 75.0
+    thermostat_delta_c: 3.0   # deadband at BOTH ends: off at max until max-3, emergency at min until min+3
     temp_safety_max_c: 85.0
     volume_l: 450.0
     k_loss_kw_per_c: 0.0032

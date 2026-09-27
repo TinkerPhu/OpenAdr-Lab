@@ -268,3 +268,46 @@ plus slack the shortfall would be expressible in the model instead of pre-clampe
 drop, floored at `min_soc`), make the deadline obligation a bound on `soc_ev[t_dead]`, and
 delete the post-solve reconstruction. Pairs naturally with R-92 — both are the same
 "generalize the EV model" work.
+
+## R-94 — the MILP does not model the heater's thermostat deadband
+
+**Where:** `VEN/src/assets/heater_milp.rs` (tank model) vs
+`VEN/src/assets/heater_thermostat.rs` (the deadband), introduced with
+`thermostat_delta_c` (2026-09-27).
+
+The MILP bounds tank energy at `temp_max_c` (`heater_milp.rs`'s `e_max`) but knows nothing
+about "once at the ceiling, stay off until `temp_max_c - thermostat_delta_c`". A plan that
+wants to absorb PV surplus into a nearly-full tank can therefore be refused by the asset,
+which surfaces as a plan/actual deviation rather than as an infeasibility.
+
+**Why it is debt rather than a bug:** the divergence window is exactly the region where the
+tank has almost no absorbing capacity left to plan for, and the deviation arbiter already
+handles a setpoint the asset does not follow. Nothing observed on the fleet yet — recorded
+because it is a new divergence class, not because it has bitten.
+
+**To resolve:** give the heater's MILP context a "may not run below this stored-energy level
+once latched" constraint derived from the same `thermostat_delta_c`, so the planner stops
+proposing dispatch the asset will refuse. Pairs with the existing switching-penalty work
+(`lambda_heat_sw_eur`), which is the economic half of the same anti-chatter concern.
+
+## R-95 — the Site Headroom series is labelled "commitment" but carries instantaneous capability
+
+**Where:** `VEN/ui/src/components/controller/charts/SiteHeadroomChart.tsx` and
+`CapacityForecastChart.tsx` ("Import/Export commitment [kW]"), fed by `CapacityCurve::steps`.
+
+`steps` is the instantaneous power of the all-in trajectory at each breakpoint
+(`assets::max_power::asset_max_power`'s stated contract: "what power is it still delivering at
+the end"). A commitment is something holdable for a duration, which is a different quantity —
+so a reader who takes a spike off this chart as "I can commit that much" is misreading it, and
+the label invites exactly that.
+
+**Why it is debt rather than a bug:** the data is correct and, with the thermostat deadband in
+place, readable and directly usable as a near-term forecast — which is what this panel is for.
+Only the wording overpromises.
+
+**To resolve:** rename the series to "capability", or add a genuine sustained-commitment series
+alongside it. Note the previously reverted attempt (`4459a4ab`, reverted in `e47ae50d`):
+replacing the instantaneous series with a cumulative average destroyed the panel's forecasting
+value and introduced a sampling error of its own. A sustained series must be *added*, densely
+sampled, and drawn as an interpolated line rather than `stepAfter`.
+

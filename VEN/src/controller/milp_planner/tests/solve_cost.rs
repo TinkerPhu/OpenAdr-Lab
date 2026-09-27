@@ -38,6 +38,7 @@ fn bench_profile(with_heater: bool) -> Profile {
             temp_min_c: 45.0,
             temp_max_c: 60.0,
             temp_safety_max_c: 60.0,
+            thermostat_delta_c: 3.0,
             thermal_mass_kwh_per_c: thermal_mass,
             k_loss_kw_per_c: 0.005,
             draw_kw: 0.3,
