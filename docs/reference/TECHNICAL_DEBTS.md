@@ -1,7 +1,8 @@
 # Technical Debts Register
 
-> **Next ID: R-86.** Use this number for the next new item filed, then increment this
-> line to R-87. When resolving and removing an item — even the current highest ID —
+> **Next ID: R-98.** Use this number for the next new item filed, then increment this
+> line to R-99. (Corrected 2026-09-27: the line still said R-86 while R-87..R-97 were
+> already issued — exactly the drift the paragraph below warns about.) When resolving and removing an item — even the current highest ID —
 > do NOT decrement this line: it tracks every ID ever issued, not the count of rows
 > currently in the table, so a removed row never frees its number for reuse. This is
 > the single source of truth for the next ID; do not derive it by scanning for the
@@ -24,6 +25,44 @@
 > Gain here usually reflects reduced risk, friction, or maintenance cost instead.
 
 Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred)
+
+---
+
+## Cross-register priority view (2026-09-27)
+
+One ordered list across **both** registers — this file (`R-*`) and `docs/BACKLOG.md` (`GB-*`) —
+because the two rate things differently: debts carry a priority emoji, while the backlog's last
+column holds effort, not severity. Ratings for `R-*` items that already had one are reproduced
+unchanged; `GB-*` severities are assigned here.
+
+**This is an index, not a second source of truth.** Each row points at the item; the item owns
+its detail. Re-rate in the item, then here.
+
+| Severity | ID | Goal it blocks | One line |
+|---|---|---|---|
+| 🔴 High | GB-41 | reliable system | Four of nine EV VENs charged **nothing** for 24 h with valid sessions; both known solver explanations ruled out. Unexplained silent non-action on the core use case. |
+| 🔴 High | GB-50 | VTN stimulus | No quantity/unit contract on the wire: W vs kW contradictions, `USAGE` treated as power where the spec says energy, no `payloadDescriptors`, and a `* duration` fudge in `kpi.py` compensating. Every VTN-facing number and every KPI rests on this. |
+| 🟠 Med-High | R-97 | reliable system | Solves of 20.8 s and 63.6 s against a 60 s per-phase timeout — the mechanism behind GB-38 is one busy host away from recurring. |
+| 🟠 Med-High | R-76 | VTN stimulus | Reservation-capacity reports likely carry swapped or conceptually wrong values, silently; self-consistent tests give no signal. |
+| 🟠 Med-High | GB-42 | VTN stimulus | The **default** stale-rate policy is a stub behaving as `LastKnown`: on a 48 h horizon with ~24 h of rates, half the plan is priced at one repeated number. |
+| 🟠 Med-High | R-93 | VTN stimulus | No per-slot EV SoC variable: the planner cannot reason about SoC mid-horizon, so no post-return recharge planning. Structural blocker under R-92. |
+| 🟡 Medium | R-86 | VTN stimulus | `randomizeStart` parsed but ignored — the whole fleet responds on the same instant, which is what the field exists to prevent. |
+| 🟡 Medium | R-21 | reliable system | `cargo test` heap corruption around the HiGHS tests: undermines the instrument every other conclusion rests on. |
+| 🟡 Medium | R-96 | reliable system | The capacity-limit E2E step waits for a freshly *adopted* plan; cost two 65-minute runs on 2026-09-27 with failures that looked like product defects. |
+| 🟡 Medium | R-87 | VTN stimulus | Stricter than the 3.1 schema on `intervalPeriod.start` — the one failure a conformance lab must not have. |
+| 🟡 Medium | R-92 | VTN stimulus | Only the next departure gets a charging goal, while availability is per-slot. |
+| 🟡 Medium | R-94 | transparent UI | The MILP does not model the heater deadband, so the asset can refuse planned dispatch with nothing on screen saying why. |
+| 🟡 Medium | R-85 | VTN stimulus | Two measurement-report builders with diverging behaviour; resolution already decided, not yet done. |
+| 🟡 Medium | GB-46 | VTN stimulus | Missing VEN-side instrumentation (tariff source event id, effective-limit column), so compliance cannot be proven from the data without harness reconstruction. |
+| 🟡 Medium | GB-52 | reliable system | The E2E broker runs anonymous while production requires credentials — the test bed does not exercise the auth path. |
+| 🔵 Low | R-74 | transparent UI | The Dashboard Simulation card hardcodes ev/heater/pv; battery, base load and shiftable loads are invisible there. Small, and the generic pattern already exists in `Controller.tsx`. |
+| 🔵 Low | R-77, R-90, R-89, R-33, R-71, R-36, R-38, R-39, R-44, R-47, R-48, R-66, R-73, R-91, R-95 | — | Hygiene, naming, dead code, coverage gaps and future-proofing. Do opportunistically, per this file's own "refactor first if Trivial/Small" rule. |
+| 🔵 Low | GB-43, GB-39, GB-12 | — | Aspirational or cosmetic (V2G modelling, dark mode, docs alignment). |
+
+**Note on R-74:** rated Low because the same data is visible on Controller/Devices — but it is
+the cheapest item in the table and the only one in the "transparent UI" goal that is purely
+additive, so it is the natural filler task between larger pieces.
+
 
 ---
 
@@ -201,6 +240,9 @@ scenario.
 
 ## R-91 — plan-ahead's horizon check ignores `plan_zones`
 
+**Severity: 🔵 Low** · Effort Trivial · Risk Low · Gain Low — `usage_sim` only; the
+`usage_forecast` class derives its horizon from the MILP's own `cum_s` and cannot disagree.
+
 **Where:** `VEN/src/tasks/sim_tick/usage_sim_plan_ahead.rs::sync_plan_ahead_session`,
 introduced by `ev-usage-simulation`.
 
@@ -226,6 +268,10 @@ reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always a
 
 ## R-92 — `engage_charge_planning` can only ever target one departure per solve
 
+**Severity: 🟡 Medium** · Effort Medium · Risk Medium · Gain Medium — the fleet plans around
+the next trip only, so a second departure inside the same horizon gets availability but no
+urgency. Blocked in practice by R-93.
+
 **Where:** `VEN/src/assets/ev_usage_forecast.rs::target_next_predicted_departure`,
 `EvMilpContext.t_dead_step`/`e_core_kwh` (`controller/milp_planner/asset_port.rs`),
 introduced by `ev-usage-forecast` (design.md Non-Goals).
@@ -249,6 +295,11 @@ no work, it already handles N trips.
 
 ## R-93 — the EV MILP still has no per-slot SoC variable
 
+**Severity: 🟠 Medium-High** · Effort Medium-Large · Risk Medium · Gain Medium-High — the
+structural blocker under R-92 and under `clamp_core_to_reachable_energy`: the solver cannot
+reason about SoC mid-horizon, so it cannot plan a post-return recharge at all. Matters most
+when a VTN event lands near an away window.
+
 **Where:** `VEN/src/assets/ev_milp.rs` (constraints are total-energy),
 `controller/milp_planner/asset_port.rs::ev_soc_trajectory` (post-solve projection),
 surfaced by `ev-usage-forecast` (design.md Decision 3a, Non-Goals).
@@ -271,6 +322,10 @@ delete the post-solve reconstruction. Pairs naturally with R-92 — both are the
 
 ## R-94 — the MILP does not model the heater's thermostat deadband
 
+**Severity: 🟡 Medium** · Effort Small-Medium · Risk Medium · Gain Medium — a new plan/actual
+divergence class (the asset can refuse planned dispatch), with no UI surface saying why.
+Narrow window in practice.
+
 **Where:** `VEN/src/assets/heater_milp.rs` (tank model) vs
 `VEN/src/assets/heater_thermostat.rs` (the deadband), introduced with
 `thermostat_delta_c` (2026-09-27).
@@ -291,6 +346,9 @@ proposing dispatch the asset will refuse. Pairs with the existing switching-pena
 (`lambda_heat_sw_eur`), which is the economic half of the same anti-chatter concern.
 
 ## R-95 — no sustained-commitment series exists alongside the capability curves
+
+**Severity: 🔵 Low** · Effort Small · Risk Medium (see the reverted attempt) · Gain Low —
+the mislabel is fixed; what remains is an optional extra series.
 
 **Where:** `VEN/ui/src/components/controller/charts/SiteHeadroomChart.tsx` and
 `CapacityForecastChart.tsx`, fed by `CapacityCurve::steps`.
@@ -313,3 +371,47 @@ history since the anchor, so a real −11 kW EV-departure cliff smeared into a s
 sampled the average only at the instantaneous curve's sparse breakpoints, which `stepAfter`
 then held flat, overstating capability by 11 kW for two hours. Any such series must be densely
 sampled and drawn as an interpolated line, not a step.
+
+## R-96 — the capacity-limit E2E step requires a freshly *adopted* plan
+
+**Severity: 🟡 Medium** · Effort Small · Risk Low · Gain Medium — costs whole 65-minute runs
+and produces failures that look like product defects.
+
+**Where:** `tests/features/steps/uc_steps.py:14`
+(`I wait for the VEN /plan to have slots with import_cap_kw at most {cap}`), used by UC-10b
+(`ven_uc_edge_cases.feature:59`) and UC-12b (`ven_uc_stress.feature:44`).
+
+The step polls for a plan that both satisfies the cap **and** was created after the limit was
+sent. Plan adoption is deliberately sticky (adoption threshold, decay, switch penalty) and the
+solve itself can take 20-60 s, so a plan that already satisfies the cap — because a previous
+scenario set the same or a tighter one, or because the new plan was not better enough to adopt
+— can leave the poll waiting 300 s for a plan that has no reason to be recomputed. Observed
+twice on 2026-09-27, each run failing a *different* one of the two scenarios, both times with
+the final plan carrying the correct `import_cap_kw` in every slot; a third run passed both.
+
+**To resolve:** make the scenario force a replan (a trigger the VEN cannot ignore) rather than
+waiting for one, or have the step accept a plan that satisfies the cap when the cap was already
+in effect before the scenario started. Changing the assertion to drop the freshness requirement
+outright would weaken a real guarantee — that the limit reached the planner — so pick one of the
+two above instead.
+
+## R-97 — MILP solve time sits close to its own timeout
+
+**Severity: 🟠 Medium-High** · Effort Medium · Risk Medium · Gain High — this is the mechanism
+behind GB-38, and the margin is thin enough that ordinary host load crosses it.
+
+**Where:** `VEN/src/controller/milp_planner/` (two-phase solve, `solver_timeout_s` default 60 s
+per phase).
+
+Solves of **20.8 s and 63.6 s** were recorded during E2E on 2026-09-27 on a host under load —
+against a 60 s per-phase timeout, i.e. at and past the ceiling that produced GB-38 (three VENs
+hitting TIME_LIMIT on essentially every solve for 24 h and never charging their EVs). GB-38 is
+marked resolved for that specific run, but nothing has reduced the underlying solve cost, so
+the same failure is one busy host away.
+
+**To resolve:** measure where the time goes before tuning anything — heater tier binaries and
+EV semi-continuous constraints are the usual suspects — then decide between a cheaper
+formulation, a coarser far-horizon zone, or an honest raise of the timeout with a visible
+TIME_LIMIT surface. Related: R-93 (a per-slot EV SoC variable would *add* variables, so it
+must be costed against this).
+
