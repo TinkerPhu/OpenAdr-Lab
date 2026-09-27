@@ -676,15 +676,7 @@ export type CapacityCurveStep = {
 export type CapacityCurve = {
   direction: "import" | "export";
   start: string;
-  /** The INSTANTANEOUS power of the all-in trajectory at each breakpoint —
-   * what actually flows, so it is what the energy total and the OpenADR
-   * per-interval capacity report use. It spikes every time a cycling asset's
-   * relay closes, so it is NOT what the site can promise to hold. */
   steps: CapacityCurveStep[];
-  /** The SUSTAINED commitment at the same breakpoints: the constant power
-   * holdable from `start` through that instant (energy ÷ duration). This is
-   * what a line labelled "commitment" must plot. */
-  sustained: CapacityCurveStep[];
 };
 
 /** `GET /flexibility/capacity` response body — both directions in one

@@ -212,13 +212,6 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
           { elapsed_s: 0, power_kw: 8.0 },
           { elapsed_s: 300, power_kw: 6.0 },
         ],
-        // Sustained = energy ÷ duration: committing through 300 s means
-        // holding the 8.0 kW that applied for all of it; the 6.0 kW only
-        // starts at 300 s, so it has not yet pulled the average down.
-        sustained: [
-          { elapsed_s: 0, power_kw: 8.0 },
-          { elapsed_s: 300, power_kw: 8.0 },
-        ],
       },
       export: {
         direction: "export",
@@ -226,10 +219,6 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
         steps: [
           { elapsed_s: 0, power_kw: -3.0 },
           { elapsed_s: 300, power_kw: 1.0 },
-        ],
-        sustained: [
-          { elapsed_s: 0, power_kw: -3.0 },
-          { elapsed_s: 300, power_kw: -3.0 },
         ],
       },
     };
@@ -267,14 +256,13 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
     // No value before `now` — the capacity curve's own t1 is always "now".
     expect(importSeries.dataKey(pastRow!)).toBeNull();
     expect(exportSeries.dataKey(pastRow!)).toBeNull();
-    // From `now` onward the SUSTAINED curve appears -- what the site can hold
-    // for the window, which is what a line labelled "commitment" must mean.
-    // At now+300s that is still 8.0 kW (the level held throughout those 5
-    // minutes), not the 6.0 kW that only begins there.
+    // From `now` onward, the curve's own step values appear -- including the
+    // Export curve's positive excursion (base-load-exceeds-export-capacity,
+    // normal per this component's own doc comment, not a sign bug).
     expect(importSeries.dataKey(nowRow!)).toBeCloseTo(8.0);
     expect(exportSeries.dataKey(nowRow!)).toBeCloseTo(-3.0);
-    expect(importSeries.dataKey(futureRow!)).toBeCloseTo(8.0);
-    expect(exportSeries.dataKey(futureRow!)).toBeCloseTo(-3.0);
+    expect(importSeries.dataKey(futureRow!)).toBeCloseTo(6.0);
+    expect(exportSeries.dataKey(futureRow!)).toBeCloseTo(1.0);
   });
 
   it("renders with no importCapKw/exportCapKw values when capacity is null", () => {
