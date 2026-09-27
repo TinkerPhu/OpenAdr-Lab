@@ -241,8 +241,8 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
         dataKey: (row: TimestampedRow) => number | null;
       }>;
     };
-    const importSeries = series.find((s) => s.key === "Import commitment [kW]")!;
-    const exportSeries = series.find((s) => s.key === "Export commitment [kW]")!;
+    const importSeries = series.find((s) => s.key === "Import capability [kW]")!;
+    const exportSeries = series.find((s) => s.key === "Export capability [kW]")!;
     expect(importSeries).toBeDefined();
     expect(exportSeries).toBeDefined();
 
@@ -285,8 +285,8 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
         dataKey: (row: TimestampedRow) => number | null;
       }>;
     };
-    const importSeries = series.find((s) => s.key === "Import commitment [kW]")!;
-    const exportSeries = series.find((s) => s.key === "Export commitment [kW]")!;
+    const importSeries = series.find((s) => s.key === "Import capability [kW]")!;
+    const exportSeries = series.find((s) => s.key === "Export capability [kW]")!;
     for (const row of data) {
       expect(importSeries.dataKey(row)).toBeNull();
       expect(exportSeries.dataKey(row)).toBeNull();

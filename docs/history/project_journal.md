@@ -13555,3 +13555,22 @@ Effect on ven-2: cycle period ~8 min → ~11.7 h (≈10 h cooling 3 °C, ~79 min
 6 kW), about four switch pairs per 48 h instead of ~360, and the OpenADR
 `STORAGE_MAX_CHARGE_POWER` report shrinks by the same factor. Duty cycle is unchanged at ~11 %
 — set by losses plus draw over `max_kw`, not by the deadband.
+
+**Postscript — the label, not the sign (same day).** Reading ven-3's panel after the deadline
+landed, the green "Export commitment" curve pointed *upward*, which reads as impossible: a
+heater cannot export. It turned out to be correct in every number and wrong in one word. The
+curve is signed net grid power while exporting as hard as possible, so it goes positive
+whenever unswitchable draw exceeds generation — and ven-3 has no battery, so at night there is
+nothing to export with at all. Its line sits at base load (+0.68 kW) and jumps to +6.68 kW for
+about 8 minutes every ~100 minutes, which the tank's own constants predict to the minute
+(3 °C × 0.233 kWh/°C = 0.70 kWh; 7.8 min to put back at 5.4 kW net, 100 min to lose at 0.42 kW).
+The heater is never commanded to run in the export direction — its export setpoint is 0 — the
+thermostat overrides the command, because a comfort floor is not negotiable.
+
+So the fix was presentational: the series are now "Import/Export capability", the export
+tooltip says "net import — nothing left to export" when positive, and the observation manual
+gained a "How to read the Site Headroom panel" section, since the panel answers two different
+questions at once (a per-instant band and one continuous all-in counterfactual) and says so
+nowhere on screen. Worth noting the sequencing: this is the third time in one day that the
+right fix for a confusing chart was somewhere other than the chart — first the physics (the
+thermostat deadband), then the data (`from_state`'s blanked horizon), and only now the words.

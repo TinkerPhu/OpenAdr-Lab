@@ -19,6 +19,7 @@ import {
   formatPowerTick,
 } from "@lab/charts/axisDomain";
 import { formatSignedPowerValue, formatPowerValue } from "@lab/charts/unitFormat";
+import { formatExportCapabilityValue } from "./capabilityFormat";
 import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
 import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
 import { formatTs } from "./tariffChartShared";
@@ -32,7 +33,7 @@ interface SiteHeadroomChartProps {
   /** Forward-looking per-slot trajectory (`GET /flexibility/forecast`); optional so
    * this component still works wherever only the past ring is available. */
   forecast?: SiteFlexibilityForecastSlot[];
-  /** `GET /flexibility/capacity` — sustained-commitment curves, `null` before the first
+  /** `GET /flexibility/capacity` — all-in capability curves, `null` before the first
    * dispatcher tick or wherever unavailable; optional so this component still works
    * without it. See this component's own doc comment for how these curves relate to
    * the achievable-range band. */
@@ -64,7 +65,7 @@ const COLOR_COMMITMENT_START = "#6A1B9A";
  * `TariffEnvelopeChart`'s Dynamic Operating Envelope (`IMPORT/EXPORT_CAPACITY_LIMIT`),
  * which is a VTN-announced forward *schedule*, not a live/forecast headroom value.
  *
- * Also overlays the sustained-commitment capacity curves (`GET /flexibility/capacity`,
+ * Also overlays the all-in capability curves (`GET /flexibility/capacity`,
  * `controller::capacity_headroom::compute_site_capacity_curve`) as dashed step-lines,
  * starting exactly at `capacity.start` with no backward extension — "now" by default, or,
  * in the cell's "Move commitment start" mode, the future plan slot the server anchored them
@@ -195,7 +196,7 @@ export function SiteHeadroomChart({
       formatter: formatSignedPowerValue,
     },
     {
-      key: "Import commitment [kW]",
+      key: "Import capability [kW]",
       axisId: "power",
       dataKey: (row) => row.values?.["importCapKw"] ?? null,
       color: "#D32F2F",
@@ -205,14 +206,16 @@ export function SiteHeadroomChart({
       formatter: formatPowerValue,
     },
     {
-      key: "Export commitment [kW]",
+      key: "Export capability [kW]",
       axisId: "power",
       dataKey: (row) => row.values?.["exportCapKw"] ?? null,
       color: "#2E7D32",
       type: "stepAfter",
       strokeDasharray: "4 3",
       connectNulls: true,
-      formatter: formatPowerValue,
+      // Signed, and positive means "net importing while exporting all it can" --
+      // see formatExportCapabilityValue for why that needs saying on screen.
+      formatter: formatExportCapabilityValue,
     },
   ];
 

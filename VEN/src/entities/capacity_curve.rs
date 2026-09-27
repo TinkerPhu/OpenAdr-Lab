@@ -1,7 +1,14 @@
 //! `CapacityCurve` — a closed-form, direction-specific power/duration/energy
-//! forecast: "if the site committed now to sustained max import (or export),
-//! how does the achievable power step down over elapsed time, and how much
-//! energy is behind it." Distinct from `SiteFlexibilityForecastSlot`, whose
+//! forecast: "if the site went all-in on import (or export) from `start` and
+//! never let up, what is it drawing or feeding at each later instant, and how
+//! much energy is behind that."
+//!
+//! Each step is the INSTANTANEOUS power of that all-in trajectory, which is
+//! what `energy_kwh_total` integrates. It is **not** a level the site could hold
+//! for the whole window: a thermostat-cycling heater spikes here every time its
+//! relay closes. The UI labels these curves "capability" for exactly that
+//! reason — calling them a commitment invites a promise the number does not
+//! make (see R-95). Distinct from `SiteFlexibilityForecastSlot`, whose
 //! per-slot `up_kw`/`down_kw` are independent point-in-time counterfactuals
 //! and must never be integrated over time — see
 //! `controller::capacity_forecast` for the computation.

@@ -949,6 +949,49 @@ curl -s http://Node1:8211/user-requests | python3 -m json.tool
 curl -s http://Node1:8211/plan | python3 -m json.tool
 ```
 
+### How to read the Site Headroom panel
+
+The panel answers two *different* questions at once, which is what makes it hard on first
+reading. Neither is "what will the site do" — that is the Accumulated Power panel above it.
+
+| What you see | What it is |
+|---|---|
+| **green band** (`Achievable range`) | per future plan slot: the absolute most the site could import / export **at that instant**, if every controllable asset went all-in right then. A per-instant snapshot, one per slot. |
+| **black line** (`Grid power`) | measured net grid power (left of "now") and the plan's own intended net (right of it). |
+| **dashed red / green lines** (`Import / Export capability`) | one continuous counterfactual: "if the site committed to maximum import (or export) **from the anchor** and never let up, what is it drawing or feeding at each later instant." |
+| **purple vertical line** | where those dashed curves are anchored — "now" unless you clicked a future time. |
+
+Four things that surprise people, in the order they usually surprise them:
+
+**1. The dashed curves are not a forecast.** They assume every asset goes all-in from the
+anchor, which is nothing like what the plan intends to do. A heater that the plan runs for
+four hours in the afternoon appears in the import curve as a *front-loaded* collapse instead:
+in the counterfactual it runs at once, saturates its tank within the hour, and stops.
+
+**2. They are stepped, not smooth.** Each breakpoint is a moment something changes — an asset
+saturates, an EV departs or returns, a thermostat cuts out. A step means "from here on, this
+much", until the next one.
+
+**3. Each curve touches the band at its own anchor.** At `t = anchor` the two are the same
+computation, so they meet by construction; past it they answer different questions and
+separate.
+
+**4. The export curve can point UP, and that is not a bug.** It is signed *net grid power
+while exporting as hard as possible* — so it goes positive whenever the draw the site cannot
+switch off exceeds what it can generate. Hovering a positive point says so: "net import —
+nothing left to export".
+
+ven-3 is the clearest example. It has no battery, so at night there is simply nothing to
+export with: the export line sits at its base load, **+0.68 kW**, and every ~100 minutes jumps
+to **+6.68 kW** for about 8 minutes. That spike is the hot-water thermostat hitting its 45 °C
+floor and forcing 6 kW of reheat. The heater is never *commanded* to run while the site tries
+to export (its export setpoint is 0) — the thermostat overrides the command, because a comfort
+floor is not negotiable. By day the same line goes properly negative, to about −3.2 kW of PV
+export.
+
+So: a positive export value tells you something useful — not "we are exporting", but "we
+cannot export, and here is what we will still be pulling in".
+
 ### View live site headroom
 
 Each controllable asset's own **absolute** achievable import/export power right now (not a delta
@@ -963,14 +1006,14 @@ See `tests/features/isolated/capacity_envelope_absolute_quantities.feature`.
 curl -s http://Node1:8211/flexibility | python3 -m json.tool
 ```
 
-### View sustained-commitment capacity forecast
+### View the all-in capability (capacity) forecast
 
-How long the site could sustain a maximum import or export commitment starting now, and how much
-energy is behind it — distinct from the instantaneous headroom above. Also visible in the VEN UI
-under Diagnostics → Capacity Forecast, and as the dashed "Import/Export commitment" lines on
+What the site would be drawing or feeding at each instant if it went all-in on import or export
+from now, and how much energy is behind that — distinct from the instantaneous headroom above. Also visible in the VEN UI
+under Diagnostics → Capacity Forecast, and as the dashed "Import/Export capability" lines on
 Controller → Site Headroom.
 
-The same question for a commitment starting **later**: on Controller → Site Headroom, click a
+The same question for an all-in run starting **later**: on Controller → Site Headroom, click a
 future time in the chart — nothing to switch on first. The dashed curves then start at the plan
 slot you clicked (5/10/15-min steps, following the plan's zones), from each asset's
 plan-forecasted state there — "if the plan runs as intended until then, and the site then goes

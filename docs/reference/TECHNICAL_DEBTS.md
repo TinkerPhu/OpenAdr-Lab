@@ -290,24 +290,26 @@ once latched" constraint derived from the same `thermostat_delta_c`, so the plan
 proposing dispatch the asset will refuse. Pairs with the existing switching-penalty work
 (`lambda_heat_sw_eur`), which is the economic half of the same anti-chatter concern.
 
-## R-95 — the Site Headroom series is labelled "commitment" but carries instantaneous capability
+## R-95 — no sustained-commitment series exists alongside the capability curves
 
 **Where:** `VEN/ui/src/components/controller/charts/SiteHeadroomChart.tsx` and
-`CapacityForecastChart.tsx` ("Import/Export commitment [kW]"), fed by `CapacityCurve::steps`.
+`CapacityForecastChart.tsx`, fed by `CapacityCurve::steps`.
 
-`steps` is the instantaneous power of the all-in trajectory at each breakpoint
-(`assets::max_power::asset_max_power`'s stated contract: "what power is it still delivering at
-the end"). A commitment is something holdable for a duration, which is a different quantity —
-so a reader who takes a spike off this chart as "I can commit that much" is misreading it, and
-the label invites exactly that.
+**Partially resolved (2026-09-27):** the mislabel is fixed. The series now read "Import/Export
+capability", the export line's tooltip says "net import — nothing left to export" when
+positive (`charts/capabilityFormat.ts`), and
+`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` has a "How to read the Site Headroom
+panel" section. Found because ven-3's export curve pointed upward at night and looked like a
+sign bug; it was the site having no battery and a thermostat forcing reheats.
 
-**Why it is debt rather than a bug:** the data is correct and, with the thermostat deadband in
-place, readable and directly usable as a near-term forecast — which is what this panel is for.
-Only the wording overpromises.
+**What remains:** there is still no series answering "what could the site *hold* for this
+window" — energy ÷ duration — which is a real and different question from instantaneous
+capability.
 
-**To resolve:** rename the series to "capability", or add a genuine sustained-commitment series
-alongside it. Note the previously reverted attempt (`4459a4ab`, reverted in `e47ae50d`):
-replacing the instantaneous series with a cumulative average destroyed the panel's forecasting
-value and introduced a sampling error of its own. A sustained series must be *added*, densely
-sampled, and drawn as an interpolated line rather than `stepAfter`.
-
+**To resolve, if it is ever wanted:** add such a series *alongside* the capability curves,
+never replacing them. The attempt that replaced them (`4459a4ab`, reverted in `e47ae50d`)
+destroyed the panel's near-term forecasting value — a cumulative average carries the whole
+history since the anchor, so a real −11 kW EV-departure cliff smeared into a slow decay — and
+sampled the average only at the instantaneous curve's sparse breakpoints, which `stepAfter`
+then held flat, overstating capability by 11 kW for two hours. Any such series must be densely
+sampled and drawn as an interpolated line, not a step.
