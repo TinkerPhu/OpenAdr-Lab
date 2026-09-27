@@ -25,14 +25,14 @@ mod tests {
     use chrono::Utc;
 
     fn curve(direction: CommitmentDirection, power_kw: f64) -> CapacityCurve {
-        CapacityCurve {
+        CapacityCurve::new(
             direction,
-            start: Utc::now(),
-            steps: vec![CapacityCurveStep {
+            Utc::now(),
+            vec![CapacityCurveStep {
                 elapsed_s: 0,
                 power_kw,
             }],
-        }
+        )
     }
 
     #[tokio::test]
