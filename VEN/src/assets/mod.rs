@@ -14,6 +14,7 @@ mod heater_capabilities;
 mod heater_control_schema;
 mod heater_emergency;
 mod heater_milp;
+mod heater_thermostat;
 mod history;
 mod max_power;
 pub mod pv;
@@ -530,6 +531,7 @@ mod phase2a_heater_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -876,6 +878,7 @@ mod phase2a_trivial_delegation_smoke_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1125,6 +1128,7 @@ mod phase2b_tick_overridable_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1138,6 +1142,7 @@ mod phase2b_tick_overridable_tests {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
 
         let overrides = TickOverrides {

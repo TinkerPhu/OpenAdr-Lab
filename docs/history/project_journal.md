@@ -13511,3 +13511,47 @@ layer) but not their route to the planner. Gating session-writing to the `Simula
 the piece that could have silently gone wrong: without it a `usage_forecast` profile would have
 driven the same deadline twice, once through the MILP context and once through an auto-written
 session — two authorities for one goal, the exact shape this project keeps paying for.
+
+## The thermostat that had a deadband at one end only (2026-09-27)
+
+ven-2's Site Headroom chart showed the import commitment curve as dense red hatching. It was
+not a rendering artifact: `GET /flexibility/capacity` really did contain 647 steps over 48 h
+with 592 direction reversals, swinging 0.59 ↔ 6.59 kW every few minutes. The 6 kW amplitude
+identified the culprit — ven-2's heater — and the period identified the mechanism: on for
+exactly one 60 s projection step, off for seven.
+
+The cause was an asymmetry nobody had noticed. `EMERGENCY_HYSTERESIS_C = 3.0` had always kept
+the emergency at `temp_min_c` running until 3 °C above it, with the comment *"to prevent rapid
+relay cycling"*. The **ceiling had no such deadband at all**: `thermostat_forced_kw_in` forced
+off at `temp_max_c` and released the instant the temperature dipped below it. In the all-in
+capacity projection the tank sits pinned at its ceiling replacing standing losses, so it
+re-closed its relay on essentially every tick. The fix completes a rule that already existed on
+one side: one profile field, `thermostat_delta_c` (default 3.0 — the old constant's value), read
+at both ends, with `HeaterState.ceiling_latched` mirroring `emergency_latched`.
+
+**Two wrong answers came first, and both are worth recording.**
+
+The first shipped: a "sustained commitment" curve that plotted energy ÷ duration instead of
+instantaneous power (`4459a4ab`, reverted in `e47ae50d`). It silenced the chatter by averaging
+it away — and made the panel useless for its actual job, near-term forecasting, because a
+cumulative average from the anchor carries the whole history: a real −11 kW cliff when the EV
+departed smeared into a slow decay. Worse, it sampled the average only at the instantaneous
+curve's own sparse breakpoints and let `stepAfter` hold it flat, so between breakpoints it
+*overstated* capability by 11 kW for two hours — precisely the defect it was written to fix.
+The lesson is not "averaging is bad" but that a chart's quantity must match the question the
+chart is asked; the honest fix for a physics artifact is in the physics.
+
+The second never shipped: a time-based dwell derived from the tank's thermal constant. It would
+have worked, but a temperature deadband is simpler, is symmetric with the floor, and lives in
+the profile where its value is visible next to the band it applies to.
+
+**Also corrected along the way:** an early attribution of the first-hour capacity collapse to
+the heater saturating. ven-2 has no battery — its import capability is EV 11 kW + heater 6 kW +
+base 0.5 — so a ~10 kW step could only ever have been the EV. The step is exactly −11.00 kW at
+the predicted departure instant. A 6 kW asset cannot explain a 10 kW cliff, and checking the
+arithmetic against the asset's own rating would have caught it immediately.
+
+Effect on ven-2: cycle period ~8 min → ~11.7 h (≈10 h cooling 3 °C, ~79 min recovering at
+6 kW), about four switch pairs per 48 h instead of ~360, and the OpenADR
+`STORAGE_MAX_CHARGE_POWER` report shrinks by the same factor. Duty cycle is unchanged at ~11 %
+— set by losses plus draw over `max_kw`, not by the deadband.

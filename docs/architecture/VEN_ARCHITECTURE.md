@@ -257,6 +257,26 @@ heat may be curtailed (`HeaterEmergencyMode::Curtail`, plus heater setpoint 0) *
 alert**, in either pass — a capacity limit's penalty-inflated marginal cost cannot open it.
 `temp_safety_max_c` stays a hard stop.
 
+**Heater thermostat deadband (`thermostat_delta_c`).** The thermostat rule lives in one place,
+`assets/heater_thermostat.rs`, and forces power at three levels of precedence: the safety
+ceiling first (`temp_safety_max_c`, reachable only in `Absorb`), then the emergency at
+`temp_min_c` (comfort beats relay protection), then the ceiling deadband. The profile field
+`thermostat_delta_c` (default 3.0 °C, validated to be smaller than the
+`temp_min_c..temp_max_c` band) is applied at **both** ends: the emergency runs until
+`temp_min_c + delta`, and once the tank reaches `temp_max_c` the relay stays open until
+`temp_max_c - delta`, tracked by `HeaterState.ceiling_latched` alongside the existing
+`emergency_latched`. Both the arming and the release read the same `state.temperature_c` the
+forcing decision was made on, so the latch cannot disagree with it.
+
+Before this existed the floor had a hysteresis and the ceiling had none, so a tank pinned at
+`temp_max_c` re-closed its relay the moment it lost a hundredth of a degree. Because
+`capability_inner` reads the same rule, that chatter reached the capacity projection: ven-2's
+48 h import curve was a 647-step sawtooth swinging 0.59 ↔ 6.59 kW every few minutes. With a
+3 °C deadband the same tank cycles roughly every 11.7 h (~10 h cooling, ~79 min recovering at
+6 kW) — about four switch pairs across the horizon instead of ~360. The **duty cycle is
+unchanged** at ~11 %: it is set by standing losses plus draw over `max_kw`, not by the
+deadband. What changes is how often the relay switches to deliver it.
+
 **Visibility.** `GET /arbiter-diagnostics` (both passes: projection, deviation, lever, the limit
 pass's target/excess/adjustments/unresolved excess, and the measured net power the tick came to),
 `GET/PUT /arbiter-settings` (both toggles, each optional in the PUT body), and

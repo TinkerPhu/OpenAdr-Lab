@@ -92,6 +92,7 @@ impl AssetProfile {
                 temp_min_c: c.temp_min_c,
                 temp_max_c: c.temp_max_c,
                 temp_safety_max_c: c.temp_safety_max_c.unwrap_or(c.temp_max_c),
+                thermostat_delta_c: c.thermostat_delta_c,
                 power_stages: c.power_stages,
                 thermal_mass_kwh_per_c: c.effective_thermal_mass(),
                 k_loss_kw_per_c: c.effective_k_loss(),
@@ -335,6 +336,13 @@ pub struct HeaterConfig {
     /// extra headroom) when omitted, so existing profiles are unaffected.
     #[serde(default)]
     pub temp_safety_max_c: Option<f64>,
+    /// Thermostat deadband (°C), applied at BOTH ends of the band: the emergency
+    /// at `temp_min_c` runs until `temp_min_c + delta`, and the forced-off ceiling
+    /// at `temp_max_c` stays off until `temp_max_c - delta`. Must be smaller than
+    /// the band itself. Default 3.0 — the value the floor used as a hard-coded
+    /// constant before this became configurable.
+    #[serde(default = "super::defaults::default_thermostat_delta_c")]
+    pub thermostat_delta_c: f64,
     /// Number of switchable power stages: 1 (on/off) or 2 (mid/full). Levels are
     /// always evenly spaced at `max_kw / power_stages`, which is the physics of a
     /// staged resistive element — there is deliberately no free mid-power field, so

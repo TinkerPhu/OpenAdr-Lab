@@ -38,6 +38,14 @@ pub struct Heater {
     /// today's (no extra headroom), so existing profiles are unaffected.
     #[serde(default)]
     pub temp_safety_max_c: f64,
+    /// Thermostat deadband (°C) at BOTH ends of the band: the emergency at
+    /// `temp_min_c` runs until `temp_min_c + delta`, the forced-off ceiling at
+    /// `temp_max_c` stays off until `temp_max_c - delta`. Default 3.0 — what the
+    /// floor's hard-coded constant used before it became configurable. Without it
+    /// at the ceiling, a tank pinned at `temp_max_c` re-closes its relay the
+    /// instant it loses a hundredth of a degree (ven-2 cycled every 8 min).
+    #[serde(default = "default_thermostat_delta_sim")]
+    pub thermostat_delta_c: f64,
     /// Set each tick by sim from SimInjectState (Behaviour C); NOT from YAML. Defaults
     /// to `Normal` — no behaviour change until something actively sets it.
     #[serde(default)]
@@ -64,11 +72,22 @@ pub struct HeaterState {
     /// from the planner commanding the top stage (GB-44).
     #[serde(default)]
     pub emergency_latched: bool,
+    /// Cut out at `temp_max_c`, still inside the deadband on the way down. The
+    /// ceiling counterpart of `emergency_latched`, explicit for the same reason:
+    /// `actual_power_kw` cannot tell "off because full" from "off, uncommanded".
+    #[serde(default)]
+    pub ceiling_latched: bool,
 }
 
 /// Serde default for `Heater::power_stages` — see the field's doc comment.
 fn default_power_stages_sim() -> u8 {
     2
+}
+
+/// Serde default for `Heater::thermostat_delta_c` — see the field's doc comment.
+/// Mirrors `profile::defaults::default_thermostat_delta_c`.
+fn default_thermostat_delta_sim() -> f64 {
+    3.0
 }
 
 impl Heater {
@@ -93,6 +112,7 @@ impl Heater {
             power_stages: cfg.power_stages.max(1),
             temp_min_c: cfg.temp_min_c,
             temp_max_c: cfg.temp_max_c,
+            thermostat_delta_c: cfg.thermostat_delta_c,
             temp_min_c_profile: cfg.temp_min_c,
             temp_max_c_profile: cfg.temp_max_c,
             temp_safety_max_c: cfg.temp_safety_max_c,
@@ -130,6 +150,7 @@ impl Heater {
             temperature_c: cfg.temp_initial_c,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: cfg.temp_initial_c >= cfg.temp_max_c,
         }
     }
 
@@ -155,61 +176,28 @@ impl Heater {
         let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
         let new_temp = state.temperature_c + delta_c;
         let emergency_latched = self.emergency_active_in(state, self.emergency_mode)
-            && new_temp < self.temp_min_c + Self::EMERGENCY_HYSTERESIS_C;
+            && new_temp < self.temp_min_c + self.thermostat_delta_c;
+        // The ceiling's counterpart: latch on reaching temp_max_c, hold until a
+        // full delta below it. Without this the relay re-closes on the next tick,
+        // because the tank loses only a hundredth of a degree in one step.
+        //
+        // Arming and release both read `state.temperature_c` -- the value
+        // `thermostat_forced_kw` judged this step by -- so the latch cannot
+        // disagree with the decision it belongs to. Keying release off `new_temp`
+        // would re-latch as soon as the reheat began, trapping the heater off.
+        let ceiling_latched = state.temperature_c >= self.temp_max_c
+            || new_temp >= self.temp_max_c
+            || (state.ceiling_latched
+                && state.temperature_c > self.temp_max_c - self.thermostat_delta_c);
         (
             HeaterState {
                 temperature_c: new_temp,
                 actual_power_kw: actual,
                 emergency_latched,
+                ceiling_latched,
             },
             actual,
         )
-    }
-
-    /// Once the emergency fires at `temp_min_c`, it keeps running until this far above
-    /// it, to prevent rapid relay cycling.
-    const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-
-    /// Is the thermostat's emergency heat running under `mode`: at/below `temp_min_c`,
-    /// or still inside the hysteresis band of an emergency that already fired. Curtail
-    /// suppresses it: drifting toward ambient below `temp_min_c` is then the desired
-    /// response, not a fault to fight (§2 — no physical floor on this side).
-    fn emergency_active_in(&self, state: &HeaterState, mode: HeaterEmergencyMode) -> bool {
-        mode != HeaterEmergencyMode::Curtail
-            && (state.temperature_c <= self.temp_min_c
-                || (state.emergency_latched
-                    && state.temperature_c < self.temp_min_c + Self::EMERGENCY_HYSTERESIS_C))
-    }
-
-    /// The power the thermostat forces regardless of setpoint, if any: off at
-    /// the forced-off ceiling, full power in an emergency. The single rule
-    /// `step_inner`, `capability_inner` and `flexibility_floor_inner` all read.
-    fn thermostat_forced_kw(&self, state: &HeaterState) -> Option<f64> {
-        self.thermostat_forced_kw_in(state, self.emergency_mode)
-    }
-
-    /// Same rule, evaluated as if `mode` were active — answers the arbiter's
-    /// what-if questions ("heat forced without Curtail?", "room under Absorb?").
-    fn thermostat_forced_kw_in(
-        &self,
-        state: &HeaterState,
-        mode: HeaterEmergencyMode,
-    ) -> Option<f64> {
-        let emergency_active = self.emergency_active_in(state, mode);
-        // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true
-        // safety ceiling temp_safety_max_c (§2).
-        let safety_ceiling_c = if mode == HeaterEmergencyMode::Absorb {
-            self.temp_safety_max_c
-        } else {
-            self.temp_max_c
-        };
-        if state.temperature_c >= safety_ceiling_c {
-            Some(0.0)
-        } else if emergency_active {
-            Some(self.max_kw)
-        } else {
-            None
-        }
     }
 
     /// Point-in-time feasible power range.
@@ -259,6 +247,7 @@ impl Heater {
         m.insert("p_step_kw".into(), self.p_step_kw());
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);
+        m.insert("thermostat_delta_c".into(), self.thermostat_delta_c);
         m.insert("temp_safety_max_c".into(), self.temp_safety_max_c);
         m.insert("thermal_mass_kwh_per_c".into(), self.thermal_mass_kwh_per_c);
         m.insert(
@@ -532,6 +521,9 @@ mod tests {
             temp_min_c_profile: 20.0,
             temp_max_c_profile: 23.0,
             temp_safety_max_c: 23.0,
+            // 3.0 is what the floor's old hard-coded constant used, so every
+            // pre-existing emergency-hysteresis test keeps its exact premise.
+            thermostat_delta_c: 3.0,
             emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -552,6 +544,7 @@ mod tests {
             temp_min_c_profile: 40.0,
             temp_max_c_profile: 80.0,
             temp_safety_max_c: 90.0,
+            thermostat_delta_c: 3.0,
             emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: 200.0 * 4.186 / 3600.0, // ≈ 0.233 kWh/°C
             k_loss_kw_per_c: 0.003,
@@ -565,6 +558,7 @@ mod tests {
             temperature_c,
             actual_power_kw,
             emergency_latched: false,
+            ceiling_latched: false,
         }
     }
 
@@ -575,6 +569,7 @@ mod tests {
             temperature_c,
             actual_power_kw: heater.max_kw,
             emergency_latched: true,
+            ceiling_latched: false,
         }
     }
 
@@ -1169,6 +1164,130 @@ mod tests {
         let vals = h.future_state_values(1.0);
         assert_eq!(vals.len(), 1, "expected exactly one key");
         assert!(vals.contains_key("temp_c"));
+    }
+
+    // ── ceiling deadband (thermostat_delta_c) ────────────────────────────
+
+    #[test]
+    fn the_ceiling_latches_when_the_tank_reaches_temp_max() {
+        let h = hot_water_heater(); // temp_max_c = 80, delta = 3
+        let (after, power) = h.step_inner(&state_at(80.0, 0.0), h.max_kw, Duration::seconds(60));
+        assert_eq!(power, 0.0, "forced off at the ceiling");
+        assert!(after.ceiling_latched, "the ceiling latch must arm");
+    }
+
+    #[test]
+    fn a_latched_ceiling_stays_off_a_hair_below_temp_max() {
+        // The chatter itself: without a deadband this re-closed the relay after
+        // one 60 s step, which is what made ven-2's capacity curve a sawtooth.
+        let h = hot_water_heater();
+        let latched = HeaterState {
+            temperature_c: 79.99,
+            actual_power_kw: 0.0,
+            emergency_latched: false,
+            ceiling_latched: true,
+        };
+        let (after, power) = h.step_inner(&latched, h.max_kw, Duration::seconds(60));
+        assert_eq!(
+            power, 0.0,
+            "must stay off inside the deadband, got {power} kW"
+        );
+        assert!(after.ceiling_latched, "and stay latched");
+    }
+
+    #[test]
+    fn the_ceiling_releases_a_full_delta_below_temp_max() {
+        // 80 - 3 = 77: at or below that the heater is free to run again.
+        let h = hot_water_heater();
+        let latched = HeaterState {
+            temperature_c: 76.9,
+            actual_power_kw: 0.0,
+            emergency_latched: false,
+            ceiling_latched: true,
+        };
+        let (after, power) = h.step_inner(&latched, h.max_kw, Duration::seconds(60));
+        assert!(
+            power > 0.0,
+            "the deadband is spent; must run again, got {power} kW"
+        );
+        assert!(!after.ceiling_latched, "and unlatch");
+    }
+
+    #[test]
+    fn an_emergency_outranks_the_ceiling_latch() {
+        // Comfort beats relay protection: a tank at its floor reheats at once,
+        // even carrying a stale ceiling latch.
+        let h = hot_water_heater(); // temp_min_c = 40
+        let cold_but_latched = HeaterState {
+            temperature_c: 39.0,
+            actual_power_kw: 0.0,
+            emergency_latched: false,
+            ceiling_latched: true,
+        };
+        let (_, power) = h.step_inner(&cold_but_latched, 0.0, Duration::seconds(60));
+        assert!(
+            power > 0.0,
+            "the emergency must override the latch, got {power} kW"
+        );
+    }
+
+    #[test]
+    fn the_safety_ceiling_still_wins_over_everything() {
+        let mut h = hot_water_heater();
+        h.emergency_mode = HeaterEmergencyMode::Absorb; // relaxes to temp_safety_max_c = 90
+        let (_, power) = h.step_inner(&state_at(90.5, 0.0), h.max_kw, Duration::seconds(60));
+        assert_eq!(power, 0.0, "nothing may run above the safety ceiling");
+    }
+
+    #[test]
+    fn the_deadband_bounds_relay_switching_at_the_ceiling() {
+        // ven-2's observed defect: a tank pinned at its ceiling switched every
+        // 8 minutes (one 60 s step on, seven off) -- 30 switches in 4 h. Sized
+        // like ven-2 (2000 l) so the number means what it did on the fleet.
+        let mut h = hot_water_heater();
+        h.thermal_mass_kwh_per_c = 2000.0 * 4.186 / 3600.0;
+        let mut state = state_at(80.0, 0.0);
+        let mut switches = 0;
+        let mut was_on = false;
+        for _ in 0..(4 * 60) {
+            let (next, power) = h.step_inner(&state, h.max_kw, Duration::seconds(60));
+            let is_on = power > 0.0;
+            if is_on != was_on {
+                switches += 1;
+            }
+            was_on = is_on;
+            state = next;
+        }
+        assert!(
+            switches <= 2,
+            "expected the deadband to bound switching, got {switches} in 4 h"
+        );
+    }
+
+    #[test]
+    fn the_floor_deadband_reads_the_same_parameter() {
+        // The emergency's hysteresis is this same delta, not a second constant:
+        // widen it and the emergency runs correspondingly further above the floor.
+        let mut h = hot_water_heater(); // temp_min_c = 40, delta = 3
+        let latched = |t: f64| HeaterState {
+            temperature_c: t,
+            actual_power_kw: 6.0,
+            emergency_latched: true,
+            ceiling_latched: false,
+        };
+        // Inside 40 + 3: still forced on.
+        let (_, power) = h.step_inner(&latched(42.0), 0.0, Duration::seconds(60));
+        assert!(power > 0.0, "still inside the floor deadband");
+        // Past it: released.
+        let (_, power) = h.step_inner(&latched(43.5), 0.0, Duration::seconds(60));
+        assert_eq!(power, 0.0, "floor deadband spent");
+        // Widen the delta and the same 43.5 degC is now inside it.
+        h.thermostat_delta_c = 5.0;
+        let (_, power) = h.step_inner(&latched(43.5), 0.0, Duration::seconds(60));
+        assert!(
+            power > 0.0,
+            "the floor must read thermostat_delta_c, not a constant"
+        );
     }
 }
 

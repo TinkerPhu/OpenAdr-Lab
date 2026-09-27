@@ -1038,6 +1038,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1049,6 +1050,7 @@ mod milp_context_trait_tests {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
         let now = Utc::now();
         let target = HeaterTarget {
@@ -1108,6 +1110,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1119,6 +1122,7 @@ mod milp_context_trait_tests {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
         let now = Utc::now();
         let target = HeaterTarget {
@@ -1173,6 +1177,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1184,6 +1189,7 @@ mod milp_context_trait_tests {
             temperature_c: 20.0,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
@@ -1218,6 +1224,7 @@ mod milp_context_trait_tests {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
@@ -1229,6 +1236,7 @@ mod milp_context_trait_tests {
             temperature_c: 20.5,
             actual_power_kw: 0.0,
             emergency_latched: false,
+            ceiling_latched: false,
         });
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();

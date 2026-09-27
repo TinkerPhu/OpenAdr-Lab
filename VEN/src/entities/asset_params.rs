@@ -130,6 +130,9 @@ pub struct HeaterParams {
     pub temp_max_c: f64,
     /// True hard safety ceiling, above `temp_max_c`. Only reachable in `Absorb` mode.
     pub temp_safety_max_c: f64,
+    /// Thermostat deadband (°C) applied at both ends of the band — see
+    /// `assets::heater::Heater::thermostat_delta_c`.
+    pub thermostat_delta_c: f64,
     /// Number of switchable power stages. A two-stage 3-phase resistive element
     /// gives levels {0, max_kw/2, max_kw}; a single-stage one gives {0, max_kw}.
     /// Levels are always evenly spaced at `max_kw / power_stages` — that spacing
@@ -155,6 +158,7 @@ impl Default for HeaterParams {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
