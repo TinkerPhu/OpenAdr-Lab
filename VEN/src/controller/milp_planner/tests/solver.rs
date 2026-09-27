@@ -60,7 +60,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
     }
 }
 
-fn make_phase1_weights() -> Phase1Weights {
+pub(super) fn make_phase1_weights() -> Phase1Weights {
     Phase1Weights {
         w_energy: 1.0,
         w_ghg: 0.0,

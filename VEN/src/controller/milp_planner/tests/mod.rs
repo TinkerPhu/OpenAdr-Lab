@@ -801,6 +801,7 @@ mod base_load;
 mod basic;
 mod capacity_schedule;
 mod cost_sign;
+mod gb41_soft_deadline_core;
 mod heater;
 mod modes;
 mod penalty;
