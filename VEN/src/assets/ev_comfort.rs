@@ -82,29 +82,49 @@ pub(super) fn ev_energy_segments(
     fine.push(*bounds.last().unwrap_or(&1.0));
     let bounds = fine;
 
-    bounds
-        .windows(2)
-        .filter_map(|w| {
-            let (lo, hi) = (w[0], w[1]);
-            let kwh = (hi - lo) * battery_kwh;
-            if kwh <= 1e-12 {
-                return None;
-            }
-            let mid = (lo + hi) / 2.0;
-            let eur_per_kwh = if rates.is_empty() {
-                // No bid expressed: the profile's own two-step default.
-                if mid <= soc_target {
-                    v_ev_core_eur_kwh
-                } else {
-                    v_ev_extra_eur_kwh
-                }
+    let fine_bands = bounds.windows(2).filter_map(|w| {
+        let (lo, hi) = (w[0], w[1]);
+        let kwh = (hi - lo) * battery_kwh;
+        if kwh <= 1e-12 {
+            return None;
+        }
+        let mid = (lo + hi) / 2.0;
+        let eur_per_kwh = if rates.is_empty() {
+            // No bid expressed: the profile's own two-step default.
+            if mid <= soc_target {
+                v_ev_core_eur_kwh
             } else {
-                ComfortRate::value_at_fill(rates, mid)
-                    + (ComfortRate::co2_value_at_fill(rates, mid) / 1000.0) * w_ghg_eur_kg
-            };
-            Some(EvEnergySegment { kwh, eur_per_kwh })
-        })
-        .collect()
+                v_ev_extra_eur_kwh
+            }
+        } else {
+            ComfortRate::value_at_fill(rates, mid)
+                + (ComfortRate::co2_value_at_fill(rates, mid) / 1000.0) * w_ghg_eur_kg
+        };
+        Some(EvEnergySegment { kwh, eur_per_kwh })
+    });
+
+    // Merge adjacent bands that carry the same bid. Two bands priced alike are
+    // one decision split in two — the solver gains nothing from being allowed to
+    // fill them separately, and pays for the extra variables.
+    //
+    // This is not a micro-optimisation. The subdivision above is unconditional,
+    // but a *flat* stretch of a curve has nothing to resolve, and the fleet's own
+    // sessions express no curve at all (`engage_charge_planning` sets a target,
+    // not a bid), so their price is a two-step function with one breakpoint —
+    // 14 bands carrying 2 distinct prices. Measured on ven-11 (EV + base load,
+    // no heater, 288 slots): median solve 114 ms before this change shipped,
+    // 6426 ms with the unmerged bands, i.e. 56x for information the model did
+    // not contain. See the R-97 note in `docs/reference/TECHNICAL_DEBTS.md`.
+    let mut merged: Vec<EvEnergySegment> = Vec::new();
+    for band in fine_bands {
+        match merged.last_mut() {
+            Some(prev) if (prev.eur_per_kwh - band.eur_per_kwh).abs() < 1e-9 => {
+                prev.kwh += band.kwh;
+            }
+            _ => merged.push(band),
+        }
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -187,6 +207,35 @@ mod tests {
             "25 kWh to the target: {segs:?}"
         );
         assert!((above - 10.0).abs() < 1e-9, "10 kWh beyond it: {segs:?}");
+    }
+
+    /// R-97: a band is a decision, and two bands at the same bid are one
+    /// decision split in two. Every extra band is a variable the solver must
+    /// branch over, so a price that does not vary must not produce more than one.
+    #[test]
+    fn bands_at_the_same_bid_are_one_band() {
+        // The fleet's own case: `engage_charge_planning` sets a target, never a
+        // curve, so the price is the two-step default. Unmerged, the 5 %-SoC
+        // subdivision turns that into 14 bands carrying 2 distinct prices — and
+        // measured 56x the solve time on ven-11.
+        let segs = segments(&[], 0.30, 0.80);
+        assert_eq!(
+            segs.len(),
+            2,
+            "a two-step price is two decisions, however finely the range is cut: {segs:?}"
+        );
+
+        // A flat curve is one price over the whole range, so one band.
+        let flat = segments(&[pt(0.0, 0.25, 0.0), pt(1.0, 0.25, 0.0)], 0.10, 0.80);
+        assert_eq!(flat.len(), 1, "a flat curve is one decision: {flat:?}");
+
+        // A ramp genuinely varies, so it keeps its resolution.
+        let ramp = segments(&[pt(0.0, 0.40, 0.0), pt(1.0, 0.00, 0.0)], 0.10, 0.80);
+        assert!(
+            ramp.len() > 5,
+            "a sloping curve must keep its shape, got {} bands",
+            ramp.len()
+        );
     }
 
     #[test]
