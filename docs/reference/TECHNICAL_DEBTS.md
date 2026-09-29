@@ -397,6 +397,43 @@ two above instead.
 
 ## R-97 — MILP solve time sits close to its own timeout
 
+**`ev-comfort-piecewise-core` made this materially worse (measured 2026-09-29).** Replacing the
+EV's pinned core energy with continuous comfort bands raised solve time on every EV VEN measured.
+Sampled from `plan_history` over the same clock window on consecutive days, so host load is
+controlled, and in three regimes (A = before the feature, B = feature as shipped, C = after the
+band-merge fix below):
+
+| VEN | A median | B median | C median | TIME_LIMIT A → C |
+|---|---|---|---|---|
+| ven-11 (EV + base load, no heater) | 114 ms | 6406 ms | 6752 ms | 0% → 0% |
+| ven-2 (heater + EV) | 17.8 s | 60.7 s | 58.7 s | 5.6% → 45.5% |
+| ven-1 | 25.6 s | 14.3 s | 4.4 s | 0% → 0% |
+
+ven-11 is the clean case — no heater, battery or PV — so the EV is the only variable: **59×**.
+ven-2 now times out on nearly half its solves. ven-1 moved the other way and ven-5 improved from
+~90% TIME_LIMIT to GAP_LIMIT, so the effect is not uniform, but the EV-only case is unambiguous.
+
+**A first fix was wrong.** The band builder subdivides every curve interval into 5 %-SoC steps
+unconditionally, and the fleet's sessions express no curve at all (`engage_charge_planning` sets a
+target, not a bid), so a two-step price became 14 variables carrying 2 distinct prices. Merging
+adjacent equal-bid bands (`assets/ev_comfort.rs`, pinned by
+`bands_at_the_same_bid_are_one_band`) removed that redundancy and **changed nothing**: 6406 →
+6752 ms on ven-11. Band count was not the bottleneck. The merge is kept because it is correct on
+its own terms — fewer variables, provably identical valuation — but it does not address this.
+
+**What is actually left to test.** The remaining structural difference is that the EV's delivered
+energy used to be *pinned* under `MustRun` and is now only lower-bounded, so the solver chooses
+how much to charge as well as when. The free range is nominally the same as the old
+`e_ev_extra` cap, which is why this was not expected — so the next step is to measure, not
+theorise: build a 288-slot EV-only benchmark (the existing offline sweep runs 24 slots, which is
+why the whole regression escaped the suite) and A/B the band objective against a pinned-energy
+control. Do that before any further change to the EV's MILP contribution.
+
+**Functional impact is nil so far.** Plans are produced, EVs charge (ven-2: 45.8 kW of EV
+allocation), no warnings, and a timed-out MILP returns a feasible incumbent — the same bound
+GB-40 establishes. What is lost is cost-optimality, on the fleet's already-worst axis.
+
+
 **Severity: 🟠 Medium-High** · Effort Medium · Risk Medium · Gain High — this is the mechanism
 behind GB-38, and the margin is thin enough that ordinary host load crosses it.
 
