@@ -13722,3 +13722,25 @@ identical valuation, pinned by `bands_at_the_same_bid_are_one_band`.
 Still open, and genuinely unexplained: what did step at 08:15Z on both hosts, and why it stayed
 elevated through 15Z including quiet hours. Answering it needs measurement on hosts nobody is
 building on.
+
+### 2026-09-29 — and the cause was an EV departure, not a deploy
+
+Closing the loop on the retracted regression. Both VENs stepped as their EV changed availability
+state: ven-11's car left at 08:09:39Z with a 65 % expected SoC drop and the step is the next
+replan at 08:14:54Z; ven-2's car *returned* at ~07:59Z with a 17.4 % drop and stepped at
+08:18:44Z. ven-11 has only `base_load` and `ev`, so nothing else on that site can account for it.
+
+The mechanism is symmetric: once a car is away and returning with a real SoC drop, the planner
+must place a substantial charge *after a predicted return* rather than charge a car that is
+present. The difficulty varies day to day with the randomised drop, which is why the effect shows
+on one morning and not the one before — and why a "same clock window yesterday" comparison was
+never going to be valid for an EV whose workload is drawn fresh each day.
+
+That capability is `ev-usage-forecast`'s, reachable for an away-now car since `96f259e9`
+(2026-09-27) — the same day ven-11's daily median first moved, 136 ms to 563 ms, two days before
+`ev-comfort-piecewise-core` existed anywhere. Details and confidence bounds under R-97.
+
+The durable gap this exposed: `plan_history` records how long a solve took and nothing about what
+it was solving, so a slow solve cannot be replayed. Every wrong turn today came from reasoning
+about correlations in timing data instead of reading the inputs. An input digest on slow solves is
+recorded in R-97 as the fix.

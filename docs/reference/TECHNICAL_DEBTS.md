@@ -435,10 +435,34 @@ What refuted it:
    rather than the fix being insufficient. The merge is kept on its own merits — fewer variables,
    provably identical valuation, pinned by `bands_at_the_same_bid_are_one_band`.
 
-**What is actually known:** ven-2 and ven-11 stepped up at ~08:15Z on 2026-09-29 for reasons not
-yet identified and stayed elevated through 15Z, including hours with no builds running. That is
-worth explaining, but it is not this change, and explaining it needs a measurement that does not
-run on hosts the measurer is also building on.
+**What did cause the step: an EV usage-forecast transition.** Both VENs stepped as their EV
+changed availability state, not as code was deployed.
+
+- **ven-11** (assets: `base_load` + `ev` only — nothing else can explain it): `GET /ev-usage-sim`
+  gives `leave_at 2026-09-29T08:09:39Z` with a **65.1 % expected SoC drop**. The step is the very
+  next replan, 08:14:54Z.
+- **ven-2** (evening departure / morning return pattern, `return_at ~07:59`): its EV **returned**
+  at ~07:59Z with a 17.4 % drop; the step follows three cycles later at 08:18:44Z.
+
+The mechanism is the same in both directions: once a car is away and returning with a real SoC
+drop, the planner must place a substantial charge *after a predicted return* instead of charging a
+car that is present — a materially harder problem, and one whose difficulty varies day to day with
+the randomised drop (`soc_drop_pct_mean`/`stddev`). That is why the effect appears on one morning
+and not the previous one.
+
+This capability is `ev-usage-forecast`'s, made reachable for an away-now car by `96f259e9`
+(deployed 2026-09-27) — which is also when ven-11's daily median first stepped, 136 ms on the 26th
+to 563 ms on the 27th, two days before `ev-comfort-piecewise-core` existed on any host.
+
+**Confidence:** strong for ven-11 (one cycle, single-asset site, exact time match), good for ven-2
+(same mechanism class, three cycles). Neither is proof of a *quantitative* cost model for
+away-window planning, which is what the next measurement should establish.
+
+**Still missing, and the reason this took a wrong turn first:** `plan_history` records
+`solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
+an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,
+EV availability pattern and required energy, binary count — so the next occurrence is
+reproducible offline instead of inferred from correlations.
 
 **Where:** `VEN/src/controller/milp_planner/` (two-phase solve, `solver_timeout_s` default 60 s
 per phase).
