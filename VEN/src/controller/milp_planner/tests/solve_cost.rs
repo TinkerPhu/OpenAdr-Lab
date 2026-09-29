@@ -414,31 +414,8 @@ fn time_ev_solve_at(
     hours_after_now: i64,
     drop_pct: f64,
 ) -> (f64, String) {
-    use crate::entities::asset_params::{EvUsageDayParams, EvUsageMode, EvUsageSimParams};
     let now = fixed_now() + chrono::Duration::hours(hours_after_now);
-    let mut profile = bench_profile(false);
-    if usage_forecast {
-        let day = EvUsageDayParams {
-            leave_time: chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
-            leave_jitter_min: 0.0,
-            return_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
-            return_jitter_min: 0.0,
-            leave_probability: 1.0,
-            soc_drop_pct_mean: drop_pct,
-            soc_drop_pct_stddev: 0.0,
-        };
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Ev(ev) = a {
-                ev.usage_sim = Some(EvUsageSimParams {
-                    mode: EvUsageMode::Forecast,
-                    engage_charge_planning: true,
-                    weekday: day.clone(),
-                    weekend: day.clone(),
-                    min_soc_after_drop_pct: 5.0,
-                });
-            }
-        }
-    }
+    let profile = ev_bench_profile(usage_forecast, drop_pct);
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let session = crate::entities::device_session::EvSession {
@@ -516,4 +493,169 @@ fn bench_ev_session_solve_cost() {
         );
     }
     println!();
+}
+
+/// The EV-only bench profile, optionally carrying the fleet's `usage_forecast`
+/// schedule with `engage_charge_planning`.
+fn ev_bench_profile(usage_forecast: bool, drop_pct: f64) -> Profile {
+    ev_bench_profile_with_heater(usage_forecast, drop_pct, false)
+}
+
+fn ev_bench_profile_with_heater(usage_forecast: bool, drop_pct: f64, heater: bool) -> Profile {
+    use crate::entities::asset_params::{EvUsageDayParams, EvUsageMode, EvUsageSimParams};
+    let mut profile = bench_profile(heater);
+    if usage_forecast {
+        let day = EvUsageDayParams {
+            leave_time: chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            leave_jitter_min: 0.0,
+            return_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+            return_jitter_min: 0.0,
+            leave_probability: 1.0,
+            soc_drop_pct_mean: drop_pct,
+            soc_drop_pct_stddev: 0.0,
+        };
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Ev(ev) = a {
+                ev.usage_sim = Some(EvUsageSimParams {
+                    mode: EvUsageMode::Forecast,
+                    engage_charge_planning: true,
+                    weekday: day.clone(),
+                    weekend: day.clone(),
+                    min_soc_after_drop_pct: 5.0,
+                });
+            }
+        }
+    }
+    profile
+}
+
+/// R-97: where does the away-window cost land — phase 1 or phase 2?
+///
+/// GB-40 established that for the heater phase 2 never binds and burns its whole
+/// budget, which is why every model-size idea aimed at phase 1 failed. Before
+/// attempting anything on the EV, find out which half its ~5x actually lives in:
+/// an EV-specific model change can only help the half that is actually spending
+/// the time.
+///
+///   wsl cargo test -p ven-app --release bench_ev_phase_split -- --ignored --nocapture
+fn ev_phase_split(
+    usage_forecast: bool,
+    hours_after_now: i64,
+    drop_pct: f64,
+) -> (f64, f64, String, String) {
+    ev_phase_split_cfg(usage_forecast, hours_after_now, drop_pct, false)
+}
+
+fn ev_phase_split_cfg(
+    usage_forecast: bool,
+    hours_after_now: i64,
+    drop_pct: f64,
+    heater: bool,
+) -> (f64, f64, String, String) {
+    let now = fixed_now() + chrono::Duration::hours(hours_after_now);
+    let profile = ev_bench_profile_with_heater(usage_forecast, drop_pct, heater);
+    let mut sim = make_snap_from_profile(&profile);
+    if heater {
+        // The live condition the fleet's heater VENs are in (same as GB-40's bench).
+        set_heater_power(&mut sim, 6.0);
+    }
+    let sim = sim;
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let cap = no_capacity();
+
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let timeout = profile.planner.solver_timeout_s as f64;
+
+    let t = Instant::now();
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 must be feasible");
+    let p1_s = t.elapsed().as_secs_f64();
+    let p1_status = format!("{:?}", p1.status);
+
+    let t = Instant::now();
+    let p2 = solve_phase2(
+        &inputs,
+        &p1w,
+        &p2w,
+        p1.objective_eur,
+        profile.planner.phase2_epsilon_eur,
+        &p1,
+        &ctxs,
+        timeout,
+    );
+    let p2_s = t.elapsed().as_secs_f64();
+    let p2_status = match &p2 {
+        Ok((sol, _)) => format!("{:?}", sol.status),
+        Err(_) => "Err".to_string(),
+    };
+    (p1_s, p2_s, p1_status, p2_status)
+}
+
+#[test]
+#[ignore = "R-97 benchmark: phase-split EV solves, run with --ignored --nocapture"]
+fn bench_ev_phase_split() {
+    let _ = ev_phase_split(false, 0, 20.0); // warm-up
+
+    println!(
+        "
+── R-97: which phase pays for the EV away window ──
+"
+    );
+    println!(
+        "  {:34} {:>9} {:>9}   {:24}",
+        "variant", "phase1", "phase2", "statuses"
+    );
+    const REPEATS: usize = 5;
+    for (label, fc, dh, drop) in [
+        ("no forecast (plain EV site)", false, 0, 20.0),
+        ("forecast, car HOME", true, 0, 20.0),
+        ("forecast, car AWAY", true, 3, 20.0),
+        ("forecast, car AWAY, 90% drop", true, 3, 90.0),
+        ("forecast, just RETURNED", true, 12, 65.0),
+    ] {
+        let mut p1s = Vec::new();
+        let mut p2s = Vec::new();
+        let mut st = (String::new(), String::new());
+        for _ in 0..REPEATS {
+            let (a, b, s1, s2) = ev_phase_split(fc, dh, drop);
+            p1s.push(a);
+            p2s.push(b);
+            st = (s1, s2);
+        }
+        p1s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        p2s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "  {label:34} {:9.3} {:9.3}   {} / {}",
+            p1s[0], p2s[0], st.0, st.1
+        );
+    }
+    // The question this whole line of work hangs on: on a heater VEN — the shape
+    // that actually hits the timeout — does the EV leaving add anything, or is
+    // phase 2 already saturated by the heater? If it is saturated, an EV-specific
+    // fix cannot move the VENs that hurt.
+    println!("\n  -- with a heater (the shape that actually times out) --\n");
+    for (label, fc, dh) in [
+        ("heater + EV, no forecast", false, 0),
+        ("heater + EV, car HOME", true, 0),
+        ("heater + EV, car AWAY", true, 3),
+    ] {
+        let mut p1s = Vec::new();
+        let mut p2s = Vec::new();
+        let mut st = (String::new(), String::new());
+        for _ in 0..3 {
+            let (a, b, s1, s2) = ev_phase_split_cfg(fc, dh, 20.0, true);
+            p1s.push(a);
+            p2s.push(b);
+            st = (s1, s2);
+        }
+        p1s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        p2s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "  {label:34} {:9.3} {:9.3}   {} / {}",
+            p1s[0], p2s[0], st.0, st.1
+        );
+    }
+    println!("\n  (minimum of {REPEATS} runs per phase; 3 for the heater rows)\n");
 }
