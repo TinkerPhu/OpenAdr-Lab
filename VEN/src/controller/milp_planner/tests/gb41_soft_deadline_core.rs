@@ -458,3 +458,142 @@ fn sweep_sites_against_pricing_and_limits() {
     );
     println!("{table}");
 }
+
+// ── R-97: what in the band model costs the solve time ───────────────────────
+//
+// `ev-comfort-piecewise-core` raised ven-11 (EV + base load, no heater) from a
+// 114 ms median solve to 6.4 s. The offline probes above run 24 slots, which is
+// why nothing here noticed; the fleet plans 288. This benchmark rebuilds the
+// ven-11 shape at the production grid and A/Bs the three candidate causes at the
+// `MilpInputs` level, so no production code has to change to run the experiment.
+//
+//   wsl cargo test -p ven-app --release bench_ev_band_solve_cost -- --ignored --nocapture
+
+/// The ven-11 shape on the production 288-slot grid: EV + base load only.
+#[cfg(test)]
+fn ev_inputs_288(segments: Vec<EvEnergySegment>, required_kwh: f64) -> MilpInputs {
+    let n = 288;
+    let mut inputs = inputs_for(&SITES[0]);
+    inputs.n = n;
+    inputs.dt_h = vec![5.0 / 60.0; n];
+    inputs.cum_s = (0..=n as i64).map(|i| i * 300).collect();
+    // Same diurnal shape as the 24-slot probe, at 5-minute resolution.
+    inputs.c_imp_eur_kwh = (0..n).map(|t| if t < 72 { 0.06 } else { 0.25 }).collect();
+    inputs.rate_stale = vec![false; n];
+    inputs.c_exp_eur_kwh = vec![0.08; n];
+    inputs.g_imp_kgco2_kwh = vec![0.30; n];
+    inputs.p_pv_kw = vec![0.0; n];
+    inputs.p_base_kw = vec![0.5; n];
+    inputs.p_imp_max_phys_kw = vec![25.0; n];
+    inputs.p_exp_max_phys_kw = vec![10.0; n];
+    inputs.p_imp_max_cont_kw = vec![25.0; n];
+    inputs.p_exp_max_cont_kw = vec![10.0; n];
+    inputs.a_ev = vec![true; n];
+    inputs.ev_mode = MilpLoadMode::MustRun; // the fleet's mode
+    inputs.t_ev_dead_step = Some(n - 1);
+    inputs.e_ev_required_kwh = required_kwh;
+    inputs.ev_segments = segments;
+    inputs
+}
+
+#[cfg(test)]
+fn time_ev_solve(label: &str, segments: Vec<EvEnergySegment>, required_kwh: f64) {
+    let inputs = ev_inputs_288(segments, required_kwh);
+    let n_bands = inputs.ev_segments.len();
+    let started = std::time::Instant::now();
+    let out = solve_phase1(
+        &inputs,
+        &realistic_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    )
+    .unwrap_or_else(|e| panic!("{label} failed to solve: {e:?}"));
+    let secs = started.elapsed().as_secs_f64();
+    let kwh = delivered_kwh(&inputs, &out);
+    println!(
+        "  {label:52} {n_bands:2} bands  {secs:8.2} s  {:?}  {kwh:6.2} kWh",
+        out.status
+    );
+}
+
+#[test]
+#[ignore = "R-97 benchmark: production-sized 288-slot solves, run with --ignored --nocapture"]
+fn bench_ev_band_solve_cost() {
+    // Untimed warm-up so solver start-up does not land in the first figure.
+    time_ev_solve("(warm-up, discarded)", bands(1.0, 0.10), TO_TARGET_KWH);
+
+    println!("\n── R-97: what the EV band model costs at 288 slots ──\n");
+
+    // 1. The fleet's actual shape today: guaranteed 25 kWh at the default bid,
+    //    10 kWh beyond the target at the low bid. This is the regressed case.
+    time_ev_solve(
+        "1 fleet shape: 25 @ 1.00 + 10 @ 0.10",
+        bands(1.0, 0.10),
+        TO_TARGET_KWH,
+    );
+
+    // 2. The same guarantee with NO energy beyond the target, so the total is
+    //    pinned exactly as it was before this change. If this is fast, the free
+    //    range above the floor is the cause.
+    time_ev_solve(
+        "2 pinned total: 25 @ 1.00 only",
+        vec![EvEnergySegment {
+            kwh: TO_TARGET_KWH,
+            eur_per_kwh: 1.0,
+        }],
+        TO_TARGET_KWH,
+    );
+
+    // 3. The same free range as (1) but at ONE price. If this is fast and (1) is
+    //    slow, it is the price *step* — two bands the solver must trade off —
+    //    rather than the freedom itself.
+    time_ev_solve(
+        "3 one price over the whole free range: 35 @ 1.00",
+        vec![EvEnergySegment {
+            kwh: TO_TARGET_KWH + BEYOND_TARGET_KWH,
+            eur_per_kwh: 1.0,
+        }],
+        TO_TARGET_KWH,
+    );
+
+    // 4. As (1) but with the beyond-target band worth nothing, so it can never
+    //    pay for itself. Isolates whether a *worthwhile* extra band is what the
+    //    solver spends its time on.
+    time_ev_solve(
+        "4 worthless extra: 25 @ 1.00 + 10 @ 0.00",
+        bands(1.0, 0.0),
+        TO_TARGET_KWH,
+    );
+
+    // 6. THE FLEET'S ACTUAL SHAPE. `engage_charge_planning` writes no session, so
+    //    `apply_usage_forecast` never fills `segments` — the EV arrives with an
+    //    empty band list and a firm requirement, and `declare_vars` covers it
+    //    with one synthetic ZERO-reward band. Nothing in the objective then
+    //    prefers any particular amount or timing beyond the floor.
+    time_ev_solve(
+        "6 fleet reality: NO bands, floor 25 (zero reward)",
+        vec![],
+        TO_TARGET_KWH,
+    );
+
+    // 7. The same with the guarantee priced. If 6 is slow and 7 is fast, the cost
+    //    is the objective's indifference, not the model's size.
+    time_ev_solve(
+        "7 same, but the guarantee is priced at 1.00",
+        vec![EvEnergySegment {
+            kwh: TO_TARGET_KWH,
+            eur_per_kwh: 1.0,
+        }],
+        TO_TARGET_KWH,
+    );
+
+    // 5. The old model's reward magnitude question: the same shape as (1) with a
+    //    bid near the actual cost of energy rather than 4x above it.
+    time_ev_solve(
+        "5 realistic bid: 25 @ 0.30 + 10 @ 0.10",
+        bands(0.30, 0.10),
+        TO_TARGET_KWH,
+    );
+
+    println!();
+}
