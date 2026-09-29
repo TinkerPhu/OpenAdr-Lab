@@ -397,45 +397,48 @@ two above instead.
 
 ## R-97 — MILP solve time sits close to its own timeout
 
-**`ev-comfort-piecewise-core` made this materially worse (measured 2026-09-29).** Replacing the
-EV's pinned core energy with continuous comfort bands raised solve time on every EV VEN measured.
-Sampled from `plan_history` over the same clock window on consecutive days, so host load is
-controlled, and in three regimes (A = before the feature, B = feature as shipped, C = after the
-band-merge fix below):
+**A claimed regression from `ev-comfort-piecewise-core`, retracted the same day (2026-09-29).**
+Kept because the method is the lesson, not the conclusion.
 
-| VEN | A median | B median | C median | TIME_LIMIT A → C |
-|---|---|---|---|---|
-| ven-11 (EV + base load, no heater) | 114 ms | 6406 ms | 6752 ms | 0% → 0% |
-| ven-2 (heater + EV) | 17.8 s | 60.7 s | 58.7 s | 5.6% → 45.5% |
-| ven-1 | 25.6 s | 14.3 s | 4.4 s | 0% → 0% |
+Post-deploy sampling showed ven-11 (EV + base load, no heater) at a 6.4 s median against 114 ms
+the day before, and ven-2 at 45-54 % TIME_LIMIT against 5.6 %. That was reported as a 56x
+regression caused by the change. **It was not established, and the attribution was wrong.**
 
-ven-11 is the clean case — no heater, battery or PV — so the EV is the only variable: **59×**.
-ven-2 now times out on nearly half its solves. ven-1 moved the other way and ven-5 improved from
-~90% TIME_LIMIT to GAP_LIMIT, so the effect is not uniform, but the EV-only case is unambiguous.
+What refuted it:
 
-**A first fix was wrong.** The band builder subdivides every curve interval into 5 %-SoC steps
-unconditionally, and the fleet's sessions express no curve at all (`engage_charge_planning` sets a
-target, not a bid), so a two-step price became 14 variables carrying 2 distinct prices. Merging
-adjacent equal-bid bands (`assets/ev_comfort.rs`, pinned by
-`bands_at_the_same_bid_are_one_band`) removed that redundancy and **changed nothing**: 6406 →
-6752 ms on ven-11. Band count was not the bottleneck. The merge is kept because it is correct on
-its own terms — fewer variables, provably identical valuation — but it does not address this.
+- **The step precedes the deploy.** Plotting consecutive solves instead of hourly medians, ven-2
+  jumps 15.4 s -> 66.0 s between 08:13:28Z and 08:18:44Z, and ven-11 402 ms -> 21984 ms between
+  08:09:54Z and 08:14:54Z. Both hosts stepped within five minutes of each other at ~08:15Z. The
+  feature reached Node1 at 09:17Z and Node2 at ~09:20Z. A cause cannot follow its effect.
+- **It does not reproduce offline.** Seven band shapes on the production 288-slot grid solve in
+  0.04-0.09 s (`bench_ev_band_solve_cost`), including the fleet's actual shape — no bands at all,
+  one synthetic zero-reward guarantee band, which is the *fastest* of the seven. Through the full
+  two-phase planner with `usage_forecast` and charge planning, 0.08-0.22 s
+  (`bench_ev_session_solve_cost`). Nothing in the band model costs seconds.
+- **Other VENs moved the other way in the same window.** ven-7 went 28.3 s -> 5.0 s across 08:15Z
+  while ven-19 and ven-15 stayed flat — all pre-deploy. That is host and fleet conditions, not a
+  code change.
 
-**What is actually left to test.** The remaining structural difference is that the EV's delivered
-energy used to be *pinned* under `MustRun` and is now only lower-bounded, so the solver chooses
-how much to charge as well as when. The free range is nominally the same as the old
-`e_ev_extra` cap, which is why this was not expected — so the next step is to measure, not
-theorise: build a 288-slot EV-only benchmark (the existing offline sweep runs 24 slots, which is
-why the whole regression escaped the suite) and A/B the band objective against a pinned-energy
-control. Do that before any further change to the EV's MILP contribution.
+**The methodological failures, which are why this entry is kept.**
 
-**Functional impact is nil so far.** Plans are produced, EVs charge (ven-2: 45.8 kW of EV
-allocation), no warnings, and a timed-out MILP returns a feasible incumbent — the same bound
-GB-40 establishes. What is lost is cost-optimality, on the fleet's already-worst axis.
+1. *A one-sample baseline.* The change's own baseline table held one `solver_ms` per VEN. ven-2's
+   entry was 11.9 s; its real distribution over the preceding 1910 solves was median 15.7 s, p90
+   31.5 s, tail to the ceiling. A single draw cannot distinguish a 4x regression from an ordinary
+   sample — in either direction.
+2. *Time-of-day matching is not load control.* Comparing the same clock window on consecutive days
+   looks controlled and is not, when the second day is full of E2E runs, image builds and fleet
+   redeploys on those same hosts — activity caused by the very work being measured.
+3. *Hourly medians hid the boundary.* They placed the jump "somewhere in the 08-09Z hour", which
+   was compatible with the deploy. Consecutive-solve sequences placed it at 08:15Z, which is not.
+4. *A confident fix for an unverified cause.* Band merging was shipped as the remedy and changed
+   nothing (6406 -> 6752 ms). That should have been read immediately as the diagnosis being wrong
+   rather than the fix being insufficient. The merge is kept on its own merits — fewer variables,
+   provably identical valuation, pinned by `bands_at_the_same_bid_are_one_band`.
 
-
-**Severity: 🟠 Medium-High** · Effort Medium · Risk Medium · Gain High — this is the mechanism
-behind GB-38, and the margin is thin enough that ordinary host load crosses it.
+**What is actually known:** ven-2 and ven-11 stepped up at ~08:15Z on 2026-09-29 for reasons not
+yet identified and stayed elevated through 15Z, including hours with no builds running. That is
+worth explaining, but it is not this change, and explaining it needs a measurement that does not
+run on hosts the measurer is also building on.
 
 **Where:** `VEN/src/controller/milp_planner/` (two-phase solve, `solver_timeout_s` default 60 s
 per phase).

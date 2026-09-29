@@ -378,3 +378,109 @@ fn bench_mip_gap_quality_sweep() {
            This is a measurement, not a threshold -- read the printed table, not an assertion.\n"
     );
 }
+
+// ── R-97: the EV band model through the FULL two-phase planner ──────────────
+//
+// The 288-slot phase-1 A/B in `gb41_soft_deadline_core.rs` showed every band
+// shape solving in 0.04-0.10 s, i.e. the bands are not expensive on their own —
+// yet ven-11 (EV + base load, no heater) went from a 114 ms median to 6.4 s when
+// `ev-comfort-piecewise-core` shipped. The difference between that harness and
+// production is that the fleet runs `run_planner`: two phases plus duals, and
+// GB-40 records phase 2 as the half that never binds and burns its full budget.
+// This measures the same site through the real entry point.
+//
+//   wsl cargo test -p ven-app --release bench_ev_session_solve_cost -- --ignored --nocapture
+
+/// One full `run_planner` pass on the EV-only bench site, with or without a
+/// firm EV session (the fleet's `engage_charge_planning` shape).
+fn time_one_ev_solve(with_session: bool) -> (f64, String) {
+    time_ev_solve_cfg(with_session, false)
+}
+
+/// As above, optionally giving the EV the fleet's `usage_forecast` schedule with
+/// `engage_charge_planning` — which adds the away-window availability mask, the
+/// projected SoC drops and a mid-horizon departure deadline. That is the part of
+/// the fleet's shape the plain bench profile does not have.
+fn time_ev_solve_cfg(with_session: bool, usage_forecast: bool) -> (f64, String) {
+    use crate::entities::asset_params::{EvUsageDayParams, EvUsageMode, EvUsageSimParams};
+    let now = fixed_now();
+    let mut profile = bench_profile(false);
+    if usage_forecast {
+        let day = EvUsageDayParams {
+            leave_time: chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            leave_jitter_min: 0.0,
+            return_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+            return_jitter_min: 0.0,
+            leave_probability: 1.0,
+            soc_drop_pct_mean: 20.0,
+            soc_drop_pct_stddev: 0.0,
+        };
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Ev(ev) = a {
+                ev.usage_sim = Some(EvUsageSimParams {
+                    mode: EvUsageMode::Forecast,
+                    engage_charge_planning: true,
+                    weekday: day.clone(),
+                    weekend: day.clone(),
+                    min_soc_after_drop_pct: 5.0,
+                });
+            }
+        }
+    }
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let session = crate::entities::device_session::EvSession {
+        id: uuid::Uuid::new_v4(),
+        target_soc: 0.80,
+        departure_time: now + chrono::Duration::hours(12),
+        soft_deadline: false,
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
+        budget_eur: None,
+        comfort_rates: vec![],
+        mode: crate::entities::design_vocabulary::UserRequestMode::ByDeadline,
+        created_at: now,
+        updated_at: now,
+    };
+    let sess = with_session.then_some(&session);
+
+    let started = Instant::now();
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, sess, None, &tariffs),
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        sess,
+        None,
+        &[],
+        None,
+        None,
+    );
+    (
+        started.elapsed().as_secs_f64(),
+        format!("{:?}", plan.solve_status),
+    )
+}
+
+#[test]
+#[ignore = "R-97 benchmark: full two-phase solves, run with --ignored --nocapture"]
+fn bench_ev_session_solve_cost() {
+    let _ = time_one_ev_solve(false); // warm-up, discarded
+
+    println!(
+        "
+── R-97: EV-only site through the full two-phase planner ──
+"
+    );
+    for (label, sess, fc) in [
+        ("no EV session", false, false),
+        ("firm EV session", true, false),
+        ("usage_forecast + charge planning", false, true),
+        ("usage_forecast + firm session", true, true),
+    ] {
+        let (secs, status) = time_ev_solve_cfg(sess, fc);
+        println!("  {label:34} {secs:8.2} s  {status}");
+    }
+    println!();
+}
