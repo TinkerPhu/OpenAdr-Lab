@@ -53,6 +53,15 @@ impl Profile {
                 }
             }
         }
+        // A zero budget would leave phase 2 no time to even read its warm start,
+        // so it would always fail and silently fall back to phase 1. Disabling
+        // phase 2 is what `phase2_epsilon_eur = 0.0` is for; say that instead.
+        if self.planner.phase2_solver_timeout_s == 0 {
+            errors.push(
+                "planner.phase2_solver_timeout_s must be ≥ 1 s; to disable phase 2                  entirely set planner.phase2_epsilon_eur = 0.0"
+                    .to_string(),
+            );
+        }
         if self.planner.phase2_epsilon_eur < 0.0 {
             errors.push(format!(
                 "planner.phase2_epsilon_eur must be ≥ 0.0, got {}",
@@ -1048,6 +1057,35 @@ planner:
         assert!(
             errs.iter().any(|e| e.contains("phase2_epsilon_eur")),
             "expected phase2_epsilon_eur violation, got: {errs:?}"
+        );
+    }
+
+    /// R-97: phase 2 gets its own budget, and 0 is a configuration error rather
+    /// than a way to switch it off (a 0 s limit makes it fail and silently fall
+    /// back to phase 1; `phase2_epsilon_eur = 0.0` is the documented off switch).
+    #[test]
+    fn validate_rejects_a_zero_phase2_solver_timeout() {
+        let mut p = make_heater_profile(0.50, 0.17);
+        p.planner.phase2_solver_timeout_s = 0;
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("phase2_solver_timeout_s")),
+            "expected phase2_solver_timeout_s violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn phase2_solver_timeout_defaults_to_a_short_budget_not_phase_ones() {
+        let cfg = PlannerConfig::default();
+        assert_eq!(
+            cfg.phase2_solver_timeout_s, 5,
+            "phase 2 is inert on heater sites and sub-second elsewhere (R-97), so              its default budget must not be phase 1's"
+        );
+        assert!(
+            cfg.phase2_solver_timeout_s < cfg.solver_timeout_s,
+            "phase 2's budget must be shorter than phase 1's: {} vs {}",
+            cfg.phase2_solver_timeout_s,
+            cfg.solver_timeout_s
         );
     }
 

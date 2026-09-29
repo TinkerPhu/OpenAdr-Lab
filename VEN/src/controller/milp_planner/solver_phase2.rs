@@ -370,6 +370,9 @@ pub(crate) fn solve_milp_two_phase(
     epsilon: f64,
     asset_contexts: &[Box<dyn AssetMilpContext>],
     timeout_s: f64,
+    // Phase 2's own budget (R-97): it is inert on heater sites and sub-second
+    // elsewhere, so it does not need phase 1's.
+    phase2_timeout_s: f64,
 ) -> Result<(SolveOutput, f64, f64, Vec<f64>), Box<dyn std::error::Error>> {
     let phase1_sol = solve_phase1(inputs, p1w, asset_contexts, timeout_s)?;
     let c_star = phase1_sol.objective_eur;
@@ -385,7 +388,7 @@ pub(crate) fn solve_milp_two_phase(
             epsilon,
             &phase1_sol,
             asset_contexts,
-            timeout_s,
+            phase2_timeout_s,
         ) {
             Ok((sol, friction_eur)) => (sol, friction_eur),
             Err(e) => {

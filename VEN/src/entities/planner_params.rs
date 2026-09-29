@@ -56,6 +56,8 @@ pub struct PlannerParams {
     pub plan_adoption_decay_s: f64,
     pub phase2_epsilon_eur: f64,
     pub solver_timeout_s: u64,
+    /// Phase 2's own budget; see `profile::planner::phase2_solver_timeout_s` (R-97).
+    pub phase2_solver_timeout_s: u64,
     /// HiGHS optimality-gap tolerance, shared by all three solve call sites and
     /// persisted on `Plan.mip_gap_target`. See `profile::schema::PlannerConfig`
     /// for why it can only be tuned by offline benchmarking.
@@ -120,6 +122,7 @@ impl Default for PlannerParams {
             plan_adoption_decay_s: 1500.0,
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
+            phase2_solver_timeout_s: 5,
             mip_gap_target: 0.02,
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,

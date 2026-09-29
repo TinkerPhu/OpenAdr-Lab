@@ -432,14 +432,15 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
     // epsilon must cover running it in every slot (4 * 0.50 = 2.0 EUR) with margin.
     let epsilon = 2.5;
 
-    let out_no_reward = solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.0), 60.0)
-        .expect("solver failed (no CO2 reward)")
-        .0;
+    let out_no_reward =
+        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.0), 60.0, 60.0)
+            .expect("solver failed (no CO2 reward)")
+            .0;
     // Reward (0.50) exceeds both the tier penalty (0.05) and the real energy
     // cost (0.50) is covered separately by epsilon — net friction benefit per
     // full-tier slot is unambiguous.
     let out_with_reward =
-        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.50), 60.0)
+        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.50), 60.0, 60.0)
             .expect("solver failed (CO2 reward=0.50)")
             .0;
 
@@ -487,6 +488,7 @@ fn ev_startup_penalty_produces_contiguous_block() {
         1.0,
         &contexts_from_inputs(&inputs),
         60.0,
+        60.0,
     )
     .expect("solver failed")
     .0;
@@ -529,6 +531,7 @@ fn battery_startup_penalty_minimises_active_restarts() {
         &weights,
         1.0,
         &contexts_from_inputs(&inputs),
+        60.0,
         60.0,
     )
     .expect("solver failed")
@@ -657,6 +660,7 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
         1.0,
         &contexts_from_inputs(&inputs),
         60.0,
+        60.0,
     )
     .expect("solver failed")
     .0;
@@ -701,6 +705,7 @@ fn battery_ramp_penalty_produces_smooth_power() {
         &weights,
         1.0,
         &contexts_from_inputs(&inputs),
+        60.0,
         60.0,
     )
     .expect("solver failed")
