@@ -659,3 +659,273 @@ fn bench_ev_phase_split() {
     }
     println!("\n  (minimum of {REPEATS} runs per phase; 3 for the heater rows)\n");
 }
+
+// ── R-97 / GB-40: is phase 2 worth the budget it burns? ─────────────────────
+//
+// Phase 2 minimises friction subject to `phase1_cap_expr <= c_star + epsilon`.
+// That cap is a HARD constraint in its model, so any feasible incumbent — however
+// early it is taken — already respects the cost bound. Everything phase 2 can
+// change is therefore bounded by `phase2_epsilon_eur` by construction, while on a
+// heater VEN it spends a full 57 s and still returns TimeLimit: half the total
+// solve budget buying a refinement it cannot prove, worth at most one epsilon.
+//
+// This sweeps phase 2's timeout independently of phase 1's and reports what is
+// actually lost: the friction it achieved, and the cost of the plan it returned.
+//
+//   wsl cargo test -p ven-app --release bench_phase2_timeout_sweep -- --ignored --nocapture
+
+struct P2Result {
+    p2_s: f64,
+    p2_status: String,
+    friction_eur: f64,
+}
+
+/// Solve the heater+EV bench site with phase 1 at its normal budget and phase 2
+/// capped at `p2_timeout_s`.
+fn phase2_at_timeout(p2_timeout_s: f64) -> P2Result {
+    phase2_at_timeout_for(47.82, 6.0, 0.25, p2_timeout_s)
+}
+
+fn phase2_at_timeout_for(
+    temp_c: f64,
+    initial_kw: f64,
+    import_eur_kwh: f64,
+    p2_timeout_s: f64,
+) -> P2Result {
+    let now = fixed_now();
+    let profile = ev_bench_profile_with_heater(true, 20.0, true);
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_temp(&mut sim, temp_c);
+    set_heater_power(&mut sim, initial_kw);
+    let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
+    let cap = no_capacity();
+
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let p1_timeout = profile.planner.solver_timeout_s as f64;
+
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, p1_timeout).expect("phase 1 must be feasible");
+
+    let t = Instant::now();
+    let p2 = solve_phase2(
+        &inputs,
+        &p1w,
+        &p2w,
+        p1.objective_eur,
+        profile.planner.phase2_epsilon_eur,
+        &p1,
+        &ctxs,
+        p2_timeout_s,
+    );
+    let p2_s = t.elapsed().as_secs_f64();
+    match p2 {
+        Ok((sol, friction_eur)) => P2Result {
+            p2_s,
+            p2_status: format!("{:?}", sol.status),
+            friction_eur,
+        },
+        Err(_) => P2Result {
+            p2_s,
+            p2_status: "Err (falls back to phase 1)".to_string(),
+            friction_eur: f64::NAN,
+        },
+    }
+}
+
+#[test]
+#[ignore = "R-97 sweep: heater-sized phase-2 solves, run with --ignored --nocapture"]
+fn bench_phase2_timeout_sweep() {
+    let profile = ev_bench_profile_with_heater(true, 20.0, true);
+    let epsilon = profile.planner.phase2_epsilon_eur;
+    println!("\n── R-97: what a shorter phase-2 budget actually costs ──");
+    println!("   (heater + EV, 288 slots; phase2_epsilon_eur = {epsilon})\n");
+    // NB: phase 2's objective *is* the friction objective, so there is no separate
+    // "plan cost" to print here — the economic cost is bounded by c_star + epsilon
+    // structurally, because that cap is a hard constraint in phase 2's own model,
+    // not because this bench measured it.
+    println!(
+        "  {:>10} {:>9} {:>14}  status",
+        "p2 budget", "p2 time", "friction EUR"
+    );
+    for budget in [60.0, 20.0, 10.0, 5.0, 2.0, 1.0] {
+        let r = phase2_at_timeout(budget);
+        println!(
+            "  {budget:>9.0}s {:>8.2}s {:>14.4}  {}",
+            r.p2_s, r.friction_eur, r.p2_status
+        );
+    }
+    println!(
+        "\n  Friction is what phase 2 buys; plan cost is bounded by c_star + {epsilon} EUR\n  \
+         at every budget, because that cap is a hard constraint in phase 2's own model.\n"
+    );
+}
+
+/// R-97: does phase 2 change anything, or does it return its warm start?
+///
+/// The timeout sweep found phase 2's friction identical from a 1 s budget to a
+/// 60 s one. Phase 2 is warm-started from phase 1, so the natural reading is that
+/// it reaches an incumbent immediately and then spends the rest of its budget
+/// failing to *prove* optimality. If that incumbent is simply phase 1's own
+/// schedule, phase 2 contributes nothing on this instance and the question is not
+/// how long to let it run but whether to run it.
+///
+///   wsl cargo test -p ven-app --release bench_does_phase2_change_the_schedule -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 probe: two heater-sized solves, run with --ignored --nocapture"]
+fn bench_does_phase2_change_the_schedule() {
+    // A heater site (phase 1 and 2 both time out) and an EV-only site (both solve
+    // cleanly). If phase 2 moves on the EV site but not the heater one, the no-op
+    // is a property of timing out, not of phase 2 itself.
+    for (label, heater) in [
+        ("heater + EV (both phases TimeLimit)", true),
+        ("EV only (both solve)", false),
+    ] {
+        println!(
+            "
+== {label}"
+        );
+        phase2_schedule_diff(heater);
+    }
+}
+
+fn phase2_schedule_diff(heater: bool) {
+    let now = fixed_now();
+    let profile = ev_bench_profile_with_heater(true, 20.0, heater);
+    let mut sim = make_snap_from_profile(&profile);
+    if heater {
+        set_heater_power(&mut sim, 6.0);
+    }
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let cap = no_capacity();
+
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let timeout = profile.planner.solver_timeout_s as f64;
+
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 must be feasible");
+    let (p2, _friction) = solve_phase2(
+        &inputs,
+        &p1w,
+        &p2w,
+        p1.objective_eur,
+        profile.planner.phase2_epsilon_eur,
+        &p1,
+        &ctxs,
+        timeout,
+    )
+    .expect("phase 2 must be feasible");
+
+    let diff = |a: &[f64], b: &[f64]| -> (usize, f64) {
+        let mut n = 0;
+        let mut worst = 0.0_f64;
+        for (x, y) in a.iter().zip(b.iter()) {
+            let d = (x - y).abs();
+            if d > 1e-6 {
+                n += 1;
+            }
+            if d > worst {
+                worst = d;
+            }
+        }
+        (n, worst)
+    };
+
+    println!("\n── R-97: what phase 2 actually changed ──\n");
+    for (name, a, b) in [
+        ("p_imp_kw", &p1.p_imp_kw, &p2.p_imp_kw),
+        ("p_ev_kw", &p1.p_ev_kw, &p2.p_ev_kw),
+        ("y_heat (stage)", &p1.y_heat, &p2.y_heat),
+        ("p_bat_ch_kw", &p1.p_bat_ch_kw, &p2.p_bat_ch_kw),
+    ] {
+        let (n, worst) = diff(a, b);
+        println!(
+            "  {name:12} slots differing: {n:4} / {:4}   largest change: {worst:8.4}",
+            a.len()
+        );
+    }
+    println!(
+        "\n  phase1 objective {:.4} EUR   phase2 objective {:.4} EUR\n",
+        p1.objective_eur, p2.objective_eur
+    );
+}
+
+/// R-97: across all ten heater instances, does phase 2 EVER change the schedule?
+///
+/// Two instances showed it returning phase 1's schedule byte-for-byte — one where
+/// both phases time out, one where both solve cleanly. Two is not a result (GB-40's
+/// MIP-gap sweep had to be redone from five instances to ten), so this runs the
+/// whole `HEATER_VARIANTS` set and prints, per instance, how many of the 288 slots
+/// phase 2 moved and what friction it reports.
+///
+///   wsl cargo test -p ven-app --release bench_phase2_changes_across_instances -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 sweep: 20 heater-sized solves (~20 min), run with --ignored --nocapture"]
+fn bench_phase2_changes_across_instances() {
+    println!("\n── R-97: does phase 2 move the schedule on any instance? ──\n");
+    println!(
+        "  {:44} {:>7} {:>7} {:>7} {:>11} {:>12}",
+        "instance", "imp", "ev", "heat", "friction", "p2 status"
+    );
+    let mut any_change = false;
+    for (temp_c, initial_kw, import_eur_kwh, label) in HEATER_VARIANTS {
+        let now = fixed_now();
+        let profile = ev_bench_profile_with_heater(true, 20.0, true);
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, temp_c);
+        set_heater_power(&mut sim, initial_kw);
+        let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+        let timeout = profile.planner.solver_timeout_s as f64;
+
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 feasible");
+        let (p2, friction) = match solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            profile.planner.phase2_epsilon_eur,
+            &p1,
+            &ctxs,
+            timeout,
+        ) {
+            Ok(v) => v,
+            Err(_) => {
+                println!(
+                    "  {label:44} {:>7} {:>7} {:>7} {:>11} {:>12}",
+                    "-", "-", "-", "-", "Err"
+                );
+                continue;
+            }
+        };
+        let count = |a: &[f64], b: &[f64]| {
+            a.iter()
+                .zip(b.iter())
+                .filter(|(x, y)| (*x - *y).abs() > 1e-6)
+                .count()
+        };
+        let (di, de, dh) = (
+            count(&p1.p_imp_kw, &p2.p_imp_kw),
+            count(&p1.p_ev_kw, &p2.p_ev_kw),
+            count(&p1.y_heat, &p2.y_heat),
+        );
+        if di + de + dh > 0 {
+            any_change = true;
+        }
+        println!(
+            "  {label:44} {di:>7} {de:>7} {dh:>7} {friction:>11.4} {:>12?}",
+            p2.status
+        );
+    }
+    println!(
+        "\n  Any instance where phase 2 moved the schedule: {any_change}\n  \
+         (all counts are out of 288 slots; phase 1 ran at the full 60 s budget)\n"
+    );
+}

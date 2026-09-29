@@ -313,6 +313,7 @@ impl Default for PlannerConfig {
             plan_adoption_decay_s: default_plan_adoption_decay(),
             phase2_epsilon_eur: default_phase2_epsilon(),
             solver_timeout_s: default_solver_timeout_s(),
+            phase2_solver_timeout_s: default_phase2_solver_timeout_s(),
             mip_gap_target: default_mip_gap_target(),
             planning_initial_delay_s: default_planning_initial_delay_s(),
             gate_switch_penalty_eur: 0.0,
@@ -358,6 +359,12 @@ pub(super) fn default_plan_adoption_decay() -> f64 {
 pub(super) fn default_power_stages() -> u8 {
     2
 }
+/// R-97: phase 2 is inert on heater sites and finishes in under a second
+/// elsewhere, so it does not need phase 1's budget. See `phase2_solver_timeout_s`.
+pub(super) fn default_phase2_solver_timeout_s() -> u64 {
+    5
+}
+
 pub(super) fn default_solver_timeout_s() -> u64 {
     60
 }

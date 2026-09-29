@@ -412,6 +412,16 @@ friction/comfort within `phase1_cap_expr <= c_star + epsilon`, so a reward can
 never make the solver pay more than the accepted slack for it. Battery has no
 comfort-curve wiring (out of scope — no natural "fill" analogue).
 
+**Phase budgets are separate (R-97).** `planner.solver_timeout_s` (default 60 s) bounds phase 1 and
+the marginal-cost dual LP; `planner.phase2_solver_timeout_s` (default 5 s) bounds phase 2 alone.
+Phase 2 is measurably inert on heater sites — over all ten benchmark instances it moves the heater
+stage in zero of 288 slots and at most one EV slot, and its friction result is identical from a 1 s
+budget to a 60 s one — while its cost cap is a hard constraint in its own model, so any incumbent it
+returns already respects `c_star + phase2_epsilon_eur`. Truncating it therefore cannot cost
+cost-optimality, only smoothing, and measurably costs none. Setting `phase2_epsilon_eur = 0.0`
+disables phase 2 entirely; a zero *timeout* is rejected at validation, because it would make phase 2
+fail and silently fall back to phase 1.
+
 #### 2.3.2 Peak-Demand Penalty Threshold (WP6.3, BL-09)
 
 A profile may declare zero or more `planner.penalty_rules` entries

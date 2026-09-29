@@ -528,6 +528,50 @@ heater-VEN solve time by roughly half at a cost bounded by epsilon, without touc
 formulation. That is a measurement worth doing (and R-27 already asks for these solver constants to
 be configurable).
 
+**Phase 2 is inert on heater sites, and now time-boxed (2026-09-30).** Following the phase split
+above, phase 2 was examined on its own terms. Three findings, each measured:
+
+1. *Its result does not depend on its budget.* Sweeping phase 2 from 60 s down to 1 s on the
+   heater+EV site gives **byte-identical friction (6.3285 EUR) at every budget**, always
+   TimeLimit (`bench_phase2_timeout_sweep`).
+2. *It returns its warm start unchanged.* Phase 2 is seeded with phase 1's solution, and the
+   solution it returns differs from that seed in **0 of 288 slots** for import, EV power, heater
+   stage and battery power (`bench_does_phase2_change_the_schedule`). This is read from the HiGHS
+   solution, not from the seed. It holds both where both phases time out *and* on an EV-only site
+   where phase 2 reports Optimal in 0.08 s — so it is not merely a timeout artefact.
+3. *It generalises across instances.* Over all ten `HEATER_VARIANTS`
+   (`bench_phase2_changes_across_instances`): the heater stage moves in **zero of 288 slots on
+   every one of the ten**, and the EV moves in a single slot on two of them. Friction 5.03-6.45
+   EUR, TimeLimit on all ten.
+
+So phase 2 spends ~57 s per cycle — half the planner's per-cycle budget — to change at most one EV
+slot, and it never once touches the heater, which is the source of the 5-6 EUR of switching cost it
+exists to minimise.
+
+**Fix shipped:** `planner.phase2_solver_timeout_s`, separate from `solver_timeout_s`, defaulting to
+**5 s** (validated non-zero; `phase2_epsilon_eur = 0.0` remains the documented way to disable phase
+2 entirely). This is safe by construction as well as by measurement: phase 2's cap
+`phase1_cost <= c_star + phase2_epsilon_eur` is a hard constraint in its own model, so any
+incumbent it returns — however early — already respects the cost bound. Truncating it can only cost
+smoothing, and measurably costs none. 5 s leaves ample headroom for the sites where phase 2 does
+finish (EV-only: 0.08-0.83 s, Optimal).
+
+**Result:** `bench_heater_solve_cost` total for the heater site falls from the **108.55 s** recorded
+under GB-40 to **61.41 s** — phase 1's budget plus a bounded phase 2. The whole Rust suite also
+halved, 117 s to 63 s.
+
+**What this does *not* fix:** phase 1 still hits TimeLimit at ~57 s on every heater instance. That
+is GB-40's standing problem and the remaining half. The two known levers there are already measured
+in GB-40: a looser `mip_gap_target` (10 % put phase 1 on GapLimit for nine of ten instances at
++2.05 % mean cost) and the refuted reformulations. Phase 2 is no longer part of that problem.
+
+**Open question worth answering:** *why* is phase 2 inert? Either phase 1's schedule is already
+friction-optimal within the 0.17 EUR epsilon — plausible, since rescheduling a heater stage costs
+more than epsilon allows — or the search cannot find the improvement. Raising `phase2_epsilon_eur`
+and re-running `bench_phase2_changes_across_instances` distinguishes the two. If epsilon is the
+binding constraint then phase 2 is not broken, it is starved, and the friction it is meant to remove
+is simply unaffordable under the current cap.
+
 **Still missing, and the reason this took a wrong turn first:** `plan_history` records
 `solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
 an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,
