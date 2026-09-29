@@ -13649,3 +13649,40 @@ two new diagnostics probes, four curve-validation tests, seven segment-builder t
 80 %") — the integral of what the planner already consumes, so interconvertible with no MILP
 change, and a genuine spending cap — plus a max-vs-planned cost display (max is the area under
 the curve, `Σ kwh × eur_per_kwh`; actual is already on `AssetAllocation.cost_eur`).
+
+### 2026-09-29, later — task 8.2 found a regression, and the first fix for it was wrong
+
+The solve-time check that `ev-comfort-piecewise-core` scheduled for itself (expecting a null
+result, since every TIME_LIMIT VEN carries a heater) instead found the feature had made R-97
+materially worse: ven-11 — EV + base load, no heater, no battery, no PV — went from a 114 ms
+median solve to 6.4 s, and ven-2 from 5.6 % TIME_LIMIT to 54 %. Measurements and the controlled
+method are under R-97 in `docs/reference/TECHNICAL_DEBTS.md`.
+
+Two process lessons, both about the measurement rather than the model.
+
+**A single sample is not a baseline.** The baseline table this change recorded for itself held one
+`solver_ms` per VEN. ven-2's entry was 11.9 s; its actual distribution over the preceding 1910
+solves was median 15.7 s, p90 31.5 s, tail to the 68 s ceiling. So when the first post-deploy
+sample came back at 53 s I wrote it off as host noise — it was inside the old distribution. Only
+pulling `plan_history` and comparing the same clock window across consecutive days showed the
+shift was real. A one-sample baseline cannot distinguish a 4× regression from an ordinary draw.
+
+**The suite could not have caught this.** Every test written for the feature asserts what the
+bands are *worth* — never how many there are — and the offline sweep solves 24 slots against the
+fleet's 288. Nothing anywhere bounds model size. `bands_at_the_same_bid_are_one_band` closes the
+specific hole; the general one is open and recorded.
+
+**The failed hypothesis, kept because it is instructive.** The fleet's sessions express no curve
+(`engage_charge_planning` sets a target, not a bid), so their price is a two-step function, and
+the unconditional 5 %-SoC subdivision turned two decisions into fourteen variables carrying two
+distinct prices. That is genuinely wasteful and merging them is correct — but it bought **nothing**
+(6406 → 6752 ms). Band count was not the bottleneck. The merge stayed (fewer variables, provably
+identical valuation, test-pinned); the commit message that claimed it fixed the regression is
+wrong and is corrected here rather than rewritten.
+
+Decision taken with the user: keep the feature deployed and find the real cause offline. GB-41 was
+a total functional failure — four VENs charging nothing for 24 h — while this costs cost-optimality
+on an axis GB-40 already dominates, and the fleet demonstrably still plans and charges (ven-2
+allocating 45.8 kW of EV, no warnings, ven-5 improved from ~90 % TIME_LIMIT to GAP_LIMIT). The
+next step is a 288-slot EV-only benchmark that A/Bs the band objective against a pinned-energy
+control — measured before any further change to the EV's MILP contribution.
