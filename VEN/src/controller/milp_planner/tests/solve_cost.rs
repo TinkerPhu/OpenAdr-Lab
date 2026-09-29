@@ -485,6 +485,12 @@ fn bench_ev_session_solve_cost() {
 ── R-97: EV-only site through the full two-phase planner ──
 "
     );
+    // Repeat each variant and report the MINIMUM, not one sample. A laptop under
+    // any other load inflates individual solves by 3-6x — enough to invent or hide
+    // an effect entirely (R-97 records a whole wrong conclusion built on single
+    // samples). The minimum is the least contaminated estimator here: noise only
+    // ever adds time.
+    const REPEATS: usize = 5;
     for (label, sess, fc, dh, drop) in [
         ("no EV session", false, false, 0, 20.0),
         ("firm EV session", true, false, 0, 20.0),
@@ -494,8 +500,20 @@ fn bench_ev_session_solve_cost() {
         ("forecast, car AWAY, 90% drop", false, true, 3, 90.0),
         ("forecast, just RETURNED, 65% drop", false, true, 12, 65.0),
     ] {
-        let (secs, status) = time_ev_solve_at(sess, fc, dh, drop);
-        println!("  {label:36} {secs:8.2} s  {status}");
+        let mut times = Vec::with_capacity(REPEATS);
+        let mut status = String::new();
+        for _ in 0..REPEATS {
+            let (secs, st) = time_ev_solve_at(sess, fc, dh, drop);
+            times.push(secs);
+            status = st;
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "  {label:36} min {:7.2} s  median {:7.2} s  max {:7.2} s  {status}",
+            times[0],
+            times[REPEATS / 2],
+            times[REPEATS - 1]
+        );
     }
     println!();
 }

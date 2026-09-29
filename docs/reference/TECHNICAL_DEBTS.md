@@ -458,6 +458,36 @@ to 563 ms on the 27th, two days before `ev-comfort-piecewise-core` existed on an
 (same mechanism class, three cycles). Neither is proof of a *quantitative* cost model for
 away-window planning, which is what the next measurement should establish.
 
+**The EV half, measured properly (2026-09-29).** `bench_ev_session_solve_cost` now repeats each
+variant five times and reports min/median/max, because single samples on a laptop swing 3-6x —
+enough to invent or erase the whole effect. With that, the away-window step is solid and repeatable
+on an EV-only site at 288 slots through the real two-phase planner:
+
+| variant | min | median |
+|---|---|---|
+| no EV session | 0.16 s | 0.17 s |
+| firm EV session | 0.26 s | 0.31 s |
+| forecast, car **home** | 0.19 s | 0.21 s |
+| forecast, car **away** (20/65/90 % drop) | 0.90-0.94 s | 0.95-1.09 s |
+| forecast, just returned | 1.02 s | 1.36 s |
+
+So ~5x for a car that is out, and **the SoC drop size is irrelevant** (20 %, 65 % and 90 % all land
+together) — the cost is the away window itself, not the energy the trip needs. That kills the
+"large drop means a large charge to place" reading.
+
+**Attempt 1 — tighten the away slots — is not demonstrated.** Away slots declare `p_ev` over the
+full `[0, p_max]` range and force it to zero only through `p_ev[t] <= 0 * z_ev_on[t]`, and their
+`z_ev_on` is a *binary* fixed at 0. Bounding that power to zero directly, declaring those `z`
+continuous, and skipping the two now-vacuous rows per away slot gives: away-20 % 1.25 -> 0.94 s,
+away-65 % 1.10 -> 0.91 s, but away-90 % 0.81 -> 0.90 s and just-returned 0.54 -> 1.02 s. Two better,
+two worse, i.e. inside cross-process variance. **Not shipped** — model size looks like the wrong
+lever here, exactly as it was for the heater (see GB-40's refuted single-integer encoding).
+
+**Next measurement, before any further attempt:** time the two phases separately, as
+`bench_heater_variants` already does for the heater. GB-40 established that phase 2 never binds and
+burns its full budget; if the EV's 5x also lands in phase 2 then the away window is a phase-2
+problem and every model-size idea is aimed at the wrong half.
+
 **Still missing, and the reason this took a wrong turn first:** `plan_history` records
 `solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
 an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,
