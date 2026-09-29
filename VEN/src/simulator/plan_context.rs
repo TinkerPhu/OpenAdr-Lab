@@ -118,6 +118,10 @@ pub fn build_asset_contexts(
     heater_c_terminal_eur_kwh: f64,
     battery_c_terminal_eur_kwh: f64,
     heater_anchor: &[Option<f64>],
+    // User comfort-curve overrides, by asset id (`AppState::comfort_overrides_map`).
+    // Each asset is priced by its override when it has one, its built-in default
+    // otherwise — the same resolution the API and session creation use.
+    comfort_overrides: &std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>,
 ) -> Vec<Box<dyn AssetMilpContext>> {
     let min_ev_charge_kw = asset_params
         .iter()
@@ -138,6 +142,11 @@ pub fn build_asset_contexts(
                 "battery" => battery_c_terminal_eur_kwh,
                 _ => 0.0,
             };
+            let comfort_rates = crate::services::comfort::effective_comfort_rates(
+                comfort_overrides,
+                &entry.id,
+                cfg.default_comfort_rates(),
+            );
             Some(cfg.as_milp_participant()?.build_milp_context(
                 &entry.id,
                 &entry.state,
@@ -146,6 +155,7 @@ pub fn build_asset_contexts(
                 now,
                 ev_sess,
                 heat_tgt,
+                &comfort_rates,
                 min_ev_charge_kw,
                 planner.v_ev_extra_eur_kwh,
                 planner.v_ev_core_eur_kwh,
@@ -367,6 +377,7 @@ mod tests {
             0.07,
             0.03,
             &[],
+            &std::collections::HashMap::new(),
         );
 
         assert_eq!(
@@ -430,6 +441,7 @@ mod tests {
             /* heater_c_terminal_eur_kwh */ 0.07,
             /* battery_c_terminal_eur_kwh */ 0.03,
             &[],
+            &std::collections::HashMap::new(),
         );
 
         let heater_ctx = contexts
@@ -474,6 +486,7 @@ mod tests {
             0.0,
             0.0,
             &[],
+            &std::collections::HashMap::new(),
         );
 
         let ev_ctx = &contexts[0];

@@ -385,6 +385,7 @@ impl MilpParticipant for ShiftableLoadAsset {
         now: DateTime<Utc>,
         _ev_session: Option<&EvSession>,
         _heater_target: Option<&HeaterTarget>,
+        _comfort_rates: &[crate::entities::asset::ComfortRate],
         _ev_min_charge_kw: f64,
         _v_ev_extra_eur_kwh: f64,
         _v_ev_core_eur_kwh: f64,

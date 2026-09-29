@@ -387,6 +387,16 @@ energy therefore buys that part; the all-or-nothing `z_ev_core` that made "not w
 mean "charge nothing" (GB-41) is gone. An empty curve falls back to a two-step default split at
 `soc_target` (`planner.v_ev_core_eur_kwh` / `v_ev_extra_eur_kwh`).
 
+The curve reaches **both** ways an EV can be asked to charge. A user/VTN request carries its own
+`comfort_rates` (resolved from the override or the built-in default when the request is created).
+A charge the VEN plans for itself from a *predicted* departure (`engage_charge_planning`, which
+writes no `EvSession` at all) is priced by the asset's effective curve resolved at plan time:
+`build_asset_contexts` calls `services::comfort::effective_comfort_rates` per asset and hands it to
+`EvMilpContext::from_state`, which builds the bands on the no-session path — they depend only on
+the curve, the current SoC, the target and the pack size, never on a deadline. Before this the
+forecast path left `segments` empty and fell back to the flat `v_ev_extra_eur_kwh` reward, so the
+fleet's own charge planning bypassed the curve entirely.
+
 A **firm** deadline is the only guarantee: `constraints` adds `Σ e_seg >= e_required_kwh`, capped
 at `EvMilpContext::reachable_energy_kwh` so a requirement the window cannot physically hold
 charges as far as it can instead of making the site solve infeasible. A soft request carries
