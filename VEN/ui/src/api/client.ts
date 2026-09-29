@@ -127,7 +127,16 @@ export class VenApi {
 
   async postComfortCurve(assetId: string, rates: ComfortRate[]): Promise<ComfortCurveResponse> {
     const r = await this.jsonReq("POST", `/assets/${assetId}/comfort_curve`, rates);
-    if (!r.ok) throw new Error(`comfort_curve ${r.status}`);
+    if (!r.ok) {
+      // The validator refuses a rising curve and names the offending point in
+      // `{"error": ...}` — that text is the whole point of the rejection, so it
+      // must survive to the editor rather than collapse into a status code.
+      const detail = await r
+        .json()
+        .then((b) => (b && typeof b.error === "string" ? b.error : null))
+        .catch(() => null);
+      throw new Error(detail ?? `comfort_curve ${r.status}`);
+    }
     return r.json();
   }
 

@@ -312,6 +312,10 @@ export type WarningKind =
   | "BUDGET_SHORTFALL"
   | "CAPACITY_VIOLATION"
   | "PEAK_PENALTY_EXCEEDED"
+  // A **firm** EV deadline whose guaranteed energy the plan cannot deliver in
+  // the window it has. The wire string is persisted in plan history, so it keeps
+  // the older "core" wording; a soft request charging less than its target is
+  // the comfort curve working as asked and raises nothing.
   | "EV_CORE_ENERGY_UNMET"
   | "OTHER";
 

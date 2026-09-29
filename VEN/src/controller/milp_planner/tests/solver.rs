@@ -38,9 +38,9 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         t_ev_dead_step: None,
         p_ev_max_kw: 0.0,
         p_ev_min_kw: 0.0,
-        e_ev_core_kwh: 0.0,
+        e_ev_required_kwh: 0.0,
+        ev_segments: vec![],
         e_ev_extra_max_kwh: 0.0,
-        v_ev_core_eur: 0.0,
         v_ev_extra_eur_kwh: 0.0,
         heater_mode: MilpLoadMode::MustNotRun,
         t_heat_dead_step: None,
@@ -56,7 +56,6 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         shiftable_loads: vec![],
         soc_ev_init: None,
         ev_soc_drops: None,
-        ev_core_unmet_warning: None,
     }
 }
 
@@ -85,19 +84,26 @@ fn make_phase2_weights() -> Phase2Weights {
     }
 }
 
-/// MayRun EV with v_ev_core_eur exceeding tariff cost → optimizer commits to charging.
+/// A soft-deadline EV whose comfort bid beats the tariff charges on the reward
+/// alone — no firm floor involved (`e_ev_required_kwh` stays 0).
 #[test]
-fn ev_may_run_commits_when_core_reward_exceeds_cost() {
+fn ev_may_run_charges_when_the_bid_exceeds_cost() {
     let mut inputs = make_solver_inputs(4, 0.0);
     inputs.a_ev = vec![true; 4];
     inputs.ev_mode = MilpLoadMode::MayRun;
     inputs.t_ev_dead_step = Some(3);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 4.0;
+    inputs.e_ev_required_kwh = 0.0;
     inputs.e_ev_extra_max_kwh = 20.0;
-    // tariff = 0.25, cost = 4.0 × 0.25 × 4 slots = up to 4 EUR; reward = 5 EUR > cost
-    inputs.v_ev_core_eur = 5.0;
+    // tariff = 0.25, so 4 kWh costs up to 1 EUR; a 5 EUR/kWh bid clears it easily.
+    let wanted_kwh = 4.0;
+    inputs.ev_segments = vec![
+        crate::controller::milp_planner::asset_port::EvEnergySegment {
+            kwh: wanted_kwh,
+            eur_per_kwh: 5.0,
+        },
+    ];
 
     let result = solve_phase1(
         &inputs,
@@ -115,10 +121,8 @@ fn ev_may_run_commits_when_core_reward_exceeds_cost() {
         .map(|(p, &d)| p * d)
         .sum();
     assert!(
-        ev_energy >= inputs.e_ev_core_kwh - 0.1,
-        "MayRun EV with sufficient reward should meet core {:.1} kWh, got {:.4}",
-        inputs.e_ev_core_kwh,
-        ev_energy
+        ev_energy >= wanted_kwh - 0.1,
+        "a bid well above cost should buy the whole {wanted_kwh:.1} kWh segment, got {ev_energy:.4}"
     );
 }
 
@@ -171,15 +175,15 @@ fn solve_base_kw_flows_into_net_import() {
 }
 
 #[test]
-fn solve_ev_must_run_meets_core() {
-    // EV MustRun: optimizer must deliver exactly e_ev_core_kwh within deadline.
+fn solve_ev_must_run_meets_its_required_energy() {
+    // A firm EV request: the optimizer must deliver e_ev_required_kwh by the deadline.
     let mut inputs = make_solver_inputs(4, 0.0); // no base load
     inputs.a_ev = vec![true; 4];
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.t_ev_dead_step = Some(3);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0; // no semi-continuous (cleaner test)
-    inputs.e_ev_core_kwh = 4.0;
+    inputs.e_ev_required_kwh = 4.0;
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -217,7 +221,7 @@ fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
     inputs.t_ev_dead_step = Some(2); // deadline inside the away window
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 7.4; // exactly what the single available slot can deliver
+    inputs.e_ev_required_kwh = 7.4; // exactly what the single available slot can deliver
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -242,17 +246,23 @@ fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
 }
 
 #[test]
-fn solve_ev_must_run_core_energy_beyond_what_the_available_slots_can_deliver() {
-    // The pathological shape of the test above: the core demand exceeds what the
-    // unmasked pre-deadline slots can physically deliver. Records what the solver
-    // does today so `ev-usage-forecast`'s clamp/warn behavior has a baseline.
+fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver() {
+    // The pathological shape of the test above: the guaranteed energy exceeds what
+    // the unmasked pre-deadline slots can physically deliver.
+    //
+    // `ev-comfort-piecewise-core` made this solvable rather than infeasible. The
+    // floor is capped at `EvMilpContext::reachable_energy_kwh` where it is imposed,
+    // so the plan charges everything the window allows and
+    // `ev_diagnostics::firm_shortfall` reports the gap — previously the caller had
+    // to shrink the requirement itself (`clamp_core_to_reachable_energy`, now gone),
+    // which meant the shortfall was invisible to the diagnostic.
     let mut inputs = make_solver_inputs(4, 0.0);
     inputs.a_ev = vec![true, false, false, true];
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.t_ev_dead_step = Some(2);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 20.0; // unreachable: only 7.4 kWh of window is left
+    inputs.e_ev_required_kwh = 20.0; // unreachable: only 7.4 kWh of window is left
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -262,10 +272,29 @@ fn solve_ev_must_run_core_energy_beyond_what_the_available_slots_can_deliver() {
         60.0,
     );
     assert!(
-        result.is_err(),
-        "an unreachable core demand is infeasible — there is no EV slack variable, \
-         so `apply_usage_forecast` must clamp the core energy to the reachable window \
-         (task 7.1) rather than hand the solver an impossible equality"
+        result.is_ok(),
+        "an unreachable guarantee must still solve: {:?}",
+        result.err()
+    );
+    let out = result.unwrap();
+    let ev_energy: f64 = out
+        .p_ev_kw
+        .iter()
+        .zip(inputs.dt_h.iter())
+        .map(|(p, &d)| p * d)
+        .sum();
+    assert!(
+        (ev_energy - 7.4).abs() < 1e-2,
+        "only slot 0 is home before the deadline, so 7.4 kWh of the 20 kWh asked \
+         for is all the window allows; got {ev_energy:.4} kWh from {:?}",
+        out.p_ev_kw
+    );
+    let warnings = crate::controller::milp_planner::ev_diagnostics::ev_warnings(&inputs, &out);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
+        "the 12.6 kWh that could not be delivered must be reported, got {warnings:?}"
     );
 }
 
@@ -446,7 +475,7 @@ fn ev_startup_penalty_produces_contiguous_block() {
     inputs.t_ev_dead_step = Some(n - 1);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
-    inputs.e_ev_core_kwh = 3.0 * 7.4; // needs 3 full slots at 1 h each
+    inputs.e_ev_required_kwh = 3.0 * 7.4; // needs 3 full slots at 1 h each
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
@@ -615,7 +644,7 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
     inputs.t_ev_dead_step = Some(n - 1);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4;
-    inputs.e_ev_core_kwh = 3.0 * 7.4; // needs ~3 full slots at max
+    inputs.e_ev_required_kwh = 3.0 * 7.4; // needs ~3 full slots at max
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
@@ -734,7 +763,7 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
     inputs.t_ev_dead_step = Some(n - 1);
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4;
-    inputs.e_ev_core_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
+    inputs.e_ev_required_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
 
     let out = solve_phase1(
         &inputs,

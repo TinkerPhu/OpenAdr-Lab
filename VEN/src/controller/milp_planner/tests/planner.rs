@@ -479,7 +479,7 @@ fn run_planner_ev_must_run_energy_met() {
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
-    let e_core_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
+    let e_required_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
     let session = crate::entities::device_session::EvSession {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
@@ -513,10 +513,8 @@ fn run_planner_ev_must_run_energy_met() {
         .map(|s| s.planned_kw_by_asset.get("ev").copied().unwrap_or(0.0) * dt_h)
         .sum();
     assert!(
-        ev_energy >= e_core_kwh - 0.1,
-        "MustRun EV should meet {:.1} kWh core, got {:.4}",
-        e_core_kwh,
-        ev_energy
+        ev_energy >= e_required_kwh - 0.1,
+        "a firm EV request should deliver its guaranteed {e_required_kwh:.1} kWh, got {ev_energy:.4}"
     );
 }
 

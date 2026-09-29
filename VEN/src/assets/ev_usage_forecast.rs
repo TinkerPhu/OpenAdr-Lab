@@ -73,7 +73,6 @@ impl EvMilpContext {
         if usage.engage_charge_planning && ev_session.is_none() {
             self.target_next_predicted_departure(cfg, usage, n, cum_s, now);
         }
-        self.clamp_core_to_reachable_energy(n, cum_s);
     }
 
     /// Sets the charging goal from the next predicted departure inside the plan
@@ -111,41 +110,6 @@ impl EvMilpContext {
         };
         self.mode = EvMilpMode::MustRun;
         self.t_dead_step = Some(t_dead);
-        self.e_core_kwh = core_kwh;
-    }
-
-    /// Masking slots the car is predicted away for can leave a goal — predicted
-    /// or stated by a real session — that no remaining slot can reach. The EV
-    /// MILP has no slack on its core-energy equality, so an unreachable core
-    /// makes the whole site solve infeasible (see
-    /// `tests/solver.rs::solve_ev_must_run_core_energy_beyond_what_the_available_slots_can_deliver`).
-    /// Charge as far as the window allows and say so, rather than reject the
-    /// request or fail the plan.
-    fn clamp_core_to_reachable_energy(&mut self, n: usize, cum_s: &[i64]) {
-        if self.mode == EvMilpMode::MustNotRun || self.e_core_kwh <= 1e-6 {
-            return;
-        }
-        let t_dead = self.t_dead_step.unwrap_or(n.saturating_sub(1));
-        let reachable_kwh: f64 = (0..n.min(t_dead + 1))
-            .filter(|&t| self.a_ev.get(t).copied().unwrap_or(false))
-            .map(|t| {
-                let dt_s = (cum_s.get(t + 1).copied().unwrap_or(0)
-                    - cum_s.get(t).copied().unwrap_or(0))
-                .max(0);
-                let dt_h = dt_s as f64 / 3600.0;
-                self.p_max_kw * dt_h
-            })
-            .sum();
-        if self.e_core_kwh <= reachable_kwh + 1e-6 {
-            return;
-        }
-        // Stable text — WP4.3's notification dedup keys on the message.
-        self.core_unmet_warning = Some(format!(
-            "EV cannot reach its charging target before departure — the car is \
-             predicted away for part of the window; charging {reachable_kwh:.1} kWh \
-             of the {:.1} kWh needed",
-            self.e_core_kwh
-        ));
-        self.e_core_kwh = reachable_kwh;
+        self.e_required_kwh = core_kwh;
     }
 }

@@ -110,7 +110,6 @@ pub(crate) fn build_phase2_warm_start(
             iv.push((v.delta_ev_ramp[i], (p1.p_ev_kw[t] - p1.p_ev_kw[i]).abs()));
         }
         iv.push((v.e_ev_extra, p1.e_ev_extra.max(0.0)));
-        iv.push((v.z_ev_core, p1.z_ev_core));
     }
     iv
 }

@@ -88,25 +88,24 @@ pub struct EvMilpContext {
     /// cannot decide (the drop when the car returns). `None` under
     /// `usage_sim`/no usage schedule — the pre-forecast behaviour.
     pub soc_drops: Option<ExogenousSocDrops>,
-    /// `ev-usage-forecast`: set when the charging target cannot be reached
-    /// before the deadline because the car is predicted away for part of the
-    /// window — the core energy was clamped to what the window allows.
-    pub core_unmet_warning: Option<String>,
     /// Last step index that counts toward the core energy sum (None = open horizon).
     pub t_dead_step: Option<usize>,
     /// Maximum charge power [kW].
     pub p_max_kw: f64,
     /// Semi-continuous minimum charge power [kW] (prevents trickle charging).
     pub p_min_kw: f64,
-    /// Core energy requirement [kWh] from the active session.
-    pub e_core_kwh: f64,
+    /// Firm requirement [kWh]: energy that MUST be delivered by `t_dead_step`,
+    /// whatever the user bid. Non-zero only for a firm (non-soft) deadline —
+    /// a guarantee, not a reward. 0.0 means "buy what the bids justify".
+    pub e_required_kwh: f64,
+    /// `ev-comfort-piecewise-core`: the user's comfort curve as priced energy
+    /// bands from the current SoC to full. Empty for the free/opportunistic
+    /// modes, which never read the curve and price per slot instead.
+    pub segments: Vec<EvEnergySegment>,
     /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh].
     pub e_extra_max_kwh: f64,
     /// Reward per kWh of extra opportunistic charging above core [€/kWh].
     pub v_extra_eur_kwh: f64,
-    /// One-time reward in EUR for committing to meet the core target (MayRun only; 0.0 otherwise).
-    /// Set to e_core_kwh × v_ev_core_eur_kwh so the optimizer commits when tariffs are reasonable.
-    pub v_core_eur: f64,
     /// WP4.1 (BL-28) ASAP mode: lateness penalty [€/kWh per hour of delay].
     /// Large enough to dominate tariff spreads → cost-blind front-loading. 0.0 = inactive.
     pub asap_lateness_eur_kwh_h: f64,
@@ -132,9 +131,6 @@ pub struct EvMilpContext {
     /// BL-17 comfort bidding: CO2 analogue of `v_extra_eur_kwh`, already monetized via
     /// w_ghg [€/kWh]. 0.0 outside the `ByDeadline`/`Asap` modes.
     pub v_extra_co2_eur_kwh: f64,
-    /// BL-17 comfort bidding: CO2 analogue of `v_core_eur`, already monetized via w_ghg
-    /// [€] (= e_core_kwh × the curve's fill=0.0 CO2 bid monetized). 0.0 otherwise.
-    pub v_core_co2_eur: f64,
 }
 
 /// Typed LP variable handles for one EV charger in the MILP model.
@@ -143,9 +139,11 @@ pub struct EvMilpVars {
     pub p_ev: Vec<Variable>,
     /// Binary on/off flag per slot (respects availability mask).
     pub z_ev_on: Vec<Variable>,
-    /// Binary: 1 when EV core target is met (MayRun only; fixed 0 otherwise).
-    pub z_ev_core: Variable,
-    /// Total extra energy above core requirement [kWh].
+    /// `ev-comfort-piecewise-core`: one continuous variable per priced energy
+    /// band, bounded by that band's kWh. Empty for the free/opportunistic modes.
+    pub e_seg: Vec<Variable>,
+    /// Total energy for the modes that price per slot rather than per band
+    /// (free/opportunistic/MAX_COST), bounded by `e_extra_max_kwh`.
     pub e_ev_extra: Variable,
     /// Startup transition binaries (empty when startup penalty disabled).
     pub delta_ev: Vec<Variable>,
@@ -161,7 +159,9 @@ pub struct EvSolOutput {
     pub p_ev_kw: Vec<f64>,
     pub z_ev_on: Vec<f64>,
     pub e_ev_extra_kwh: f64,
-    pub z_ev_core: f64,
+    /// Energy bought from the priced bands [kWh] — what the comfort curve
+    /// actually justified, which is how much of a firm requirement was met.
+    pub e_seg_kwh: f64,
 }
 
 // ── Heater MILP types ─────────────────────────────────────────────────────────
@@ -274,6 +274,28 @@ pub use crate::controller::asset_milp_port::{
 pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f64> {
     let soc = (e_kwh / capacity_kwh).clamp(0.0, 1.0);
     HashMap::from([("soc".into(), soc)])
+}
+
+/// One band of EV energy priced at a single marginal bid
+/// (`ev-comfort-piecewise-core`).
+///
+/// The user's comfort curve is a marginal-value curve over state of charge:
+/// "the most I will pay for the next kWh, at this much charge". Walking it
+/// produces these bands — together they span the energy from the EV's current
+/// SoC to full, each with its own €/kWh. The planner buys the bands whose bid
+/// beats their cost and stops, which is what lets a charge degrade gracefully
+/// instead of being an all-or-nothing block.
+///
+/// Bids are non-increasing across the bands (enforced at the API boundary by
+/// `services::comfort::validate_curve`), which is what keeps the valuation
+/// concave and therefore solvable with continuous variables only — no binary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvEnergySegment {
+    /// Energy in this band [kWh].
+    pub kwh: f64,
+    /// What the user bids for each kWh in it [€/kWh], CO2 bid already
+    /// monetized in.
+    pub eur_per_kwh: f64,
 }
 
 /// Exogenous, decision-independent state-of-charge changes at specific slots

@@ -194,6 +194,54 @@ def step_comfort_plan_has_charging(context, asset_id):
     assert any(p > 0.01 for p in kw), f"expected {asset_id} charging, got {kw}"
 
 
+def _asset_energy_kwh(plan, asset_id):
+    """Energy the plan allocates to one asset across the horizon."""
+    total = 0.0
+    for slot in plan.get("slots", []):
+        try:
+            start = datetime.fromisoformat(slot["start"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(slot["end"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        hours = (end - start).total_seconds() / 3600.0
+        for a in slot.get("allocations", []):
+            if a.get("asset_id") == asset_id:
+                total += a.get("power_kw", 0.0) * hours
+    return total
+
+
+@then(
+    'the comfort-curve-driven plan charges "{asset_id}" between {low:f} and {high:f} kWh'
+)
+def step_comfort_plan_partial_charge(context, asset_id, low, high):
+    """`ev-comfort-piecewise-core`: a bid that covers part of the energy buys
+    that part. The window is what makes this a partial charge rather than an
+    all-or-nothing one, so both bounds matter."""
+
+    def in_band(plan):
+        return plan is not None and low <= _asset_energy_kwh(plan, asset_id) <= high
+
+    if not in_band(context.comfort_plan):
+        _wait_for_comfort_plan_matching(
+            context, in_band, f"plan charges {asset_id} between {low} and {high} kWh"
+        )
+    kwh = _asset_energy_kwh(context.comfort_plan, asset_id)
+    assert low <= kwh <= high, (
+        f"expected a partial charge of {low}-{high} kWh for {asset_id}, got {kwh:.2f} kWh; "
+        f"warnings={[w.get('kind') for w in context.comfort_plan.get('warnings', [])]}"
+    )
+
+
+@then("the comfort-curve-driven plan reports no unmet EV obligation")
+def step_comfort_plan_no_unmet_warning(context):
+    """A soft request promises nothing, so charging less than its target is the
+    curve working as asked — not a shortfall (GB-41)."""
+    kinds = [w.get("kind") for w in context.comfort_plan.get("warnings", [])]
+    assert "EV_CORE_ENERGY_UNMET" not in kinds, (
+        f"a soft request must not report an unmet obligation, got {kinds}"
+    )
+
+
 @when("I DELETE the comfort-curve-driven user request")
 def step_delete_comfort_request(context):
     req_id = context.comfort_request.get("id")

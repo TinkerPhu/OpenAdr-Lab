@@ -21,7 +21,18 @@ import {
 import type { ComfortRate } from "../../api/types";
 import { CurveChart } from "../charts/CurveChart";
 
-const CURVE_ASSETS = ["ev", "heater", "battery"];
+/** What the curve's x axis means for each asset, declared next to the asset
+ *  rather than branched on at the field (`declare-dont-branch`). For the EV it
+ *  is state of charge — `ev-comfort-piecewise-core` prices every kWh from the
+ *  current SoC to full, so "50 %" is the battery being half full, not a task
+ *  being half done. */
+const CURVE_ASSETS = [
+  { id: "ev", fillLabel: "State of charge (%)" },
+  { id: "heater", fillLabel: "Fill (%)" },
+  { id: "battery", fillLabel: "Fill (%)" },
+] as const;
+
+const DEFAULT_FILL_LABEL = "Fill (%)";
 
 /** WP4.2 (BL-19): per-asset comfort-curve editor — a plain table of
  *  (fill %, bid €/kWh) points; POST installs an override, DELETE restores
@@ -42,6 +53,12 @@ export function ComfortCurveCard() {
   function updateRow(i: number, patch: Partial<ComfortRate>) {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
+
+  const fillLabel =
+    CURVE_ASSETS.find((a) => a.id === assetId)?.fillLabel ?? DEFAULT_FILL_LABEL;
+  // The API refuses a rising curve and names the offending point; show that
+  // rather than letting a failed save look like nothing happened.
+  const saveError = setMut.error instanceof Error ? setMut.error.message : null;
 
   return (
     <Card data-testid="comfort-curve-card">
@@ -68,11 +85,16 @@ export function ComfortCurveCard() {
           data-testid="comfort-asset-select"
         >
           {CURVE_ASSETS.map((a) => (
-            <option key={a} value={a}>
-              {a}
+            <option key={a.id} value={a.id}>
+              {a.id}
             </option>
           ))}
         </TextField>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Each point is the most you will pay for the <em>next</em> kWh at that level of
+          fill — a marginal bid, not a total. Bids must not rise as fill increases;
+          a rising curve is rejected.
+        </Typography>
         <CurveChart rows={rows} />
         {rows.length === 0 ? (
           <Typography color="text.secondary">No curve points</Typography>
@@ -85,7 +107,7 @@ export function ComfortCurveCard() {
                 sx={{ display: "flex", gap: 1, alignItems: "center" }}
               >
                 <TextField
-                  label="Fill (%)"
+                  label={fillLabel}
                   type="number"
                   size="small"
                   value={Math.round(r.fill * 100)}
@@ -123,6 +145,16 @@ export function ComfortCurveCard() {
               </Box>
             ))}
           </Stack>
+        )}
+        {saveError && (
+          <Typography
+            variant="body2"
+            color="error"
+            sx={{ mt: 2 }}
+            data-testid="comfort-save-error"
+          >
+            {saveError}
+          </Typography>
         )}
       </CardContent>
       <CardActions sx={{ px: 2 }}>

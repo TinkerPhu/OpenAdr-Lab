@@ -172,11 +172,14 @@ pub(crate) struct MilpInputs {
     /// Semi-continuous minimum charge power [kW] (EvConfig.min_charge_kw)
     pub(crate) p_ev_min_kw: f64,
     /// Core energy requirement [kWh] from active packet; 0.0 when absent
-    pub(crate) e_ev_core_kwh: f64,
+    /// Firm requirement [kWh]: energy guaranteed by the deadline, 0.0 when the
+    /// request is soft and its comfort bids decide instead.
+    pub(crate) e_ev_required_kwh: f64,
+    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
+    pub(crate) ev_segments: Vec<super::asset_port::EvEnergySegment>,
     /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
     pub(crate) e_ev_extra_max_kwh: f64,
     /// One-time reward in EUR for committing to meet the core energy target (MayRun only; 0.0 otherwise).
-    pub(crate) v_ev_core_eur: f64,
     /// Reward per kWh of extra opportunistic charging [€/kWh]
     pub(crate) v_ev_extra_eur_kwh: f64,
 
@@ -215,9 +218,6 @@ pub(crate) struct MilpInputs {
     /// projected SoC trajectory (see `asset_port::ExogenousSocDrops`).
     /// None when no EV is present or no usage forecast is configured.
     pub(crate) ev_soc_drops: Option<super::asset_port::ExogenousSocDrops>,
-    /// `ev-usage-forecast`: the EV's own "target unreachable before departure"
-    /// warning, surfaced as a plan warning. None when nothing was clamped.
-    pub(crate) ev_core_unmet_warning: Option<String>,
 }
 
 /// Internal MILP descriptor for one shiftable load block. Implements
@@ -375,7 +375,8 @@ pub(crate) struct SolveOutput {
     /// Total extra EV energy above core requirement [kWh]
     pub(crate) e_ev_extra: f64,
     /// 1.0 when EV core target is met (MayRun only); 0.0 otherwise
-    pub(crate) z_ev_core: f64,
+    /// Energy bought from the priced bands [kWh].
+    pub(crate) e_seg_kwh: f64,
     /// 1.0 when heater energy deadline is met (MayRun only); 0.0 otherwise
     pub(crate) z_heat_ready: f64,
     /// Tank energy above T_min [kWh] per slot; empty when heater absent

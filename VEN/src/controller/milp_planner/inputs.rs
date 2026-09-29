@@ -259,14 +259,14 @@ pub(crate) fn build_milp_inputs(
     let mut t_ev_dead: Option<usize> = None;
     let mut p_ev_max = 0.0_f64;
     let mut p_ev_min = 0.0_f64;
-    let mut e_ev_core = 0.0_f64;
+    let mut e_ev_required = 0.0_f64;
+    let mut ev_segments: Vec<super::asset_port::EvEnergySegment> = Vec::new();
     let mut e_ev_extra = 0.0_f64;
     let mut v_ev_extra = 0.0_f64;
-    let mut v_ev_core = 0.0_f64;
+
     let mut ev_budget_eur: Option<f64> = None;
     let mut soc_ev_init: Option<f64> = None;
     let mut ev_soc_drops: Option<super::asset_port::ExogenousSocDrops> = None;
-    let mut ev_core_unmet_warning: Option<String> = None;
 
     let mut milp_loads: Vec<ShiftableLoadMilpContext> = Vec::new();
 
@@ -299,14 +299,14 @@ pub(crate) fn build_milp_inputs(
                 t_ev_dead = e.t_dead_step;
                 p_ev_max = e.p_max_kw;
                 p_ev_min = e.p_min_kw;
-                e_ev_core = e.e_core_kwh;
+                e_ev_required = e.e_required_kwh;
+                ev_segments = e.segments;
                 e_ev_extra = e.e_extra_max_kwh;
                 v_ev_extra = e.v_extra_eur_kwh;
-                v_ev_core = e.v_core_eur;
+
                 ev_budget_eur = e.budget_eur;
                 soc_ev_init = Some(e.soc_init);
                 ev_soc_drops = e.soc_drops;
-                ev_core_unmet_warning = e.core_unmet_warning;
             }
             AssetMilpParams::Heater(h) => {
                 heater_mode = h.mode;
@@ -404,9 +404,10 @@ pub(crate) fn build_milp_inputs(
         t_ev_dead_step: t_ev_dead,
         p_ev_max_kw: p_ev_max,
         p_ev_min_kw: p_ev_min,
-        e_ev_core_kwh: e_ev_core,
+        e_ev_required_kwh: e_ev_required,
+        ev_segments,
         e_ev_extra_max_kwh: e_ev_extra,
-        v_ev_core_eur: v_ev_core,
+
         v_ev_extra_eur_kwh: v_ev_extra,
         heater_mode,
         t_heat_dead_step: t_heat_dead,
@@ -422,6 +423,5 @@ pub(crate) fn build_milp_inputs(
         shiftable_loads: milp_loads,
         soc_ev_init,
         ev_soc_drops,
-        ev_core_unmet_warning,
     }
 }
