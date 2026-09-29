@@ -8,18 +8,24 @@ const mockCurveData = vi.fn(
   (): ComfortCurveResponse => ({ source: "default", rates: [] }),
 );
 const mockSetCurve = vi.fn(async () => ({}));
+let mockSetError: Error | null = null;
 const mockDeleteCurve = vi.fn(async () => ({}));
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useComfortCurve: () => ({ data: mockCurveData() }),
-  useSetComfortCurve: () => ({ mutateAsync: mockSetCurve, isPending: false }),
+  useSetComfortCurve: () => ({
+    mutateAsync: mockSetCurve,
+    isPending: false,
+    error: mockSetError,
+  }),
   useDeleteComfortCurve: () => ({ mutateAsync: mockDeleteCurve, isPending: false }),
 }));
 
 describe("ComfortCurveCard", () => {
   beforeEach(() => {
     mockSetCurve.mockClear();
+    mockSetError = null;
     mockDeleteCurve.mockClear();
     mockCurveData.mockReturnValue({
       source: "default",
@@ -82,6 +88,30 @@ describe("ComfortCurveCard", () => {
         { fill: 1.0, max_marginal_price: 0.1, max_marginal_co2: 0 },
       ],
     });
+  });
+
+  it("labels the EV's fill axis as state of charge and explains the marginal bid", () => {
+    render(<ComfortCurveCard />);
+    // `ev-comfort-piecewise-core`: for an EV the curve is a property of the
+    // battery's fullness, and each point is a bid for the *next* kWh.
+    expect(screen.getAllByLabelText("State of charge (%)")).toHaveLength(2);
+    expect(screen.getByText(/next/)).toBeInTheDocument();
+    expect(screen.getByText(/must not rise as fill increases/)).toBeInTheDocument();
+  });
+
+  it("surfaces the API's rejection message when a curve is refused", () => {
+    mockSetError = new Error(
+      "point 1: max_marginal_price 0.4 rises above the previous 0.1 — bids must not increase with fill",
+    );
+    render(<ComfortCurveCard />);
+    expect(screen.getByTestId("comfort-save-error")).toHaveTextContent(
+      "bids must not increase with fill",
+    );
+  });
+
+  it("shows no rejection message when the last save succeeded", () => {
+    render(<ComfortCurveCard />);
+    expect(screen.queryByTestId("comfort-save-error")).not.toBeInTheDocument();
   });
 
   it("reset restores the default via DELETE and is enabled only on overrides", async () => {

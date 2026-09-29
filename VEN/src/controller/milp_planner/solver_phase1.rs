@@ -281,9 +281,9 @@ pub(crate) fn read_solve_output<S: Solution>(
         (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
     };
 
-    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, z_ev_core_out) = if let Some(v) = &pool.ev {
+    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, e_seg_out) = if let Some(v) = &pool.ev {
         let sol = EvMilpContext::read_solution(solution, v, n);
-        (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.z_ev_core)
+        (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.e_seg_kwh)
     } else {
         (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
     };
@@ -321,7 +321,7 @@ pub(crate) fn read_solve_output<S: Solution>(
         s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_ref[t])).collect(),
         z_ev_on: z_ev_on_out,
         e_ev_extra: e_ev_extra_out,
-        z_ev_core: z_ev_core_out,
+        e_seg_kwh: e_seg_out,
         z_heat_ready: z_heat_ready_out,
         e_heat_tank_kwh: e_heat_tank_out,
         p_shiftable_kw,

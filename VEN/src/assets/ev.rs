@@ -283,16 +283,23 @@ impl EvCharger {
         }
     }
 
+    /// The bid a session carries when the user expressed none. Re-drawn for
+    /// `ev-comfort-piecewise-core`: the curve is read **marginally** now, so the
+    /// old 0.35 → 0.05 ramp averaged ~0.20 €/kWh and bought almost nothing once
+    /// the 0.22 €/kWh controllable-import malus was added to the tariff. 0.45
+    /// clears a cheap slot (0.06 + 0.22) and a mid one (0.25 + 0.22), declining
+    /// to 0.30 because the last kWh is worth less than the first. Charging at
+    /// any price is a firm deadline's job, not a bid's.
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.35,
+                max_marginal_price: 0.45,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.05,
+                max_marginal_price: 0.30,
                 max_marginal_co2: 0.0,
             },
         ]

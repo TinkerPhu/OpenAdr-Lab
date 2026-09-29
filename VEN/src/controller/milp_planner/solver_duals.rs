@@ -101,7 +101,7 @@ fn declare_fixed_battery_vars(
     }
 }
 
-/// EV vars with `z_ev_on`/`z_ev_core` fixed continuous; power/extra-energy stay free.
+/// EV vars with `z_ev_on` fixed continuous; power and segment energy stay free.
 fn declare_fixed_ev_vars(
     inputs: &MilpInputs,
     winning: &SolveOutput,
@@ -125,15 +125,19 @@ fn declare_fixed_ev_vars(
             vars.add(variable().min(v).max(v))
         })
         .collect();
-    let z_ev_core = {
-        let v = round_bin(winning.z_ev_core);
-        vars.add(variable().min(v).max(v))
-    };
     let e_ev_extra = vars.add(variable().min(0.0).max(e_extra_max));
+    // `ev-comfort-piecewise-core`: the bands are continuous, so unlike the
+    // binary they replaced there is nothing to round or pin here — they are
+    // re-declared with their own bounds and left free.
+    let e_seg = inputs
+        .ev_segments
+        .iter()
+        .map(|seg| vars.add(variable().min(0.0).max(seg.kwh)))
+        .collect();
     EvMilpVars {
         p_ev,
         z_ev_on,
-        z_ev_core,
+        e_seg,
         e_ev_extra,
         delta_ev: vec![],
         delta_ev_ramp: vec![],

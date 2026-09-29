@@ -1,44 +1,36 @@
-//! GB-41: does a soft-deadline (`MayRun`) EV session charge on a site with no PV
-//! and no battery?
+//! GB-41's regression harness, restated for `ev-comfort-piecewise-core`.
 //!
-//! Four of nine fleet VENs charged nothing at all for 24 h with a valid
-//! `BY_DEADLINE` session and `soft_deadline: true`. The solver returned OPTIMAL
-//! and set `z_ev_core = 0` — it *decided* not to charge. Live probing narrowed
-//! the discriminator to PV/battery presence and ruled out price, CO2 weighting,
-//! the comfort reward, session creation, `plugged`, and solver cost.
+//! GB-41: four of nine fleet VENs charged nothing at all for 24 h with a valid
+//! soft-deadline session, solving OPTIMAL every cycle. Reproduced offline here on
+//! 2026-09-27, the mechanism was an all-or-nothing core — one binary
+//! (`z_ev_core`) deciding the whole requested block — priced against a comfort
+//! bid that the 0.22 €/kWh controllable-import malus pushed below cost. When the
+//! bid did not cover the *whole* block, zero was optimal.
 //!
-//! The fleet no longer exercises this path: `ev-usage-forecast`'s
-//! `engage_charge_planning` sets `MustRun`, whose constraint is an equality with
-//! no `z_ev_core` binary at all. So the symptom is gone from the fleet while the
-//! decision that produced it is untouched — any user-created soft-deadline
-//! request still goes through `MayRun`. These tests settle "solved or merely
-//! bypassed" offline, which is what GB-41 itself proposes as the next step.
+//! That binary is gone. The comfort curve now prices every kWh from the current
+//! SoC to full as continuous bands, so a bid covering part of the energy buys
+//! that part. These tests state the new behaviour and fail if the cliff returns.
 //!
 //! Every assertion carries a full input/output dump (`dump`), so a failure is
-//! diagnosable from the test output alone without re-running a 24 h fleet
-//! scenario — the thing the original investigation could not do, because the
-//! run's per-slot `p_ev_kw` was never retained.
+//! diagnosable from the test output alone — the thing the original investigation
+//! could not do, because that run's per-slot `p_ev_kw` was never retained.
 
-use super::*;
-// The same weights the other solver tests use: w_energy = 1, everything else
-// off. Deliberately the case most favourable to charging -- no CO2 term, no
-// grid/import malus, no wear. If the solver still declines here, the cause is a
-// constraint, not a price.
 use super::solver::make_phase1_weights;
+use super::*;
+use crate::controller::milp_planner::asset_port::EvEnergySegment;
 
-/// ven-11's EV, as GB-41 recorded it: 7.4 kW, 50 kWh, 30 % -> 80 % target, so
-/// 25 kWh of core energy. ven-19 (which charged) has the same EV and differs
-/// only in site assets — that pair is the controlled experiment.
+/// ven-11's EV, as GB-41 recorded it: 7.4 kW, 50 kWh, 30 % SoC, 80 % target — so
+/// 25 kWh to the target and 10 kWh beyond it. ven-19 (which charged) had the same
+/// EV and differed only in site assets; that pair is the controlled experiment.
 const P_EV_MAX_KW: f64 = 7.4;
 const BATTERY_KWH: f64 = 50.0;
 const SOC_START: f64 = 0.30;
 const SOC_TARGET: f64 = 0.80;
-const CORE_KWH: f64 = BATTERY_KWH * (SOC_TARGET - SOC_START);
-/// `profile::defaults::default_v_ev_core` — the reward is `core_kwh * this`.
-const V_EV_CORE_EUR_KWH: f64 = 1.0;
+const TO_TARGET_KWH: f64 = BATTERY_KWH * (SOC_TARGET - SOC_START);
+const BEYOND_TARGET_KWH: f64 = BATTERY_KWH * (1.0 - SOC_TARGET);
+/// `profile::defaults::default_v_ev_core`.
+const DEFAULT_CORE_BID: f64 = 1.0;
 
-/// One site variant to solve. `pv_kw` and the battery are what GB-41 narrowed
-/// the difference down to.
 struct Site {
     name: &'static str,
     pv_kw: f64,
@@ -46,7 +38,6 @@ struct Site {
 }
 
 const SITES: [Site; 4] = [
-    // ven-11 / ven-16-shaped: nothing but the EV and the house.
     Site {
         name: "bare (ven-11: EV + base load only)",
         pv_kw: 0.0,
@@ -62,7 +53,6 @@ const SITES: [Site; 4] = [
         pv_kw: 0.0,
         battery: true,
     },
-    // ven-19-shaped: the site that charged.
     Site {
         name: "with PV + battery (ven-19)",
         pv_kw: 5.0,
@@ -70,17 +60,29 @@ const SITES: [Site; 4] = [
     },
 ];
 
-/// A 24-slot hourly horizon with a realistic tariff shape, a soft-deadline EV
-/// session due at the end, and the site's own assets.
+/// The bands a session's curve produces: `to_target` at `bid`, the rest of the
+/// battery at `bid_beyond`.
+fn bands(bid: f64, bid_beyond: f64) -> Vec<EvEnergySegment> {
+    vec![
+        EvEnergySegment {
+            kwh: TO_TARGET_KWH,
+            eur_per_kwh: bid,
+        },
+        EvEnergySegment {
+            kwh: BEYOND_TARGET_KWH,
+            eur_per_kwh: bid_beyond,
+        },
+    ]
+}
+
+/// A 24-slot hourly horizon with a realistic tariff shape and the site's assets.
 fn inputs_for(site: &Site) -> MilpInputs {
     let n = 24;
-    // Cheap overnight, expensive daytime — the shape the fleet actually saw.
     let c_imp: Vec<f64> = (0..n)
         .map(|t| if (0..6).contains(&t) { 0.06 } else { 0.25 })
         .collect();
     let p_pv: Vec<f64> = (0..n)
         .map(|t| {
-            // A daylight bell, zero at night.
             let x = (t as f64 - 13.0) / 4.0;
             (site.pv_kw * (1.0 - x * x)).max(0.0)
         })
@@ -115,15 +117,15 @@ fn inputs_for(site: &Site) -> MilpInputs {
         p_bat_dis_max_kw: site.battery.then_some(5.0),
         eff_bat_ch: site.battery.then_some(0.96),
         eff_bat_dis: site.battery.then_some(0.96),
-        // The session: soft deadline at the end of the horizon, so MayRun.
         a_ev: vec![true; n],
+        // Soft deadline: nothing guaranteed, the bids decide.
         ev_mode: MilpLoadMode::MayRun,
         t_ev_dead_step: Some(n - 1),
         p_ev_max_kw: P_EV_MAX_KW,
-        p_ev_min_kw: 1.4, // semi-continuous floor, as the fleet profiles set
-        e_ev_core_kwh: CORE_KWH,
-        e_ev_extra_max_kwh: BATTERY_KWH * (1.0 - SOC_TARGET),
-        v_ev_core_eur: CORE_KWH * V_EV_CORE_EUR_KWH,
+        p_ev_min_kw: 1.4,
+        e_ev_required_kwh: 0.0,
+        ev_segments: bands(DEFAULT_CORE_BID, 0.10),
+        e_ev_extra_max_kwh: 0.0,
         v_ev_extra_eur_kwh: 0.0,
         heater_mode: MilpLoadMode::MustNotRun,
         t_heat_dead_step: None,
@@ -139,26 +141,20 @@ fn inputs_for(site: &Site) -> MilpInputs {
         shiftable_loads: vec![],
         soc_ev_init: Some(SOC_START),
         ev_soc_drops: None,
-        ev_core_unmet_warning: None,
     }
 }
 
-/// Everything needed to diagnose a failure without re-running anything: the
-/// decision, the money behind it, and the per-slot plan.
-fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
-    let ev_energy: f64 = out
-        .p_ev_kw
+fn delivered_kwh(inputs: &MilpInputs, out: &SolveOutput) -> f64 {
+    out.p_ev_kw
         .iter()
         .zip(inputs.dt_h.iter())
         .map(|(p, d)| p * d)
-        .sum();
-    let import_cost: f64 = out
-        .p_imp_kw
-        .iter()
-        .zip(inputs.c_imp_eur_kwh.iter())
-        .zip(inputs.dt_h.iter())
-        .map(|((p, c), d)| p * c * d)
-        .sum();
+        .sum()
+}
+
+/// Everything needed to diagnose a failure without re-running anything.
+fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
+    let ev_energy = delivered_kwh(inputs, out);
     let cheapest = inputs
         .c_imp_eur_kwh
         .iter()
@@ -166,133 +162,40 @@ fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
         .fold(f64::INFINITY, f64::min);
     let mut s = String::new();
     s.push_str(&format!("\n── GB-41 probe: {} ──\n", site.name));
-    s.push_str(&format!(
-        "decision      z_ev_core = {:.3}   (0 = solver declined the core energy)\n",
-        out.z_ev_core
-    ));
     s.push_str(&format!("status        {:?}\n", out.status));
     s.push_str(&format!("objective     {:.4} EUR\n", out.objective_eur));
+    s.push_str(&format!("delivered     {ev_energy:.2} kWh EV\n"));
     s.push_str(&format!(
-        "core          {CORE_KWH:.1} kWh wanted, reward {:.2} EUR ({V_EV_CORE_EUR_KWH:.2} EUR/kWh)\n",
-        inputs.v_ev_core_eur
+        "required      {:.2} kWh (0 = soft, the bids decide)\n",
+        inputs.e_ev_required_kwh
     ));
+    s.push_str("bands         ");
+    for b in &inputs.ev_segments {
+        s.push_str(&format!(
+            "[{:.1} kWh @ {:.2} EUR/kWh] ",
+            b.kwh, b.eur_per_kwh
+        ));
+    }
     s.push_str(&format!(
-        "cheapest rate {cheapest:.3} EUR/kWh -> core at best price would cost {:.2} EUR\n",
-        CORE_KWH * cheapest
+        "\ncheapest rate {cheapest:.3} EUR/kWh (+0.22 ctrl-import malus when priced)\n"
     ));
-    s.push_str(&format!(
-        "delivered     {ev_energy:.2} kWh EV,  site import cost {import_cost:.2} EUR\n"
-    ));
-    s.push_str(&format!(
-        "ev p_min/max  {:.1} / {:.1} kW,  import cap {:.1} kW,  base {:.1} kW\n",
-        inputs.p_ev_min_kw, inputs.p_ev_max_kw, inputs.p_imp_max_cont_kw[0], inputs.p_base_kw[0]
-    ));
-    s.push_str("slot  rate   pv    p_ev   p_imp  bat_ch bat_dis\n");
+    s.push_str("slot  rate   pv    p_ev   p_imp\n");
     for t in 0..inputs.n {
         s.push_str(&format!(
-            "{t:>4}  {:.2}  {:4.1}  {:5.2}  {:5.2}  {:5.2}  {:5.2}\n",
-            inputs.c_imp_eur_kwh[t],
-            inputs.p_pv_kw[t],
-            out.p_ev_kw[t],
-            out.p_imp_kw[t],
-            out.p_bat_ch_kw.get(t).copied().unwrap_or(0.0),
-            out.p_bat_dis_kw.get(t).copied().unwrap_or(0.0),
+            "{t:>4}  {:.2}  {:4.1}  {:5.2}  {:5.2}\n",
+            inputs.c_imp_eur_kwh[t], inputs.p_pv_kw[t], out.p_ev_kw[t], out.p_imp_kw[t],
         ));
     }
     s
 }
 
-fn solve_site(site: &Site) -> (MilpInputs, SolveOutput) {
-    let inputs = inputs_for(site);
-    let out = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    )
-    .unwrap_or_else(|e| panic!("{} failed to solve: {e:?}", site.name));
-    (inputs, out)
+fn solve(inputs: &MilpInputs, weights: &Phase1Weights, site: &Site) -> SolveOutput {
+    solve_phase1(inputs, weights, &contexts_from_inputs(inputs), 60.0)
+        .unwrap_or_else(|e| panic!("{} failed to solve: {e:?}", site.name))
 }
 
-/// The question GB-41 asks: on a site with no PV and no battery, does a
-/// soft-deadline session get its core energy?
-#[test]
-fn gb41_soft_deadline_core_is_taken_on_a_bare_site() {
-    let site = &SITES[0];
-    let (inputs, out) = solve_site(site);
-    let report = dump(site, &inputs, &out);
-    assert!(
-        out.z_ev_core >= 0.5,
-        "GB-41 reproduces: the solver declined the core energy on a site with no PV \
-         and no battery, exactly as four fleet VENs did for 24 h.{report}"
-    );
-    let ev_energy: f64 = out
-        .p_ev_kw
-        .iter()
-        .zip(inputs.dt_h.iter())
-        .map(|(p, d)| p * d)
-        .sum();
-    assert!(
-        ev_energy >= CORE_KWH - 0.5,
-        "core energy was committed (z_ev_core=1) but not delivered.{report}"
-    );
-}
-
-/// The controlled pair from GB-41: same EV, same session, same prices — only
-/// the site assets differ. If the bare site declines and these charge, the
-/// discriminator really is PV/battery presence and the defect is live.
-#[test]
-fn gb41_every_site_variant_reaches_the_same_decision() {
-    let mut declined: Vec<&str> = Vec::new();
-    let mut reports = String::new();
-    for site in SITES.iter() {
-        let (inputs, out) = solve_site(site);
-        reports.push_str(&dump(site, &inputs, &out));
-        if out.z_ev_core < 0.5 {
-            declined.push(site.name);
-        }
-    }
-    assert!(
-        declined.is_empty(),
-        "the same soft-deadline session is taken on some sites and declined on others, \
-         which is GB-41's discriminator. Declined: {declined:?}{reports}"
-    );
-}
-
-/// GB-41 proposes this as the decisive follow-up: if the same site charges once
-/// the deadline is firm, the soft-deadline core value is priced below what the
-/// solver would rather avoid, and the fix belongs in that valuation.
-#[test]
-fn gb41_a_firm_deadline_charges_the_same_bare_site() {
-    let site = &SITES[0];
-    let mut inputs = inputs_for(site);
-    inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.v_ev_core_eur = 0.0; // firm deadlines carry no comfort reward
-    let out = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    )
-    .unwrap_or_else(|e| panic!("firm-deadline solve failed: {e:?}"));
-    let ev_energy: f64 = out
-        .p_ev_kw
-        .iter()
-        .zip(inputs.dt_h.iter())
-        .map(|(p, d)| p * d)
-        .sum();
-    assert!(
-        ev_energy >= CORE_KWH - 0.5,
-        "a firm deadline must deliver the core energy on any site.{}",
-        dump(site, &inputs, &out)
-    );
-}
-
-/// The fleet's real weights, from `profile::defaults`: the controllable-import
-/// malus (0.22 EUR/kWh on top of the tariff) is the one that could plausibly
-/// outweigh a comfort reward, and a PV site can dodge it by charging from
-/// surplus instead of import — which is exactly the shape of GB-41's
-/// PV-vs-no-PV discriminator.
+/// The fleet's real weights: the 0.22 €/kWh controllable-import malus is the term
+/// that pushed a comfort bid below cost in GB-41.
 fn realistic_weights() -> Phase1Weights {
     Phase1Weights {
         w_energy: 1.0,
@@ -307,21 +210,206 @@ fn realistic_weights() -> Phase1Weights {
     }
 }
 
-/// One axis of the sweep below: what the solve is priced and bounded by.
-struct Variant {
-    name: &'static str,
-    weights: fn() -> Phase1Weights,
-    /// Site import ceiling [kW] — GB-41 lists "site import limit vs p_max_kw +
-    /// base load" as a candidate constraint.
-    import_cap_kw: f64,
+// ── The behaviour this change exists for ─────────────────────────────────────
+
+/// A bid that clears the cost buys the energy — on the bare site, which is the
+/// case GB-41 never charged on.
+#[test]
+fn a_worthwhile_bid_charges_on_a_bare_site() {
+    let site = &SITES[0];
+    let inputs = inputs_for(site);
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        kwh >= TO_TARGET_KWH - 0.5,
+        "a 1.00 EUR/kWh bid must buy the 25 kWh to target even at tariff + malus{}",
+        dump(site, &inputs, &out)
+    );
 }
 
-/// Sweeps every site against every pricing/bounding variant and reports the
-/// decision for each. This is the experiment GB-41 asks for: if the bare site
-/// declines under some variant while the PV site takes it, that variant is the
-/// cause, and the dump names it.
+/// **The heart of the change.** A bid below the cost of most energy buys the part
+/// it does cover instead of nothing. Under the old all-or-nothing core this
+/// delivered exactly 0 — which is what GB-41 observed on the fleet.
 #[test]
-fn gb41_sweep_sites_against_pricing_and_limits() {
+fn a_bid_that_covers_only_part_of_the_energy_buys_that_part() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    // Only two cheap hours, so the charger can draw at most 2 x 7.4 = 14.8 kWh
+    // of the 25 kWh at a price this bid covers; the rest would have to come from
+    // 0.25-rate slots costing 0.47 with the malus.
+    inputs.c_imp_eur_kwh = (0..inputs.n)
+        .map(|t| if t < 2 { 0.06 } else { 0.25 })
+        .collect();
+    // 0.284 clears a cheap slot (0.06 + 0.22 malus = 0.28) but not a dear one.
+    inputs.ev_segments = bands(0.284, 0.0);
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    let report = dump(site, &inputs, &out);
+    assert!(
+        kwh > 0.5,
+        "the covered part must be bought, not refused wholesale{report}"
+    );
+    assert!(
+        kwh < TO_TARGET_KWH - 0.5,
+        "and only the covered part — the dear slots are not worth this bid{report}"
+    );
+}
+
+/// The same low bid on a site with surplus buys strictly more, because surplus
+/// costs neither tariff nor malus. GB-41 read this as "PV sites charge, bare
+/// sites don't"; it is now a difference of degree, not of kind.
+#[test]
+fn surplus_buys_more_of_the_same_low_bid_than_a_bare_site_does() {
+    let bare = &SITES[0];
+    let sunny = Site {
+        name: "ample PV",
+        pv_kw: 14.0,
+        battery: false,
+    };
+    let mut a = inputs_for(bare);
+    a.ev_segments = bands(0.10, 0.0);
+    let mut b = inputs_for(&sunny);
+    b.ev_segments = bands(0.10, 0.0);
+    let out_a = solve(&a, &realistic_weights(), bare);
+    let out_b = solve(&b, &realistic_weights(), &sunny);
+    let (kwh_a, kwh_b) = (delivered_kwh(&a, &out_a), delivered_kwh(&b, &out_b));
+    assert!(
+        kwh_b > kwh_a + 0.5,
+        "surplus must buy more of the same bid: bare {kwh_a:.2} kWh vs sunny {kwh_b:.2} kWh{}{}",
+        dump(bare, &a, &out_a),
+        dump(&sunny, &b, &out_b)
+    );
+}
+
+/// A firm deadline is a guarantee: it delivers its floor even when the bid is far
+/// below the cost of the energy. The "I need 60 % to reach the destination" case
+/// belongs here, not in a rewarded binary that can decline.
+#[test]
+fn a_firm_deadline_delivers_its_floor_however_low_the_bid() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    inputs.e_ev_required_kwh = TO_TARGET_KWH;
+    inputs.ev_segments = bands(0.0, 0.0); // no comfort value at all
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        kwh >= TO_TARGET_KWH - 0.5,
+        "a firm requirement must be met regardless of the bid{}",
+        dump(site, &inputs, &out)
+    );
+}
+
+/// A guarantee the window cannot physically hold: the floor is capped to what
+/// the available slots can deliver (otherwise the solve is infeasible, since the
+/// EV's energy balance has no slack), the plan charges that much, and the gap is
+/// reported — the one remaining meaning of `EV_CORE_ENERGY_UNMET`.
+#[test]
+fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    // Only the first two slots are available, so the window holds at most
+    // 2 x 0.5 h x P_EV_MAX_KW — far less than the full requirement.
+    inputs.a_ev = (0..inputs.n).map(|t| t < 2).collect();
+    inputs.t_ev_dead_step = Some(1);
+    inputs.e_ev_required_kwh = TO_TARGET_KWH;
+    inputs.ev_segments = bands(0.0, 0.0); // the guarantee, not a bid, is on trial
+
+    let out = solve(&inputs, &realistic_weights(), site);
+    let reachable_kwh = 2.0 * inputs.dt_h[0] * P_EV_MAX_KW;
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        (kwh - reachable_kwh).abs() < 0.5,
+        "must charge everything the window allows ({reachable_kwh:.2} kWh){}",
+        dump(site, &inputs, &out)
+    );
+
+    let warnings = super::super::ev_diagnostics::ev_warnings(&inputs, &out);
+    let w = warnings
+        .iter()
+        .find(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet)
+        .unwrap_or_else(|| {
+            panic!(
+                "an unmet guarantee must be reported, got {warnings:?}{}",
+                dump(site, &inputs, &out)
+            )
+        });
+    assert!(
+        w.message.contains(&format!("{TO_TARGET_KWH:.1} kWh"))
+            && w.message.contains(&format!("{kwh:.1} kWh")),
+        "the warning must name both required and delivered energy: {}",
+        w.message
+    );
+}
+
+/// The mirror of the test above: a **soft** request that charges less than its
+/// target reports nothing, because it promised nothing.
+#[test]
+fn a_soft_request_that_charges_partially_reports_no_unmet_obligation() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    // Same construction as `a_bid_that_covers_only_part_of_the_energy_buys_that
+    // _part`: two cheap hours the bid clears, the rest dear enough that it does not.
+    inputs.c_imp_eur_kwh = (0..inputs.n)
+        .map(|t| if t < 2 { 0.06 } else { 0.25 })
+        .collect();
+    inputs.ev_segments = bands(0.284, 0.0);
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        kwh > 0.5 && kwh < TO_TARGET_KWH - 0.5,
+        "this probe needs a genuinely partial charge, got {kwh:.2} kWh{}",
+        dump(site, &inputs, &out)
+    );
+    assert!(
+        super::super::ev_diagnostics::ev_warnings(&inputs, &out).is_empty(),
+        "a soft request owes nothing, so a partial charge is not a shortfall{}",
+        dump(site, &inputs, &out)
+    );
+}
+
+/// Nothing is bought when no kWh is worth its cost — the one case where charging
+/// nothing is still the right answer.
+#[test]
+fn a_bid_below_every_cost_buys_nothing() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    inputs.ev_segments = bands(0.01, 0.0);
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        kwh < 0.5,
+        "0.01 EUR/kWh cannot justify energy costing at least 0.28{}",
+        dump(site, &inputs, &out)
+    );
+}
+
+/// Bands are bought most-valuable-first, so the energy toward the target is taken
+/// before the energy beyond it.
+#[test]
+fn the_valuable_band_is_bought_before_the_cheap_one() {
+    let site = &SITES[0];
+    let mut inputs = inputs_for(site);
+    inputs.ev_segments = bands(1.00, 0.29);
+    let out = solve(&inputs, &realistic_weights(), site);
+    let kwh = delivered_kwh(&inputs, &out);
+    assert!(
+        kwh >= TO_TARGET_KWH - 0.5,
+        "the high-value band must be filled first{}",
+        dump(site, &inputs, &out)
+    );
+}
+
+/// The sweep GB-41 asked for, restated: every site delivers energy at a
+/// worthwhile bid. Prints the table for the record.
+#[test]
+fn sweep_sites_against_pricing_and_limits() {
+    struct Variant {
+        name: &'static str,
+        weights: fn() -> Phase1Weights,
+        import_cap_kw: f64,
+    }
     let variants = [
         Variant {
             name: "minimal weights, ample import",
@@ -340,263 +428,33 @@ fn gb41_sweep_sites_against_pricing_and_limits() {
         },
     ];
 
-    let mut table = String::from(
-        "
-── GB-41 sweep: z_ev_core per site x variant (0 = declined) ──
-",
-    );
-    let mut declined: Vec<String> = Vec::new();
+    let mut table = String::from("\n── delivered kWh per site x variant ──\n");
+    let mut starved: Vec<String> = Vec::new();
     let mut detail = String::new();
 
     for variant in variants.iter() {
-        table.push_str(&format!(
-            "
-{}
-",
-            variant.name
-        ));
+        table.push_str(&format!("\n{}\n", variant.name));
         for site in SITES.iter() {
             let mut inputs = inputs_for(site);
             inputs.p_imp_max_cont_kw = vec![variant.import_cap_kw; inputs.n];
             inputs.p_imp_max_phys_kw = vec![variant.import_cap_kw; inputs.n];
-            let out = solve_phase1(
-                &inputs,
-                &(variant.weights)(),
-                &contexts_from_inputs(&inputs),
-                60.0,
-            )
-            .unwrap_or_else(|e| panic!("{} / {} failed to solve: {e:?}", variant.name, site.name));
-            let ev_kwh: f64 = out
-                .p_ev_kw
-                .iter()
-                .zip(inputs.dt_h.iter())
-                .map(|(p, d)| p * d)
-                .sum();
+            let out = solve(&inputs, &(variant.weights)(), site);
+            let kwh = delivered_kwh(&inputs, &out);
             table.push_str(&format!(
-                "  {:<34} z_ev_core={:.2}  delivered={:6.2} kWh  obj={:8.3}
-",
-                site.name, out.z_ev_core, ev_kwh, out.objective_eur
+                "  {:<34} delivered={kwh:6.2} kWh  obj={:8.3}\n",
+                site.name, out.objective_eur
             ));
-            if out.z_ev_core < 0.5 {
-                declined.push(format!("{} / {}", variant.name, site.name));
+            if kwh < 0.5 {
+                starved.push(format!("{} / {}", variant.name, site.name));
                 detail.push_str(&dump(site, &inputs, &out));
             }
         }
     }
 
-    // A site with PV taking the core while the bare site declines IS GB-41.
-    // Any decline at all is worth failing on: the session asked for energy and
-    // the solver said no.
     assert!(
-        declined.is_empty(),
-        "the soft-deadline core was declined in {} combination(s): {declined:#?}{table}{detail}",
-        declined.len()
+        starved.is_empty(),
+        "a 1.00 EUR/kWh bid bought nothing in {} combination(s): {starved:#?}{table}{detail}",
+        starved.len()
     );
-    // Not an assertion, but the table is the point of the test — print it so a
-    // passing run still leaves the evidence behind (`cargo test -- --nocapture`).
     println!("{table}");
-}
-
-/// **The mechanism behind GB-41, reproduced.**
-///
-/// `UserRequestMode::ByDeadlineFree` / `AsapFree` / `Opportunistic` set
-/// `free_only`, and `EvMilpContext::inject_grid_slots` then caps EV power per
-/// slot at `(pv - base).max(0)` — PV surplus over the house load. Combined with
-/// `MayRun`'s **all-or-nothing** core (`ev_energy == e_core * z_ev_core`), a
-/// site that cannot cover the *entire* core from surplus charges **nothing at
-/// all** — not "as much as it can".
-///
-/// That covers everything GB-41 called unexplained, including the counterexample
-/// that broke its own PV rule (ven-18 *has* PV and still charged nothing): what
-/// matters is not whether a site has PV, but whether its surplus covers the
-/// whole core. It also explains OPTIMAL-with-no-charging and the price
-/// independence — nothing here is a price decision.
-///
-/// What this does NOT establish is which session mode the 2026-08/09 campaign
-/// actually created. If those sessions were `BY_DEADLINE` (not `*_FREE`), this
-/// mechanism was not active and GB-41 stays open on a different cause.
-fn free_energy_ctx(
-    inputs: &MilpInputs,
-) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
-    use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode};
-    use crate::services::test_support::milp_mocks::MockEvCtx;
-    let mut ctx = EvMilpContext {
-        mode: EvMilpMode::MayRun,
-        soc_init: SOC_START,
-        a_ev: vec![true; inputs.n],
-        soc_drops: None,
-        core_unmet_warning: None,
-        t_dead_step: Some(inputs.n - 1),
-        p_max_kw: P_EV_MAX_KW,
-        p_min_kw: 0.0, // surplus rarely reaches a semi-continuous floor
-        e_core_kwh: CORE_KWH,
-        e_extra_max_kwh: BATTERY_KWH * (1.0 - SOC_TARGET),
-        v_extra_eur_kwh: 0.0,
-        v_core_eur: CORE_KWH * V_EV_CORE_EUR_KWH,
-        asap_lateness_eur_kwh_h: 0.0,
-        free_only: true,
-        p_free_cap_kw: None,
-        reward_per_slot: false,
-        free_early_bias: false,
-        budget_eur: None,
-        c_imp_eur_kwh: None,
-        v_extra_co2_eur_kwh: 0.0,
-        v_core_co2_eur: 0.0,
-    };
-    ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
-    Box::new(MockEvCtx { ctx })
-}
-
-/// Solves `site` with a free-energy-gated EV session; returns (surplus offered,
-/// core taken?, kWh delivered, report).
-fn solve_free_energy(site: &Site) -> (f64, bool, f64, String) {
-    let mut inputs = inputs_for(site);
-    inputs.p_ev_min_kw = 0.0;
-    let mut contexts = contexts_from_inputs(&inputs);
-    contexts.retain(|c| c.asset_id() != "ev");
-    let surplus: f64 = inputs
-        .p_pv_kw
-        .iter()
-        .zip(inputs.p_base_kw.iter())
-        .zip(inputs.dt_h.iter())
-        .map(|((pv, base), dt)| (pv - base).max(0.0) * dt)
-        .sum();
-    contexts.push(free_energy_ctx(&inputs));
-    let out = solve_phase1(&inputs, &realistic_weights(), &contexts, 60.0)
-        .unwrap_or_else(|e| panic!("{} free-energy solve failed: {e:?}", site.name));
-    let ev_kwh: f64 = out
-        .p_ev_kw
-        .iter()
-        .zip(inputs.dt_h.iter())
-        .map(|(p, d)| p * d)
-        .sum();
-    let report = format!(
-        "
-surplus offered over the horizon: {surplus:.2} kWh vs core {CORE_KWH:.1} kWh{}",
-        dump(site, &inputs, &out)
-    );
-    (surplus, out.z_ev_core >= 0.5, ev_kwh, report)
-}
-
-#[test]
-fn gb41_free_energy_without_pv_can_never_charge() {
-    let (surplus, took_core, kwh, report) = solve_free_energy(&SITES[0]);
-    assert!(
-        surplus < 0.01,
-        "a site with no PV offers no surplus{report}"
-    );
-    assert!(
-        !took_core && kwh < 0.01,
-        "expected zero charging when no surplus exists at all{report}"
-    );
-}
-
-/// The finding that explains GB-41's own broken PV rule: partial surplus buys
-/// **nothing**, because the core is all-or-nothing. ven-18 has PV and charged
-/// nothing; this is why.
-#[test]
-fn gb41_free_energy_with_partial_surplus_charges_nothing_rather_than_partially() {
-    let (surplus, took_core, kwh, report) = solve_free_energy(&SITES[1]); // 5 kW PV
-    assert!(
-        surplus > 1.0 && surplus < CORE_KWH,
-        "this site must offer some surplus, but less than the core{report}"
-    );
-    assert!(
-        !took_core && kwh < 0.01,
-        "MayRun's core is all-or-nothing, so partial surplus delivers zero —          if this now charges partially, the model changed and GB-41's mechanism          is gone{report}"
-    );
-}
-
-/// The control: give the same site enough surplus to cover the whole core and
-/// it commits, proving the gate is the surplus volume and not the site type.
-#[test]
-fn gb41_free_energy_with_ample_surplus_delivers_the_core() {
-    let ample = Site {
-        name: "ample PV (surplus exceeds the core)",
-        pv_kw: 14.0,
-        battery: false,
-    };
-    let (surplus, took_core, kwh, report) = solve_free_energy(&ample);
-    assert!(
-        surplus > CORE_KWH,
-        "fixture must offer more surplus than the core{report}"
-    );
-    assert!(
-        took_core && kwh >= CORE_KWH - 0.5,
-        "with surplus covering the core, a free-energy session must deliver it{report}"
-    );
-}
-
-/// **The likely root cause of GB-41**, in two parts that only bite together.
-///
-/// Part 1 — valuation. `assets::ev_comfort::resolve_ev_comfort_reward` REPLACES
-/// the profile's `v_ev_core_eur_kwh` (default 1.0 EUR/kWh) with the session's own
-/// comfort rate at 0 % fill whenever the session carries `comfort_rates`; the
-/// fleet's envelopes ran 0.05-0.35 EUR/kWh. Grid charging costs the tariff PLUS
-/// the 0.22 EUR/kWh controllable-import malus, so at 0.10 EUR/kWh a 25 kWh core is
-/// worth 2.50 EUR against ~7-12 EUR of import: declining is simply optimal, and
-/// the solver says so with OPTIMAL and `EV_CORE_ENERGY_UNMET`.
-///
-/// Part 2 — the discriminator. A site whose PV surplus covers the core pays
-/// neither tariff nor malus for it, so the same cheap session is still worth
-/// taking there. Sites without enough surplus take nothing, because `MayRun`'s
-/// core is all-or-nothing.
-///
-/// Together these predict GB-41's pattern *including* the counterexample that
-/// broke its own "has PV" rule (ven-18 has PV and charged nothing): what matters
-/// is whether surplus covers the whole core, not whether PV exists.
-#[test]
-fn gb41_a_low_comfort_rate_declines_grid_charging_but_not_free_charging() {
-    let comfort_rate_eur_kwh = 0.10;
-    let ample_pv = Site {
-        name: "ample PV (surplus covers the core)",
-        pv_kw: 14.0,
-        battery: false,
-    };
-    let mut outcome: Vec<(&str, bool)> = Vec::new();
-    let mut report = String::new();
-
-    for site in [&SITES[0], &ample_pv] {
-        let mut inputs = inputs_for(site);
-        inputs.v_ev_core_eur = CORE_KWH * comfort_rate_eur_kwh;
-        let out = solve_phase1(
-            &inputs,
-            &realistic_weights(),
-            &contexts_from_inputs(&inputs),
-            60.0,
-        )
-        .unwrap_or_else(|e| panic!("{} failed to solve: {e:?}", site.name));
-        report.push_str(&dump(site, &inputs, &out));
-        outcome.push((site.name, out.z_ev_core >= 0.5));
-    }
-
-    assert!(
-        !outcome[0].1,
-        "a {comfort_rate_eur_kwh} EUR/kWh core must not be worth importing at          tariff + 0.22 malus{report}"
-    );
-    assert!(
-        outcome[1].1,
-        "the same cheap core must still be taken where surplus covers it — that          asymmetry is GB-41's discriminator{report}"
-    );
-}
-
-/// The same site and session, with the profile's own default reward instead of
-/// a low comfort rate: it charges. This is what makes the line above a
-/// valuation problem rather than a constraint problem.
-#[test]
-fn gb41_the_profile_default_reward_would_have_charged_the_same_site() {
-    let site = &SITES[0];
-    let inputs = inputs_for(site); // v_ev_core_eur = CORE * 1.0 EUR/kWh
-    let out = solve_phase1(
-        &inputs,
-        &realistic_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    )
-    .unwrap();
-    assert!(
-        out.z_ev_core >= 0.5,
-        "at the profile default the bare site must charge{}",
-        dump(site, &inputs, &out)
-    );
 }

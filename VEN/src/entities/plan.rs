@@ -310,10 +310,11 @@ pub enum WarningKind {
     CapacityViolation,
     /// WP6.3 (BL-09) — a penalty-rule threshold was still exceeded after solving (penalty accepted).
     PeakPenaltyExceeded,
-    /// GB-41 diagnostic: a soft-deadline (`MayRun`) EV session still has unmet core energy
-    /// (`target_soc` not reached) but the solver chose `z_ev_core = 0` for the whole horizon —
-    /// a legitimate cost-optimal outcome, but one that looks identical to a stuck/inert EV from
-    /// the outside, so it must be visible rather than silently inferred from a flat SoC trace.
+    /// A **firm**-deadline EV session whose guaranteed energy the plan cannot deliver in the
+    /// window it has (car away for too much of it, charger too slow, deadline too close). The
+    /// wire name predates `ev-comfort-piecewise-core`, which narrowed the meaning to this one
+    /// case: a soft request that charges less than its target is the comfort curve working as
+    /// asked, not an unmet obligation (GB-41).
     EvCoreEnergyUnmet,
     /// Reserved for future warning sites not yet classified above.
     Other,

@@ -202,14 +202,33 @@ fn test_mode_by_deadline_selects_cheapest_of_six_blocks() {
     let plan = solve_with_session(&profile, &sim, &tariffs, now, &session);
     let ev_kw = plan_ev_kw(&plan);
 
-    assert!(
-        (ev_kw[3] - 7.4).abs() < 1e-3,
-        "BY_DEADLINE must charge the cheapest block (index 3, 0.08) at max rate, got {ev_kw:?}"
+    // The cheapest block carries the most power. It is no longer the *only*
+    // block used: since `ev-comfort-piecewise-core` a firm request also buys
+    // energy beyond its guarantee wherever the user's own curve values it above
+    // cost, so the priciest slots stay light rather than empty.
+    let (argmax, _) =
+        ev_kw.iter().enumerate().fold(
+            (0usize, f64::MIN),
+            |(bi, bv), (i, &v)| {
+                if v > bv {
+                    (i, v)
+                } else {
+                    (bi, bv)
+                }
+            },
+        );
+    assert_eq!(
+        argmax, 3,
+        "BY_DEADLINE must put the most power in the cheapest block (index 3, 0.08), got {ev_kw:?}"
     );
-    let core_kwh: f64 = ev_kw.iter().map(|p| p * 0.5).sum();
     assert!(
-        core_kwh >= 6.0 - 1e-6,
-        "BY_DEADLINE must still deliver the full 6 kWh core by the deadline, got {ev_kw:?}"
+        ev_kw[3] > ev_kw[4],
+        "the cheapest block must out-draw the priciest (index 4, 0.40), got {ev_kw:?}"
+    );
+    let charged_kwh: f64 = ev_kw.iter().map(|p| p * 0.5).sum();
+    assert!(
+        charged_kwh >= 6.0 - 1e-6,
+        "BY_DEADLINE must still deliver its guaranteed 6 kWh by the deadline, got {ev_kw:?}"
     );
 }
 
@@ -313,9 +332,9 @@ fn test_mode_opportunistic_has_no_deadline_constraint() {
     );
     assert_eq!(inp.t_ev_dead_step, None);
     assert!(
-        inp.e_ev_core_kwh < 1e-9,
+        inp.e_ev_required_kwh < 1e-9,
         "OPPORTUNISTIC has no core obligation, got {}",
-        inp.e_ev_core_kwh
+        inp.e_ev_required_kwh
     );
 }
 
@@ -468,32 +487,32 @@ fn test_mode_asap_free_still_gated_to_free_energy() {
     );
 }
 
-// ── BL-34: comfort curve shapes the soft-deadline core-commitment reward ────
+// ── BL-34: the comfort curve prices soft-deadline charging, kWh by kWh ──────
 //
-// EvMilpMode::MayRun makes reaching the core target optional, gated by the
-// binary z_ev_core (constraints: ev_energy >= e_core_kwh * z_ev_core), driven
-// purely by whether v_core_eur (= e_core_kwh * curve.value_at_fill(0.0))
-// outweighs the tariff cost of charging that energy. This is the mechanism
-// that actually drives allocation — the parallel `e_ev_extra`/fill=1.0 reward
-// used to be a documented no-op in this branch, tracked as R-18 in
-// docs/reference/TECHNICAL_DEBTS.md: `e_ev_extra` was only bounded *above* by
-// `e_extra_max_kwh * z_ev_core`, nothing lower-bounded it by real charged
-// power, so the solver "banked" that reward without moving p_ev. Fixed by
-// coupling `ev_energy == e_core_kwh * z_ev_core + e_ev_extra` (equality, not
-// just an upper bound) in `EvMilpContext::constraints` — see
-// `test_by_deadline_hard_extra_reward_drives_extra_charging` below.
+// A soft-deadline (`MayRun`) session values energy through the curve alone:
+// every kWh from the current SoC to full sits in one segment of
+// `EvMilpContext::segments`, each a continuous variable rewarded at its own
+// bid, and `ev_energy == Σ e_seg`. So the bid decides *how much* is charged,
+// not whether anything is — there is no commitment binary left to flip. The
+// tests below pin the ordering that follows: a higher bid buys more energy, and
+// a bid below the cost of every available kWh buys none.
+//
+// (R-18's "banked reward without moving p_ev" is structurally impossible now:
+// the energy balance is an equality over the same variables the objective
+// rewards.)
 
-/// Two BY_DEADLINE/soft_deadline sessions, identical except for their comfort
-/// curve's fill=0.0 price: only the session whose curve values core energy
-/// above the flat tariff cost commits to charging it at all.
+/// Two BY_DEADLINE/soft_deadline sessions, identical except for what they bid:
+/// the higher bid buys strictly more energy.
 ///
-/// The fill=1.0 price is pinned to 0.0 in both curves, not varied — a
-/// positive fill=1.0 price would confound this comparison: `e_ev_extra` is
-/// only bounded *above* by `e_extra_max_kwh * z_ev_core` (see module-level
-/// comment above), so any positive extra-reward gets "banked" for free the
-/// instant z_ev_core=1, independent of real charging, which would bias
-/// *both* sessions toward committing and mask the core-price signal this
-/// test is isolating.
+/// Restated for `ev-comfort-piecewise-core`. This used to assert an
+/// all-or-nothing commitment — the high curve charged the *whole* core, the low
+/// one charged *nothing*. That cliff is what GB-41 turned out to be, and it is
+/// gone: a bid now buys the kWh it covers and no more, so the invariant worth
+/// pinning is the ordering (and that a bid far below cost still buys nothing).
+///
+/// Flat curves, not ramps: the bid is read marginally now, so a ramp from
+/// `core_price` to 0.0 would average to half of it and blur the very signal
+/// this test isolates.
 #[test]
 fn test_by_deadline_soft_comfort_curve_shapes_core_commitment() {
     let now = fixed_now();
@@ -502,16 +521,18 @@ fn test_by_deadline_soft_comfort_curve_shapes_core_commitment() {
     set_ev_plugged(&mut sim, true);
     let tariffs = make_tariffs(0.20, 0.08, 300.0); // flat 0.20, no PV
 
-    let curve = |core_price: f64| {
+    // Flat at `bid`: every kWh is worth the same, so the comparison is about
+    // price alone.
+    let curve = |bid: f64| {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: core_price,
+                max_marginal_price: bid,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.0,
+                max_marginal_price: bid,
                 max_marginal_co2: 0.0,
             },
         ]
@@ -519,47 +540,52 @@ fn test_by_deadline_soft_comfort_curve_shapes_core_commitment() {
 
     let mut high = ev_session_with_mode(now, UserRequestMode::ByDeadline);
     high.soft_deadline = true;
-    high.comfort_rates = curve(0.35); // well above the commit threshold — commits
+    high.comfort_rates = curve(0.60); // clears the 0.20 tariff + 0.22 malus
     let plan_high = solve_with_session(&profile, &sim, &tariffs, now, &high);
     let charged_high: f64 = plan_ev_kw(&plan_high).iter().map(|p| p * 0.5).sum();
 
     let mut low = ev_session_with_mode(now, UserRequestMode::ByDeadline);
     low.soft_deadline = true;
-    low.comfort_rates = curve(0.05); // well below the commit threshold — skips
+    low.comfort_rates = curve(0.05); // below any cost here — buys nothing
     let plan_low = solve_with_session(&profile, &sim, &tariffs, now, &low);
     let charged_low: f64 = plan_ev_kw(&plan_low).iter().map(|p| p * 0.5).sum();
 
     assert!(
-        charged_high >= 5.9,
-        "high-value curve commits to the core target, got {charged_high}"
+        charged_high > charged_low,
+        "a higher bid must buy more energy: high {charged_high} vs low {charged_low}"
+    );
+    assert!(
+        charged_high > 0.5,
+        "a bid above the cost of energy must buy some of it, got {charged_high}"
     );
     assert!(
         charged_low < 0.5,
-        "low-value curve isn't worth the tariff cost, skips charging, got {charged_low}"
+        "a bid below every cost buys nothing, got {charged_low}"
     );
-    assert!(
-        plan_low
-            .warnings
-            .iter()
-            .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
-        "GB-41: a MayRun session that legitimately skips its unmet core energy must say so \
-         in plan.warnings, not just leave it inferable from a flat SoC trace; got {:?}",
-        plan_low.warnings
-    );
-    assert!(
-        !plan_high
-            .warnings
-            .iter()
-            .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
-        "a session that commits to its core energy must not raise the unmet-energy warning; got {:?}",
-        plan_high.warnings
-    );
+    // Neither plan may claim an unmet obligation: a soft request promises
+    // nothing, so buying less than the target is the model working as asked
+    // (`ev-comfort-piecewise-core` — the warning is firm-shortfall only now).
+    for (name, plan) in [("high", &plan_high), ("low", &plan_low)] {
+        assert!(
+            !plan
+                .warnings
+                .iter()
+                .any(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet),
+            "{name}: a soft request must not raise an unmet-energy warning; got {:?}",
+            plan.warnings
+        );
+    }
 }
 
-/// A session using the asset's default comfort curve (no override) behaves
-/// deterministically from that curve, not a no-op zero reward: the EV
-/// default (`ev.rs::default_comfort_rates`, 0.35 at fill=0.0) exceeds the
-/// tariff cost here, so the session commits to its core target.
+/// A session that expressed no curve of its own uses the asset's built-in
+/// default, and that default still buys energy in ordinary conditions.
+///
+/// Restated for `ev-comfort-piecewise-core`: the curve is read marginally now,
+/// so `ev.rs::default_comfort_rates` was re-drawn (0.45 → 0.30) to stay above a
+/// realistic cost — tariff plus the 0.22 €/kWh controllable-import malus. The
+/// old 0.35 → 0.05 ramp averaged about 0.20 €/kWh under the new reading and
+/// would have bought almost nothing, which is precisely the regression this
+/// test exists to catch.
 #[test]
 fn test_by_deadline_soft_no_curve_override_uses_default_reward() {
     let now = fixed_now();
@@ -570,23 +596,18 @@ fn test_by_deadline_soft_no_curve_override_uses_default_reward() {
 
     let mut session = ev_session_with_mode(now, UserRequestMode::ByDeadline);
     session.soft_deadline = true;
-    session.comfort_rates = vec![
-        crate::entities::asset::ComfortRate {
-            fill: 0.0,
-            max_marginal_price: 0.35,
-            max_marginal_co2: 0.0,
-        },
-        crate::entities::asset::ComfortRate {
-            fill: 1.0,
-            max_marginal_price: 0.05,
-            max_marginal_co2: 0.0,
-        },
-    ];
+    // The asset's own default, not a hand-written curve: if this list and
+    // `EvCharger::default_comfort_rates` ever diverge, the test stops testing
+    // the default.
+    session.comfort_rates = crate::assets::ev::EvCharger::from_params(
+        &crate::entities::asset_params::EvParams::default(),
+    )
+    .default_comfort_rates();
     let plan = solve_with_session(&profile, &sim, &tariffs, now, &session);
     let charged: f64 = plan_ev_kw(&plan).iter().map(|p| p * 0.5).sum();
     assert!(
-        (5.9..=6.5).contains(&charged),
-        "default curve commits to ~core energy, got {charged}"
+        charged > 0.5,
+        "the default curve must still buy energy at a 0.20 tariff, got {charged}"
     );
 }
 

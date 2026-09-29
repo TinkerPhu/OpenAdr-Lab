@@ -59,7 +59,14 @@ pub(crate) fn build_plan_envelopes(
     if let Some(session) = ev_session {
         if let Some(ev_cfg) = ev_cfg {
             // Remaining energy to charge
-            let energy_needed_kwh = inputs.e_ev_core_kwh;
+            // `ev-comfort-piecewise-core`: what the user asked for is the firm
+            // requirement when there is one, else the energy their bids cover
+            // (the bands' total) — there is no single "core" block any more.
+            let energy_needed_kwh = if inputs.e_ev_required_kwh > 0.0 {
+                inputs.e_ev_required_kwh
+            } else {
+                inputs.ev_segments.iter().map(|s| s.kwh).sum()
+            };
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
                 let window_end = session.departure_time;

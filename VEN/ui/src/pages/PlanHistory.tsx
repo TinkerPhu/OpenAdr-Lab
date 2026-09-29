@@ -29,7 +29,7 @@ const WARNING_KIND_LABELS: Record<WarningKind, string> = {
   BUDGET_SHORTFALL: "Budget shortfall",
   CAPACITY_VIOLATION: "Capacity violation",
   PEAK_PENALTY_EXCEEDED: "Peak penalty exceeded",
-  EV_CORE_ENERGY_UNMET: "EV core energy unmet",
+  EV_CORE_ENERGY_UNMET: "EV guaranteed charge not delivered",
   OTHER: "Other",
 };
 

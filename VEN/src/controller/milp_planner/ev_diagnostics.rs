@@ -1,72 +1,50 @@
-//! GB-41 diagnostic: split out of `results.rs` to stay under the VEN/src/
-//! 500-production-line cap (`ven-architecture` rule, `.claude/CLAUDE.md`).
+//! The EV's "you were promised energy and did not get it" warning. Split out of
+//! `results.rs` to stay under the VEN/src/ 500-production-line cap
+//! (`ven-architecture` rule, `.claude/CLAUDE.md`).
 //!
-//! A soft-deadline EV session (`MilpLoadMode::MayRun`) legitimately lets the solver
-//! choose `z_ev_core = 0` for the whole horizon when charging doesn't pay for itself —
-//! but from outside the solve, that looks identical to a stuck/inert EV. The GB-41
-//! investigation (four of nine fleet EVs charged nothing across a 24h run) found no
-//! historical record of which case it was, because per-slot planned power isn't
-//! persisted, only `PlanWarning::kind`. This warning makes the legitimate-skip case
-//! visible going forward without needing a live reproduction to tell them apart.
+//! `ev-comfort-piecewise-core` narrowed this to one meaning: a **firm** request
+//! whose guaranteed energy the plan cannot deliver in the window it has. That is
+//! the only case where the system promised something and fell short.
+//!
+//! It deliberately no longer fires for a soft request that charges less than its
+//! target. Under the comfort curve a soft target is a preference priced per kWh,
+//! so "charged 14 of 25 kWh because the bid stopped covering the cost" is the
+//! model working as asked, not an unmet obligation — the old all-or-nothing core
+//! is what made that look like a failure (GB-41).
 
-use crate::entities::asset_params::EvParams;
-use crate::entities::device_session::EvSession;
 use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
 
-use super::types::{MilpInputs, MilpLoadMode, SolveOutput};
+use super::types::{MilpInputs, SolveOutput};
 
-/// Every EV "the target was not (fully) planned for" warning this cycle: the
-/// GB-41 soft-deadline skip below, plus `ev-usage-forecast`'s clamped target —
-/// one place, so a reader finds both shapes of the same concept together.
-pub(super) fn ev_warnings(
-    inputs: &MilpInputs,
-    sol: &SolveOutput,
-    ev_session: Option<&EvSession>,
-    ev_cfg: Option<&EvParams>,
-) -> Vec<PlanWarning> {
-    let clamped = inputs.ev_core_unmet_warning.as_ref().map(|msg| PlanWarning {
-        severity: WarningSeverity::Warning,
-        kind: WarningKind::EvCoreEnergyUnmet,
-        message: msg.clone(),
-        suggested_action: Some(
-            "the car is predicted away for part of the charging window — move the departure later or lower the target SoC".to_string(),
-        ),
-    });
-    clamped
-        .into_iter()
-        .chain(soft_deadline_skip(inputs, sol, ev_session, ev_cfg))
-        .collect()
+/// The EV shortfall warning for this cycle, if any.
+pub(super) fn ev_warnings(inputs: &MilpInputs, sol: &SolveOutput) -> Vec<PlanWarning> {
+    firm_shortfall(inputs, sol).into_iter().collect()
 }
 
-/// GB-41: a `MayRun` session whose core energy the solver declined entirely.
-fn soft_deadline_skip(
-    inputs: &MilpInputs,
-    sol: &SolveOutput,
-    ev_session: Option<&EvSession>,
-    ev_cfg: Option<&EvParams>,
-) -> Option<PlanWarning> {
-    if inputs.ev_mode != MilpLoadMode::MayRun || sol.z_ev_core >= 0.5 {
+/// A firm requirement the plan could not meet: the window is too short, the car
+/// is away for too much of it, or the charger cannot deliver it in time.
+fn firm_shortfall(inputs: &MilpInputs, sol: &SolveOutput) -> Option<PlanWarning> {
+    let required = inputs.e_ev_required_kwh;
+    if required <= 1e-6 {
         return None;
     }
-    let session = ev_session?;
-    let ev_cfg = ev_cfg?;
-    let current_soc = inputs.soc_ev_init.unwrap_or(session.target_soc);
-    let core_kwh = ((session.target_soc - current_soc) * ev_cfg.battery_kwh).max(0.0);
-    if core_kwh <= 1e-6 {
+    let delivered = sol.e_seg_kwh;
+    if delivered >= required - 1e-3 {
         return None;
     }
+    let short = required - delivered;
     Some(PlanWarning {
         severity: WarningSeverity::Warning,
         kind: WarningKind::EvCoreEnergyUnmet,
         message: format!(
-            "EV '{}' soft-deadline session wants {core_kwh:.1} kWh more (soc {:.0}% -> target {:.0}% by {}) but the plan schedules none of it — the solver found charging not worth its cost this cycle",
-            ev_cfg.id,
-            current_soc * 100.0,
-            session.target_soc * 100.0,
-            session.departure_time.format("%H:%M"),
+            "EV charging falls {short:.1} kWh short of its guaranteed {required:.1} kWh \
+             before the deadline — the plan delivers {delivered:.1} kWh, which is all the \
+             available window allows"
         ),
         suggested_action: Some(
-            "check the session's comfort rate / v_ev_core_eur_kwh against the current tariff — raise it if the EV should charge regardless of price".to_string(),
+            "move the deadline later, lower the target, or check whether the car is predicted \
+             away for part of the window"
+                .to_string(),
         ),
     })
 }

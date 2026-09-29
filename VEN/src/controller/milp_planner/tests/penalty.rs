@@ -41,9 +41,9 @@ fn base_inputs(n: usize) -> MilpInputs {
         t_ev_dead_step: None,
         p_ev_max_kw: 0.0,
         p_ev_min_kw: 0.0,
-        e_ev_core_kwh: 0.0,
+        e_ev_required_kwh: 0.0,
+        ev_segments: vec![],
         e_ev_extra_max_kwh: 0.0,
-        v_ev_core_eur: 0.0,
         v_ev_extra_eur_kwh: 0.0,
         heater_mode: MilpLoadMode::MustNotRun,
         t_heat_dead_step: None,
@@ -59,7 +59,6 @@ fn base_inputs(n: usize) -> MilpInputs {
         shiftable_loads: vec![],
         soc_ev_init: None,
         ev_soc_drops: None,
-        ev_core_unmet_warning: None,
     }
 }
 
@@ -97,7 +96,7 @@ fn penalty_rule_disabled_by_default_adds_no_slack_and_matches_unmodified_plan() 
     inputs.t_ev_dead_step = Some(1);
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 12.0;
+    inputs.e_ev_required_kwh = 12.0;
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
@@ -120,7 +119,7 @@ fn add_penalty_constraints_splits_load_below_threshold() {
     inputs.t_ev_dead_step = Some(1);
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 12.0;
+    inputs.e_ev_required_kwh = 12.0;
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
@@ -157,7 +156,7 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
     inputs.t_ev_dead_step = Some(0);
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_core_kwh = 12.0;
+    inputs.e_ev_required_kwh = 12.0;
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
@@ -184,7 +183,7 @@ fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.t_ev_dead_step = Some(0);
     inputs.p_ev_max_kw = 12.0;
-    inputs.e_ev_core_kwh = 12.0;
+    inputs.e_ev_required_kwh = 12.0;
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let weights = p1w();

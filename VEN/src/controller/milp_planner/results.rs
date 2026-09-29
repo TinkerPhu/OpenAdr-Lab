@@ -448,7 +448,7 @@ pub(crate) fn translate_to_plan(
         }
     }
 
-    warnings.extend(ev_warnings(inputs, sol, ev_session, ev_cfg));
+    warnings.extend(ev_warnings(inputs, sol));
     // ── Assemble plan ───────────────────────────────────────────────────
     let envelopes = build_plan_envelopes(
         ev_session,

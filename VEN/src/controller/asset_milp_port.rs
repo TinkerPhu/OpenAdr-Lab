@@ -52,16 +52,15 @@ pub struct EvScalars {
     /// `ev-usage-forecast`: exogenous SoC changes to project (see
     /// `EvMilpContext::soc_drops`). `None` when no usage forecast is configured.
     pub soc_drops: Option<crate::controller::milp_planner::asset_port::ExogenousSocDrops>,
-    /// `ev-usage-forecast`: the clamped-target warning, if any (see
-    /// `EvMilpContext::core_unmet_warning`).
-    pub core_unmet_warning: Option<String>,
     pub t_dead_step: Option<usize>,
     pub p_max_kw: f64,
     pub p_min_kw: f64,
-    pub e_core_kwh: f64,
+    /// Firm requirement [kWh] — a guarantee by `t_dead_step`, 0.0 for a soft request.
+    pub e_required_kwh: f64,
+    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
+    pub segments: Vec<crate::controller::milp_planner::asset_port::EvEnergySegment>,
     pub e_extra_max_kwh: f64,
     pub v_extra_eur_kwh: f64,
-    pub v_core_eur: f64,
     /// WP4.1-c MAX_COST: total charging-cost ceiling [€]; None otherwise.
     pub budget_eur: Option<f64>,
 }

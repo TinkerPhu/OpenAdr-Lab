@@ -84,9 +84,8 @@ pub struct PlannerConfig {
     /// Incentivises opportunistic top-up charging when tariffs are low.
     #[serde(default = "super::defaults::default_v_ev_extra")]
     pub v_ev_extra_eur_kwh: f64,
-    /// One-time reward (EUR) per kWh of core energy target for committing to a
-    /// soft-deadline EV session (MayRun mode). Must exceed the expected charging
-    /// cost for the optimizer to choose z_ev_core = 1. Default: 1.0 EUR/kWh
+    /// Fallback per-kWh bid for energy up to the session's target SoC, used only
+    /// when the session carries no comfort curve. Default: 1.0 EUR/kWh
     /// (~3–5× typical peak tariff), overridable per-VEN in profile YAML.
     #[serde(default = "super::defaults::default_v_ev_core")]
     pub v_ev_core_eur_kwh: f64,

@@ -114,14 +114,13 @@ impl MockEvCtx {
                 soc_init: 0.0,
                 a_ev: vec![false; n],
                 soc_drops: None,
-                core_unmet_warning: None,
                 t_dead_step: None,
                 p_max_kw,
                 p_min_kw: 0.0,
-                e_core_kwh: 0.0,
+                e_required_kwh: 0.0,
+                segments: vec![],
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.0,
-                v_core_eur: 0.0,
                 asap_lateness_eur_kwh_h: 0.0,
                 free_only: false,
                 p_free_cap_kw: None,
@@ -130,27 +129,25 @@ impl MockEvCtx {
                 budget_eur: None,
                 c_imp_eur_kwh: None,
                 v_extra_co2_eur_kwh: 0.0,
-                v_core_co2_eur: 0.0,
             },
         }
     }
 
     #[allow(dead_code)] // full EvMilpMode mock coverage; no current test exercises MustRun
-    pub fn must_run(n: usize, p_max_kw: f64, e_core_kwh: f64) -> Self {
+    pub fn must_run(n: usize, p_max_kw: f64, e_required_kwh: f64) -> Self {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustRun,
                 soc_init: 0.0,
                 a_ev: vec![true; n],
                 soc_drops: None,
-                core_unmet_warning: None,
                 t_dead_step: Some(n - 1),
                 p_max_kw,
                 p_min_kw: 0.0,
-                e_core_kwh,
+                e_required_kwh,
+                segments: vec![],
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.05,
-                v_core_eur: 0.0,
                 asap_lateness_eur_kwh_h: 0.0,
                 free_only: false,
                 p_free_cap_kw: None,
@@ -159,7 +156,6 @@ impl MockEvCtx {
                 budget_eur: None,
                 c_imp_eur_kwh: None,
                 v_extra_co2_eur_kwh: 0.0,
-                v_core_co2_eur: 0.0,
             },
         }
     }
@@ -185,14 +181,13 @@ impl AssetMilpContext for MockEvCtx {
             soc_init: self.ctx.soc_init,
             a_ev: self.ctx.a_ev.clone(),
             soc_drops: None,
-            core_unmet_warning: None,
             t_dead_step: self.ctx.t_dead_step,
             p_max_kw: self.ctx.p_max_kw,
             p_min_kw: self.ctx.p_min_kw,
-            e_core_kwh: self.ctx.e_core_kwh,
+            e_required_kwh: self.ctx.e_required_kwh,
+            segments: self.ctx.segments.clone(),
             e_extra_max_kwh: self.ctx.e_extra_max_kwh,
             v_extra_eur_kwh: self.ctx.v_extra_eur_kwh,
-            v_core_eur: self.ctx.v_core_eur,
             budget_eur: self.ctx.budget_eur,
         })
     }

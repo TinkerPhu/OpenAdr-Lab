@@ -2,18 +2,18 @@
 // Struct/enum definitions live in `controller::milp_planner::asset_port`.
 // Method implementations below are cross-file inherent impl blocks — valid Rust.
 
-use chrono::{DateTime, Utc};
-use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution};
+use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution, Variable};
 
-use super::EvCharger;
+// Used only by the test module below, which refers to them through `super::`.
+#[cfg(test)]
+use {
+    super::EvCharger,
+    chrono::{DateTime, Utc},
+};
+
 use crate::controller::milp_planner::asset_port::{
     EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
 };
-
-/// WP4.1-c MAX_COST: per-kWh completion reward - an order of magnitude above
-/// any real tariff so the solver charges toward the target regardless of
-/// price, with the budget constraint (not the price) doing the capping.
-const BUDGET_CHARGE_REWARD_EUR_KWH: f64 = 5.0;
 
 impl EvMilpContext {
     /// Declare all LP variables for this EV charger. Context-side canonical implementation.
@@ -43,10 +43,27 @@ impl EvMilpContext {
                 }
             })
             .collect();
-        let z_ev_core = if self.mode == EvMilpMode::MayRun {
-            vars.add(variable().binary())
+        // `ev-comfort-piecewise-core`: one continuous variable per priced band.
+        // Because the bids are non-increasing (enforced by
+        // `services::comfort::validate_curve`) the solver fills the valuable
+        // bands first on its own — no ordering constraints and no binary.
+        let e_seg: Vec<Variable> = if self.mode == EvMilpMode::MustNotRun {
+            Vec::new()
         } else {
-            vars.add(variable().min(0.0).max(0.0))
+            let mut v: Vec<Variable> = self
+                .segments
+                .iter()
+                .map(|seg| vars.add(variable().min(0.0).max(seg.kwh)))
+                .collect();
+            // A guarantee is not conditional on a bid: any requirement the bands
+            // do not cover gets one more band at zero reward, delivered because
+            // it was promised rather than because it is worth something.
+            let priced_kwh: f64 = self.segments.iter().map(|s| s.kwh).sum();
+            let uncovered = self.e_required_kwh - priced_kwh;
+            if uncovered > 1e-9 {
+                v.push(vars.add(variable().min(0.0).max(uncovered)));
+            }
+            v
         };
         let e_ev_extra = if self.mode == EvMilpMode::MustNotRun {
             vars.add(variable().min(0.0).max(0.0))
@@ -66,7 +83,7 @@ impl EvMilpContext {
         EvMilpVars {
             p_ev,
             z_ev_on,
-            z_ev_core,
+            e_seg,
             e_ev_extra,
             delta_ev,
             delta_ev_ramp,
@@ -85,6 +102,18 @@ impl EvMilpContext {
             }
         }
         expr
+    }
+
+    /// The most energy this charger can take before its deadline, given the
+    /// slots the vehicle is present for. The upper bound on any guarantee.
+    pub fn reachable_energy_kwh(&self, n: usize, dt_h: &[f64]) -> f64 {
+        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
+        dt_h.iter()
+            .enumerate()
+            .take(n)
+            .filter(|&(t, _)| t <= t_dlim && self.a_ev.get(t).copied().unwrap_or(false))
+            .map(|(_, &dt)| self.p_max_kw * dt)
+            .sum()
     }
 
     /// Generate all MILP constraints for this EV charger. Context-side canonical implementation.
@@ -116,22 +145,36 @@ impl EvMilpContext {
             }
             cs.push(constraint!(cost <= budget_eur));
         }
-        match self.mode {
-            EvMilpMode::MustRun => {
-                // R-18 fix: equality (not just an upper bound) couples e_ev_extra to
-                // energy actually charged beyond core, so the extra-reward term in
-                // `objective()` can no longer be "banked" without moving p_ev.
-                cs.push(constraint!(ev_energy == self.e_core_kwh + v.e_ev_extra));
+        if self.mode != EvMilpMode::MustNotRun {
+            // Energy delivered by the deadline is exactly what was bought: the
+            // priced bands, or the capped `e_ev_extra` for the modes that price
+            // per slot. R-18: an equality, so a reward cannot be "banked"
+            // without moving p_ev.
+            let mut bought = Expression::from(0.0);
+            for seg in &v.e_seg {
+                bought += *seg;
             }
-            EvMilpMode::MayRun => {
-                cs.push(constraint!(
-                    ev_energy == self.e_core_kwh * v.z_ev_core + v.e_ev_extra
-                ));
-                cs.push(constraint!(
-                    v.e_ev_extra <= self.e_extra_max_kwh * v.z_ev_core
-                ));
+            bought += v.e_ev_extra;
+            cs.push(constraint!(ev_energy == bought));
+
+            // A firm deadline is a guarantee, not a bid. Zero for a soft
+            // request, which buys only what its bids justify.
+            //
+            // The floor is capped at what the window can physically deliver:
+            // masking slots the car is away for (or a deadline close enough to
+            // now) can leave a guarantee no remaining slot can reach, and the
+            // equality above has no slack, so an uncapped floor would make the
+            // whole site solve infeasible. Charge as far as the window allows;
+            // `ev_diagnostics::firm_shortfall` compares what was delivered
+            // against `e_required_kwh` and reports the gap.
+            let floor_kwh = self.e_required_kwh.min(self.reachable_energy_kwh(n, dt_h));
+            if floor_kwh > 1e-9 {
+                let mut delivered = Expression::from(0.0);
+                for seg in &v.e_seg {
+                    delivered += *seg;
+                }
+                cs.push(constraint!(delivered >= floor_kwh));
             }
-            EvMilpMode::MustNotRun => {}
         }
         for i in 0..v.delta_ev.len() {
             let t = i + 1;
@@ -172,9 +215,13 @@ impl EvMilpContext {
             // BL-17 comfort bidding: CO2 analogue, already monetized via w_ghg.
             obj += -(w_services * self.v_extra_co2_eur_kwh) * v.e_ev_extra;
         }
-        if self.mode == EvMilpMode::MayRun {
-            obj += -(w_services * self.v_core_eur) * v.z_ev_core;
-            obj += -(w_services * self.v_core_co2_eur) * v.z_ev_core;
+        // Each band pays its own bid, so a partial charge earns partial value
+        // (CO2 bid already monetized in). `zip` stops short, so the synthetic
+        // guarantee band from `declare_vars` earns nothing — as it should.
+        if self.mode != EvMilpMode::MustNotRun {
+            for (seg, var) in self.segments.iter().zip(v.e_seg.iter()) {
+                obj += -(w_services * seg.eur_per_kwh) * *var;
+            }
         }
         // WP4.1 (BL-28) OPPORTUNISTIC / *_FREE / MAX_COST: reward the energy
         // actually charged, per slot, rather than the lump e_ev_extra reward
@@ -218,185 +265,7 @@ impl EvMilpContext {
             p_ev_kw: (0..n).map(|t| sol.value(v.p_ev[t])).collect(),
             z_ev_on: (0..n).map(|t| sol.value(v.z_ev_on[t])).collect(),
             e_ev_extra_kwh: sol.value(v.e_ev_extra),
-            z_ev_core: sol.value(v.z_ev_core),
-        }
-    }
-
-    /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_state(
-        state: &super::AssetState,
-        cfg: &EvCharger,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        ev_session: Option<&crate::entities::device_session::EvSession>,
-        min_charge_kw: f64,
-        v_ev_extra_eur_kwh: f64,
-        v_ev_core_eur_kwh: f64,
-        asap_lateness_eur_kwh_h: f64,
-        v_ev_free_charge_eur_kwh: f64,
-        w_ghg_eur_kg: f64,
-    ) -> Self {
-        use crate::entities::design_vocabulary::UserRequestMode;
-        let (plugged, current_soc) = if let super::AssetState::Ev(s) = state {
-            (s.plugged, s.soc)
-        } else {
-            (false, 0.0)
-        };
-        // Idle/unplugged template — every branch below overrides only what differs.
-        let base = Self {
-            mode: EvMilpMode::MustNotRun,
-            soc_init: current_soc,
-            a_ev: vec![false; n],
-            soc_drops: None,
-            core_unmet_warning: None,
-            t_dead_step: None,
-            p_max_kw: cfg.max_charge_kw,
-            p_min_kw: min_charge_kw,
-            e_core_kwh: 0.0,
-            e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
-            v_extra_eur_kwh: v_ev_extra_eur_kwh,
-            v_core_eur: 0.0,
-            asap_lateness_eur_kwh_h: 0.0,
-            free_only: false,
-            p_free_cap_kw: None,
-            reward_per_slot: false,
-            free_early_bias: false,
-            budget_eur: None,
-            c_imp_eur_kwh: None,
-            v_extra_co2_eur_kwh: 0.0,
-            v_core_co2_eur: 0.0,
-        };
-        // `ev-usage-forecast`: presence for future slots comes from the EV's own
-        // schedule, not the live plug — blanking the horizon here left a mid-trip
-        // VEN with no charging plan at all. `apply_usage_forecast` then ANDs the
-        // prediction in, which is false for every away slot, slot 0 included.
-        let forecast_presence = cfg
-            .usage_sim
-            .as_ref()
-            .is_some_and(|u| u.mode == crate::entities::asset_params::EvUsageMode::Forecast);
-        if !plugged && !forecast_presence {
-            return base;
-        }
-        let Some(session) = ev_session else {
-            // Plugged, no session: slots available but no charging obligation.
-            return Self {
-                a_ev: vec![true; n],
-                soc_drops: None,
-                core_unmet_warning: None,
-                ..base
-            };
-        };
-        let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
-        let secs = (session.departure_time - now).num_seconds();
-        let t_dead = if secs <= 0 {
-            0
-        } else {
-            cum_s
-                .partition_point(|&s| s <= secs)
-                .saturating_sub(1)
-                .min(n.saturating_sub(1))
-        };
-        let deadline_mask: Vec<bool> = (0..n).map(|t| t <= t_dead).collect();
-
-        match session.mode {
-            // WP4.1 (BL-28) OPPORTUNISTIC / ASAP_FREE: no deadline, no core
-            // obligation - all charging is optional "extra" up to the session
-            // target, rewarded per charged kWh but gated to free energy via
-            // inject_grid_slots. ASAP_FREE additionally biases the reward
-            // toward earlier slots.
-            UserRequestMode::Opportunistic | UserRequestMode::AsapFree => Self {
-                mode: EvMilpMode::MustRun, // core = 0 -> only the gated extra term acts
-                a_ev: vec![true; n],
-                soc_drops: None,
-                core_unmet_warning: None,
-                e_extra_max_kwh: core_kwh,
-                v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
-                free_only: true,
-                reward_per_slot: true,
-                free_early_bias: session.mode == UserRequestMode::AsapFree,
-                ..base
-            },
-            // WP4.1-c MAX_COST: complete whenever, but total charging cost
-            // stays within the budget (hard constraint from the injected
-            // import rates). Completion is a per-kWh reward high enough to
-            // beat any real tariff, NOT a hard core constraint - an
-            // unaffordable target degrades to partial charging + a plan
-            // warning, never an infeasible solve.
-            UserRequestMode::MaxCost => Self {
-                mode: EvMilpMode::MustRun,
-                a_ev: vec![true; n],
-                soc_drops: None,
-                core_unmet_warning: None,
-                e_extra_max_kwh: core_kwh,
-                v_extra_eur_kwh: BUDGET_CHARGE_REWARD_EUR_KWH,
-                reward_per_slot: true,
-                budget_eur: session.budget_eur,
-                ..base
-            },
-            // WP4.1-c BY_DEADLINE_FREE: the deadline mask stays, but there is
-            // no core obligation (free energy may simply not exist) - free-
-            // gated per-kWh reward inside the window instead.
-            UserRequestMode::ByDeadlineFree => Self {
-                mode: EvMilpMode::MustRun,
-                a_ev: deadline_mask,
-                soc_drops: None,
-                core_unmet_warning: None,
-                t_dead_step: Some(t_dead),
-                e_extra_max_kwh: core_kwh,
-                v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
-                free_only: true,
-                reward_per_slot: true,
-                ..base
-            },
-            // Legacy BY_DEADLINE (+ ASAP, which only adds the lateness
-            // penalty): hard/soft core energy by the departure deadline.
-            // BL-34: v_core_eur/v_extra_eur_kwh are sourced from the session's
-            // resolved comfort curve here — this is the only mode where they
-            // retain their original "reward for completing core / reward for
-            // topping off beyond core" meaning; every other arm above already
-            // redirects v_extra_eur_kwh to an unrelated signal (free-energy
-            // incentive, budget reward), so the curve doesn't apply there.
-            UserRequestMode::ByDeadline | UserRequestMode::Asap => {
-                let reward = super::ev_comfort::resolve_ev_comfort_reward(
-                    session,
-                    v_ev_core_eur_kwh,
-                    v_ev_extra_eur_kwh,
-                    w_ghg_eur_kg,
-                );
-                Self {
-                    mode: if session.soft_deadline {
-                        EvMilpMode::MayRun
-                    } else {
-                        EvMilpMode::MustRun
-                    },
-                    a_ev: deadline_mask,
-                    soc_drops: None,
-                    core_unmet_warning: None,
-                    t_dead_step: Some(t_dead),
-                    e_core_kwh: core_kwh,
-                    e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
-                    v_extra_eur_kwh: reward.v_extra_eur_kwh,
-                    v_core_eur: if session.soft_deadline {
-                        core_kwh * reward.v_core_eur_kwh
-                    } else {
-                        0.0
-                    },
-                    v_extra_co2_eur_kwh: reward.v_extra_co2_eur_kwh,
-                    v_core_co2_eur: if session.soft_deadline {
-                        core_kwh * reward.v_core_co2_eur_kwh
-                    } else {
-                        0.0
-                    },
-                    asap_lateness_eur_kwh_h: if session.mode == UserRequestMode::Asap {
-                        asap_lateness_eur_kwh_h
-                    } else {
-                        0.0
-                    },
-                    ..base
-                }
-            }
+            e_seg_kwh: v.e_seg.iter().map(|s| sol.value(*s)).sum(),
         }
     }
 }
@@ -427,14 +296,13 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
                 soc_init: self.soc_init,
                 a_ev: self.a_ev.clone(),
                 soc_drops: self.soc_drops.clone(),
-                core_unmet_warning: self.core_unmet_warning.clone(),
                 t_dead_step: self.t_dead_step,
                 p_max_kw: self.p_max_kw,
                 p_min_kw: self.p_min_kw,
-                e_core_kwh: self.e_core_kwh,
+                e_required_kwh: self.e_required_kwh,
+                segments: self.segments.clone(),
                 e_extra_max_kwh: self.e_extra_max_kwh,
                 v_extra_eur_kwh: self.v_extra_eur_kwh,
-                v_core_eur: self.v_core_eur,
                 budget_eur: self.budget_eur,
             },
         )
@@ -756,9 +624,9 @@ mod milp_context_trait_tests {
             "the next departure still sets a target"
         );
         assert!(
-            ctx.e_core_kwh > 1.0,
+            ctx.e_required_kwh > 1.0,
             "core energy must survive the reachability clamp, got {}",
-            ctx.e_core_kwh
+            ctx.e_required_kwh
         );
     }
 
@@ -809,18 +677,24 @@ mod milp_context_trait_tests {
         assert_eq!(ctx.t_dead_step, Some(8));
         // soc 0.30 -> soc_target 0.80 over a 60 kWh pack = 30 kWh.
         assert!(
-            (ctx.e_core_kwh - 30.0).abs() < 1e-9,
+            (ctx.e_required_kwh - 30.0).abs() < 1e-9,
             "core energy must target soc_target by departure, got {}",
-            ctx.e_core_kwh
+            ctx.e_required_kwh
         );
+        // 8 h at 7.4 kW covers 30 kWh, so the floor is the whole requirement.
+        let dt_h = vec![1.0; n];
         assert!(
-            ctx.core_unmet_warning.is_none(),
-            "8 h at 7.4 kW covers 30 kWh — nothing to clamp"
+            ctx.reachable_energy_kwh(n, &dt_h) >= ctx.e_required_kwh,
+            "the window must be able to hold the requirement"
         );
     }
 
+    /// `ev-comfort-piecewise-core`: the requirement stays what the user asked
+    /// for — it is no longer shrunk to fit. What gets capped is the MILP *floor*
+    /// (in `constraints`), so the solve stays feasible; the gap between the two
+    /// is what `ev_diagnostics::firm_shortfall` reports.
     #[test]
-    fn a_target_the_remaining_window_cannot_reach_is_clamped_and_warned_about() {
+    fn a_target_the_remaining_window_cannot_reach_keeps_its_requirement() {
         use crate::entities::asset_params::EvUsageMode;
         use chrono::{TimeZone, Utc};
         let mut cfg = ev_with_usage(EvUsageMode::Forecast);
@@ -834,17 +708,16 @@ mod milp_context_trait_tests {
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
         assert_eq!(ctx.t_dead_step, Some(2));
         assert!(
-            (ctx.e_core_kwh - 14.8).abs() < 1e-6,
-            "core energy must be clamped to the reachable 14.8 kWh, got {}",
-            ctx.e_core_kwh
+            (ctx.e_required_kwh - 30.0).abs() < 1e-6,
+            "the requirement is what the user asked for, got {}",
+            ctx.e_required_kwh
         );
-        let msg = ctx
-            .core_unmet_warning
-            .as_deref()
-            .expect("an unreachable target must warn, not silently shrink");
+        let dt_h = vec![1.0; n];
         assert!(
-            msg.contains("14.8 kWh") && msg.contains("30.0 kWh"),
-            "warning must name both the reachable and the needed energy: {msg}"
+            (ctx.reachable_energy_kwh(n, &dt_h) - 14.8).abs() < 1e-6,
+            "only slots 0 and 1 are home before the 08:00 departure — \
+             2 h at 7.4 kW = 14.8 kWh, got {}",
+            ctx.reachable_energy_kwh(n, &dt_h)
         );
     }
 
@@ -859,7 +732,10 @@ mod milp_context_trait_tests {
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
         assert_eq!(ctx.t_dead_step, None, "no deadline may be introduced");
-        assert_eq!(ctx.e_core_kwh, 0.0, "no core obligation may be introduced");
+        assert_eq!(
+            ctx.e_required_kwh, 0.0,
+            "no core obligation may be introduced"
+        );
         // Availability is unconditional — the away window is still masked.
         assert!(
             !ctx.a_ev[10],
@@ -918,9 +794,9 @@ mod milp_context_trait_tests {
 
         assert_eq!(ctx.t_dead_step, Some(4), "the real session's deadline wins");
         assert!(
-            (ctx.e_core_kwh - 6.0).abs() < 1e-9,
+            (ctx.e_required_kwh - 6.0).abs() < 1e-9,
             "the real session's target wins (0.40-0.30)*60 = 6 kWh, got {}",
-            ctx.e_core_kwh
+            ctx.e_required_kwh
         );
         // ...but availability is still the forecast's, not the session's guess.
         assert!(
@@ -960,14 +836,13 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: vec![true; n],
             soc_drops: None,
-            core_unmet_warning: None,
             t_dead_step: Some(n - 1),
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_core_kwh: 10.0,
+            e_required_kwh: 10.0,
+            segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
-            v_core_eur: 0.0,
             asap_lateness_eur_kwh_h: 0.0,
             free_only: false,
             p_free_cap_kw: None,
@@ -976,16 +851,15 @@ mod milp_context_trait_tests {
             budget_eur: None,
             c_imp_eur_kwh: None,
             v_extra_co2_eur_kwh: 0.0,
-            v_core_co2_eur: 0.0,
         }
     }
 
-    /// BL-34: `from_state` sources `v_core_eur`/`v_extra_eur_kwh` from the session's resolved
-    /// comfort curve in the `ByDeadline`/soft_deadline branch, not the passed-in global
-    /// defaults (here `v_ev_core_eur_kwh=1.0`, `v_ev_extra_eur_kwh=1.0` — if the curve were
-    /// ignored, `v_core_eur` would be `6.0 * 1.0 = 6.0`, not `6.0 * 0.05 = 0.30`).
+    /// BL-34, restated for `ev-comfort-piecewise-core`: the `ByDeadline` arm prices its
+    /// energy bands from the session's own comfort curve, not from the passed-in global
+    /// defaults. The curve here bids 0.05 €/kWh, the defaults are 1.0 — if the curve were
+    /// ignored the bands would carry 1.0.
     #[test]
-    fn from_state_by_deadline_soft_sources_v_core_eur_from_curve() {
+    fn from_state_by_deadline_soft_prices_segments_from_the_curve() {
         use crate::entities::asset::ComfortRate;
         use crate::entities::design_vocabulary::UserRequestMode;
         use crate::entities::device_session::EvSession;
@@ -1052,17 +926,23 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
-        assert!((ctx.e_core_kwh - 6.0).abs() < 1e-9, "{}", ctx.e_core_kwh);
+        // A soft deadline guarantees nothing — the bands carry the intent.
+        assert_eq!(ctx.e_required_kwh, 0.0);
+        let total_kwh: f64 = ctx.segments.iter().map(|s| s.kwh).sum();
         assert!(
-            (ctx.v_core_eur - 0.30).abs() < 1e-9,
-            "expected 6.0 * 0.05 = 0.30, got {}",
-            ctx.v_core_eur
+            total_kwh > 6.0,
+            "bands must span past the target to full, got {total_kwh}"
         );
-        assert!(
-            (ctx.v_extra_eur_kwh - 0.12).abs() < 1e-9,
-            "expected curve's fill=1.0 price 0.12, got {}",
-            ctx.v_extra_eur_kwh
-        );
+        assert!(!ctx.segments.is_empty(), "the curve must produce bands");
+        for seg in &ctx.segments {
+            assert!(
+                seg.eur_per_kwh <= 0.12 + 1e-9,
+                "bands must carry the curve's own bids (0.05..0.12), not the 1.0 default: {:?}",
+                ctx.segments
+            );
+        }
+        // A soft deadline guarantees nothing: the bids decide.
+        assert_eq!(ctx.e_required_kwh, 0.0);
         assert_eq!(ctx.mode, EvMilpMode::MayRun);
     }
 
@@ -1173,15 +1053,16 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
+        // No curve on the session: the profile defaults stand in as a two-step
+        // curve — 0.77 €/kWh up to the target, 0.42 €/kWh beyond it.
+        let bids: Vec<f64> = ctx.segments.iter().map(|s| s.eur_per_kwh).collect();
         assert!(
-            (ctx.v_core_eur - 6.0 * 0.77).abs() < 1e-9,
-            "{}",
-            ctx.v_core_eur
+            bids.iter().any(|b| (b - 0.77).abs() < 1e-9),
+            "expected the core default 0.77 below the target: {bids:?}"
         );
         assert!(
-            (ctx.v_extra_eur_kwh - 0.42).abs() < 1e-9,
-            "{}",
-            ctx.v_extra_eur_kwh
+            bids.iter().any(|b| (b - 0.42).abs() < 1e-9),
+            "expected the extra default 0.42 above it: {bids:?}"
         );
     }
 
@@ -1211,14 +1092,13 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: vec![true; 4],
             soc_drops: None,
-            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_core_kwh: 0.0,
+            e_required_kwh: 0.0,
+            segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
-            v_core_eur: 0.0,
             asap_lateness_eur_kwh_h: 0.0,
             free_only: false,
             p_free_cap_kw: None,
@@ -1227,7 +1107,6 @@ mod milp_context_trait_tests {
             budget_eur: None,
             c_imp_eur_kwh: None,
             v_extra_co2_eur_kwh: 0.0,
-            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
@@ -1242,14 +1121,13 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: vec![false; 4],
             soc_drops: None,
-            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_core_kwh: 0.0,
+            e_required_kwh: 0.0,
+            segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
-            v_core_eur: 0.0,
             asap_lateness_eur_kwh_h: 0.0,
             free_only: false,
             p_free_cap_kw: None,
@@ -1258,7 +1136,6 @@ mod milp_context_trait_tests {
             budget_eur: None,
             c_imp_eur_kwh: None,
             v_extra_co2_eur_kwh: 0.0,
-            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
@@ -1275,14 +1152,13 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: a_ev.clone(),
             soc_drops: None,
-            core_unmet_warning: None,
             t_dead_step: None,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_core_kwh: 0.0,
+            e_required_kwh: 0.0,
+            segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
-            v_core_eur: 0.0,
             asap_lateness_eur_kwh_h: 0.0,
             free_only: false,
             p_free_cap_kw: None,
@@ -1291,7 +1167,6 @@ mod milp_context_trait_tests {
             budget_eur: None,
             c_imp_eur_kwh: None,
             v_extra_co2_eur_kwh: 0.0,
-            v_core_co2_eur: 0.0,
         };
         match ctx.milp_params(n, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),
