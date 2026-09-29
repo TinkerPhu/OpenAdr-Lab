@@ -371,8 +371,30 @@ into per-asset MILP reward terms, monetizing both axes into €/kWh (the CO₂ a
 the profile's `w_ghg` weight, €/kgCO2) before they ever reach the objective — the
 solver only ever sees €. Heater rewards full-tier operation
 (`comfort_full_reward_eur_kwh` / `comfort_full_co2_reward_eur_kwh` ×
-`z_heat_full[t]`); EV rewards core/extra charge completion
-(`v_core_eur`/`v_core_co2_eur`, `v_extra_eur_kwh`/`v_extra_co2_eur_kwh`). Both
+`z_heat_full[t]`).
+
+The **EV** reads the curve as a *marginal* bid over state of charge: at each `fill`, the most the
+user will pay for the next kWh, where `fill` is the battery's fullness (0 = empty, 1 = full), not
+progress through a task. `assets::ev_comfort::ev_energy_segments` turns the curve into
+`Vec<EvEnergySegment { kwh, eur_per_kwh }>` spanning `soc_init → 1.0` — each band priced at the
+curve's value over that band, subdivided at `MAX_BAND_FILL` (0.05) so a ramp is not collapsed to
+its average — and `ev_milp.rs::declare_vars` emits one bounded continuous variable per band.
+`ev_energy == Σ e_seg` (an equality, so no reward can be banked without moving `p_ev`), and each
+band is rewarded at its own bid. Because `services::comfort::validate_curve` refuses a curve whose
+bid *rises* with fill, the valuation is concave and the solver fills the valuable bands first
+without being told to — no ordering constraints and **no binary**. A bid covering part of the
+energy therefore buys that part; the all-or-nothing `z_ev_core` that made "not worth all of it"
+mean "charge nothing" (GB-41) is gone. An empty curve falls back to a two-step default split at
+`soc_target` (`planner.v_ev_core_eur_kwh` / `v_ev_extra_eur_kwh`).
+
+A **firm** deadline is the only guarantee: `constraints` adds `Σ e_seg >= e_required_kwh`, capped
+at `EvMilpContext::reachable_energy_kwh` so a requirement the window cannot physically hold
+charges as far as it can instead of making the site solve infeasible. A soft request carries
+`e_required_kwh = 0` and buys only what its bids justify. The free/opportunistic
+(`reward_per_slot`) modes never read the curve at all — they are gated by PV surplus, not price,
+and keep their flat per-slot rewards.
+
+Both
 reward terms are phase-gated to Phase 2 only (zeroed in Phase 1's own objective
 and its Phase-2 cost cap, mirroring `w_tier_penalty_eur`) — this is deliberate:
 Phase 1 finds the cost-optimal plan, Phase 2 spends a bounded epsilon budget on
@@ -805,13 +827,15 @@ context from the next predicted departure — no `EvSession` is written at all
 session always outranks the prediction for the *goal* while the availability
 mask still applies, because availability is fact, not preference.
 
-Because the EV's core-energy constraint is a hard equality with no slack,
-masking can leave a goal that no remaining slot can reach — which would make the
-entire site solve infeasible. `clamp_core_to_reachable_energy` therefore clamps
-the core energy to what the unmasked pre-deadline slots can deliver and records
-`core_unmet_warning`, surfaced as a `WarningKind::EvCoreEnergyUnmet` plan
-warning (`milp_planner::ev_diagnostics::ev_warnings`). The clamp guards a real
-session's target too, which the same mask can strand. Both classes report
+Because the EV's energy balance is a hard equality with no slack, masking can leave a goal that no
+remaining slot can reach — which would make the entire site solve infeasible. The guaranteed-energy
+floor is therefore capped where it is imposed, at `EvMilpContext::reachable_energy_kwh`
+(`ev_milp.rs::constraints`): `e_required_kwh` stays what was asked for, the plan charges everything
+the window allows, and the gap between the two is reported as a
+`WarningKind::EvCoreEnergyUnmet` plan warning by
+`milp_planner::ev_diagnostics::firm_shortfall`. That is the warning's only meaning — a soft request
+charging less than its target is the comfort curve working as asked, not an unmet obligation. The
+cap guards a real session's target too, which the same mask can strand. Both classes report
 themselves on `GET /ev-usage-sim` via a `mode` field (`simulated` /
 `forecast`), which the VEN UI EV card labels from a per-case declaration.
 

@@ -895,6 +895,54 @@ absence is fact, so those slots stay at zero either way.
 
 ---
 
+## How to set a comfort curve (Devices → Comfort Curve)
+
+A comfort curve is how you tell the controller **what energy is worth to you**. It is a table of
+points, each one a *marginal bid*: the most you are willing to pay for the **next** kWh at that
+level of fill. It is not a total and not a budget — a budget is a separate field on the request.
+
+**For an EV, `fill` means state of charge** — 0 % is an empty battery, 100 % a full one. Not
+progress through the charge you asked for. So a curve is a property of the car, and the same curve
+keeps working whatever SoC the car comes home at. Every kWh from where the battery is now to full
+is priced by the curve at the SoC that kWh takes it through.
+
+**Bids may not rise as fill increases.** Saying you will pay more for the 90th percent than for the
+10th has no reading here, and the editor's Save is refused with a message naming the point. Equal
+(flat) or falling is accepted.
+
+### Reading the plan against the curve
+
+Charging happens in a slot when the curve's bid at that SoC is **at least the cost of the energy
+there**. Cost means the import tariff in that slot plus the controllable-import malus
+(0.22 €/kWh by default — an internal nudge toward self-consumption, not money you pay), and it is
+zero for PV surplus. So:
+
+| Your curve | What you get |
+|---|---|
+| Flat, far above any tariff (e.g. 2.00) | Charges to full as fast as the charger and the window allow |
+| Flat, just above off-peak cost (e.g. 0.30) | Charges in cheap slots and PV surplus, skips peak |
+| Falls steeply (e.g. 0.50 at 20 % → 0.05 at 80 %) | Fills the first part of the battery eagerly, then stops where the bid drops below cost |
+| Flat, below every cost (e.g. 0.02) | Charges only from PV surplus; may charge nothing |
+
+The third row is the important one: the plan **charges partly**. It buys the kWh your bid covers and
+stops. It does not refuse the whole charge because the last kWh was not worth it, and it raises no
+warning — you asked for a preference, and the preference was honoured.
+
+### When is a target actually promised?
+
+| Request | `soc_target` means |
+|---|---|
+| **Firm** deadline (`soft_deadline: false`) | A **guarantee**. The plan delivers it by the deadline whatever the curve says, and if the window physically cannot (the car is away for part of it, the charger is too slow), it charges as far as it can and raises `EV guaranteed charge not delivered` with the delivered and required kWh. |
+| **Soft** deadline (`soft_deadline: true`) | A **preference**. It is where your bid typically drops. Charging short of it is a normal outcome and raises nothing. |
+
+If you need a certain SoC to actually get somewhere, use a firm deadline. That is what makes it a
+constraint the planner cannot decline.
+
+**Covered by:** `tests/features/ven_comfort_curve.feature`,
+`VEN/src/controller/milp_planner/tests/gb41_soft_deadline_core.rs`.
+
+---
+
 ## CLI Reference: POST /user-requests
 
 The **User Requests** page (http://Node1:8214/user-requests) is the primary way to submit and cancel user requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.

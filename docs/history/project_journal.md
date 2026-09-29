@@ -13574,3 +13574,78 @@ questions at once (a per-instant band and one continuous all-in counterfactual) 
 nowhere on screen. Worth noting the sequencing: this is the third time in one day that the
 right fix for a confusing chart was somewhere other than the chart — first the physics (the
 thermostat deadband), then the data (`from_state`'s blanked horizon), and only now the words.
+
+## 2026-09-29 — EV charging valued by one comfort curve; the all-or-nothing core is gone
+
+**What.** `ev-comfort-piecewise-core`. The EV's requested energy used to be one binary:
+`ev_energy == e_core_kwh * z_ev_core`, a block from the current SoC to `soc_target`, rewarded
+with a lump `v_core_eur` taken from a *single point* of the user's comfort curve
+(`value_at_fill(0.0)`). It is now a set of continuous energy bands. `ev_energy_segments` reads
+the curve as a marginal bid over state of charge and builds
+`Vec<EvEnergySegment { kwh, eur_per_kwh }>` spanning `soc_init → 1.0`; `declare_vars` emits one
+bounded continuous variable per band; `ev_energy == Σ e_seg`; each band is rewarded at its own
+bid. `soc_target` survives only as a **floor on firm requests**.
+
+**Why.** GB-41: four of nine EV VENs charged nothing for 24 h with valid soft-deadline sessions,
+solving OPTIMAL and firing `EV_CORE_ENERGY_UNMET` on essentially every cycle. Reproduced offline
+two days earlier; the mechanism was the binary plus the 0.22 €/kWh controllable-import malus. A
+bid that did not cover the *whole* block made zero optimal — which is also why every "has PV"
+style rule failed on ven-18: what mattered was whether cheap energy covered the whole block, not
+whether PV existed. The threshold use case the binary was built for ("I need 60 % to reach the
+destination") does not justify it, because a genuine threshold belongs in a constraint that
+cannot decline, not a reward that can.
+
+**Three things the tests found that the design did not.**
+
+1. *One band per curve interval collapses a ramp to its average.* A 0.50 → 0.05 interval priced
+   at its midpoint is 0.275 €/kWh everywhere inside it, which loses exactly the information the
+   curve exists to carry. Fixed by subdividing at `MAX_BAND_FILL = 0.05`, pinned by
+   `segment_value_equals_the_area_under_the_users_curve`.
+2. *The firm floor summed over bands, so a requirement with no bands was infeasible.* An empty
+   or short curve left `Σ e_seg` unable to reach `e_required_kwh`. Fixed by a synthetic
+   zero-reward band in `declare_vars` covering whatever the priced bands do not: a guarantee is
+   delivered because it was promised, not because it is worth something.
+3. *Reading the bid marginally makes existing declining curves buy far less.* The old lump
+   reading valued a 0.35 → 0.05 ramp at 0.35 everywhere; read marginally the same ramp averages
+   ~0.20, below tariff plus malus, and buys almost nothing. So the built-in default was re-drawn
+   to 0.45 → 0.30. This is a real breaking change in what a stored curve means, recorded in the
+   proposal and the user manual rather than left to be discovered.
+
+**A consolidation that turned out to be the interesting part.** `clamp_core_to_reachable_energy`
+shrank the requirement upstream so the equality could not become infeasible, and carried a
+`core_unmet_warning` string through `EvScalars` → `EvMilpContext` → `MilpInputs`. Two problems,
+one shape. The clamp made the shortfall *invisible* — once the requirement was lowered, the plan
+met it exactly and nothing downstream could see a gap — and the warning string it carried had
+been orphaned by an earlier refactor and was read by nobody. Both are gone. The cap now lives at
+the one place that imposes the floor (`EvMilpContext::reachable_energy_kwh`, called from
+`constraints`), `e_required_kwh` stays what the user asked for, and the gap is *computed* by
+`ev_diagnostics::firm_shortfall`. A value pre-adjusted for feasibility cannot also be the
+reference that adjustment is measured against — written up in `KEY_LEARNINGS.md`.
+
+**`EV_CORE_ENERGY_UNMET` now has one meaning:** a firm guarantee the window cannot deliver,
+carrying delivered vs required. The soft path raises nothing, because a soft request promises
+nothing. The wire string is unchanged (it is persisted in `plan_history.warning_kinds`); the UI
+label became "EV guaranteed charge not delivered".
+
+**Sweep, before and after.** The 12-combination offline sweep read `z_ev_core = 1.00` and 25.00
+kWh delivered in every cell. After: the fleet-weight rows are unchanged at 25.00 (the default bid
+still clears tariff-plus-malus up to target, the 0.10 band beyond it does not), and the
+minimal-weight rows now deliver **more** than the old core — 29.6 to 35.0 kWh — because without
+the malus the energy beyond the target is worth buying, which the block could not express at all.
+Nothing delivers less.
+
+**Surfaces.** The curve editor labels the EV's axis "State of charge (%)" (declared per asset in
+`CURVE_ASSETS`, not branched on at the field), explains that a point is a bid for the *next* kWh,
+and shows the API's rejection message — which required `postComfortCurve` to actually read the
+route's `{"error": ...}` body instead of throwing a bare status code. The manual gained a "How to
+set a comfort curve" section with the four curve shapes and what each buys, and the firm-vs-soft
+table. Two new BDD scenarios: partial delivery under a partly-covering bid, and the rising-curve
+rejection.
+
+**Numbers.** 1473 Rust tests (from 1464). Nine GB-41 probes rewritten to state the new behaviour,
+two new diagnostics probes, four curve-validation tests, seven segment-builder tests.
+
+**Follow-up filed as GB-53:** express the curve as *cumulative* spend ("€2 for 60 %, €2.50 for
+80 %") — the integral of what the planner already consumes, so interconvertible with no MILP
+change, and a genuine spending cap — plus a max-vs-planned cost display (max is the area under
+the curve, `Σ kwh × eur_per_kwh`; actual is already on `AssetAllocation.cost_eur`).

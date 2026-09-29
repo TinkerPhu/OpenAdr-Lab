@@ -132,6 +132,10 @@ and a null result is the expected honest outcome.
       `docs/architecture/VEN_ARCHITECTURE.md`'s EV section, and a `docs/history/project_journal.md`
       entry. Close GB-41 in `docs/BACKLOG.md` as resolved-by-removal and drop R-95's
       warning-kind-collision note in `docs/reference/TECHNICAL_DEBTS.md`.
+      **Correction:** no such note exists in `TECHNICAL_DEBTS.md` — that claim was written from
+      memory and is wrong (`grep -n "EvCoreEnergyUnmet\|collision"` finds nothing). R-95 is about
+      the missing sustained-commitment series only and stays as it is. Also filed **GB-53** for
+      the cumulative-spend curve UX and the max-vs-planned cost display, per the review questions.
 - [ ] 8.4 Delete `openspec/changes/ev-comfort-piecewise-core/` per workflow rule 3 (do not
       archive), once 8.1–8.3 are green and merged.
 

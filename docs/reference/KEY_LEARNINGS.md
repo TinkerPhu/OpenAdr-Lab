@@ -2428,3 +2428,40 @@ Found by accident, while restarting the broker to verify something unrelated. Th
 time in one day that the *verification* of one fix exposed a defect bigger than the fix (see the
 scenario-isolation entry above): exercising a system in a way nobody routinely does is where
 these live.
+
+## A binary is a claim that the physics is discontinuous (2026-09-29)
+
+GB-41 — four fleet VENs charging nothing for 24 h with valid sessions, solving OPTIMAL — was
+one binary variable. The EV's requested energy was modelled as a block that either happened or
+did not (`ev_energy == e_core_kwh * z_ev_core`), so when the user's bid did not cover the
+*whole* block at the prevailing cost, zero was the optimum. Every hypothesis that looked at
+prices, weights, caps and PV availability failed to explain the pattern, because the pattern was
+not about price levels at all: it was about whether cheap energy covered the whole block.
+
+The lesson is about when a binary is honest. A wash cycle really is all-or-nothing — half a
+cycle leaves wet laundry. Charging is not: energy bought short of a target stays in the battery
+for the next trip. The binary asserted a discontinuity that does not exist in the physics, and
+the MILP then faithfully optimised the model we gave it. Before declaring a binary, ask what
+happens at 60 % of the thing. If the answer is "60 % of the benefit", it is continuous, and a
+binary will eventually produce an all-or-nothing decision nobody wanted.
+
+Corollary for genuine thresholds: "I need 60 % to reach the destination" is a real
+discontinuity, but it belongs in a **constraint** that cannot decline, not in a rewarded binary
+that can. A rewarded binary that strands you is worse than no model of the threshold at all.
+
+## Shrinking a requirement to fit hides the shortfall (2026-09-29)
+
+The EV's guaranteed energy used to be clamped upstream to what the charging window could
+physically reach (`clamp_core_to_reachable_energy`), because the energy balance is an equality
+with no slack and an unreachable requirement made the whole site solve infeasible. The clamp
+worked, and it made the shortfall invisible: once the requirement had been lowered to the
+reachable amount, the plan met it exactly, so nothing downstream could tell that anything was
+missing. The warning string the clamp carried alongside was, by the time this was noticed, read
+by nobody — it had been quietly orphaned by a refactor and no test caught it, because no test
+asserted that an unreachable guarantee produces a warning.
+
+The fix is a shape, not a patch: keep the requirement at what was asked for, and apply the cap
+**where the constraint is imposed** (`min(required, reachable)` at the floor). Then one number
+means "what the user asked for", one derived value means "what is feasible", and the gap between
+them is the diagnostic — computed, not carried. A value that has been pre-adjusted for
+feasibility cannot also serve as the reference the adjustment is measured against.
