@@ -488,6 +488,46 @@ lever here, exactly as it was for the heater (see GB-40's refuted single-integer
 burns its full budget; if the EV's 5x also lands in phase 2 then the away window is a phase-2
 problem and every model-size idea is aimed at the wrong half.
 
+**Phase split settles it: the EV away window is not worth optimising (2026-09-29).**
+`bench_ev_phase_split` times the two phases separately, five repeats, minimum reported.
+
+EV-only site, 288 slots:
+
+| variant | phase 1 | phase 2 | statuses |
+|---|---|---|---|
+| no forecast | 0.044 s | 0.036 s | Optimal / Optimal |
+| forecast, car home | 0.035 s | 0.079 s | Optimal / Optimal |
+| forecast, car **away** | 0.039 s | **0.833 s** | Optimal / GapLimit |
+| forecast, away, 90 % drop | 0.033 s | 0.681 s | Optimal / GapLimit |
+| forecast, just returned | 0.037 s | 0.490 s | GapLimit / Optimal |
+
+**Phase 1 is flat.** The entire away-window cost is phase 2 — ~20x — which is why the phase-1
+tightening above was inconclusive: it aimed at the half that spends 40 ms.
+
+Same site **with a heater**, the shape that actually times out:
+
+| variant | phase 1 | phase 2 | statuses |
+|---|---|---|---|
+| heater + EV, no forecast | 57.5 s | 57.4 s | TimeLimit / TimeLimit |
+| heater + EV, car home | 57.3 s | 57.2 s | TimeLimit / TimeLimit |
+| heater + EV, car away | 56.9 s | 56.3 s | TimeLimit / TimeLimit |
+
+**Both phases are already pinned at the timeout with or without the EV, and with no usage forecast
+at all.** There is no headroom for the EV to consume, so removing the away-window cost cannot move
+any VEN that times out; and the VENs where the 20x is visible (EV-only, e.g. ven-11) run at
+0.8 s against a 60 s-per-phase budget, solving OPTIMAL. **Conclusion: do not optimise the EV away
+window.** It has no operational payoff at either end of the fleet. 100 % of the real timeout is the
+heater (GB-40).
+
+**The cheap option this exposes, which is not EV-specific.** Phase 2 minimises friction subject to
+`phase1_cap_expr <= c_star + epsilon`, so *by construction* everything phase 2 can change is
+bounded by `phase2_epsilon_eur`. On a heater VEN it spends its entire 57 s budget and still returns
+TimeLimit — i.e. it cannot prove the refinement it is buying, while the most that refinement can be
+worth is one epsilon. A separately configurable, much shorter phase-2 timeout would therefore cut
+heater-VEN solve time by roughly half at a cost bounded by epsilon, without touching the
+formulation. That is a measurement worth doing (and R-27 already asks for these solver constants to
+be configurable).
+
 **Still missing, and the reason this took a wrong turn first:** `plan_history` records
 `solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
 an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,
