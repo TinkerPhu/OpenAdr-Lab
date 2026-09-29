@@ -402,8 +402,20 @@ fn time_one_ev_solve(with_session: bool) -> (f64, String) {
 /// projected SoC drops and a mid-horizon departure deadline. That is the part of
 /// the fleet's shape the plain bench profile does not have.
 fn time_ev_solve_cfg(with_session: bool, usage_forecast: bool) -> (f64, String) {
+    time_ev_solve_at(with_session, usage_forecast, 0, 20.0)
+}
+
+/// `hours_after_now` shifts the clock so the car can be *already away*, and
+/// `drop_pct` sets how much SoC the trip consumes — the two things that vary
+/// day to day in the fleet and that R-97 identifies as the real cost driver.
+fn time_ev_solve_at(
+    with_session: bool,
+    usage_forecast: bool,
+    hours_after_now: i64,
+    drop_pct: f64,
+) -> (f64, String) {
     use crate::entities::asset_params::{EvUsageDayParams, EvUsageMode, EvUsageSimParams};
-    let now = fixed_now();
+    let now = fixed_now() + chrono::Duration::hours(hours_after_now);
     let mut profile = bench_profile(false);
     if usage_forecast {
         let day = EvUsageDayParams {
@@ -412,7 +424,7 @@ fn time_ev_solve_cfg(with_session: bool, usage_forecast: bool) -> (f64, String) 
             return_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
             return_jitter_min: 0.0,
             leave_probability: 1.0,
-            soc_drop_pct_mean: 20.0,
+            soc_drop_pct_mean: drop_pct,
             soc_drop_pct_stddev: 0.0,
         };
         for a in profile.assets.iter_mut() {
@@ -473,14 +485,17 @@ fn bench_ev_session_solve_cost() {
 ── R-97: EV-only site through the full two-phase planner ──
 "
     );
-    for (label, sess, fc) in [
-        ("no EV session", false, false),
-        ("firm EV session", true, false),
-        ("usage_forecast + charge planning", false, true),
-        ("usage_forecast + firm session", true, true),
+    for (label, sess, fc, dh, drop) in [
+        ("no EV session", false, false, 0, 20.0),
+        ("firm EV session", true, false, 0, 20.0),
+        ("forecast, car HOME (leaves 08:00)", false, true, 0, 20.0),
+        ("forecast, car AWAY, 20% drop", false, true, 3, 20.0),
+        ("forecast, car AWAY, 65% drop", false, true, 3, 65.0),
+        ("forecast, car AWAY, 90% drop", false, true, 3, 90.0),
+        ("forecast, just RETURNED, 65% drop", false, true, 12, 65.0),
     ] {
-        let (secs, status) = time_ev_solve_cfg(sess, fc);
-        println!("  {label:34} {secs:8.2} s  {status}");
+        let (secs, status) = time_ev_solve_at(sess, fc, dh, drop);
+        println!("  {label:36} {secs:8.2} s  {status}");
     }
     println!();
 }
