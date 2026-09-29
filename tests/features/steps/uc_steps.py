@@ -28,6 +28,19 @@ def step_wait_plan_import_cap(context, cap):
     # scenario's setup — only a plan created after the limit was sent counts.
     sent_at = getattr(context, "capacity_limit_sent_at", None)
 
+    # R-96: that freshness requirement is not satisfiable by waiting. The test
+    # profile's `replan_interval_s` is 300 s and this poll's budget is 300 s, so
+    # a periodic replan — adopted only *after* a 20-60 s solve — can never land
+    # inside the window. The only other source of a fresh plan is an
+    # event-triggered one, and the capacity event can be absorbed by a solve
+    # already in flight: on 2026-09-29 the VEN produced a plan carrying the
+    # correct 6.0 kW cap in all 24 slots one second *before* `sent_at`, and then
+    # had nothing left to react to, so the step waited 300 s for a plan with no
+    # reason to exist. Force the replan instead of hoping for one — `/plan/trigger`
+    # is a trigger the VEN cannot ignore, so the freshness guarantee is kept
+    # rather than relaxed.
+    ven_post("/plan/trigger")
+
     def has_cap(plan):
         if plan is None:
             return False
