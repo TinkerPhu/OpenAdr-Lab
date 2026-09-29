@@ -28,6 +28,7 @@ impl EvMilpContext {
         cum_s: &[i64],
         now: DateTime<Utc>,
         ev_session: Option<&crate::entities::device_session::EvSession>,
+        comfort_rates: &[crate::entities::asset::ComfortRate],
         min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
         v_ev_core_eur_kwh: f64,
@@ -76,9 +77,35 @@ impl EvMilpContext {
         }
         let Some(session) = ev_session else {
             // Plugged, no session: slots available but no charging obligation.
+            //
+            // The bands are still built, because they do not depend on a deadline
+            // — they are a function of the curve, the current SoC, the target and
+            // the pack size, all known here. `apply_usage_forecast` may then turn
+            // this into a real obligation from a *predicted* departure
+            // (`engage_charge_planning`), and when it does the energy must be
+            // priced by the user's curve exactly as a requested charge is. Leaving
+            // `segments` empty here is what made the fleet's own charge planning
+            // bypass the curve entirely and fall back to the flat `e_ev_extra`
+            // reward, i.e. the model `ev-comfort-piecewise-core` replaced.
+            //
+            // Under `MustNotRun` (nothing has made the EV runnable) `declare_vars`
+            // emits no band variables at all, so carrying them costs nothing.
             return Self {
                 a_ev: vec![true; n],
                 soc_drops: None,
+                segments: super::ev_comfort::ev_energy_segments(
+                    comfort_rates,
+                    current_soc,
+                    cfg.soc_target,
+                    cfg.battery_kwh,
+                    v_ev_core_eur_kwh,
+                    v_ev_extra_eur_kwh,
+                    w_ghg_eur_kg,
+                ),
+                // Priced per band, so nothing may also be bought through the flat
+                // beyond-target reward — same reason as the `ByDeadline` arm.
+                e_extra_max_kwh: 0.0,
+                v_extra_eur_kwh: 0.0,
                 ..base
             };
         };

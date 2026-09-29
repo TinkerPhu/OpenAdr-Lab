@@ -368,6 +368,9 @@ pub trait MilpParticipant {
         now: DateTime<Utc>,
         ev_session: Option<&EvSession>,
         heater_target: Option<&HeaterTarget>,
+        // The asset's effective comfort curve (user override, else built-in
+        // default). Empty when the asset has none.
+        comfort_rates: &[crate::entities::asset::ComfortRate],
         ev_min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
         v_ev_core_eur_kwh: f64,

@@ -566,6 +566,16 @@ mod milp_context_trait_tests {
         cum_s: &[i64],
         now: DateTime<Utc>,
     ) -> EvMilpContext {
+        ctx_from_state_with_curve(cfg, n, cum_s, now, &[])
+    }
+
+    fn ctx_from_state_with_curve(
+        cfg: &super::EvCharger,
+        n: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+        comfort_rates: &[crate::entities::asset::ComfortRate],
+    ) -> EvMilpContext {
         let state = super::super::AssetState::Ev(super::super::EvState {
             soc: 0.30,
             plugged: true,
@@ -574,10 +584,82 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: false,
         });
         let mut ctx = EvMilpContext::from_state(
-            &state, cfg, n, cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+            &state,
+            cfg,
+            n,
+            cum_s,
+            now,
+            None,
+            comfort_rates,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
         );
         ctx.apply_usage_forecast(cfg, n, cum_s, now, None);
         ctx
+    }
+
+    /// A forecast-driven charge must be priced by the user's comfort curve, exactly
+    /// like a charge a user asked for.
+    ///
+    /// `engage_charge_planning` writes no `EvSession`, so before this test the
+    /// forecast path set a target and a deadline but left `segments` empty — the
+    /// curve was never consulted, and the energy beyond the target fell back to the
+    /// flat `v_ev_extra_eur_kwh` reward, i.e. the pre-`ev-comfort-piecewise-core`
+    /// model. Every fleet EV charges through this path, so the curve applied to
+    /// nothing the fleet actually did (`no-half-built-features`).
+    #[test]
+    fn a_forecast_driven_charge_is_priced_by_the_comfort_curve() {
+        use crate::entities::asset::ComfortRate;
+        use crate::entities::asset_params::EvUsageMode;
+        use chrono::{TimeZone, Utc};
+        let mut cfg = ev_with_usage(EvUsageMode::Forecast);
+        cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let n = 24;
+        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+
+        // A curve the user could have drawn: 0.50 falling to 0.10 as the pack fills.
+        let curve = vec![
+            ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.50,
+                max_marginal_co2: 0.0,
+            },
+            ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.10,
+                max_marginal_co2: 0.0,
+            },
+        ];
+        let ctx = ctx_from_state_with_curve(&cfg, n, &cum_s, now, &curve);
+
+        assert!(
+            !ctx.segments.is_empty(),
+            "a forecast-driven charge must carry priced bands, got none"
+        );
+        // soc 0.30 -> full on a 60 kWh pack = 42 kWh, all of it priced by the curve.
+        let total: f64 = ctx.segments.iter().map(|s| s.kwh).sum();
+        assert!(
+            (total - 42.0).abs() < 1e-6,
+            "bands must span soc_init..1.0 (42 kWh), got {total}"
+        );
+        // Every bid must come from the curve's range, not from the profile default.
+        for s in &ctx.segments {
+            assert!(
+                s.eur_per_kwh <= 0.50 + 1e-9 && s.eur_per_kwh >= 0.10 - 1e-9,
+                "bid {} is outside the curve the user drew",
+                s.eur_per_kwh
+            );
+        }
+        // And the flat beyond-target reward must not also pay for the same energy.
+        assert_eq!(
+            ctx.e_extra_max_kwh, 0.0,
+            "energy is priced by bands here, so `e_ev_extra` must be inert"
+        );
     }
 
     /// Regression (found by `ev_usage_forecast.feature` running mid-trip): the
@@ -602,7 +684,19 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: true,
         });
         let mut ctx = EvMilpContext::from_state(
-            &state, &cfg, n, &cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+            &state,
+            &cfg,
+            n,
+            &cum_s,
+            now,
+            None,
+            &[],
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
         );
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
 
@@ -648,7 +742,19 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: true,
         });
         let mut ctx = EvMilpContext::from_state(
-            &state, &cfg, n, &cum_s, now, None, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+            &state,
+            &cfg,
+            n,
+            &cum_s,
+            now,
+            None,
+            &[],
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
         );
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
         assert!(
@@ -783,6 +889,7 @@ mod milp_context_trait_tests {
             &cum_s,
             now,
             Some(&session),
+            &[],
             0.0,
             1.0,
             1.0,
@@ -919,6 +1026,7 @@ mod milp_context_trait_tests {
             &cum_s,
             now,
             Some(&session),
+            &[],
             0.0,
             1.0,
             1.0,
@@ -981,6 +1089,7 @@ mod milp_context_trait_tests {
                 &cum_s,
                 chrono::Utc::now(),
                 None,
+                &[],
                 0.0,
                 1.0,
                 1.0,
@@ -1046,6 +1155,7 @@ mod milp_context_trait_tests {
             &cum_s,
             now,
             Some(&session),
+            &[],
             0.0,
             0.42, // v_ev_extra_eur_kwh
             0.77, // v_ev_core_eur_kwh

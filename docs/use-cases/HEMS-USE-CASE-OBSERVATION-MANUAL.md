@@ -928,6 +928,10 @@ The third row is the important one: the plan **charges partly**. It buys the kWh
 stops. It does not refuse the whole charge because the last kWh was not worth it, and it raises no
 warning — you asked for a preference, and the preference was honoured.
 
+Your curve applies to charges **you** ask for *and* to charges the VEN plans by itself from a
+predicted departure (an EV profile with `engage_charge_planning`). Both are priced by the same
+curve — the override you saved if there is one, the built-in default otherwise.
+
 ### When is a target actually promised?
 
 | Request | `soc_target` means |

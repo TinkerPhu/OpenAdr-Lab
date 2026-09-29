@@ -116,6 +116,7 @@ pub(super) async fn run_plan_cycle(
         heater_c_terminal_eur_kwh,
         battery_c_terminal_eur_kwh,
         &heater_anchor,
+        &state.comfort_overrides_map().await,
     );
 
     // Live PvInverter's own weather/decay-aware forecast; None with no live "pv" asset.

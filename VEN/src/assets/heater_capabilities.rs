@@ -43,6 +43,7 @@ impl MilpParticipant for Heater {
         now: DateTime<Utc>,
         _ev_session: Option<&EvSession>,
         heater_target: Option<&HeaterTarget>,
+        _comfort_rates: &[crate::entities::asset::ComfortRate],
         _ev_min_charge_kw: f64,
         _v_ev_extra_eur_kwh: f64,
         _v_ev_core_eur_kwh: f64,
