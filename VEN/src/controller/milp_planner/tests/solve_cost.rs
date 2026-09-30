@@ -1611,3 +1611,80 @@ fn bench_what_is_in_phase2_friction() {
          blend its own name does not describe.\n"
     );
 }
+
+/// R-97 / GB-40: is heater MILP difficulty set by the tank's thermal slack?
+///
+/// Live ven-2 and ven-3 run the same assets, the same 288-slot 48 h grid and the
+/// same `mip_gap_target` (0.06), yet phase 1 takes **227-309 ms** on ven-2 and
+/// **11-46 s** on ven-3. The profiles differ in tank physics:
+///
+///   ven-2: volume 2000 L, band 40-80 C (40 K)   -> phase 1 fast
+///   ven-3: volume  200 L, band 45-60 C (15 K)   -> phase 1 slow
+///
+/// A large tank with a wide band has enormous thermal slack, so the heater can be
+/// placed almost anywhere and the schedule is barely constrained. A small tank with
+/// a narrow band must cycle frequently and precisely. If difficulty tracks slack,
+/// that explains GB-40's own unexplained variance ("not every heater VEN is slow --
+/// ven-2 18.2 s, ven-20 29.0 s") and points at a *physical* lever rather than a
+/// reformulation.
+///
+/// Held fixed: grid, tariffs, gap, assets. Varied: volume and band only.
+///
+///   wsl cargo test -p ven-app --release bench_phase1_vs_tank_slack -- --ignored --nocapture
+#[test]
+#[ignore = "R-97/GB-40: 8 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_phase1_vs_tank_slack() {
+    println!("\n── R-97/GB-40: phase-1 cost vs the tank's thermal slack ──\n");
+    println!(
+        "  {:>9} {:>12} {:>10} {:>12} {:>10} {:>14}  status",
+        "volume L", "band K", "slack kWh", "phase1 s", "switches", "objective EUR"
+    );
+    for (volume_l, tmin, tmax) in [
+        (200.0, 45.0, 60.0), // ven-3
+        (200.0, 40.0, 80.0), // small tank, wide band
+        (500.0, 45.0, 60.0),
+        (1000.0, 45.0, 60.0),
+        (2000.0, 45.0, 60.0), // big tank, narrow band
+        (2000.0, 40.0, 80.0), // ven-2
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06; // both live VENs
+        let thermal_mass = volume_l * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = tmin;
+                h.temp_max_c = tmax;
+                h.temp_safety_max_c = tmax;
+                h.temp_initial_c = (tmin + tmax) / 2.0;
+            }
+        }
+        // Usable thermal energy between the band limits — the slack the planner has.
+        let slack_kwh = thermal_mass * (tmax - tmin);
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, (tmin + tmax) / 2.0);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let secs = t.elapsed().as_secs_f64();
+        let switches = (1..inputs.n)
+            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .count();
+        println!(
+            "  {volume_l:>9.0} {:>12.0} {slack_kwh:>10.1} {secs:>12.2} {switches:>10} {:>14.4}  {:?}",
+            tmax - tmin,
+            p1.objective_eur,
+            p1.status
+        );
+    }
+    println!(
+        "\n  If phase-1 time falls as slack rises, heater difficulty is a property of the\n  \
+         installation, not of the formulation — and GB-40's per-VEN variance is explained.\n"
+    );
+}

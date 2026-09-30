@@ -606,6 +606,57 @@ budget, and production hosts run 85-89 % busy, so 5 s there buys less solver wor
 idle laptop and would intermittently land in the found-nothing regime. 15 s keeps the plateau with
 2-3x margin, still far below the 60 s it replaced (ven-2 total was 64 s before any of this).
 
+**Heater MILP difficulty is set by the tank's thermal slack — a property of the installation, not
+the formulation (2026-09-30).** This is the first mechanism proposed today that survived its control,
+and it bears directly on GB-40.
+
+Live ven-2 and ven-3 run the same assets, the same 288-slot 48 h grid and the same
+`mip_gap_target` (0.06 — confirmed in both profiles, so the tolerance is controlled), yet phase 1
+takes **227-309 ms** on ven-2 and **11-46 s** on ven-3. The profiles differ in tank physics:
+ven-2 has 2000 L across a 40 K band, ven-3 has 200 L across 15 K — about 27x the usable slack.
+
+`bench_phase1_vs_tank_slack` varies volume and band with grid, tariffs, gap and assets held fixed,
+three repeats:
+
+| volume L | band K | slack kWh | phase 1 (3 runs) | switches |
+|---|---|---|---|---|
+| 200 | 15 (**ven-3**) | 3.5 | 1.29 / 1.22 / 2.00 s | 53 |
+| 200 | 40 | 9.3 | 0.66 / 0.70 / 1.21 s | 14 |
+| 500 | 15 | 8.7 | 0.61 / 0.61 / 0.67 s | 12 |
+| 1000 | 15 | 17.4 | 0.44 / 0.42 / 0.50 s | 16 |
+| 2000 | 15 | 34.9 | 0.22 / 0.18 / 0.19 s | 4 |
+| 2000 | 40 (**ven-2**) | 93.0 | 0.19 / 0.21 / 0.24 s | 22 |
+
+Monotone in slack in every run, ~6-8x end to end, and the endpoints are exactly the two live VENs.
+These solves finish (GapLimit) so they are deterministic — switch counts are identical across runs,
+unlike the time-limited phase-2 measurements elsewhere in this entry.
+
+**Switch count does *not* predict difficulty** (2000 L/40 K has 22 switches and is fastest; 500 L/15 K
+has 12 and is slower), so "number of forced thermostat cycles" is not the mechanism. Slack itself is
+the predictor. The likely reason is that low slack narrows the feasible tank-trajectory corridor
+until integrality binds hard — standard MILP behaviour — but that is **not verified**.
+
+**Why this matters for GB-40.** GB-40 has pursued the formulation for weeks on the theory that the
+stage binaries carry the power level and weaken the relaxation, and three reformulations failed:
+the single-integer encoding bought nothing, tier-bounded continuous power was unsound (~25 % cheaper
+unphysical answers), dwell-time constraints were worse. GB-40 also records variance it cannot
+explain — "not every heater VEN is slow (ven-2 18.2 s, ven-20 29.0 s)". Thermal slack explains that
+variance, and explains why the reformulations failed: when slack is tight the discreteness they tried
+to relax away is load-bearing.
+
+**Levers this opens, none of them a reformulation:**
+1. **Widen a needlessly narrow thermostat band** where the installation permits. Measured: 200 L
+   going 15 K -> 40 K roughly halves phase 1 (1.29 -> 0.66 s). A physical/config change, and it
+   also reduces switching (53 -> 14).
+2. **Treat slack-poor VENs differently** — a looser `mip_gap_target` or coarser far zones for them
+   specifically, rather than fleet-wide settings that are wasted on slack-rich sites.
+3. Far-zone coarsening (measured 2.6x earlier in this entry) now has a mechanism behind it.
+
+**Caveat on magnitude:** the bench's hardest row is 1.3-2.0 s while production ven-3 is 11-46 s, so
+the bench under-represents ven-3 by roughly an order of magnitude — its base load, PV, EV state and
+real tariffs compound on top. The *direction* is confirmed; the absolute scale is not this bench's
+to give.
+
 **ROOT CAUSE of ineffective smoothing: 9 of 11 heater VENs run an epsilon below the threshold at
 which phase 2 can do anything (2026-09-30).** Found by the new `planner: phase timings` log, within
 minutes of deploying it.
