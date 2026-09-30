@@ -110,7 +110,7 @@ describe("FleetPage", () => {
 
   it("draws the per-VEN chart over the selected window", () => {
     renderFleet();
-    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("60");
+    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("1440");
   });
 
   /* The window picker is what makes "did it react" and "what did today look
@@ -125,8 +125,8 @@ describe("FleetPage", () => {
 
   it("moves both charts with one window selector", () => {
     renderFleet();
-    expect(screen.getByTestId("fleet-tariff-stub")).toHaveTextContent("60");
-    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("60");
+    expect(screen.getByTestId("fleet-tariff-stub")).toHaveTextContent("1440");
+    expect(screen.getByTestId("fleet-chart-stub")).toHaveTextContent("1440");
   });
 
   it("offers the operator a window to choose", async () => {

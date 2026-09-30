@@ -32,7 +32,7 @@ export function ControllerPage() {
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   // Widen the timeline window when the global expand toggle is active.
   const hoursForward = expanded ? 48.0 : 1.0;

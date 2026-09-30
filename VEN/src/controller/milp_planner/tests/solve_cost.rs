@@ -929,3 +929,396 @@ fn bench_phase2_changes_across_instances() {
          (all counts are out of 288 slots; phase 1 ran at the full 60 s budget)\n"
     );
 }
+
+/// R-97 cause analysis, ineffective planning: is phase 2 *starved* or *failing*?
+///
+/// Phase 2 never moves the heater on any instance. Two candidate causes:
+///   (a) starved — the `phase1_cost <= c_star + epsilon` cap is too tight for any
+///       cheaper-switching schedule to fit, so there is genuinely nothing legal to
+///       find. Rescheduling a heater stage moves real money; epsilon is 0.17 EUR.
+///   (b) failing — improvements exist within the cap and branch-and-bound does not
+///       find them in the time available.
+/// Raising epsilon separates the two: under (a) phase 2 starts moving once the cap
+/// is loose enough to admit a swap; under (b) it stays inert however loose it gets.
+///
+///   wsl cargo test -p ven-app --release bench_phase2_epsilon_sweep -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 cause analysis: ~8 heater-sized solves, run with --ignored --nocapture"]
+fn bench_phase2_epsilon_sweep() {
+    println!("\n── R-97: is phase 2 starved by its cost cap, or failing to search? ──\n");
+    println!(
+        "  {:>9} {:>8} {:>8} {:>8} {:>11}  status",
+        "epsilon", "imp", "ev", "heat", "friction"
+    );
+    // The heater instance with the most switching cost to remove.
+    for epsilon in [0.17, 0.5, 1.0, 5.0] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.phase2_epsilon_eur = epsilon;
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_tariffs(0.25, 0.08, 300.0);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+        let t_p1 = profile.planner.solver_timeout_s as f64;
+
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, t_p1).expect("phase 1 feasible");
+        // Deliberately a generous phase-2 budget here: this asks whether an
+        // improvement EXISTS within the cap, not how fast it is found.
+        let (p2, friction) = match solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            epsilon,
+            &p1,
+            &ctxs,
+            60.0,
+        ) {
+            Ok(v) => v,
+            Err(_) => {
+                println!(
+                    "  {epsilon:>9.2} {:>8} {:>8} {:>8} {:>11}  Err",
+                    "-", "-", "-", "-"
+                );
+                continue;
+            }
+        };
+        let count = |a: &[f64], b: &[f64]| {
+            a.iter()
+                .zip(b.iter())
+                .filter(|(x, y)| (*x - *y).abs() > 1e-6)
+                .count()
+        };
+        println!(
+            "  {epsilon:>9.2} {:>8} {:>8} {:>8} {friction:>11.4}  {:?}",
+            count(&p1.p_imp_kw, &p2.p_imp_kw),
+            count(&p1.p_ev_kw, &p2.p_ev_kw),
+            count(&p1.y_heat, &p2.y_heat),
+            p2.status
+        );
+    }
+    println!("\n  (slot counts out of 288; phase 2 given a full 60 s at every epsilon)\n");
+}
+
+/// R-97 cause analysis, long planning time: how does phase 1 scale with horizon?
+///
+/// GB-40 lists horizon truncation as untried, and GB-42 records that everything
+/// past the end of published tariff data is priced by a flat hold. Flat prices make
+/// far-horizon schedules tie, and ties are what stop branch-and-bound pruning — so
+/// the far half of the horizon may contribute almost no information while carrying
+/// half the heater's stage integers. This measures phase 1 alone against the number
+/// of slots, holding everything else fixed.
+///
+///   wsl cargo test -p ven-app --release bench_phase1_vs_horizon -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 cause analysis: 5 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_phase1_vs_horizon() {
+    println!("\n── R-97: how phase 1's cost scales with horizon length ──\n");
+    println!(
+        "  {:>7} {:>10} {:>14}  status",
+        "slots", "phase1 s", "objective EUR"
+    );
+    for zones in [
+        vec![crate::entities::plan::PlanZone {
+            step_s: 300,
+            slots: 48,
+        }],
+        vec![crate::entities::plan::PlanZone {
+            step_s: 300,
+            slots: 96,
+        }],
+        vec![
+            crate::entities::plan::PlanZone {
+                step_s: 300,
+                slots: 96,
+            },
+            crate::entities::plan::PlanZone {
+                step_s: 600,
+                slots: 96,
+            },
+        ],
+        vec![
+            crate::entities::plan::PlanZone {
+                step_s: 300,
+                slots: 96,
+            },
+            crate::entities::plan::PlanZone {
+                step_s: 600,
+                slots: 96,
+            },
+            crate::entities::plan::PlanZone {
+                step_s: 900,
+                slots: 96,
+            },
+        ],
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        let n: usize = zones.iter().map(|z| z.slots as usize).sum();
+        profile.planner.plan_zones = zones;
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_tariffs(0.25, 0.08, 300.0);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        println!(
+            "  {n:>7} {:>10.2} {:>14.4}  {:?}",
+            t.elapsed().as_secs_f64(),
+            p1.objective_eur,
+            p1.status
+        );
+    }
+    println!("\n  (the production grid is the last row: 288 slots over three zones)\n");
+}
+
+/// A diurnal tariff series covering `hours` ahead, one snapshot per hour, so the
+/// far horizon carries real price variation instead of a flat stale-rate hold.
+fn make_diurnal_tariffs(hours: i64) -> TariffTimeSeries {
+    let now = fixed_now();
+    let snaps: Vec<TariffSnapshot> = (0..hours)
+        .map(|h| {
+            let start = now - chrono::Duration::hours(1) + chrono::Duration::hours(h);
+            // Cheap at night, dear in the evening peak — the shape a real feed has.
+            let hour_of_day = (chrono::Timelike::hour(&start) as f64) % 24.0;
+            let imp = 0.15 + 0.15 * (1.0 + ((hour_of_day - 18.0) / 3.0).cos()) / 2.0;
+            TariffSnapshot {
+                interval_start: start,
+                interval_end: start + chrono::Duration::hours(1),
+                import_tariff_eur_kwh: Some(imp),
+                export_tariff_eur_kwh: Some(0.08),
+                co2_g_kwh: Some(300.0),
+            }
+        })
+        .collect();
+    TariffTimeSeries::from_snapshots(&snaps)
+}
+
+/// R-97 root cause: is phase 1's 288-slot cliff caused by the *number* of slots,
+/// or by the far horizon being priced by a flat stale-rate hold?
+///
+/// The horizon sweep found 192 slots solving in 1.09 s and 288 in 60.04 s — 1.5x
+/// the slots for 55x the time. But the two are confounded: the bench tariff covers
+/// 25 h, so 192 slots (24 h) is fully priced while 288 (48 h) runs ~23 h past
+/// coverage into `StaleRatePolicy`'s flat hold (GB-42). Flat prices make far-horizon
+/// schedules tie, and ties are what stop branch-and-bound pruning, while those
+/// slots still carry ~96 of the heater's stage integers.
+///
+/// This holds the slot count at 288 and varies only whether the far half is priced.
+///
+///   wsl cargo test -p ven-app --release bench_phase1_flat_vs_priced_far_horizon -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 root cause: 4 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_phase1_flat_vs_priced_far_horizon() {
+    println!("\n── R-97: does the FLAT far horizon cause the cliff, or the slot count? ──\n");
+    println!(
+        "  {:>7} {:>26} {:>10} {:>14}  status",
+        "slots", "far horizon", "phase1 s", "objective EUR"
+    );
+    for (slots_label, zones) in [
+        (
+            192,
+            vec![
+                crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 96,
+                },
+                crate::entities::plan::PlanZone {
+                    step_s: 600,
+                    slots: 96,
+                },
+            ],
+        ),
+        (
+            288,
+            vec![
+                crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 96,
+                },
+                crate::entities::plan::PlanZone {
+                    step_s: 600,
+                    slots: 96,
+                },
+                crate::entities::plan::PlanZone {
+                    step_s: 900,
+                    slots: 96,
+                },
+            ],
+        ),
+    ] {
+        for (tariff_label, tariffs) in [
+            ("flat hold past 25 h", make_tariffs(0.25, 0.08, 300.0)),
+            ("priced all 49 h", make_diurnal_tariffs(49)),
+        ] {
+            let now = fixed_now();
+            let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+            profile.planner.plan_zones = zones.clone();
+            let mut sim = make_snap_from_profile(&profile);
+            set_heater_power(&mut sim, 6.0);
+            let cap = no_capacity();
+            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let t = Instant::now();
+            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+            println!(
+                "  {slots_label:>7} {tariff_label:>26} {:>10.2} {:>14.4}  {:?}",
+                t.elapsed().as_secs_f64(),
+                p1.objective_eur,
+                p1.status
+            );
+        }
+    }
+    println!(
+        "\n  If 288 + priced is fast, the cliff is the flat hold (GB-42), not the model size.\n"
+    );
+}
+
+/// R-97 root cause, continued: slot COUNT or horizon DURATION?
+///
+/// The flat-vs-priced control refuted pricing as the cause: 288 slots times out at
+/// 60 s either way. The production grid is 288 slots spanning 48 h, so count and
+/// duration are still confounded. This varies them independently:
+///
+///   288 slots / 24 h  — production's count, half its span
+///   192 slots / 48 h  — production's span, two thirds its count
+///   288 slots / 48 h  — production
+///
+/// If the 24 h variant is fast, the difficulty is the horizon's *length in time*
+/// (tank trajectory, terminal conditions). If the 48 h/192 variant is fast, it is
+/// the *number of integer decisions*.
+///
+///   wsl cargo test -p ven-app --release bench_phase1_count_vs_duration -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 root cause: 4 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_phase1_count_vs_duration() {
+    println!("\n── R-97: is it the slot count or the horizon duration? ──\n");
+    println!(
+        "  {:>34} {:>7} {:>7} {:>10} {:>14}  status",
+        "grid", "slots", "hours", "phase1 s", "objective EUR"
+    );
+    let z = |step_s: u64, slots: usize| crate::entities::plan::PlanZone { step_s, slots };
+    for (label, zones) in [
+        ("96x300s (8 h, reference)", vec![z(300, 96)]),
+        ("288x300s (24 h, prod count)", vec![z(300, 288)]),
+        ("192x900s (48 h, prod span)", vec![z(900, 192)]),
+        (
+            "96x300+96x600+96x900 (48 h, PROD)",
+            vec![z(300, 96), z(600, 96), z(900, 96)],
+        ),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        let n: usize = zones.iter().map(|x| x.slots).sum();
+        let hours: f64 = zones
+            .iter()
+            .map(|x| x.slots as f64 * x.step_s as f64 / 3600.0)
+            .sum();
+        profile.planner.plan_zones = zones;
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        println!(
+            "  {label:>34} {n:>7} {hours:>7.0} {:>10.2} {:>14.4}  {:?}",
+            t.elapsed().as_secs_f64(),
+            p1.objective_eur,
+            p1.status
+        );
+    }
+    println!("\n  (all four fully priced, so pricing is held constant)\n");
+}
+
+/// R-97: does the 48 h horizon make the EXECUTED part of the plan worse?
+///
+/// Count-vs-duration showed 288 slots solving in 2.14 s over 24 h and timing out at
+/// 60 s over 48 h, so duration is the cost driver. But a plan only executes its
+/// first slots before the next replan, so a bad far horizon is only *harmful* if it
+/// changes those near-term decisions. This solves the same site at both spans and
+/// compares the first 8 h: the schedule, and its cost under identical pricing.
+///
+///   wsl cargo test -p ven-app --release bench_does_the_far_horizon_harm_execution -- --ignored --nocapture
+#[test]
+#[ignore = "R-97: 2 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_does_the_far_horizon_harm_execution() {
+    let z = |step_s: u64, slots: usize| crate::entities::plan::PlanZone { step_s, slots };
+    let mut results = Vec::new();
+    for (label, zones) in [
+        ("24 h (288x300s)", vec![z(300, 288)]),
+        (
+            "48 h (PROD 3-zone)",
+            vec![z(300, 96), z(600, 96), z(900, 96)],
+        ),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.plan_zones = zones;
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let secs = t.elapsed().as_secs_f64();
+
+        // Economic cost of the first 8 hours only — the part that actually runs
+        // before the next cycle replaces it. Same pricing in both, so comparable.
+        let mut cost_8h = 0.0;
+        let mut elapsed_h = 0.0;
+        let mut heater_switches = 0usize;
+        let mut ev_kwh_8h = 0.0;
+        for t_i in 0..inputs.n {
+            if elapsed_h >= 8.0 {
+                break;
+            }
+            let dt = inputs.dt_h[t_i];
+            cost_8h += (inputs.c_imp_eur_kwh[t_i] * p1.p_imp_kw[t_i]
+                - inputs.c_exp_eur_kwh[t_i] * p1.p_exp_kw[t_i])
+                * dt;
+            ev_kwh_8h += p1.p_ev_kw[t_i] * dt;
+            if t_i > 0 && (p1.y_heat[t_i] - p1.y_heat[t_i - 1]).abs() > 1e-6 {
+                heater_switches += 1;
+            }
+            elapsed_h += dt;
+        }
+        results.push((
+            label,
+            secs,
+            p1.objective_eur,
+            cost_8h,
+            ev_kwh_8h,
+            heater_switches,
+            format!("{:?}", p1.status),
+        ));
+    }
+
+    println!("\n── R-97: what the 48 h horizon does to the first 8 hours ──\n");
+    println!(
+        "  {:>20} {:>9} {:>13} {:>13} {:>11} {:>10}  status",
+        "horizon", "phase1 s", "full obj EUR", "first-8h EUR", "EV kWh 8h", "heat sw 8h"
+    );
+    for (label, secs, obj, c8, ev8, sw, st) in &results {
+        println!("  {label:>20} {secs:>9.2} {obj:>13.4} {c8:>13.4} {ev8:>11.2} {sw:>10}  {st}");
+    }
+    println!(
+        "\n  first-8h EUR is the cost of the part that actually executes, priced identically\n  \
+         in both rows. If the 48 h row is worse there, the long horizon is not merely\n  \
+         expensive to solve — it degrades the decisions the VEN carries out.\n"
+    );
+}
