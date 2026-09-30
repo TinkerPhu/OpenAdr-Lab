@@ -560,6 +560,52 @@ appears only somewhere past 20 s.
 switches at 25 min and 2 at 1 h under both. Over 8 h the 5 s solution has *fewer* switches (11 vs
 15). The horizon-wide friction difference lives in slots that are replaced before they run.
 
+**Phase 2 returns provably suboptimal incumbents, and its response to configuration is not
+monotone (2026-09-30).** This is the sharpest thing the sweeps show, and it comes out of the data
+without needing a mechanism.
+
+Phase 2 minimises friction subject to `cost <= c_star + epsilon`. Raising epsilon strictly enlarges
+the feasible set, so the true optimum at a larger epsilon **cannot be worse**. The sweep violates
+that in both gap rows:
+
+| mip_gap | epsilon | heat slots moved | friction |
+|---|---|---|---|
+| 0.02 | 0.17 | 51 | 2.2916 |
+| 0.02 | **0.50** | **0** | **4.9113** |
+| 0.02 | 1.00 | 47 | 1.9949 |
+| 0.02 | 5.00 | 74 | 1.2471 |
+| 0.06 | 0.17 | 0 | 4.6201 |
+| 0.06 | **0.50** | 59 | **1.8315** |
+| 0.06 | **1.00** | 68 | **2.0805** |
+| 0.06 | 5.00 | 87 | 1.4559 |
+
+Friction *rises* from 2.29 to 4.91 as the cap loosens from 0.17 to 0.50 (gap 0.02), and from 1.83 to
+2.08 loosening 0.50 to 1.00 (gap 0.06). Both are impossible for optimal solutions, so phase 2 is
+landing on substantially suboptimal incumbents — consistent with TimeLimit at 58-59 s in all eight
+cells. The cells showing zero movement are therefore **search failures, not structural inertness**.
+
+Three consequences:
+
+1. **`phase2_epsilon_eur` cannot be tuned by measurement on one instance.** The response is not
+   monotone, so a sweep can rank a tighter cap above a looser one purely by incumbent luck.
+2. **Phase 2's freedom is inversely coupled to phase 1's quality.** The cap is anchored on
+   `c_star` = phase 1's objective, so a sloppier phase 1 gives phase 2 more absolute room. Visible
+   at epsilon 0.17: a timed-out phase 1 (gap 0.02) lets phase 2 move 51 heater slots, a converged
+   one (gap 0.06) lets it move none. Tuning `mip_gap_target` therefore silently retunes how much
+   smoothing the plan gets — an odd property for a lexicographic two-phase design.
+3. **Phase 2 is a heater-only pass in practice.** The EV column is 0 in all eight cells.
+
+**The budget is a staircase, not a curve** (`bench_phase2_budget_with_real_prices`): nothing below
+~5 s, an exact plateau at 5/10/20 s (friction 3.4555, 76 heater slots), then a better basin past
+20 s (2.0805, and only 68 slots moved — fewer edits, better result). Classic incumbent-update
+behaviour.
+
+**Default raised 5 s -> 15 s as a result.** The plateau means 15 s delivers the same plan quality as
+5 s, while the threshold behaviour means 5 s is fragile: it is a **wall-clock** budget, not a work
+budget, and production hosts run 85-89 % busy, so 5 s there buys less solver work than 5 s on an
+idle laptop and would intermittently land in the found-nothing regime. 15 s keeps the plateau with
+2-3x margin, still far below the 60 s it replaced (ven-2 total was 64 s before any of this).
+
 **Rule for any future phase-2 measurement: use a varying tariff.** A flat fixture makes phase 2 look
 inert and will reproduce this wrong conclusion.
 

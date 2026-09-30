@@ -359,10 +359,13 @@ pub(super) fn default_plan_adoption_decay() -> f64 {
 pub(super) fn default_power_stages() -> u8 {
     2
 }
-/// R-97: phase 2 is inert on heater sites and finishes in under a second
-/// elsewhere, so it does not need phase 1's budget. See `phase2_solver_timeout_s`.
+/// R-97: phase 2's value plateaus — 5, 10 and 20 s all yield identical friction,
+/// and it achieves *nothing* below ~5 s. 15 s therefore buys the full plateau with
+/// margin, because this is a **wall-clock** budget and production hosts run 85-89 %
+/// busy, so a budget sitting right at the improvement threshold would intermittently
+/// land in the found-nothing regime. See `phase2_solver_timeout_s`.
 pub(super) fn default_phase2_solver_timeout_s() -> u64 {
-    5
+    15
 }
 
 pub(super) fn default_solver_timeout_s() -> u64 {

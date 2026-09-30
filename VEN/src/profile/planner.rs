@@ -138,7 +138,7 @@ pub struct PlannerConfig {
     pub solver_timeout_s: u64,
 
     /// HiGHS solver time limit for **phase 2** in seconds, separately from phase 1
-    /// because the two phases behave nothing alike (R-97). Default: 5.
+    /// because the two phases behave nothing alike (R-97). Default: 15.
     ///
     /// Phase 2 does real work — with a varying tariff at a realistic epsilon it
     /// roughly halves heater switching (58 switches over 48 h down to 32). But
@@ -150,6 +150,12 @@ pub struct PlannerConfig {
     /// slots that are replaced before they run, so it costs ~55 s per cycle for
     /// nothing the hardware feels. Measured by `bench_phase2_budget_with_real_prices`
     /// and `bench_phase2_budget_executed_window`; see R-97.
+    ///
+    /// The budget is a **staircase, not a curve**: phase 2 achieves nothing below
+    /// ~5 s, then 5/10/20 s all give identical friction, and only past 20 s does a
+    /// better basin appear. 15 s buys the whole plateau with margin — it is
+    /// wall-clock, not solver work, and production hosts run 85-89 % busy, so a
+    /// budget pinned at the threshold would intermittently deliver no smoothing.
     ///
     /// Any benchmark of this must use a *varying* tariff — a flat one gives phase 1
     /// no reason to fragment the schedule, which makes phase 2 look inert and once

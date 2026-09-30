@@ -1078,8 +1078,8 @@ planner:
     fn phase2_solver_timeout_defaults_to_a_short_budget_not_phase_ones() {
         let cfg = PlannerConfig::default();
         assert_eq!(
-            cfg.phase2_solver_timeout_s, 5,
-            "phase 2 is inert on heater sites and sub-second elsewhere (R-97), so              its default budget must not be phase 1's"
+            cfg.phase2_solver_timeout_s, 15,
+            "phase 2's value plateaus at 5-20 s and is nil below ~5 s (R-97), so its              default sits on the plateau with margin — not at phase 1's budget, and              not pinned at the threshold where host load would cost all smoothing"
         );
         assert!(
             cfg.phase2_solver_timeout_s < cfg.solver_timeout_s,
