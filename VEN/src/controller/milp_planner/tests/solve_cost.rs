@@ -943,65 +943,84 @@ fn bench_phase2_changes_across_instances() {
 ///
 ///   wsl cargo test -p ven-app --release bench_phase2_epsilon_sweep -- --ignored --nocapture
 #[test]
-#[ignore = "R-97 cause analysis: ~8 heater-sized solves, run with --ignored --nocapture"]
+#[ignore = "R-97 cause analysis: 8 heater-sized solves, run with --ignored --nocapture"]
 fn bench_phase2_epsilon_sweep() {
-    println!("\n── R-97: is phase 2 starved by its cost cap, or failing to search? ──\n");
     println!(
-        "  {:>9} {:>8} {:>8} {:>8} {:>11}  status",
-        "epsilon", "imp", "ev", "heat", "friction"
+        "
+── R-97: is phase 2 starved by its cost cap, or failing to search? ──"
     );
-    // The heater instance with the most switching cost to remove.
-    for epsilon in [0.17, 0.5, 1.0, 5.0] {
-        let now = fixed_now();
-        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
-        profile.planner.phase2_epsilon_eur = epsilon;
-        let mut sim = make_snap_from_profile(&profile);
-        set_heater_power(&mut sim, 6.0);
-        let tariffs = make_tariffs(0.25, 0.08, 300.0);
-        let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
-        let t_p1 = profile.planner.solver_timeout_s as f64;
+    println!(
+        "   (ven-2 runs mip_gap 0.06 / epsilon 1.00 in production; the earlier bench
+             used 0.02 / 0.17, where phase 1 times out and phase 2 inherits a poor
+             incumbent and c_star. Both gaps are swept so that difference is visible.)
+"
+    );
+    println!(
+        "  {:>8} {:>9} {:>9} {:>10} {:>9} {:>8} {:>8} {:>8} {:>11}",
+        "mip_gap", "epsilon", "p1 s", "p1 status", "p2 s", "imp", "ev", "heat", "friction"
+    );
+    for mip_gap in [0.02, 0.06] {
+        for epsilon in [0.17, 0.5, 1.0, 5.0] {
+            let now = fixed_now();
+            let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+            profile.planner.phase2_epsilon_eur = epsilon;
+            profile.planner.mip_gap_target = mip_gap;
+            let mut sim = make_snap_from_profile(&profile);
+            set_heater_power(&mut sim, 6.0);
+            let tariffs = make_diurnal_tariffs(50);
+            let cap = no_capacity();
+            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let p2w = build_phase2_weights(&inputs, &profile.planner);
 
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, t_p1).expect("phase 1 feasible");
-        // Deliberately a generous phase-2 budget here: this asks whether an
-        // improvement EXISTS within the cap, not how fast it is found.
-        let (p2, friction) = match solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            epsilon,
-            &p1,
-            &ctxs,
-            60.0,
-        ) {
-            Ok(v) => v,
-            Err(_) => {
-                println!(
-                    "  {epsilon:>9.2} {:>8} {:>8} {:>8} {:>11}  Err",
-                    "-", "-", "-", "-"
-                );
-                continue;
+            let t = Instant::now();
+            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+            let p1_s = t.elapsed().as_secs_f64();
+
+            // Deliberately a full 60 s: this asks whether an improvement EXISTS
+            // within the cap, not how fast it is found.
+            let t = Instant::now();
+            let r = solve_phase2(
+                &inputs,
+                &p1w,
+                &p2w,
+                p1.objective_eur,
+                epsilon,
+                &p1,
+                &ctxs,
+                60.0,
+            );
+            let p2_s = t.elapsed().as_secs_f64();
+            match r {
+                Ok((p2, friction)) => {
+                    let c = |a: &[f64], b: &[f64]| {
+                        a.iter()
+                            .zip(b.iter())
+                            .filter(|(x, y)| (*x - *y).abs() > 1e-6)
+                            .count()
+                    };
+                    println!(
+                        "  {mip_gap:>8.2} {epsilon:>9.2} {p1_s:>9.2} {:>10?} {p2_s:>9.2} {:>8} {:>8} {:>8} {friction:>11.4}",
+                        p1.status,
+                        c(&p1.p_imp_kw, &p2.p_imp_kw),
+                        c(&p1.p_ev_kw, &p2.p_ev_kw),
+                        c(&p1.y_heat, &p2.y_heat),
+                    );
+                }
+                Err(_) => println!(
+                    "  {mip_gap:>8.2} {epsilon:>9.2} {p1_s:>9.2} {:>10?} {p2_s:>9.2}   phase 2 Err",
+                    p1.status
+                ),
             }
-        };
-        let count = |a: &[f64], b: &[f64]| {
-            a.iter()
-                .zip(b.iter())
-                .filter(|(x, y)| (*x - *y).abs() > 1e-6)
-                .count()
-        };
-        println!(
-            "  {epsilon:>9.2} {:>8} {:>8} {:>8} {friction:>11.4}  {:?}",
-            count(&p1.p_imp_kw, &p2.p_imp_kw),
-            count(&p1.p_ev_kw, &p2.p_ev_kw),
-            count(&p1.y_heat, &p2.y_heat),
-            p2.status
-        );
+        }
     }
-    println!("\n  (slot counts out of 288; phase 2 given a full 60 s at every epsilon)\n");
+    println!(
+        "
+  Starved -> heat/imp counts rise as epsilon loosens. Failing -> they stay 0
+           however loose the cap gets. Slot counts are out of 288.
+"
+    );
 }
 
 /// R-97 cause analysis, long planning time: how does phase 1 scale with horizon?
