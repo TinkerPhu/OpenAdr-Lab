@@ -572,6 +572,56 @@ and re-running `bench_phase2_changes_across_instances` distinguishes the two. If
 binding constraint then phase 2 is not broken, it is starved, and the friction it is meant to remove
 is simply unaffordable under the current cap.
 
+**Root cause of phase 1's time: horizon DURATION, not model size (2026-09-30).** Four controls,
+all on the heater+EV site, phase 1 only, `bench_phase1_vs_horizon` /
+`bench_phase1_flat_vs_priced_far_horizon` / `bench_phase1_count_vs_duration`:
+
+| grid | slots | hours | phase 1 | status |
+|---|---|---|---|---|
+| 96 x 300 s | 96 | 8 | 0.39 s | GapLimit |
+| **288 x 300 s** | **288** | **24** | **2.14 s** | GapLimit |
+| **192 x 900 s** | **192** | **48** | **23.15 s** | GapLimit |
+| 96x300 + 96x600 + 96x900 (**production**) | 288 | 48 | **60.03 s** | **TimeLimit** |
+
+288 slots solve in 2 s over 24 h; 192 slots take 23 s over 48 h. **The cost scales with the span of
+time modelled, not the number of integer decisions.** Production sits at 48 h and times out.
+
+Three mechanisms were proposed and refuted along the way, each by its own control — worth recording
+so they are not re-proposed:
+- *EV comfort-band count* — merging equal-bid bands changed nothing (6406 -> 6752 ms).
+- *Away-slot variables* — tightening them was inside cross-process variance, and the phase split
+  later showed phase 1 spends 40 ms on the EV regardless.
+- *Flat far-horizon pricing* (the GB-42 interaction) — 288 slots time out at 60 s whether the far
+  half is flat-held or fully priced (60.03 s both ways). Pricing does improve plan *quality*
+  (-5.08 -> -7.04 EUR) but not solve time.
+
+Unverified hypothesis for *why* duration dominates: the tank cycles roughly every 100 min, so 48 h
+holds about twice as many near-interchangeable thermostat cycles to coordinate as 24 h, and
+interchangeable patterns are what stop branch-and-bound pruning. Not tested.
+
+**It is waste, not harm — an earlier claim here is retracted.** `bench_does_the_far_horizon_harm_execution`
+compares the part of the plan that actually runs before the next cycle replaces it:
+
+| horizon | phase 1 | first-8 h cost | EV kWh (8 h) | heater switches (8 h) |
+|---|---|---|---|---|
+| 24 h | 2.05 s | 1.4994 EUR | 22.00 | 28 |
+| 48 h (production) | 60.03 s | 1.4875 EUR | 22.00 | 28 |
+
+Identical EV energy and switch count, and the 48 h plan's executed cost is marginally *lower*. So
+the long horizon costs ~58 s per cycle and changes nothing the VEN carries out.
+
+An interim claim that the 48 h horizon produced *worse* plans was wrong, and the reasoning behind it
+was invalid: it argued a 48 h optimum could replicate a 24 h plan and then idle, making -7.04 vs
+-9.98 EUR proof of suboptimality. The second day carries its own unavoidable base load and tank
+losses, so the two objectives span different periods and cannot be compared that way.
+
+**Candidate fix, not yet validated:** `plan_horizon_h` 48 -> 24 would buy ~28x on phase 1 for no
+measured change in executed behaviour — the first change that addresses the fleet's actual timeout
+rather than a neighbouring cost. Before proposing it as a default: repeat the executed-window
+comparison across all ten `HEATER_VARIANTS` (one instance is not a result), and establish what the
+far horizon is currently relied on for — EV deadlines beyond 24 h, VTN capacity obligations, and the
+far-horizon zone's documented role in `VEN_ARCHITECTURE.md`.
+
 **Still missing, and the reason this took a wrong turn first:** `plan_history` records
 `solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
 an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,

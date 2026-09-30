@@ -24,7 +24,7 @@ const WINDOWS = [
 ];
 
 export function FleetPage() {
-  const [windowIndex, setWindowIndex] = useState(1);
+  const [windowIndex, setWindowIndex] = useState(3);
   const chosen = WINDOWS[windowIndex];
 
   const live = useFleetPower();
