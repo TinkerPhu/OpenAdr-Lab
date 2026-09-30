@@ -606,6 +606,80 @@ budget, and production hosts run 85-89 % busy, so 5 s there buys less solver wor
 idle laptop and would intermittently land in the found-nothing regime. 15 s keeps the plateau with
 2-3x margin, still far below the 60 s it replaced (ven-2 total was 64 s before any of this).
 
+**ROOT CAUSE of ineffective smoothing: 9 of 11 heater VENs run an epsilon below the threshold at
+which phase 2 can do anything (2026-09-30).** Found by the new `planner: phase timings` log, within
+minutes of deploying it.
+
+Live ven-2 vs ven-3, same host, same code:
+
+| | ven-2 | ven-3 |
+|---|---|---|
+| phase 1 | **227-309 ms** | **11 131-45 566 ms** |
+| phase 2 | 13-15 s, sometimes GapLimit | ~15 s, always TimeLimit |
+| `phase2_epsilon_eur` | **1.00** | **0.17** |
+| friction | ~1.33 | 4.30-5.60 |
+
+Auditing every profile: `default_phase2_epsilon()` is **0.02**, and the sweep above shows epsilon
+0.17 already yields **zero** heater slot changes at gap 0.06. Only **ven-2** sets a working value
+(1.00); ven-3 sets 0.17; every other heater VEN — ven-5, ven-10, ven-12, ven-14, ven-15, ven-17,
+ven-18, ven-20 — runs the 0.02 default. **They get no smoothing at all, and now pay a 15 s phase 2
+for it.**
+
+There is a mechanical floor behind this, not just a tuning preference: removing a heater switch
+requires moving energy in time, which costs something. If epsilon is below that cost, no improving
+move is feasible and phase 2 provably finds nothing however long it runs. ven-2's own profile
+comment states the scale — effective switching cost `3.0 x 10/60 = 0.50 EUR/switch`, epsilon set to
+2x that. The 0.02 default is **25x below a single switch**.
+
+**Validation gap:** `validate.rs` already rejects an epsilon that is too *large* relative to
+switching cost, but has no lower bound — nothing warns that phase 2 has been configured into
+uselessness. A check that epsilon is at least the effective cost of one switch (when a heater is
+present) would have caught this on every one of those nine profiles. Making it a hard error would
+stop nine VENs from booting, so it should warn, or ship together with the profile fix.
+
+**Remedies, for a decision rather than an unattended change:**
+1. Raise `phase2_epsilon_eur` to ~2x effective switching cost on heater VENs (ven-2's 1.00 is the
+   worked example) — phase 2 then halves switching, 58 -> 32 over the horizon.
+2. Or set `phase2_epsilon_eur: 0.0` on them, which disables phase 2 outright and reclaims the 15 s.
+   Honest, and strictly better than paying for a pass that cannot act.
+Doing neither is the only option with no argument for it.
+
+**Also corrects a claim made earlier today:** "phase 1 is negligible in production (~0.25 s)" was
+drawn from ven-2 alone and is **wrong for ven-3**, whose phase 1 runs 11-46 s. Phase-1 cost is
+strongly VEN-dependent, so parking phase-1 optimisation fleet-wide was premature — it is negligible
+on ven-2 and dominant on ven-3.
+
+**Phase 2's result at a fixed budget is NOT reproducible — every budget comparison here is
+suspect (2026-09-30).** Two runs of `bench_what_is_in_phase2_friction` / `bench_phase2_budget_with_real_prices`
+on the same instance, same code, same 60 s budget returned friction **2.0805** and **3.4555**. A
+time-limited search explores however many nodes the host grants in that window, so its incumbent
+depends on machine load. GB-40's finding that "HiGHS is deterministic here" applies to solves that
+*finish*; it does not extend to time-limited ones.
+
+Consequences for everything measured on this axis:
+
+- The 5/10/20 s "plateau" and the better basin "past 20 s" may both be single-run artefacts. In the
+  second run **5 s and 60 s were identical** (friction 3.4555, 32 switches), which argues 5 s is
+  sufficient.
+- `phase2_solver_timeout_s: 15` remains defensible as **load margin** — phase 2 achieves nothing
+  below ~5 s, and a wall-clock budget pinned at that threshold on an 85-89 %-busy host would
+  intermittently deliver no smoothing. The separate claim that a longer budget *captures more value*
+  does not survive.
+- Any future budget or epsilon decision needs repeated runs, not one sweep. This is the same
+  one-sample trap that produced the retracted regression earlier in this file, in a new place.
+
+**What is robust across both runs:** phase 2 halves heater switching, 58 -> 32 over the horizon.
+Its value is real; only its budget-sensitivity was noise.
+
+**A refuted hypothesis, recorded so it is not re-proposed.** `PV_USE_TIEBREAK_EUR_PER_KWH` (0.005
+EUR/kWh) is documented as a bias "small enough that any real constraint still dominates" — which is
+calibrated against phase 1's objective (tens of EUR of energy cost), while phase 2's objective is
+friction-only (a few EUR). The concern was that the same constant becomes first-order in phase 2 and
+that `friction_eur` is really a switching/PV blend. **It is not:** PV utilisation is identical
+(91.87 kWh) across phase 1, the 5 s and the 60 s solutions — it is saturated, nothing is traded —
+and the term is worth only -0.4594 EUR, not the ~2 EUR estimated from assuming continuous 6 kW
+output. The estimate, not the constant, was wrong.
+
 **Rule for any future phase-2 measurement: use a varying tariff.** A flat fixture makes phase 2 look
 inert and will reproduce this wrong conclusion.
 
