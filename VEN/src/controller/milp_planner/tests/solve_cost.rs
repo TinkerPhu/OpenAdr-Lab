@@ -1518,3 +1518,96 @@ fn bench_phase2_budget_executed_window() {
 "
     );
 }
+
+/// R-97: what is actually inside phase 2's "friction"?
+///
+/// `PV_USE_TIEBREAK_EUR_PER_KWH` is 0.005 EUR/kWh, documented as a bias "small
+/// enough that any real constraint still dominates". That was calibrated against
+/// **phase 1's** objective, which carries tens of euros of energy cost. Phase 2's
+/// objective is friction-only — a few euros — so over 288 slots with a 6 kW array
+/// the same term accumulates to roughly 2 EUR, the same order as the friction it is
+/// mixed into. If so, phase 2 is not minimising switching; it is trading switching
+/// against PV utilisation, and `friction_eur` is not a switching metric.
+///
+/// That would also explain the otherwise contradictory result that the 60 s solution
+/// has MORE heater switches than the 5 s one (15 vs 11 over 8 h) yet reports LOWER
+/// friction (2.08 vs 3.46).
+///
+///   wsl cargo test -p ven-app --release bench_what_is_in_phase2_friction -- --ignored --nocapture
+#[test]
+#[ignore = "R-97: 2 heater-sized phase-2 solves, run with --ignored --nocapture"]
+fn bench_what_is_in_phase2_friction() {
+    let now = fixed_now();
+    let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+    profile.planner.mip_gap_target = 0.06;
+    profile.planner.phase2_epsilon_eur = 1.00;
+    let switch_penalty = 0.50_f64; // heater switching_penalty_eur in bench_profile
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_diurnal_tariffs(50);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+
+    let decompose = |sol: &SolveOutput| -> (usize, f64, f64, f64) {
+        let switches = (1..inputs.n)
+            .filter(|&t| (sol.y_heat[t] - sol.y_heat[t - 1]).abs() > 1e-6)
+            .count();
+        let pv_kwh: f64 = sol
+            .p_pv_used_kw
+            .iter()
+            .zip(inputs.dt_h.iter())
+            .map(|(p, d)| p * d)
+            .sum();
+        // The same coefficient the objective uses, with its sign: a reward.
+        let pv_tiebreak =
+            -crate::controller::milp_interactions::PV_USE_TIEBREAK_EUR_PER_KWH * pv_kwh;
+        (
+            switches,
+            switches as f64 * switch_penalty,
+            pv_kwh,
+            pv_tiebreak,
+        )
+    };
+
+    println!("\n── R-97: decomposing phase 2's objective ──");
+    println!(
+        "   (PV_USE_TIEBREAK_EUR_PER_KWH = {}, heater switching_penalty = {switch_penalty})\n",
+        crate::controller::milp_interactions::PV_USE_TIEBREAK_EUR_PER_KWH
+    );
+    println!(
+        "  {:>16} {:>11} {:>9} {:>13} {:>11} {:>13}",
+        "solution", "friction", "switches", "switch cost", "PV kWh", "PV tiebreak"
+    );
+    let (s, sc, pv, tb) = decompose(&p1);
+    println!(
+        "  {:>16} {:>11} {s:>9} {sc:>13.4} {pv:>11.2} {tb:>13.4}",
+        "phase 1", "-"
+    );
+    for budget in [5.0, 60.0] {
+        let (p2, friction) = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            1.00,
+            &p1,
+            &ctxs,
+            budget,
+        )
+        .expect("phase 2 feasible");
+        let (s, sc, pv, tb) = decompose(&p2);
+        println!(
+            "  {:>15}s {friction:>11.4} {s:>9} {sc:>13.4} {pv:>11.2} {tb:>13.4}",
+            budget as i64
+        );
+    }
+    println!(
+        "\n  If the PV tiebreak column moves by the same order as the friction column,\n  \
+         then `friction_eur` is not a switching metric and phase 2 is optimising a\n  \
+         blend its own name does not describe.\n"
+    );
+}
