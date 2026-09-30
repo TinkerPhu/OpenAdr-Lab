@@ -122,7 +122,7 @@ impl Default for PlannerParams {
             plan_adoption_decay_s: 1500.0,
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
-            phase2_solver_timeout_s: 5,
+            phase2_solver_timeout_s: 15,
             mip_gap_target: 0.02,
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,
