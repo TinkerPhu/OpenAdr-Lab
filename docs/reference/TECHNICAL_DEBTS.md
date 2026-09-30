@@ -572,6 +572,38 @@ and re-running `bench_phase2_changes_across_instances` distinguishes the two. If
 binding constraint then phase 2 is not broken, it is starved, and the friction it is meant to remove
 is simply unaffordable under the current cap.
 
+**Production verification of the phase-2 budget, and two side effects (2026-09-30).** Measured from
+`plan_history` before (29th 13:00-16:00Z) and after (30th 05:45Z+) the deploy:
+
+| VEN | before median | after median | TIME_LIMIT before -> after |
+|---|---|---|---|
+| ven-2 (heater) | 64.0 s | **10.3 s** | 57 % -> 100 % |
+| ven-3 (heater) | 72.2 s | **8.5 s** | 90 % -> 100 % |
+| ven-1 (no heater) | 4.2 s | 4.6 s | 0 % -> **27 %** |
+
+A 6-8x win on exactly the VENs that were hurting, with tight distributions (ven-2 min 9.8 s,
+p90 10.4 s, n=11). It also corrects the model this work was reasoning from: live ven-2's phase 1 is
+only ~5 s, so **phase 2 was consuming nearly all of its 64 s**, and the benchmark instance
+(phase 1 at 57 s) is considerably harder than any real fleet VEN.
+
+Two side effects, neither predicted:
+
+1. **`TIME_LIMIT` is now the normal state for a heater VEN, which breaks it as a health signal.**
+   Phase 2 always hits its 5 s cap, so `solve_status` reports TIME_LIMIT on ~100 % of cycles by
+   design. GB-38 and GB-40 both use the TIME_LIMIT *rate* as the fleet's headline symptom, and that
+   metric is now uninformative: it can no longer distinguish "phase 1 could not solve this site"
+   (a real problem) from "phase 2 stopped at its intended budget" (normal). The status should
+   carry the two phases separately — e.g. record phase-1 and phase-2 status independently on
+   `Plan`, rather than one field that collapses them. Until then, treat TIME_LIMIT on a heater VEN
+   as uninformative rather than as GB-40 evidence.
+2. **Non-heater VENs lose some smoothing in their tail.** ven-1 went from 0 % to 27 % TIME_LIMIT:
+   phase 2 used to converge there within 60 s and now the slowest quarter of its cycles are cut at
+   5 s. The cost impact is bounded by `phase2_epsilon_eur` by construction, so this is lost
+   friction smoothing rather than lost cost-optimality — but it is a real behaviour change the
+   bench did not predict (an EV-only bench site finishes phase 2 in 0.08-0.83 s; production ven-1
+   evidently carries more). If that smoothing turns out to matter, 10-15 s would still cut the
+   heater VENs by ~4x while leaving non-heater sites room to converge.
+
 **Root cause of phase 1's time: horizon DURATION, not model size (2026-09-30).** Four controls,
 all on the heater+EV site, phase 1 only, `bench_phase1_vs_horizon` /
 `bench_phase1_flat_vs_priced_far_horizon` / `bench_phase1_count_vs_duration`:
