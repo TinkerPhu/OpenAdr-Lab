@@ -1077,7 +1077,7 @@ fn bench_phase1_vs_horizon() {
     ] {
         let now = fixed_now();
         let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
-        let n: usize = zones.iter().map(|z| z.slots as usize).sum();
+        let n: usize = zones.iter().map(|z| z.slots).sum();
         profile.planner.plan_zones = zones;
         let mut sim = make_snap_from_profile(&profile);
         set_heater_power(&mut sim, 6.0);
@@ -1339,5 +1339,182 @@ fn bench_does_the_far_horizon_harm_execution() {
         "\n  first-8h EUR is the cost of the part that actually executes, priced identically\n  \
          in both rows. If the 48 h row is worse there, the long horizon is not merely\n  \
          expensive to solve — it degrades the decisions the VEN carries out.\n"
+    );
+}
+
+/// R-97 URGENT: with realistic prices, how fast does phase 2 earn its friction?
+///
+/// The original timeout sweep used a FLAT tariff, where phase 1 has no reason to
+/// fragment the schedule and phase 2 consequently has nothing to clean up — which
+/// is why it looked inert at every budget. With diurnal prices at ven-2's own
+/// settings (mip_gap 0.06, epsilon 1.00) phase 2 moves 68 of 288 heater slots and
+/// halves friction, taking ~59 s to do it. The deployed 5 s cap may therefore be
+/// cutting off real work.
+///
+/// This re-runs the budget sweep on the production-shaped configuration. If
+/// friction at 5 s is no better than doing nothing, the cap is a regression.
+///
+///   wsl cargo test -p ven-app --release bench_phase2_budget_with_real_prices -- --ignored --nocapture
+#[test]
+#[ignore = "R-97 urgent: 6 heater-sized solves, run with --ignored --nocapture"]
+fn bench_phase2_budget_with_real_prices() {
+    let now = fixed_now();
+    let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+    profile.planner.mip_gap_target = 0.06; // ven-2 production
+    profile.planner.phase2_epsilon_eur = 1.00; // ven-2 production
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_diurnal_tariffs(50);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+
+    println!(
+        "
+── R-97: phase 2 vs its budget, at ven-2's settings with real prices ──"
+    );
+    println!(
+        "   (mip_gap 0.06, epsilon 1.00, diurnal tariff; phase 1 {:?})
+",
+        p1.status
+    );
+    println!(
+        "  {:>10} {:>9} {:>8} {:>8} {:>11}  status",
+        "p2 budget", "p2 time", "imp", "heat", "friction"
+    );
+    for budget in [1.0, 2.0, 5.0, 10.0, 20.0, 60.0] {
+        let t = Instant::now();
+        let r = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            1.00,
+            &p1,
+            &ctxs,
+            budget,
+        );
+        let secs = t.elapsed().as_secs_f64();
+        match r {
+            Ok((p2, friction)) => {
+                let c = |a: &[f64], b: &[f64]| {
+                    a.iter()
+                        .zip(b.iter())
+                        .filter(|(x, y)| (*x - *y).abs() > 1e-6)
+                        .count()
+                };
+                println!(
+                    "  {budget:>9.0}s {secs:>8.2}s {:>8} {:>8} {friction:>11.4}  {:?}",
+                    c(&p1.p_imp_kw, &p2.p_imp_kw),
+                    c(&p1.y_heat, &p2.y_heat),
+                    p2.status
+                );
+            }
+            Err(_) => {
+                println!("  {budget:>9.0}s {secs:>8.2}s   phase 2 Err (falls back to phase 1)")
+            }
+        }
+    }
+    println!(
+        "
+  Lower friction is better. If 5 s sits at the do-nothing value while 60 s
+           halves it, the deployed phase2_solver_timeout_s default is a regression.
+"
+    );
+}
+
+/// R-97: does the phase-2 budget change what actually gets EXECUTED?
+///
+/// Horizon-wide friction overstates the real cost of a short budget: the plan is
+/// replanned every `replan_interval_s` (300 s), so only its first slots ever run
+/// and far-horizon switches never happen. 5 s captures ~46 % of the horizon-wide
+/// friction reduction that 60 s achieves — this asks how much of that difference
+/// lands in the part of the plan the relay actually follows.
+///
+///   wsl cargo test -p ven-app --release bench_phase2_budget_executed_window -- --ignored --nocapture
+#[test]
+#[ignore = "R-97: 2 heater-sized phase-2 solves, run with --ignored --nocapture"]
+fn bench_phase2_budget_executed_window() {
+    let now = fixed_now();
+    let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+    profile.planner.mip_gap_target = 0.06;
+    profile.planner.phase2_epsilon_eur = 1.00;
+    let mut sim = make_snap_from_profile(&profile);
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_diurnal_tariffs(50);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+
+    // Switches inside the first `hours` of a solution.
+    let switches_within = |y: &[f64], hours: f64| -> usize {
+        let mut n = 0;
+        let mut elapsed = 0.0;
+        for t in 1..inputs.n {
+            if elapsed >= hours {
+                break;
+            }
+            if (y[t] - y[t - 1]).abs() > 1e-6 {
+                n += 1;
+            }
+            elapsed += inputs.dt_h[t];
+        }
+        n
+    };
+
+    println!(
+        "
+── R-97: phase-2 budget vs the window that actually executes ──"
+    );
+    println!(
+        "   (ven-2 settings; replan every 300 s, so the first slots are what run)
+"
+    );
+    println!(
+        "  {:>12} {:>11} {:>12} {:>12} {:>12} {:>12}",
+        "p2 budget", "friction", "switches 25m", "switches 1h", "switches 8h", "switches 48h"
+    );
+    println!(
+        "  {:>12} {:>11.4} {:>12} {:>12} {:>12} {:>12}",
+        "phase 1 only",
+        f64::NAN,
+        switches_within(&p1.y_heat, 25.0 / 60.0),
+        switches_within(&p1.y_heat, 1.0),
+        switches_within(&p1.y_heat, 8.0),
+        switches_within(&p1.y_heat, 48.0),
+    );
+    for budget in [5.0, 60.0] {
+        let (p2, friction) = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            1.00,
+            &p1,
+            &ctxs,
+            budget,
+        )
+        .expect("phase 2 feasible");
+        println!(
+            "  {:>11.0}s {friction:>11.4} {:>12} {:>12} {:>12} {:>12}",
+            budget,
+            switches_within(&p2.y_heat, 25.0 / 60.0),
+            switches_within(&p2.y_heat, 1.0),
+            switches_within(&p2.y_heat, 8.0),
+            switches_within(&p2.y_heat, 48.0),
+        );
+    }
+    println!(
+        "
+  25m is roughly five replan cycles — beyond that the plan is almost certainly
+           replaced before it runs. If 5 s and 60 s agree there, the budget costs nothing
+           the relay ever feels.
+"
     );
 }
