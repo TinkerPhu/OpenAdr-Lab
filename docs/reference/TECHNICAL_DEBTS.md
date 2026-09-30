@@ -604,6 +604,39 @@ Two side effects, neither predicted:
    evidently carries more). If that smoothing turns out to matter, 10-15 s would still cut the
    heater VENs by ~4x while leaving non-heater sites room to converge.
 
+**Phase-1 optimisation is parked; the 48 h horizon stays (2026-09-30).** Decided with the user.
+Two reasons:
+
+- **The 48 h span is a requirement, not an accident.** A receding-horizon controller needs lookahead
+  well past the window it optimises, or end-of-horizon effects distort the near term — battery
+  drained at the boundary, tank left cold, no preparation for the next morning's departure. The
+  profiles say so explicitly (`plan_horizon_h: 48 # 2 solar windows for the 15.5 h-fill tank`). The
+  executed-window comparison below is consistent with keeping it: 24 h and 48 h produce identical
+  near-term behaviour, so the long horizon is not costing anything in decisions.
+- **Phase 1 is only ~5 s on a live VEN.** ven-2's pre-deploy total was 64 s, of which phase 2 was
+  ~57 s. The 57 s phase-1 figure that drove this investigation came from the *benchmark* instance
+  (mip_gap 0.02, emergency-full heater), which is harder than any real fleet VEN — ven-2 runs
+  mip_gap 0.06. Phase-1 work would therefore shave seconds off a solve that is no longer the
+  problem.
+
+If a real VEN ever does sit at the benchmark's difficulty, the measured options are recorded above:
+coarsening the far zones keeps the 48 h span and bought 2.6x (192 vs 288 slots at the same span);
+`mip_gap_target` 0.06 -> 0.10 has GB-40's 10-instance cost measurement behind it (+2.05 % mean); and
+relaxing heater integrality in *far zones only* is the strongest untested idea but must be weighed
+against GB-40's Arm 1, where decoupling heater power from the stage integer produced ~25 % cheaper
+unphysical answers — confined to slots that never execute it may be acceptable, but it biases
+lookahead optimistically, which can distort near-term deferral.
+
+**The open item is phase 2's effectiveness, not its cost.** Its cost is now bounded at 5 s. What is
+unexplained is why it changes nothing, and therefore whether even 5 s is worth spending or
+`phase2_epsilon_eur = 0.0` (disable) is the honest setting.
+
+**Methodological flaw found in this work's own bench:** it ran mip_gap 0.02 / epsilon 0.17 while
+ven-2 runs 0.06 / 1.00. At 0.02 the bench's phase 1 *times out*, so its phase 2 inherits a poor
+incumbent and a `c_star` derived from it — not the situation on a live VEN, whose phase 1 finishes.
+Every phase-2 conclusion here was drawn on that unrepresentative configuration and is being re-run
+across both gaps.
+
 **Root cause of phase 1's time: horizon DURATION, not model size (2026-09-30).** Four controls,
 all on the heater+EV site, phase 1 only, `bench_phase1_vs_horizon` /
 `bench_phase1_flat_vs_priced_far_horizon` / `bench_phase1_count_vs_duration`:
