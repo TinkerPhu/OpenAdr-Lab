@@ -414,11 +414,13 @@ comfort-curve wiring (out of scope — no natural "fill" analogue).
 
 **Phase budgets are separate (R-97).** `planner.solver_timeout_s` (default 60 s) bounds phase 1 and
 the marginal-cost dual LP; `planner.phase2_solver_timeout_s` (default 5 s) bounds phase 2 alone.
-Phase 2 is measurably inert on heater sites — over all ten benchmark instances it moves the heater
-stage in zero of 288 slots and at most one EV slot, and its friction result is identical from a 1 s
-budget to a 60 s one — while its cost cap is a hard constraint in its own model, so any incumbent it
-returns already respects `c_star + phase2_epsilon_eur`. Truncating it therefore cannot cost
-cost-optimality, only smoothing, and measurably costs none. Setting `phase2_epsilon_eur = 0.0`
+Phase 2 does real work — with a varying tariff at a realistic `phase2_epsilon_eur` it roughly
+halves heater switching (58 switches over 48 h down to 32) — but its value saturates almost at once
+in the window that executes: 5 s and 60 s budgets give an identical near-term schedule (2 switches
+at 25 min and at 1 h under both), and the extra horizon-wide smoothing a full budget buys sits in
+far slots that the next replan replaces. Its cost cap is also a hard constraint in its own model, so
+any incumbent it returns already respects `c_star + phase2_epsilon_eur` — truncating it can never
+cost cost-optimality, only smoothing, and none of the smoothing that reaches the relay. Setting `phase2_epsilon_eur = 0.0`
 disables phase 2 entirely; a zero *timeout* is rejected at validation, because it would make phase 2
 fail and silently fall back to phase 1.
 

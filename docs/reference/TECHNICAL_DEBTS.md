@@ -528,25 +528,40 @@ heater-VEN solve time by roughly half at a cost bounded by epsilon, without touc
 formulation. That is a measurement worth doing (and R-27 already asks for these solver constants to
 be configurable).
 
-**Phase 2 is inert on heater sites, and now time-boxed (2026-09-30).** Following the phase split
-above, phase 2 was examined on its own terms. Three findings, each measured:
+**CORRECTED: phase 2 is *effective*; the earlier "inert" finding was a test-fixture artefact
+(2026-09-30).** The conclusion below about the 5 s budget stands, but the reasoning that produced it
+was wrong and is replaced here.
 
-1. *Its result does not depend on its budget.* Sweeping phase 2 from 60 s down to 1 s on the
-   heater+EV site gives **byte-identical friction (6.3285 EUR) at every budget**, always
-   TimeLimit (`bench_phase2_timeout_sweep`).
-2. *It returns its warm start unchanged.* Phase 2 is seeded with phase 1's solution, and the
-   solution it returns differs from that seed in **0 of 288 slots** for import, EV power, heater
-   stage and battery power (`bench_does_phase2_change_the_schedule`). This is read from the HiGHS
-   solution, not from the seed. It holds both where both phases time out *and* on an EV-only site
-   where phase 2 reports Optimal in 0.08 s — so it is not merely a timeout artefact.
-3. *It generalises across instances.* Over all ten `HEATER_VARIANTS`
-   (`bench_phase2_changes_across_instances`): the heater stage moves in **zero of 288 slots on
-   every one of the ten**, and the EV moves in a single slot on two of them. Friction 5.03-6.45
-   EUR, TimeLimit on all ten.
+*What was claimed:* that phase 2 returns its warm start unchanged on every instance — 0 of 288 slots
+moved, friction identical from a 1 s to a 60 s budget — and therefore burns half the planner's
+budget for nothing.
 
-So phase 2 spends ~57 s per cycle — half the planner's per-cycle budget — to change at most one EV
-slot, and it never once touches the heater, which is the source of the 5-6 EUR of switching cost it
-exists to minimise.
+*Why it was wrong:* every one of those runs used `make_tariffs(...)`, a **flat** tariff. Flat prices
+give phase 1 no reason to fragment the heater schedule, so there was no chatter for phase 2 to
+remove. The inertness was a property of the fixture, not the planner.
+
+*What phase 2 actually does,* measured with a diurnal tariff at ven-2's own production settings
+(`mip_gap 0.06`, `phase2_epsilon_eur 1.00`, `bench_phase2_epsilon_sweep`): it moves 68 of 288 heater
+slots and 31 import slots, cutting friction from 4.62 to 2.08 EUR. Against phase 1 alone it roughly
+**halves heater switching** — 58 switches over 48 h down to 32, and 28 down to 11 over the first 8 h.
+Phase 2 earns its place.
+
+*The starvation threshold is real, just below production.* At `mip_gap 0.06`: epsilon 0.17 moves
+nothing, epsilon 0.50 moves 59 heater slots, 1.00 moves 68, 5.00 moves 87. ven-2's 1.00 sits
+comfortably above the threshold. A profile left at a tight epsilon would get no smoothing at all.
+
+*Budget vs value* (`bench_phase2_budget_with_real_prices`, same settings): friction 4.6201 at 1-2 s
+(no change), **3.4555 at 5, 10 and 20 s** (an exact plateau — 76 heater slots), 2.0805 at 60 s. So
+there is no useful middle setting: 10 s and 20 s buy nothing over 5 s, and the remaining gain
+appears only somewhere past 20 s.
+
+*Why 5 s is nonetheless right* (`bench_phase2_budget_executed_window`): with `replan_interval_s` at
+300 s only a plan's first slots ever reach the relay, and there 5 s and 60 s are **identical** — 2
+switches at 25 min and 2 at 1 h under both. Over 8 h the 5 s solution has *fewer* switches (11 vs
+15). The horizon-wide friction difference lives in slots that are replaced before they run.
+
+**Rule for any future phase-2 measurement: use a varying tariff.** A flat fixture makes phase 2 look
+inert and will reproduce this wrong conclusion.
 
 **Fix shipped:** `planner.phase2_solver_timeout_s`, separate from `solver_timeout_s`, defaulting to
 **5 s** (validated non-zero; `phase2_epsilon_eur = 0.0` remains the documented way to disable phase

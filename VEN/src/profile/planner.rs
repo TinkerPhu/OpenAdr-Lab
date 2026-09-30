@@ -140,16 +140,20 @@ pub struct PlannerConfig {
     /// HiGHS solver time limit for **phase 2** in seconds, separately from phase 1
     /// because the two phases behave nothing alike (R-97). Default: 5.
     ///
-    /// Phase 2 minimises friction subject to a hard `phase1_cost <= c_star +
-    /// phase2_epsilon_eur` cap, so anything it can change is bounded by that
-    /// epsilon — and measured across all ten `HEATER_VARIANTS` instances
-    /// (`bench_phase2_changes_across_instances`) it moves the heater stage in
-    /// **zero** of 288 slots on **every** instance, and at most one EV slot,
-    /// while burning a full 60 s and returning TimeLimit. Its friction result is
-    /// identical from a 1 s budget to a 60 s one. Giving it 60 s therefore spends
-    /// half the planner's per-cycle budget on no change at all; 5 s leaves ample
-    /// headroom for the sites where it does finish (an EV-only site solves phase 2
-    /// in 0.08-0.83 s and reports Optimal).
+    /// Phase 2 does real work — with a varying tariff at a realistic epsilon it
+    /// roughly halves heater switching (58 switches over 48 h down to 32). But
+    /// its value saturates almost immediately in the window that matters: with
+    /// `replan_interval_s` at 300 s only a plan's first slots ever reach the
+    /// relay, and there a 5 s budget and a 60 s budget are identical (2 switches
+    /// at 25 min and at 1 h under both), while 5/10/20 s form an exact plateau on
+    /// horizon-wide friction. The extra smoothing a full 60 s buys sits in far
+    /// slots that are replaced before they run, so it costs ~55 s per cycle for
+    /// nothing the hardware feels. Measured by `bench_phase2_budget_with_real_prices`
+    /// and `bench_phase2_budget_executed_window`; see R-97.
+    ///
+    /// Any benchmark of this must use a *varying* tariff — a flat one gives phase 1
+    /// no reason to fragment the schedule, which makes phase 2 look inert and once
+    /// produced exactly that wrong conclusion.
     #[serde(default = "super::defaults::default_phase2_solver_timeout_s")]
     pub phase2_solver_timeout_s: u64,
 

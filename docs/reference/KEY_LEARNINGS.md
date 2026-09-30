@@ -2465,3 +2465,29 @@ The fix is a shape, not a patch: keep the requirement at what was asked for, and
 means "what the user asked for", one derived value means "what is feasible", and the gap between
 them is the diagnostic — computed, not carried. A value that has been pre-adjusted for
 feasibility cannot also serve as the reference the adjustment is measured against.
+
+## A flat test fixture can make a working component look dead (2026-09-30)
+
+Phase 2 of the MILP planner was measured as completely inert: across all ten benchmark heater
+instances it returned phase 1's schedule byte-for-byte, 0 of 288 slots changed, with friction
+identical whether it was given 1 second or 60. The conclusion drawn was that it burned half the
+planner's per-cycle budget for nothing.
+
+Every one of those runs used a **flat** tariff. Phase 2's job is to remove switching chatter, and
+chatter is created by phase 1 chasing price differences — with a constant price there is nothing to
+chase, so phase 1 produced a schedule that was already smooth and phase 2 correctly did nothing.
+Re-measured with a diurnal tariff at the fleet's own settings, phase 2 moves 68 of 288 heater slots
+and halves switching over the horizon. The component was working the whole time; the fixture had
+removed the phenomenon it exists to handle.
+
+Two things to take from it. First, when a component measures as having no effect, check that the
+fixture actually exercises the condition it responds to before concluding the component is broken —
+"no effect" and "no input" are indistinguishable from the outside. Second, the flat fixture was
+chosen *because* it was simple and deterministic, which is normally a virtue in a benchmark; here
+that simplicity silently removed the independent variable. A benchmark for a price-driven mechanism
+needs prices that vary, even at the cost of a messier fixture.
+
+The right answer survived anyway, for a different reason than the one given: the short phase-2
+budget is sound because its value saturates in the window that executes, not because phase 2 is
+useless. A correct conclusion reached through a wrong mechanism is still worth re-deriving — the
+next decision built on that mechanism would not have survived.
