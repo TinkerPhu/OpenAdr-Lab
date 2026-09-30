@@ -374,8 +374,19 @@ pub(crate) fn solve_milp_two_phase(
     // elsewhere, so it does not need phase 1's.
     phase2_timeout_s: f64,
 ) -> Result<(SolveOutput, f64, f64, Vec<f64>), Box<dyn std::error::Error>> {
+    // R-97: time and report the phases separately. `Plan.solve_status` carries only
+    // the winning solution's status, which collapses two solves that behave nothing
+    // alike — since phase 2 got its own (short) budget it reports TimeLimit on
+    // essentially every heater cycle by design, making the field useless for
+    // telling "phase 1 could not solve this site" from "phase 2 stopped as
+    // intended". Until that is on `Plan` itself, this line is the only way to see
+    // which half spent the time.
+    let t_p1 = std::time::Instant::now();
     let phase1_sol = solve_phase1(inputs, p1w, asset_contexts, timeout_s)?;
+    let phase1_ms = t_p1.elapsed().as_millis() as u64;
+    let phase1_status = format!("{:?}", phase1_sol.status);
     let c_star = phase1_sol.objective_eur;
+    let t_p2 = std::time::Instant::now();
     let (winning_sol, friction_eur) = if epsilon == 0.0 {
         (phase1_sol, 0.0)
     } else {
@@ -401,6 +412,19 @@ pub(crate) fn solve_milp_two_phase(
             }
         }
     };
+
+    let phase2_ms = t_p2.elapsed().as_millis() as u64;
+    tracing::info!(
+        phase1_ms,
+        phase1_status = %phase1_status,
+        phase2_ms,
+        phase2_status = %format!("{:?}", winning_sol.status),
+        phase2_budget_s = phase2_timeout_s,
+        phase1_budget_s = timeout_s,
+        friction_eur,
+        epsilon,
+        "planner: phase timings"
+    );
 
     let marginal_cost_eur_per_kwh = match super::solver_duals::solve_marginal_costs(
         inputs,
