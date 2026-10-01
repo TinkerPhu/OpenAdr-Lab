@@ -568,3 +568,52 @@ across three repeats while production could not. Production logs remain good for
 uniquely show — did the solve succeed, what status did it reach, is the fleet keeping up — and
 for *within*-VEN before/after on the same host at the same hour, which is what the gap-0.30
 canary measured. They cannot rank two different VENs.
+
+## Battery+EV on the bench: phase 1 is trivial, phase 2 is genuinely expensive (2026-10-01)
+
+`bench_battery_ev_phase2_executed_window`, one solve at a time on a quiet machine — the
+instrument the retraction above says to use. ven-19's battery (16 kWh / 7 kW) plus an 11 kW EV,
+no heater, 288 slots, gap 0.06, epsilon 0.02 (the fleet default). Phase 2 budget 15 s.
+
+| round-trip eff | phase 1 | phase 2 | phase 2 status | EV 25 min (p1 → p2) | battery net 25 min (p1 → p2) | battery net 48 h (p1 → p2) |
+|---|---|---|---|---|---|---|
+| 0.92 (fleet) | **0.28 s** | **13.4 s** | TimeLimit | 5.500 → 5.500 | −2.369 → −2.172 | 1.486 → 1.927 |
+| 0.93 (ven-19) | **0.20 s** | **11.5 s** | GapLimit | 5.500 → 5.500 | −2.519 → −2.317 | 1.336 → 1.781 |
+| 0.96 | **0.19 s** | **10.7 s** | GapLimit | 5.500 → 5.500 | −2.492 → −2.436 | 1.328 → 1.326 |
+
+**Phase 1 on this class is 0.19-0.28 s, not 0.8-12.6 s.** The production readings were inflated
+3-45x by contention. This is the retraction's own claim measured directly, and it is worse than
+the retraction assumed: for battery+EV, production phase-1 time is almost entirely queueing.
+
+**ven-19's efficiency hypothesis is refuted.** Phase 1 does not climb with `round_trip_efficiency`
+— it falls slightly (0.28 → 0.20 → 0.19 s) — so the arbitrage-break-even/weak-bound story is
+wrong for phase 1. With capacity/power already refuted, **ven-19 has no model-side explanation
+left**, which is consistent with its 12.6 s having been contention and nothing else.
+
+**But the phase-2 claim survives, and this is the useful result.** 10.7-13.4 s on a machine with
+nothing competing is not queueing — phase 2 on battery+EV really does consume most of its 15 s
+budget, and at the fleet's actual 0.92 it hits the TimeLimit outright. Efficiency does matter
+here, just in the other phase and mildly: 0.92 is the hardest of the three (13.4 s, TimeLimit)
+and higher efficiency is easier (10.7 s, GapLimit). A ~25 % effect, not a 10x one.
+
+**What the 11-13 s buys at the relay.** EV dispatch in the first 25 minutes is **identical** in
+both phases at every efficiency (5.500 kWh, to four digits). Battery net energy moves by
+0.06-0.20 kWh against ~2.4 kWh dispatched — a 2-8 % change in the executed window. Real, but
+small, and nothing at all on the EV. The larger divergence is again out in the horizon
+(1.486 → 1.927 kWh over 48 h at 0.92), matching the heater-class finding that phase 2's work
+lands in hours 4-48.
+
+`friction_eur` is **negative** (−0.345) on all six solves, reconfirming that phase 2's friction
+is not a switching metric — it carries the PV-use tiebreak reward (see "What is actually inside
+phase 2's friction?" above) and can go below zero.
+
+### Where this leaves the fleet's solver cost
+
+Phase 2 is now the only measured, uncontended cost worth attacking: ~11-13 s per cycle on the
+four battery+EV VENs, for a 2-8 % change in executed battery energy and none in EV dispatch.
+Phase 1 on that class is free. The outstanding decision is therefore the one already recorded
+and deliberately not taken — whether to cut `phase2_solver_timeout_s` (or epsilon) for
+battery+EV — and it now has a measured price tag on both sides rather than only on the cost side.
+Note this is a *different* argument from the retracted "phase 2 fails only on battery+EV": the
+heater VENs hit the phase-2 TimeLimit too, and whether that is contention or real is still
+unmeasured on the bench for that class.
