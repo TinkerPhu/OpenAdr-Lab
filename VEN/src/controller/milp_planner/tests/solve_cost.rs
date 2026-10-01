@@ -2761,3 +2761,222 @@ fn bench_phase2_smoothing_reaches_relay() {
          never reaches the relay and the 15 s buys nothing the hardware feels.\n"
     );
 }
+
+/// R-97: can a looser gap get heater+battery phase 1 off the ceiling?
+///
+/// Post-warm-start-fix production timings show ven-5's phase 1 at 36-60 s, hitting
+/// the 60 s limit on most cycles, while phase 2 is bounded at 15 s. So phase 1 on
+/// the heater+battery class is now the dominant cost in the fleet, and the bench
+/// agrees (57.8 s against 3.83 s for heater-only).
+///
+/// GB-40 measured the `mip_gap_target` lever across ten instances — 10 % puts phase
+/// 1 on GapLimit for nine of them at +2.05 % mean objective cost — but never on this
+/// asset mix, which did not exist as a bench case until now. These three VENs
+/// (ven-5, ven-14, ven-17) already run 0.06.
+///
+/// The objective column is the price: a looser gap accepts a worse plan. Reported so
+/// the trade is visible rather than assumed, and the gap only changes the optimality
+/// tolerance — not asset behaviour.
+///
+///   bash scripts/run_planner_experiment.sh bench_heater_battery_gap_sweep
+#[test]
+#[ignore = "R-97: 5 heater+battery phase-1 solves, run with --ignored --nocapture"]
+fn bench_heater_battery_gap_sweep() {
+    use crate::entities::asset_params::BatteryParams;
+    println!("\n── R-97: heater+battery phase 1 vs mip_gap_target ──");
+    println!("   (ven-5 shape: 200 L/15 K tank + 11 kWh battery, 288 slots, 48 h)\n");
+    println!(
+        "  {:>9} {:>11} {:>15} {:>13}  status",
+        "mip_gap", "phase1 s", "objective EUR", "vs 0.06"
+    );
+    let mut baseline: Option<f64> = None;
+    for gap in [0.06, 0.10, 0.15, 0.20, 0.30] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = gap;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = 47.82;
+            }
+        }
+        profile
+            .assets
+            .push(crate::entities::asset_params::AssetParams::Battery(
+                BatteryParams {
+                    id: "battery".into(),
+                    capacity_kwh: 11.0,
+                    max_charge_kw: 5.5,
+                    max_discharge_kw: 5.5,
+                    initial_soc: 0.50,
+                    round_trip_efficiency: 0.92,
+                    min_soc: 0.10,
+                    c_terminal_eur_kwh: None,
+                },
+            ));
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, 47.82);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let secs = t.elapsed().as_secs_f64();
+        if baseline.is_none() {
+            baseline = Some(p1.objective_eur);
+        }
+        // Objective is a cost being minimised, so a higher value is a worse plan.
+        let delta = baseline
+            .map(|b| {
+                if b.abs() > 1e-9 {
+                    format!("{:+.2}%", 100.0 * (p1.objective_eur - b) / b.abs())
+                } else {
+                    "n/a".to_string()
+                }
+            })
+            .unwrap_or_default();
+        println!(
+            "  {gap:>9.2} {secs:>11.2} {:>15.4} {delta:>13}  {:?}",
+            p1.objective_eur, p1.status
+        );
+        emit_result(&format!(
+            r#"{{"params":{{"class":"heater + battery","mip_gap":{gap},"slots":{},"volume_l":200,"band_k":15}},"results":{{"phase1_s":{secs:.3},"objective_eur":{:.4},"status":"{:?}"}}}}"#,
+            inputs.n, p1.objective_eur, p1.status
+        ));
+    }
+    println!(
+        "\n  A gap that takes phase 1 off TimeLimit without a large objective penalty is\n  \
+         a real saving for ven-5/ven-14/ven-17, whose phase 1 is 36-60 s in production.\n"
+    );
+}
+
+/// R-97: does a looser gap cost anything in the EXECUTED window?
+///
+/// `bench_heater_battery_gap_sweep` shows gap 0.30 taking heater+battery phase 1 from
+/// 58 s (TimeLimit) to 12.5 s (GapLimit) — a 4.6x saving for ven-5/ven-14/ven-17 —
+/// at a 6.37 % worse horizon-wide objective.
+///
+/// That objective covers 48 h, but a plan is replaced every 300 s, so only its first
+/// slots are ever executed. Every comparable question in this investigation has come
+/// out the same way: the horizon-wide number overstated the executed impact (the 48 h
+/// horizon looked harmful and was neutral; phase 2's smoothing looked valuable and
+/// never reached the relay). So the horizon objective is the wrong yardstick here too.
+///
+/// This prices the first 25 min / 1 h / 8 h of each plan under identical tariffs.
+///
+///   bash scripts/run_planner_experiment.sh bench_gap_executed_cost
+#[test]
+#[ignore = "R-97: 2 heater+battery phase-1 solves, run with --ignored --nocapture"]
+fn bench_gap_executed_cost() {
+    use crate::entities::asset_params::BatteryParams;
+    println!("\n── R-97: executed-window cost of a looser gap (heater+battery) ──");
+    println!("   (replan every 300 s, so the first slots are what actually run)\n");
+    println!(
+        "  {:>16} {:>7} {:>9} {:>11} {:>11} {:>11} {:>13}  status",
+        "instance", "mip_gap", "phase1 s", "cost 25min", "cost 1h", "cost 8h", "objective"
+    );
+    let mut rows = Vec::new();
+    // Several start conditions, because a gap that works on one instance need not
+    // work on another — the epsilon sweeps in this file show exactly that failure.
+    for (inst, temp_c, initial_kw) in [
+        ("cool, full", 47.82, 6.0),
+        ("near T_min, off", 46.0, 0.0),
+        ("mid-band, mid", 52.0, 3.0),
+        ("warm, off", 57.0, 0.0),
+    ] {
+        for gap in [0.06, 0.30] {
+            let now = fixed_now();
+            let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+            profile.planner.mip_gap_target = gap;
+            let thermal_mass = 200.0 * 4.186 / 3600.0;
+            for a in profile.assets.iter_mut() {
+                if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                    h.thermal_mass_kwh_per_c = thermal_mass;
+                    h.temp_min_c = 45.0;
+                    h.temp_max_c = 60.0;
+                    h.temp_safety_max_c = 60.0;
+                    h.temp_initial_c = temp_c;
+                }
+            }
+            profile
+                .assets
+                .push(crate::entities::asset_params::AssetParams::Battery(
+                    BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 11.0,
+                        max_charge_kw: 5.5,
+                        max_discharge_kw: 5.5,
+                        initial_soc: 0.50,
+                        round_trip_efficiency: 0.92,
+                        min_soc: 0.10,
+                        c_terminal_eur_kwh: None,
+                    },
+                ));
+            let mut sim = make_snap_from_profile(&profile);
+            set_heater_temp(&mut sim, temp_c);
+            set_heater_power(&mut sim, initial_kw);
+            let tariffs = make_diurnal_tariffs(50);
+            let cap = no_capacity();
+            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let t = Instant::now();
+            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+            let secs = t.elapsed().as_secs_f64();
+
+            // Net grid cost over the first `hours`, priced identically in both rows.
+            let cost_within = |hours: f64| -> f64 {
+                let mut c = 0.0;
+                let mut elapsed = 0.0;
+                for i in 0..inputs.n {
+                    if elapsed >= hours {
+                        break;
+                    }
+                    c += (inputs.c_imp_eur_kwh[i] * p1.p_imp_kw[i]
+                        - inputs.c_exp_eur_kwh[i] * p1.p_exp_kw[i])
+                        * inputs.dt_h[i];
+                    elapsed += inputs.dt_h[i];
+                }
+                c
+            };
+            let (c25, c1, c8) = (cost_within(25.0 / 60.0), cost_within(1.0), cost_within(8.0));
+            println!(
+            "  {inst:>16} {gap:>7.2} {secs:>9.2} {c25:>11.4} {c1:>11.4} {c8:>11.4} {:>13.4}  {:?}",
+            p1.objective_eur, p1.status
+        );
+            emit_result(&format!(
+                r#"{{"params":{{"class":"heater + battery","instance":"{inst}","temp_c":{temp_c},"initial_kw":{initial_kw},"mip_gap":{gap},"slots":{},"volume_l":200,"band_k":15}},"results":{{"phase1_s":{secs:.3},"cost_25min_eur":{c25:.4},"cost_1h_eur":{c1:.4},"cost_8h_eur":{c8:.4},"objective_eur":{:.4},"status":"{:?}"}}}}"#,
+                inputs.n, p1.objective_eur, p1.status
+            ));
+            rows.push((gap, c25, c1, c8));
+        }
+    }
+    if rows.len() == 2 {
+        let (_, a25, a1, a8) = rows[0];
+        let (_, b25, b1, b8) = rows[1];
+        let pct = |a: f64, b: f64| {
+            if a.abs() > 1e-9 {
+                format!("{:+.2}%", 100.0 * (b - a) / a.abs())
+            } else {
+                "n/a".to_string()
+            }
+        };
+        println!(
+            "\n  0.30 vs 0.06 in the executed window: 25min {}, 1h {}, 8h {}",
+            pct(a25, b25),
+            pct(a1, b1),
+            pct(a8, b8)
+        );
+    }
+    println!(
+        "\n  If the 25min and 1h costs are unchanged, the 6.37 % horizon penalty is paid\n  \
+         entirely in slots that never run, and gap 0.30 is a 4.6x saving for free.\n"
+    );
+}
