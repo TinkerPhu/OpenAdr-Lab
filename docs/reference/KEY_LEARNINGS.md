@@ -1278,6 +1278,17 @@ outes/sim.rs causes a T1+T2 double-solve race:
   detached/background WSL command that needs `cargo`, `rustc`, or other `~/.cargo/bin` tools
   on PATH.
 
+- **It is not only background commands: bare `wsl cargo ...` never works, foreground
+  included** (2026-10-01). `CLAUDE.md`'s `local-rust` rule is written as `wsl cargo check`,
+  which resolves `cargo` against WSL's default (non-login) PATH and fails with
+  `/bin/bash: line 1: cargo: command not found`. Always `wsl bash -lc "cd <path> && cargo ..."`.
+  The reason this is worth its own entry rather than a footnote on the one above: the failure
+  is one line on stderr, so it hides perfectly behind the habit of filtering compiler output.
+  `wsl cargo check --tests 2>&1 | grep -E "^error|-->" ; echo "EXIT=$?"` prints `EXIT=0` and no
+  errors for a command that never ran — `$?` is **grep's** status, and grep is happy to find
+  nothing. A bench was declared "compiles clean" on that basis. Capture the output to a file or
+  variable first, check the real exit code, and only then filter.
+
 ## Sustained-Commitment Capacity Forecast (flexibility-capacity-forecast, 2026-08-21)
 
 - **A shared helper's contract can be wrong for a new caller even when it's correct for

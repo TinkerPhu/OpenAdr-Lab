@@ -2980,3 +2980,149 @@ fn bench_gap_executed_cost() {
          entirely in slots that never run, and gap 0.30 is a 4.6x saving for free.\n"
     );
 }
+
+/// R-97: the two questions the fleet phase survey left open, in one run.
+///
+/// The survey (docs/reference/R97_PLANNER_BENCHMARKS.md) found phase 2 hitting its
+/// 15 s timeout on **every** battery+EV VEN and converging on every other class —
+/// 4 VENs x 15 s per cycle, the fleet's dominant solver cost. Two things are unknown:
+///
+/// 1. **Does that 15 s reach the relay?** The executed-window check was run on
+///    heater instances only (2 of 6 changed in the first 25 min). Battery+EV is a
+///    different model and must be measured separately before anything is concluded
+///    about trimming the budget.
+/// 2. **Why is ven-19 a 10x outlier inside its own class** (12.6 s vs 0.78-2.4 s)?
+///    Its only unique parameters are the fleet's largest battery (16 kWh / 7 kW) and
+///    the only `round_trip_efficiency` of 0.93 rather than 0.92. Round-trip loss sets
+///    the price spread at which arbitrage breaks even; an efficiency landing
+///    break-even near the actual tariff spread leaves many near-optimal schedules and
+///    a weak LP bound. Sweeping only the efficiency, with everything else fixed,
+///    separates that from the size.
+///
+///   wsl cargo test -p ven-app --release bench_battery_ev_phase2_executed_window -- --ignored --nocapture
+#[test]
+#[ignore = "R-97: 2 solves per efficiency, run with --ignored --nocapture"]
+fn bench_battery_ev_phase2_executed_window() {
+    use crate::entities::asset_params::BatteryParams;
+
+    let now = fixed_now();
+    let tariffs = make_diurnal_tariffs(50);
+    let cap = no_capacity();
+
+    // Energy moved inside the first `hours` of a dispatch [kWh] — what the relay
+    // actually sees before the next replan replaces the plan.
+    let energy_within = |p: &[f64], dt_h: &[f64], n: usize, hours: f64| -> f64 {
+        let mut kwh = 0.0;
+        let mut elapsed = 0.0;
+        for t in 0..n {
+            if elapsed >= hours {
+                break;
+            }
+            kwh += p[t] * dt_h[t];
+            elapsed += dt_h[t];
+        }
+        kwh
+    };
+
+    println!("\n── R-97: battery+EV, does phase 2's 15 s reach the relay? ──");
+    println!("   (ven-19's battery 16 kWh / 7 kW; EV 11 kW; no heater; 288 slots, 48 h)\n");
+    println!(
+        "  {:>5} {:>8} {:>8} {:>11} {:>11} {:>10} {:>10} {:>10}",
+        "eff", "p1 s", "p2 s", "p2 status", "friction", "ev 25m", "bat 25m", "bat 48h"
+    );
+
+    for eff in [0.92_f64, 0.93, 0.96] {
+        let mut profile = ev_bench_profile(true, 20.0);
+        profile.planner.mip_gap_target = 0.06;
+        profile.planner.phase2_epsilon_eur = 0.02; // the fleet default
+        profile
+            .assets
+            .push(crate::entities::asset_params::AssetParams::Battery(
+                BatteryParams {
+                    id: "battery".into(),
+                    capacity_kwh: 16.0,
+                    max_charge_kw: 7.0,
+                    max_discharge_kw: 7.0,
+                    initial_soc: 0.50,
+                    round_trip_efficiency: eff,
+                    min_soc: 0.10,
+                    c_terminal_eur_kwh: None,
+                },
+            ));
+
+        let sim = make_snap_from_profile(&profile);
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+
+        let t0 = std::time::Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1_s = t0.elapsed().as_secs_f64();
+
+        let t1 = std::time::Instant::now();
+        let (p2, friction) = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            profile.planner.phase2_epsilon_eur,
+            &p1,
+            &ctxs,
+            15.0,
+        )
+        .expect("phase 2 feasible");
+        let p2_s = t1.elapsed().as_secs_f64();
+
+        let bat_net = |s: &crate::controller::milp_planner::types::MilpSolution, h: f64| -> f64 {
+            energy_within(&s.p_bat_ch_kw, &inputs.dt_h, inputs.n, h)
+                - energy_within(&s.p_bat_dis_kw, &inputs.dt_h, inputs.n, h)
+        };
+
+        for (tag, s, p2s, fr) in [
+            ("p1", &p1, f64::NAN, f64::NAN),
+            ("p2", &p2, p2_s, friction),
+        ] {
+            println!(
+                "  {:>5} {:>8.2} {:>8.2} {:>11} {:>11.4} {:>10.3} {:>10.3} {:>10.3}",
+                format!("{eff:.2}{tag}"),
+                if tag == "p1" { p1_s } else { f64::NAN },
+                p2s,
+                format!("{:?}", s.status),
+                fr,
+                energy_within(&s.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+                bat_net(s, 25.0 / 60.0),
+                bat_net(s, 48.0),
+            );
+        }
+
+        emit_result(&format!(
+            "{{\"bench\":\"bench_battery_ev_phase2_executed_window\",\"class\":1,\
+             \"params\":{{\"class\":\"battery + EV\",\"round_trip_efficiency\":{eff},\
+             \"capacity_kwh\":16.0,\"max_charge_kw\":7.0,\"mip_gap\":0.06,\
+             \"phase2_epsilon_eur\":0.02,\"slots\":288}},\
+             \"results\":{{\"phase1_s\":{:.3},\"phase2_s\":{:.3},\"phase1_status\":\"{:?}\",\
+             \"phase2_status\":\"{:?}\",\"friction_eur\":{:.5},\
+             \"p1_ev_25min_kwh\":{:.4},\"p2_ev_25min_kwh\":{:.4},\
+             \"p1_bat_net_25min_kwh\":{:.4},\"p2_bat_net_25min_kwh\":{:.4},\
+             \"p1_bat_net_48h_kwh\":{:.4},\"p2_bat_net_48h_kwh\":{:.4}}}}}",
+            p1_s,
+            p2_s,
+            p1.status,
+            p2.status,
+            friction,
+            energy_within(&p1.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+            energy_within(&p2.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+            bat_net(&p1, 25.0 / 60.0),
+            bat_net(&p2, 25.0 / 60.0),
+            bat_net(&p1, 48.0),
+            bat_net(&p2, 48.0),
+        ));
+    }
+
+    println!(
+        "\n  If p1 and p2 agree on `ev 25m` and `bat 25m`, the 15 s buys nothing the\n\
+         \x20          relay feels on this class. If phase 1 time climbs with efficiency, ven-19's\n\
+         \x20          outlier is the efficiency, not the battery size.\n"
+    );
+}
