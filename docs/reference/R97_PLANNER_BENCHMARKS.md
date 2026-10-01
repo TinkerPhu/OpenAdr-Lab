@@ -502,3 +502,69 @@ even, and an efficiency that puts break-even near the actual tariff spread leave
 near-optimal schedules and a weak LP bound — which would also explain the chaotic epsilon
 sensitivity recorded above. Untested; a bench sweeping only `round_trip_efficiency` on one
 battery+EV instance would settle it.
+
+## RETRACTED: production wall-clock cannot compare VENs — 17 solvers, 4 cores (2026-10-01)
+
+**The quantitative half of the fleet survey above is invalid.** Re-measuring the same VENs
+40 minutes later, at the same commit, with no code or profile change:
+
+| VEN | first sample | second sample |
+|---|---|---|
+| ven-14 (battery, heater) | 4.2 s | **21-28 s** |
+| ven-5 (battery, EV, heater) | 18.8 s | **36-49 s** |
+| ven-15 (heater, PV) | — | 8.8 s **and 60.1 s (TimeLimit)** |
+
+A 5-6x swing on one unchanged VEN is larger than every between-VEN difference the survey table
+rests on, so that table measures host load, not model difficulty.
+
+**Why.** Node2 has **4 cores and runs 17 VENs**, each solving every 300 s. Solver wall-time
+summed across the fleet is 1,222 s per 30 min — only ~17 % of 4 x 1800 core-seconds, so the host
+is *not* saturated on average. The problem is **alignment, not volume**: the solves arrive in
+bursts. Six completed inside a 90 s window at 20:26 UTC, including the two heaviest (ven-5,
+ven-17), against 4 cores.
+
+**And the bursts are partly self-inflicted.** Recreating eight containers in a tight loop (the
+container-name cleanup, 20:14 UTC) restarted eight VENs within seconds of each other, so their
+fixed 300 s cadences are now in phase and will stay in phase. Every subsequent cycle collides.
+The slow second-sample numbers above are all from that restarted set.
+
+**A real deployment issue, found by accident.** The replan cadence has no stagger and no jitter,
+and the interval is measured from solve *completion*, so a VEN whose solve takes 34 s runs on a
+~334 s period. ven-17's completions: 20:09:34, 20:15:03, 20:21:19, 20:26:58 — intervals of 329,
+376 and 339 s against a nominal 300. Phases therefore drift at different rates per VEN, wander
+into each other, and stick together for a while once aligned. On a 4-core host with 17 VENs that
+converts directly into wall-clock solve time, TimeLimit terminations, and the appearance of
+model difficulty. Filed as a backlog item; the fix is per-VEN replan jitter.
+
+### What survives from the section above
+
+- **The asset-map correction.** ven-1/7/13/16/19 were misclassified in earlier notes; read from
+  the profiles, not from timings. Several older class comparisons rest on the wrong map.
+- **`penalty_rules` add no binaries** — `declare_penalty_vars` adds `variable().min(0.0)` only,
+  96 continuous slacks and 288 constraints at 48 h / 1800 s windows. Structural, from the code.
+  The *measured* 2.5-3x is as confounded as everything else here and is withdrawn.
+- **ven-9's penalty floor.** 0.3 kW threshold under a flat 0.5 kW base load with no PV or
+  battery pins `>= 0.2 kW` of slack in all 96 windows: ~19.2 EUR of its ~50 EUR objective is
+  unavoidable. Arithmetic, not measurement.
+- **Battery capacity/power ratio cannot drive the within-class spread**, and this one holds
+  whatever the cause of the spread: ven-1, ven-13 and ven-16 have *identical* 2.0 h ratios
+  (10/5, 10/5, 8/4) and do not solve alike, so a quantity that is the same cannot explain a
+  difference that is real. The thermal-slack analogy does not carry over.
+
+### Withdrawn, pending bench confirmation
+
+- "Phase 1 scales with the count of co-scheduled storage assets." Suggestive, and it would
+  subsume the tank-slack result neatly, but every number supporting it is a contended wall-clock
+  reading. Needs one-at-a-time bench instances per mix.
+- "Phase 2 fails to converge on exactly one class, battery+EV." The second sample contradicts
+  it outright — ven-5, ven-14 and ven-15 are heater VENs and all hit the phase-2 TimeLimit.
+- ven-19 as a "10x outlier". Possibly just where its phase landed.
+
+### Method rule for everything after this
+
+**Compare models on the bench, never in production.** The bench runs one solve at a time on a
+quiet machine, which is why `bench_phase1_vs_tank_slack` could show a monotone relationship
+across three repeats while production could not. Production logs remain good for what they
+uniquely show — did the solve succeed, what status did it reach, is the fleet keeping up — and
+for *within*-VEN before/after on the same host at the same hour, which is what the gap-0.30
+canary measured. They cannot rank two different VENs.
