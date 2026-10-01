@@ -317,3 +317,48 @@ character of VEN behaviour, which is the user's call and not an optimisation to 
 The evidence is also from one bench profile: before acting it should be reproduced on the real
 heater profiles and checked against anything downstream that consumes plan smoothness (the arbiter's
 limit-enforcement pass, the gate switch penalty).
+
+
+## A free 2.6-9.5x on the fleet's slowest VENs: gap 0.30 for heater+battery (2026-10-01)
+
+After the warm-start fix, production timings put ven-5's phase 1 at 36-60 s, hitting the 60 s
+ceiling on most cycles, while phase 2 is bounded at 15 s. Phase 1 on the heater+battery class is
+therefore the dominant remaining cost in the fleet, and the bench agrees (57.8 s against 3.83 s for
+heater only).
+
+`bench_heater_battery_gap_sweep` — gap is the only variable:
+
+| mip_gap | phase 1 | objective | status |
+|---|---|---|---|
+| 0.06 (current) | 57.99 s | -11.8370 | TimeLimit |
+| 0.10 | 57.74 s | -12.6554 | TimeLimit |
+| 0.15 | 58.81 s | -11.8347 | TimeLimit |
+| 0.20 | 57.44 s | -11.8235 | TimeLimit |
+| **0.30** | **12.54 s** | -11.0826 | **GapLimit** |
+
+0.30 is the first gap that gets phase 1 off the ceiling. (0.10 landing a *better* objective than
+0.06 is more incumbent luck — both TimeLimit, so both suboptimal.)
+
+`bench_gap_executed_cost` then prices what actually runs, across four tank start conditions:
+
+| instance | phase 1 @0.06 | phase 1 @0.30 | speedup | cost 25 min | cost 1 h | cost 8 h |
+|---|---|---|---|---|---|---|
+| cool, full | 57.40 s | **11.09 s** | 5.2x | identical | identical | identical |
+| near T_min, off | 57.22 s | **6.05 s** | 9.5x | identical | identical | identical |
+| mid-band, mid | 56.07 s | **21.81 s** | 2.6x | identical | identical | 0.7 % cheaper |
+| warm, off | 27.96 s | **6.22 s** | 4.5x | identical | identical | 2.2 % cheaper |
+
+**The executed window is unchanged in every instance** — first-25 min and first-1 h cost identical,
+first-8 h identical or slightly cheaper. The ~6 % penalty on the 48 h objective is paid entirely in
+slots the next replan (300 s) discards.
+
+This is why the conclusion differs from GB-40's. That sweep went to 0.22 and rejected looser gaps on
+**phase-1 objective** grounds, reporting +4-9 % mean cost at 16-22 %. It never priced the executed
+window, and the executed window is what the meter sees. The horizon objective is the wrong yardstick
+for a receding-horizon controller — the same mistake this file records for the 48 h horizon question
+and for phase 2's smoothing.
+
+**Applied as a canary on ven-5 only.** ven-14 and ven-17 are the same asset mix and stay at 0.06 as
+the control, so the production difference is attributable. 0.30 is well beyond GB-40's measured
+range, and four bench instances are not a fleet, so the canary earns the change rather than
+assuming it.

@@ -102,9 +102,28 @@ simulator:
   persist_every_s: 15
 
 planner:
-  mip_gap_target: 0.06          # GB-40: heater-bearing VEN, loosened from the 0.02
-                                 # default for solve-time relief; see
-                                 # docs/reference/GB40_MIP_GAP_BENCHMARK.md
+  mip_gap_target: 0.30          # R-97 CANARY (2026-10-01): heater+battery is the
+                                 # fleet's hardest mix -- phase 1 ran 36-60 s here,
+                                 # hitting the 60 s ceiling on most cycles. 0.30 is
+                                 # the first gap that gets it off the ceiling:
+                                 # 2.6-9.5x faster across four tank start conditions
+                                 # (57->11, 57->6, 56->22, 28->6 s) with the EXECUTED
+                                 # window unchanged -- first-25min and first-1h cost
+                                 # identical in all four, and first-8h slightly
+                                 # cheaper in two. The 48 h objective is ~6 % worse,
+                                 # but that is paid entirely in slots the next replan
+                                 # (300 s) discards.
+                                 #
+                                 # GB-40 swept to 0.22 and rejected it on phase-1
+                                 # objective grounds; it never measured the executed
+                                 # window, which is why this goes further. Only ven-5
+                                 # carries it for now -- ven-14 and ven-17 are the
+                                 # same mix and stay at 0.06 as the control.
+                                 # Evidence: docs/reference/R97_PLANNER_BENCHMARKS.md
+                                 # and experiments/results/planner/solve_cost.jsonl
+                                 # (bench_gap_executed_cost).
+                                 # Was: 0.06 (GB-40, loosened from the 0.02 default);
+                                 # see docs/reference/GB40_MIP_GAP_BENCHMARK.md
   plan_zones:
     - step_s: 300
       slots: 96   # 8 h at 5-min resolution
