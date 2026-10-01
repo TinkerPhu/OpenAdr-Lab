@@ -143,3 +143,54 @@ Totals from `plan_history`, median over each regime:
 The bench's hardest phase-1 row is 1.3-2.0 s against ven-3's live 11-46 s, so the
 bench under-represents production by roughly an order of magnitude. Direction is
 confirmed; absolute scale is not the bench's to give.
+
+
+## Solve cost by fleet asset-mix class — binary interaction is real
+
+`bench_asset_mix_solve_cost`, gap 0.06, epsilon 1.00, 288 slots, ven-3's tank where a heater is
+present, ven-5's battery (11 kWh, 5.5 kW, eta 0.92, min_soc 0.10). Both phases timed separately.
+
+| class | VENs | phase 1 | phase 2 | p1 status | p2 status |
+|---|---|---|---|---|---|
+| **heater + battery** | ven-5, ven-14, ven-17 | **57.81 s** | **57.79 s** | **TimeLimit** | **Err** |
+| heater only | ven-2, 3, 10, 12, 15, 18, 20 | 3.83 s | 57.75 s | GapLimit | TimeLimit |
+| battery only | ven-1, 4, 6, 13, 16, 19 | 0.79 s | 34.39 s | GapLimit | GapLimit |
+| neither | ven-7, ven-8, ven-11 | 0.04 s | 0.06 s | Optimal | Optimal |
+
+Heater+battery is **15x worse than heater alone** and 73x battery alone, and nowhere near additive
+(3.83 + 0.79 = 4.6 s against an actual 57.81 s). This is the first measurement in this project that
+supports GB-40's binary-interaction theory, and it explains why ven-5 was GB-40's worst case at
+120 s: it is one of only three VENs carrying both assets.
+
+### Production confirmation
+
+The bench predicted phase 2 *fails* on that class. `grep 'Phase 2 failed'` over 3 h on Node2
+(~36 replan cycles):
+
+| VEN | class | failures in 3 h |
+|---|---|---|
+| ven-5 | heater + battery | **29** |
+| ven-14 | heater + battery | **33** |
+| ven-17 | heater + battery | **32** |
+| ven-11 | neither | 0 |
+
+So those three fail phase 2 on essentially every cycle, fall back to phase 1, and discard the whole
+phase-2 budget. The logged cause is `NoSolutionFound` with **`epsilon: 0.02`** — the default. The cap
+`cost <= c_star + 0.02` is tight enough that HiGHS finds *no* solution at all on a heater+battery
+instance, despite being handed a feasible warm start (phase 1's own schedule satisfies the cap by
+construction).
+
+### What follows, per VEN class
+
+`solver_phase2.rs` skips phase 2 outright when `phase2_epsilon_eur == 0.0`, so the settings below
+are the whole mechanism — no code change needed.
+
+| VENs | today | consequence | proposed |
+|---|---|---|---|
+| ven-5, ven-14, ven-17 | epsilon 0.02 (default) | phase 2 **fails every cycle**, 15 s discarded | **0.0** — disable. Reclaims ~15 s/cycle with **zero** behavioural change, since the plan already comes from phase 1 |
+| ven-10, 12, 15, 18, 20 | epsilon 0.02 (default) | phase 2 runs, finds nothing (below the starvation threshold), 15 s wasted | **~1.00** — buys the smoothing the 15 s is already being spent on (68 of 288 heater slots, switching 58 -> 32) |
+| ven-3 | epsilon 0.17 | same starvation | **~1.00** |
+| ven-2 | epsilon 1.00 | working as intended | unchanged |
+
+Both remedies are profile-only. The first is strictly a saving; the second buys value for time
+already being spent. Neither changes asset behaviour or the forecast horizon.
