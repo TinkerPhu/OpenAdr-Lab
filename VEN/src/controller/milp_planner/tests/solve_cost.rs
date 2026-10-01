@@ -2404,3 +2404,360 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
         );
     }
 }
+
+/// R-97: is a "working" epsilon repeatable, or did it get lucky once?
+///
+/// `bench_min_epsilon_by_class` found exactly one epsilon in eight producing a large
+/// heater improvement, at a different value per class (1.00 heater-only, 0.75
+/// heater+battery). Since raising epsilon strictly enlarges the feasible set, a value
+/// that works at 0.75 cannot legitimately fail at 1.00 — so either the search is
+/// landing on incumbents by luck, or those particular values are genuinely special.
+///
+/// This decides it: hold epsilon at the value that worked for each class and repeat.
+/// Phase 1 is solved once (it does not depend on epsilon) and reused, so every repeat
+/// starts from an identical warm start and the only variable is the solver's own
+/// search.
+///
+/// - Improvement found every time -> the value is recommendable per class.
+/// - Found sometimes -> it is a lottery, and no single-sweep epsilon recommendation
+///   is sound. Phase 2's contribution would then be inherently intermittent.
+///
+///   bash scripts/run_planner_experiment.sh bench_epsilon_repeatability 2
+#[test]
+#[ignore = "R-97: 2 phase-1 + 10 phase-2 solves, run with --ignored --nocapture"]
+fn bench_epsilon_repeatability() {
+    use crate::entities::asset_params::BatteryParams;
+    const REPEATS: usize = 5;
+    const P2_BUDGET_S: f64 = 30.0;
+    println!("\n── R-97: repeatability of a working epsilon ──");
+    println!("   (gap 0.06, 288 slots, {REPEATS} repeats, phase-2 budget {P2_BUDGET_S:.0} s)\n");
+    for (class, battery, epsilon) in [
+        ("heater only", false, 1.00),
+        ("heater + battery", true, 0.75),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        profile.planner.phase2_epsilon_eur = epsilon;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = 47.82;
+            }
+        }
+        if battery {
+            profile
+                .assets
+                .push(crate::entities::asset_params::AssetParams::Battery(
+                    BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 11.0,
+                        max_charge_kw: 5.5,
+                        max_discharge_kw: 5.5,
+                        initial_soc: 0.50,
+                        round_trip_efficiency: 0.92,
+                        min_soc: 0.10,
+                        c_terminal_eur_kwh: None,
+                    },
+                ));
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, 47.82);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1_sw = (1..inputs.n)
+            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .count();
+
+        println!("  == {class} at epsilon {epsilon:.2} (phase 1: {p1_sw} heater switches)");
+        let mut improved = 0usize;
+        for r in 1..=REPEATS {
+            let t = Instant::now();
+            let res = solve_phase2(
+                &inputs,
+                &p1w,
+                &p2w,
+                p1.objective_eur,
+                epsilon,
+                &p1,
+                &ctxs,
+                P2_BUDGET_S,
+            );
+            let secs = t.elapsed().as_secs_f64();
+            match res {
+                Ok((p2, friction)) => {
+                    let moved = (0..inputs.n)
+                        .filter(|&i| (p1.y_heat[i] - p2.y_heat[i]).abs() > 1e-6)
+                        .count();
+                    let sw = (1..inputs.n)
+                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .count();
+                    if moved > 0 {
+                        improved += 1;
+                    }
+                    println!(
+                        "     run {r}: {secs:>6.2} s  moved {moved:>3}  switches {sw:>3}  friction {friction:>8.4}  {:?}",
+                        p2.status
+                    );
+                    emit_result(&format!(
+                        r#"{{"params":{{"class":"{class}","battery":{battery},"epsilon":{epsilon},"run":{r},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"phase2_s":{secs:.3},"heat_slots_moved":{moved},"heat_switches":{sw},"p1_heat_switches":{p1_sw},"friction_eur":{friction:.4},"p2_status":"{:?}"}}}}"#,
+                        inputs.n, p2.status
+                    ));
+                }
+                Err(e) => println!("     run {r}: {secs:>6.2} s  Err: {e}"),
+            }
+        }
+        println!("     -> improvement found in {improved}/{REPEATS} runs\n");
+    }
+    println!(
+        "  {REPEATS}/{REPEATS} means the value is recommendable for that class; anything less\n  \
+         means phase 2's contribution is intermittent and no epsilon can be tuned from\n  \
+         a single sweep.\n"
+    );
+}
+
+/// R-97: does a working epsilon survive a change of instance?
+///
+/// Phase 2 is deterministic per configuration, so a measured epsilon holds — for
+/// *that* instance. Live VENs re-solve every 300 s against a different tank
+/// temperature, SoC and price window, so the practical question is whether one value
+/// keeps working as state moves.
+///
+/// This sweeps epsilon against several start conditions drawn from the band a real
+/// tank occupies (45-60 C) at both heater stages. If one epsilon improves on every
+/// instance, per-VEN tuning is viable in production. If the working value jumps
+/// between instances, then no fixed epsilon can be relied on and phase 2's
+/// contribution is intermittent in practice even though each solve is deterministic.
+///
+///   bash scripts/run_planner_experiment.sh bench_epsilon_across_instances 2
+#[test]
+#[ignore = "R-97: 4 phase-1 + 24 phase-2 solves (~15 min), run with --ignored --nocapture"]
+fn bench_epsilon_across_instances() {
+    const P2_BUDGET_S: f64 = 15.0; // production budget
+    println!("\n── R-97: does one epsilon work across instances? ──");
+    println!(
+        "   (heater only, gap 0.06, 288 slots, phase-2 budget {P2_BUDGET_S:.0} s = production)\n"
+    );
+    println!(
+        "  {:>28} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "instance", "e=0.3", "e=0.5", "e=0.75", "e=1.0", "e=1.5", "e=2.0"
+    );
+    for (label, temp_c, initial_kw) in [
+        ("cool tank, full power", 47.82, 6.0),
+        ("near T_min, off", 46.0, 0.0),
+        ("mid-band, mid stage", 52.0, 3.0),
+        ("warm tank, off", 57.0, 0.0),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = temp_c;
+            }
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, temp_c);
+        set_heater_power(&mut sim, initial_kw);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1_sw = (1..inputs.n)
+            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .count();
+
+        let mut cells = Vec::new();
+        for epsilon in [0.3, 0.5, 0.75, 1.0, 1.5, 2.0] {
+            let mut pr = profile.clone();
+            pr.planner.phase2_epsilon_eur = epsilon;
+            let p2w = build_phase2_weights(&inputs, &pr.planner);
+            let r = solve_phase2(
+                &inputs,
+                &p1w,
+                &p2w,
+                p1.objective_eur,
+                epsilon,
+                &p1,
+                &ctxs,
+                P2_BUDGET_S,
+            );
+            let cell = match r {
+                Ok((p2, friction)) => {
+                    let sw = (1..inputs.n)
+                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .count();
+                    emit_result(&format!(
+                        r#"{{"params":{{"instance":"{label}","temp_c":{temp_c},"initial_kw":{initial_kw},"epsilon":{epsilon},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"p1_heat_switches":{p1_sw},"heat_switches":{sw},"friction_eur":{friction:.4},"p2_status":"{:?}"}}}}"#,
+                        inputs.n, p2.status
+                    ));
+                    // Switches after phase 2 vs after phase 1: lower is better.
+                    if sw < p1_sw {
+                        format!("{sw}<{p1_sw}")
+                    } else {
+                        format!("={p1_sw}")
+                    }
+                }
+                Err(_) => "Err".to_string(),
+            };
+            cells.push(cell);
+        }
+        println!(
+            "  {label:>28} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            cells[0], cells[1], cells[2], cells[3], cells[4], cells[5]
+        );
+    }
+    println!(
+        "\n  Cells show heater switches after phase 2 against after phase 1. '=N' means\n  \
+         phase 2 changed nothing. A column that improves on every row is an epsilon\n  \
+         that can be set per VEN; if the improving column moves between rows, no fixed\n  \
+         value is dependable as live state changes.\n"
+    );
+}
+
+/// R-97: when phase 2 *does* smooth, does any of it reach the relay?
+///
+/// The cross-instance sweep shows phase 2 roughly halving heater switches when it
+/// fires (58 -> 26, 54 -> 24), but only on some instances at some epsilons. Whether
+/// that is worth 15 s per cycle hinges on something else entirely: a plan is replaced
+/// every `replan_interval_s` (300 s), so only its first slots are ever executed.
+///
+/// This takes the instances and epsilons where phase 2 demonstrably improves the
+/// horizon-wide schedule, and asks how many of those switches fall inside the
+/// executed window.
+///
+/// - Executed window unchanged -> phase 2's smoothing never reaches the hardware,
+///   and `phase2_epsilon_eur = 0.0` saves 15 s/cycle fleet-wide at no behavioural
+///   cost. That would be the largest clean win available.
+/// - Executed window improves -> the 15 s buys real relay life and the intermittency
+///   is a genuine cost to live with.
+///
+///   bash scripts/run_planner_experiment.sh bench_phase2_smoothing_reaches_relay 2
+#[test]
+#[ignore = "R-97: 6 two-phase solves, run with --ignored --nocapture"]
+fn bench_phase2_smoothing_reaches_relay() {
+    const P2_BUDGET_S: f64 = 15.0;
+    println!("\n── R-97: does phase 2's smoothing reach the executed window? ──");
+    println!("   (replan every 300 s, so ~25 min is already five cycles ahead)\n");
+    println!(
+        "  {:>26} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9}",
+        "instance / phase", "eps", "sw 25min", "sw 1h", "sw 4h", "sw 8h", "sw 48h"
+    );
+    // The two (instance, epsilon) pairs the cross-instance sweep showed improving.
+    for (label, temp_c, initial_kw, epsilon, battery) in [
+        ("cool tank, full", 47.82, 6.0, 1.00, false),
+        ("near T_min, off", 46.0, 0.0, 1.00, false),
+        ("mid-band, mid", 52.0, 3.0, 0.75, false),
+        ("warm tank, off", 57.0, 0.0, 1.00, false),
+        ("cool+battery", 47.82, 6.0, 0.75, true),
+        ("mid-band+battery", 52.0, 3.0, 0.75, true),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        if battery {
+            profile
+                .assets
+                .push(crate::entities::asset_params::AssetParams::Battery(
+                    crate::entities::asset_params::BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 11.0,
+                        max_charge_kw: 5.5,
+                        max_discharge_kw: 5.5,
+                        initial_soc: 0.50,
+                        round_trip_efficiency: 0.92,
+                        min_soc: 0.10,
+                        c_terminal_eur_kwh: None,
+                    },
+                ));
+        }
+        profile.planner.mip_gap_target = 0.06;
+        profile.planner.phase2_epsilon_eur = epsilon;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = temp_c;
+            }
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, temp_c);
+        set_heater_power(&mut sim, initial_kw);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let (p2, _friction) = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            epsilon,
+            &p1,
+            &ctxs,
+            P2_BUDGET_S,
+        )
+        .expect("phase 2 feasible");
+
+        let sw_within = |y: &[f64], hours: f64| -> usize {
+            let mut n = 0;
+            let mut elapsed = 0.0;
+            for t in 1..inputs.n {
+                if elapsed >= hours {
+                    break;
+                }
+                if (y[t] - y[t - 1]).abs() > 1e-6 {
+                    n += 1;
+                }
+                elapsed += inputs.dt_h[t];
+            }
+            n
+        };
+        for (phase, y) in [("phase 1", &p1.y_heat), ("phase 2", &p2.y_heat)] {
+            println!(
+                "  {:>26} {epsilon:>7.2} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                format!("{label} / {phase}"),
+                sw_within(y, 25.0 / 60.0),
+                sw_within(y, 1.0),
+                sw_within(y, 4.0),
+                sw_within(y, 8.0),
+                sw_within(y, 48.0),
+            );
+            emit_result(&format!(
+                r#"{{"params":{{"instance":"{label}","phase":"{phase}","epsilon":{epsilon},"temp_c":{temp_c},"initial_kw":{initial_kw},"battery":{battery},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"sw_25min":{},"sw_1h":{},"sw_4h":{},"sw_8h":{},"sw_48h":{}}}}}"#,
+                inputs.n,
+                sw_within(y, 25.0 / 60.0),
+                sw_within(y, 1.0),
+                sw_within(y, 4.0),
+                sw_within(y, 8.0),
+                sw_within(y, 48.0),
+            ));
+        }
+    }
+    println!(
+        "\n  If the 25min and 1h columns match between phase 1 and phase 2, the smoothing\n  \
+         never reaches the relay and the 15 s buys nothing the hardware feels.\n"
+    );
+}

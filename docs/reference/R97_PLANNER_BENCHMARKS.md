@@ -232,3 +232,88 @@ are the whole mechanism — no code change needed.
 
 Both remedies are profile-only. The first is strictly a saving; the second buys value for time
 already being spent. Neither changes asset behaviour or the forecast horizon.
+
+
+## Phase 2 is deterministic, not a lottery (2026-10-01)
+
+`bench_epsilon_repeatability`: hold epsilon at the value that worked for each class, solve phase 1
+once (it does not depend on epsilon) so every repeat starts from an identical warm start, and repeat
+phase 2 five times.
+
+| class | epsilon | runs improving | result each run |
+|---|---|---|---|
+| heater only | 1.00 | **5/5** | 76 slots moved, switches 58 -> 32, friction 3.4555 |
+| heater + battery | 0.75 | **5/5** | 90 slots moved, switches 74 -> 29, friction 2.9686 |
+
+Bit-for-bit identical every time. **Two earlier claims in this file are retracted:**
+
+- *"Phase 2's improvement is a lottery over incumbents"* — no. A given configuration reproduces
+  exactly.
+- *"Phase 2 at a fixed budget is not reproducible"* (the friction 2.0805 vs 3.4555 pair) — that
+  compared two **different bench functions** assumed to build identical instances. Under a
+  controlled five-repeat test the result is deterministic, so those two instances must have
+  differed in some way not accounted for. The non-reproducibility was in the comparison, not the
+  solver.
+
+What survives is more precise: phase 2 is **deterministic but chaotically sensitive to epsilon**.
+0.75 improves and 1.00 does not, reproducibly, on heater+battery. Changing epsilon changes the LP
+relaxation, hence the branching order, hence which incumbent the search lands on. That is still
+proof of suboptimal incumbents — a strictly larger feasible set cannot yield a worse optimum — but
+it is predictable for a fixed configuration rather than random.
+
+**Practical consequence:** per-VEN epsilon tuning *is* viable, because a measured choice holds. What
+cannot be done is reasoning about the value, or extrapolating one VEN's working value to another —
+each needs measuring. The open question is whether a value that works on one instance keeps working
+as live state changes every replan cycle; that is what `bench_epsilon_across_instances` tests.
+
+
+## Does phase 2's smoothing reach the relay? Mostly no (2026-10-01)
+
+`bench_epsilon_across_instances` first: no fixed epsilon works across instances.
+
+| instance | e=0.3 | e=0.5 | e=0.75 | e=1.0 | e=1.5 | e=2.0 |
+|---|---|---|---|---|---|---|
+| cool tank, full power | =58 | =58 | =58 | **32** | =58 | =58 |
+| near T_min, off | =58 | =58 | =58 | **26** | **34** | **32** |
+| mid-band, mid stage | =54 | **26** | **24** | =54 | =54 | =54 |
+| warm tank, off | =44 | =44 | =44 | =44 | =44 | =44 |
+
+(Heater switches after phase 2 against after phase 1; `=N` means phase 2 changed nothing.) No column
+improves every row — e=1.0 helps the first two instances, e=0.5/0.75 the third, and the fourth is
+untouched at every value. Since live state changes every 300 s, **per-VEN epsilon tuning is not
+viable in production**: the working value moves with the tank, even though each individual solve is
+deterministic.
+
+`bench_phase2_smoothing_reaches_relay`, six instances at the **production 15 s budget**:
+
+| instance | 25 min | 1 h | 4 h | 8 h | 48 h |
+|---|---|---|---|---|---|
+| cool tank, full — phase 1 / 2 | 0 / **2** | 0 / **2** | 10 / 5 | 28 / 11 | 58 / 32 |
+| near T_min, off — phase 1 / 2 | 2 / **1** | 4 / **2** | 14 / 7 | 32 / 8 | 58 / 26 |
+| mid-band, mid — phase 1 / 2 | 0 / 0 | 0 / 0 | 6 / 2 | 24 / 4 | 54 / 24 |
+| warm tank, off — phase 1 / 2 | 0 / 0 | 0 / 0 | 0 / 0 | 12 / 12 | 44 / 44 |
+| cool + battery — phase 1 / 2 | 0 / 0 | 0 / 0 | 12 / 12 | 28 / 28 | 74 / 74 |
+| mid-band + battery — phase 1 / 2 | 0 / 0 | 0 / 0 | 4 / 4 | 20 / 20 | 66 / 66 |
+
+Two results:
+
+1. **At the 15 s production budget, heater+battery gets no smoothing at all.** Those same instances
+   improved at a 30 s budget (74 -> 29 at epsilon 0.75), so ven-5/ven-14/ven-17 still get nothing —
+   now for a budget reason rather than the warm-start bug.
+2. **The executed window is a wash.** With a 300 s replan interval, only the first slots ever run.
+   Phase 2 changes the first 25 minutes in 2 of 6 instances — once **worse** (0 -> 2) and once better
+   (2 -> 1) — and leaves four unchanged. All the substantial improvement (58 -> 32, 58 -> 26,
+   54 -> 24) sits in hours 4-48, which the next cycle replaces.
+
+**What this implies, as a recommendation rather than a change.** Phase 2 costs ~15 s per cycle on
+every VEN. At the production budget it improves the horizon-wide schedule on about half of
+instances, none of that reaching the hardware, and it occasionally adds a switch to the window that
+does. `phase2_epsilon_eur = 0.0` would reclaim that time fleet-wide with no measured executed-
+behaviour cost.
+
+This is deliberately **not** applied. Disabling a whole phase changes what the plan *looks* like —
+horizon-wide chatter becomes visible in the UI and in `plan_history` — and that is a change in the
+character of VEN behaviour, which is the user's call and not an optimisation to make unattended.
+The evidence is also from one bench profile: before acting it should be reproduced on the real
+heater profiles and checked against anything downstream that consumes plan smoothness (the arbiter's
+limit-enforcement pass, the gate switch penalty).
