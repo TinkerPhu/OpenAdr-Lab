@@ -362,3 +362,44 @@ and for phase 2's smoothing.
 the control, so the production difference is attributable. 0.30 is well beyond GB-40's measured
 range, and four bench instances are not a fleet, so the canary earns the change rather than
 assuming it.
+
+
+## CORRECTED: it was the smallest tank, not the asset mix (2026-10-01)
+
+The canary's own controls refute the conclusion that produced it. ven-5, ven-14 and ven-17 share the
+heater+battery mix and the same host; only ven-5 carries gap 0.30. Production phase-1 medians:
+
+| VEN | volume | band | slack kWh | battery | mip_gap | phase 1 median | status |
+|---|---|---|---|---|---|---|---|
+| **ven-5** | **150 L** | 20 K | **3.49** | 11 kWh | 0.30 | **18.8 s** | GapLimit |
+| ven-17 | 250 L | 20 K | 5.81 | 12 kWh | 0.06 | **4.2 s** | GapLimit |
+| ven-14 | 300 L | 20 K | 6.97 | 7 kWh | 0.06 | **4.2 s** | GapLimit |
+
+The untouched controls at 0.06 are **4.5x faster than the canary at 0.30**. So "heater+battery is
+catastrophically slow" is **wrong** — two VENs with that exact mix solve in ~4 s. ven-5 is slow
+because it has the **smallest tank in the fleet**, half ven-14's.
+
+This is the tank-slack result confirmed in production, and more cleanly than the bench managed:
+three VENs, identical asset mix, same host, same 20 K band, differing only in volume — and phase-1
+time tracks slack (3.49 kWh -> 18.8 s; 5.81 and 6.97 kWh -> 4.2 s).
+
+**Why the bench misled.** It used 200 L across a 15 K band = 3.49 kWh of slack, which is *exactly*
+ven-5's 150 L across 20 K. Every "heater+battery" bench row was therefore modelling ven-5
+specifically, not the class, and the 57.8 s it reported is ven-5's number rather than the mix's.
+
+**What the bench measured that production does not contradict:** at *constant* slack (3.49 kWh),
+adding a battery took bench phase 1 from 3.83 s (heater only) to 57.8 s. Production cannot separate
+that cleanly — ven-3 is heater-only with the same 3.49 kWh slack and also runs 11-46 s — so the
+battery's marginal contribution on top of low slack is **not established**. Slack is the driver that
+is established, on both bench and fleet.
+
+**Canary status: justified, but narrower than claimed.** ven-5 went from 36-60 s TimeLimit to
+6.8-38.7 s GapLimit (median 18.8 s), and the gap change caused it — the warm-start fix had already
+been deployed and ven-5 was still at 36-60 s TimeLimit after it. Total solve 75 s -> 23 s. But the
+reason is ven-5's tank, not its asset mix, so it should **not** be extended to ven-14 and ven-17,
+which are already at 4 s and would pay the ~6 % horizon-objective cost for nothing.
+
+**The better lever for ven-5 is physical.** The tank-slack sweep showed widening a band from 15 K to
+40 K roughly halving phase 1 and cutting switching 53 -> 14. ven-5 runs 45-65 C on 150 L; if that
+installation can take a wider band or a larger tank, it addresses the cause rather than loosening
+the optimality tolerance. That is a hardware question, recorded here rather than acted on.

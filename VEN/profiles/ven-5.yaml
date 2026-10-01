@@ -116,9 +116,17 @@ planner:
                                  #
                                  # GB-40 swept to 0.22 and rejected it on phase-1
                                  # objective grounds; it never measured the executed
-                                 # window, which is why this goes further. Only ven-5
-                                 # carries it for now -- ven-14 and ven-17 are the
-                                 # same mix and stay at 0.06 as the control.
+                                 # window, which is why this goes further.
+                                 #
+                                 # VERIFIED + SCOPED (same day): ven-5 went 36-60 s
+                                 # TimeLimit -> 6.8-38.7 s GapLimit, total 75 -> 23 s.
+                                 # But the controls showed WHY: ven-14 (300 L) and
+                                 # ven-17 (250 L) share this asset mix and solve in
+                                 # ~4.2 s at gap 0.06. ven-5 is slow because it has
+                                 # the fleet's smallest tank (150 L, 3.49 kWh of slack
+                                 # vs their 6.97 and 5.81) -- not because of the
+                                 # heater+battery mix. So this stays ven-5-only; the
+                                 # others would pay ~6 % horizon cost for nothing.
                                  # Evidence: docs/reference/R97_PLANNER_BENCHMARKS.md
                                  # and experiments/results/planner/solve_cost.jsonl
                                  # (bench_gap_executed_cost).
