@@ -3079,10 +3079,7 @@ fn bench_battery_ev_phase2_executed_window() {
                 - energy_within(&s.p_bat_dis_kw, &inputs.dt_h, inputs.n, h)
         };
 
-        for (tag, s, p2s, fr) in [
-            ("p1", &p1, f64::NAN, f64::NAN),
-            ("p2", &p2, p2_s, friction),
-        ] {
+        for (tag, s, p2s, fr) in [("p1", &p1, f64::NAN, f64::NAN), ("p2", &p2, p2_s, friction)] {
             println!(
                 "  {:>5} {:>8.2} {:>8.2} {:>11} {:>11.4} {:>10.3} {:>10.3} {:>10.3}",
                 format!("{eff:.2}{tag}"),

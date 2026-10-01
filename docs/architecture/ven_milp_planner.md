@@ -213,7 +213,7 @@ All planner configuration lives in `VEN/src/profile.rs → PlannerConfig`. Key p
 | Parameter | Default | Meaning |
 |---|---|---|
 | `plan_zones` | 3-tier (A/B/C) | Zone step and slot count definitions |
-| `replan_interval_s` | 300 | How often the planning loop fires |
+| `replan_interval_s` | 300 | How often the planning loop fires — the *period*, not a post-cycle sleep; see § Replan scheduling |
 | `plan_adoption_threshold_eur` | 0.20 | Minimum improvement to adopt a periodic replan |
 | `plan_adoption_decay_s` | 1500 | After this many seconds without adoption, force-adopt |
 | `gate_switch_penalty_eur` | 0.0 | Added cost per Zone-A-equivalent heater switch in adoption gate |
@@ -324,3 +324,37 @@ Regression coverage: `entities/asset.rs::comfort_rate_tests`, `ev_milp.rs`'s
 `controller/milp_planner/tests/modes.rs`'s
 `test_by_deadline_soft_comfort_curve_shapes_core_commitment` (core half) and
 `test_by_deadline_hard_extra_reward_drives_extra_charging` (extra half, R-18 fix).
+
+## Replan scheduling: an absolute grid with a per-VEN phase
+
+The periodic trigger is anchored to absolute time, not to the end of the previous cycle.
+`entities::planner_params::next_replan_at(now, replan_interval_s, replan_phase_offset_s)` returns
+the first instant strictly after `now` that satisfies
+`t ≡ replan_phase_offset_s (mod replan_interval_s)`, and the planning loop
+(`tasks/planning/mod.rs`) waits until that instant.
+
+Two properties follow, and both exist because of GB-54:
+
+1. **The period is `replan_interval_s`, whatever the cycle cost.** Sleeping for the interval
+   *after* a cycle — what the loop did before — makes the real period
+   `replan_interval_s + solve_time`. ven-17, solving in ~34 s, ran on a ~334 s period:
+   observed completion gaps of 329 s, 376 s and 339 s against a nominal 300 s.
+2. **Each VEN sits at its own phase in that grid.** `replan_phase_offset_s(ven_name, interval)`
+   hashes the VEN's name with FNV-1a, so the offset is identical on every start of every build.
+   Stability is the point, not spread alone: an offset derived from start-up time would
+   re-randomise on restart, and a deploy restarts the whole fleet at once. FNV is written out
+   rather than taken from `DefaultHasher`, whose output Rust does not promise to keep stable
+   across versions.
+
+A cycle that overruns a whole interval **skips** to the next grid point instead of firing
+immediately — a VEN already too slow is the last one that should replan back-to-back.
+
+Why it matters: without (1), fleet members drift at per-VEN rates, wander into each other, and
+then stay together, because every VEN in a collided group is slowed equally and keeps its offset.
+On a host with fewer cores than VENs that burst converts directly into phase-1/phase-2
+`TimeLimit` terminations — on Node2 (4 cores, 17 VENs) fleet solver wall-time was only ~17 % of
+available core-seconds while six solves once landed inside a single 90 s window. Without (2), the
+grid in (1) would be strictly worse than a post-cycle sleep, since every VEN would fire on the
+same instant.
+
+Pinned by the `replan_schedule_tests` module in `entities/planner_params.rs`.

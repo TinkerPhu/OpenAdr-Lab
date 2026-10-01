@@ -31,6 +31,9 @@ pub(crate) fn spawn_planning(
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
     history: Option<Arc<dyn HistoryPort>>,
+    // GB-54 — this VEN's stable phase within the replan grid. Built from the
+    // VEN's name by `planner_params::replan_phase_offset_s` at start-up.
+    replan_phase_offset_s: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
@@ -80,12 +83,24 @@ pub(crate) fn spawn_planning(
             )
             .await;
 
-            // Wait for next trigger OR periodic timeout.
+            // Wait for next trigger OR the next periodic slot.
             // Record what woke us: timeout → Periodic, channel change → that trigger.
             // This ensures the acceptance gate sees Periodic for routine replans
             // and is only bypassed for genuine event-driven triggers.
+            //
+            // GB-54: the wait is to the next point on this VEN's own absolute
+            // replan grid, not a flat sleep from here. Sleeping from the end of a
+            // cycle made the real period `replan_interval_s + solve_time`, so
+            // fleet members drifted at per-VEN rates and periodically collided on
+            // a shared host — see `next_replan_at`.
+            let due = crate::entities::planner_params::next_replan_at(
+                now_fn(),
+                planner.replan_interval_s,
+                replan_phase_offset_s,
+            );
+            let wait_s = (due - now_fn()).num_seconds().clamp(0, i64::MAX) as u64;
             wake_trigger = tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(planner.replan_interval_s)) => PlanTriggerSignal::bare(PlanTrigger::Periodic),
+                _ = tokio::time::sleep(std::time::Duration::from_secs(wait_s)) => PlanTriggerSignal::bare(PlanTrigger::Periodic),
                 _ = trigger_rx.changed() => trigger_rx.borrow_and_update().clone(),
             };
         }
@@ -177,6 +192,7 @@ mod tests {
             Arc::new(crate::controller::NoopWeatherPort),
             None,
             None,
+            0,
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort

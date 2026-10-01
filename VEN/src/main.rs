@@ -359,6 +359,13 @@ async fn main() -> anyhow::Result<()> {
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     let weather_pv_params = profile.weather_pv_params();
     {
+        // GB-54: a stable per-VEN phase in the replan grid, so a fleet sharing a
+        // host does not solve in lockstep — and so a deploy that restarts all of
+        // them does not align them, which is how GB-54 was found.
+        let replan_offset_s = crate::entities::planner_params::replan_phase_offset_s(
+            &cfg.ven_name,
+            planner_params.replan_interval_s,
+        );
         let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf, wp, wpp, hp) = (
             state.clone(),
             planner_params.clone(),
@@ -392,6 +399,7 @@ async fn main() -> anyhow::Result<()> {
                 wp.clone(),
                 wpp,
                 hp.clone(),
+                replan_offset_s,
             )
         });
     }

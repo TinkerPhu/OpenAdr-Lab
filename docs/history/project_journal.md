@@ -13744,3 +13744,38 @@ The durable gap this exposed: `plan_history` records how long a solve took and n
 it was solving, so a slow solve cannot be replayed. Every wrong turn today came from reasoning
 about correlations in timing data instead of reading the inputs. An input digest on slow solves is
 recorded in R-97 as the fix.
+
+## GB-54 — replan scheduling anchored to a grid, with a per-VEN phase (2026-10-01)
+
+**What.** `tasks/planning/mod.rs` waited `sleep(replan_interval_s)` *after* each plan cycle, so a
+VEN's real period was `replan_interval_s + solve_time`. Replaced with a wait until the next point
+on an absolute grid at this VEN's own phase: `entities::planner_params::next_replan_at` and
+`replan_phase_offset_s`, the latter hashing the VEN name with FNV-1a.
+
+**Why.** Found while trying to explain why production per-VEN solve times varied so much, and it
+turned out to be the explanation. On Node2 (4 cores, 17 VENs) fleet solver wall-time is only ~17 %
+of available core-seconds, yet six solves once landed inside a 90 s window. Because the period
+depended on each VEN's own solve time, members drifted at different rates, wandered into each
+other, and then stayed together — a collided group is slowed equally and keeps its offset. The
+phase offset is derived from the VEN's name rather than from start-up time precisely because a
+deploy restarts the whole fleet at once; a start-up-derived offset would re-align it every time.
+
+**Key learnings.**
+- *A shared host makes wall-clock solve time a measurement of contention, not of the model.* This
+  one cost a retraction: a fleet survey showing phase-1 time rising with the number of
+  co-scheduled storage assets was invalidated when re-measuring the same VENs 40 minutes later
+  moved ven-14 from 4.2 s to 21-28 s with no code change. The bench later put battery+EV phase 1
+  at 0.2 s — the production figure was 3-45x inflated queueing. Compare models on the bench;
+  use production for status, success and throughput, and for within-VEN before/after.
+- *Mean utilisation is the wrong instrument for periodic work; peak concurrency is the right one.*
+  ~17 % average CPU looked like abundant headroom and explained nothing.
+- *Housekeeping on a live system is an intervention.* Recreating eight containers in a tight loop
+  to tidy prefixed container names put eight VENs permanently in phase, and produced the slow
+  numbers that triggered the retraction.
+- *A test's hand-computed constants can encode a false premise.* Four of these tests failed
+  against a correct `next_replan_at` because they assumed epoch 1_000_000 lies on a 300 s grid
+  (it does not: 1_000_000/300 = 3333.33). Rewritten to derive expected instants from the grid
+  itself, so the test cannot disagree with what it checks.
+- *`wsl cargo <cmd>` silently does nothing* — cargo is not on WSL's non-login PATH, and the
+  one-line stderr hides behind any `| grep` of compiler output while `$?` reports grep's status.
+  A bench was declared "compiles clean" on that evidence. `CLAUDE.md` now says `wsl bash -lc`.
