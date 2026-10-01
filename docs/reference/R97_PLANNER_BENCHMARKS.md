@@ -180,7 +180,45 @@ phase-2 budget. The logged cause is `NoSolutionFound` with **`epsilon: 0.02`** �
 instance, despite being handed a feasible warm start (phase 1's own schedule satisfies the cap by
 construction).
 
-### What follows, per VEN class
+### CORRECTED after the warm-start fix (2026-10-01)
+
+Everything in the table above, and the per-class advice that used to follow it, was measured
+**through an infeasible phase-2 warm start** (the `u_bat` direction-selector bug, fixed in
+`b8430232`). Re-measured on correct code, `bench_min_epsilon_by_class`, 30 s phase-2 budget:
+
+| epsilon | heater only: slots moved / friction | heater + battery: slots moved / friction |
+|---|---|---|
+| 0.02 | 0 / 4.6201 | 0 / 6.5530 |
+| 0.10 | 0 / 4.6201 | 0 / 6.5259 |
+| 0.20 | 0 / 4.6201 | 0 / 6.4971 |
+| 0.30 | 0 / 4.6201 | 0 / 6.4691 |
+| 0.50 | 0 / 4.6201 | 0 / 6.4176 |
+| 0.75 | 0 / 4.6201 | **90 / 2.9686** (switches 74 -> 29) |
+| 1.00 | **76 / 3.4555** (switches 58 -> 32) | 0 / 6.3237 |
+| 2.00 | 0 / 4.6201 | 0 / 6.1964 |
+
+Three things change:
+
+1. **Phase 2 now succeeds on heater+battery at every epsilon** — it previously returned `Err`
+   (`NoSolutionFound`) at all eight. The earlier recommendation to set `phase2_epsilon_eur = 0.0`
+   on ven-5/ven-14/ven-17 is **retracted**: it was predicated on phase 2 being unfixably broken
+   there, and disabling it would now discard real smoothing.
+2. **"Heater slots moved" was too narrow a metric.** On heater+battery, friction improves
+   monotonically with epsilon (6.5530 -> 6.1964) in rows where *zero* heater slots moved, so phase
+   2 is smoothing the **battery and grid** schedules there. Earlier conclusions drawn from heater
+   slot counts alone missed that entirely.
+3. **The erratic behaviour is real, not a consequence of the bug.** Exactly one epsilon in eight
+   finds the large heater improvement, and it is a *different* value per class (1.00 for heater
+   only, 0.75 for heater+battery). Raising epsilon strictly enlarges the feasible set, so a value
+   that works at 0.75 cannot legitimately fail at 1.00 — phase 2 is still landing on suboptimal
+   incumbents, and the choice is incumbent luck rather than a threshold.
+
+**Consequence for tuning:** there is no reliable per-VEN epsilon to recommend from a single sweep.
+The monotone part (battery/grid friction falling as epsilon rises) is the dependable gain; the
+large heater-schedule improvement is a lottery. Any epsilon recommendation needs repeated runs per
+candidate value, which is the same discipline this file already requires for budget measurements.
+
+### Superseded: what follows, per VEN class
 
 `solver_phase2.rs` skips phase 2 outright when `phase2_epsilon_eur == 0.0`, so the settings below
 are the whole mechanism — no code change needed.
