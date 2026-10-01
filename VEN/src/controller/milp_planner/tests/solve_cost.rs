@@ -1824,3 +1824,355 @@ fn bench_phase1_vs_zones() {
 "
     );
 }
+
+/// R-97: bisect the 3-12x gap between the bench and live ven-3.
+///
+/// At the production gap (0.06) the synthetic bench solves ven-3's grid and tank in
+/// 3.9-5.3 s, while the `planner: phase timings` log shows live ven-3 at
+/// 11 131-45 566 ms. The heater parameters are already faithful (200 L, 45-60 C,
+/// k_loss 0.005, draw 0.3, switching 0.50 — all match ven-3.yaml), so the gap is
+/// elsewhere. The bench differs from the real profile in three places:
+///
+///   - `spikes: vec![]` vs three real appliance spikes (coffee/lunch/dinner)
+///   - PV rated 6.0 kW vs 8.0 kW (inverter 7.5)
+///   - heater `temp_initial_c` 47.82 vs 50.0
+///
+/// Added one at a time, so whichever carries the cost is attributable rather than
+/// guessed. A spiky base load is the prime suspect: it makes the net-load shape far
+/// richer, and every spike is a window where the heater's placement interacts with
+/// a load peak.
+///
+///   bash scripts/run_planner_experiment.sh bench_bisect_ven3_gap
+#[test]
+#[ignore = "R-97: 5 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_bisect_ven3_gap() {
+    use crate::entities::asset_params::ApplianceSpikeParams;
+    // ven-3.yaml's real spikes.
+    let real_spikes = || {
+        vec![
+            ApplianceSpikeParams {
+                center_hour: 8.0,
+                jitter_h: 0.2,
+                amplitude_kw: 1.2,
+                duration_h: 0.25,
+                ramp_h: 0.03,
+                probability: 1.0,
+                weekdays: vec![0, 1, 2, 3, 4],
+            },
+            ApplianceSpikeParams {
+                center_hour: 12.0,
+                jitter_h: 0.25,
+                amplitude_kw: 2.0,
+                duration_h: 0.5,
+                ramp_h: 0.05,
+                probability: 0.6,
+                weekdays: vec![0, 1, 2, 3, 4],
+            },
+            ApplianceSpikeParams {
+                center_hour: 18.0,
+                jitter_h: 0.3,
+                amplitude_kw: 2.5,
+                duration_h: 0.75,
+                ramp_h: 0.08,
+                probability: 1.0,
+                weekdays: vec![0, 1, 2, 3, 4],
+            },
+        ]
+    };
+
+    println!("\n── R-97: bisecting the bench-vs-live-ven-3 phase-1 gap ──");
+    println!("   (gap 0.06, 288-slot production grid, ven-3's 200 L / 45-60 C tank)\n");
+    println!(
+        "  {:>38} {:>10} {:>11} {:>13}  status",
+        "variant", "phase1 s", "switches", "objective"
+    );
+    for (label, spikes, pv_kw, temp_init) in [
+        ("bench baseline (flat load, 6 kW PV)", false, 6.0, 47.82),
+        ("+ ven-3 base-load spikes", true, 6.0, 47.82),
+        ("+ ven-3 PV 8.0 kW", false, 8.0, 47.82),
+        ("+ ven-3 temp_initial 50 C", false, 6.0, 50.0),
+        ("all three (closest to live ven-3)", true, 8.0, 50.0),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            match a {
+                crate::entities::asset_params::AssetParams::Heater(h) => {
+                    h.thermal_mass_kwh_per_c = thermal_mass;
+                    h.temp_min_c = 45.0;
+                    h.temp_max_c = 60.0;
+                    h.temp_safety_max_c = 60.0;
+                    h.temp_initial_c = temp_init;
+                    h.switching_penalty_eur = 0.50;
+                }
+                crate::entities::asset_params::AssetParams::BaseLoad(b) => {
+                    if spikes {
+                        b.spikes = real_spikes();
+                    }
+                }
+                crate::entities::asset_params::AssetParams::Pv(pv) => {
+                    pv.rated_kw = pv_kw;
+                    pv.inverter_max_kw = pv_kw.min(7.5);
+                }
+                _ => {}
+            }
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, temp_init);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let secs = t.elapsed().as_secs_f64();
+        let switches = (1..inputs.n)
+            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .count();
+        println!(
+            "  {label:>38} {secs:>10.2} {switches:>11} {:>13.4}  {:?}",
+            p1.objective_eur, p1.status
+        );
+        emit_result(&format!(
+            r#"{{"params":{{"variant":"{label}","spikes":{spikes},"pv_rated_kw":{pv_kw},"temp_initial_c":{temp_init},"mip_gap":0.06,"slots":{},"volume_l":200,"band_k":15}},"results":{{"phase1_s":{secs:.3},"switches":{switches},"objective_eur":{:.4},"status":"{:?}"}}}}"#,
+            inputs.n, p1.objective_eur, p1.status
+        ));
+    }
+    println!(
+        "\n  Live ven-3 phase 1: 11 131-45 566 ms. Whichever row approaches that is the\n  \
+         cause; if none does, the remaining difference is live state (real tariff\n  \
+         shape, actual SoC/tank, capacity events) rather than the profile.\n"
+    );
+}
+
+/// R-97: do the EV/battery startup binaries make phase 2 unsolvable?
+///
+/// `declare_vars` emits `n-1` **binary** `delta_ev` variables whenever
+/// `c_ev_startup_eur > 0`, plus `n-1` continuous ramp variables when
+/// `c_ev_ramp_eur_kw > 0` — and the same for the battery. Those weights are
+/// **phase-2 only** (`build_phase2_weights`), and their defaults are non-zero:
+/// startup 0.01 EUR, ramp 0.005 EUR/kW. No fleet profile overrides them.
+///
+/// So phase 2 carries ~287 extra binaries per storage asset in order to express a
+/// 0.01 EUR anti-chatter preference, on top of a hard cost cap — and phase 2 is
+/// precisely the half that never proves optimality (its friction is non-monotone in
+/// epsilon, which is only possible for suboptimal incumbents).
+///
+/// This measures phase-2 time against those terms. **The behavioural columns are the
+/// point**: startup costs exist to stop the EV and battery chattering, so a faster
+/// phase 2 is only acceptable if EV/battery switching does not grow. Changing the
+/// character of VEN behaviour is not on the table.
+///
+///   bash scripts/run_planner_experiment.sh bench_phase2_startup_binaries 2
+#[test]
+#[ignore = "R-97: 4 heater-sized two-phase solves, run with --ignored --nocapture"]
+fn bench_phase2_startup_binaries() {
+    println!("\n── R-97: phase-2 cost of the EV/battery startup+ramp binaries ──");
+    println!("   (ven-3 tank, gap 0.06, epsilon 1.00, diurnal prices, 288 slots)\n");
+    println!(
+        "  {:>30} {:>9} {:>11} {:>10} {:>10} {:>10}  p2 status",
+        "variant", "p2 s", "friction", "heat sw", "ev sw", "bat sw"
+    );
+    for (label, startup, ramp) in [
+        ("defaults (0.01 / 0.005)", 0.01, 0.005),
+        ("startup 0, ramp kept", 0.0, 0.005),
+        ("startup kept, ramp 0", 0.01, 0.0),
+        ("both 0 (no delta vars)", 0.0, 0.0),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        profile.planner.phase2_epsilon_eur = 1.00;
+        profile.planner.c_ev_startup_eur = startup;
+        profile.planner.c_bat_startup_eur = startup;
+        profile.planner.c_ev_ramp_eur_kw = ramp;
+        profile.planner.c_bat_ramp_eur_kw = ramp;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = 47.82;
+            }
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, 47.82);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+
+        let t = Instant::now();
+        let r = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            profile.planner.phase2_epsilon_eur,
+            &p1,
+            &ctxs,
+            60.0,
+        );
+        let p2_s = t.elapsed().as_secs_f64();
+        let (p2, friction, status) = match r {
+            Ok((sol, f)) => {
+                let st = format!("{:?}", sol.status);
+                (sol, f, st)
+            }
+            Err(_) => {
+                println!("  {label:>30} {p2_s:>9.2}   phase 2 Err");
+                continue;
+            }
+        };
+        // Behaviour: how often each controllable asset starts/stops. These must not
+        // grow, or the anti-chatter purpose of the startup cost has been defeated.
+        let onoff = |v: &[f64]| {
+            (1..v.len())
+                .filter(|&i| (v[i] > 1e-6) != (v[i - 1] > 1e-6))
+                .count()
+        };
+        println!(
+            "  {label:>30} {p2_s:>9.2} {friction:>11.4} {:>10} {:>10} {:>10}  {status}",
+            (1..inputs.n)
+                .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                .count(),
+            onoff(&p2.p_ev_kw),
+            onoff(&p2.p_bat_ch_kw) + onoff(&p2.p_bat_dis_kw),
+        );
+        emit_result(&format!(
+            r#"{{"params":{{"c_startup_eur":{startup},"c_ramp_eur_kw":{ramp},"mip_gap":0.06,"epsilon":1.0,"slots":{},"volume_l":200,"band_k":15}},"results":{{"phase2_s":{p2_s:.3},"friction_eur":{friction:.4},"heat_switches":{},"ev_onoff":{},"bat_onoff":{},"p2_status":"{status}"}}}}"#,
+            inputs.n,
+            (1..inputs.n)
+                .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                .count(),
+            onoff(&p2.p_ev_kw),
+            onoff(&p2.p_bat_ch_kw) + onoff(&p2.p_bat_dis_kw),
+        ));
+    }
+    println!(
+        "\n  A faster phase 2 is only acceptable if ev sw and bat sw do NOT rise —\n  \
+         that is what the startup cost exists to prevent.\n"
+    );
+}
+
+/// R-97: solve cost across the fleet's real asset-mix classes.
+///
+/// Every bench so far has used one mix (EV + heater + PV + base load). The fleet
+/// actually has four classes, and the heaviest one has never been measured here:
+///
+///   heater + battery : ven-5, ven-14, ven-17   <- never tested; ven-5 was GB-40's worst (120 s)
+///   heater only      : ven-2, ven-3, ven-10, ven-12, ven-15, ven-18, ven-20
+///   battery only     : ven-1, ven-4, ven-6, ven-13, ven-16, ven-19
+///   neither          : ven-7, ven-8, ven-11
+///
+/// A battery adds its own direction binaries and SoC trajectory on top of the
+/// heater's tier integers, so this is where binary interaction should show up if it
+/// shows up anywhere. Battery parameters are ven-5's (11 kWh, 5.5 kW, eta 0.92,
+/// min_soc 0.10). Both phases timed separately.
+///
+///   bash scripts/run_planner_experiment.sh bench_asset_mix_solve_cost 2
+#[test]
+#[ignore = "R-97: 4 two-phase heater-sized solves, run with --ignored --nocapture"]
+fn bench_asset_mix_solve_cost() {
+    use crate::entities::asset_params::BatteryParams;
+    println!("\n── R-97: solve cost by fleet asset-mix class ──");
+    println!("   (gap 0.06, epsilon 1.00, 288 slots, ven-3 tank where a heater is present)\n");
+    println!(
+        "  {:>34} {:>9} {:>9} {:>12} {:>12}  statuses",
+        "class", "phase1 s", "phase2 s", "p1 status", "p2 status"
+    );
+    for (label, heater, battery) in [
+        ("heater + battery (ven-5/14/17)", true, true),
+        ("heater only (ven-2/3/...)", true, false),
+        ("battery only (ven-1/4/...)", false, true),
+        ("neither (ven-7/8/11)", false, false),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, heater);
+        profile.planner.mip_gap_target = 0.06;
+        profile.planner.phase2_epsilon_eur = 1.00;
+        if heater {
+            let thermal_mass = 200.0 * 4.186 / 3600.0;
+            for a in profile.assets.iter_mut() {
+                if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                    h.thermal_mass_kwh_per_c = thermal_mass;
+                    h.temp_min_c = 45.0;
+                    h.temp_max_c = 60.0;
+                    h.temp_safety_max_c = 60.0;
+                    h.temp_initial_c = 47.82;
+                }
+            }
+        }
+        if battery {
+            // ven-5's battery.
+            profile
+                .assets
+                .push(crate::entities::asset_params::AssetParams::Battery(
+                    BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 11.0,
+                        max_charge_kw: 5.5,
+                        max_discharge_kw: 5.5,
+                        initial_soc: 0.50,
+                        round_trip_efficiency: 0.92,
+                        min_soc: 0.10,
+                        c_terminal_eur_kwh: None,
+                    },
+                ));
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        if heater {
+            set_heater_temp(&mut sim, 47.82);
+            set_heater_power(&mut sim, 6.0);
+        }
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &profile.planner);
+
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1_s = t.elapsed().as_secs_f64();
+        let t = Instant::now();
+        let r = solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            1.00,
+            &p1,
+            &ctxs,
+            60.0,
+        );
+        let p2_s = t.elapsed().as_secs_f64();
+        let p2_status = match &r {
+            Ok((sol, _)) => format!("{:?}", sol.status),
+            Err(_) => "Err".to_string(),
+        };
+        println!(
+            "  {label:>34} {p1_s:>9.2} {p2_s:>9.2} {:>12?} {p2_status:>12}",
+            p1.status
+        );
+        emit_result(&format!(
+            r#"{{"params":{{"class":"{label}","heater":{heater},"battery":{battery},"mip_gap":0.06,"epsilon":1.0,"slots":{}}},"results":{{"phase1_s":{p1_s:.3},"phase2_s":{p2_s:.3},"p1_status":"{:?}","p2_status":"{p2_status}"}}}}"#,
+            inputs.n, p1.status
+        ));
+    }
+    println!(
+        "\n  Live GB-40 reference: ven-5 (heater+battery) was its worst at 120 s.\n  \
+         If heater+battery is far worse here too, binary interaction is real and the\n  \
+         fleet's hard cases are the three VENs with both.\n"
+    );
+}
