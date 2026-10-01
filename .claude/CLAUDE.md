@@ -62,7 +62,13 @@ heavy test builds there compete with and can slow down live services. Use Node1 
 Node2 is unavailable/locked, or when a test specifically needs Node1 (e.g. verifying
 something against the real production stack).
 
-local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Node1 docker stack.
+local-rust: WSL is installed on this Windows machine. Use WSL for local Rust compilation
+instead of native Windows cargo, which lacks cmake/HiGHS. Always go through a **login**
+shell, because `cargo` lives in `~/.cargo/bin` and only a login shell puts it on PATH:
+  wsl bash -lc "cd /mnt/c/DriveD/Tinker/OpenAdr-Lab/VEN && cargo check --tests -j 2"
+Bare `wsl cargo check` fails with `cargo: command not found` on one line of stderr — which
+hides behind any `| grep` of the compiler output, and `echo $?` then reports grep's status,
+not cargo's. Capture output, check the real exit code, then filter. For a full test run including HiGHS, use the Node1 docker stack.
 
 memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed the host
 (pagefile exhaustion, "Catastrophic failure Wsl/Service/E_UNEXPECTED"). Before starting
@@ -162,7 +168,7 @@ lines), and E2E tests green on Node1.
 
 testing: full guide at docs/guidelines/TESTING.md. Four suites:
   1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
-  2. Rust unit+integration — wsl cargo test -p ven-app  (local, no HiGHS needed for most)
+  2. Rust unit+integration — wsl bash -lc "cd <VEN> && cargo test -p ven-app"  (local, no HiGHS needed for most)
   3. E2E BDD (Node1)         — bash run_all_tests.sh --e2e  (behave)
   4. Resilience (Node1)      — bash run_all_tests.sh --resilience
 Run everything: bash run_all_tests.sh
@@ -186,12 +192,12 @@ For JS/TS (VEN/ui, VTN/ui): eslint must report zero errors. Suppress clippy lint
 keep domain and application layer tests meaningful.
 
 build:
-  local VEN Rust : wsl cargo build  (or wsl cargo check for fast syntax check)
+  local VEN Rust : wsl bash -lc "cd <VEN> && cargo build"  (or cargo check for fast syntax check)
   local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
   Node1 docker     : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build"
   Node1 single svc : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build ven"
   Node2 docker     : ssh Node2 "cd /srv/docker/openadr_lab && docker compose build"
-  Always use wsl for Rust compilation — native Windows cargo lacks cmake/HiGHS.
+  Always use wsl (via bash -lc) for Rust compilation — native Windows cargo lacks cmake/HiGHS.
   CI: .github/workflows/ holds three workflows — pre-pr-checks-splittasks.yml
   (fmt/clippy/audit/DCO on PR), file_size_audit-splittasks.yml (scripts/audit_file_sizes.py
   on push/PR), e2e-tests.yml (manual dispatch only). Still run linting + tests manually
