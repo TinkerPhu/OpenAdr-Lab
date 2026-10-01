@@ -214,3 +214,192 @@ mod tests {
         assert_eq!(p.plan_zones[0].slots, 288);
     }
 }
+
+/// GB-54 — when the next periodic replan is due.
+///
+/// Two properties, both of which the previous `sleep(replan_interval_s)` after
+/// each cycle lacked:
+///
+/// 1. **The period is the interval, not the interval plus the solve.** Sleeping
+///    *after* a cycle makes a VEN's real period `replan_interval_s + solve_time`,
+///    so a VEN whose solve takes 34 s runs on ~334 s. Measured on ven-17:
+///    completions 329 s, 376 s and 339 s apart against a nominal 300 s. Different
+///    VENs therefore drift at different rates, wander into each other, and — once
+///    collided, because collided VENs are all slowed equally and keep their
+///    offset — stay collided. On a 4-core host with 17 VENs that burst is what
+///    produces `TimeLimit` terminations, not model difficulty: fleet solver
+///    wall-time is only ~17 % of the host's core-seconds, yet six solves once
+///    landed inside one 90 s window. Anchoring to a grid of absolute time keeps
+///    the period at exactly `replan_interval_s` however long a cycle takes.
+///
+/// 2. **A per-VEN phase, so the grid does not put everyone in lockstep.** A
+///    shared absolute grid alone would be strictly worse than the status quo —
+///    every VEN would fire on the same instant. `replan_phase_offset_s` spreads
+///    them, and being derived from the VEN's name rather than from start-up time
+///    is the whole point: a restart must not re-align the fleet. Recreating eight
+///    containers in a tight loop is exactly how GB-54 was found.
+///
+/// A cycle that overruns a whole interval **skips** to the next grid point rather
+/// than firing immediately: a VEN that is already too slow is the last one that
+/// should be asked to replan back-to-back.
+pub fn next_replan_at(
+    now: chrono::DateTime<chrono::Utc>,
+    replan_interval_s: u64,
+    replan_phase_offset_s: u64,
+) -> chrono::DateTime<chrono::Utc> {
+    let interval = replan_interval_s.max(1) as i64;
+    let offset = (replan_phase_offset_s as i64).rem_euclid(interval);
+    let now_s = now.timestamp();
+    // Grid points are `k * interval + offset`; take the first strictly after now
+    // so a cycle finishing exactly on a grid point waits a full interval rather
+    // than re-firing instantly.
+    let k = (now_s - offset).div_euclid(interval) + 1;
+    chrono::DateTime::from_timestamp(k * interval + offset, 0).unwrap_or(now)
+}
+
+/// GB-54 — this VEN's stable phase within the replan grid, in seconds.
+///
+/// Derived from the VEN's name with FNV-1a so it is identical on every start of
+/// every build: an offset that moved on restart would re-shuffle the fleet
+/// exactly when a deploy has just restarted all of it. FNV is spelled out rather
+/// than taken from `DefaultHasher`, whose values Rust does not promise to keep
+/// stable across versions.
+pub fn replan_phase_offset_s(ven_name: &str, replan_interval_s: u64) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in ven_name.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h % replan_interval_s.max(1)
+}
+
+#[cfg(test)]
+mod replan_schedule_tests {
+    use super::*;
+    use chrono::{DateTime, TimeZone, Utc};
+
+    fn at(epoch_s: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(epoch_s, 0).unwrap()
+    }
+
+    const INTERVAL: i64 = 300;
+    const OFFSET: i64 = 47;
+
+    /// A point on this VEN's replan grid, `k` steps from the epoch.
+    ///
+    /// These tests state their expectations through this helper rather than
+    /// through hand-written epoch constants. The first version of them did the
+    /// arithmetic by hand and encoded a false premise — that 1_000_000 lies on a
+    /// 300 s grid, when 1_000_000 / 300 = 3333.33 — so four of them failed
+    /// against a `next_replan_at` that was answering correctly. The properties
+    /// asserted below are unchanged; only the way the expected instants are
+    /// derived is, so that the test cannot disagree with the grid it is checking.
+    fn grid(k: i64) -> i64 {
+        k * INTERVAL + OFFSET
+    }
+
+    /// Is this instant on the grid at all?
+    fn on_grid(epoch_s: i64) -> bool {
+        (epoch_s - OFFSET).rem_euclid(INTERVAL) == 0
+    }
+
+    #[test]
+    fn next_replan_at_lands_on_the_grid_point_for_this_vens_phase() {
+        // From anywhere strictly inside a step, the answer is that step's end:
+        // on the grid, in the future, and at most one interval away.
+        for probe in [grid(3333) + 1, grid(3333) + 150, grid(3333) + INTERVAL - 1] {
+            let next = next_replan_at(at(probe), INTERVAL as u64, OFFSET as u64).timestamp();
+            assert!(on_grid(next), "{next} is not on the grid");
+            assert!(next > probe, "{next} must be after {probe}");
+            assert!(
+                next - probe <= INTERVAL,
+                "{next} is more than one interval after {probe}"
+            );
+            assert_eq!(next, grid(3334), "the next grid point after {probe}");
+        }
+    }
+
+    #[test]
+    fn next_replan_at_keeps_the_period_at_the_interval_however_long_a_cycle_took() {
+        // The drift GB-54 is about: whatever a cycle that woke on a grid point
+        // spends solving, the next replan is one interval after it WOKE, not one
+        // interval after it finished. Checked across a range of solve durations
+        // precisely because the old flat sleep was correct only at 0.
+        let woke = grid(3334);
+        for solve_s in [0, 1, 34, INTERVAL - 1] {
+            let next =
+                next_replan_at(at(woke + solve_s), INTERVAL as u64, OFFSET as u64).timestamp();
+            assert_eq!(
+                next - woke,
+                INTERVAL,
+                "a {solve_s}s solve must not stretch the period"
+            );
+        }
+    }
+
+    #[test]
+    fn next_replan_at_skips_rather_than_catches_up_after_an_overrun() {
+        // A cycle that ate more than a whole interval gets the NEXT grid point,
+        // not an immediate re-fire — the slowest VEN is the last one that should
+        // be asked to solve back-to-back.
+        let woke = grid(3334);
+        let finished = woke + 700; // 2.33 intervals
+        let next = next_replan_at(at(finished), INTERVAL as u64, OFFSET as u64).timestamp();
+        assert!(
+            next > finished,
+            "must be in the future, not a catch-up burst"
+        );
+        assert!(
+            next - finished <= INTERVAL,
+            "must not idle past one interval"
+        );
+        assert_eq!(
+            next,
+            grid(3337),
+            "the next grid point, skipping the missed ones"
+        );
+    }
+
+    #[test]
+    fn next_replan_at_on_an_exact_grid_point_waits_a_full_interval() {
+        let point = grid(3334);
+        assert_eq!(
+            next_replan_at(at(point), INTERVAL as u64, OFFSET as u64).timestamp(),
+            point + INTERVAL,
+            "landing exactly on a grid point must not re-fire instantly"
+        );
+    }
+
+    #[test]
+    fn replan_phase_offset_is_stable_for_a_name_and_inside_the_interval() {
+        for name in ["ven-1", "ven-19", "ven-20"] {
+            let a = replan_phase_offset_s(name, 300);
+            assert_eq!(a, replan_phase_offset_s(name, 300), "{name} must not move");
+            assert!(a < 300, "{name} offset {a} must be inside the interval");
+        }
+    }
+
+    #[test]
+    fn replan_phase_offset_spreads_the_fleet_across_the_interval() {
+        // The property that matters: 20 VENs must not cluster. With 20 names in a
+        // 300 s grid, require them to occupy at least 4 of 6 fifty-second buckets
+        // — a weak bound that a constant or near-constant hash would fail.
+        let mut buckets = [0_usize; 6];
+        for i in 1..=20 {
+            buckets[(replan_phase_offset_s(&format!("ven-{i}"), 300) / 50) as usize] += 1;
+        }
+        let used = buckets.iter().filter(|&&c| c > 0).count();
+        assert!(
+            used >= 4,
+            "offsets cluster into {used} of 6 buckets: {buckets:?}"
+        );
+    }
+
+    #[test]
+    fn a_zero_interval_cannot_panic_or_divide_by_zero() {
+        // Defensive: validate.rs rejects 0, but these are pure functions that
+        // must not be a panic site if that ever changes.
+        assert_eq!(replan_phase_offset_s("ven-1", 0), 0);
+        assert!(next_replan_at(at(1_000_000), 0, 0).timestamp() > 1_000_000);
+    }
+}
