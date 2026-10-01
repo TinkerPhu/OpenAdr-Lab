@@ -2176,3 +2176,231 @@ fn bench_asset_mix_solve_cost() {
          fleet's hard cases are the three VENs with both.\n"
     );
 }
+
+/// R-97: the minimum epsilon that buys smoothing, per asset-mix class.
+///
+/// Two open questions from the asset-mix result:
+///   1. Can phase 2 succeed at **any** epsilon on heater+battery, or is
+///      `phase2_epsilon_eur = 0.0` (disable) the only honest setting for
+///      ven-5/14/17? Production shows `NoSolutionFound` at the 0.02 default on
+///      every cycle.
+///   2. For heater-only VENs, what is the *minimum* epsilon that actually moves the
+///      schedule? ven-2 runs 1.00 and works, but that value was chosen as "2x the
+///      effective switching cost", not measured. Recommending it elsewhere by
+///      analogy is a guess; a tighter working value gives the solver less cost
+///      slack to spend, which is strictly better for plan cost.
+///
+/// Phase 1 does not depend on epsilon, so it is solved once per class and reused
+/// across the sweep.
+///
+///   bash scripts/run_planner_experiment.sh bench_min_epsilon_by_class 2
+#[test]
+#[ignore = "R-97: 2 phase-1 + 16 phase-2 solves, run with --ignored --nocapture"]
+fn bench_min_epsilon_by_class() {
+    use crate::entities::asset_params::BatteryParams;
+    const P2_BUDGET_S: f64 = 30.0;
+    println!("\n── R-97: minimum working epsilon by asset-mix class ──");
+    println!("   (gap 0.06, 288 slots, ven-3 tank, phase-2 budget {P2_BUDGET_S:.0} s)\n");
+    for (class, battery) in [("heater only", false), ("heater + battery", true)] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = 47.82;
+            }
+        }
+        if battery {
+            profile
+                .assets
+                .push(crate::entities::asset_params::AssetParams::Battery(
+                    BatteryParams {
+                        id: "battery".into(),
+                        capacity_kwh: 11.0,
+                        max_charge_kw: 5.5,
+                        max_discharge_kw: 5.5,
+                        initial_soc: 0.50,
+                        round_trip_efficiency: 0.92,
+                        min_soc: 0.10,
+                        c_terminal_eur_kwh: None,
+                    },
+                ));
+        }
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, 47.82);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        // Phase 1 is independent of epsilon — solve once, reuse across the sweep.
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1_switches = (1..inputs.n)
+            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .count();
+        println!(
+            "  == {class}: phase 1 {:?}, {p1_switches} heater switches\n",
+            p1.status
+        );
+        println!(
+            "  {:>9} {:>9} {:>10} {:>12} {:>11}  p2 status",
+            "epsilon", "p2 s", "heat moved", "heat switches", "friction"
+        );
+        for epsilon in [0.02, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0] {
+            let mut pr = profile.clone();
+            pr.planner.phase2_epsilon_eur = epsilon;
+            let p2w = build_phase2_weights(&inputs, &pr.planner);
+            let t = Instant::now();
+            let r = solve_phase2(
+                &inputs,
+                &p1w,
+                &p2w,
+                p1.objective_eur,
+                epsilon,
+                &p1,
+                &ctxs,
+                P2_BUDGET_S,
+            );
+            let secs = t.elapsed().as_secs_f64();
+            match r {
+                Ok((p2, friction)) => {
+                    let moved = (0..inputs.n)
+                        .filter(|&i| (p1.y_heat[i] - p2.y_heat[i]).abs() > 1e-6)
+                        .count();
+                    let sw = (1..inputs.n)
+                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .count();
+                    println!(
+                        "  {epsilon:>9.2} {secs:>9.2} {moved:>10} {sw:>12} {friction:>11.4}  {:?}",
+                        p2.status
+                    );
+                    emit_result(&format!(
+                        r#"{{"params":{{"class":"{class}","battery":{battery},"epsilon":{epsilon},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"phase2_s":{secs:.3},"heat_slots_moved":{moved},"heat_switches":{sw},"p1_heat_switches":{p1_switches},"friction_eur":{friction:.4},"p2_status":"{:?}"}}}}"#,
+                        inputs.n, p2.status
+                    ));
+                }
+                Err(e) => {
+                    let msg = format!("{e}");
+                    let short = msg
+                        .split(':')
+                        .next_back()
+                        .unwrap_or("Err")
+                        .trim()
+                        .to_string();
+                    println!(
+                        "  {epsilon:>9.2} {secs:>9.2} {:>10} {:>12} {:>11}  Err: {short}",
+                        "-", "-", "-"
+                    );
+                    emit_result(&format!(
+                        r#"{{"params":{{"class":"{class}","battery":{battery},"epsilon":{epsilon},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"phase2_s":{secs:.3},"p2_status":"Err","error":"{short}"}}}}"#,
+                        inputs.n
+                    ));
+                }
+            }
+        }
+        println!();
+    }
+    println!(
+        "  'heat moved' is slots differing from phase 1 — zero means phase 2 achieved\n  \
+         nothing. The lowest epsilon with a non-zero count is the minimum working value;\n  \
+         if heater+battery has none, 0.0 (disable) is the only honest setting there.\n"
+    );
+}
+
+/// R-97 **bug**: the phase-2 warm start is infeasible whenever the battery discharges.
+///
+/// `u_bat` is the battery's *direction selector*, not an activity flag
+/// (`battery_milp.rs`):
+///
+/// ```text
+/// p_ch[t]  <= ch_max  * u_bat[t]          u_bat = 1 -> charging allowed
+/// p_dis[t] <= dis_max * (1 - u_bat[t])    u_bat = 1 -> discharging forced to 0
+/// ```
+///
+/// but `build_phase2_warm_start` sets it from an *activity* test:
+///
+/// ```text
+/// let active = if p_ch > 0 || p_dis > 0 { 1.0 } else { 0.0 };
+/// iv.push((v.u_bat[t], active));
+/// ```
+///
+/// So in every slot where phase 1 discharges the battery, the warm start asserts
+/// `u_bat = 1` alongside `p_dis > 0`, violating `p_dis <= dis_max * (1 - u_bat) = 0`.
+/// The start phase 2 is handed is therefore infeasible, and it must find a solution
+/// from scratch — which it manages on an easy instance (battery-only converges) and
+/// fails on a hard one. That is exactly the production symptom: ven-5, ven-14 and
+/// ven-17 (the three heater+battery VENs) log `NoSolutionFound` on essentially every
+/// cycle, 29-33 times per 3 h, while ven-11 never does.
+///
+/// `z_active` is a genuine activity flag (`p_ch + p_dis <= big_m * z_active`), so its
+/// warm-start value is correct and must stay as it is.
+#[test]
+fn phase2_warm_start_respects_the_battery_direction_selector() {
+    use crate::entities::asset_params::BatteryParams;
+    let now = fixed_now();
+    let mut profile = ev_bench_profile_with_heater(true, 20.0, false);
+    // Small grid: this is a correctness test, not a benchmark.
+    profile.planner.plan_zones = vec![crate::entities::plan::PlanZone {
+        step_s: 900,
+        slots: 16,
+    }];
+    profile
+        .assets
+        .push(crate::entities::asset_params::AssetParams::Battery(
+            BatteryParams {
+                id: "battery".into(),
+                capacity_kwh: 11.0,
+                max_charge_kw: 5.5,
+                max_discharge_kw: 5.5,
+                initial_soc: 0.90, // nearly full, so discharging is attractive
+                round_trip_efficiency: 0.92,
+                min_soc: 0.10,
+                c_terminal_eur_kwh: Some(0.0), // no terminal reward, so it will discharge
+            },
+        ));
+    let sim = make_snap_from_profile(&profile);
+    // Expensive import makes discharging the cheap option.
+    let tariffs = make_tariffs(0.60, 0.08, 300.0);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+
+    let discharging: Vec<usize> = (0..inputs.n)
+        .filter(|&t| p1.p_bat_dis_kw[t] > 1e-6)
+        .collect();
+    assert!(
+        !discharging.is_empty(),
+        "this test needs phase 1 to discharge the battery; it did not, so the fixture \
+         no longer exercises the bug. p_bat_dis_kw = {:?}",
+        p1.p_bat_dis_kw
+    );
+
+    // Rebuild phase 2's variable pool exactly as solve_phase2 does, then inspect the
+    // warm start it would be given.
+    let (iv, u_bat) =
+        crate::controller::milp_planner::solver_phase2::warm_start_for_test(&inputs, &p1, &ctxs);
+    let lookup: std::collections::HashMap<_, _> = iv.into_iter().collect();
+    for t in discharging {
+        let v = lookup
+            .get(&u_bat[t])
+            .copied()
+            .unwrap_or_else(|| panic!("u_bat[{t}] missing from the warm start"));
+        assert!(
+            v < 0.5,
+            "slot {t}: phase 1 discharges at {:.3} kW, so the warm start must set the \
+             direction selector u_bat to 0 (discharge). It is {v}, which asserts \
+             'charging' and makes p_dis <= dis_max * (1 - 1) = 0 infeasible — the start \
+             phase 2 is handed cannot be used, and on a heater+battery instance it then \
+             reports NoSolutionFound (R-97).",
+            p1.p_bat_dis_kw[t]
+        );
+    }
+}

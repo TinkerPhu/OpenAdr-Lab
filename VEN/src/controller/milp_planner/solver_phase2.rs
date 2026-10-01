@@ -64,12 +64,26 @@ pub(crate) fn build_phase2_warm_start(
         for t in 0..n {
             iv.push((v.p_ch[t], p1.p_bat_ch_kw[t].max(0.0)));
             iv.push((v.p_dis[t], p1.p_bat_dis_kw[t].max(0.0)));
+            // R-97: `u_bat` is the battery's *direction selector*, not an activity
+            // flag — `p_ch <= ch_max * u_bat` and `p_dis <= dis_max * (1 - u_bat)`
+            // (`battery_milp.rs`). Seeding it from an activity test asserted
+            // "charging" in every discharging slot, which makes
+            // `p_dis <= dis_max * (1 - 1) = 0` contradict the warm start's own
+            // `p_dis > 0`. Phase 2 was therefore handed an infeasible start and had
+            // to solve from scratch: survivable on an easy instance, and on
+            // heater+battery it returned `NoSolutionFound` on essentially every
+            // cycle (ven-5/ven-14/ven-17, 29-33 failures per 3 h in production).
+            // Idle slots may take either value; 0 is chosen so an idle battery is
+            // not nudged toward charging.
+            let charging = if p1.p_bat_ch_kw[t] > 1e-6 { 1.0 } else { 0.0 };
+            iv.push((v.u_bat[t], charging));
+            // `z_active` genuinely is an activity flag
+            // (`p_ch + p_dis <= big_m * z_active`), so it keeps the activity value.
             let active = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 {
                 1.0
             } else {
                 0.0
             };
-            iv.push((v.u_bat[t], active));
             if let Some(&za) = v.z_active.get(t) {
                 iv.push((za, active));
             }
@@ -441,4 +455,60 @@ pub(crate) fn solve_milp_two_phase(
     };
 
     Ok((winning_sol, c_star, friction_eur, marginal_cost_eur_per_kwh))
+}
+
+/// R-97 test seam: build phase 2's variable pool and warm start exactly as
+/// `solve_phase2` does, and hand back the battery's `u_bat` handles so a test can
+/// check what value the warm start assigns them. Exists because an infeasible warm
+/// start is invisible from the outside — it shows up only as `NoSolutionFound` on
+/// instances hard enough that phase 2 cannot recover by solving from scratch.
+#[cfg(test)]
+pub(crate) fn warm_start_for_test(
+    inputs: &MilpInputs,
+    p1: &SolveOutput,
+    asset_contexts: &[Box<dyn AssetMilpContext>],
+) -> (Vec<(Variable, f64)>, Vec<Variable>) {
+    let n = inputs.n;
+    let mut vars = variables!();
+    let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
+    let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let mut pool = MilpVarPool {
+        grid: GridMilpVars {
+            p_imp: p_imp.clone(),
+            p_exp: p_exp.clone(),
+            u_grid: u_grid.clone(),
+            s_imp_viol: s_imp_viol.clone(),
+            s_exp_viol: s_exp_viol.clone(),
+            p_pv_used,
+        },
+        bat: None,
+        ev: None,
+        heater: None,
+        shiftable: Vec::new(),
+    };
+    // Same non-zero startup/ramp costs phase 2 uses, so the same aux vars exist.
+    for ctx in asset_contexts {
+        ctx.declare_vars_into_pool(n, 0.01, 0.005, &mut vars, &mut pool);
+    }
+    let u_bat = pool
+        .bat
+        .as_ref()
+        .map(|b| b.u_bat.clone())
+        .unwrap_or_default();
+    let iv = build_phase2_warm_start(
+        inputs,
+        p1,
+        &p_imp,
+        &p_exp,
+        &u_grid,
+        &s_imp_viol,
+        &s_exp_viol,
+        &pool,
+        n,
+    );
+    (iv, u_bat)
 }
