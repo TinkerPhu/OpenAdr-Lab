@@ -403,3 +403,102 @@ which are already at 4 s and would pay the ~6 % horizon-objective cost for nothi
 40 K roughly halving phase 1 and cutting switching 53 -> 14. ven-5 runs 45-65 C on 150 L; if that
 installation can take a wider band or a larger tank, it addresses the cause rather than loosening
 the optimality tolerance. That is a hardware question, recorded here rather than acted on.
+
+## Fleet-wide phase survey: it is the count of co-scheduled storage assets (2026-10-01)
+
+Measured in production on all 20 VENs' own containers, 4 consecutive periodic solves each,
+commit `a51f7a13`. Rebuilding the asset map **from the profiles themselves** rather than from
+earlier notes was the point of the exercise, and it found the notes wrong: ven-19 was recorded
+as battery-only but carries battery + EV + PV, ven-1/13/16 as battery-only but all carry an EV,
+and ven-7 as assetless but carries an EV. Several earlier class comparisons rested on that map.
+
+| VEN | assets | phase 1 median | phase 2 median | phase 2 status |
+|---|---|---|---|---|
+| ven-11 | EV | **0.07 s** | 0.23 s | GapLimit |
+| ven-9 | EV + `penalty_rules` | **0.18 s** | 0.80 s | GapLimit |
+| ven-4 | battery, PV | **0.58 s** | 4.6 s | GapLimit |
+| ven-6 | battery, PV | **0.57 s** | 6.8 s | GapLimit / Optimal |
+| ven-1 | battery, EV, PV | **0.78 s** | **15.6 s** | **TimeLimit** |
+| ven-16 | battery, EV | **1.3 s** | **15.2 s** | **TimeLimit** |
+| ven-13 | battery, EV | **2.4 s** | **15.1 s** | **TimeLimit** |
+| ven-19 | battery, EV, PV | **12.6 s** | **15.2 s** | **TimeLimit** |
+| ven-17 | battery, heater, PV | 4.2 s | — | — |
+| ven-14 | battery, heater | 4.2 s | — | — |
+| ven-5 | battery, EV, heater, PV | 18.8 s | — | — |
+
+**Phase 1 scales with how many storage assets must be co-scheduled**, not with which ones:
+
+| storage assets | phase 1 |
+|---|---|
+| EV alone | 0.07 s |
+| battery alone | ~0.6 s |
+| battery + EV | 0.8-12.6 s |
+| battery + heater | 4.2 s |
+| battery + EV + heater | 18.8 s |
+
+Each storage asset adds a corridor the solver must thread, and they interact only through the
+shared import/export balance — so the difficulty compounds rather than adds. This **subsumes**
+the tank-slack result rather than replacing it: slack is a real driver *within* the heater
+class (monotone across 3 bench repeats, and across ven-5/14/17 in production), but across
+classes the asset count dominates. ven-5 being the fleet's **only** three-storage-asset VEN is
+the structural half of why it is slowest; its 150 L tank is the rest.
+
+It also settles the question the previous section left open. "The battery's marginal
+contribution on top of low slack is not established" — it now is, from the other direction:
+ven-19 (battery + EV, **no heater**) runs 12.6 s, three times ven-14/17's heater+battery 4.2 s.
+Heaters are not what makes this model hard.
+
+### Phase 2 fails to converge on exactly one class: battery + EV
+
+All four battery+EV VENs hit the 15 s `phase2_solver_timeout_s` on every sampled solve. Every
+other class converges — EV-only in under a second, battery-only in 4-7 s. The pairing is what
+phase 2 cannot close, and it is insensitive to phase 1's own difficulty: ven-1 solves phase 1 in
+0.78 s and still burns the full phase-2 budget.
+
+That makes this the fleet's **dominant** solver cost: 4 VENs x 15 s every 5 minutes, spent
+reaching a time limit rather than an answer. Read together with "Does phase 2's smoothing reach
+the relay? Mostly no" above — which found the first-25-minutes dispatch changed in 2 of 6
+instances, all real gains landing in hours 4-48 — this is 60 s/cycle of fleet compute for an
+effect that mostly does not reach hardware. The executed-window check has **not** been run on
+the battery+EV class specifically, so this is the next measurement, not yet a conclusion.
+
+### `penalty_rules` are not a solve-time risk (closes the ven-9 open item)
+
+ven-9 is the only VEN carrying `penalty_rules`, and ven-11 is its exact control: both are
+EV + base_load on the same host and grid, differing only in the rule. The 48 h horizon at
+1800 s windows gives 96 windows, so the rule adds **96 continuous slack variables and 288
+constraints — and no binaries** (`penalty.rs::declare_penalty_vars` adds `variable().min(0.0)`).
+
+Measured cost: phase 1 0.07 -> 0.18 s, phase 2 0.23 -> 0.80 s, roughly 2.5-3x both phases on a
+base so small the total stays near 1 s. The factor is real and structurally explained — the
+window constraints couple every import slot within each 30 min bucket, which is LP work repeated
+at every branch-and-bound node — but there is no combinatorial blow-up, because nothing branches.
+
+**Separate observation, not a solver issue.** ven-9's threshold is 0.3 kW while its base load is
+a flat 0.5 kW, and it has neither PV nor battery, so `p_imp >= 0.5` in every slot and the slack
+is pinned at `>= 0.2 kW` in all 96 windows: ~19.2 EUR of the reported ~50 EUR objective is a
+constant the plan can never avoid. The rule still steers the part that matters (11 kW of EV
+charging on top of it), but its floor means `objective_eur` for ven-9 is not comparable with any
+other VEN's, and phase 2's epsilon — an **absolute** 0.02 EUR cap — is a 0.04 % tolerance against
+a `c_star` that size. Worth knowing before reading ven-9 cost numbers or tuning its epsilon.
+
+### Refuted here
+
+- **Battery corridor width (capacity/power) does not predict difficulty.** The fleet is
+  near-uniformly 2.0 h of storage (ven-1 10/5, ven-6 9/4.5, ven-13 10/5, ven-16 8/4, ven-5
+  11/5.5, ven-14 7/3.5, ven-17 12/6); the only exceptions are ven-4 at 2.7 h and ven-19 at
+  2.29 h. ven-4 is the fastest battery VEN and ven-19 the slowest, so the ratio orders them
+  backwards. The thermal-slack analogy does **not** carry over to the electrochemical corridor.
+- **PV is not the discriminator.** ven-1 carries battery + EV + PV and solves phase 1 in 0.78 s,
+  against ven-19's 12.6 s with the same three. Export/curtailment decisions are not the cost.
+
+### Open
+
+**ven-19 is a 10x outlier inside its own class** (12.6 s vs 0.78-2.4 s for ven-1/13/16) and
+nothing structural explains it yet. Its distinguishing features are the fleet's largest battery
+(16 kWh / 7 kW) and the only `round_trip_efficiency` of 0.93 rather than 0.92. The efficiency is
+the more suspicious of the two: round-trip loss sets the price spread at which arbitrage breaks
+even, and an efficiency that puts break-even near the actual tariff spread leaves many
+near-optimal schedules and a weak LP bound — which would also explain the chaotic epsilon
+sensitivity recorded above. Untested; a bench sweeping only `round_trip_efficiency` on one
+battery+EV instance would settle it.
