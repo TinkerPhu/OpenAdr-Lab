@@ -1221,8 +1221,8 @@ fn bench_phase1_flat_vs_priced_far_horizon() {
 fn bench_phase1_count_vs_duration() {
     println!("\n── R-97: is it the slot count or the horizon duration? ──\n");
     println!(
-        "  {:>34} {:>7} {:>7} {:>10} {:>14}  status",
-        "grid", "slots", "hours", "phase1 s", "objective EUR"
+        "  {:>34} {:>8} {:>6} {:>6} {:>10} {:>13}  status",
+        "grid", "mip_gap", "slots", "hours", "phase1 s", "objective"
     );
     let z = |step_s: u64, slots: usize| crate::entities::plan::PlanZone { step_s, slots };
     for (label, zones) in [
@@ -1234,31 +1234,41 @@ fn bench_phase1_count_vs_duration() {
             vec![z(300, 96), z(600, 96), z(900, 96)],
         ),
     ] {
-        let now = fixed_now();
-        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
-        let n: usize = zones.iter().map(|x| x.slots).sum();
-        let hours: f64 = zones
-            .iter()
-            .map(|x| x.slots as f64 * x.step_s as f64 / 3600.0)
-            .sum();
-        profile.planner.plan_zones = zones;
-        let mut sim = make_snap_from_profile(&profile);
-        set_heater_power(&mut sim, 6.0);
-        let tariffs = make_diurnal_tariffs(50);
-        let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        println!(
-            "  {label:>34} {n:>7} {hours:>7.0} {:>10.2} {:>14.4}  {:?}",
-            t.elapsed().as_secs_f64(),
-            p1.objective_eur,
-            p1.status
-        );
+        // Both gaps. The first run of this bench used the 0.02 default while every
+        // heater VEN in the fleet runs 0.06, and the two differ enough to have
+        // turned a grid that solves in ~5 s at production settings into a reported
+        // "60 s cliff". Sweeping both keeps that confound visible in the log.
+        for mip_gap in [0.02, 0.06] {
+            let now = fixed_now();
+            let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+            profile.planner.mip_gap_target = mip_gap;
+            let n: usize = zones.iter().map(|x| x.slots).sum();
+            let hours: f64 = zones
+                .iter()
+                .map(|x| x.slots as f64 * x.step_s as f64 / 3600.0)
+                .sum();
+            profile.planner.plan_zones = zones.clone();
+            let mut sim = make_snap_from_profile(&profile);
+            set_heater_power(&mut sim, 6.0);
+            let tariffs = make_diurnal_tariffs(50);
+            let cap = no_capacity();
+            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let t = Instant::now();
+            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+            let secs = t.elapsed().as_secs_f64();
+            println!(
+                "  {label:>34} {mip_gap:>8.2} {n:>6} {hours:>6.0} {secs:>10.2} {:>13.4}  {:?}",
+                p1.objective_eur, p1.status
+            );
+            emit_result(&format!(
+                r#"{{"params":{{"grid":"{label}","slots":{n},"hours":{hours:.0},"mip_gap":{mip_gap},"volume_l":200,"band_k":15}},"results":{{"phase1_s":{secs:.3},"objective_eur":{:.4},"status":"{:?}"}}}}"#,
+                p1.objective_eur, p1.status
+            ));
+        }
     }
-    println!("\n  (all four fully priced, so pricing is held constant)\n");
+    println!("\n  (all fully priced; gap is the only other variable)\n");
 }
 
 /// R-97: does the 48 h horizon make the EXECUTED part of the plan worse?
@@ -1682,9 +1692,135 @@ fn bench_phase1_vs_tank_slack() {
             p1.objective_eur,
             p1.status
         );
+        emit_result(&format!(
+            r#"{{"params":{{"volume_l":{volume_l},"band_k":{},"slack_kwh":{slack_kwh:.2},"mip_gap":0.06,"slots":{},"hours":48}},"results":{{"phase1_s":{secs:.3},"switches":{switches},"status":"{:?}","objective_eur":{:.4}}}}}"#,
+            tmax - tmin,
+            inputs.n,
+            p1.status,
+            p1.objective_eur
+        ));
     }
     println!(
         "\n  If phase-1 time falls as slack rises, heater difficulty is a property of the\n  \
          installation, not of the formulation — and GB-40's per-VEN variance is explained.\n"
+    );
+}
+
+/// Print one experiment record for `scripts/run_planner_experiment.sh` to stamp and
+/// append to `experiments/results/planner/solve_cost.jsonl`. Keeping the emission in
+/// the benchmark means the log cannot drift from the code, which hand-copied prose
+/// tables always eventually do.
+fn emit_result(json_body: &str) {
+    println!("@@RESULT {json_body}");
+}
+
+/// R-97: can the 48 h horizon be kept while cutting phase-1 cost?
+///
+/// The 48 h span is a requirement — a receding-horizon controller needs lookahead
+/// past the window it optimises, or end-of-horizon effects distort the near term.
+/// But phase-1 cost tracks *duration*, and at a fixed 48 h span fewer slots helped
+/// (192 slots took 23 s against 288's 60 s). So coarsen the far zones: keep the
+/// executed near term at 5-minute resolution and spend fewer integer decisions on
+/// hours 8-48, where the plan is replaced long before it runs.
+///
+/// Run on a **slack-poor** heater (200 L / 15 K, ven-3's shape), because the
+/// tank-slack result says that is the hard case and the only one worth optimising.
+/// The executed-window columns guard the near term: if first-8 h cost or switching
+/// degrades, the coarsening is not free.
+///
+///   bash scripts/run_planner_experiment.sh bench_phase1_vs_zones
+#[test]
+#[ignore = "R-97: 4 heater-sized phase-1 solves, run with --ignored --nocapture"]
+fn bench_phase1_vs_zones() {
+    let z = |step_s: u64, slots: usize| crate::entities::plan::PlanZone { step_s, slots };
+    println!(
+        "
+── R-97: far-zone coarsening at a fixed 48 h span (slack-poor heater) ──
+"
+    );
+    println!(
+        "  {:>34} {:>6} {:>9} {:>11} {:>13} {:>12}  status",
+        "grid (all 48 h)", "slots", "phase1 s", "switches 8h", "first-8h EUR", "objective"
+    );
+    for (label, zones) in [
+        (
+            "96x300 + 96x600 + 96x900 (PROD)",
+            vec![z(300, 96), z(600, 96), z(900, 96)],
+        ),
+        (
+            "96x300 + 48x1200 + 24x3600",
+            vec![z(300, 96), z(1200, 48), z(3600, 24)],
+        ),
+        (
+            "96x300 + 24x2400 + 12x7200",
+            vec![z(300, 96), z(2400, 24), z(7200, 12)],
+        ),
+        (
+            "48x300 + 44x1200 + 28x3600",
+            vec![z(300, 48), z(1200, 44), z(3600, 28)],
+        ),
+    ] {
+        let now = fixed_now();
+        let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
+        profile.planner.mip_gap_target = 0.06;
+        // ven-3's tank: 200 L across 45-60 C, the slack-poor case.
+        let thermal_mass = 200.0 * 4.186 / 3600.0;
+        for a in profile.assets.iter_mut() {
+            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+                h.thermal_mass_kwh_per_c = thermal_mass;
+                h.temp_min_c = 45.0;
+                h.temp_max_c = 60.0;
+                h.temp_safety_max_c = 60.0;
+                h.temp_initial_c = 47.82;
+            }
+        }
+        let n: usize = zones.iter().map(|x| x.slots).sum();
+        let hours: f64 = zones
+            .iter()
+            .map(|x| x.slots as f64 * x.step_s as f64 / 3600.0)
+            .sum();
+        profile.planner.plan_zones = zones;
+        let mut sim = make_snap_from_profile(&profile);
+        set_heater_temp(&mut sim, 47.82);
+        set_heater_power(&mut sim, 6.0);
+        let tariffs = make_diurnal_tariffs(50);
+        let cap = no_capacity();
+        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let t = Instant::now();
+        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let secs = t.elapsed().as_secs_f64();
+
+        // Executed window: the part that runs before the next replan replaces it.
+        let mut cost_8h = 0.0;
+        let mut sw_8h = 0usize;
+        let mut elapsed = 0.0;
+        for i in 0..inputs.n {
+            if elapsed >= 8.0 {
+                break;
+            }
+            cost_8h += (inputs.c_imp_eur_kwh[i] * p1.p_imp_kw[i]
+                - inputs.c_exp_eur_kwh[i] * p1.p_exp_kw[i])
+                * inputs.dt_h[i];
+            if i > 0 && (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6 {
+                sw_8h += 1;
+            }
+            elapsed += inputs.dt_h[i];
+        }
+        println!(
+            "  {label:>34} {n:>6} {secs:>9.2} {sw_8h:>11} {cost_8h:>13.4} {:>12.4}  {:?}",
+            p1.objective_eur, p1.status
+        );
+        emit_result(&format!(
+            r#"{{"params":{{"grid":"{label}","slots":{n},"hours":{hours:.0},"mip_gap":0.06,"volume_l":200,"band_k":15}},"results":{{"phase1_s":{secs:.3},"switches_8h":{sw_8h},"first_8h_eur":{cost_8h:.4},"objective_eur":{:.4},"status":"{:?}"}}}}"#,
+            p1.objective_eur, p1.status
+        ));
+    }
+    println!(
+        "
+  first-8h EUR and switches 8h guard the executed window: coarsening the far
+           zones is only free if those hold while phase1 s falls.
+"
     );
 }
