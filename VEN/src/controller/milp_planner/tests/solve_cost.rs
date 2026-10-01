@@ -3074,7 +3074,7 @@ fn bench_battery_ev_phase2_executed_window() {
         .expect("phase 2 feasible");
         let p2_s = t1.elapsed().as_secs_f64();
 
-        let bat_net = |s: &crate::controller::milp_planner::types::MilpSolution, h: f64| -> f64 {
+        let bat_net = |s: &crate::controller::milp_planner::types::SolveOutput, h: f64| -> f64 {
             energy_within(&s.p_bat_ch_kw, &inputs.dt_h, inputs.n, h)
                 - energy_within(&s.p_bat_dis_kw, &inputs.dt_h, inputs.n, h)
         };
