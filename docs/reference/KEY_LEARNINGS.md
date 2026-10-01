@@ -2502,3 +2502,26 @@ The right answer survived anyway, for a different reason than the one given: the
 budget is sound because its value saturates in the window that executes, not because phase 2 is
 useless. A correct conclusion reached through a wrong mechanism is still worth re-deriving — the
 next decision built on that mechanism would not have survived.
+
+## Measuring solve time on a live fleet (R-97, 2026-10-01)
+
+- **A shared host makes wall-clock solve time a measurement of contention, not of the model.**
+  Comparing per-VEN solve times from production logs on Node2 (4 cores, 17 VENs, each solving
+  every 300 s) produced a clean-looking table in which phase-1 time rose with the number of
+  storage assets. Re-measuring the same VENs 40 minutes later at the same commit moved ven-14
+  from 4.2 s to 21-28 s and ven-5 from 18.8 s to 36-49 s — a bigger swing on one unchanged VEN
+  than any difference the table was built on. **Compare models on the bench (one solve at a time,
+  quiet machine); use production logs for status, success and throughput, and for within-VEN
+  before/after at the same hour.** The gap-0.30 canary was measured that way and stands.
+- **Check for average saturation and then don't trust it.** Fleet solver wall-time was ~17 % of
+  the host's core-seconds, which says "plenty of headroom" and is useless here: the solves arrive
+  in bursts. Six landed in one 90 s window. The instrument that matters for a periodic workload is
+  **peak concurrency**, not mean utilisation.
+- **A periodic task scheduled from completion rather than from a clock grid has a period that
+  depends on its own duration**, so a fleet of them drifts at per-member rates, and members that
+  collide are slowed together and therefore stay collided. Restarting several at once puts them in
+  phase permanently. Filed as GB-54.
+- **Doing housekeeping in a tight loop can be the cause of the next measurement.** Recreating
+  eight containers back-to-back (a cosmetic container-name cleanup) synchronised eight VENs and
+  produced the slow numbers above. Benign-looking maintenance on a live system is an intervention;
+  if a measurement follows it, say so.
