@@ -95,18 +95,30 @@ impl UserRequestService {
     }
 
     /// Create a user request for a shiftable load. No sim-asset lookup required.
-    // Not yet wired to a route — shiftable loads are created inline in routes/hems.rs.
-    #[allow(dead_code)]
+    ///
+    /// The single place a shiftable-load request is built and validated:
+    /// `POST /user-requests` used to construct the same pair inline, with its
+    /// own window-length check this function did not have — two answers to one
+    /// question, which is what the `Err` arms below now settle.
     pub fn create_shiftable(
         body: CreateUserRequestParams,
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, ShiftableLoad), String> {
-        let power = body.power_kw.unwrap();
-        let duration = body.duration_min.unwrap();
+        let power = body
+            .power_kw
+            .ok_or_else(|| "power_kw required for shiftable load".to_string())?;
+        let duration = body
+            .duration_min
+            .ok_or_else(|| "duration_min required for shiftable load".to_string())?;
         let earliest = body.earliest_start.unwrap_or(now);
         let latest = body
             .latest_end
             .ok_or_else(|| "latest_end required for shiftable load".to_string())?;
+        if latest - earliest < chrono::Duration::minutes(duration as i64) {
+            return Err(
+                "the [earliest_start, latest_end] window is too short for duration_min".to_string(),
+            );
+        }
 
         let mode = body.mode.clone().unwrap_or_default();
         let load = ShiftableLoad {
@@ -211,8 +223,6 @@ impl UserRequestService {
     }
 
     /// Determine which creation path to use based on the request body.
-    // Not yet wired to a route — shiftable detection is done inline in routes/hems.rs.
-    #[allow(dead_code)]
     pub fn is_shiftable(body: &CreateUserRequestParams) -> bool {
         body.power_kw.is_some() && body.duration_min.is_some()
     }
@@ -265,6 +275,66 @@ mod tests {
         assert!((req.target_energy_kwh - 2.0).abs() < 0.001); // 2kW * 60min / 60 = 2kWh
         assert_eq!(load.power_kw, 2.0);
         assert_eq!(load.duration_min, 60);
+    }
+
+    fn shiftable_body(duration_min: u32, window_h: i64) -> CreateUserRequestParams {
+        CreateUserRequestParams {
+            mode: Default::default(),
+            asset_id: "washing_machine".to_string(),
+            power_kw: Some(2.0),
+            duration_min: Some(duration_min),
+            earliest_start: Some(Utc::now()),
+            latest_end: Some(Utc::now() + chrono::Duration::hours(window_h)),
+            target_soc: None,
+            target_energy_kwh: None,
+            desired_power_kw: None,
+            deadlines: vec![],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            soft_deadline: None,
+            target_temp_c: None,
+        }
+    }
+
+    /// A 2 h run inside a 1 h window cannot be placed. The route used to check
+    /// this on its own while this function did not, so whichever caller came
+    /// second got a different answer to the same question.
+    #[test]
+    fn create_shiftable_rejects_a_window_shorter_than_the_run() {
+        let err = UserRequestService::create_shiftable(shiftable_body(120, 1), Utc::now())
+            .expect_err("a 2 h run does not fit a 1 h window");
+        assert!(
+            err.contains("too short"),
+            "error must name the window, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_shiftable_accepts_a_window_exactly_as_long_as_the_run() {
+        assert!(UserRequestService::create_shiftable(shiftable_body(60, 1), Utc::now()).is_ok());
+    }
+
+    /// `latest_end` is what bounds the placement; without it there is no
+    /// window at all.
+    #[test]
+    fn create_shiftable_rejects_a_missing_latest_end() {
+        let mut body = shiftable_body(60, 1);
+        body.latest_end = None;
+        let err = UserRequestService::create_shiftable(body, Utc::now())
+            .expect_err("latest_end is required");
+        assert!(err.contains("latest_end"), "got: {err}");
+    }
+
+    /// `create_shiftable` used to `unwrap()` these, which is only safe behind
+    /// an `is_shiftable` check the caller had to remember.
+    #[test]
+    fn create_shiftable_rejects_a_body_that_is_not_a_shiftable_load() {
+        let mut body = shiftable_body(60, 1);
+        body.power_kw = None;
+        assert!(UserRequestService::create_shiftable(body, Utc::now()).is_err());
     }
 
     /// Cancelling an unknown id returns CancelError::NotFound.

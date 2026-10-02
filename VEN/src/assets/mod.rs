@@ -25,9 +25,8 @@ pub mod shiftable_load;
 // AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
 // #[allow(dead_code)]'d for before this file split.
-#[allow(unused_imports)]
+#[cfg(test)]
 pub use asset_handle::AssetHandle;
-#[allow(unused_imports)]
 pub use asset_trait::{
     Asset, MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
     Trajectory, TrajectoryPoint,
@@ -38,9 +37,6 @@ pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
 pub use history::{AssetHistoryBuffer, HistoryPoint};
-#[allow(unused_imports)]
-// not yet called from production code -- see max_power.rs's own doc comment
-pub use max_power::asset_max_power;
 pub use max_power::asset_max_power_series;
 pub use pv::{PvInverter, PvPowerInputs, PvState};
 pub use shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};

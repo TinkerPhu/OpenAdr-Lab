@@ -1,10 +1,12 @@
 // ── SimulatorPort trait and snapshot types ────────────────────────────────────
 pub mod simulator_port;
+pub use simulator_port::{SimSnapshot, SimulatorPort};
 // AssetSnapshot: only test code re-imports it via this path now that
 // tasks/sim_tick/publish.rs's manual shiftable-runtime augmentation (its only
-// non-test consumer) was deleted (shiftable-load-as-asset).
-#[allow(unused_imports)]
-pub use simulator_port::{AssetSnapshot, SimSnapshot, SimulatorPort};
+// non-test consumer) was deleted (shiftable-load-as-asset). Gated like
+// `GridSnapshot` below rather than allow-listed.
+#[cfg(test)]
+pub use simulator_port::AssetSnapshot;
 
 // ── VtnPort trait and typed OpenADR structs ───────────────────────────────────
 pub mod vtn_port;
@@ -20,12 +22,9 @@ pub use solver_port::{SolveRequest, SolverPort};
 
 // ── AssetMilpContext port trait and contract types (R-23) ─────────────────────
 pub mod asset_milp_port;
-#[allow(unused_imports)]
-// public re-export surface; consumers import via milp_planner::asset_port
-pub use asset_milp_port::{
-    AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
-    MilpLoadMode,
-};
+// No re-export here: every consumer imports these through
+// `milp_planner::asset_port`, which is the one path the port documents. A
+// second, unused path was kept alive only by `#[allow(unused_imports)]`.
 
 // ── HistoryPort trait ──────────────────────────────────────────────────────────
 pub mod history_port;

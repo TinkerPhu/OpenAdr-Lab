@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod debug;
+mod error;
 pub mod event_log;
 pub mod events;
 pub mod hems;
