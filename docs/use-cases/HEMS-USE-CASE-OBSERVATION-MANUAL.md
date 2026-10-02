@@ -876,6 +876,9 @@ needed). `VEN/profiles/usage_forecast_test.yaml` is a ready-made example.
   window — not just up to the departure, which is what a session-carried deadline would show
 - the projected EV SoC trace steps **down** at the return slot by the trip's drop, floored at
   `min_soc_after_drop_pct`
+- if the horizon reaches past the return, `plan_ev` may also be non-zero **after** it: the SoC
+  curve is solved rather than reconstructed, so the planner can schedule the recharge the return
+  makes possible instead of only avoiding the away window
 
 **Controller → Plan card warnings:**
 - If the remaining time before departure cannot deliver the target, an `EV_CORE_ENERGY_UNMET`

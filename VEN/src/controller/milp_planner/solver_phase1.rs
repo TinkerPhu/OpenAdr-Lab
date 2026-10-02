@@ -281,12 +281,29 @@ pub(crate) fn read_solve_output<S: Solution>(
         (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
     };
 
-    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, e_seg_out) = if let Some(v) = &pool.ev {
-        let sol = EvMilpContext::read_solution(solution, v, n);
-        (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.e_seg_kwh)
-    } else {
-        (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
-    };
+    let (ev_kw_out, soc_ev_out, ev_shortfall_out, z_ev_on_out, e_ev_extra_out, e_seg_out) =
+        if let Some(v) = &pool.ev {
+            let sol = EvMilpContext::read_solution(solution, v, n);
+            (
+                sol.p_ev_kw,
+                sol.soc_ev,
+                sol.shortfall_kwh,
+                sol.z_ev_on,
+                sol.e_ev_extra_kwh,
+                sol.e_seg_kwh,
+            )
+        } else {
+            (
+                vec![0.0; n],
+                // No EV in the model: a flat curve at the live reading, so a
+                // consumer never has to special-case a missing series.
+                vec![inputs.soc_ev_init.unwrap_or(0.0); n + 1],
+                Vec::new(),
+                vec![0.0; n],
+                0.0,
+                0.0,
+            )
+        };
 
     let (y_heat_out, z_heat_ready_out, e_heat_tank_out) = if let Some(v) = &pool.heater {
         let sol = HeaterMilpContext::read_solution(solution, v, n);
@@ -315,6 +332,8 @@ pub(crate) fn read_solve_output<S: Solution>(
         p_bat_ch_kw: bat_ch_kw,
         p_bat_dis_kw: bat_dis_kw,
         p_ev_kw: ev_kw_out,
+        soc_ev: soc_ev_out,
+        ev_shortfall_kwh: ev_shortfall_out,
         y_heat: y_heat_out,
         e_bat_kwh,
         s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_ref[t])).collect(),

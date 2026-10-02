@@ -1288,6 +1288,20 @@ outes/sim.rs causes a T1+T2 double-solve race:
   errors for a command that never ran — `$?` is **grep's** status, and grep is happy to find
   nothing. A bench was declared "compiles clean" on that basis. Capture the output to a file or
   variable first, check the real exit code, and only then filter.
+- **Generalised (2026-10-02): this is a pipe problem, not a cargo problem.** The same failure
+  recurred on an unrelated command — `bash scripts/wsl_lock.sh acquire ... | tail -5` reported
+  success while the script had correctly exited 2 with "Still held after 540s", because a
+  pipeline's exit status is the *last* command's. The consequence was nearly material: two
+  sessions one command away from concurrent cargo builds on a 12 GB laptop, which is exactly what
+  that lock exists to prevent. The rule is not "don't pipe compiler output", it is **never read
+  the exit status of anything through a pipe**. `cmd > log 2>&1; echo EXIT=$?` then inspect the
+  log.
+- **A cold worktree does not need a cold dependency build** (2026-10-02). The first `cargo check`
+  in a fresh `git worktree` was killed by the OOM killer partway through the dependency graph
+  (2.7 GB free of 12 GB). Dependencies are identical to the main checkout's whenever `Cargo.lock`
+  is, so `CARGO_TARGET_DIR=<main checkout>/VEN/target cargo check` reused 5344 warm artefacts and
+  compiled one crate instead of the graph. Hold the WSL lock while doing it: cargo's own file lock
+  on the target dir makes sharing safe between sessions, but only serialised.
 
 ## Sustained-Commitment Capacity Forecast (flexibility-capacity-forecast, 2026-08-21)
 

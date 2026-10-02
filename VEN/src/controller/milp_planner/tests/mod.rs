@@ -544,6 +544,44 @@ fn build_asset_contexts(
     ctxs
 }
 
+/// One firm EV obligation of `kwh` to be delivered by `deadline_step`, expressed
+/// the way the model states it since R-93: a target state of charge against the
+/// fixture's own pack size. Keeps the many solver fixtures that used to say
+/// "`e_ev_required_kwh`: 20.0" one line long, and in one place, so the
+/// kWh→SoC conversion cannot drift test by test.
+fn ev_firm_kwh(
+    battery_kwh: f64,
+    soc_init: f64,
+    kwh: f64,
+    deadline_step: usize,
+) -> Vec<crate::controller::milp_planner::asset_port::EvObligation> {
+    vec![crate::controller::milp_planner::asset_port::EvObligation {
+        deadline_step,
+        target_soc: soc_init + kwh / battery_kwh,
+        session_id: None,
+    }]
+}
+
+/// State one firm EV obligation of `kwh` by `deadline_step` on a fixture, derived
+/// from that fixture's own pack size and live SoC. The sites that used to set
+/// `t_ev_dead_step` and `e_ev_required_kwh` as a pair call this instead, so the
+/// kWh→SoC conversion lives in one place.
+fn set_ev_firm(inputs: &mut MilpInputs, kwh: f64, deadline_step: usize) {
+    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
+    inputs.ev_obligations = ev_firm_kwh(inputs.ev_battery_kwh, soc_init, kwh, deadline_step);
+}
+
+/// The firm energy a fixture's obligations demand above its live SoC [kWh] — the
+/// quantity the old scalar `e_ev_required_kwh` held directly.
+fn firm_kwh(inputs: &MilpInputs) -> f64 {
+    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
+    inputs
+        .ev_obligations
+        .iter()
+        .map(|o| ((o.target_soc - soc_init) * inputs.ev_battery_kwh).max(0.0))
+        .fold(0.0_f64, f64::max)
+}
+
 fn contexts_from_inputs(
     inputs: &MilpInputs,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
@@ -575,11 +613,13 @@ fn contexts_from_inputs(
                 mode,
                 soc_init: inputs.soc_ev_init.unwrap_or(0.0),
                 a_ev: inputs.a_ev.clone(),
-                soc_drops: None,
-                t_dead_step: inputs.t_ev_dead_step,
+                // Forwarded, not dropped: R-93 put the trip drops inside the SoC
+                // balance, so a fixture that declares them must see them in the model.
+                soc_drops: inputs.ev_soc_drops.clone(),
+                obligations: inputs.ev_obligations.clone(),
+                battery_kwh: inputs.ev_battery_kwh,
                 p_max_kw: inputs.p_ev_max_kw,
                 p_min_kw: inputs.p_ev_min_kw,
-                e_required_kwh: inputs.e_ev_required_kwh,
                 segments: inputs.ev_segments.clone(),
                 e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
                 v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
@@ -809,6 +849,7 @@ mod modes;
 mod penalty;
 mod planner;
 mod pv;
+mod soc_balance;
 mod solve_cost;
 mod solver;
 mod stale_rates;

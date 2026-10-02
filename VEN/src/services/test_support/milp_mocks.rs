@@ -7,7 +7,7 @@ use good_lp::{Constraint, Expression, ProblemVariables};
 
 use crate::controller::milp_interactions::MilpVarPool;
 use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode,
+    BatteryMilpContext, EvMilpContext, EvMilpMode, EvObligation, HeaterMilpContext, HeaterMilpMode,
 };
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
@@ -106,6 +106,10 @@ pub struct MockEvCtx {
     pub ctx: EvMilpContext,
 }
 
+/// Pack size the EV mocks assume, so a `required_kwh` argument converts to the
+/// target SoC the model now states without each mock inventing its own capacity.
+const MOCK_EV_BATTERY_KWH: f64 = 60.0;
+
 impl MockEvCtx {
     pub fn must_not_run(n: usize, p_max_kw: f64) -> Self {
         Self {
@@ -114,10 +118,10 @@ impl MockEvCtx {
                 soc_init: 0.0,
                 a_ev: vec![false; n],
                 soc_drops: None,
-                t_dead_step: None,
+                obligations: vec![],
+                battery_kwh: MOCK_EV_BATTERY_KWH,
                 p_max_kw,
                 p_min_kw: 0.0,
-                e_required_kwh: 0.0,
                 segments: vec![],
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.0,
@@ -134,17 +138,21 @@ impl MockEvCtx {
     }
 
     #[allow(dead_code)] // full EvMilpMode mock coverage; no current test exercises MustRun
-    pub fn must_run(n: usize, p_max_kw: f64, e_required_kwh: f64) -> Self {
+    pub fn must_run(n: usize, p_max_kw: f64, required_kwh: f64) -> Self {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustRun,
                 soc_init: 0.0,
                 a_ev: vec![true; n],
                 soc_drops: None,
-                t_dead_step: Some(n - 1),
+                obligations: vec![EvObligation {
+                    deadline_step: n - 1,
+                    target_soc: required_kwh / MOCK_EV_BATTERY_KWH,
+                    session_id: None,
+                }],
+                battery_kwh: MOCK_EV_BATTERY_KWH,
                 p_max_kw,
                 p_min_kw: 0.0,
-                e_required_kwh,
                 segments: vec![],
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.05,
@@ -181,10 +189,10 @@ impl AssetMilpContext for MockEvCtx {
             soc_init: self.ctx.soc_init,
             a_ev: self.ctx.a_ev.clone(),
             soc_drops: None,
-            t_dead_step: self.ctx.t_dead_step,
+            obligations: self.ctx.obligations.clone(),
+            battery_kwh: self.ctx.battery_kwh,
             p_max_kw: self.ctx.p_max_kw,
             p_min_kw: self.ctx.p_min_kw,
-            e_required_kwh: self.ctx.e_required_kwh,
             segments: self.ctx.segments.clone(),
             e_extra_max_kwh: self.ctx.e_extra_max_kwh,
             v_extra_eur_kwh: self.ctx.v_extra_eur_kwh,

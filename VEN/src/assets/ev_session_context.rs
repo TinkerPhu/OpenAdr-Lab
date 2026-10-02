@@ -11,7 +11,7 @@
 use chrono::{DateTime, Utc};
 
 use super::EvCharger;
-use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode};
+use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, EvObligation};
 
 /// WP4.1-c MAX_COST: per-kWh completion reward — an order of magnitude above any
 /// real tariff so the solver charges toward the target regardless of price, with
@@ -48,10 +48,10 @@ impl EvMilpContext {
             soc_init: current_soc,
             a_ev: vec![false; n],
             soc_drops: None,
-            t_dead_step: None,
+            obligations: Vec::new(),
+            battery_kwh: cfg.battery_kwh,
             p_max_kw: cfg.max_charge_kw,
             p_min_kw: min_charge_kw,
-            e_required_kwh: 0.0,
             segments: Vec::new(),
             e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
             v_extra_eur_kwh: v_ev_extra_eur_kwh,
@@ -161,7 +161,10 @@ impl EvMilpContext {
                 mode: EvMilpMode::MustRun,
                 a_ev: deadline_mask,
                 soc_drops: None,
-                t_dead_step: Some(t_dead),
+                // Free energy may simply not exist, so BY_DEADLINE_FREE states no
+                // obligation at all: its window is already expressed by `a_ev`,
+                // and a guarantee it cannot honour would be a promise, not a goal.
+                obligations: Vec::new(),
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
                 free_only: true,
@@ -195,10 +198,17 @@ impl EvMilpContext {
                     },
                     a_ev: deadline_mask,
                     soc_drops: None,
-                    t_dead_step: Some(t_dead),
-                    // A firm deadline guarantees the target; a soft one expresses
-                    // it through the bids instead.
-                    e_required_kwh: if session.soft_deadline { 0.0 } else { core_kwh },
+                    // A firm deadline guarantees the target; a soft one states no
+                    // obligation and lets its comfort bids decide how far to go.
+                    obligations: if session.soft_deadline {
+                        Vec::new()
+                    } else {
+                        vec![EvObligation {
+                            deadline_step: t_dead,
+                            target_soc: session.target_soc,
+                            session_id: Some(session.id),
+                        }]
+                    },
                     segments,
                     // Inert here: this arm prices per band, so nothing may also
                     // be bought through `e_ev_extra`.

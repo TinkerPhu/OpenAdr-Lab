@@ -21,29 +21,37 @@ pub(super) fn ev_warnings(inputs: &MilpInputs, sol: &SolveOutput) -> Vec<PlanWar
     firm_shortfall(inputs, sol).into_iter().collect()
 }
 
-/// A firm requirement the plan could not meet: the window is too short, the car
-/// is away for too much of it, or the charger cannot deliver it in time.
+/// A firm obligation the plan could not meet: the window is too short, the car is
+/// away for too much of it, or the charger cannot deliver it in time.
+///
+/// R-93: the gap is now the solved shortfall slack, not a comparison the diagnostic
+/// re-derives. The model itself decided how much it had to give up, so there is no
+/// second rule here that can disagree with the plan — and the slack is per
+/// obligation, so the warning can say which request fell short.
 fn firm_shortfall(inputs: &MilpInputs, sol: &SolveOutput) -> Option<PlanWarning> {
-    let required = inputs.e_ev_required_kwh;
-    if required <= 1e-6 {
-        return None;
-    }
-    let delivered = sol.e_seg_kwh;
-    if delivered >= required - 1e-3 {
-        return None;
-    }
-    let short = required - delivered;
+    let (idx, short) = sol
+        .ev_shortfall_kwh
+        .iter()
+        .enumerate()
+        .filter(|(_, &kwh)| kwh > 1e-3)
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, &kwh)| (i, kwh))?;
+    let ob = inputs.ev_obligations.get(idx)?;
+    let required =
+        ((ob.target_soc - inputs.soc_ev_init.unwrap_or(0.0)) * inputs.ev_battery_kwh).max(0.0);
+    let delivered = (required - short).max(0.0);
+    let whose = match ob.session_id {
+        Some(id) => format!(" for request {id}"),
+        None => String::new(),
+    };
     Some(PlanWarning {
         severity: WarningSeverity::Warning,
         kind: WarningKind::EvCoreEnergyUnmet,
         message: format!(
-            "EV charging falls {short:.1} kWh short of its guaranteed {required:.1} kWh \
-             before the deadline — the plan delivers {delivered:.1} kWh, which is all the \
-             available window allows"
+            "EV charging{whose} falls {short:.1} kWh short of its guaranteed {required:.1} kWh              before the deadline — the plan delivers {delivered:.1} kWh, which is all the              available window allows"
         ),
         suggested_action: Some(
-            "move the deadline later, lower the target, or check whether the car is predicted \
-             away for part of the window"
+            "move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"
                 .to_string(),
         ),
     })

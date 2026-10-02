@@ -256,10 +256,10 @@ pub(crate) fn build_milp_inputs(
 
     let mut a_ev = vec![false; n];
     let mut ev_mode = MilpLoadMode::MustNotRun;
-    let mut t_ev_dead: Option<usize> = None;
+    let mut ev_obligations: Vec<super::asset_port::EvObligation> = Vec::new();
+    let mut ev_battery_kwh = 0.0_f64;
     let mut p_ev_max = 0.0_f64;
     let mut p_ev_min = 0.0_f64;
-    let mut e_ev_required = 0.0_f64;
     let mut ev_segments: Vec<super::asset_port::EvEnergySegment> = Vec::new();
     let mut e_ev_extra = 0.0_f64;
     let mut v_ev_extra = 0.0_f64;
@@ -296,10 +296,10 @@ pub(crate) fn build_milp_inputs(
             AssetMilpParams::Ev(e) => {
                 a_ev = e.a_ev;
                 ev_mode = e.mode;
-                t_ev_dead = e.t_dead_step;
+                ev_obligations = e.obligations;
+                ev_battery_kwh = e.battery_kwh;
                 p_ev_max = e.p_max_kw;
                 p_ev_min = e.p_min_kw;
-                e_ev_required = e.e_required_kwh;
                 ev_segments = e.segments;
                 e_ev_extra = e.e_extra_max_kwh;
                 v_ev_extra = e.v_extra_eur_kwh;
@@ -401,10 +401,10 @@ pub(crate) fn build_milp_inputs(
         eff_bat_dis: eff_dis,
         a_ev,
         ev_mode,
-        t_ev_dead_step: t_ev_dead,
+        ev_obligations,
+        ev_battery_kwh,
         p_ev_max_kw: p_ev_max,
         p_ev_min_kw: p_ev_min,
-        e_ev_required_kwh: e_ev_required,
         ev_segments,
         e_ev_extra_max_kwh: e_ev_extra,
 

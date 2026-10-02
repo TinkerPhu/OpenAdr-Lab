@@ -317,7 +317,7 @@ pub(crate) fn translate_to_plan(
     let soc_trajectory_kwh = sol.e_bat_kwh.clone();
 
     // ── Planned state by asset (T008/T013/T017) ──────────────────────────
-    planned_state::fill_planned_state(&mut slots, n, sol, inputs, battery_cfg, ev_cfg, heat_cfg);
+    planned_state::fill_planned_state(&mut slots, n, sol, battery_cfg, ev_cfg, heat_cfg);
 
     // ── Summary (raw energy economics, no weights) ──────────────────────
     let summary = PlanSummary {

@@ -355,10 +355,11 @@ constraints — the solver does not iterate over session objects directly:
 | Session field | MILP use |
 |---|---|
 | `EvSession.soft_deadline` | `false` → `MilpLoadMode::MustRun`; `true` → `MayRun` |
-| `EvSession.departure_time` | → horizon constraint step `t_ev_dead_step` |
+| `EvSession.departure_time` | → an `EvObligation`'s `deadline_step` (one per departure) |
 | `HeaterTarget` presence | present → `MustRun` (hard deadline); absent → `MayRun` (autonomous, no deadline) |
 | `HeaterTarget.ready_by` | → horizon constraint step `t_dead_step` |
-| `EvSession.target_soc` / `HeaterTarget.target_temp_c` | → energy/thermal requirement |
+| `EvSession.target_soc` | → that `EvObligation`'s `target_soc`, bound on `soc_ev` at its deadline |
+| `HeaterTarget.target_temp_c` | → thermal requirement |
 
 Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
 by the Dispatcher and reporting layer — not by the solver.
@@ -397,10 +398,12 @@ the curve, the current SoC, the target and the pack size, never on a deadline. B
 forecast path left `segments` empty and fell back to the flat `v_ev_extra_eur_kwh` reward, so the
 fleet's own charge planning bypassed the curve entirely.
 
-A **firm** deadline is the only guarantee: `constraints` adds `Σ e_seg >= e_required_kwh`, capped
-at `EvMilpContext::reachable_energy_kwh` so a requirement the window cannot physically hold
-charges as far as it can instead of making the site solve infeasible. A soft request carries
-`e_required_kwh = 0` and buys only what its bids justify. The free/opportunistic
+A **firm** deadline is the only guarantee: `constraints` adds
+`soc_ev[deadline_step + 1] + shortfall_soc >= target_soc` for each `EvObligation`, where
+`shortfall_soc` is a slack priced far above any tariff or bid. A requirement the window cannot
+physically hold therefore charges as far as it can and reports the remainder, instead of making
+the site solve infeasible. A soft request states no obligation at all and buys only what its
+bids justify. The free/opportunistic
 (`reward_per_slot`) modes never read the curve at all — they are gated by PV surplus, not price,
 and keep their flat per-slot rewards.
 
@@ -841,21 +844,25 @@ into the existing per-slot `a_ev` mask, so every predicted-away slot is bounded
 to zero charging power for the whole horizon — including the car's *return*
 inside the same solve, which the session mechanism's one-sided deadline cannot
 express. The trip's SoC drop is carried as `ExogenousSocDrops` into the
-post-solve projection (`asset_port::ev_soc_trajectory`), so the plan's EV SoC
-curve shows the dip the trip will cause rather than a flat hold. With
+solver's own SoC balance (R-93), so the plan's EV SoC curve shows the dip the
+trip will cause rather than a flat hold — and, because the drop is inside the
+model rather than applied afterwards, the solver can plan the recharge the
+*return* makes possible. With
 `engage_charge_planning`, the target and deadline are set directly on the MILP
 context from the next predicted departure — no `EvSession` is written at all
 (session-writing stays the `usage_sim` class's mechanism), and a real user/VTN
 session always outranks the prediction for the *goal* while the availability
 mask still applies, because availability is fact, not preference.
 
-Because the EV's energy balance is a hard equality with no slack, masking can leave a goal that no
-remaining slot can reach — which would make the entire site solve infeasible. The guaranteed-energy
-floor is therefore capped where it is imposed, at `EvMilpContext::reachable_energy_kwh`
-(`ev_milp.rs::constraints`): `e_required_kwh` stays what was asked for, the plan charges everything
-the window allows, and the gap between the two is reported as a
-`WarningKind::EvCoreEnergyUnmet` plan warning by
-`milp_planner::ev_diagnostics::firm_shortfall`. That is the warning's only meaning — a soft request
+Masking can leave a goal that no remaining slot can reach, which would make the entire site solve
+infeasible if the target were a hard bound. Each obligation therefore carries its own penalised
+`shortfall_soc` slack (`ev_milp.rs::constraints`): the target stays what was asked for, the plan
+charges everything the window allows, and the slack the solver had to buy *is* the gap — reported
+per obligation, naming the session it came from, as a `WarningKind::EvCoreEnergyUnmet` plan warning
+by `milp_planner::ev_diagnostics::firm_shortfall`. Because the model decides the gap, nothing
+outside it re-derives the number (R-93 replaced an earlier pre-solve
+`min(required, reachable_energy_kwh)` cap, which had to be compared against afterwards to recover
+the shortfall). That is the warning's only meaning — a soft request
 charging less than its target is the comfort curve working as asked, not an unmet obligation. The
 cap guards a real session's target too, which the same mask can strand. Both classes report
 themselves on `GET /ev-usage-sim` via a `mode` field (`simulated` /

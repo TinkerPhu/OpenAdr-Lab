@@ -330,11 +330,10 @@ fn test_mode_opportunistic_has_no_deadline_constraint() {
         "OPPORTUNISTIC ignores the departure deadline, mask {:?}",
         inp.a_ev
     );
-    assert_eq!(inp.t_ev_dead_step, None);
     assert!(
-        inp.e_ev_required_kwh < 1e-9,
-        "OPPORTUNISTIC has no core obligation, got {}",
-        inp.e_ev_required_kwh
+        inp.ev_obligations.is_empty(),
+        "OPPORTUNISTIC has no core obligation, got {:?}",
+        inp.ev_obligations
     );
 }
 

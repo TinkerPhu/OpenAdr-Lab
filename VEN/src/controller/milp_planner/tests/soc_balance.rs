@@ -1,0 +1,269 @@
+//! R-93: the EV's state of charge is part of the solved plan.
+//!
+//! These assert the properties the deleted post-solve integrator
+//! (`asset_port::ev_soc_trajectory`) used to be unit-tested for — monotonic rise
+//! under charging, the pack ceiling, a predicted trip's drop landing at its own
+//! slot, and the floor absorbing an oversized drop. They are now properties of
+//! the plan the solver produces, so each one runs a real solve and reads
+//! `SolveOutput::soc_ev` rather than calling a helper that no longer exists.
+
+use super::solver::{make_phase1_weights, make_solver_inputs};
+use super::*;
+use crate::controller::milp_planner::asset_port::ExogenousSocDrops;
+
+/// An EV that is present throughout, cheap to charge, and obliged to reach a
+/// target — the shape every test here varies.
+fn ev_inputs(n: usize, battery_kwh: f64, soc_init: f64) -> MilpInputs {
+    let mut inputs = make_solver_inputs(n, 0.0);
+    inputs.a_ev = vec![true; n];
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    inputs.ev_battery_kwh = battery_kwh;
+    inputs.soc_ev_init = Some(soc_init);
+    inputs.p_ev_max_kw = 7.2;
+    inputs.p_ev_min_kw = 0.0;
+    inputs
+}
+
+fn solve(inputs: &MilpInputs) -> SolveOutput {
+    solve_phase1(
+        inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(inputs),
+        60.0,
+    )
+    .expect("solve must succeed")
+}
+
+#[test]
+fn soc_rises_by_the_energy_charged() {
+    // 10 kWh pack, a firm 5 kWh by the last slot: the curve must end half a pack
+    // above where it started, and never step down while charging.
+    let n = 5;
+    let mut inputs = ev_inputs(n, 10.0, 0.0);
+    inputs.ev_obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
+
+    let sol = solve(&inputs);
+
+    assert_eq!(sol.soc_ev.len(), n + 1, "one SoC value per step boundary");
+    assert!(
+        (sol.soc_ev[0] - 0.0).abs() < 1e-6,
+        "must start at the live reading, got {}",
+        sol.soc_ev[0]
+    );
+    for t in 1..=n {
+        assert!(
+            sol.soc_ev[t] >= sol.soc_ev[t - 1] - 1e-6,
+            "SoC must not fall while only charging: {:?}",
+            sol.soc_ev
+        );
+    }
+    // The obligation sits on slot n-1, so it binds the boundary after it.
+    assert!(
+        (sol.soc_ev[n] - 0.5).abs() < 1e-3,
+        "5 kWh into a 10 kWh pack is half a pack by the deadline, got {}",
+        sol.soc_ev[n]
+    );
+}
+
+#[test]
+fn soc_never_exceeds_a_full_pack() {
+    // Far more charging opportunity than the pack can hold, and a per-kWh reward
+    // that would happily buy more: the ceiling is what stops it.
+    let n = 10;
+    let mut inputs = ev_inputs(n, 5.0, 0.5);
+    inputs.e_ev_extra_max_kwh = 100.0;
+    inputs.v_ev_extra_eur_kwh = 10.0;
+
+    let sol = solve(&inputs);
+
+    for (t, &soc) in sol.soc_ev.iter().enumerate() {
+        assert!(
+            soc <= 1.0 + 1e-6,
+            "SoC must never exceed a full pack, got {soc} at step {t}"
+        );
+    }
+}
+
+#[test]
+fn a_predicted_drop_lands_at_its_own_slot() {
+    // No obligation and no reward, so the only movement in the curve is the trip.
+    let n = 5;
+    let mut inputs = ev_inputs(n, 10.0, 0.80);
+    let mut drop_frac_per_slot = vec![0.0; n];
+    drop_frac_per_slot[2] = 0.30;
+    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+        drop_frac_per_slot,
+        floor_frac: 0.05,
+    });
+
+    let sol = solve(&inputs);
+
+    assert!(
+        (sol.soc_ev[2] - 0.80).abs() < 1e-3,
+        "unchanged before the drop slot, got {}",
+        sol.soc_ev[2]
+    );
+    assert!(
+        (sol.soc_ev[3] - 0.50).abs() < 1e-3,
+        "slot 2's drop must show at the following boundary, got {}",
+        sol.soc_ev[3]
+    );
+    assert!(
+        (sol.soc_ev[4] - 0.50).abs() < 1e-3,
+        "and then hold, got {}",
+        sol.soc_ev[4]
+    );
+}
+
+#[test]
+fn an_oversized_drop_settles_at_the_floor_rather_than_going_infeasible() {
+    // A trip that would consume more than the pack holds. The old integrator
+    // clamped this after the fact; the model now absorbs it with the penalised
+    // `drop_unmet` slack, so the solve must still succeed and settle at the floor.
+    let n = 3;
+    let mut inputs = ev_inputs(n, 10.0, 0.20);
+    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+        drop_frac_per_slot: vec![0.0, 0.90, 0.0],
+        floor_frac: 0.05,
+    });
+
+    let sol = solve(&inputs);
+
+    assert!(
+        (sol.soc_ev[2] - 0.05).abs() < 1e-3,
+        "must settle at the configured floor, got {}",
+        sol.soc_ev[2]
+    );
+}
+
+#[test]
+fn a_drop_the_pack_can_absorb_is_applied_in_full() {
+    // The guard on the slack above: where the floor is not binding, the whole
+    // drop must land. Otherwise `drop_unmet` would be a way to dodge a trip.
+    let n = 3;
+    let mut inputs = ev_inputs(n, 10.0, 0.90);
+    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+        drop_frac_per_slot: vec![0.0, 0.40, 0.0],
+        floor_frac: 0.05,
+    });
+
+    let sol = solve(&inputs);
+
+    assert!(
+        (sol.soc_ev[2] - 0.50).abs() < 1e-3,
+        "the full 40 % must be consumed, got {}",
+        sol.soc_ev[2]
+    );
+}
+
+#[test]
+fn without_declared_drops_the_curve_only_reflects_charging() {
+    let n = 4;
+    let mut inputs = ev_inputs(n, 10.0, 0.30);
+    inputs.ev_soc_drops = None;
+    inputs.ev_obligations = ev_firm_kwh(10.0, 0.30, 2.0, n - 1);
+
+    let sol = solve(&inputs);
+
+    assert!(
+        (sol.soc_ev[n] - 0.50).abs() < 1e-3,
+        "0.30 plus 2 kWh of a 10 kWh pack, got {}",
+        sol.soc_ev[n]
+    );
+}
+
+// ── Obligations bind at their own deadline (R-92) ────────────────────────────
+
+#[test]
+fn a_firm_obligation_is_met_at_its_deadline_step() {
+    let n = 6;
+    let mut inputs = ev_inputs(n, 20.0, 0.0);
+    inputs.ev_obligations = ev_firm_kwh(20.0, 0.0, 10.0, 3);
+
+    let sol = solve(&inputs);
+
+    assert!(
+        sol.soc_ev[4] >= 0.5 - 1e-3,
+        "must hold half the pack by the end of slot 3, got {}",
+        sol.soc_ev[4]
+    );
+    assert!(
+        sol.ev_shortfall_kwh.iter().all(|&kwh| kwh < 1e-3),
+        "a reachable target must never be traded for shortfall slack: {:?}",
+        sol.ev_shortfall_kwh
+    );
+}
+
+#[test]
+fn two_obligations_are_each_met_at_their_own_step() {
+    // The capability R-92 was opened for: two departures inside one horizon, each
+    // with its own target, both binding.
+    let n = 8;
+    let mut inputs = ev_inputs(n, 20.0, 0.0);
+    inputs.ev_obligations = vec![
+        crate::controller::milp_planner::asset_port::EvObligation {
+            deadline_step: 2,
+            target_soc: 0.25,
+            session_id: None,
+        },
+        crate::controller::milp_planner::asset_port::EvObligation {
+            deadline_step: 6,
+            target_soc: 0.75,
+            session_id: None,
+        },
+    ];
+
+    let sol = solve(&inputs);
+
+    assert!(
+        sol.soc_ev[3] >= 0.25 - 1e-3,
+        "first target must bind by the end of slot 2, got {}",
+        sol.soc_ev[3]
+    );
+    assert!(
+        sol.soc_ev[7] >= 0.75 - 1e-3,
+        "second target must bind by the end of slot 6, got {}",
+        sol.soc_ev[7]
+    );
+}
+
+#[test]
+fn an_unreachable_obligation_reports_the_gap_instead_of_failing_the_solve() {
+    // 7.2 kW for two slots cannot fill a 100 kWh pack. The old model pre-clamped
+    // the requirement so the gap was invisible; the slack now carries it.
+    let n = 2;
+    let mut inputs = ev_inputs(n, 100.0, 0.0);
+    inputs.ev_obligations = ev_firm_kwh(100.0, 0.0, 90.0, 1);
+
+    let sol = solve(&inputs);
+
+    let short: f64 = sol.ev_shortfall_kwh.iter().copied().fold(0.0, f64::max);
+    assert!(
+        short > 1.0,
+        "the unreachable part must be reported as shortfall, got {:?}",
+        sol.ev_shortfall_kwh
+    );
+    // What the window *can* deliver must still be charged.
+    assert!(
+        sol.p_ev_kw.iter().sum::<f64>() > 0.0,
+        "the plan must still charge everything the window allows"
+    );
+}
+
+#[test]
+fn charging_while_away_is_never_scheduled() {
+    let n = 6;
+    let mut inputs = ev_inputs(n, 20.0, 0.0);
+    inputs.a_ev = vec![true, true, false, false, true, true];
+    inputs.ev_obligations = ev_firm_kwh(20.0, 0.0, 5.0, n - 1);
+
+    let sol = solve(&inputs);
+
+    for t in [2usize, 3] {
+        assert!(
+            sol.p_ev_kw[t].abs() < 1e-6,
+            "no charging while the car is away, got {} at slot {t}",
+            sol.p_ev_kw[t]
+        );
+    }
+}
