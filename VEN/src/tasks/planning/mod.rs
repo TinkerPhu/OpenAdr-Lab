@@ -46,6 +46,25 @@ pub(crate) fn spawn_planning(
         // from mis-classifying timeout cycles as hard triggers, bypassing the gate.
         let mut wake_trigger = PlanTriggerSignal::bare(PlanTrigger::Periodic);
         loop {
+            // GB-55: hold a rate-change reaction for a jittered moment before
+            // solving. A VTN rate update reaches the whole fleet at once and hard
+            // triggers bypass GB-54's periodic grid, so without this every VEN
+            // solves on the same instant. Held *before* `now_fn()` so the plan is
+            // built from the time it is actually solved at, not from when the
+            // trigger arrived.
+            if matches!(wake_trigger.trigger, PlanTrigger::RateChange) {
+                let delay_s = crate::entities::planner_params::rate_change_delay_s(
+                    planner.rate_change_trigger_delay_s,
+                    planner.rate_change_trigger_jitter_pct,
+                    planner.replan_interval_s,
+                    rand::random::<f64>(),
+                );
+                if delay_s > 0 {
+                    info!(delay_s, "planner loop: holding RateChange replan (GB-55)");
+                    tokio::time::sleep(std::time::Duration::from_secs(delay_s)).await;
+                }
+            }
+
             let wall_now = now_fn();
             // Align to the nearest step boundary so all replans within the same window
             // share identical slot grids (gate stability, warm-start prerequisite).

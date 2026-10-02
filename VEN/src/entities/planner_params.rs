@@ -58,6 +58,11 @@ pub struct PlannerParams {
     pub solver_timeout_s: u64,
     /// Phase 2's own budget; see `profile::planner::phase2_solver_timeout_s` (R-97).
     pub phase2_solver_timeout_s: u64,
+    /// GB-55 — base hold on a `RateChange`-triggered replan, in seconds; 0 = react
+    /// at once. See `profile::planner::rate_change_trigger_delay_s`.
+    pub rate_change_trigger_delay_s: u64,
+    /// GB-55 — symmetric spread on that hold, in percent of it.
+    pub rate_change_trigger_jitter_pct: f64,
     /// HiGHS optimality-gap tolerance, shared by all three solve call sites and
     /// persisted on `Plan.mip_gap_target`. See `profile::schema::PlannerConfig`
     /// for why it can only be tuned by offline benchmarking.
@@ -123,6 +128,8 @@ impl Default for PlannerParams {
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
             phase2_solver_timeout_s: 15,
+            rate_change_trigger_delay_s: 30,
+            rate_change_trigger_jitter_pct: 100.0,
             mip_gap_target: 0.02,
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,
@@ -271,6 +278,126 @@ pub fn replan_phase_offset_s(ven_name: &str, replan_interval_s: u64) -> u64 {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h % replan_interval_s.max(1)
+}
+
+/// GB-55 — how long to hold a `RateChange`-triggered replan before running it.
+///
+/// A VTN rate update reaches the whole fleet at once: ven-17 and ven-19 were
+/// observed waking at the same centisecond (2026-10-02T04:18:56.86) on one
+/// broadcast. Hard triggers deliberately bypass the periodic grid GB-54 installed,
+/// so the grid does nothing for them and 20 VENs solve simultaneously on a host
+/// with 4 cores. Spreading the *reaction* is what the grid does for periodic
+/// replans, done per-event instead of per-VEN.
+///
+/// `draw` is a uniform sample in `[0, 1)`, passed in rather than drawn here so the
+/// mapping is a pure function the tests can pin at both ends of the range (the
+/// project's `determinism` rule, applied to randomness rather than to the clock).
+///
+/// The delay is `base_s` scaled by a symmetric jitter of `jitter_pct` percent:
+/// `base_s * (1 + (2*draw - 1) * jitter_pct/100)`, floored at zero. So
+/// `jitter_pct = 100` spreads uniformly over `[0, 2*base_s]` and reaches zero,
+/// which matters — a fleet-wide fixed delay would move the collision rather than
+/// break it up, and some VENs should still react at once.
+///
+/// `base_s = 0` disables the feature and is **not** the shipped default; see
+/// `profile::defaults::default_rate_change_trigger_delay_s` for why 30 s / 100 %.
+///
+/// The base is capped at `replan_interval_s / 2`, so the hold can never outlive the
+/// periodic replan that would make it redundant.
+///
+/// Only `RateChange` is delayed. `Alert` and `CapacityChange` are safety and
+/// contractual limits whose whole value is reacting now, and `UserRequest` is
+/// someone waiting at a UI.
+pub fn rate_change_delay_s(base_s: u64, jitter_pct: f64, replan_interval_s: u64, draw: f64) -> u64 {
+    if base_s == 0 {
+        return 0;
+    }
+    // A hold at or beyond the replan interval is self-defeating: the periodic grid
+    // fires first, the rate change is picked up by a Periodic cycle, and the held
+    // RateChange replan is redundant. Clamped here rather than rejected in
+    // `validate.rs` because the operator usually did not choose this number - they
+    // inherited a default sized for production's 300 s interval, and a profile with
+    // a short interval (the test fixtures run 20 s) should not be *invalid* for
+    // that. Making the bound structural also means it cannot be forgotten.
+    let base_s = base_s.min((replan_interval_s / 2).max(1));
+    let spread = jitter_pct.max(0.0) / 100.0;
+    let factor = 1.0 + (2.0 * draw.clamp(0.0, 1.0) - 1.0) * spread;
+    (base_s as f64 * factor.max(0.0)).round() as u64
+}
+
+#[cfg(test)]
+mod rate_change_delay_tests {
+    use super::rate_change_delay_s;
+
+    #[test]
+    fn a_zero_base_disables_the_delay_whatever_the_jitter() {
+        for draw in [0.0, 0.5, 0.999] {
+            assert_eq!(rate_change_delay_s(0, 100.0, 300, draw), 0);
+        }
+    }
+
+    #[test]
+    fn zero_jitter_is_a_fixed_delay() {
+        for draw in [0.0, 0.5, 0.999] {
+            assert_eq!(rate_change_delay_s(30, 0.0, 300, draw), 30);
+        }
+    }
+
+    #[test]
+    fn full_jitter_spans_zero_to_twice_the_base() {
+        // The shipped default's shape: 30 s at 100 % must reach 0 and ~60.
+        assert_eq!(rate_change_delay_s(30, 100.0, 300, 0.0), 0);
+        assert_eq!(rate_change_delay_s(30, 100.0, 300, 0.5), 30);
+        assert_eq!(rate_change_delay_s(30, 100.0, 300, 1.0), 60);
+    }
+
+    #[test]
+    fn the_delay_is_monotone_in_the_draw_and_stays_in_range() {
+        let mut prev = 0;
+        for i in 0..=20 {
+            let d = rate_change_delay_s(30, 50.0, 300, i as f64 / 20.0);
+            assert!(d >= prev, "must not go backwards: {d} after {prev}");
+            assert!((15..=45).contains(&d), "50 % jitter on 30 s gave {d}");
+            prev = d;
+        }
+    }
+
+    #[test]
+    fn jitter_over_100_percent_cannot_produce_a_negative_delay() {
+        // 200 % would mathematically give -30 s at draw 0; the floor catches it
+        // rather than wrapping the u64 cast into something enormous.
+        assert_eq!(rate_change_delay_s(30, 200.0, 300, 0.0), 0);
+        assert_eq!(rate_change_delay_s(30, 200.0, 300, 1.0), 90);
+    }
+
+    #[test]
+    fn a_negative_jitter_is_treated_as_none_not_as_a_reversed_range() {
+        assert_eq!(rate_change_delay_s(30, -50.0, 300, 0.0), 30);
+    }
+
+    /// The default base (30 s) is sized for production's 300 s replan interval, but
+    /// the test profiles run a 20 s interval, where a 30 s hold would be overtaken
+    /// by the periodic replan that makes it pointless. The cap keeps those profiles
+    /// *valid* — the operator inherited the 30 from a default rather than choosing
+    /// it, so rejecting the profile would punish them for not overriding something
+    /// they never set. This started as a `validate.rs` error that failed three
+    /// shipped-profile validation tests, which were right and the rule was wrong.
+    #[test]
+    fn the_hold_is_capped_at_half_the_replan_interval() {
+        // 20 s interval: the 30 s default is capped to 10 s, so full jitter spans
+        // [0, 20] and the hold can never outlive the cycle that supersedes it.
+        assert_eq!(rate_change_delay_s(30, 0.0, 20, 0.5), 10);
+        assert_eq!(rate_change_delay_s(30, 100.0, 20, 1.0), 20);
+        for i in 0..=10 {
+            let d = rate_change_delay_s(30, 100.0, 20, i as f64 / 10.0);
+            assert!(d <= 20, "hold {d} exceeds the 20 s replan interval");
+        }
+        // Production's 300 s interval leaves the default untouched.
+        assert_eq!(rate_change_delay_s(30, 0.0, 300, 0.5), 30);
+        // A degenerate interval must not produce a zero-width cap or a panic.
+        assert_eq!(rate_change_delay_s(30, 0.0, 1, 0.5), 1);
+        assert_eq!(rate_change_delay_s(30, 0.0, 0, 0.5), 1);
+    }
 }
 
 #[cfg(test)]

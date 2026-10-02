@@ -358,3 +358,37 @@ grid in (1) would be strictly worse than a post-cycle sleep, since every VEN wou
 same instant.
 
 Pinned by the `replan_schedule_tests` module in `entities/planner_params.rs`.
+
+### Hard triggers: `RateChange` is held, the others are not
+
+The grid above covers `Periodic` replans only. Hard triggers (`RateChange`,
+`CapacityChange`, `Alert`, `UserRequest`, `AssetStateChange`) bypass it by design — the point of a
+hard trigger is to react now — which left one fleet-wide burst untouched: a VTN rate update
+reaches every VEN at once. ven-17 and ven-19 were observed waking at the same centisecond
+(`2026-10-02T04:18:56.86`) on a single broadcast.
+
+`RateChange` alone is therefore held for a jittered interval before its cycle runs
+(`entities::planner_params::rate_change_delay_s`, applied in `tasks/planning/mod.rs` *before* the
+cycle reads its clock, so the plan is built from the time it is solved at):
+
+| profile field | default | meaning |
+|---|---|---|
+| `planner.rate_change_trigger_delay_s` | 30 | base hold in seconds; `0` reacts immediately |
+| `planner.rate_change_trigger_jitter_pct` | 100 | symmetric spread, in percent of the base |
+
+The delay is `base * (1 + (2*draw - 1) * pct/100)` for a uniform `draw`, floored at zero — so the
+defaults spread uniformly over `[0, 60 s]`. **The jitter reaching zero is the point**: a fixed
+fleet-wide delay moves the collision 30 s later instead of breaking it up, and some VENs should
+still react at once.
+
+Why these defaults: the cost is bounded at 60 s of tariff-reaction latency against a 300 s
+periodic grid that would catch the change anyway, on a plan spanning 48 h in 5-minute slots. The
+benefit is 20 VENs arriving one every ~3 s. It ships enabled because the storm was measured, not
+hypothesised, and affects every multi-VEN host.
+
+The other hard triggers are deliberately **not** delayed: `Alert` and `CapacityChange` are safety
+and contractual limits whose entire value is immediacy, and `UserRequest` has a person waiting at
+a UI. `validate.rs` rejects a negative jitter, and a delay `>= replan_interval_s` — which the
+periodic grid would overtake, making the held trigger redundant.
+
+Pinned by the `rate_change_delay_tests` module in `entities/planner_params.rs`.

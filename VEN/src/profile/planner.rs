@@ -163,6 +163,26 @@ pub struct PlannerConfig {
     #[serde(default = "super::defaults::default_phase2_solver_timeout_s")]
     pub phase2_solver_timeout_s: u64,
 
+    /// GB-55 — how long a `RateChange`-triggered replan is held before it runs,
+    /// in seconds, before jitter. A VTN rate update reaches the whole fleet at
+    /// once, and hard triggers deliberately bypass the periodic replan grid
+    /// (GB-54), so without this every VEN solves on the same instant.
+    /// `0` disables the delay and reacts immediately, as before GB-55.
+    /// Only `RateChange` is affected: `Alert` and `CapacityChange` are safety and
+    /// contractual limits whose value is reacting now, and `UserRequest` has
+    /// someone waiting at a UI.
+    #[serde(default = "super::defaults::default_rate_change_trigger_delay_s")]
+    pub rate_change_trigger_delay_s: u64,
+
+    /// GB-55 — symmetric random spread on `rate_change_trigger_delay_s`, in
+    /// percent of it. The delay becomes
+    /// `delay_s * (1 + (2*draw - 1) * pct/100)` for a uniform draw, floored at
+    /// zero, so `100` spreads over `[0, 2*delay_s]` and `0` is a fixed delay.
+    /// A fixed delay would move the fleet's collision rather than break it up,
+    /// which is why the default is 100 rather than something smaller.
+    #[serde(default = "super::defaults::default_rate_change_trigger_jitter_pct")]
+    pub rate_change_trigger_jitter_pct: f64,
+
     /// HiGHS optimality-gap tolerance, shared by all three solve call sites and
     /// persisted on `Plan.mip_gap_target`. The solver stops once the incumbent
     /// is within this fraction of the best known bound, reporting `GapLimit`;

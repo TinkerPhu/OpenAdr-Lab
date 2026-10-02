@@ -314,6 +314,8 @@ impl Default for PlannerConfig {
             phase2_epsilon_eur: default_phase2_epsilon(),
             solver_timeout_s: default_solver_timeout_s(),
             phase2_solver_timeout_s: default_phase2_solver_timeout_s(),
+            rate_change_trigger_delay_s: default_rate_change_trigger_delay_s(),
+            rate_change_trigger_jitter_pct: default_rate_change_trigger_jitter_pct(),
             mip_gap_target: default_mip_gap_target(),
             planning_initial_delay_s: default_planning_initial_delay_s(),
             gate_switch_penalty_eur: 0.0,
@@ -366,6 +368,30 @@ pub(super) fn default_power_stages() -> u8 {
 /// land in the found-nothing regime. See `phase2_solver_timeout_s`.
 pub(super) fn default_phase2_solver_timeout_s() -> u64 {
     15
+}
+
+/// GB-55: 30 s, spread over [0, 60 s] by the 100 % jitter below.
+///
+/// Chosen against the two things it trades off. The cost is latency reacting to a
+/// new tariff, bounded at 60 s — negligible, because the periodic grid would pick
+/// the change up within `replan_interval_s` (300 s) anyway, so the worst case is
+/// still 5x sooner than the fallback, and the plan being corrected spans 48 h in
+/// 5-minute slots. The benefit is de-correlation: 20 VENs uniform over 60 s is one
+/// every ~3 s, against solves that are mostly under 5 s once they are not queueing.
+///
+/// Deliberately *enabled* by default rather than opt-in. The storm it prevents was
+/// measured, not hypothesised (ven-17 and ven-19 waking at the same centisecond on
+/// one broadcast), and it affects every multi-VEN host. Set to 0 to react at once.
+pub(super) fn default_rate_change_trigger_delay_s() -> u64 {
+    30
+}
+
+/// GB-55: 100 %, so the delay spans `[0, 2*base]` and reaches zero.
+///
+/// Reaching zero is the point: a fleet-wide *fixed* delay moves the collision 30 s
+/// later instead of breaking it up, and some VENs should still react immediately.
+pub(super) fn default_rate_change_trigger_jitter_pct() -> f64 {
+    100.0
 }
 
 pub(super) fn default_solver_timeout_s() -> u64 {

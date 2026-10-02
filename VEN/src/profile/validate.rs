@@ -62,6 +62,15 @@ impl Profile {
                     .to_string(),
             );
         }
+        // GB-55: a negative jitter is almost certainly a typo for a positive
+        // spread, and `rate_change_delay_s` would silently treat it as zero -
+        // say so rather than quietly ignoring the operator's intent.
+        if self.planner.rate_change_trigger_jitter_pct < 0.0 {
+            errors.push(format!(
+                "planner.rate_change_trigger_jitter_pct must be >= 0.0, got {}; the spread is symmetric, so a positive value already jitters in both directions",
+                self.planner.rate_change_trigger_jitter_pct
+            ));
+        }
         if self.planner.phase2_epsilon_eur < 0.0 {
             errors.push(format!(
                 "planner.phase2_epsilon_eur must be ≥ 0.0, got {}",

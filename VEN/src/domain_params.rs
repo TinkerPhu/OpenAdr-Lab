@@ -40,6 +40,8 @@ pub fn build_domain_params(
         phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
         solver_timeout_s: profile.planner.solver_timeout_s,
         phase2_solver_timeout_s: profile.planner.phase2_solver_timeout_s,
+        rate_change_trigger_delay_s: profile.planner.rate_change_trigger_delay_s,
+        rate_change_trigger_jitter_pct: profile.planner.rate_change_trigger_jitter_pct,
         mip_gap_target: profile.planner.mip_gap_target,
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
         gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
