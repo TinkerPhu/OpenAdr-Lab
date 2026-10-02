@@ -61,7 +61,7 @@ pub(crate) fn apply_dispatch_override(
 pub(crate) fn apply_comms_loss_clamp(
     sp: &mut HashMap<String, f64>,
     sim_snap: &SimSnapshot,
-    comms_loss: Option<super::context::CommsLossState>,
+    comms_loss: Option<crate::controller::comms_loss::CommsLossState>,
 ) {
     for (asset_id, (min_kw, max_kw)) in comms_loss_setpoint_bounds_kw(sim_snap, comms_loss) {
         if let Some(sp_kw) = sp.get_mut(&asset_id) {
@@ -75,7 +75,7 @@ pub(crate) fn apply_comms_loss_clamp(
 /// after it and must stay inside them. Empty while comms-loss is not active.
 pub(crate) fn comms_loss_setpoint_bounds_kw(
     sim_snap: &SimSnapshot,
-    comms_loss: Option<super::context::CommsLossState>,
+    comms_loss: Option<crate::controller::comms_loss::CommsLossState>,
 ) -> crate::controller::arbiter::SetpointBoundsKw {
     let Some(cl) = comms_loss.filter(|c| c.active) else {
         return Default::default();
@@ -351,8 +351,8 @@ mod dispatch_override_tests {
     fn comms_loss(
         active: bool,
         max_power_pct: f64,
-    ) -> Option<super::super::context::CommsLossState> {
-        Some(super::super::context::CommsLossState {
+    ) -> Option<crate::controller::comms_loss::CommsLossState> {
+        Some(crate::controller::comms_loss::CommsLossState {
             active,
             max_power_pct,
         })

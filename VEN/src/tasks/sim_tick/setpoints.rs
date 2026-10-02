@@ -1,107 +1,24 @@
-// Synchronous helper functions for the simulator tick.
+//! This tick's setpoint decision: the plan's base allocation, then every
+//! reactive pass that may change it.
+//!
+//! What else lived here moved to the ring that owns it -- the state
+//! injections to `simulator::inject`, the capacity composition onto
+//! `OadrCapacityState` itself, and the comms-loss PV resolver to
+//! `controller::comms_loss`. None of the three was scheduling, which is all
+//! `tasks/` is for; keeping them here is what kept this file at 196 of its
+//! 200 allowed lines.
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use crate::controller;
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::{tightest_capacity_limit, OadrCapacityState};
-use crate::entities::plan::Plan;
-use crate::entities::sim_inject::SimInjectState;
-use crate::simulator::SimState;
+use crate::entities::capacity::tightest_capacity_limit;
 
-use super::context::{CommsLossState, TickContext};
+use super::context::TickContext;
 use super::dispatch_override::{
     apply_comms_loss_clamp, apply_dispatch_override, comms_loss_setpoint_bounds_kw,
 };
-
-/// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
-/// Returns a list of field names that were applied and should be cleared.
-pub(crate) fn apply_sim_injections(
-    inject: &SimInjectState,
-    sim: &mut SimState,
-) -> Vec<&'static str> {
-    let mut cleared = Vec::new();
-    if let Some(soc) = inject.battery_soc {
-        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_BATTERY) {
-            let mut v = HashMap::new();
-            v.insert("soc".to_string(), soc);
-            cfg.reset(&mut entry.state, v);
-        }
-        cleared.push("battery_soc");
-    }
-    if let Some(soc) = inject.ev_soc {
-        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_EV) {
-            let mut v = HashMap::new();
-            v.insert("soc".to_string(), soc);
-            cfg.reset(&mut entry.state, v);
-        }
-        cleared.push("ev_soc");
-    }
-    if let Some(temp) = inject.heater_temp_c {
-        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_HEATER) {
-            let mut v = HashMap::new();
-            v.insert("temp_c".to_string(), temp);
-            cfg.reset(&mut entry.state, v);
-        }
-        cleared.push("heater_temp_c");
-    }
-    cleared
-}
-
-/// Compose effective capacity: inject grid limits only when no VTN event is active.
-/// Used by the PV generation-limit resolver (`tasks/sim_tick/tick.rs`) so it sees the
-/// same sim-injected overrides (`grid_import/export_limit_kw`), not just the raw
-/// VTN-driven `OadrCapacityState`.
-pub(crate) fn effective_capacity(
-    capacity_snap: &OadrCapacityState,
-    inject: &SimInjectState,
-) -> OadrCapacityState {
-    let mut effective_capacity = capacity_snap.clone();
-    if effective_capacity.import_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_import_limit_kw {
-            effective_capacity.import_limit_kw = Some(lim);
-        }
-    }
-    if effective_capacity.export_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_export_limit_kw {
-            effective_capacity.export_limit_kw = Some(lim);
-        }
-    }
-    effective_capacity
-}
-
-/// PHASE 1b: resolve the PV generation limit from capacity/plan/arbiter/manual/
-/// comms-loss sources, composing `effective_capacity` above with
-/// `controller::dispatcher::resolve_pv_generation_limit_kw`. `sim_snap` is only
-/// needed to read the PV asset's `inverter_max_kw` ceiling for the comms-loss
-/// candidate (R-59).
-pub(crate) fn resolve_pv_limit(
-    sim_snap: &SimSnapshot,
-    plan_snap: Option<&Plan>,
-    capacity_snap: &OadrCapacityState,
-    inject: &SimInjectState,
-    now: DateTime<Utc>,
-    arbiter_tighten_kw: Option<f64>,
-    comms_loss: Option<CommsLossState>,
-) -> controller::dispatcher::ResolvedPvGenerationLimit {
-    let capacity = effective_capacity(capacity_snap, inject);
-    let comms_loss_limit_kw = comms_loss.filter(|c| c.active).and_then(|c| {
-        sim_snap
-            .assets
-            .get(crate::ids::ASSET_PV)
-            .and_then(|s| s.val("inverter_max_kw"))
-            .map(|max_kw| c.max_power_pct * max_kw)
-    });
-    controller::dispatcher::resolve_pv_generation_limit_kw(
-        plan_snap,
-        &capacity,
-        now,
-        arbiter_tighten_kw,
-        inject.pv_generation_limit_kw,
-        comms_loss_limit_kw,
-    )
-}
 
 /// PHASE 2: build the plan's base setpoint allocation, then the arbiter's
 /// reactive layer on top of it (`controller::arbiter`): deviation correction

@@ -1,6 +1,13 @@
-//! Pure 1-minute downsampling accumulator (WP1.2), split out of `mod.rs` to
-//! keep the `tasks/` file-size cap. Clock-injected (`now` passed in per call)
-//! so minute-boundary logic is testable without sleeps.
+//! Pure 1-minute downsampling of the simulator's 1 s snapshots into the
+//! `TickSample`/`GridSample` rows the history store keeps (WP1.2).
+//! Clock-injected (`now` passed in per call), so minute-boundary logic is
+//! testable without sleeps.
+//!
+//! Lived in `tasks/history_sampler/`, where it was "split out of mod.rs to
+//! keep the tasks/ file-size cap" — but there is no scheduling in it, which
+//! is all `tasks/` is for. It aggregates port snapshots into domain values,
+//! so it belongs in the application ring; the task module keeps the loop,
+//! the `spawn_blocking` writes and the retention/rollover boundaries.
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};

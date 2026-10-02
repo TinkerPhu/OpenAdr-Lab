@@ -6,9 +6,9 @@ mod dispatch_override;
 mod feeds;
 mod finalize;
 mod forecast_wiring;
-mod helpers;
 mod post_lock;
 mod publish;
+mod setpoints;
 mod tick;
 mod usage_sim_plan_ahead;
 

@@ -1,9 +1,9 @@
 //! WP1.2/1.3/1.6 — history sampler task glue: 1-minute downsample write path
-//! (accumulator in `accumulator.rs`), daily retention pruning, and monthly
+//! (the accumulator itself is `services::history_sampling`), daily retention
+//! pruning, and monthly
 //! `AssetLedger` billing-period rollover. Boundary checks are pure/clock-injected
 //! (testable without sleeps); the async loop snapshots the simulator each 1s tick
 //! and writes through `spawn_blocking` — best-effort, log-and-continue.
-mod accumulator;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use chrono::{DateTime, Datelike, TimeZone, Utc};
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use accumulator::HistorySampler;
+use crate::services::history_sampling::HistorySampler;
 
 use crate::controller::{HistoryPort, SimulatorPort};
 use crate::entities::asset_ledger::AssetLedgerEntry;
@@ -20,8 +20,10 @@ use crate::entities::history::{GridSample, LedgerPeriod, TickSample};
 use crate::entities::DomainError;
 use crate::simulator::SimState;
 use crate::state::AppState;
+use crate::tasks::daily_gate::DailyGate;
 
-/// Width of each flushed downsample window — matches `accumulator.rs`'s fixed 1-minute
+/// Width of each flushed downsample window — matches
+/// `services::history_sampling`'s fixed 1-minute
 /// bucketing (`now.timestamp() / 60`). Also the window `reconcile_forecast_actuals`
 /// (forecast-accuracy-tracking) matches an open forecast sample's `target_ts` against.
 const DOWNSAMPLE_WINDOW_S: i64 = 60;
@@ -65,20 +67,6 @@ async fn write_window(
     }
 }
 
-/// WP1.3 — returns `true` (and records `now`'s UTC calendar day) exactly the
-/// first time this is called for a given day, i.e. once per day boundary.
-/// Fires on the very first call too — pruning is idempotent, so an immediate
-/// startup prune is desirable, unlike ledger rollover below.
-fn day_boundary_crossed(last_pruned_day: &mut Option<i64>, now: DateTime<Utc>) -> bool {
-    let day = now.timestamp().div_euclid(86_400);
-    if *last_pruned_day == Some(day) {
-        false
-    } else {
-        *last_pruned_day = Some(day);
-        true
-    }
-}
-
 /// Run `HistoryPort::prune_before` (WAL checkpoint happens inside the adapter)
 /// off the async loop, logging and continuing on failure.
 async fn prune_retention(history: Arc<dyn HistoryPort>, cutoff: DateTime<Utc>) {
@@ -96,7 +84,7 @@ async fn prune_retention(history: Arc<dyn HistoryPort>, cutoff: DateTime<Utc>) {
 /// WP1.6 — returns the `(year, month)` being closed exactly when `now` moves
 /// into a new calendar month; `None` on the first call (nothing accumulated
 /// yet to close — the live ledger may have survived a restart mid-month via
-/// `state.json` persistence, so unlike `day_boundary_crossed` this must NOT
+/// `state.json` persistence, so unlike `DailyGate` this must NOT
 /// fire on startup) and `None` while still in the same month.
 fn month_boundary_crossed(last: &mut Option<(i32, u32)>, now: DateTime<Utc>) -> Option<(i32, u32)> {
     let ym = (now.year(), now.month());
@@ -168,7 +156,7 @@ pub(crate) fn spawn_history_sampler(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut sampler = HistorySampler::new();
-        let mut last_pruned_day: Option<i64> = None;
+        let mut daily_prune = DailyGate::default();
         let mut last_ledger_month: Option<(i32, u32)> = None;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         loop {
@@ -192,7 +180,7 @@ pub(crate) fn spawn_history_sampler(
             ) {
                 write_window(history.clone(), &notifier, &state, now, ticks, grid).await;
             }
-            if day_boundary_crossed(&mut last_pruned_day, now) {
+            if daily_prune.crossed(now) {
                 let cutoff = now - chrono::Duration::days(retention_days as i64);
                 prune_retention(history.clone(), cutoff).await;
             }
@@ -218,33 +206,7 @@ mod tests {
         Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
     }
 
-    #[test]
-    fn test_day_boundary_crossed_first_call_is_true() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert_eq!(last, Some(0));
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_same_day_is_false() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert!(
-            !day_boundary_crossed(&mut last, ts(86_399)),
-            "still day 0 — must not cross again"
-        );
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_next_day_is_true_exactly_once() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert!(day_boundary_crossed(&mut last, ts(86_400)), "day 1 begins");
-        assert!(
-            !day_boundary_crossed(&mut last, ts(86_400 + 100)),
-            "still day 1 — must not cross again"
-        );
-    }
+    // The once-per-day gate is tested once, in `tasks/daily_gate.rs`.
 
     #[test]
     fn test_month_boundary_crossed_first_call_is_none() {

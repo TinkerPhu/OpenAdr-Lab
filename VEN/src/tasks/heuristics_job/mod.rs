@@ -11,21 +11,7 @@ use tracing::warn;
 use crate::controller::HistoryPort;
 use crate::services::heuristics::{learn_asset_heuristics, HeuristicsConfig, HEURISTIC_ASSET_IDS};
 use crate::state::AppState;
-
-/// Returns `true` (and records `now`'s UTC calendar day) exactly the first
-/// time this is called for a given day — mirrors `history_sampler`'s
-/// `day_boundary_crossed`. Fires on the first call too, so a freshly
-/// preloaded history gets a heuristic computed on the next check rather
-/// than waiting a full day.
-fn day_boundary_crossed(last_run_day: &mut Option<i64>, now: DateTime<Utc>) -> bool {
-    let day = now.timestamp().div_euclid(86_400);
-    if *last_run_day == Some(day) {
-        false
-    } else {
-        *last_run_day = Some(day);
-        true
-    }
-}
+use crate::tasks::daily_gate::DailyGate;
 
 /// Run the aggregation once for every heuristic-eligible asset, storing
 /// each non-`None` result. Log-and-continue on failure — never blocks or
@@ -67,12 +53,12 @@ pub(crate) fn spawn_heuristics_job(
     heuristics_config: HeuristicsConfig,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut last_run_day: Option<i64> = None;
+        let mut daily = DailyGate::default();
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         loop {
             interval.tick().await;
             let now = Utc::now();
-            if day_boundary_crossed(&mut last_run_day, now) {
+            if daily.crossed(now) {
                 run_heuristics_once(history.clone(), &state, now, &heuristics_config).await;
             }
         }
@@ -88,30 +74,7 @@ mod tests {
     use crate::services::test_support::mock_history_port::MockHistoryPort;
     use chrono::{Duration, TimeZone};
 
-    fn ts(secs: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(secs, 0).unwrap()
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_first_call_is_true() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert_eq!(last, Some(0));
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_same_day_is_false() {
-        let mut last = None;
-        day_boundary_crossed(&mut last, ts(0));
-        assert!(!day_boundary_crossed(&mut last, ts(86_399)));
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_next_day_is_true() {
-        let mut last = None;
-        day_boundary_crossed(&mut last, ts(0));
-        assert!(day_boundary_crossed(&mut last, ts(86_400)));
-    }
+    // The once-per-day gate is tested once, in `tasks/daily_gate.rs`.
 
     #[tokio::test]
     async fn run_heuristics_once_stores_non_flat_base_load_profile() {
