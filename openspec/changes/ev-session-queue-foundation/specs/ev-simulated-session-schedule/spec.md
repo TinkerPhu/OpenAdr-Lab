@@ -78,7 +78,7 @@ becoming stored sessions.
 ### Requirement: The simulated schedule never conflicts with stated sessions
 
 The simulated schedule SHALL only add sessions that do not conflict with any
-user- or VTN-created session, and SHALL leave such sessions untouched.
+user-stated session, and SHALL leave such sessions untouched.
 
 #### Scenario: A user session blocks one simulated day
 
