@@ -27,6 +27,15 @@
       "notes": "Also checked by .github/workflows/openspec-version-check.yml, which files an issue. This entry is the local half: it catches the update while someone is actually here to apply it."
     },
     {
+      "id": "base-image-digests",
+      "description": "Have the digest-pinned Docker base images moved on their tags?",
+      "command": "{python} scripts/check_base_image_digests.py",
+      "interval_days": 7,
+      "last_run": "2026-10-02T14:33:32Z",
+      "last_status": "ok",
+      "notes": "The other half of pinning a base image by digest (tests/Dockerfile): the pin keeps builds cacheable across a `docker system prune`, but it also stops security updates arriving implicitly, so the tag has to be watched deliberately. Weekly like openspec-version because it is cheap (one registry HEAD per pin) and the answer changes often. Exit 1 = a pin has moved, 2 = the registry could not be reached, which deliberately does NOT read as current. Bumping is a code change, not bookkeeping: a new base can change system packages, so rebuild the affected image and run its suite. The script finds every `FROM name:tag@sha256:` in the repo, so a second pinned image needs no change here."
+    },
+    {
       "id": "dependency-audit",
       "description": "cargo audit and npm audit; findings go to docs/BACKLOG.md with severity",
       "command": null,
