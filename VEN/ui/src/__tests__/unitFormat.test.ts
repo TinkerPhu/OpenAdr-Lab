@@ -13,14 +13,14 @@ import {
 describe("canonical per-unit formatting", () => {
   it("power: Watts below 1kW, kW at/above, matching the axis-tick rule exactly", () => {
     expect(formatPowerValue(0.45)).toBe("450 W");
-    expect(formatPowerValue(1)).toBe("1.00 kW");
+    expect(formatPowerValue(1)).toBe("1 kW");
     expect(formatPowerValue(2.345)).toBe("2.35 kW");
     expect(formatPowerValue(-0.003)).toBe("-3 W");
   });
 
   it("signed power: explicit +/- prefix, from the real value not the rounded string", () => {
-    expect(formatSignedPowerValue(1.0)).toBe("+1.00 kW");
-    expect(formatSignedPowerValue(-4.2)).toBe("-4.20 kW");
+    expect(formatSignedPowerValue(1.0)).toBe("+1 kW");
+    expect(formatSignedPowerValue(-4.2)).toBe("-4.2 kW");
     expect(formatSignedPowerValue(0)).toBe("0 W");
     // Sub-watt negative residual that rounds to 0 W — sign must still be visible,
     // not silently dropped by the underlying Math.round(-0.2) -> "-0" -> "0" collapse.

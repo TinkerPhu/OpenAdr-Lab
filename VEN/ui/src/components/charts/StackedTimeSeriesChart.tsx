@@ -14,7 +14,7 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../controller/types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../controller/types";
 import type { ZoneDef } from "../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis } from "@lab/charts/axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis, POWER_AXIS_WIDTH_PX } from "@lab/charts/axisDomain";
 import { formatSignedPowerValue } from "@lab/charts/unitFormat";
 import { renderNowLine } from "@lab/charts/NowLine";
 import { renderZoneShading } from "@lab/charts/ZoneShading";
@@ -203,7 +203,7 @@ export function StackedTimeSeriesChart({
           <YAxis
             yAxisId="power"
             tick={{ fontSize: 10 }}
-            width={46}
+            width={POWER_AXIS_WIDTH_PX}
             tickFormatter={formatPowerTick}
             domain={powerAxis.domain}
             ticks={powerAxis.ticks}

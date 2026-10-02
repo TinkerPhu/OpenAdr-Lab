@@ -86,7 +86,7 @@ describe("StackedAreaTooltip", () => {
         colorMap={colorMap}
       />
     );
-    expect(screen.getByText(/\+3\.50 kW/)).toBeInTheDocument();
+    expect(screen.getByText(/\+3\.5 kW/)).toBeInTheDocument();
   });
 
   it("shows net kW for unidirectional export asset (negative)", () => {
@@ -102,7 +102,7 @@ describe("StackedAreaTooltip", () => {
         colorMap={colorMap}
       />
     );
-    expect(screen.getByText(/-4\.20 kW/)).toBeInTheDocument();
+    expect(screen.getByText(/-4\.2 kW/)).toBeInTheDocument();
   });
 
   it("shows net kW for bidirectional asset (battery charging and discharging)", () => {
@@ -119,7 +119,7 @@ describe("StackedAreaTooltip", () => {
         colorMap={colorMap}
       />
     );
-    expect(screen.getByText(/\+1\.00 kW/)).toBeInTheDocument();
+    expect(screen.getByText(/\+1 kW/)).toBeInTheDocument();
   });
 
   it("keeps a visible sign for a sub-watt negative residual that rounds to 0 W", () => {
