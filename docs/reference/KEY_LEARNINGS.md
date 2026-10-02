@@ -2557,3 +2557,109 @@ next decision built on that mechanism would not have survived.
   apart also keeps the distinction honest: the prose is an interpretation, and in this
   investigation interpretations were retracted twice while the rows stayed valid. When the two
   disagree, the rows win.
+
+## A rule enforced by prose is not enforced (2026-10-03)
+
+`.claude/CLAUDE.md` lists the VEN's hexagonal dependency rules, and
+`scripts/audit_ven_architecture.py` scripts them. The script checked
+`use crate::assets::` inside `controller/milp_planner/` and inside `entities/` — two
+rooms of the domain ring — and never mentioned `crate::simulator` at all. Both
+`controller/capacity_headroom.rs` and `controller/site_headroom.rs` had been taking
+`&SimState` and downcasting to concrete `BaseLoad`/`PvInverter` for months. The audit
+reported PASSED every time, because the rule it ran was narrower than the rule it
+claimed.
+
+The same document described the file-size allowlist as "currently just assets/mod.rs".
+`ALLOWLIST` is an empty set, and that file is 192 of its 500 allowed production lines —
+the refactor the exception was waiting for had landed and nobody updated the prose.
+
+**How to apply:** when a rule is worth writing down, write the check that covers *all*
+of it, and prefer one broad check to several narrow ones (the fifth rule added here is
+"no `crate::assets` or `crate::simulator` anywhere in `controller/`", which subsumes
+the two narrow ones rather than joining them). A prose restatement of a scripted rule
+drifts silently and reads as compliance; if the prose and the script disagree, the
+script is the rule. Checks whose trigger is "time passed" rather than "this commit"
+belong in `jobs.json`.
+
+## A file-size cap can be satisfied the wrong way (2026-10-03)
+
+`tasks/` carries a 200-production-line cap, and its purpose is to stop logic
+accumulating in the adapter ring. Four files sat at 190-197 lines, and their own module
+docs said how they got there: "split out of `tick.rs` to keep it under the tasks/
+file-size cap", "split out of `mod.rs` to keep the tasks/ file-size cap".
+`tasks/sim_tick/` had reached 13 files named for *when* they run — `helpers`, `context`,
+`post_lock`, `arbiter_glue`, `finalize` — and `spawn_sim_tick` took 21 parameters, one
+of them a tuple bundled "purely to keep the main.rs call site's line count down".
+
+Every one of those splits made the audit pass. None of them reduced what `tasks/` knew.
+The functions actually over the line were not scheduling at all: writing an asset's
+state into a `SimState`, composing two capacity values, deciding a PV ceiling during
+comms loss, downsampling snapshots into history rows. Moved to `simulator/`,
+`entities/`, `controller/` and `services/` respectively, the biggest file dropped from
+196 lines to 105.
+
+**How to apply:** when a file is near its cap, the question is not "where do I cut it"
+but "what is in here that this ring does not own". A split named for a line budget
+(`helpers`, `glue`, `context`, `post_lock`) is a signal the answer was "cut". A cap met
+by slicing orchestration thinner has been complied with and not obeyed. The
+counter-case matters too: `tasks/planning/cycle.rs` is at 195/200 and really is
+orchestration in the right ring — its length comes from threading a 29-parameter
+`build_solve_request`, so its fix is that signature, and splitting it again would be
+the mistake above.
+
+## `cargo check --tests` does not check the build (2026-10-03)
+
+Nine production names were moved behind `#[cfg(test)]`. `cargo check --tests` passed
+cleanly, because it compiles the `cfg(test)` arm where those names exist. `cargo check`
+without `--tests` failed on all nine — the binary does not have that arm.
+
+**How to apply:** run both, and treat `--tests` alone as saying nothing about the
+binary. The failure is silent in the direction that matters: a green `--tests` run
+looks like more coverage than a plain `check`, not less.
+
+## An `#[allow]` is a claim, and it can be checked (2026-10-03)
+
+`controller/milp_planner/mod.rs` held ten `#[allow(unused_imports)]` imports under a
+comment asserting the test submodules consumed them via `use super::*`. Moving them
+into a `#[cfg(test)] mod test_prelude` made rustc evaluate that claim — and most of it
+was false: 11 asset-port context types, 5 milp-interaction types, 8 of 9 plan types and
+several other names were used by nothing. The allow had been suppressing a correct
+warning about dead code for as long as it existed.
+
+Two other `#[allow(dead_code)]` items turned out to be genuinely dead
+(`assets::asset_max_power`, `services::hems::HvacService`), and two more were a
+half-built feature the allow was holding open: `UserRequestService::create_shiftable`
+carried "not yet wired to a route — shiftable loads are created inline in
+routes/hems.rs", i.e. two implementations of one concept, and they had already drifted
+(the route validated that a run fits its placement window; the service did not).
+
+**How to apply:** prefer a construction that makes the claim checkable to an `#[allow]`
+that asserts it — `#[cfg(test)]` for a test-only item, so losing its last caller becomes
+a warning again. When an allow says "not yet called", the fix is to call it or delete
+it; left alone it becomes a second implementation nobody runs, which is where the
+divergence hides.
+
+## Lint noise about placement is a report about placement (2026-10-03)
+
+`VEN/ui` had six `react-refresh/only-export-components` warnings — "this file exports
+something that is not a component" — which reads as a dev-mode HMR nicety. Acting on
+them found: `dayRangeIso` defined byte-identically in two pages with byte-identical
+duplicated tests, its sibling `last24hRangeIso` drifted between those pages so that one
+of them read the browser's clock where the other deliberately read the server's (a real
+bug: a client with OS-clock skew queried a 24 h window containing no data), and
+`PlanPowerStack` importing its data builders out of `GridAccumulatedCell.tsx`.
+
+**How to apply:** a lint that can only fire on misplaced code is worth reading as a
+placement report, not triaged as cosmetic. The warning does not know what it found.
+
+## Deleting the dead part of a file (2026-10-03)
+
+`services/hems.rs` was 75 lines: a dead `HvacService` whose two methods only forwarded
+to `AppState`, and the project's only `DomainError` to HTTP status mapping. The module
+name mentioned neither. Deleting "the dead service" deleted the live mapping with it;
+the compiler caught it one commit later.
+
+**How to apply:** before deleting a file whose *contents* are dead, read what else is in
+it. A module named after a feature rather than a responsibility is where unrelated live
+code goes to hide. The mapping now lives in `routes/error.rs`, where choosing a status
+code belongs.
