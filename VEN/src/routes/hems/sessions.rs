@@ -16,8 +16,7 @@ use crate::controller::user_request::{
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::design_vocabulary::UserRequestMode;
-use crate::entities::device_session::ShiftableLoad;
-use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
+use crate::entities::user_request::SessionType;
 use crate::services::user_request::UserRequestService;
 use crate::AppCtx;
 
@@ -182,64 +181,19 @@ pub async fn post_requests(
 
     // ── Shiftable-load fast-path (Plan C) ───────────────────────────────────
     // WM has no sim-asset profile entry; create_from_body would return UnknownAsset.
-    if body.power_kw.is_some() && body.duration_min.is_some() {
-        let earliest = body.earliest_start.unwrap_or(now);
-        let latest = match body.latest_end {
-            Some(t) => t,
-            None => {
+    if UserRequestService::is_shiftable(&body) {
+        // The request/load pair and every rule about it belong to the
+        // service; this route's job is to turn its `Err` into a status code
+        // and to install what it returns.
+        let (user_req, load) = match UserRequestService::create_shiftable(body, now) {
+            Ok(pair) => pair,
+            Err(msg) => {
                 return (
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(serde_json::json!({"error": "latest_end required for shiftable load"})),
+                    Json(serde_json::json!({ "error": msg })),
                 )
                     .into_response()
             }
-        };
-        let power = body.power_kw.unwrap();
-        let duration = body.duration_min.unwrap();
-        if latest - earliest < chrono::Duration::minutes(duration as i64) {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::json!({
-                    "error": "the [earliest_start, latest_end] window is too short for duration_min"
-                })),
-            )
-                .into_response();
-        }
-        let mode = body.mode.clone().unwrap_or_default();
-        let load = ShiftableLoad {
-            id: Uuid::new_v4(),
-            asset_id: body.asset_id.clone(),
-            power_kw: power,
-            duration_min: duration,
-            earliest_start: earliest,
-            latest_end: latest,
-            mode: mode.clone(),
-            created_at: now,
-            updated_at: now,
-        };
-        let user_req = UserRequest {
-            id: Uuid::new_v4(),
-            asset_id: body.asset_id.clone(),
-            target_soc: None,
-            target_energy_kwh: (power * duration as f64) / 60.0,
-            desired_power_kw: power,
-            deadlines: vec![],
-            mode,
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
-            session_id: Some(load.id),
-            session_type: Some(SessionType::ShiftableLoad),
-            comfort_rates: vec![],
-            status: UserRequestStatus::Active,
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: body.interruptible.unwrap_or(false),
-            tolerance_min: body.tolerance_min,
-            budget_eur: body.budget_eur,
-            created_at: now,
-            updated_at: now,
         };
         if let Err(msg) = ctx.state.add_shiftable_load(load.clone()).await {
             return (
@@ -292,8 +246,8 @@ pub async fn post_requests(
             request_id = %user_req.id,
             session_id = ?user_req.session_id,
             asset_id = %user_req.asset_id,
-            power_kw = power,
-            duration_min = duration,
+            power_kw = load.power_kw,
+            duration_min = load.duration_min,
             "user request created (shiftable load)"
         );
         return (

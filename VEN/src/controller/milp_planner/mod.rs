@@ -4,52 +4,34 @@
 //! the solution into a `Plan` with per-slot allocations.
 //! See `docs/plans/milp_planner_transition.md` for the design.
 
-// These imports are consumed by `use super::*` in the test submodules (tests/).
-// They appear unused in non-test compilation but are the implicit re-export mechanism
-// for the wildcard test imports. #[allow] is narrowly scoped to this file.
-#[allow(unused_imports)]
-use chrono::{DateTime, Duration, Utc};
-#[allow(unused_imports)]
-use good_lp::solvers::highs::highs;
-#[allow(unused_imports)]
-use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable,
-    WithInitialSolution, WithMipGap, WithTimeLimit,
-};
-#[allow(unused_imports)]
-use tracing::warn;
-#[allow(unused_imports)]
-use uuid::Uuid;
+// The test submodules under tests/ reach their fixtures through `use super::*`,
+// so this module is their import surface. Gated on `cfg(test)` rather than
+// carried as production imports behind `#[allow(unused_imports)]`: in a test
+// build the children use them, in a production build they do not exist, and
+// neither case needs an allow.
+#[cfg(test)]
+mod test_prelude {
+    pub use chrono::{DateTime, Duration, Utc};
+    pub use good_lp::{constraint, Solution, SolverModel};
+    pub use tracing::warn;
 
-#[allow(unused_imports)]
-use self::asset_port::{
-    BatteryMilpContext, BatteryMilpVars, BatterySolOutput, EvMilpContext, EvMilpMode, EvMilpVars,
-    EvSolOutput, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
-};
+    pub use crate::entities::asset::PlanTrigger;
+    pub use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+    pub use crate::entities::plan::Plan;
+}
+#[cfg(test)]
+use test_prelude::*;
 
 pub use self::asset_port::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
     MilpLoadMode, ShiftableLoadScalars,
 };
 pub(crate) use self::types::ShiftableLoadMilpContext;
-#[allow(unused_imports)]
-use crate::controller::milp_interactions::{
-    build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
-};
-#[allow(unused_imports)]
-use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::asset_params::{
     BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
 use crate::entities::capacity::OadrCapacityState;
-#[allow(unused_imports)]
-use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
-#[allow(unused_imports)]
-use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary, PlanTimeSlot,
-    PlanWarning, PlanningHorizon, WarningSeverity,
-};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 

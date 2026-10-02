@@ -1,6 +1,6 @@
-//! `asset_max_power` (`asset-max-power-primitive` D4) and the `Trajectory`
-//! types `Asset::simulate_forward` produces — split out of `asset_trait.rs`
-//! to stay under that file's 500-production-line budget.
+//! `asset_max_power_series` (`asset-max-power-primitive` D4) and the
+//! `Trajectory` types `Asset::simulate_forward` produces — split out of
+//! `asset_trait.rs` to stay under that file's 500-production-line budget.
 
 use chrono::{DateTime, Duration, Utc};
 
@@ -27,19 +27,18 @@ pub struct TrajectoryPoint {
     pub state: AssetState,
 }
 
-/// Same "if this asset committed now to a sustained extreme in `direction`
-/// under `tier`, held from `t1`" question as `asset_max_power`, but reporting
-/// every elapsed point along the way instead of only the final one —
-/// `(elapsed_s, power_kw, cumulative_energy_kwh)` triples, one per
+/// "If this asset committed now to a sustained extreme in `direction` under
+/// `tier`, held from `t1`, what is it delivering at every point along the
+/// way?" — `(elapsed_s, power_kw, cumulative_energy_kwh)` triples, one per
 /// `max_effort_schedule`'s own fine-grained (60s-resolution) step.
 ///
 /// Built once, from a single schedule/`simulate_forward` walk out to
 /// `t1 + t2_max`, specifically so a caller sweeping many different `t2`
 /// samples (e.g. a capacity-forecast curve) doesn't re-walk the schedule
 /// from scratch for each sample — `O(t2_max / 60s)` total work, not
-/// `O(samples²)` (`unified-capacity-envelope-engine` D2). `asset_max_power`
-/// itself is defined in terms of this (reading the last point), so the two
-/// can never independently diverge.
+/// `O(samples²)` (`unified-capacity-envelope-engine` D2). A caller wanting
+/// only the endpoint reads the last point; there is deliberately no second
+/// function for that, so no second answer can exist.
 pub fn asset_max_power_series(
     asset: &dyn Asset,
     state: &AssetState,
@@ -66,30 +65,18 @@ pub fn asset_max_power_series(
     series
 }
 
-/// "If this asset committed now to a sustained extreme in `direction` under
-/// `tier`, held from `t1` for `t2`, what power is it still delivering at the
-/// end and how much energy flowed?" (`asset-max-power-primitive` D4). Pure
-/// composition over `asset_max_power_series` — no simulation logic of its
-/// own. Returns `(power_kw_at_t1_plus_t2, energy_kwh)`.
-#[allow(dead_code)]
-pub fn asset_max_power(
-    asset: &dyn Asset,
-    state: &AssetState,
-    t1: DateTime<Utc>,
-    t2: Duration,
-    direction: CommitmentDirection,
-    tier: LimitTier,
-) -> (f64, f64) {
-    asset_max_power_series(asset, state, t1, t2, direction, tier)
-        .last()
-        .map(|&(_, power_kw, energy_kwh)| (power_kw, energy_kwh))
-        .unwrap_or((0.0, 0.0))
-}
+// `asset_max_power` (`asset-max-power-primitive` D4) lived here: the
+// `(power_kw, energy_kwh)` endpoint of `asset_max_power_series`. Every
+// consumer wants the whole series — the sweep-line merge in
+// `simulator/capacity_headroom.rs` needs every breakpoint, not the last one —
+// so it never acquired a production caller and survived only behind
+// `#[allow(dead_code)]`. Its tests were about `max_effort_schedule`'s
+// fine-grained default body, which they still cover through the series.
 
 #[cfg(test)]
 mod asset_max_power_tests {
     //! `asset-max-power-primitive`: `max_effort_schedule`'s fine-grained
-    //! default body + `asset_max_power`'s composition, verified against a
+    //! default body and the series built over it, verified against a
     //! worked numeric example — the whole reason for fine-grained stepping
     //! instead of one coarse `simulate_forward` call is that `step()` doesn't
     //! detect exhaustion *within* an over-long `dt` (confirmed against
@@ -98,6 +85,23 @@ mod asset_max_power_tests {
 
     use super::*;
     use crate::assets::battery::{Battery, BatteryState};
+
+    /// The series' endpoint — what a caller wanting only "power and energy at
+    /// `t1 + t2`" would read. A test helper rather than a production function:
+    /// no production caller ever wanted it (see the note above the series).
+    fn series_endpoint(
+        asset: &dyn Asset,
+        state: &AssetState,
+        t1: DateTime<Utc>,
+        t2: Duration,
+        direction: CommitmentDirection,
+        tier: LimitTier,
+    ) -> (f64, f64) {
+        asset_max_power_series(asset, state, t1, t2, direction, tier)
+            .last()
+            .map(|&(_, power_kw, energy_kwh)| (power_kw, energy_kwh))
+            .unwrap_or((0.0, 0.0))
+    }
 
     fn battery(capacity_kwh: f64, max_kw: f64, soc: f64) -> (Battery, AssetState) {
         (
@@ -141,13 +145,13 @@ mod asset_max_power_tests {
     }
 
     #[test]
-    fn asset_max_power_matches_manual_schedule_and_reports_correct_energy() {
-        // Same setup: exactly 1 kWh of headroom, so asset_max_power's energy
+    fn series_endpoint_matches_manual_schedule_and_reports_correct_energy() {
+        // Same setup: exactly 1 kWh of headroom, so the endpoint's energy
         // must be ~1.0 kWh, not 5.0 kWh (the naive-coarse-step bug's answer).
         let (bat, state) = battery(10.0, 5.0, 0.9);
         let t1 = Utc::now();
         let t2 = Duration::hours(1);
-        let (power_kw, energy_kwh) = asset_max_power(
+        let (power_kw, energy_kwh) = series_endpoint(
             &bat,
             &state,
             t1,
@@ -171,13 +175,13 @@ mod asset_max_power_tests {
     }
 
     #[test]
-    fn asset_max_power_with_ample_headroom_delivers_the_full_rate_throughout() {
+    fn series_endpoint_with_ample_headroom_delivers_the_full_rate_throughout() {
         // 10 kWh capacity, 5 kW rate, soc=0.5 -> 5 kWh headroom, needs 1h to
         // fill. A 0.5h window should never hit the ceiling.
         let (bat, state) = battery(10.0, 5.0, 0.5);
         let t1 = Utc::now();
         let t2 = Duration::minutes(30);
-        let (power_kw, energy_kwh) = asset_max_power(
+        let (power_kw, energy_kwh) = series_endpoint(
             &bat,
             &state,
             t1,
@@ -194,35 +198,9 @@ mod asset_max_power_tests {
 
     // ── asset_max_power_series (unified-capacity-envelope-engine D2) ───────
 
-    #[test]
-    fn asset_max_power_series_last_point_matches_asset_max_power() {
-        // Same boundary-exact 1kWh/5kW headroom fixture as the test above --
-        // confirms asset_max_power (now defined in terms of the series) still
-        // reports the identical answer it always did, not a second,
-        // independently-diverging computation.
-        let (bat, state) = battery(10.0, 5.0, 0.9);
-        let t1 = Utc::now();
-        let t2 = Duration::hours(1);
-        let series = asset_max_power_series(
-            &bat,
-            &state,
-            t1,
-            t2,
-            CommitmentDirection::Import,
-            LimitTier::Physical,
-        );
-        let &(_, series_power_kw, series_energy_kwh) = series.last().unwrap();
-        let (power_kw, energy_kwh) = asset_max_power(
-            &bat,
-            &state,
-            t1,
-            t2,
-            CommitmentDirection::Import,
-            LimitTier::Physical,
-        );
-        assert_eq!(series_power_kw, power_kw);
-        assert_eq!(series_energy_kwh, energy_kwh);
-    }
+    // The "last series point equals asset_max_power" test is gone with
+    // `asset_max_power` itself: the endpoint is now read from the series by
+    // the test helper above, so comparing the two could only ever pass.
 
     #[test]
     fn asset_max_power_series_reports_every_60s_step_not_just_the_endpoint() {

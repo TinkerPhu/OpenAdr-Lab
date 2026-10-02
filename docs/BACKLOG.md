@@ -37,19 +37,8 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | Note | Gain |
 |---|---|---|
-| [BL-23](#bl-23-hvacservice--route-wiring-or-removal-of-the-unused-impl) | Consistency-only decision, no behavior change either way | None |
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
-
----
-
-### BL-23: `HvacService` — route wiring or removal of the unused impl
-**Req:** `services/hems.rs` (`HvacService`)
-**Problem:** `EvSessionService` is the live pattern for session lifecycle; `HvacService` sketches the same shape for heater targets, but `post_heater_target` sets the target directly instead of going through it — so `HvacService`'s methods are never called.
-**Fix:** Either route `post_heater_target` through `HvacService` for consistency with the EV path, or fold whatever `HvacService` was meant to add into the existing direct path and delete the empty shell.
-**Gain:** None (cleanup only) — consistency decision, no behavior change either way.
-**Complexity:** Small — this is a consistency decision, not new functionality.
-**Verify:** `cargo build` clean; existing heater-target route tests unaffected either way.
 
 ---
 
