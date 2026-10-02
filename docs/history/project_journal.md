@@ -13779,3 +13779,44 @@ deploy restarts the whole fleet at once; a start-up-derived offset would re-alig
 - *`wsl cargo <cmd>` silently does nothing* — cargo is not on WSL's non-login PATH, and the
   one-line stderr hides behind any `| grep` of compiler output while `$?` reports grep's status.
   A bench was declared "compiles clean" on that evidence. `CLAUDE.md` now says `wsl bash -lc`.
+
+## GB-55 — holding the rate-change replan so the fleet does not react in unison (2026-10-02)
+
+**What.** Two optional profile fields, `planner.rate_change_trigger_delay_s` (default 30) and
+`planner.rate_change_trigger_jitter_pct` (default 100), hold a `RateChange`-triggered replan for
+`base * (1 + (2*draw - 1) * pct/100)` seconds — uniform `[0, 60 s]` at the defaults — via the pure
+`entities::planner_params::rate_change_delay_s`, applied in `tasks/planning/mod.rs` before the
+cycle reads its clock.
+
+**Why.** Found by verifying GB-54 rather than by looking for it. That check confirmed 13/13
+periodic cycles landing on their predicted FNV offsets, and the two wakes that did *not* fit —
+ven-17 and ven-19 at the same centisecond — turned out to be `RateChange`, which bypasses the
+periodic grid by design. So GB-54 closed the steady-state collision and left the event-driven one
+wide open. A VTN rate update is routine, and it hits all 20 VENs at once on a 4-core host.
+
+**Design decisions worth keeping.**
+- *Only `RateChange` is held.* `Alert` and `CapacityChange` are safety and contractual limits
+  whose entire value is immediacy; `UserRequest` has a person waiting at a UI. Delaying those to
+  save CPU would trade the wrong thing.
+- *The jitter must reach zero*, which is why the default is 100 % and not something smaller. A
+  fixed fleet-wide delay moves the collision 30 s later instead of breaking it up.
+- *Enabled by default, not opt-in.* The storm was measured, not hypothesised, and affects every
+  multi-VEN host. `0` disables it.
+- *The random draw is a parameter, not an internal call.* `rate_change_delay_s(base, pct, draw)`
+  takes a uniform sample so the mapping is a pure function testable at both ends of the range —
+  the `determinism` rule applied to randomness rather than to the clock.
+- *`validate.rs` rejects a delay `>= replan_interval_s`*: the periodic grid would fire first, so a
+  longer hold makes the delayed trigger redundant rather than just slow.
+
+**Key learning — a filter that cannot see failure is worse than no check.** Three times in this
+stretch a command that never ran looked like a command that passed: `wsl cargo check` behind
+`| grep '^error'`, `docker compose build ven` (no such service) behind a `DONE|ERROR` waiter, and
+then a repeat of the first one *after* writing the lesson down. Each time the evidence was an
+empty filtered output, which is indistinguishable from success. The habit that fixes all three is
+to capture the exit code first and filter second — `cmd > log 2>&1; echo EXIT=$?` then inspect —
+never `cmd | grep ...; echo $?`, which reports grep's verdict on its own output.
+
+**Also corrected here.** An earlier estimate that adding a `PlannerParams` field would break seven
+construction sites was wrong: all four non-default sites use `..PlannerParams::default()`. The
+estimate came from `grep "PlannerParams {" -A 2`, a window too narrow to reach the `..default()`
+line. Checked rather than assumed, which is why it cost nothing.
