@@ -46,8 +46,16 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
   # question the page exists to answer, and only a browser can check it.
   @ui
   Scenario: The fleet page draws a line for every VEN that is reporting
+    # The chart renders `fleet-chart-empty` instead of itself until the history
+    # store has rows (FleetPowerChart.tsx), so the data this asserts on is a
+    # precondition, not something to race. Without this wait the scenario fails
+    # on any freshly started stack - reproducibly, not as a flake - because it
+    # waits 60 s for a chart that cannot appear until the store has been
+    # written. The step is the same one the "still there a minute later"
+    # scenario above uses; it polls for 120 s.
     Given I open the VTN UI
-    When I navigate to the Fleet page
+    When I wait for the fleet history of the last 10 minutes to have samples
+    And I navigate to the Fleet page
     Then the fleet chart has a line for every reporting VEN
     And hiding a VEN in the legend removes its line
 
