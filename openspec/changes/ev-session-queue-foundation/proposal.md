@@ -9,14 +9,18 @@ Monday's commute, Wednesday's, a weekend trip — and the planner cannot see pas
 the next one, so it cannot pre-charge for a deadline that lies behind another
 departure, nor account for the SoC the car will lose in between.
 
+**Prerequisite: `ev-soc-state-variables`** (R-93/R-92) lands first, giving the EV
+MILP per-slot SoC variables and a list of charging obligations instead of one
+scalar deadline. This change is then purely about the session layer.
+
 The gap is purely in the obligation layer. The EV's own trip generator
 (`VEN/src/assets/ev_schedule.rs`) is already stateless, deterministic and
 multi-trip-capable: `availability_per_slot` and `soc_drop_frac_per_slot` already
 project *any number* of away-windows and return-drops across a planning horizon.
-Only the goal — "be at SoC X by time T" — is pinned to a single slot, so the
-simulated-usage producer must throw away everything but the nearest trip
+Only the *storage* of the goal is pinned to a single slot, so the simulated-usage
+producer must throw away everything but the nearest trip
 (`sync_plan_ahead_session`, `VEN/src/tasks/sim_tick/usage_sim_plan_ahead.rs:62`)
-and the MILP context carries one `t_dead_step` / one `e_required_kwh`.
+even though the planner it feeds can, after the prerequisite change, hold several.
 
 ## What Changes
 
@@ -35,12 +39,12 @@ and the MILP context carries one `t_dead_step` / one `e_required_kwh`.
   sessions conflict, plus the insertion rule that keeps the queue ordered and
   non-overlapping. Used by every producer in this change, and reused unchanged
   by the follow-up change that adds human conflict resolution.
-- The **MILP context** carries the queue as a sequence of per-session
-  obligations (window + required energy) instead of one deadline and one
-  required energy, so the solver can pre-charge across an intervening
-  departure. The existing comfort-curve band pricing keeps governing the head
-  session; queued sessions behind it carry firm energy-by-deadline obligations
-  chained open-loop through the predicted return drops.
+- Each queued session inside the planning horizon becomes one entry in the
+  **obligation list** the prerequisite change introduced — its departure step and
+  its target state of charge. The solver already chains state of charge across
+  departures, so pre-charging for a deadline behind an intervening trip needs no
+  new planner mechanism here. The comfort curve keeps pricing the head session's
+  energy; queued sessions behind it carry firm targets.
 - The **simulated-usage producer** becomes the first consumer: instead of
   writing the nearest trip only, it maintains a rolling **7-day** window of
   simulated sessions, topped up each tick from repeated
@@ -72,9 +76,9 @@ and it is the single line the follow-up change replaces with a refusal.
 - `ev-session-queue`: an EV asset holds an ordered queue of non-overlapping
   charging sessions; how sessions are inserted, ordered, expired and removed,
   and what the queue guarantees to its consumers.
-- `ev-session-queue-planning`: how the planner consumes the queue — per-session
-  obligation windows, energy chained through predicted return drops, and what
-  the plan guarantees for each queued session.
+- `ev-session-queue-planning`: how the queue reaches the planner — one obligation
+  per queued session, attributable back to it, and what the plan guarantees and
+  reports per session.
 - `ev-simulated-session-schedule`: the simulated-usage producer maintains a
   rolling 7-day schedule of simulated sessions derived from the EV's own trip
   generator.
@@ -93,13 +97,12 @@ Code:
 - `VEN/src/routes/hems/sessions.rs` — user-request producer; `GET /user-requests`
   per-request session resolution; `VEN/src/routes/hems/ev.rs` — `GET /ev-session`.
 - `VEN/src/tasks/sim_tick/arbiter_glue.rs` — head expiry, `paused_by_active_session`.
-- `VEN/src/assets/ev_session_context.rs`, `VEN/src/assets/ev_milp.rs`,
-  `VEN/src/assets/ev_usage_forecast.rs`,
-  `VEN/src/controller/milp_planner/asset_port.rs` — per-session obligations.
+- `VEN/src/assets/ev_session_context.rs` — one obligation per queued session
+  (the obligation list and its constraints come from the prerequisite change).
 - `VEN/src/assets/ev.rs` — `EvCharger.departure_time` tick override; `VEN/src/tasks/planning/cycle_state.rs`, `VEN/src/tasks/sim_tick/context.rs` — carriers.
 - `VEN/ui/src/api/types.ts`, `VEN/ui/src/components/sessions/` — queue surface.
 
 APIs: `GET /ev-session` and `GET /user-requests` response shapes gain the queue;
 `POST /user-requests` request shape is unchanged in this change.
 
-Dependencies: none added.
+Dependencies: none added. Hard prerequisite: `ev-soc-state-variables`.

@@ -4,8 +4,8 @@
 merged first.** This change consumes its `EvSessionQueue::insert` /
 `EvSessionConflict`; none of the tasks below re-implement overlap detection.
 
-Branch: `NNN-ev-session-user-conflict-resolution` (next free openspec feature ID).
-Test-first throughout (`test-first` rule).
+Branch: `050-ev-session-user-conflict-resolution`. Prerequisite:
+`049-ev-session-queue-foundation` merged to main. Test-first throughout.
 
 ## 1. Request validation and the conflict error
 

@@ -2,7 +2,14 @@
 
 ## Context
 
-See `proposal.md` — Why. The constraints that shape the approach:
+See `proposal.md` — Why.
+
+**Prerequisite: `ev-soc-state-variables`** (R-93/R-92) must land first. It gives the
+EV MILP per-slot SoC variables, a balance constraint carrying trip drops, and an
+`obligations: Vec<EvObligation>` list bound at each obligation's deadline step. This
+change consumes that list; it adds no planner mechanism of its own.
+
+The constraints that shape the approach:
 
 **Where the concept lives today** (the `one-concept-one-function` inventory this
 change reuses or consolidates):
@@ -20,9 +27,9 @@ change reuses or consolidates):
 | Per-slot absence / return drops | `assets/ev_schedule.rs::availability_per_slot` / `soc_drop_frac_per_slot` | **Reused unchanged — already multi-trip** |
 | Session to MILP | `assets/ev_session_context.rs::EvMilpContext::from_state` | Builds one obligation per session |
 | Predicted departure to MILP | `assets/ev_usage_forecast.rs::target_next_predicted_departure` | Pushes into the same obligation list |
-| Deadline in the model | `EvMilpContext.t_dead_step` + `.e_required_kwh` — `controller/milp_planner/asset_port.rs:92,101` | Replaced by the obligation list |
-| Deadline-bounded energy | `assets/ev_milp.rs::energy_expr:96` / `reachable_energy_kwh:109` | Generalised to take a window |
-| Shortfall reporting | `assets/ev_diagnostics.rs::firm_shortfall` | Reports per obligation |
+| Obligation in the model | `EvMilpContext.obligations: Vec<EvObligation>` (built by the prerequisite change) | **Reused unchanged** — one obligation per queued session |
+| Per-slot SoC + trip drops | `EvMilpVars.soc_ev` + balance constraint (prerequisite change) | **Reused unchanged** — the solver chains SoC across departures |
+| Shortfall reporting | `milp_planner/ev_diagnostics.rs::firm_shortfall` (reads the solved slack after the prerequisite change) | **Reused** — already names its obligation's `session_id` |
 | Tick-level departure | `EvCharger.departure_time` + `TickOverrides.ev_departure_time` — `assets/ev.rs:53,447` | Fed from the head session |
 | UI session type | `VEN/ui/src/api/types.ts:522`; `components/sessions/SessionProgressBoard.tsx` | Queue-aware |
 
@@ -33,12 +40,11 @@ and drops in one horizon (see `availability_per_slot_reflects_multiple_trips_in_
 in `ev_schedule.rs`). This change adds **no** second notion of "when is the car
 away" or "how much does a trip cost in SoC".
 
-**The EV MILP model is energy-based, not state-based.** `EvMilpVars`
-(`asset_port.rs:140`) has no state-of-charge variable: the obligation is one
-cumulative-energy constraint `energy_expr(...) == bought` over slots `0..=t_dead_step`,
-with a floor `delivered >= min(e_required_kwh, reachable_energy_kwh)`. SoC appears
-only as `soc_init` plus the post-solve trajectory. Any design that needs the SoC at
-a *future* session's window start therefore has to predict it outside the solver.
+**The EV MILP already reasons about SoC** once the prerequisite change lands:
+`soc_ev[t]` over `0..=n`, a balance equality per slot carrying charging power and the
+exogenous trip drop, and one `soc_ev[deadline_step] + shortfall_soc >= target_soc`
+bound per obligation. A session therefore needs no energy arithmetic of its own —
+only its deadline step and its target.
 
 **Constraints**: VEN file-size caps (500 production lines in `VEN/src/`, 200 in
 `tasks/`) — `ev_session_context.rs`, `ev_milp.rs` and `ev_usage_forecast.rs` are
@@ -62,9 +68,11 @@ so added solver variables are not free.
 
 **Non-Goals:**
 
-- No state-of-charge decision variable in the MILP (see Decision 4).
-- No closed-loop optimisation of how much pre-charge survives a trip; the drop is
-  predicted open-loop, exactly as `soc_drop_frac_per_slot` already does.
+- No planner mechanism: the SoC variables, balance constraint, obligation bounds
+  and shortfall slack all arrive with the prerequisite change. This change only maps
+  sessions onto the obligation list it already exposes.
+- No change to the EV MILP's valuation of energy (comfort bands, per-slot rewards,
+  budgets) beyond which session supplies the curve (Decision 5).
 - No multiple *concurrent* sessions: one charge point, one vehicle. The queue is
   strictly time-ordered and non-overlapping by construction.
 - No change to how a user submits a request (that is the follow-up change).
@@ -147,57 +155,39 @@ queue is what lets one `insert` serve all three:
 Origin precedence (`EvSessionOrigin`) therefore stays in the producers, where it
 already lives.
 
-### Decision 4 — The planner receives a list of obligations; SoC between sessions is predicted open-loop, not solved
+### Decision 4 — Each session becomes one `EvObligation`; the solver chains SoC itself
 
-`EvMilpContext.t_dead_step: Option<usize>` and `.e_required_kwh: f64` are replaced
-by `obligations: Vec<EvObligation>`, where
+`ev-soc-state-variables` (R-93/R-92) has already replaced the scalar deadline pair
+with `obligations: Vec<EvObligation>` — `{ deadline_step, target_soc, session_id }`
+— bound as `soc_ev[deadline_step] + shortfall_soc >= target_soc` against solved
+per-slot SoC variables. So this change adds **no** planner mechanism at all. It
+maps each queued session inside the horizon to one obligation:
 
-    EvObligation {
-        first_step: usize,
-        last_step: usize,
-        required_kwh: f64,
-        session_id: Option<Uuid>,
-    }
+    deadline_step = the slot containing session.departure_time
+    target_soc    = session.target_soc
+    session_id    = Some(session.id)
 
-`energy_expr` and `reachable_energy_kwh` take `(first_step, last_step)` instead of
-reading `t_dead_step`; `constraints()` emits one energy-floor constraint per
-obligation (`delivered_in_window >= min(required_kwh, reachable_in_window)`), and
-the single `ev_energy == bought` equality becomes a whole-horizon equality so the
-band/extra accounting is unchanged.
+and that is the whole planner-facing change.
 
-`required_kwh` for each obligation is computed **outside** the solver, chaining:
+*Why this ordering mattered*: computing each session's required energy outside the
+solver would have meant predicting the SoC at a future session's window start,
+which is a third implementation of "this EV's future SoC" beside
+`asset_port::ev_soc_trajectory` and `ev_schedule::soc_drop_frac_per_slot` — the
+duplication `one-concept-one-function` forbids, and the reason R-93 is recorded as
+the structural blocker under R-92. With SoC in the model, the chaining *is* the
+balance constraint: charge before a departure, the trip drop, and the recharge
+after the return are all one series the solver reasons over, so carrying charge
+across an intervening departure is expressible rather than capped.
 
-    soc_at_window_start[0] = live SoC
-    soc_at_window_start[k] = max(target[k-1] - predicted_drop[k-1], floor)
-    required_kwh[k]        = max(0, (target[k] - soc_at_window_start[k]) * battery_kwh)
+*What the session's `window_start` contributes*: it bounds availability, not the
+obligation. A session's window start and the preceding session's departure are the
+absence the drop belongs to, and absence is already asserted per slot by
+`ev_schedule::availability_per_slot` (`a_ev`). The obligation itself needs only its
+deadline — the solver's SoC chain supplies everything else.
 
-with `predicted_drop` taken from the same trip the gap belongs to — i.e. from
-`ev_schedule`, not from a second source.
-
-*Why open-loop*: the EV MILP has no SoC state variable (see Context). Introducing
-one plus a per-session chaining constraint would let the solver trade pre-charge
-against a later session's requirement optimally, but it adds `n` continuous
-variables and `n` equalities per EV to a model whose phase 2 already costs 11-13 s
-(R-97), and it changes the EV model from energy-accounting to state-accounting —
-a far larger change than this one, affecting every existing mode arm. Open-loop
-prediction is also already the project's accepted treatment of the same quantity:
-`soc_drop_frac_per_slot` predicts the drop for the trajectory without the solver
-deciding it. Where the prediction is wrong, the next planning cycle corrects it,
-because `soc_init` is re-read from the live asset every cycle.
-
-*The honest limitation this accepts*: pre-charging beyond `target[k-1]` before an
-intervening departure cannot be rewarded, because `target[k-1]` caps the chain.
-The plan therefore pre-charges across a departure only up to the earlier session's
-own target, and reports the rest as shortfall on the later session. This is
-recorded in `ev-session-queue-planning`'s "Pre-charging across an intervening
-departure" scenario, and is the right conservative answer for a firm obligation —
-promising energy that an unpredictable trip may consume would be the worse failure.
-It goes into `docs/reference/TECHNICAL_DEBTS.md` as the known gap, with the
-state-variable model as its fix.
-
-*Alternative considered*: keep one obligation and simply pick the most binding
-session. Rejected — it is today's behaviour with extra bookkeeping, and cannot
-satisfy two different targets at two different departures.
+*Alternative considered*: keep one obligation and pick the most binding session.
+Rejected — it is today's behaviour with extra bookkeeping, and cannot satisfy two
+different targets at two different departures, which is the point of the queue.
 
 ### Decision 5 — The comfort curve prices the head session only
 
@@ -205,17 +195,18 @@ satisfy two different targets at two different departures.
 be built once, from the live SoC and the head session's curve and target. Queued
 sessions behind the head contribute a firm `required_kwh` and no bands.
 
-*Why*: a band's `kwh` is measured from a *known* starting SoC. For a session two
-departures out the starting SoC is itself a prediction (Decision 4), so bands
-built from it would price energy against a number the solver may invalidate. A
-firm requirement does not have that problem: it is a guarantee, and
-`declare_vars` already handles "requirement not covered by bands" by adding one
-unpriced guarantee band (`ev_milp.rs:60-66`) — the mechanism for exactly this case
-already exists and is reused unchanged.
+*Why*: a band's `kwh` is measured from a starting SoC. For a session two departures
+out, that starting SoC is a quantity the *solver* now decides (it is `soc_ev` at
+that session's window start), so bands sized from it would have to be built from a
+value that does not exist until the solve finishes. A firm requirement has no such
+circularity: it is a bound at a deadline, and `declare_vars` already handles
+"requirement not covered by bands" with one unpriced guarantee band
+(`ev_milp.rs:60-66`) — reused unchanged.
 
-*Alternative considered*: build bands per session from the predicted start SoC.
-Rejected for the reason above, and because it multiplies `e_seg` variables by the
-number of queued sessions for a valuation that is speculative anyway.
+*Alternative considered*: SoC-indexed band variables per session, letting each
+session's bid price its own energy. Rejected here as a valuation change rather than
+a queue change — it multiplies `e_seg` by queue length and belongs in its own piece
+of work if the fleet ever wants it. Recorded in `TECHNICAL_DEBTS.md`.
 
 ### Decision 6 — "A session is active" means its window is open now, not "the queue is non-empty"
 
@@ -258,26 +249,21 @@ schedule.
   empty → Decision 6 changes the test to "window open now" in the same step as the
   producer; pinned by a scenario asserting opportunistic charging resumes between
   sessions.
-- **Pre-charge across a departure is capped by the earlier target** (Decision 4's
-  accepted limitation) → recorded in `TECHNICAL_DEBTS.md` with the
-  SoC-state-variable model named as the fix; the shortfall is reported per session
-  rather than hidden.
-- **Solve time grows with queue length** — one energy-floor constraint per
-  obligation inside the horizon (at most ~7) → constraints only, no new variables
-  except the existing uncovered-guarantee band; re-benchmark against R-97's
-  battery+EV figures before merge and record the delta.
-- **A wrong open-loop drop prediction mis-sizes a later obligation** → every
-  planning cycle re-reads live SoC, so the error is corrected at the next cycle
-  rather than accumulating; the firm floor is additionally capped at
-  `reachable_energy_kwh` for the window, so a mis-prediction degrades to a reported
-  shortfall and never an infeasible site solve.
+- **Solve time grows with queue length** — one SoC bound plus one shortfall slack
+  per obligation inside the horizon (at most ~7) → re-benchmark against the figures
+  the prerequisite change records and note the delta; a 7-session queue is the
+  realistic worst case the rolling window produces.
+- **A wrong drop prediction mis-sizes a later obligation** → every planning cycle
+  re-reads live SoC into `soc_ev[0]`, so the error is corrected at the next cycle
+  rather than accumulating, and the shortfall slack means a mis-prediction degrades
+  to a reported gap, never an infeasible site solve.
 - **Three producers inserting into one invariant-bearing structure** → the only
   mutator is the checked `insert`; a property test asserts the invariant holds
   after arbitrary interleavings of insert/remove/expire.
-- **File-size caps** on `ev_session_context.rs` / `ev_milp.rs` /
-  `usage_sim_plan_ahead.rs` (the latter under the 200-line `tasks/` cap) → the
-  obligation-chaining arithmetic lands in its own module beside
-  `ev_session_context.rs`, and `scripts/audit_file_sizes.py` runs before commit.
+- **File-size caps** on `ev_session_context.rs` and `usage_sim_plan_ahead.rs` (the
+  latter under the 200-line `tasks/` cap) → the trip-to-session mapping lands in
+  `assets/` if the task file would overflow, and `scripts/audit_file_sizes.py` runs
+  before commit.
 
 ## Migration Plan
 

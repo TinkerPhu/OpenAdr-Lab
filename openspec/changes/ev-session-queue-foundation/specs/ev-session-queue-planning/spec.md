@@ -11,20 +11,19 @@ pre-charge for a deadline that lies behind an intervening departure.
 
 ### Requirement: Every queued session becomes its own planning obligation
 
-The planner SHALL receive one obligation per queued session that falls within the
-planning horizon, each bounded by that session's own charging window. Charging
-scheduled inside one session's window SHALL NOT count toward another session's
-target.
+The planner SHALL receive one charging obligation per queued session whose
+departure falls within the planning horizon, carrying that session's departure and
+its target state of charge, and identifying the session it came from.
 
 #### Scenario: A plan satisfies two sessions in sequence
 
 - **WHEN** two non-overlapping sessions are queued within the horizon, each with a firm target
 - **THEN** the plan delivers each session's required energy inside that session's own window
 
-#### Scenario: Charging after a departure does not satisfy that departure
+#### Scenario: Each obligation is attributable to its session
 
-- **WHEN** a session's window has closed and the plan charges in a later window
-- **THEN** that later energy does not count toward the closed session's target
+- **WHEN** several sessions are queued within the horizon
+- **THEN** each resulting obligation identifies the session it came from
 
 #### Scenario: Sessions beyond the horizon are ignored
 
@@ -47,27 +46,22 @@ windows. An obligation SHALL never make an absent slot chargeable.
 - **WHEN** a session's window would include a slot the EV's own schedule predicts the vehicle is away for
 - **THEN** that slot remains unchargeable
 
-### Requirement: State of charge lost while away is carried between sessions
+### Requirement: A session's target is reached using the vehicle's whole available history
 
-The energy each queued session requires SHALL be derived from the state of charge
-the vehicle is expected to have when that session's window opens, which accounts
-for the charge consumed during the preceding absence. The plan's projected state
-of charge SHALL show each expected drop at the slot the vehicle returns.
+Each queued session's target SHALL be served by any charging the vehicle can
+physically retain until that session's deadline, including charging that happened
+before an earlier departure. The charge the vehicle is expected to consume while
+away SHALL be accounted for between sessions.
 
-#### Scenario: A later session requires the energy the trip consumed
+#### Scenario: A later session is served by charging before an earlier departure
 
-- **WHEN** a session follows a departure that is expected to consume part of the pack
-- **THEN** that session's required energy includes the consumed amount, so its target is still reached by its departure
+- **WHEN** a queued session's own window cannot deliver its target, but charging before the preceding departure can, and that charge survives the trip
+- **THEN** the plan charges before the earlier departure and the later session's target is met
 
-#### Scenario: Pre-charging across an intervening departure
+#### Scenario: The consumed charge is accounted for
 
-- **WHEN** a queued session's window alone cannot physically deliver its target, but energy is cheap before the preceding departure
-- **THEN** the plan charges ahead of the earlier departure only up to what survives the intervening absence, and reports the remaining shortfall rather than promising the unreachable target
-
-#### Scenario: The projected state of charge shows the drop
-
-- **WHEN** the plan spans a predicted return
-- **THEN** the projected state of charge falls at the return slot by the predicted amount, and never below the configured floor
+- **WHEN** a session follows a departure expected to consume part of the pack
+- **THEN** the plan accounts for that consumption when serving the session's target, rather than assuming the vehicle returns as it left
 
 ### Requirement: An unreachable obligation degrades visibly, never infeasibly
 
