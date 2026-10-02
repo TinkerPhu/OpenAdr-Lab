@@ -1,7 +1,7 @@
 # Tasks
 
-Branch: `NNN-ev-session-queue-foundation` (take the next free openspec feature ID
-for `NNN` at branch-creation time).
+Branch: `049-ev-session-queue-foundation`. Prerequisite: `048-ev-soc-state-variables`
+merged to main.
 
 Every Rust task is written test-first (`test-first` rule): add the failing test,
 run it selectively to confirm it fails, then implement until green.
@@ -29,15 +29,18 @@ run it selectively to confirm it fails, then implement until green.
 - [ ] 3.2 Change `resolve_overlay_enabled` to use `current_ev_session(now)` for the pause flag and `expire_ev_sessions(now)` for expiry (design Decision 6), and verify the 3.1 tests pass plus the existing arbiter_glue tests stay green
 - [ ] 3.3 Feed `EvCharger.departure_time` / `TickOverrides.ev_departure_time` from the current session, falling back to the queue head (design Decision 8), and verify the existing `simulate_forward` departure tests in `assets/ev_schedule.rs` still pass
 
-## 4. The planner obligation list
+## 4. Sessions become planner obligations
 
-- [ ] 4.1 Write the failing MILP context tests in `assets/ev_milp.rs`: `two_queued_sessions_yield_two_obligations`, `energy_in_a_later_window_does_not_satisfy_an_earlier_obligation`, `obligation_beyond_the_horizon_is_dropped`; confirm they fail
-- [ ] 4.2 Replace `EvMilpContext.t_dead_step` + `.e_required_kwh` with `obligations: Vec<EvObligation>` in `controller/milp_planner/asset_port.rs`, generalise `energy_expr`/`reachable_energy_kwh` to take `(first_step, last_step)`, and emit one energy-floor constraint per obligation with the whole-horizon `ev_energy == bought` equality retained (design Decision 4); verify 4.1 passes and every pre-existing single-session MILP test is still green
-- [ ] 4.3 Write a failing test that the open-loop SoC chain sizes a later obligation correctly (`required_kwh` for session k includes the preceding trip's predicted drop, floored at `min_soc_after_drop_pct`), then implement the chaining in a new module beside `assets/ev_session_context.rs` sourcing the drop from `ev_schedule` only; verify it passes
-- [ ] 4.4 Build the obligation list in `EvMilpContext::from_state` from the session queue, keeping the comfort-curve `segments` built from the head session alone (design Decision 5), and verify the existing `ev-comfort-piecewise-core` band tests are byte-identical in behaviour
-- [ ] 4.5 Switch `assets/ev_usage_forecast.rs::target_next_predicted_departure` to push one `EvObligation` instead of writing `t_dead_step`/`e_required_kwh` (design Decision 7), and verify `tests/features/ev_usage_forecast.feature` behaviour is unchanged via the existing unit tests
-- [ ] 4.6 Make `assets/ev_diagnostics.rs::firm_shortfall` report per obligation with its `session_id`, and verify a test asserting the shortfall names which queued session fell short
-- [ ] 4.7 Verify no obligation can make the site solve infeasible: add a test where a queued session demands more than its window can deliver and assert a plan is still produced with a reported shortfall (spec: "An unreachable obligation degrades visibly, never infeasibly")
+Depends on `ev-soc-state-variables` being merged: the obligation list, the SoC
+balance constraint, the per-obligation SoC bounds and the shortfall slack all exist
+already. This section only maps sessions onto them.
+
+- [ ] 4.1 Write failing tests in `assets/ev_session_context.rs`: `each_queued_session_in_the_horizon_becomes_one_obligation`, `an_obligation_carries_its_session_id`, `a_session_departing_beyond_the_horizon_yields_no_obligation`; confirm they fail
+- [ ] 4.2 Build the obligation list in `EvMilpContext::from_state` from the session queue — one `EvObligation { deadline_step, target_soc, session_id }` per queued session inside the horizon — and verify 4.1 passes with every pre-existing single-session MILP test still green
+- [ ] 4.3 Keep the comfort-curve `segments` built from the head session alone (design Decision 5) and verify the existing `ev-comfort-piecewise-core` band tests behave identically
+- [ ] 4.4 Write and verify a solver test that two queued sessions are each met at their own departure, and that the plan charges before an intervening departure when only that can serve the later session (spec: "A session's target is reached using the vehicle's whole available history") — this should need no production change beyond 4.2; if it does, fix the model rather than the test
+- [ ] 4.5 Verify `ev_diagnostics::firm_shortfall` already names the right session for a queued-session shortfall (it reports per obligation after the prerequisite change), with a test asserting which session is named
+- [ ] 4.6 Verify no charging is scheduled in the gap between two queued sessions, which `ev_schedule::availability_per_slot` should already assert (spec: "The gap between two sessions carries no charging")
 
 ## 5. The simulated-usage producer
 
