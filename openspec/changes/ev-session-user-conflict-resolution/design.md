@@ -48,7 +48,7 @@ is a commitment disappearing unnoticed.
 - No partial displacement: a submission either clears all its conflicts or none.
 - No automatic resolution heuristic ("the later plan probably wins"). The decision
   is the user's; that is the entire point.
-- No change to the VTN or simulated-usage producers — they keep the foundation's
+- No change to the simulated-usage producer — it keeps the foundation's
   precedence behaviour (skip on conflict).
 
 ## Decisions
