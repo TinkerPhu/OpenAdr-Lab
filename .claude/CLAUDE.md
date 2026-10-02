@@ -328,15 +328,20 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
   production lines. "Production lines" = non-blank lines excluding #[cfg(test)] blocks
   and whole test-only files/directories (e.g. controller/milp_planner/tests/) — this is
   exactly what scripts/audit_file_sizes.py measures; run it to check compliance.
-  Allowlisted exceptions (cohesive dispatch/glue code, not a line-count problem) are
-  listed inside that script — currently just assets/mod.rs, whose real fix is the
-  enum→trait refactor tracked in docs/plans/refactoring_backlog.md.
+  The script's ALLOWLIST is empty and should stay that way. It once held
+  assets/mod.rs pending the enum→trait refactor; that refactor landed (AssetConfig
+  is gone) and the file is now 192/500 production lines, so the exception was
+  removed. Add an entry only for genuinely cohesive code a split would make worse,
+  and justify it in docs/plans/refactoring_backlog.md at the same time.
 
-  Verifiable invariants — run before any VEN PR:
-    grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes  → must be empty
-    grep -r "use crate::assets::" VEN/src/controller/milp_planner --include="*.rs" | grep -v "cfg(test)\|tests/"  → must be empty
-    grep "serde_json::Value" VEN/src/vtn.rs                                           → must be empty or internal only
-    grep -r "use crate::assets::" VEN/src/entities                                   → must be empty
+  Verifiable invariants — run `python scripts/audit_ven_architecture.py` before any
+  VEN PR. It applies these five rules to production code only (comments and
+  #[cfg(test)] stripped), which the raw greps below cannot do:
+    no `use crate::profile` in entities/, controller/, routes/
+    no `use crate::assets::` in controller/milp_planner/
+    no `use crate::assets::` in entities/
+    no `serde_json::Value` on vtn.rs's pub surface
+    no `crate::assets` or `crate::simulator` anywhere in controller/
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md

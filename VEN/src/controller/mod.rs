@@ -47,12 +47,17 @@ pub mod rate_schedule;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod arbiter;
-pub mod capacity_headroom;
 pub mod dispatcher;
 pub mod milp_interactions;
 pub mod milp_planner;
-pub mod site_headroom;
 pub mod timeline;
+// `capacity_headroom`/`site_headroom` used to live here. They take `&SimState`
+// and call `Asset::max_effort_setpoint` directly — see `simulator_port.rs`'s
+// own note on why the flattened snapshot cannot answer PV's achievable range —
+// so they were the domain ring importing infra. They now live in `simulator/`,
+// beside the `forecast.rs` they already shared, and `controller/` imports
+// neither `crate::assets` nor `crate::simulator` (checked by
+// `scripts/audit_ven_architecture.py`).
 
 // ── Monitoring & reporting ────────────────────────────────────────────────────
 pub mod monitor;

@@ -1,3 +1,8 @@
+//! Lives in `simulator/` rather than `controller/`: it reads a `&SimState`,
+//! walks simulated trajectories and resolves concrete asset kinds, which in
+//! the domain ring was infra reached from inside. What leaves the module is
+//! entities (`CapacityCurve`, `SiteFlexibilityForecastSlot`).
+//!
 //! Unified capacity/headroom engine (`unified-capacity-envelope-engine`,
 //! Spec E of the asset-max-power-forecast master plan). Replaces
 //! `capacity_forecast.rs`/`envelope_forecast.rs`'s two independent
@@ -22,7 +27,7 @@
 //!
 //! A third fixed slice of the same domain — `t1 = now` only, `t2 = 0` — feeds
 //! the *history/live* half of the same Site Headroom UI panel:
-//! `controller::site_headroom::compute_site_headroom`. It was originally a
+//! `simulator::site_headroom::compute_site_headroom`. It was originally a
 //! separate, differently-named function (`compute_envelope`) left on a stale
 //! relative-delta model after this module's own Spec E rewrite — a real,
 //! user-reported bug (see that module's doc comment and

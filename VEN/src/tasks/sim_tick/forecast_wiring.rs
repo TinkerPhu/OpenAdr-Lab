@@ -4,11 +4,11 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::controller::capacity_headroom::{
-    compute_site_capacity_curve, compute_site_headroom_forecast,
-};
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
 use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
+use crate::simulator::capacity_headroom::{
+    compute_site_capacity_curve, compute_site_headroom_forecast,
+};
 use crate::simulator::SimState;
 
 /// Both forward-looking signals for one tick. Neither needs a separately
@@ -17,7 +17,7 @@ use crate::simulator::SimState;
 /// `asset_max_power_series`/`simulated_trajectory` primitives every other
 /// asset kind uses, since `PvInverter` implements its own weather-aware
 /// `max_effort_schedule`/`simulate_forward` — see
-/// `controller::capacity_headroom`'s module doc. No active plan → empty
+/// `simulator::capacity_headroom`'s module doc. No active plan → empty
 /// forecast (battery/EV/heater/base-load/shiftable-load capacity curves
 /// still read the live snapshot directly via `SimState`, unaffected by plan
 /// absence).

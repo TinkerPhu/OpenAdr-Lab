@@ -1,4 +1,5 @@
 mod base_load_preview;
+pub mod capacity_headroom;
 pub mod energy;
 pub mod forecast;
 mod grid_meter;
@@ -7,6 +8,7 @@ pub mod plan_context;
 pub mod power_model;
 mod pv_preview;
 pub(crate) mod pv_smoothing;
+pub mod site_headroom;
 mod snapshot;
 
 use chrono::{DateTime, Utc};

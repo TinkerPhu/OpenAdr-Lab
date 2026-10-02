@@ -1,8 +1,17 @@
+//! The site's instantaneous flexibility headroom.
+//!
+//! Lives in `simulator/` rather than `controller/` because it reads a
+//! `&SimState` and calls `Asset::max_effort_setpoint` directly — see
+//! `controller/simulator_port.rs`'s note on why the flattened `SimSnapshot`
+//! cannot answer PV's achievable range. In `controller/` that made the domain
+//! ring import infra; here it is infra computing over infra, and what leaves
+//! the module is an entity (`SiteFlexibilityEnvelope`).
+
 use chrono::{DateTime, Duration, Utc};
 
-use crate::controller::capacity_headroom::compute_site_capacity_curve;
 use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::simulator::capacity_headroom::compute_site_capacity_curve;
 use crate::simulator::SimState;
 
 const NEAR_ZERO_KW: f64 = 1e-3;
@@ -10,7 +19,7 @@ const NEAR_ZERO_KWH: f64 = 1e-6;
 
 /// Compute the site-level flexibility headroom from current asset states — the
 /// `t1 = now, t2 = 0` instant of the same `(t1, t2, direction, tier)` domain
-/// `controller::capacity_headroom`'s module doc describes; that module's
+/// `simulator::capacity_headroom`'s module doc describes; that module's
 /// `compute_site_headroom_forecast` is the `t2 = 0`, sweep-`t1` sibling, this
 /// function is its single-instant (`t1 = now` only) counterpart, needed
 /// because `GET /flexibility`/`GET /flexibility/history` must answer "right

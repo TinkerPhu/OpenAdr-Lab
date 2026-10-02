@@ -5,10 +5,10 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::simulator;
 use crate::simulator::SensorSnapshot;
 use crate::simulator::SimState;
 
@@ -61,7 +61,7 @@ pub(crate) fn finalize_tick_outputs(
     // the flattened snapshot: needed to call `Asset::max_effort_setpoint`,
     // which the snapshot's `AssetSnapshot`/`capability()` shape can't answer
     // correctly for PV — see `site_headroom.rs`'s module doc).
-    let tick_envelope = controller::site_headroom::compute_site_headroom(
+    let tick_envelope = simulator::site_headroom::compute_site_headroom(
         sim,
         now,
         ctx.grid_max_import_kw,

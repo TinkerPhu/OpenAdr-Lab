@@ -174,13 +174,13 @@ pub struct FlexibilityEnvelope {
 
 /// Live site-level flexibility available to the grid right now (§9).
 ///
-/// Computed by `controller::site_headroom::compute_site_headroom` — independent
+/// Computed by `simulator::site_headroom::compute_site_headroom` — independent
 /// of the active plan. Always queryable without triggering a planning cycle.
 ///
 /// `up_kw`/`down_kw` are SIGNED now (`site-capacity-seam-unification`,
 /// matching `CapacityCurveStep::power_kw`'s convention: positive = import,
 /// negative = export) — literally the `t2 = 0` point of
-/// `controller::capacity_headroom::compute_site_capacity_curve`, called once
+/// `simulator::capacity_headroom::compute_site_capacity_curve`, called once
 /// per direction, not an independent sum. `up_kw` = the site's net signed
 /// power under a sustained Export commitment (negative when genuinely
 /// exportable; can swing positive/net-importing when non-exportable
@@ -237,7 +237,7 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 /// `Asset::simulate_forward`, driven by the active plan's own
 /// `planned_kw_by_asset` schedule, so this trajectory self-corrects for any
 /// drift between the plan's assumptions and reality on every tick — see
-/// `controller::capacity_headroom::compute_site_headroom_forecast`.
+/// `simulator::capacity_headroom::compute_site_headroom_forecast`.
 ///
 /// **`up_kw`/`down_kw` are ABSOLUTE, not a delta from the plan's own chosen
 /// dispatch** (`unified-capacity-envelope-engine`, Spec E). **Signed now**

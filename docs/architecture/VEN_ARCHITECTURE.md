@@ -674,7 +674,7 @@ horizon instead of re-walking it for every slot.
 
 ### 3.0c Unified Capacity/Headroom Engine (`unified-capacity-envelope-engine`, Spec E)
 
-`controller/capacity_headroom.rs` (renamed from `capacity_envelope.rs` in a
+`simulator/capacity_headroom.rs` (renamed from `capacity_envelope.rs` in a
 2026-09-07 follow-up — see below) replaces `capacity_forecast.rs`'s sustained-
 commitment curve and `envelope_forecast.rs`'s plan-driven headroom trajectory
 with one engine, built on §3.0a/§3.0b's primitives — the *forecast* half of
@@ -716,7 +716,7 @@ every asset must answer that window with the same value its longer schedules
 start with. `ShiftableLoadAsset` does this by applying its own placement at
 `t1` (drawing if its run is placed at or before `t1`).
 - **Site Headroom, live/history** (same UI panel's other half, `GET
-  /flexibility`/`GET /flexibility/history`) — `controller/site_headroom.rs`'s
+  /flexibility`/`GET /flexibility/history`) — `simulator/site_headroom.rs`'s
   `compute_site_headroom`: `t1 = now` only, `t2 = 0` (the degenerate case of
   the same domain, needed without an active plan). Originally a separate,
   differently-named function (`compute_envelope`) left on the pre-Spec-E
