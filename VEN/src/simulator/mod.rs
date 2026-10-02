@@ -3,6 +3,7 @@ pub mod capacity_headroom;
 pub mod energy;
 pub mod forecast;
 mod grid_meter;
+pub mod inject;
 pub mod persist;
 pub mod plan_context;
 pub mod power_model;

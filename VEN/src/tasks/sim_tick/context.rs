@@ -4,22 +4,12 @@
 //! inject/plan/capacity/dispatch/tariff snapshots, arbiter gates) into one
 //! struct so `tick_once` stays a thin orchestrator.
 
+use crate::controller::comms_loss::CommsLossState;
 use crate::controller::{MeasurementPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::sim_inject::SimInjectState;
 use crate::profile::comms_loss::CommsLossConfig;
 use crate::state::AppState;
-
-/// R-59: resolved comms-loss curtailment state for this tick — `active` is
-/// the debounced "VTN has been unreachable long enough" verdict, computed
-/// once here so both the PV resolver and the EV/heater/battery clamp read
-/// the identical value. `None` overall (not just `active: false`) means the
-/// profile has no `comms_loss:` section at all (opt-out fast path).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CommsLossState {
-    pub active: bool,
-    pub max_power_pct: f64,
-}
 
 pub(crate) struct TickContext {
     pub inject: SimInjectState,

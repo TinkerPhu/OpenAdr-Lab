@@ -65,7 +65,8 @@ pub(crate) async fn tick_once(
     ) = {
         let mut sim_guard = sim.lock().await;
 
-        let cleared_fields = super::helpers::apply_sim_injections(&ctx.inject, &mut sim_guard);
+        let cleared_fields =
+            crate::simulator::inject::apply_state_injections(&ctx.inject, &mut sim_guard);
 
         let pre_snap = sim_guard
             .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
@@ -102,7 +103,7 @@ pub(crate) async fn tick_once(
 
         let thermostat_setpoints_kw =
             sim_guard.thermostat_setpoints_kw(ctx.inject.heater_setpoint_c);
-        let mut outcome = super::helpers::build_tick_setpoints(
+        let mut outcome = super::setpoints::build_tick_setpoints(
             &ctx,
             &pre_snap,
             &thermostat_setpoints_kw,
@@ -110,7 +111,7 @@ pub(crate) async fn tick_once(
             (live_pv_kw, live_base_load_kw),
         );
 
-        let resolved_pv_generation_limit = super::helpers::resolve_pv_limit(
+        let resolved_pv_generation_limit = crate::controller::comms_loss::pv_generation_limit(
             &pre_snap,
             ctx.plan_snap.as_ref(),
             &ctx.capacity_snap,

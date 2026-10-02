@@ -1,4 +1,5 @@
 mod backoff;
+mod daily_gate;
 pub mod fleet_trace;
 pub mod heuristics_job;
 pub mod history_sampler;

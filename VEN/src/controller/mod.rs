@@ -46,6 +46,7 @@ pub mod rate_schedule;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod arbiter;
+pub mod comms_loss;
 pub mod dispatcher;
 pub mod milp_interactions;
 pub mod milp_planner;

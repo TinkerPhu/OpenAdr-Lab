@@ -30,6 +30,94 @@ pub struct OadrCapacityState {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
+impl OadrCapacityState {
+    /// This state with the sim-injected grid limits standing in where no VTN
+    /// event supplies one — a manual limit substitutes for a VTN directive,
+    /// it never overrides one.
+    ///
+    /// Composing two entity values is the domain's own business; this lived
+    /// in `tasks/sim_tick/helpers.rs` only because the tick was the first
+    /// caller to need it.
+    pub fn with_sim_injected_limits(
+        &self,
+        inject: &crate::entities::sim_inject::SimInjectState,
+    ) -> Self {
+        let mut out = self.clone();
+        if out.import_limit_event_id.is_none() {
+            if let Some(kw) = inject.grid_import_limit_kw {
+                out.import_limit_kw = Some(kw);
+            }
+        }
+        if out.export_limit_event_id.is_none() {
+            if let Some(kw) = inject.grid_export_limit_kw {
+                out.export_limit_kw = Some(kw);
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod injected_limit_tests {
+    use super::*;
+    use crate::entities::sim_inject::SimInjectState;
+
+    fn inject(import_kw: Option<f64>, export_kw: Option<f64>) -> SimInjectState {
+        SimInjectState {
+            grid_import_limit_kw: import_kw,
+            grid_export_limit_kw: export_kw,
+            ..SimInjectState::default()
+        }
+    }
+
+    #[test]
+    fn an_injected_limit_stands_in_when_no_vtn_event_supplies_one() {
+        let state = OadrCapacityState::default();
+        let out = state.with_sim_injected_limits(&inject(Some(7.0), Some(3.0)));
+        assert_eq!(out.import_limit_kw, Some(7.0));
+        assert_eq!(out.export_limit_kw, Some(3.0));
+    }
+
+    #[test]
+    fn a_vtn_limit_is_never_overridden_by_an_injected_one() {
+        let state = OadrCapacityState {
+            import_limit_kw: Some(5.0),
+            import_limit_event_id: Some("evt-1".into()),
+            ..OadrCapacityState::default()
+        };
+        let out = state.with_sim_injected_limits(&inject(Some(7.0), None));
+        assert_eq!(
+            out.import_limit_kw,
+            Some(5.0),
+            "a manual limit substitutes for a VTN directive, never overrides one"
+        );
+    }
+
+    #[test]
+    fn each_direction_is_decided_on_its_own_event_id() {
+        // An import event in force must not stop an injected *export* limit.
+        let state = OadrCapacityState {
+            import_limit_kw: Some(5.0),
+            import_limit_event_id: Some("evt-1".into()),
+            ..OadrCapacityState::default()
+        };
+        let out = state.with_sim_injected_limits(&inject(Some(7.0), Some(3.0)));
+        assert_eq!(out.import_limit_kw, Some(5.0));
+        assert_eq!(out.export_limit_kw, Some(3.0));
+    }
+
+    #[test]
+    fn no_injection_changes_nothing() {
+        let state = OadrCapacityState {
+            import_limit_kw: Some(5.0),
+            ..OadrCapacityState::default()
+        };
+        let out = state.with_sim_injected_limits(&inject(None, None));
+        assert_eq!(out.import_limit_kw, Some(5.0));
+        assert_eq!(out.export_limit_kw, None);
+    }
+}
+
 /// One segment of the capacity-limit schedule, mirroring `TariffSnapshot`'s
 /// shape. Parsed from IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT event
 /// payloads (the OpenADR 3.1 "Dynamic Operating Envelope", User Guide §8.10.1),
