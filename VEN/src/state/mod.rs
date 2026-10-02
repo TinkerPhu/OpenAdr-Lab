@@ -19,6 +19,7 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 mod arbiter;
+mod bounded_log;
 mod capacity_curves;
 mod connection;
 mod event_log;
@@ -136,14 +137,8 @@ pub struct AppState {
     pub polling: Arc<RwLock<PollingState>>,
     pub ctrl_sim: Arc<RwLock<ControllerSimState>>,
     pub hems: Arc<RwLock<HemsState>>,
-    /// WP4.3 (BL-20): bounded ring of user-facing notifications, newest last.
-    pub notifications: Arc<
-        RwLock<
-            crate::entities::ring_buffer::RingBuffer<
-                crate::entities::notification::UserNotification,
-            >,
-        >,
-    >,
+    /// WP4.3 (BL-20): bounded log of user-facing notifications.
+    pub notifications: bounded_log::BoundedLog<crate::entities::notification::UserNotification>,
     /// WP4.2 (BL-19): per-asset user comfort-curve overrides (hot map;
     /// persisted through SettingsPort, re-seeded at startup).
     pub comfort_overrides:
@@ -162,7 +157,7 @@ pub struct AppState {
     pub task_status: Arc<RwLock<std::collections::HashMap<String, TaskStatus>>>,
     /// WP-T4: VEN-operational event log — deliberately separate from
     /// `notifications` (see `state/event_log.rs`).
-    pub event_log: Arc<RwLock<crate::entities::ring_buffer::RingBuffer<EventLogEntry>>>,
+    pub event_log: bounded_log::BoundedLog<EventLogEntry>,
     pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
     /// D-3: what each report has already told the VTN, so a submission adds to
     /// the series rather than replacing it (`state/report_windows.rs`).
@@ -177,16 +172,11 @@ pub struct AppState {
     pub controller_trace_tx:
         tokio::sync::broadcast::Sender<crate::controller::trace::ControllerEvent>,
     /// WP-T5 (G-5): bounded ring of report submission outcomes, newest last.
-    pub report_submissions: Arc<
-        RwLock<
-            crate::entities::ring_buffer::RingBuffer<
-                crate::entities::report_submission::ReportSubmissionRecord,
-            >,
-        >,
-    >,
-    /// BL-43: bounded ring of `SiteFlexibilityEnvelope` snapshots, oldest first (`site_envelope` holds only the latest).
-    pub flexibility_history:
-        Arc<RwLock<crate::entities::ring_buffer::RingBuffer<SiteFlexibilitySample>>>,
+    pub report_submissions:
+        bounded_log::BoundedLog<crate::entities::report_submission::ReportSubmissionRecord>,
+    /// BL-43: bounded log of `SiteFlexibilityEnvelope` snapshots (`site_envelope`
+    /// holds only the latest).
+    pub flexibility_history: bounded_log::BoundedLog<SiteFlexibilitySample>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -215,30 +205,22 @@ impl AppState {
                 limit_enforcement_enabled: true,
                 ..HemsState::default()
             })),
-            notifications: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
-                NOTIFICATION_RING_CAP,
-            ))),
+            notifications: bounded_log::BoundedLog::new(NOTIFICATION_RING_CAP),
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
             wire_rejections: Arc::new(RwLock::new(std::collections::BTreeMap::new())),
             storage_ok: Arc::new(RwLock::new(true)),
             task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            event_log: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
-                event_log::EVENT_LOG_RING_CAP,
-            ))),
+            event_log: bounded_log::BoundedLog::new(event_log::EVENT_LOG_RING_CAP),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
             report_windows: Arc::new(RwLock::new(Default::default())),
             controller_trace_tx: tokio::sync::broadcast::channel(64).0,
-            report_submissions: Arc::new(RwLock::new(
-                crate::entities::ring_buffer::RingBuffer::new(
-                    report_submissions::REPORT_SUBMISSION_RING_CAP,
-                ),
-            )),
-            flexibility_history: Arc::new(RwLock::new(
-                crate::entities::ring_buffer::RingBuffer::new(
-                    flexibility_history::FLEXIBILITY_HISTORY_RING_CAP,
-                ),
-            )),
+            report_submissions: bounded_log::BoundedLog::new(
+                report_submissions::REPORT_SUBMISSION_RING_CAP,
+            ),
+            flexibility_history: bounded_log::BoundedLog::new(
+                flexibility_history::FLEXIBILITY_HISTORY_RING_CAP,
+            ),
         }
     }
 
@@ -269,7 +251,7 @@ impl AppState {
 
     /// WP4.3: append a notification, evicting the oldest past the ring cap.
     pub async fn push_notification(&self, n: crate::entities::notification::UserNotification) {
-        self.notifications.write().await.push(n);
+        self.notifications.record(n).await;
     }
 
     /// 030 (notification-dedup): find the newest ring entry carrying this
@@ -282,14 +264,18 @@ impl AppState {
         now: chrono::DateTime<chrono::Utc>,
         window: chrono::Duration,
     ) -> Option<crate::entities::notification::UserNotification> {
-        let mut ring = self.notifications.write().await;
-        let hit = ring.iter_mut().rev().find(|n| {
-            n.dedup_key.as_deref() == Some(dedup_key)
-                && now.signed_duration_since(n.last_seen_at) <= window
-        })?;
-        hit.count += 1;
-        hit.last_seen_at = now;
-        Some(hit.clone())
+        self.notifications
+            .bump_newest_where(
+                |n| {
+                    n.dedup_key.as_deref() == Some(dedup_key)
+                        && now.signed_duration_since(n.last_seen_at) <= window
+                },
+                |n| {
+                    n.count += 1;
+                    n.last_seen_at = now;
+                },
+            )
+            .await
     }
 
     /// WP4.3: notifications strictly newer than `since` (all when `None`), oldest first.
@@ -297,11 +283,9 @@ impl AppState {
         &self,
         since: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Vec<crate::entities::notification::UserNotification> {
-        let ring = self.notifications.read().await;
-        ring.iter()
-            .filter(|n| since.is_none_or(|s| n.created_at > s))
-            .cloned()
-            .collect()
+        self.notifications
+            .oldest_first_where(|n| since.is_none_or(|s| n.created_at > s))
+            .await
     }
 
     pub async fn update_sensor(&self, sensor: SensorSnapshot) {

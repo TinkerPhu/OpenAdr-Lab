@@ -1,6 +1,5 @@
-//! BL-43 — bounded in-memory ring of `SiteFlexibilityEnvelope` snapshots so
-//! the UI can plot the live site-headroom band over time. Mirrors the
-//! report-submission ring pattern (`state/report_submissions.rs`); unlike
+//! BL-43 — bounded in-memory log of `SiteFlexibilityEnvelope` snapshots so
+//! the UI can plot the live site-headroom band over time. Unlike
 //! `plan_history`/`forecast_accuracy` this is NOT persisted to SQLite — it's
 //! a live diagnostic like `event_log`/`notifications`, not meant for
 //! post-restart analysis.
@@ -17,18 +16,14 @@ pub const FLEXIBILITY_HISTORY_RING_CAP: usize = 3600;
 impl AppState {
     /// Append a sample, evicting the oldest entry past the cap.
     pub async fn record_flexibility_sample(&self, env: &SiteFlexibilityEnvelope) {
-        self.flexibility_history.write().await.push(env.into());
+        self.flexibility_history.record(env.into()).await;
     }
 
-    /// All recorded samples, oldest first (time-series order) — the one
-    /// difference from `report_submissions()`'s newest-first log-view convention.
+    /// All recorded samples, oldest first — this is a time series to plot, not
+    /// a log to read, so it reads in the other direction from
+    /// `report_submissions()`.
     pub async fn flexibility_history(&self) -> Vec<SiteFlexibilitySample> {
-        self.flexibility_history
-            .read()
-            .await
-            .iter()
-            .cloned()
-            .collect()
+        self.flexibility_history.oldest_first().await
     }
 }
 
@@ -59,20 +54,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn ring_evicts_oldest_past_cap() {
-        let state = AppState::new();
-        for i in 0..(FLEXIBILITY_HISTORY_RING_CAP + 5) {
-            state
-                .record_flexibility_sample(&env(i as f64, i as i64))
-                .await;
-        }
-        let all = state.flexibility_history().await;
-        assert_eq!(all.len(), FLEXIBILITY_HISTORY_RING_CAP);
-        assert_eq!(all.first().unwrap().up_kw, 5.0);
-        assert_eq!(
-            all.last().unwrap().up_kw,
-            (FLEXIBILITY_HISTORY_RING_CAP + 4) as f64
-        );
-    }
+    // Eviction past the cap is `BoundedLog`'s own property, tested once in
+    // `state/bounded_log.rs` rather than re-asserted per feed.
 }

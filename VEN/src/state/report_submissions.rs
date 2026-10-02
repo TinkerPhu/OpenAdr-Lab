@@ -1,9 +1,8 @@
-//! WP-T5 (G-5) — report submission outcome ring, split out of `mod.rs` to
-//! keep it under the file-size cap; behaves as an ordinary `impl AppState`
-//! block. Mirrors the notification ring pattern (bounded, newest evicts
-//! oldest) rather than a `HashMap` keyed by report identity, since repeated
-//! submissions under the same `report_name` are expected and each attempt
-//! is individually meaningful.
+//! WP-T5 (G-5) — report submission outcomes, a `BoundedLog` rather than a
+//! `HashMap` keyed by report identity: repeated submissions under the same
+//! `report_name` are expected and each attempt is individually meaningful.
+//! Split out of `mod.rs` to keep it under the file-size cap; behaves as an
+//! ordinary `impl AppState` block.
 
 use crate::entities::report_submission::ReportSubmissionRecord;
 
@@ -16,18 +15,12 @@ pub const REPORT_SUBMISSION_RING_CAP: usize = 100;
 impl AppState {
     /// Append a submission outcome, evicting the oldest entry past the cap.
     pub async fn record_report_submission(&self, record: ReportSubmissionRecord) {
-        self.report_submissions.write().await.push(record);
+        self.report_submissions.record(record).await;
     }
 
     /// All recorded submission outcomes, newest first.
     pub async fn report_submissions(&self) -> Vec<ReportSubmissionRecord> {
-        self.report_submissions
-            .read()
-            .await
-            .iter()
-            .rev()
-            .cloned()
-            .collect()
+        self.report_submissions.newest_first().await
     }
 }
 
@@ -59,19 +52,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn ring_evicts_oldest_past_cap() {
-        let state = AppState::new();
-        for i in 0..(REPORT_SUBMISSION_RING_CAP + 5) {
-            state
-                .record_report_submission(record(&format!("r{i}")))
-                .await;
-        }
-        let all = state.report_submissions().await;
-        assert_eq!(all.len(), REPORT_SUBMISSION_RING_CAP);
-        assert_eq!(
-            all.first().unwrap().report_name.as_deref(),
-            Some(format!("r{}", REPORT_SUBMISSION_RING_CAP + 4).as_str())
-        );
-    }
+    // Eviction past the cap is `BoundedLog`'s own property, tested once in
+    // `state/bounded_log.rs` rather than re-asserted per feed.
 }
