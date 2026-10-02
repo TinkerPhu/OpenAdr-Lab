@@ -28,16 +28,10 @@ VEN/docker-compose.fleet.yml
 VEN/fleet/
 VEN/profiles/fleet-ven-*.yaml
 
-# experiments/run_experiment.py output (host-local run snapshots).
-# `experiments/results/*` rather than `experiments/results/` so the curated
-# planner result store below can be re-included: git cannot re-include a path
-# whose parent DIRECTORY is excluded, only one whose contents are.
-experiments/results/*
-# R-97 planner solve-cost store: small, curated, commit-stamped, and the only
-# record of non-reproducible measurements (time-limited solves, live fleet
-# observations). It was ignored along with the run snapshots until 2026-10-02,
-# which left ~150 rows of this investigation on one laptop and nowhere else.
-!experiments/results/planner/
+# experiments/run_experiment.py output (host-local run snapshots) - bulk,
+# regenerable, and periodically deleted to reclaim disk. Nothing that must
+# survive may live under here; see experiments/planner_benchmarks/README.md.
+experiments/results/
 experiments/run_logs/
 
 # cargo-tarpaulin coverage reports (GB-30, docs/BACKLOG.md — host-local, regenerated per run)
