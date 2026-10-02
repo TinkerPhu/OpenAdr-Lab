@@ -5,6 +5,7 @@
 //!                 (PV surplus or non-positive tariff).
 
 use super::*;
+use crate::assets::Asset;
 use crate::entities::design_vocabulary::UserRequestMode;
 
 fn ev_session_with_mode(

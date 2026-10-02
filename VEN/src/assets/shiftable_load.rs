@@ -132,10 +132,6 @@ impl ShiftableLoadAsset {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        0.0 // hold off by default; dispatcher/MILP decides when to start
-    }
-
     pub fn state_values(&self, state: &ShiftableLoadState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("power_kw".into(), self.power_kw);
@@ -156,17 +152,9 @@ impl ShiftableLoadAsset {
         m
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![]
-    }
-
     pub fn reset(&self, _state: &mut ShiftableLoadState, _values: HashMap<String, f64>) {
         // No sim-inject-editable fields: power/duration/window are fixed at
         // request time, and elapsed/started are physics-driven, not user-set.
-    }
-
-    pub fn update_config(&mut self, _values: HashMap<String, f64>) {
-        // No runtime-editable config — see `reset`'s doc comment.
     }
 
     /// Holds the current physics forward: if pending, stays at 0 (this
@@ -199,18 +187,6 @@ impl ShiftableLoadAsset {
             interpolation: Interpolation::Linear,
         }
     }
-
-    pub fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        vec![]
-    }
-
-    pub fn default_completion_policy(&self) -> CompletionPolicy {
-        CompletionPolicy::Stop
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        None
-    }
 }
 
 impl Asset for ShiftableLoadAsset {
@@ -237,27 +213,27 @@ impl Asset for ShiftableLoadAsset {
     }
 
     fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
+        0.0 // hold off by default; dispatcher/MILP decides when to start
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
+        vec![]
     }
 
-    fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
+    fn update_config(&mut self, _values: HashMap<String, f64>) {
+        // No runtime-editable config — see `reset`'s doc comment.
     }
 
     fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
+        vec![]
     }
 
     fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
+        CompletionPolicy::Stop
     }
 
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        None
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {

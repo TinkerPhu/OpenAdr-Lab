@@ -232,48 +232,13 @@ impl BaseLoad {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        self.baseline_kw
-    }
-
     pub fn state_values(&self, _state: &BaseLoadState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("baseline_kw".into(), self.baseline_kw);
         m
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![
-            ControlDescriptor {
-                key: "base_load_kw".into(),
-                label: "Base Load Override".into(),
-                kind: ControlKind::Slider,
-                min: Some(0.0),
-                max: Some(6.0),
-                unit: "kW".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "base_load_alpha".into(),
-                label: "Blend-back Speed".into(),
-                kind: ControlKind::Slider,
-                min: Some(0.01),
-                max: Some(1.0),
-                unit: "".into(),
-                display_scale: None,
-                nullable: false,
-            },
-        ]
-    }
-
     pub fn reset(&self, _state: &mut BaseLoadState, _values: HashMap<String, f64>) {}
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        if let Some(&v) = values.get("baseline_kw") {
-            self.baseline_kw = v.max(0.0);
-        }
-    }
 
     /// `base-load-competence-consolidation`: the learned heuristic when
     /// present, else the static configured baseline (`baseline_kw_profile`,
@@ -309,29 +274,6 @@ impl BaseLoad {
             interpolation: Interpolation::Step,
         }
     }
-
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        vec![
-            crate::entities::asset::ComfortRate {
-                fill: 0.0,
-                max_marginal_price: 0.0,
-                max_marginal_co2: 0.0,
-            },
-            crate::entities::asset::ComfortRate {
-                fill: 1.0,
-                max_marginal_price: 0.0,
-                max_marginal_co2: 0.0,
-            },
-        ]
-    }
-
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        crate::entities::asset::CompletionPolicy::Stop
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        None
-    }
 }
 
 impl Asset for BaseLoad {
@@ -358,27 +300,61 @@ impl Asset for BaseLoad {
     }
 
     fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
+        self.baseline_kw
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
+        vec![
+            ControlDescriptor {
+                key: "base_load_kw".into(),
+                label: "Base Load Override".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.0),
+                max: Some(6.0),
+                unit: "kW".into(),
+                display_scale: None,
+                nullable: false,
+            },
+            ControlDescriptor {
+                key: "base_load_alpha".into(),
+                label: "Blend-back Speed".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.01),
+                max: Some(1.0),
+                unit: "".into(),
+                display_scale: None,
+                nullable: false,
+            },
+        ]
     }
 
     fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
+        if let Some(&v) = values.get("baseline_kw") {
+            self.baseline_kw = v.max(0.0);
+        }
     }
 
     fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
+        vec![
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.0,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.0,
+                max_marginal_co2: 0.0,
+            },
+        ]
     }
 
     fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
+        crate::entities::asset::CompletionPolicy::Stop
     }
 
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        None
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {

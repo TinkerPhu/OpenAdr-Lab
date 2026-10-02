@@ -229,10 +229,6 @@ impl PvInverter {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        f64::MAX // no generation limit by default
-    }
-
     pub fn state_values(&self, state: &PvState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("irradiance".into(), self.irradiance);
@@ -254,7 +250,46 @@ impl PvInverter {
         m
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
+    pub fn reset(&self, _state: &mut PvState, _values: HashMap<String, f64>) {}
+
+    /// Natural sin-model irradiance [0,1] at `ts`, without any user offset.
+    /// Delegates to the domain-owned definition so the formula exists once —
+    /// `controller::milp_planner::inputs` used to keep its own mirrored copy.
+    pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
+        crate::entities::solar::natural_irradiance_at(ts)
+    }
+
+    // Forward-projection logic moved to `pv_schedule.rs` (file-size cap).
+}
+
+impl Asset for PvInverter {
+    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
+        let AssetState::Pv(s) = state else {
+            unreachable!("PvInverter/state mismatch")
+        };
+        let (ns, p) = self.step_inner(s, setpoint_kw, dt);
+        (AssetState::Pv(ns), p)
+    }
+
+    fn capability(&self, state: &AssetState) -> AssetCapability {
+        let AssetState::Pv(s) = state else {
+            unreachable!()
+        };
+        self.capability_inner(s)
+    }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::Pv(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
+
+    fn default_setpoint(&self) -> f64 {
+        f64::MAX // no generation limit by default
+    }
+
+    fn control_schema(&self) -> Vec<ControlDescriptor> {
         vec![
             ControlDescriptor {
                 key: "pv_irradiance".into(),
@@ -296,24 +331,13 @@ impl PvInverter {
         ]
     }
 
-    pub fn reset(&self, _state: &mut PvState, _values: HashMap<String, f64>) {}
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
+    fn update_config(&mut self, values: HashMap<String, f64>) {
         if let Some(&v) = values.get("rated_kw") {
             self.rated_kw = v.max(0.0);
         }
     }
 
-    /// Natural sin-model irradiance [0,1] at `ts`, without any user offset.
-    /// Delegates to the domain-owned definition so the formula exists once —
-    /// `controller::milp_planner::inputs` used to keep its own mirrored copy.
-    pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
-        crate::entities::solar::natural_irradiance_at(ts)
-    }
-
-    // Forward-projection logic moved to `pv_schedule.rs` (file-size cap).
-
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
+    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
@@ -328,60 +352,12 @@ impl PvInverter {
         ]
     }
 
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
+    fn default_completion_policy(&self) -> CompletionPolicy {
         crate::entities::asset::CompletionPolicy::Stop
     }
 
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        None
-    }
-}
-
-impl Asset for PvInverter {
-    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
-        let (ns, p) = self.step_inner(s, setpoint_kw, dt);
-        (AssetState::Pv(ns), p)
-    }
-
-    fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::Pv(s) = state else {
-            unreachable!()
-        };
-        self.capability_inner(s)
-    }
-
-    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::Pv(s) = state else {
-            unreachable!()
-        };
-        self.flexibility_floor_inner(s)
-    }
-
-    fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
-    }
-
-    fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
-    }
-
-    fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
-    }
-
-    fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
-    }
-
-    fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
-    }
-
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        None
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {

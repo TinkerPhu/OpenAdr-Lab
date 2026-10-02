@@ -129,10 +129,6 @@ impl Battery {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        0.0 // hold by default; dispatcher controls
-    }
-
     pub fn state_values(&self, state: &BatteryState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("soc".into(), state.soc);
@@ -152,22 +148,9 @@ impl Battery {
         HashMap::from([("soc".into(), soc)])
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![]
-    }
-
     pub fn reset(&self, state: &mut BatteryState, values: HashMap<String, f64>) {
         if let Some(&soc) = values.get("soc") {
             state.soc = soc.clamp(0.0, 1.0);
-        }
-    }
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        if let Some(&v) = values.get("capacity_kwh") {
-            self.capacity_kwh = v.max(0.1);
-        }
-        if let Some(&v) = values.get("min_soc") {
-            self.min_soc = v.clamp(0.0, 1.0);
         }
     }
 
@@ -221,29 +204,6 @@ impl Battery {
         }
     }
 
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        vec![
-            crate::entities::asset::ComfortRate {
-                fill: 0.0,
-                max_marginal_price: 0.20,
-                max_marginal_co2: 0.0,
-            },
-            crate::entities::asset::ComfortRate {
-                fill: 1.0,
-                max_marginal_price: 0.05,
-                max_marginal_co2: 0.0,
-            },
-        ]
-    }
-
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        crate::entities::asset::CompletionPolicy::Stop
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        None
-    }
-
     pub fn resolve_request_target(
         &self,
         state: &BatteryState,
@@ -284,27 +244,43 @@ impl Asset for Battery {
     }
 
     fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
+        0.0 // hold by default; dispatcher controls
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
+        vec![]
     }
 
     fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
+        if let Some(&v) = values.get("capacity_kwh") {
+            self.capacity_kwh = v.max(0.1);
+        }
+        if let Some(&v) = values.get("min_soc") {
+            self.min_soc = v.clamp(0.0, 1.0);
+        }
     }
 
     fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
+        vec![
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.20,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.05,
+                max_marginal_co2: 0.0,
+            },
+        ]
     }
 
     fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
+        crate::entities::asset::CompletionPolicy::Stop
     }
 
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        None
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
