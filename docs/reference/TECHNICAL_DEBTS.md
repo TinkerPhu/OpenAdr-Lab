@@ -1,7 +1,11 @@
 # Technical Debts Register
 
-> **Next ID: R-99.** Use this number for the next new item filed, then increment this
-> line to R-100. (Corrected 2026-09-27: the line still said R-86 while R-87..R-97 were
+> **Next ID: R-100.** Use this number for the next new item filed, then increment this
+> line to R-101. (R-98 came from `048-ev-soc-state-variables` and R-99 from
+> `fix/fleet-chart-precondition`; both are now merged, so this line counts both. It was
+> written as R-100 on that branch *before* either landed, deliberately, so whichever
+> merged second would not have to notice — keep the higher number.) (Corrected
+> 2026-09-27: the line still said R-86 while R-87..R-97 were
 > already issued — exactly the drift the paragraph below warns about.) When resolving and removing an item — even the current highest ID —
 > do NOT decrement this line: it tracks every ID ever issued, not the count of rows
 > currently in the table, so a removed row never frees its number for reuse. This is
@@ -311,6 +315,41 @@ the only thing keeping them in step is that someone remembers to edit both — e
 
 **To resolve:** give `EvMilpContext` one `declare_vars_with(z_on: ZOnPolicy)` (free binary vs.
 pinned continuous) and have both callers use it, so the variable set and its bounds exist once.
+
+## R-99 — the fleet-chart UI scenario depends on elapsed time, by an unknown rule
+
+**Severity: 🟡 Medium** · Effort Small-Medium · Risk Low · Gain Medium — a test that fails on a
+fresh stack and passes minutes later reads as a product defect to whoever is bisecting, and costs
+a full E2E run to dismiss. It cost one here.
+
+**Where:** `tests/features/fleet_telemetry.feature:48` ("The fleet page draws a line for every VEN
+that is reporting"), `VTN/ui/src/components/FleetPowerChart.tsx`, `VTN/ui/src/pages/Fleet.tsx`.
+
+`FleetPowerChart` renders `fleet-chart-empty` *instead of* `fleet-power-chart` while
+`rows.length === 0`, so the selector the scenario waits 60 s for cannot exist until the chart has
+data. On a freshly started stack it does not, and the scenario fails.
+
+**What was measured (2026-10-02), so the next attempt does not repeat it:**
+
+- It is **not** the host-contention flake the resilience suite is. It failed at host load 7.31 and
+  again at 2.33; the resilience scenario that failed alongside it passed on the quiet re-run.
+- It is **not** caused by the EV SoC work: it reproduces on a branch based on `main` with none of
+  `048-ev-soc-state-variables` in it.
+- Waiting for the existing `I wait for the fleet history of the last 10 minutes to have samples`
+  step is **not sufficient**. That step passed — `/api/fleet/power` *did* have rows — and the chart
+  was still empty. So the store having samples is a weaker condition than the chart rendering.
+- In both runs the same scenario **passed** in the later `@isolated` pass, minutes after failing in
+  the main pass, with no code change between them. Elapsed time is the variable.
+
+**What is still unknown:** what the Fleet page's own fetch receives when the chart is empty. The
+page asks for 15 minutes at `stepSeconds: 5` (`Fleet.tsx`), the probe asked for 10 minutes at the
+same step, and the two disagreed — so the next step is to read the actual response the browser gets
+(or the 502 it may be getting: `tests/entrypoint.sh` documents nginx caching a stale BFF IP, which
+turns every `/api/*` call into a 502 and would present exactly as an empty chart).
+
+**To resolve:** find the real condition and wait for *that*, or fix the page if the answer is that
+it never recovers without a reload. Raising the 60 s timeout is not a fix — it hides a rule nobody
+has written down.
 
 ## R-94 — the MILP does not model the heater's thermostat deadband
 
