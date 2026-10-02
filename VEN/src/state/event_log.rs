@@ -37,13 +37,13 @@ impl AppState {
             category: category.to_string(),
             message: message.into(),
         };
-        self.event_log.write().await.push(entry.clone());
+        self.event_log.record(entry.clone()).await;
         let _ = self.event_log_tx.send(entry);
     }
 
     /// Current ring contents, oldest first.
     pub async fn event_log_snapshot(&self) -> Vec<EventLogEntry> {
-        self.event_log.read().await.iter().cloned().collect()
+        self.event_log.oldest_first().await
     }
 
     /// Subscribe for live updates (SSE bridge).
@@ -74,23 +74,8 @@ mod tests {
         assert_eq!(broadcast_entry.id, snapshot[0].id);
     }
 
-    #[tokio::test]
-    async fn record_event_evicts_oldest_beyond_ring_cap() {
-        let state = AppState::new();
-        let now = Utc::now();
-        for i in 0..EVENT_LOG_RING_CAP + 5 {
-            state
-                .record_event(now, "task_supervisor", format!("entry {i}"))
-                .await;
-        }
-
-        let snapshot = state.event_log_snapshot().await;
-        assert_eq!(snapshot.len(), EVENT_LOG_RING_CAP, "ring stays at capacity");
-        assert_eq!(
-            snapshot[0].message, "entry 5",
-            "the oldest 5 entries were evicted"
-        );
-    }
+    // Eviction past the cap is `BoundedLog`'s own property, tested once in
+    // `state/bounded_log.rs` rather than re-asserted per feed.
 
     #[tokio::test]
     async fn event_log_snapshot_returns_oldest_first() {
