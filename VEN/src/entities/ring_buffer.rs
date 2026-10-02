@@ -36,10 +36,17 @@ impl<T> RingBuffer<T> {
         self.items.push_back(item);
     }
 
+    // Production reads the ring only through `state::bounded_log::BoundedLog`,
+    // which hands out whole `Vec`s; nothing asks a live ring for its length.
+    // Gated rather than kept "because a container ought to have them" — an
+    // ungated pair would need `#[allow(dead_code)]`, which is how unused code
+    // stops being visible.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }

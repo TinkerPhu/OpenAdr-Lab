@@ -25,7 +25,6 @@ pub mod shiftable_load;
 // AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
 // #[allow(dead_code)]'d for before this file split.
-#[cfg(test)]
 pub use asset_handle::AssetHandle;
 pub use asset_trait::{
     Asset, MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
