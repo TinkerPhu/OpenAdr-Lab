@@ -1,10 +1,10 @@
 # Technical Debts Register
 
-> **Next ID: R-100.** Use this number for the next new item filed, then increment this
-> line to R-101. (R-98 came from `048-ev-soc-state-variables` and R-99 from
-> `fix/fleet-chart-precondition`; both are now merged, so this line counts both. It was
-> written as R-100 on that branch *before* either landed, deliberately, so whichever
-> merged second would not have to notice — keep the higher number.) (Corrected
+> **Next ID: R-101.** Use this number for the next new item filed, then increment this
+> line to R-102. (R-98 came from `048-ev-soc-state-variables` and R-99 from
+> `fix/fleet-chart-precondition`, both merged; R-100 is issued on this branch for the
+> disabled VTN session path. The line counts every ID ever issued, so on a merge keep
+> the higher number rather than the one either branch alone would suggest.) (Corrected
 > 2026-09-27: the line still said R-86 while R-87..R-97 were
 > already issued — exactly the drift the paragraph below warns about.) When resolving and removing an item — even the current highest ID —
 > do NOT decrement this line: it tracks every ID ever issued, not the count of rows
@@ -56,6 +56,7 @@ its detail. Re-rate in the item, then here.
 | 🟡 Medium | R-21 | reliable system | `cargo test` heap corruption around the HiGHS tests: undermines the instrument every other conclusion rests on. |
 | 🟡 Medium | R-96 | reliable system | The capacity-limit E2E step waits for a freshly *adopted* plan; cost two 65-minute runs on 2026-09-27 with failures that looked like product defects. |
 | 🟡 Medium | R-87 | VTN stimulus | Stricter than the 3.1 schema on `intervalPeriod.start` — the one failure a conformance lab must not have. |
+| 🟡 Medium | R-100 | VTN stimulus | A VTN SoC command was modelled as the user's own charging intent; disabled 2026-10-03 pending a decision on what it should be. |
 | 🟡 Medium | R-98 | reliable system | The EV variable set is declared twice — the real solve and phase-2's dual extraction — and R-93 widened what the second must mirror. |
 | 🟡 Medium | R-99 | reliable system | **Test half resolved 2026-10-03**; what is left is a product question. The Fleet page opens on a 24 h / 900 s window and shows "No telemetry stored for the last 1440 minutes" on a freshly started VTN — which is false, there is just less than one bucket of it. It cannot tell "the store is still filling" from "nothing is reporting". |
 | 🟡 Medium | R-94 | transparent UI | The MILP does not model the heater deadband, so the asset can refuse planned dispatch with nothing on screen saying why. |
@@ -296,6 +297,42 @@ own answer and `ev_diagnostics::firm_shortfall` reports it per obligation, namin
 variables, so no integrator exists to drift from it, which closes the remaining EV half of R-73.
 
 Pinned by `VEN/src/controller/milp_planner/tests/soc_balance.rs`.
+
+## R-100 — a VTN SoC command is modelled as if it were the user's own intent
+
+**Severity: 🟡 Medium** · Effort Medium · Risk Medium · Gain Medium — an ownership question, not
+a defect: nothing is broken today because the path is disabled, but the modelling must be settled
+before a VTN can influence EV charging again.
+
+**Where:** `VEN/src/tasks/poll_signals.rs::apply_vtn_charge_state_session` (preserved but **not
+called** as of 2026-10-03), `VEN/src/entities/device_session.rs::EvSessionOrigin::Vtn`,
+`VEN/src/controller/openadr_interface.rs::parse_charge_state_setpoint`.
+
+A VTN `CHARGE_STATE_SETPOINT` used to create an `EvSession` — the same object a user's own
+charging request creates, distinguished only by `origin`. Those are different things: one is an
+external constraint from the grid, the other is intent about the user's own car and their own
+travel. Modelling them identically says a grid preference *is* the driver's plan.
+
+The spec's own wording supports the doubt: `CHARGE_STATE_SETPOINT` is "the state of charge of an
+energy storage resource", which fits a grid-scale or aggregator-controlled battery far better than
+a household EV whose schedule follows its driver.
+
+**Why it stopped being theoretical.** The EV session queue forbids overlapping sessions, so a VTN
+session and a user session compete for one calendar: a grid signal can be refused because the user
+has booked their car, and a VTN session can block the user from booking it at all. The old single
+slot hid this — the last writer simply won, which is also how a VTN signal could silently overwrite
+a user's session whose target merely differed.
+
+**Current state:** disabled on the user's instruction (2026-10-03), code preserved verbatim with
+its ownership-by-id bookkeeping and withdrawal semantics intact, and pinned shut by
+`a_charge_state_signal_creates_no_ev_session`. The two tests covering the preserved path drive it
+directly rather than through `apply_signal_changes`.
+
+**To resolve:** decide what a VTN SoC command *is* here. The likely answer is a planner
+**constraint** weighed against the user's sessions (alongside capacity limits and prices), not a
+session competing with them — an obligation the MILP receives without an `EvSession`, much as
+`ev-usage-forecast` already hands the planner a predicted departure without writing one. Until
+then it stays off; do not re-wire it as a session.
 
 ## R-98 — the EV variable set is declared in two places
 
