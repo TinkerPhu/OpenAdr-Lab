@@ -32,8 +32,9 @@ time was. `jobs.json` records each check's interval and when it last ran, and
 - [ ] `python scripts/jobs.py done <id>` — for the ones only a human can do, once handled
 
 Registered today: the openspec version check (weekly, also covered by CI), the
-`cargo audit` / `npm audit` sweep, the `ven-architecture` invariant greps plus the module
-diagram, and documentation drift. Add a job rather than a checklist line whenever the
+digest-pinned Docker base images (weekly — the pin keeps builds cacheable, so something
+has to watch the tag it froze), the `cargo audit` / `npm audit` sweep, the
+`ven-architecture` invariant greps plus the module diagram, and documentation drift. Add a job rather than a checklist line whenever the
 trigger is "time passed" rather than "this commit".
 
 ## 5. Definition of Done *(verify before closing a feature)*
