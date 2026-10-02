@@ -141,7 +141,8 @@ pub(crate) async fn resolve_tick_context(
         incumbent_lever: state.arbiter_active_lever().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
-        ev_session: state.ev_session().await,
+        // The session governing this tick: the one whose window is open now.
+        ev_session: state.current_ev_session(now).await,
         comms_loss,
     }
 }
