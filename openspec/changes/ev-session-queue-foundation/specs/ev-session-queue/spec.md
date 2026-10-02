@@ -32,6 +32,38 @@ charge to reach by that departure.
 - **WHEN** the queue holds a session whose charging window opens in the future
 - **THEN** it is readable as a queued session and is not reported as the current session
 
+### Requirement: A session declares what the following trip is expected to consume
+
+A charging session SHALL carry the distance the vehicle is expected to travel after
+its departure, so that the charge consumed between one session and the next is
+stated rather than assumed.
+
+Where the user does not state a distance, the EV's own configured default SHALL be
+used, and the plan SHALL make clear that a default was applied rather than a stated
+value. The vehicle itself SHALL be the only authority that converts a distance into
+a state-of-charge drop: no route, interface or planner may do that arithmetic
+independently.
+
+#### Scenario: A stated distance determines the expected drop
+
+- **WHEN** a user states a session whose following trip is 120 km, for a vehicle configured at 0.2 kWh/km with a 60 kWh pack
+- **THEN** the expected drop after that departure is 40 % of the pack
+
+#### Scenario: An unstated distance falls back to the vehicle's default, visibly
+
+- **WHEN** a user states a session without a distance
+- **THEN** the EV's configured default distance is used, and the plan reports that the value was defaulted rather than stated
+
+#### Scenario: A simulated session carries the trip it was generated from
+
+- **WHEN** the simulated usage schedule produces a session
+- **THEN** that session's expected consumption is the one its own generated trip already describes, not the configured default
+
+#### Scenario: Two sessions with no trip between them consume nothing
+
+- **WHEN** a session's departure is immediately followed by the next session's window opening
+- **THEN** no consumption is expected between them, whatever default is configured
+
 ### Requirement: Queued sessions never overlap
 
 The queue SHALL never contain two sessions whose charging windows overlap in

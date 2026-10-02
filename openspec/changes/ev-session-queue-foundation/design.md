@@ -193,6 +193,58 @@ deadline — the solver's SoC chain supplies everything else.
 Rejected — it is today's behaviour with extra bookkeeping, and cannot satisfy two
 different targets at two different departures, which is the point of the queue.
 
+### Decision 9 — A session states the trip distance; the EV converts it
+
+This change's own planning spec already requires that "the charge the vehicle is
+expected to consume while away SHALL be accounted for between sessions". For
+*simulated* sessions that holds today: `ev_schedule::soc_drop_frac_per_slot` derives
+the drop from `EvUsageSimParams`. For a *manually stated* series it does not hold at
+all — `EvSession` carries no consumption field, so the planner assumes the car
+returns as it left.
+
+The failure is concrete. 50 kWh pack, two stated sessions, no usage simulation
+configured: the user asks for 80 % by Monday 08:00 and 80 % by Wednesday 08:00. The
+plan charges to 80 % for Monday, believes the car returns Monday evening still at
+80 %, and schedules **nothing** for Wednesday. The car sits at 40 % on Wednesday
+morning, and Monday night's cheap tariff went unused.
+
+So the session declares it:
+
+    EvSession.expected_trip_distance_km: Option<f64>   // None = use the EV's default
+    EvParams.default_trip_distance_km:   f64           // the suggestion/fallback
+    EvParams.consumption_kwh_per_km:     f64           // converts km into energy
+
+**Distance, not a percentage.** A driver knows "about 120 km", not "38 % of my
+pack". The conversion needs the pack size and the vehicle's consumption, both of
+which the EV already owns.
+
+**The EV does the conversion, nobody else.** `EvCharger` exposes the
+distance-to-SoC-drop function and is the single authority for it
+(`asset-competence-assurance`): a route, the UI or the planner computing its own
+`km × kWh/km ÷ battery_kwh` would be a second copy of the rule, which is how this
+project's recurring class of bug starts.
+
+**`Option` with a visible default, not a silent one.** `None` means "the user did not
+say", and the EV's configured default fills it — but the plan reports that it did.
+That is the `wire-contracts` pattern already required of protocol values: apply the
+documented default *and surface that you applied it*. A silently defaulted 120 km is
+a number whose origin lives only in the reader.
+
+**Naming.** `trip`, not `usage`: `ev_schedule` already calls a journey a trip
+(`UsageTrip`, `daily_trip`, `next_trip_after`), while `usage` names the *config
+block* (`usage_sim`), so `trip` is the word that greps from one to the other
+(`naming-transparency`). Units are suffixed per the `naming` rule, and
+`consumption_kwh_per_km` follows the existing `tariff_eur_per_kwh` shape.
+`kWh/km` rather than Europe's more common kWh/100 km, because every call site wants
+the per-km figure and a factor of 100 in the arithmetic is a bug waiting to happen —
+the UI may still present it per 100 km.
+
+*Alternative considered — derive the drop from the gap length using the EV's learned
+heuristics.* Rejected as the primary mechanism: a 10-hour gap might be a commute or a
+car sitting on the drive, and the user would have no way to correct the guess. It
+remains a reasonable future refinement of the *default*, which is why the default is
+an EV-owned function rather than a constant read at the call site.
+
 ### Decision 5 — The comfort curve prices the head session only
 
 `segments` (the priced bands from `ev_comfort::ev_energy_segments`) continues to
