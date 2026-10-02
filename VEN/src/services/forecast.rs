@@ -47,7 +47,7 @@ pub async fn finish_plan_cycle(
     // below awaits on state/weather).
     let site_headroom = {
         let guard = sim.lock().await;
-        crate::controller::site_headroom::compute_site_headroom(
+        crate::simulator::site_headroom::compute_site_headroom(
             &guard,
             wall_now,
             grid_max_import_kw,

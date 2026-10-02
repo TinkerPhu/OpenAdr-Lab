@@ -1,5 +1,5 @@
 //! Plan-driven forward re-simulation, shared by
-//! `controller::capacity_headroom::compute_site_headroom_forecast` and
+//! `simulator::capacity_headroom::compute_site_headroom_forecast` and
 //! `resolve_plan_state_at` below. Re-simulates each asset forward from its
 //! REAL current state — never `Plan.planned_state_by_asset`, a stale
 //! solve-time-only snapshot — driven by the active plan's own
@@ -24,7 +24,7 @@ use super::SimState;
 /// `Asset::simulate_forward`'s doc comment: each `TrajectoryPoint` pairs the
 /// state BEFORE that slot's step with the setpoint driving it).
 ///
-/// Shared by `controller::capacity_headroom::compute_site_headroom_forecast`
+/// Shared by `simulator::capacity_headroom::compute_site_headroom_forecast`
 /// (capability-per-slot) and `resolve_plan_state_at` (state-at-a-single-`t1`)
 /// so there is exactly one place that runs this simulation —
 /// `planstate-t1-resolver`'s D1: two independent implementations of "the
@@ -43,7 +43,7 @@ use super::SimState;
 /// itself is bounds-checked by every existing caller, so this extra point
 /// is silently ignored where it isn't wanted).
 ///
-/// `pub(crate)` (not private) so `controller::capacity_headroom`
+/// `pub(crate)` (not private) so `simulator::capacity_headroom`
 /// (`unified-capacity-envelope-engine`, Spec E) can compute each asset's
 /// per-slot trajectory once and read every slot's point off it, rather than
 /// calling `resolve_plan_state_at` once per slot (which would redundantly
@@ -105,7 +105,7 @@ pub(crate) fn simulated_trajectory(
 /// (deleted once this change lands; see `docs/history/project_journal.md`
 /// for the design record) before assuming this resolves more than it does.
 ///
-/// Called by `controller::capacity_headroom::compute_site_capacity_curves_at`
+/// Called by `simulator::capacity_headroom::compute_site_capacity_curves_at`
 /// (the Controller's "Move commitment start" capacity curves), together with
 /// `plan_state_boundary_at` below for the boundary it snapped to.
 pub fn resolve_plan_state_at(

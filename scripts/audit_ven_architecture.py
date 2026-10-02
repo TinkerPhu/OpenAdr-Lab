@@ -23,6 +23,13 @@ The rules, and why each exists:
   4. `serde_json::Value` in vtn.rs stays internal. The VtnPort's own surface is
      typed; an untyped value crossing it pushes wire-shape decisions into
      callers that cannot see the wire.
+  5. No `crate::assets` or `crate::simulator` anywhere in controller/. Rules 2
+     and 3 each guard one room of the domain ring and left the largest one
+     unwatched: until 2026-10-02 `controller/capacity_headroom.rs` and
+     `controller/site_headroom.rs` took `&SimState` and downcast to concrete
+     `BaseLoad`/`PvInverter`, and no rule here could see it. They now live in
+     `simulator/`. This rule covers the whole ring and both infra modules, so
+     the next one is caught the day it lands rather than at the next audit.
 
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
@@ -112,6 +119,9 @@ CHECKS = [
     ("concrete assets in entities",
      lambda: forbid("assets", [VEN_SRC / "entities"], r"use crate::assets::")),
     ("untyped Value on the VtnPort surface", vtn_value_leaks),
+    ("infra reached from the controller ring",
+     lambda: forbid("infra", [VEN_SRC / "controller"],
+                    r"crate::(assets|simulator)\b")),
 ]
 
 

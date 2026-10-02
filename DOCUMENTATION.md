@@ -497,7 +497,7 @@ At any moment the VEN can report its site-level flexibility to the VTN:
 
 This is used by the VTN operator to understand available DR capacity across VENs.
 
-**How the site headroom is calculated** (`controller/site_headroom.rs`, `compute_site_headroom()`):
+**How the site headroom is calculated** (`simulator/site_headroom.rs`, `compute_site_headroom()`):
 
 For each controllable asset (via `SimState::iter_assets()`), `Asset::max_effort_setpoint()` at
 `LimitTier::Physical` gives the asset's own absolute achievable power in each direction —

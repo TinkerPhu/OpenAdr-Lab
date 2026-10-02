@@ -71,7 +71,7 @@ pub struct CapacityCurveStep {
     /// actual external boundary that needs it
     /// (`controller::report_intervals::build_capacity_forecast_intervals`,
     /// for OpenADR's direction-tagged-by-name report payloads) — see
-    /// `controller::capacity_headroom`'s module doc for the full reasoning.
+    /// `simulator::capacity_headroom`'s module doc for the full reasoning.
     pub power_kw: f64,
 }
 

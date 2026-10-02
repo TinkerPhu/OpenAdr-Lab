@@ -86,7 +86,7 @@ fn operating_state(
 ///     slot, straight from the active plan (None if no plan adopted yet)
 ///   - STORAGE_MAX_CHARGE_POWER / STORAGE_MAX_DISCHARGE_POWER → the
 ///     sustained-commitment capacity curve
-///     (`controller::capacity_headroom::compute_site_capacity_curve`), one
+///     (`simulator::capacity_headroom::compute_site_capacity_curve`), one
 ///     interval per curve step — deliberately NOT routed through the generic
 ///     `!obligation.historical => build_forecast_intervals(active_plan,
 ///     ..)` fallback below, since that reads plan slots, not this closed-form curve.

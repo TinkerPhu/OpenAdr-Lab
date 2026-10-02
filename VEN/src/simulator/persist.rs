@@ -396,12 +396,11 @@ mod tests {
         let (entry, _) = saved.find_asset_mut("flex").unwrap();
         // Same id, different kind -- what a profile edit from a battery to a
         // shiftable load at id "flex" leaves behind on disk.
-        entry.state =
-            crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
-                started: true,
-                elapsed_min: 5.0,
-                actual_power_kw: 2.0,
-            });
+        entry.state = crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
+            started: true,
+            elapsed_min: 5.0,
+            actual_power_kw: 2.0,
+        });
         save(&saved, data_dir).await.unwrap();
 
         let asset_params = [battery_params("flex")];

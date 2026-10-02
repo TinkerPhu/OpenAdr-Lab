@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::controller::capacity_headroom::compute_site_capacity_curves_at;
 use crate::entities::capacity_curve::CapacityCurves;
+use crate::simulator::capacity_headroom::compute_site_capacity_curves_at;
 use crate::AppCtx;
 
 /// GET /flexibility — returns the live site-level flexibility envelope (Phase E).
@@ -57,7 +57,7 @@ pub struct CapacityCurvesQuery {
 /// GET /flexibility/capacity — sustained-commitment power/duration/energy
 /// capacity curves (both directions in one response). Without `start`, the
 /// curves re-derived every dispatcher tick from the current asset state (see
-/// `controller::capacity_headroom`'s module doc for why this is a distinct
+/// `simulator::capacity_headroom`'s module doc for why this is a distinct
 /// computation from `GET /flexibility/forecast` above, not an extension of
 /// it — they're fixed-axis slices of the same underlying
 /// `(t1, t2, direction, tier)` domain). With a future `start` and an active
