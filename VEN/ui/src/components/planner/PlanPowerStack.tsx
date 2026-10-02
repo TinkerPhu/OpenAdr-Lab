@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { AssetId } from "../controller/types";
 import { ASSET_COLORS } from "../controller/types";
-import { buildStackedFromAllTimelines, assetIdsWithTimelineData } from "../controller/GridAccumulatedCell";
+import { buildStackedFromAllTimelines, assetIdsWithTimelineData } from "../controller/stackedTimelines";
 import type { Plan } from "../../api/types";
 import { useAllTimelines } from "../../api/hooks";
 import { Box, Typography } from "@mui/material";

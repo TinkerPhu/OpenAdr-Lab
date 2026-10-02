@@ -39,7 +39,7 @@ const mockSim = vi.fn().mockResolvedValue(baseSim);
 const mockRates = vi.fn().mockResolvedValue(baseTariffs);
 const mockAllTimelines = vi.fn().mockResolvedValue(baseTimeline);
 
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({
     api: {
       baseUrl: "http://localhost:8211",

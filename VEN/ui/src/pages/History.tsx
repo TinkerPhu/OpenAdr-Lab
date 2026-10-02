@@ -5,8 +5,9 @@ import {
 } from "@mui/material";
 import {
   useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
-  useHealth,
 } from "../api/hooks";
+import { dayRangeIso, last24hRangeIso } from "../utils/dayRange";
+import { useFrozenServerNowMs } from "../utils/useFrozenServerNowMs";
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvelopeChart";
 import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
@@ -59,43 +60,11 @@ function HistoryTablePager({
   );
 }
 
-/** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
-export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string } {
-  const from = new Date(`${dateStr}T00:00:00.000Z`);
-  const to = new Date(from.getTime() + 24 * 3600 * 1000);
-  return { fromIso: from.toISOString(), toIso: to.toISOString() };
-}
-
-/** [from, to) ISO bounds for the rolling 24h window ending at `nowMs` — the default view,
- * so the tab is useful the moment it's opened instead of showing an empty/mostly-empty
- * calendar day. `nowMs` is caller-supplied (the server clock, not the browser's) so a
- * client with a skewed OS clock still queries a window that actually contains data. */
-function last24hRangeIso(nowMs: number): { fromIso: string; toIso: string } {
-  const to = new Date(nowMs);
-  return { fromIso: new Date(to.getTime() - 24 * 3600 * 1000).toISOString(), toIso: to.toISOString() };
-}
-
 export function HistoryPage() {
   // null = default rolling last-24h window; a "YYYY-MM-DD" string once the user picks a
   // specific UTC calendar day to inspect instead.
   const [date, setDate] = useState<string | null>(null);
-  // Server clock (see Controller.tsx's nowMs for the full rationale), captured once and
-  // then frozen — like `date`, the rolling window is meant to be computed once (not
-  // re-anchored on every /health poll), so it doesn't reset the Events/Reports table
-  // pagination underneath a user mid-page. `frozenServerNowMs` is set at most once,
-  // adjusted during render the first time /health resolves (React's documented pattern
-  // for deriving state from a prop, same as `pagedRangeIso` below) rather than in an
-  // effect, which would cause an extra commit for the same outcome. Until then it falls
-  // back to a Date.now() snapshot taken once at mount (not recomputed every render,
-  // which could otherwise change fromIso/toIso every render and loop the state-reset
-  // block below).
-  const health = useHealth();
-  const [mountNowMs] = useState(() => Date.now());
-  const [frozenServerNowMs, setFrozenServerNowMs] = useState<number | null>(null);
-  if (frozenServerNowMs === null && health.data) {
-    setFrozenServerNowMs(new Date(health.data.server_time).getTime());
-  }
-  const serverNowMs = frozenServerNowMs ?? mountNowMs;
+  const serverNowMs = useFrozenServerNowMs();
   const { fromIso, toIso } = useMemo(
     () => (date ? dayRangeIso(date) : last24hRangeIso(serverNowMs)),
     [date, serverNowMs]

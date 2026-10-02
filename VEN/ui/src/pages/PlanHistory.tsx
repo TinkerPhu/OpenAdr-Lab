@@ -7,21 +7,10 @@ import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useHistoryPlans } from "../api/hooks";
+import { dayRangeIso, last24hRangeIso } from "../utils/dayRange";
+import { useFrozenServerNowMs } from "../utils/useFrozenServerNowMs";
 import { niceAxis, tickFormatterForStep } from "@lab/charts/axisDomain";
 import type { PlanHistorySample, WarningKind } from "../api/types";
-
-/** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
-export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string } {
-  const from = new Date(`${dateStr}T00:00:00.000Z`);
-  const to = new Date(from.getTime() + 24 * 3600 * 1000);
-  return { fromIso: from.toISOString(), toIso: to.toISOString() };
-}
-
-/** [from, to) ISO bounds for the rolling 24h window ending now — the default view. */
-function last24hRangeIso(): { fromIso: string; toIso: string } {
-  const to = new Date();
-  return { fromIso: new Date(to.getTime() - 24 * 3600 * 1000).toISOString(), toIso: to.toISOString() };
-}
 
 const WARNING_KIND_LABELS: Record<WarningKind, string> = {
   SOLVER_INFEASIBLE: "Solver infeasible",
@@ -49,7 +38,13 @@ function formatTs(ts: number): string {
 
 export function PlanHistoryPage() {
   const [date, setDate] = useState<string | null>(null);
-  const { fromIso, toIso } = useMemo(() => (date ? dayRangeIso(date) : last24hRangeIso()), [date]);
+  // The server's clock, same as the History page: the browser's would query a
+  // 24 h window that need not contain any data on a client with OS-clock drift.
+  const serverNowMs = useFrozenServerNowMs();
+  const { fromIso, toIso } = useMemo(
+    () => (date ? dayRangeIso(date) : last24hRangeIso(serverNowMs)),
+    [date, serverNowMs]
+  );
   const displayDate = date ?? toIso.slice(0, 10);
 
   const plansQuery = useHistoryPlans(fromIso, toIso);

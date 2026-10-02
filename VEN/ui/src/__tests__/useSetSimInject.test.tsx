@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 
 // Mock VenContext so the hook can be rendered without the full app tree.
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({
     api: {
       postSimInject: vi.fn().mockResolvedValue({}),

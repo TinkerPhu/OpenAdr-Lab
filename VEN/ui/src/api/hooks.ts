@@ -1,6 +1,6 @@
 import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useRef, useEffect, useLayoutEffect } from "react";
-import { useVenContext } from "../App";
+import { useVenContext } from "./venContext";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   UpdateEvSettingsBody, UpdateArbiterSettingsBody,

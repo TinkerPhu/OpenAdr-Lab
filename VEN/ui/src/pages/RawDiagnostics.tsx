@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Typography } from "@mui/material";
-import { useVenContext } from "../App";
+import { useVenContext } from "../api/venContext";
 import { DiagnosticCell } from "../components/raw-diagnostics/DiagnosticCell";
 import { SimProfileChart } from "../components/raw-diagnostics/SimProfileChart";
 import { TariffsLineChart } from "../components/raw-diagnostics/TariffsLineChart";

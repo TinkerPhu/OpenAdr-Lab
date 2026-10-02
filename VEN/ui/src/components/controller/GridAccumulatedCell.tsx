@@ -8,63 +8,12 @@ import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "@lab/charts/chartLayout";
-import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
+import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
+import { assetIdsWithTimelineData, buildStackedFromAllTimelines } from "./stackedTimelines";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { ZoneDef } from "../../api/types";
 import { formatSignedPowerValue } from "@lab/charts/unitFormat";
-
-/** Discover all asset IDs present in the timelines (everything except "grid"). */
-function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {
-  return Object.keys(allTimelines).filter((id) => id !== "grid");
-}
-
-/**
- * Narrows a candidate asset-ID list (e.g. the currently-configured roster from
- * assetSummaries) down to the ones that actually have timeline entries — i.e. the
- * same set StackedTimeSeriesChart will actually draw a graph for. A candidate asset
- * with no timeline data yet would otherwise still get a legend entry with nothing
- * plotted next to it; this is the single filter both StackedTimeSeriesChart callers
- * (GridAccumulatedCell, PlanPowerStack) apply before passing `assetIds` to the chart,
- * so a legend entry and its graph can never drift apart.
- */
-export function assetIdsWithTimelineData(
-  candidateIds: AssetId[],
-  allTimelines: Record<string, AssetTimelinePoint[]>
-): AssetId[] {
-  return candidateIds.filter((id) => (allTimelines[id]?.length ?? 0) > 0);
-}
-
-/** Build stacked-area data by positional zip across grid-aligned asset arrays. */
-export function buildStackedFromAllTimelines(
-  allTimelines: Record<string, AssetTimelinePoint[]>
-): StackedAreaPoint[] {
-  const assetIds = discoverAssetIds(allTimelines);
-  // Use the first non-empty asset's array to determine length and timestamps.
-  // RF-05c guarantees all assets share the same ts at each index.
-  const refAsset = assetIds.find((id) => (allTimelines[id]?.length ?? 0) > 0);
-  const refPoints = refAsset ? allTimelines[refAsset] : [];
-  if (!refPoints || refPoints.length === 0) return [];
-
-  return refPoints.map((ref, i) => {
-    const pt: StackedAreaPoint = {
-      ts: ref.ts,
-      ev_pos: 0, ev_neg: 0,
-      heater_pos: 0, heater_neg: 0,
-      pv_pos: 0, pv_neg: 0,
-      battery_pos: 0, battery_neg: 0,
-      base_load_pos: 0, base_load_neg: 0,
-      gridPowerKw: null,
-    };
-    for (const assetId of assetIds) {
-      const kw = allTimelines[assetId]?.[i]?.values?.["power_kw"] ?? 0;
-      pt[`${assetId}_pos`] = Math.max(0, kw);
-      pt[`${assetId}_neg`] = Math.min(0, kw);
-    }
-    pt.gridPowerKw = allTimelines["grid"]?.[i]?.values?.["power_kw"] ?? null;
-    return pt;
-  });
-}
 
 interface GridAccumulatedCellProps {
   assetSummaries: AssetSummary[];
