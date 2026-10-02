@@ -41,7 +41,7 @@ function entry(id: string, message = id): EventLogEntry {
 
 const mockEventLog = vi.fn<() => Promise<EventLogEntry[]>>();
 
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({
     api: { baseUrl: "http://ven-1", eventLog: mockEventLog },
   }),

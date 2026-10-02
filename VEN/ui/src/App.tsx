@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import {
@@ -7,6 +7,7 @@ import {
 } from "@mui/material";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { VenApi } from "./api/client";
+import { VenContext } from "./api/venContext";
 import { useHealth } from "./api/hooks";
 import { DEFAULT_VENS, fetchDiscoveredVens, mergeVens } from "./api/venRegistry";
 import { NotificationsBell } from "./components/NotificationsBell";
@@ -28,21 +29,6 @@ import { DevicesPage } from "./pages/Devices";
 import { PlanHistoryPage } from "./pages/PlanHistory";
 import { CapacityForecastPage } from "./pages/CapacityForecast";
 import { debugLog } from "./utils/debugLog";
-
-type VenContextType = {
-  venUrl: string;
-  venName: string;
-  setVenUrl: (url: string) => void;
-  api: VenApi;
-};
-
-const VenContext = createContext<VenContextType | null>(null);
-
-export function useVenContext(): VenContextType {
-  const ctx = useContext(VenContext);
-  if (!ctx) throw new Error("useVenContext must be used within VenProvider");
-  return ctx;
-}
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();

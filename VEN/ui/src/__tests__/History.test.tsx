@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { HistoryPage, dayRangeIso } from "../pages/History";
+import { HistoryPage } from "../pages/History";
 
 const mockTicks = [
   { ts: Date.UTC(2026, 0, 1, 6), asset_id: "ev", power_kw: 3.5, soc_pct: 42, temperature_c: null },
@@ -80,7 +80,7 @@ vi.mock("../api/hooks", () => ({
   useHealth: () => ({ data: mockHealthData.current }),
 }));
 
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({ venUrl: "http://localhost:8081", venName: "ven-1", setVenUrl: vi.fn(), api: {} }),
 }));
 
@@ -103,13 +103,7 @@ beforeEach(() => {
   mockHealthData.current = { server_time: new Date().toISOString() };
 });
 
-describe("dayRangeIso", () => {
-  it("returns a 24h [from, to) window for a UTC calendar day", () => {
-    const { fromIso, toIso } = dayRangeIso("2026-01-01");
-    expect(fromIso).toBe("2026-01-01T00:00:00.000Z");
-    expect(toIso).toBe("2026-01-02T00:00:00.000Z");
-  });
-});
+// dayRangeIso is tested once, in __tests__/dayRange.test.ts.
 
 describe("HistoryPage", () => {
   it("renders one chart section per asset present in the ticks data", () => {

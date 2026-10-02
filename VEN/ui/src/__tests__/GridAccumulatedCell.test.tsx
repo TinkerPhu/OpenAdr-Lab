@@ -10,7 +10,7 @@ import { ControllerPage } from "../pages/Controller";
 import {
   buildStackedFromAllTimelines,
   assetIdsWithTimelineData,
-} from "../components/controller/GridAccumulatedCell";
+} from "../components/controller/stackedTimelines";
 import type { SimSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 

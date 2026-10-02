@@ -103,8 +103,11 @@ export function ControllerPage() {
     resetAssetSoc({ assetId, soc }, { onSuccess: onDone });
   }
 
-  const tariffs = rates ?? [];
-  const requests = userRequests ?? [];
+  // Stable references, same reason as `allTimelines`/`zones` above: a bare
+  // `rates ?? []` builds a new array on every render while the query is
+  // empty, which re-ran all three memos below on every render.
+  const tariffs = useMemo(() => rates ?? [], [rates]);
+  const requests = useMemo(() => userRequests ?? [], [userRequests]);
 
   // Enrich asset timelines with cost_rate_eur_h / co2_rate_g_h for history/now-point.
   // Requires allTimelines so gridFraction can be computed per timestamp — PV-covered

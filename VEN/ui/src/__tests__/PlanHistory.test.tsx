@@ -2,7 +2,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
-import { PlanHistoryPage, dayRangeIso } from "../pages/PlanHistory";
+import { PlanHistoryPage } from "../pages/PlanHistory";
+
+/// The server clock the page anchors its rolling window on. A fixed instant,
+/// not `new Date()`: the point of reading the server's clock is that the
+/// browser's is not trusted, so a test that asserted the browser's "today"
+/// could not tell the two apart.
+const SERVER_NOW_ISO = "2026-01-01T12:00:00.000Z";
 
 const mockPlans = [
   {
@@ -45,9 +51,12 @@ const mockRefetch = vi.hoisted(() => ({ plans: vi.fn() }));
 
 vi.mock("../api/hooks", () => ({
   useHistoryPlans: () => ({ data: mockPlans, refetch: mockRefetch.plans }),
+  // The page anchors its rolling window on the server clock
+  // (`useFrozenServerNowMs`), as the History page already did.
+  useHealth: () => ({ data: { server_time: SERVER_NOW_ISO } }),
 }));
 
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({ venUrl: "http://localhost:8081", venName: "ven-1", setVenUrl: vi.fn(), api: {} }),
 }));
 
@@ -62,13 +71,7 @@ function renderPlanHistory() {
   );
 }
 
-describe("dayRangeIso", () => {
-  it("returns a 24h [from, to) window for a UTC calendar day", () => {
-    const { fromIso, toIso } = dayRangeIso("2026-01-01");
-    expect(fromIso).toBe("2026-01-01T00:00:00.000Z");
-    expect(toIso).toBe("2026-01-02T00:00:00.000Z");
-  });
-});
+// dayRangeIso is tested once, in __tests__/dayRange.test.ts.
 
 describe("PlanHistoryPage", () => {
   it("renders the page root", () => {
@@ -115,7 +118,6 @@ describe("PlanHistoryPage", () => {
 
     fireEvent.click(screen.getByTestId("plan-history-last-24h-btn"));
 
-    const todayUtc = new Date().toISOString().slice(0, 10);
-    expect(input.value).toBe(todayUtc);
+    expect(input.value).toBe(SERVER_NOW_ISO.slice(0, 10));
   });
 });

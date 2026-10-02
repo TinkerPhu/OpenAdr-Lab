@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ReportsPage, buildExampleResources } from "../pages/Reports";
+import { ReportsPage } from "../pages/Reports";
+import { buildExampleResources } from "../utils/exampleResources";
 import type { VtnEvent } from "../api/types";
 
 const mockEvents = [
@@ -60,7 +61,7 @@ vi.mock("../api/hooks", () => ({
   useUpdateReport: () => ({ mutate: updateMutateMock, isPending: false }),
 }));
 
-vi.mock("../App", () => ({
+vi.mock("../api/venContext", () => ({
   useVenContext: () => ({ venUrl: "http://localhost:8081", venName: "ven-1", setVenUrl: vi.fn(), api: {} }),
 }));
 

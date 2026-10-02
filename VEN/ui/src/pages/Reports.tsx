@@ -6,12 +6,13 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
-import type { Report, ReportSubmission, VtnEvent } from "../api/types";
+import type { Report, ReportSubmission } from "../api/types";
+import { buildExampleResources } from "../utils/exampleResources";
 import {
   useReports, useReportSubmissions, useReportWindows, useSubmitReport, useUpdateReport, useEvents, usePrograms,
   useObligations,
 } from "../api/hooks";
-import { useVenContext } from "../App";
+import { useVenContext } from "../api/venContext";
 import { JsonDialog } from "../components/JsonDialog";
 
 /** WP-T5 (G-5): newest submission matching a report, by reportName AND
@@ -48,23 +49,6 @@ export function ReportStatusChip({ submission }: { submission: ReportSubmission 
       <Chip size="small" color="error" label="Rejected" data-testid="report-status-rejected" />
     </Tooltip>
   );
-}
-
-export function buildExampleResources(event: VtnEvent, venName: string): string {
-  const intervals = (event.intervals ?? []).map((iv) => ({
-    id: iv.id,
-    payloads: (iv.payloads ?? []).map((p) => ({
-      type: p.type,
-      values: p.values.map((v) => {
-        if (p.type === "SIMPLE" && v === 0) return 1;
-        if (v === 0) return 0;
-        const offset = 1 + (Math.random() * 0.08 - 0.04); // ±4%
-        return Math.round(v * offset * 10) / 10;
-      }),
-    })),
-  }));
-  const resource = { resourceName: `${venName}-meter`, intervals };
-  return JSON.stringify([resource], null, 2);
 }
 
 export function ReportsPage() {
