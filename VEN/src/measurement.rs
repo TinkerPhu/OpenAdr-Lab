@@ -74,15 +74,14 @@ pub struct MqttMeasurementAdapter {
     last_seen: Arc<Mutex<Option<Instant>>>,
 }
 
+/// Parses a raw payload into a reading. Device-specific logic lives entirely
+/// in the function passed to `MqttMeasurementAdapter::spawn` (see
+/// `measurement_translation.rs`), never in this file.
+pub type MeasurementParser = fn(&[u8]) -> Result<MeasurementReading, String>;
+
 impl MqttMeasurementAdapter {
     /// Spawn the background MQTT subscription task and return the adapter.
-    /// `translate` parses a raw payload into `(value_kw, reading's own
-    /// timestamp)` — device-specific logic lives entirely in the function
-    /// passed here (see `measurement_translation.rs`), never in this file.
-    pub fn spawn(
-        config: MeasurementMqttConfig,
-        translate: fn(&[u8]) -> Result<MeasurementReading, String>,
-    ) -> Self {
+    pub fn spawn(config: MeasurementMqttConfig, translate: MeasurementParser) -> Self {
         let (tx, rx) = watch::channel(None);
         let last_seen: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
