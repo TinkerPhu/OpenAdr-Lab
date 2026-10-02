@@ -205,24 +205,27 @@ pub fn run_planner(
         planner.solver_timeout_s as f64,
         planner.phase2_solver_timeout_s as f64,
     ) {
-        Ok((sol, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh)) => translate_to_plan(
-            &sol,
-            &inputs,
-            &p1w,
-            planner,
-            now,
-            trigger,
-            ev_session,
-            heater_target,
-            shiftable_loads,
-            objective,
-            phase1_cost_eur,
-            friction_eur,
-            battery,
-            ev,
-            heater,
-            &marginal_cost_eur_per_kwh,
-        ),
+        Ok((sol, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh, phase_report)) => {
+            translate_to_plan(
+                &sol,
+                &inputs,
+                &p1w,
+                planner,
+                now,
+                trigger,
+                ev_session,
+                heater_target,
+                shiftable_loads,
+                objective,
+                phase1_cost_eur,
+                friction_eur,
+                battery,
+                ev,
+                heater,
+                &marginal_cost_eur_per_kwh,
+                Some(phase_report),
+            )
+        }
         Err(e) => {
             // BL-25 (WP2.3): construct the reserved PlanInfeasible variant at
             // its real boundary. SolverPort::solve stays infallible by design
