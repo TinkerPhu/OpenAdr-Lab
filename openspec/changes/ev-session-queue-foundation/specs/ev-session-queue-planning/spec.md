@@ -9,11 +9,19 @@ pre-charge for a deadline that lies behind an intervening departure.
 
 ## ADDED Requirements
 
-### Requirement: Every queued session becomes its own planning obligation
+### Requirement: Every queued session with a firm target becomes its own planning obligation
 
-The planner SHALL receive one charging obligation per queued session whose
-departure falls within the planning horizon, carrying that session's departure and
-its target state of charge, and identifying the session it came from.
+The planner SHALL receive one charging obligation per queued session that states a
+**firm** target and whose departure falls within the planning horizon, carrying
+that session's departure and its target state of charge, and identifying the
+session it came from.
+
+A session with a **soft** deadline SHALL contribute no obligation: a soft target
+is a preference priced per unit of energy by the user's comfort curve, not a
+guarantee, so it is expressed through that valuation instead. The same holds for
+the free and opportunistic modes, which are gated by available surplus rather than
+by a deadline. Those sessions still bound when the vehicle is present, because
+availability is fact rather than preference.
 
 #### Scenario: A plan satisfies two sessions in sequence
 
@@ -22,8 +30,13 @@ its target state of charge, and identifying the session it came from.
 
 #### Scenario: Each obligation is attributable to its session
 
-- **WHEN** several sessions are queued within the horizon
+- **WHEN** several sessions with firm targets are queued within the horizon
 - **THEN** each resulting obligation identifies the session it came from
+
+#### Scenario: A soft session states no obligation
+
+- **WHEN** a queued session has a soft deadline
+- **THEN** it contributes no obligation, and how far it charges is decided by its comfort curve
 
 #### Scenario: Sessions beyond the horizon are ignored
 
@@ -83,8 +96,10 @@ session. A queued session SHALL NOT make the site plan infeasible.
 
 The session whose charging window is currently open SHALL continue to be valued
 by the comfort curve its request carried, with each unit of energy priced at the
-user's stated willingness to pay at that state of charge. Sessions queued behind
-it SHALL carry a firm energy-by-deadline obligation.
+user's stated willingness to pay at that state of charge. A session queued behind
+it SHALL carry an obligation only where its target is firm; a soft one behind the
+head is still a preference, and contributes neither an obligation nor a second
+priced curve.
 
 #### Scenario: The current session's bids still price its energy
 

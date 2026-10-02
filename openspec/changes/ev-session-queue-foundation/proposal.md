@@ -44,7 +44,9 @@ even though the planner it feeds can, after the prerequisite change, hold severa
   its target state of charge. The solver already chains state of charge across
   departures, so pre-charging for a deadline behind an intervening trip needs no
   new planner mechanism here. The comfort curve keeps pricing the head session's
-  energy; queued sessions behind it carry firm targets.
+  energy; a queued session behind it contributes an obligation only where its
+  target is firm, since a soft deadline is priced by its bids rather than
+  guaranteed (the rule `ev-soc-state-variables` already shipped).
 - The **simulated-usage producer** becomes the first consumer: instead of
   writing the nearest trip only, it maintains a rolling **7-day** window of
   simulated sessions, topped up each tick from repeated
