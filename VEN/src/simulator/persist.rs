@@ -20,6 +20,23 @@ pub async fn save(state: &SimState, data_dir: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The fresh (params-built) entry for `id`. Infallible at both call sites:
+/// `id` comes from iterating `fresh.assets` itself.
+fn fresh_entry<'a>(fresh: &'a SimState, id: &str) -> &'a super::AssetEntry {
+    fresh
+        .assets
+        .iter()
+        .find(|e| e.id == id)
+        .expect("id was taken from fresh.assets")
+}
+
+/// Whether a persisted entry's state is the same `AssetState` variant the
+/// current params build for that id.
+fn same_state_kind(persisted: &super::AssetEntry, fresh: &SimState, id: &str) -> bool {
+    std::mem::discriminant(&persisted.state)
+        == std::mem::discriminant(&fresh_entry(fresh, id).state)
+}
+
 /// Load persisted sim state and replace asset configs from the current params.
 ///
 /// Only mutable runtime state (temperatures, SoCs, energy counters, last_tick) is
@@ -27,7 +44,10 @@ pub async fn save(state: &SimState, data_dir: &str) -> anyhow::Result<()> {
 /// rebuilt from the current params so that configuration changes take effect on restart.
 ///
 /// Falls back to a fresh params-based state when the file is missing, corrupt, or
-/// when the persisted asset IDs don't match the current asset list.
+/// when the persisted asset IDs don't match the current asset list. A single
+/// entry whose persisted state is a *different asset kind* than the current
+/// params build for that id is replaced by the fresh one (see
+/// `same_state_kind`), leaving every other asset's restored state intact.
 pub async fn load_with_params(
     data_dir: &str,
     asset_params: &[crate::entities::asset_params::AssetParams],
@@ -50,6 +70,20 @@ pub async fn load_with_params(
     let mut reconciled = Vec::with_capacity(current_ids.len());
     for &id in &current_ids {
         match loaded.assets.iter().find(|e| e.id == id) {
+            // A profile may reuse an id for a different asset kind. The config
+            // below is always rebuilt from params, so pairing it with a
+            // persisted state of another variant would make every `Asset`
+            // method's `unreachable!("…/state mismatch")` fire on the first
+            // tick -- a boot crash loop from a file that parses cleanly. Keep
+            // the id, take the fresh state.
+            Some(entry) if !same_state_kind(entry, &fresh, id) => {
+                warn!(
+                    id,
+                    "persisted asset state is a different kind than the current profile's \
+                     — discarding it and starting this asset fresh from params"
+                );
+                reconciled.push(fresh_entry(&fresh, id).clone());
+            }
             Some(entry) => reconciled.push(entry.clone()),
             None => {
                 let loaded_ids: Vec<&str> = loaded.assets.iter().map(|e| e.id.as_str()).collect();
@@ -344,6 +378,45 @@ mod tests {
             restarted.find_asset("wm").is_none(),
             "stale dynamic asset must be dropped, not restored"
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A profile that reuses an id for a *different* asset kind pairs the
+    /// rebuilt config with a persisted state of the wrong variant. Every
+    /// `Asset` method destructures that state and `unreachable!`s on a
+    /// mismatch, so without this guard the VEN panics on the first tick --
+    /// on every boot, from a file `load()` parses happily.
+    #[tokio::test]
+    async fn load_with_params_discards_a_persisted_state_of_the_wrong_kind() {
+        let dir = temp_data_dir();
+        let data_dir = dir.to_str().unwrap();
+
+        let mut saved = SimState::from_params(&[battery_params("flex")], now());
+        let (entry, _) = saved.find_asset_mut("flex").unwrap();
+        // Same id, different kind -- what a profile edit from a battery to a
+        // shiftable load at id "flex" leaves behind on disk.
+        entry.state =
+            crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
+                started: true,
+                elapsed_min: 5.0,
+                actual_power_kw: 2.0,
+            });
+        save(&saved, data_dir).await.unwrap();
+
+        let asset_params = [battery_params("flex")];
+        let restarted = load_with_params(data_dir, &asset_params, now()).await;
+
+        let (entry, _) = restarted
+            .find_asset("flex")
+            .expect("the asset must still exist, built fresh from current params");
+        match &entry.state {
+            crate::assets::AssetState::Battery(s) => assert!(
+                (s.soc - 0.5).abs() < 1e-9,
+                "mismatched state must be replaced by the fresh params-built one"
+            ),
+            other => panic!("expected a fresh Battery state, got {other:?}"),
+        }
 
         std::fs::remove_dir_all(&dir).ok();
     }
