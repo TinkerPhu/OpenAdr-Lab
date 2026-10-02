@@ -1707,7 +1707,7 @@ fn bench_phase1_vs_tank_slack() {
 }
 
 /// Print one experiment record for `scripts/run_planner_experiment.sh` to stamp and
-/// append to `experiments/results/planner/solve_cost.jsonl`. Keeping the emission in
+/// append to `experiments/planner_benchmarks/solve_cost.jsonl`. Keeping the emission in
 /// the benchmark means the log cannot drift from the code, which hand-copied prose
 /// tables always eventually do.
 fn emit_result(json_body: &str) {

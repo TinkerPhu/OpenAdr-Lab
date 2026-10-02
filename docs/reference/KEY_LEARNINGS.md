@@ -2525,3 +2525,21 @@ next decision built on that mechanism would not have survived.
   eight containers back-to-back (a cosmetic container-name cleanup) synchronised eight VENs and
   produced the slow numbers above. Benign-looking maintenance on a live system is an intervention;
   if a measurement follows it, say so.
+
+## Where measurements live (R-97, 2026-10-02)
+
+- **A durable record must not live inside a folder that is cleaned for disk space.** The planner
+  solve-cost log was created at `experiments/results/planner/` — under a path that exists for
+  `run_experiment.py`'s bulk, regenerable, periodically-deleted snapshots. It inherited that
+  parent's `.gitignore` entry too, so ~150 rows of *non-reproducible* measurement (time-limited
+  solves, live fleet observations) sat on one laptop, untracked, inside a directory whose whole
+  purpose is being deleted. Both halves of the mistake came from filing by **topic** ("it's an
+  experiment result") instead of by **lifetime** ("it can never be regenerated"). Lifetime
+  decides: irrecoverable things go outside every cleanup path, and into git. Now at
+  `experiments/planner_benchmarks/`.
+- **Measurements must not live in the same folder as the conclusions drawn from them.** Raw rows
+  and their condensed reading have different lifetimes and different failure modes — a cleanup,
+  rewrite or reorganisation of one should not be able to take the other with it. Keeping them
+  apart also keeps the distinction honest: the prose is an interpretation, and in this
+  investigation interpretations were retracted twice while the rows stayed valid. When the two
+  disagree, the rows win.

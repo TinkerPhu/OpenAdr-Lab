@@ -3,7 +3,7 @@
 #
 # Benchmarks print lines of the form `@@RESULT {json}`; this stamps each with the
 # timestamp, the commit it ran against and the result class, then appends to
-# experiments/results/planner/solve_cost.jsonl. See that directory's README.
+# experiments/planner_benchmarks/solve_cost.jsonl. See that directory's README.
 #
 #   bash scripts/run_planner_experiment.sh bench_phase1_vs_tank_slack [class]
 #
@@ -14,7 +14,7 @@ set -uo pipefail
 BENCH="${1:?usage: run_planner_experiment.sh <bench_fn> [class]}"
 CLASS="${2:-1}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG="$ROOT/experiments/results/planner/solve_cost.jsonl"
+LOG="$ROOT/experiments/planner_benchmarks/solve_cost.jsonl"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DIRTY=""

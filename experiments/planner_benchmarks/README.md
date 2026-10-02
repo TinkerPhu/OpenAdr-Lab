@@ -17,6 +17,27 @@ Results split into three classes, and only one needs disk:
 Each line is a few hundred bytes. A thousand runs is under a megabyte, so there is
 no compression problem here — the storage pressure is entirely class 3.
 
+## Where this lives, and why not next to anything else
+
+Two siting rules, both learned the hard way on 2026-10-02.
+
+**1. Durable records do not live inside a folder that gets cleaned for disk.**
+This log started life at `experiments/results/planner/`, under a path that exists to
+hold `run_experiment.py`'s bulk host-local snapshots and is periodically deleted to
+reclaim space. A cleanup aimed at gigabytes of regenerable snapshots would have taken
+~150 bytes-per-row of **class 2** measurements that by definition cannot be
+regenerated. It was also gitignored by inheritance from that parent, so there was no
+second copy anywhere. Lifetime, not topic, decides where a file lives: anything
+irrecoverable belongs outside every bulk-cleanup path, and in git.
+
+**2. Measurements do not live in the same folder as the conclusions drawn from them.**
+The condensed reading of this data is `docs/reference/R97_PLANNER_BENCHMARKS.md`, and
+it stays there. Keeping the two apart is what stops a cleanup, a rewrite or a
+reorganisation of either one from silently taking the other with it, and it keeps the
+distinction honest: the prose is an interpretation that has been wrong and been
+retracted, while these rows are what was actually observed. When they disagree, the
+rows win.
+
 ## Schema
 
 ```json
