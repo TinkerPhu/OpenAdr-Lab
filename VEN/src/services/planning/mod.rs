@@ -295,33 +295,41 @@ pub fn build_plan_cycle_inputs(
     }
 }
 
+/// Smallest planned-heater-power difference [kW] this module treats as a real
+/// change — below it, two slots are the same heater state and a site reads as
+/// off. One constant because "the heater is on", "this is still the same
+/// block" and "the heater switched" are three readings of one question: a
+/// per-call-site tolerance would let them disagree about the same plan.
+pub const HEATER_KW_EPS: f64 = 0.1;
+
+/// Planned heater power in one slot [kW]. Absent heater data — a fallback plan,
+/// or a site with no heater at all — reads as off.
+fn heater_kw(slot: &crate::entities::plan::PlanTimeSlot) -> f64 {
+    slot.planned_kw_by_asset
+        .get(crate::ids::ASSET_HEATER)
+        .copied()
+        .unwrap_or(0.0)
+}
+
 /// Returns the end time of the consecutive heater block containing `now` in `plan`.
 ///
 /// Reads the heater power in the first future slot (start of block), then walks forward
-/// while heater power stays within 0.1 kW of that value. Returns the `end` of the last
-/// slot in the run, or `None` when no future slots exist.
+/// while heater power stays within `HEATER_KW_EPS` of that value. Returns the `end` of
+/// the last slot in the run, or `None` when no future slots exist.
 pub fn heater_block_end(plan: &Plan, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let mut iter = plan.all_slots().filter(|s| s.end > now).peekable();
-    let kw0 = iter
-        .peek()?
-        .planned_kw_by_asset
-        .get("heater")
-        .copied()
-        .unwrap_or(0.0);
+    let kw0 = heater_kw(iter.peek()?);
     // Only anchor an active heating block. When the heater is off in the first future slot
     // (kw0 ≈ 0 — including fallback plans that have no heater data at all), anchoring all
     // subsequent slots to "off" forces the dynamics to drain the tank below its domain lower
     // bound, making the next MILP infeasible at presolve. No anchor is needed for off-state:
     // the switching penalty in Phase 2 already discourages rapid re-cycling.
-    if kw0 < 0.1 {
+    if kw0 < HEATER_KW_EPS {
         return None;
     }
-    iter.take_while(|s| {
-        let kw = s.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0);
-        (kw - kw0).abs() < 0.1
-    })
-    .last()
-    .map(|s| s.end)
+    iter.take_while(|s| (heater_kw(s) - kw0).abs() < HEATER_KW_EPS)
+        .last()
+        .map(|s| s.end)
 }
 
 /// Build a per-slot heater anchor vector for the next planning cycle.
@@ -349,12 +357,7 @@ pub fn build_heater_anchor(
         if slot.start >= until {
             break;
         }
-        out[i] = Some(
-            slot.planned_kw_by_asset
-                .get("heater")
-                .copied()
-                .unwrap_or(0.0),
-        );
+        out[i] = Some(heater_kw(slot));
     }
     out
 }
@@ -401,14 +404,10 @@ pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>, p_step_kw: f64) ->
     let mut count = 0.0f64;
     let mut prev: Option<f64> = None;
     for slot in plan.all_slots().filter(|s| s.start >= now) {
-        let kw = slot
-            .planned_kw_by_asset
-            .get("heater")
-            .copied()
-            .unwrap_or(0.0);
+        let kw = heater_kw(slot);
         if let Some(p) = prev {
             let delta_kw = (p - kw).abs();
-            if delta_kw > 0.1 {
+            if delta_kw > HEATER_KW_EPS {
                 let ops = if p_step_kw > 0.0 {
                     (delta_kw / p_step_kw).round().max(1.0)
                 } else {
@@ -839,6 +838,41 @@ mod tests {
             "friction_eur": 0.0
         }))
         .expect("test plan must deserialize")
+    }
+
+    /// `heater_block_end` ("still the same block") and `count_heater_switches`
+    /// ("the heater changed") are two readings of one question, and they must
+    /// answer it with the same tolerance. A delta just under `HEATER_KW_EPS`
+    /// is neither a block break nor a switch; just over, it is both. Pins the
+    /// consolidation onto `HEATER_KW_EPS` so the two cannot drift apart.
+    #[test]
+    fn block_end_and_switch_count_share_one_tolerance() {
+        let now = fixed_now();
+        let step_s = 1200i64;
+        let on = 2.0;
+
+        let below = make_plan_with_heater_slots(now, step_s, &[on, on + HEATER_KW_EPS * 0.9]);
+        assert_eq!(
+            heater_block_end(&below, now),
+            Some(now + Duration::seconds(2 * step_s)),
+            "a sub-epsilon delta must not break the block"
+        );
+        assert_eq!(
+            count_heater_switches(&below, now, on),
+            0.0,
+            "the same sub-epsilon delta must not count as a switch"
+        );
+
+        let above = make_plan_with_heater_slots(now, step_s, &[on, on + HEATER_KW_EPS * 1.1]);
+        assert_eq!(
+            heater_block_end(&above, now),
+            Some(now + Duration::seconds(step_s)),
+            "a supra-epsilon delta must end the block at the first slot"
+        );
+        assert!(
+            count_heater_switches(&above, now, on) > 0.0,
+            "the same supra-epsilon delta must count as a switch"
+        );
     }
 
     #[test]
