@@ -164,17 +164,19 @@ pub(crate) struct MilpInputs {
     /// Per-step plugged-in availability mask. False forces p_ev[t] = 0.
     pub(crate) a_ev: Vec<bool>,
     pub(crate) ev_mode: MilpLoadMode,
-    /// Last step index that counts toward the EV energy sum.
-    /// None = open horizon (plugged, no active packet with a deadline).
-    pub(crate) t_ev_dead_step: Option<usize>,
+    /// Every charging obligation this EV must meet inside the horizon (R-92).
+    /// Empty = open horizon (plugged, no departure to charge for).
+    ///
+    /// Same type as `EvMilpContext::obligations`, moved across rather than
+    /// re-expressed: one definition of "a charging obligation" in the planner.
+    pub(crate) ev_obligations: Vec<super::asset_port::EvObligation>,
+    /// Usable pack size [kWh]; 0.0 when EV absent. Turns an obligation's target
+    /// SoC into the energy the diagnostics and envelopes report.
+    pub(crate) ev_battery_kwh: f64,
     /// Max charge power [kW]; 0.0 when EV absent
     pub(crate) p_ev_max_kw: f64,
     /// Semi-continuous minimum charge power [kW] (EvConfig.min_charge_kw)
     pub(crate) p_ev_min_kw: f64,
-    /// Core energy requirement [kWh] from active packet; 0.0 when absent
-    /// Firm requirement [kWh]: energy guaranteed by the deadline, 0.0 when the
-    /// request is soft and its comfort bids decide instead.
-    pub(crate) e_ev_required_kwh: f64,
     /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
     pub(crate) ev_segments: Vec<super::asset_port::EvEnergySegment>,
     /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
@@ -362,6 +364,11 @@ pub(crate) struct SolveOutput {
     pub(crate) p_bat_dis_kw: Vec<f64>,
     /// EV charge power per step [kW]; all 0.0 when EV absent/MustNotRun
     pub(crate) p_ev_kw: Vec<f64>,
+    /// R-93: the solved EV state-of-charge curve (0..1), len = n + 1. The plan's
+    /// own SoC trace — not reconstructed from `p_ev_kw` afterwards.
+    pub(crate) soc_ev: Vec<f64>,
+    /// Solved per-obligation shortfall [kWh], in `ev_obligations` order.
+    pub(crate) ev_shortfall_kwh: Vec<f64>,
     /// Heater stage index (0..=n_stages) per step
     pub(crate) y_heat: Vec<f64>,
     /// Battery SoC trajectory [kWh], len = n + 1; index 0 = initial SoC

@@ -3,7 +3,7 @@ use super::*;
 // ── Solver tests (run actual HiGHS on synthetic inputs) ──────────────────
 
 /// Build a minimal MilpInputs with no optional assets.
-fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
+pub(super) fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
     MilpInputs {
         n,
         dt_h: vec![1.0; n],
@@ -35,10 +35,12 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         eff_bat_dis: None,
         a_ev: vec![false; n],
         ev_mode: MilpLoadMode::MustNotRun,
-        t_ev_dead_step: None,
+        ev_obligations: vec![],
+        // A real pack size even when no EV participates: the SoC balance divides
+        // by it, and a fixture that says "0 kWh of battery" is not a thing.
+        ev_battery_kwh: 60.0,
         p_ev_max_kw: 0.0,
         p_ev_min_kw: 0.0,
-        e_ev_required_kwh: 0.0,
         ev_segments: vec![],
         e_ev_extra_max_kwh: 0.0,
         v_ev_extra_eur_kwh: 0.0,
@@ -85,16 +87,16 @@ fn make_phase2_weights() -> Phase2Weights {
 }
 
 /// A soft-deadline EV whose comfort bid beats the tariff charges on the reward
-/// alone — no firm floor involved (`e_ev_required_kwh` stays 0).
+/// alone — no firm obligation involved (`ev_obligations` stays empty).
 #[test]
 fn ev_may_run_charges_when_the_bid_exceeds_cost() {
     let mut inputs = make_solver_inputs(4, 0.0);
     inputs.a_ev = vec![true; 4];
     inputs.ev_mode = MilpLoadMode::MayRun;
-    inputs.t_ev_dead_step = Some(3);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 0.0;
+    set_ev_firm(&mut inputs, 0.0, 3);
     inputs.e_ev_extra_max_kwh = 20.0;
     // tariff = 0.25, so 4 kWh costs up to 1 EUR; a 5 EUR/kWh bid clears it easily.
     let wanted_kwh = 4.0;
@@ -176,14 +178,14 @@ fn solve_base_kw_flows_into_net_import() {
 
 #[test]
 fn solve_ev_must_run_meets_its_required_energy() {
-    // A firm EV request: the optimizer must deliver e_ev_required_kwh by the deadline.
+    // A firm EV request: the optimizer must reach the obligation's target SoC by its deadline.
     let mut inputs = make_solver_inputs(4, 0.0); // no base load
     inputs.a_ev = vec![true; 4];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(3);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0; // no semi-continuous (cleaner test)
-    inputs.e_ev_required_kwh = 4.0;
+    set_ev_firm(&mut inputs, 4.0, 3);
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -218,10 +220,10 @@ fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
     // Away for slots 1 and 2; only slot 0 (and slot 3, past the deadline) are home.
     inputs.a_ev = vec![true, false, false, true];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(2); // deadline inside the away window
+    // deadline inside the away window
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 7.4; // exactly what the single available slot can deliver
+    set_ev_firm(&mut inputs, 7.4, 2); // exactly what the single available slot can deliver
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -250,19 +252,21 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
     // The pathological shape of the test above: the guaranteed energy exceeds what
     // the unmasked pre-deadline slots can physically deliver.
     //
-    // `ev-comfort-piecewise-core` made this solvable rather than infeasible. The
-    // floor is capped at `EvMilpContext::reachable_energy_kwh` where it is imposed,
-    // so the plan charges everything the window allows and
-    // `ev_diagnostics::firm_shortfall` reports the gap — previously the caller had
-    // to shrink the requirement itself (`clamp_core_to_reachable_energy`, now gone),
-    // which meant the shortfall was invisible to the diagnostic.
+    // `ev-comfort-piecewise-core` made this solvable rather than infeasible, and
+    // R-93 moved the mechanism into the model: the obligation binds the SoC at its
+    // deadline with a penalised shortfall slack, so the plan charges everything the
+    // window allows and `ev_diagnostics::firm_shortfall` reports the solved gap.
+    // Previously the caller shrank the requirement itself
+    // (`clamp_core_to_reachable_energy`), then the floor was pre-capped at a
+    // `reachable_energy_kwh` estimate — either way the shortfall was something
+    // outside the model had to re-derive.
     let mut inputs = make_solver_inputs(4, 0.0);
     inputs.a_ev = vec![true, false, false, true];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(2);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 20.0; // unreachable: only 7.4 kWh of window is left
+    set_ev_firm(&mut inputs, 20.0, 2); // unreachable: only 7.4 kWh of window is left
     inputs.e_ev_extra_max_kwh = 20.0;
 
     let result = solve_phase1(
@@ -473,10 +477,10 @@ fn ev_startup_penalty_produces_contiguous_block() {
     let mut inputs = make_solver_inputs(n, 0.0);
     inputs.a_ev = vec![true; n];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(n - 1);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
-    inputs.e_ev_required_kwh = 3.0 * 7.4; // needs 3 full slots at 1 h each
+    set_ev_firm(&mut inputs, 3.0 * 7.4, n - 1); // needs 3 full slots at 1 h each
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
@@ -644,10 +648,10 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
     let mut inputs = make_solver_inputs(n, 0.0);
     inputs.a_ev = vec![true; n];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(n - 1);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4;
-    inputs.e_ev_required_kwh = 3.0 * 7.4; // needs ~3 full slots at max
+    set_ev_firm(&mut inputs, 3.0 * 7.4, n - 1); // needs ~3 full slots at max
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
@@ -765,10 +769,10 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
 
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.a_ev = vec![true; n];
-    inputs.t_ev_dead_step = Some(n - 1);
+
     inputs.p_ev_max_kw = 7.4;
     inputs.p_ev_min_kw = 1.4;
-    inputs.e_ev_required_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
+    set_ev_firm(&mut inputs, 4.0 * 1.4, n - 1); // 5.6 kWh — easily met by PV alone
 
     let out = solve_phase1(
         &inputs,

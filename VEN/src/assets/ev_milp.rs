@@ -15,6 +15,19 @@ use crate::controller::milp_planner::asset_port::{
     EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
 };
 
+/// Penalty for letting the floor absorb part of a predicted trip's SoC drop
+/// [EUR per SoC fraction]. The drop is a fact, not a choice: this only has to be
+/// expensive enough that the solver never prefers dodging it to charging, while
+/// staying finite so a drop deeper than the pack is floored rather than
+/// infeasible (R-93 design Decision 3).
+const DROP_UNMET_PENALTY_EUR: f64 = 1.0e5;
+
+/// Penalty for missing a firm obligation [EUR per SoC fraction]. Above any
+/// comfort bid or tariff spread, so shortfall is only ever bought when the window
+/// physically cannot deliver — but finite, so an unreachable target degrades to a
+/// reported gap instead of an infeasible site solve.
+const SHORTFALL_PENALTY_EUR: f64 = 1.0e4;
+
 impl EvMilpContext {
     /// Declare all LP variables for this EV charger. Context-side canonical implementation.
     pub fn declare_vars(
@@ -32,6 +45,29 @@ impl EvMilpContext {
                     vars.add(variable().min(0.0).max(self.p_max_kw))
                 }
             })
+            .collect();
+        // R-93: the SoC state itself, following `battery_milp.rs`'s `e_bat` —
+        // index 0 pinned to the live reading by equal bounds, the rest free
+        // between the floor and a full pack.
+        let floor_frac = self.floor_frac();
+        let soc_ev = (0..=n)
+            .map(|i| {
+                if i == 0 {
+                    vars.add(variable().min(self.soc_init).max(self.soc_init))
+                } else {
+                    vars.add(variable().min(floor_frac).max(1.0))
+                }
+            })
+            .collect();
+        // Bounded by its own slot's drop, so it can only ever absorb what the
+        // floor would have cut — zero-width in every slot without a return.
+        let drop_unmet = (0..n)
+            .map(|t| vars.add(variable().min(0.0).max(self.drop_frac_at(t))))
+            .collect();
+        let shortfall_soc = self
+            .obligations
+            .iter()
+            .map(|o| vars.add(variable().min(0.0).max(o.target_soc.max(0.0))))
             .collect();
         let z_ev_on = (0..n)
             .map(|t| {
@@ -59,7 +95,7 @@ impl EvMilpContext {
             // do not cover gets one more band at zero reward, delivered because
             // it was promised rather than because it is worth something.
             let priced_kwh: f64 = self.segments.iter().map(|s| s.kwh).sum();
-            let uncovered = self.e_required_kwh - priced_kwh;
+            let uncovered = self.firm_required_kwh() - priced_kwh;
             if uncovered > 1e-9 {
                 v.push(vars.add(variable().min(0.0).max(uncovered)));
             }
@@ -82,38 +118,70 @@ impl EvMilpContext {
         };
         EvMilpVars {
             p_ev,
+            soc_ev,
+            drop_unmet,
+            shortfall_soc,
             z_ev_on,
             e_seg,
             e_ev_extra,
             delta_ev,
             delta_ev_ramp,
             p_min_kw: self.p_min_kw,
+            battery_kwh: self.battery_kwh,
         }
     }
 
-    /// Build the energy accumulator expression up to the deadline step.
-    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    /// The SoC floor a predicted trip may not push the projection below — the
+    /// same floor the live tick's `apply_return_drop` applies. 0.0 when no usage
+    /// schedule declared one.
+    ///
+    /// Capped at the live reading: a car already sitting below its floor (a 2 %
+    /// pack against a 5 % floor) must not make the site solve infeasible, and the
+    /// floor's job is to stop a trip draining the pack, never to invent charge the
+    /// vehicle does not have. In that degenerate case the floor is simply where
+    /// the car already is.
+    pub fn floor_frac(&self) -> f64 {
+        self.soc_drops
+            .as_ref()
+            .map_or(0.0, |d| d.floor_frac)
+            .min(self.soc_init)
+            .max(0.0)
+    }
+
+    /// Slot `t`'s exogenous SoC drop as a fraction (0.0 in every slot where no
+    /// predicted trip ends). One reader of `ExogenousSocDrops`, so the balance
+    /// constraint and the variable bounds cannot disagree about it.
+    pub fn drop_frac_at(&self, t: usize) -> f64 {
+        self.soc_drops
+            .as_ref()
+            .and_then(|d| d.drop_frac_per_slot.get(t).copied())
+            .unwrap_or(0.0)
+            .max(0.0)
+    }
+
+    /// Total energy charged across the whole horizon [kWh].
+    ///
+    /// Whole-horizon, not deadline-bounded: with the obligation now a bound on
+    /// `soc_ev[deadline_step]`, this expression's only job is to tie the priced
+    /// bands to actual power so a reward cannot be banked without moving `p_ev`.
+    /// Several obligations have several deadlines, so there is no single one to
+    /// bound it by.
     pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: &[f64]) -> Expression {
-        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
         let mut expr = Expression::from(0.0);
         for (t, &dt) in dt_h.iter().enumerate().take(n) {
-            if t <= t_dlim {
-                expr += dt * v.p_ev[t];
-            }
+            expr += dt * v.p_ev[t];
         }
         expr
     }
 
-    /// The most energy this charger can take before its deadline, given the
-    /// slots the vehicle is present for. The upper bound on any guarantee.
-    pub fn reachable_energy_kwh(&self, n: usize, dt_h: &[f64]) -> f64 {
-        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
-        dt_h.iter()
-            .enumerate()
-            .take(n)
-            .filter(|&(t, _)| t <= t_dlim && self.a_ev.get(t).copied().unwrap_or(false))
-            .map(|(_, &dt)| self.p_max_kw * dt)
-            .sum()
+    /// The firm energy the bands must be able to cover [kWh]: the most any single
+    /// obligation demands above the live SoC. Only used to size the unpriced
+    /// guarantee band — a promise is not conditional on a bid.
+    pub fn firm_required_kwh(&self) -> f64 {
+        self.obligations
+            .iter()
+            .map(|o| ((o.target_soc - self.soc_init) * self.battery_kwh).max(0.0))
+            .fold(0.0_f64, f64::max)
     }
 
     /// Generate all MILP constraints for this EV charger. Context-side canonical implementation.
@@ -146,35 +214,59 @@ impl EvMilpContext {
             cs.push(constraint!(cost <= budget_eur));
         }
         if self.mode != EvMilpMode::MustNotRun {
-            // Energy delivered by the deadline is exactly what was bought: the
-            // priced bands, or the capped `e_ev_extra` for the modes that price
-            // per slot. R-18: an equality, so a reward cannot be "banked"
-            // without moving p_ev.
+            // Energy charged is exactly what was bought: the priced bands, or the
+            // capped `e_ev_extra` for the modes that price per slot. R-18: an
+            // equality, so a reward cannot be "banked" without moving p_ev.
             let mut bought = Expression::from(0.0);
             for seg in &v.e_seg {
                 bought += *seg;
             }
             bought += v.e_ev_extra;
             cs.push(constraint!(ev_energy == bought));
+        }
 
-            // A firm deadline is a guarantee, not a bid. Zero for a soft
-            // request, which buys only what its bids justify.
-            //
-            // The floor is capped at what the window can physically deliver:
-            // masking slots the car is away for (or a deadline close enough to
-            // now) can leave a guarantee no remaining slot can reach, and the
-            // equality above has no slack, so an uncapped floor would make the
-            // whole site solve infeasible. Charge as far as the window allows;
-            // `ev_diagnostics::firm_shortfall` compares what was delivered
-            // against `e_required_kwh` and reports the gap.
-            let floor_kwh = self.e_required_kwh.min(self.reachable_energy_kwh(n, dt_h));
-            if floor_kwh > 1e-9 {
-                let mut delivered = Expression::from(0.0);
-                for seg in &v.e_seg {
-                    delivered += *seg;
-                }
-                cs.push(constraint!(delivered >= floor_kwh));
+        // ── R-93: the SoC state itself ───────────────────────────────────────
+        // Charging and the exogenous trip drop chained across the horizon, so the
+        // plan's SoC curve is solved rather than reconstructed afterwards. Holds
+        // in every mode, `MustNotRun` included: an unplugged EV still has a SoC,
+        // and a predicted trip still consumes it.
+        for (t, &dt) in dt_h.iter().enumerate().take(n) {
+            let drop_frac = self.drop_frac_at(t);
+            // `drop_unmet` is bounded by this slot's own drop (see `declare_vars`)
+            // and penalised, so it can only absorb the part of the drop the floor
+            // would have cut — mirroring the live tick's `(soc - drop).max(floor)`
+            // instead of making a deep trip infeasible.
+            cs.push(constraint!(
+                v.soc_ev[t + 1]
+                    == v.soc_ev[t] + (dt / self.battery_kwh) * v.p_ev[t] - drop_frac
+                        + v.drop_unmet[t]
+            ));
+        }
+
+        // ── Each obligation binds the SoC at its own deadline ────────────────
+        // A firm target is a guarantee, not a bid. The slack makes an unreachable
+        // one a reported gap instead of an infeasible site solve — the behaviour
+        // the old pre-solve `min(required, reachable)` clamp produced, now
+        // expressed by the model so `ev_diagnostics` can report what was actually
+        // missed, and for which session.
+        for (k, ob) in self.obligations.iter().enumerate() {
+            if self.mode == EvMilpMode::MustNotRun || ob.target_soc <= 1e-9 {
+                continue;
             }
+            // An obligation whose deadline falls outside this horizon constrains
+            // nothing here; the next cycle will see it.
+            if ob.deadline_step >= n {
+                continue;
+            }
+            // `soc_ev[t]` is the state at the *start* of slot `t`, so energy
+            // charged during the deadline slot itself lands at `deadline_step + 1`
+            // — the same slots the previous cumulative-energy sum counted
+            // (`0..=t_dead_step` inclusive). Binding at `deadline_step` instead
+            // would quietly move every existing deadline one slot earlier.
+            let step = ob.deadline_step + 1;
+            cs.push(constraint!(
+                v.soc_ev[step] + v.shortfall_soc[k] >= ob.target_soc
+            ));
         }
         for i in 0..v.delta_ev.len() {
             let t = i + 1;
@@ -256,13 +348,35 @@ impl EvMilpContext {
                 elapsed_h += dt;
             }
         }
+        // R-93: both slacks exist so a physical fact (a deep trip) or an
+        // impossible promise degrades gracefully instead of making the site solve
+        // infeasible. Neither may ever be cheaper than charging, so both are
+        // priced far above any tariff or comfort bid — and deliberately outside
+        // `w_services`, since they express model integrity, not a preference.
+        for u in v.drop_unmet.iter().take(n) {
+            obj += DROP_UNMET_PENALTY_EUR * *u;
+        }
+        for sf in &v.shortfall_soc {
+            obj += SHORTFALL_PENALTY_EUR * *sf;
+        }
         obj
     }
 
     /// Read back the EV solution. Associated function (no `self` needed).
+    ///
+    /// The per-obligation SoC shortfall is converted back into the kWh the
+    /// diagnostic reports, using the pack size cached on the vars.
     pub fn read_solution(sol: &impl Solution, v: &EvMilpVars, n: usize) -> EvSolOutput {
         EvSolOutput {
             p_ev_kw: (0..n).map(|t| sol.value(v.p_ev[t])).collect(),
+            // R-93: the plan's SoC curve, straight off the solved variables —
+            // there is no second integrator to disagree with it.
+            soc_ev: (0..=n).map(|t| sol.value(v.soc_ev[t])).collect(),
+            shortfall_kwh: v
+                .shortfall_soc
+                .iter()
+                .map(|sf| sol.value(*sf) * v.battery_kwh)
+                .collect(),
             z_ev_on: (0..n).map(|t| sol.value(v.z_ev_on[t])).collect(),
             e_ev_extra_kwh: sol.value(v.e_ev_extra),
             e_seg_kwh: v.e_seg.iter().map(|s| sol.value(*s)).sum(),
@@ -296,10 +410,10 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
                 soc_init: self.soc_init,
                 a_ev: self.a_ev.clone(),
                 soc_drops: self.soc_drops.clone(),
-                t_dead_step: self.t_dead_step,
+                obligations: self.obligations.clone(),
                 p_max_kw: self.p_max_kw,
                 p_min_kw: self.p_min_kw,
-                e_required_kwh: self.e_required_kwh,
+                battery_kwh: self.battery_kwh,
                 segments: self.segments.clone(),
                 e_extra_max_kwh: self.e_extra_max_kwh,
                 v_extra_eur_kwh: self.v_extra_eur_kwh,
@@ -718,9 +832,9 @@ mod milp_context_trait_tests {
             "the next departure still sets a target"
         );
         assert!(
-            ctx.e_required_kwh > 1.0,
+            ctx.firm_required_kwh() > 1.0,
             "core energy must survive the reachability clamp, got {}",
-            ctx.e_required_kwh
+            ctx.firm_required_kwh()
         );
     }
 
@@ -780,17 +894,18 @@ mod milp_context_trait_tests {
             "a target must be planned for"
         );
         // Departs 08:00 -> deadline is the 08:00 slot.
-        assert_eq!(ctx.t_dead_step, Some(8));
+        assert_eq!(ctx.obligations[0].deadline_step, 8);
         // soc 0.30 -> soc_target 0.80 over a 60 kWh pack = 30 kWh.
         assert!(
-            (ctx.e_required_kwh - 30.0).abs() < 1e-9,
+            (ctx.firm_required_kwh() - 30.0).abs() < 1e-9,
             "core energy must target soc_target by departure, got {}",
-            ctx.e_required_kwh
+            ctx.firm_required_kwh()
         );
         // 8 h at 7.4 kW covers 30 kWh, so the floor is the whole requirement.
         let dt_h = vec![1.0; n];
+        let deadline = ctx.obligations[0].deadline_step;
         assert!(
-            ctx.reachable_energy_kwh(n, &dt_h) >= ctx.e_required_kwh,
+            window_energy_kwh(&ctx, n, &dt_h, deadline) >= ctx.firm_required_kwh(),
             "the window must be able to hold the requirement"
         );
     }
@@ -812,18 +927,19 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
-        assert_eq!(ctx.t_dead_step, Some(2));
+        assert_eq!(ctx.obligations[0].deadline_step, 2);
         assert!(
-            (ctx.e_required_kwh - 30.0).abs() < 1e-6,
+            (ctx.firm_required_kwh() - 30.0).abs() < 1e-6,
             "the requirement is what the user asked for, got {}",
-            ctx.e_required_kwh
+            ctx.firm_required_kwh()
         );
         let dt_h = vec![1.0; n];
+        let deadline = ctx.obligations[0].deadline_step;
         assert!(
-            (ctx.reachable_energy_kwh(n, &dt_h) - 14.8).abs() < 1e-6,
+            (window_energy_kwh(&ctx, n, &dt_h, deadline) - 14.8).abs() < 1e-6,
             "only slots 0 and 1 are home before the 08:00 departure — \
              2 h at 7.4 kW = 14.8 kWh, got {}",
-            ctx.reachable_energy_kwh(n, &dt_h)
+            window_energy_kwh(&ctx, n, &dt_h, deadline)
         );
     }
 
@@ -837,9 +953,13 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
-        assert_eq!(ctx.t_dead_step, None, "no deadline may be introduced");
+        assert!(
+            ctx.obligations.is_empty(),
+            "no obligation may be introduced"
+        );
         assert_eq!(
-            ctx.e_required_kwh, 0.0,
+            ctx.firm_required_kwh(),
+            0.0,
             "no core obligation may be introduced"
         );
         // Availability is unconditional — the away window is still masked.
@@ -899,11 +1019,14 @@ mod milp_context_trait_tests {
         );
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, Some(&session));
 
-        assert_eq!(ctx.t_dead_step, Some(4), "the real session's deadline wins");
+        assert_eq!(
+            ctx.obligations[0].deadline_step, 4,
+            "the real session's deadline wins"
+        );
         assert!(
-            (ctx.e_required_kwh - 6.0).abs() < 1e-9,
+            (ctx.firm_required_kwh() - 6.0).abs() < 1e-9,
             "the real session's target wins (0.40-0.30)*60 = 6 kWh, got {}",
-            ctx.e_required_kwh
+            ctx.firm_required_kwh()
         );
         // ...but availability is still the forecast's, not the session's guess.
         assert!(
@@ -937,16 +1060,43 @@ mod milp_context_trait_tests {
         );
     }
 
+    /// What the unmasked slots before `deadline_step` can physically deliver [kWh].
+    ///
+    /// R-93 deleted the production `reachable_energy_kwh`: the solver now decides
+    /// how much of an obligation it can meet and reports the rest as shortfall
+    /// slack, so nothing outside the model needs to pre-compute this. The two tests
+    /// below still assert the *window* arithmetic they always did, so the rule
+    /// lives here, in the only place that still asks the question. That an
+    /// unreachable target degrades to a reported gap rather than an infeasible
+    /// solve is covered by
+    /// `milp_planner::tests::soc_balance::an_unreachable_obligation_reports_the_gap_instead_of_failing_the_solve`.
+    fn window_energy_kwh(ctx: &EvMilpContext, n: usize, dt_h: &[f64], deadline_step: usize) -> f64 {
+        dt_h.iter()
+            .enumerate()
+            .take(n)
+            .filter(|&(t, _)| t <= deadline_step && ctx.a_ev.get(t).copied().unwrap_or(false))
+            .map(|(_, &dt)| ctx.p_max_kw * dt)
+            .sum()
+    }
+
+    use crate::controller::milp_planner::asset_port::EvObligation;
+
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
             mode: EvMilpMode::MustRun,
             soc_init: 0.0,
             a_ev: vec![true; n],
             soc_drops: None,
-            t_dead_step: Some(n - 1),
+            obligations: vec![EvObligation {
+                deadline_step: n - 1,
+                // 10 kWh of a 60 kWh pack from empty — what this fixture used to
+                // state as `e_required_kwh: 10.0`.
+                target_soc: 10.0 / 60.0,
+                session_id: None,
+            }],
+            battery_kwh: 60.0,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_required_kwh: 10.0,
             segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
@@ -1035,7 +1185,7 @@ mod milp_context_trait_tests {
             0.0,
         );
         // A soft deadline guarantees nothing — the bands carry the intent.
-        assert_eq!(ctx.e_required_kwh, 0.0);
+        assert_eq!(ctx.firm_required_kwh(), 0.0);
         let total_kwh: f64 = ctx.segments.iter().map(|s| s.kwh).sum();
         assert!(
             total_kwh > 6.0,
@@ -1050,7 +1200,7 @@ mod milp_context_trait_tests {
             );
         }
         // A soft deadline guarantees nothing: the bids decide.
-        assert_eq!(ctx.e_required_kwh, 0.0);
+        assert_eq!(ctx.firm_required_kwh(), 0.0);
         assert_eq!(ctx.mode, EvMilpMode::MayRun);
     }
 
@@ -1202,10 +1352,10 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: vec![true; 4],
             soc_drops: None,
-            t_dead_step: None,
+            obligations: vec![],
+            battery_kwh: 60.0,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_required_kwh: 0.0,
             segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
@@ -1231,10 +1381,10 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: vec![false; 4],
             soc_drops: None,
-            t_dead_step: None,
+            obligations: vec![],
+            battery_kwh: 60.0,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_required_kwh: 0.0,
             segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
@@ -1262,10 +1412,10 @@ mod milp_context_trait_tests {
             soc_init: 0.0,
             a_ev: a_ev.clone(),
             soc_drops: None,
-            t_dead_step: None,
+            obligations: vec![],
+            battery_kwh: 60.0,
             p_max_kw: 7.2,
             p_min_kw: 0.0,
-            e_required_kwh: 0.0,
             segments: vec![],
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,

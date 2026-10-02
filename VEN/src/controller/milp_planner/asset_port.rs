@@ -88,16 +88,21 @@ pub struct EvMilpContext {
     /// cannot decide (the drop when the car returns). `None` under
     /// `usage_sim`/no usage schedule — the pre-forecast behaviour.
     pub soc_drops: Option<ExogenousSocDrops>,
-    /// Last step index that counts toward the core energy sum (None = open horizon).
-    pub t_dead_step: Option<usize>,
+    /// Every charging obligation this EV must meet inside the horizon, one per
+    /// stated or predicted departure. Empty = no obligation (open horizon):
+    /// charge what the bids justify, whenever.
+    ///
+    /// R-92: this is deliberately a list, not a scalar deadline. A household EV
+    /// has a *sequence* of departures, and a 30-48 h horizon routinely holds two.
+    pub obligations: Vec<EvObligation>,
+    /// Usable pack size [kWh]. Converts charging power into state of charge in
+    /// the SoC balance, so the model reasons in the same unit the asset and the
+    /// UI use.
+    pub battery_kwh: f64,
     /// Maximum charge power [kW].
     pub p_max_kw: f64,
     /// Semi-continuous minimum charge power [kW] (prevents trickle charging).
     pub p_min_kw: f64,
-    /// Firm requirement [kWh]: energy that MUST be delivered by `t_dead_step`,
-    /// whatever the user bid. Non-zero only for a firm (non-soft) deadline —
-    /// a guarantee, not a reward. 0.0 means "buy what the bids justify".
-    pub e_required_kwh: f64,
     /// `ev-comfort-piecewise-core`: the user's comfort curve as priced energy
     /// bands from the current SoC to full. Empty for the free/opportunistic
     /// modes, which never read the curve and price per slot instead.
@@ -137,6 +142,19 @@ pub struct EvMilpContext {
 #[derive(Debug, Clone)]
 pub struct EvMilpVars {
     pub p_ev: Vec<Variable>,
+    /// State of charge (0..1) at every step boundary, len = n + 1. R-93: the
+    /// plan's SoC curve is solved, not reconstructed afterwards. Index 0 is
+    /// pinned to the live reading.
+    pub soc_ev: Vec<Variable>,
+    /// Per-slot part of a predicted trip's SoC drop that the floor absorbs
+    /// (len = n, upper-bounded by that slot's drop, zero-width where no trip
+    /// ends). Without it a drop deeper than the pack would be infeasible instead
+    /// of floored, which is what the live tick's `apply_return_drop` does.
+    pub drop_unmet: Vec<Variable>,
+    /// Per-obligation shortfall in SoC terms (len = obligations). Lets an
+    /// unreachable target be expressed by the model and reported, instead of
+    /// pre-clamped by the caller and invisible.
+    pub shortfall_soc: Vec<Variable>,
     /// Binary on/off flag per slot (respects availability mask).
     pub z_ev_on: Vec<Variable>,
     /// `ev-comfort-piecewise-core`: one continuous variable per priced energy
@@ -151,12 +169,19 @@ pub struct EvMilpVars {
     pub delta_ev_ramp: Vec<Variable>,
     /// Semi-continuous minimum charge power [kW] — cached for cross-asset interactions.
     pub p_min_kw: f64,
+    /// Usable pack size [kWh] — cached so the readback can turn a solved SoC
+    /// shortfall back into kWh without the context (same reason `p_min_kw` is here).
+    pub battery_kwh: f64,
 }
 
 /// Per-EV MILP solution readback.
 #[derive(Debug, Clone)]
 pub struct EvSolOutput {
     pub p_ev_kw: Vec<f64>,
+    /// Solved state-of-charge curve (0..1), len = n + 1.
+    pub soc_ev: Vec<f64>,
+    /// Solved per-obligation shortfall [kWh], in obligation order.
+    pub shortfall_kwh: Vec<f64>,
     pub z_ev_on: Vec<f64>,
     pub e_ev_extra_kwh: f64,
     /// Energy bought from the priced bands [kWh] — what the comfort curve
@@ -298,6 +323,28 @@ pub struct EvEnergySegment {
     pub eur_per_kwh: f64,
 }
 
+/// One charging obligation: "this EV must hold this much energy by this step".
+///
+/// R-92/R-93: the planner used to carry a single `(t_dead_step, e_required_kwh)`
+/// pair per EV — twice over, once on `EvMilpContext` and once on `MilpInputs` —
+/// so only the next departure could ever be targeted. One list of these replaces
+/// both copies, and the solver emits one constraint per entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvObligation {
+    /// Last step index that counts toward this obligation.
+    pub deadline_step: usize,
+    /// State of charge (0..1) the vehicle MUST hold at `deadline_step`, whatever
+    /// the user bid — a guarantee, not a reward. An obligation exists only for a
+    /// firm target: a soft deadline states no obligation and lets its comfort
+    /// bids decide how far to charge.
+    pub target_soc: f64,
+    /// The `EvSession` this obligation came from, when it came from one. `None`
+    /// for an obligation the EV's own predicted schedule produced
+    /// (`ev-usage-forecast`), which has no session. Carried so a shortfall can
+    /// name which request it belongs to.
+    pub session_id: Option<uuid::Uuid>,
+}
+
 /// Exogenous, decision-independent state-of-charge changes at specific slots
 /// (`ev-usage-forecast`: the drop when the car returns from a predicted trip).
 ///
@@ -310,40 +357,6 @@ pub struct ExogenousSocDrops {
     pub drop_frac_per_slot: Vec<f64>,
     /// A drop never takes the projected SoC below this fraction.
     pub floor_frac: f64,
-}
-
-/// SoC trajectory from MILP power schedule over `n+1` steps.
-/// `dt_h[t]` is the slot duration in hours for slot `t`.
-///
-/// The single implementation of "integrate EV charge power into a SoC curve"
-/// (R-73: this used to be duplicated by a dead `EvCharger::soc_trajectory`,
-/// consolidated here — this is the copy the planner actually calls).
-///
-/// `drops` applies `ev-usage-forecast`'s exogenous SoC changes on top of the
-/// integrated charging; `None` reproduces the pre-forecast behaviour exactly.
-pub fn ev_soc_trajectory(
-    p_ev_kw: &[f64],
-    soc_init: f64,
-    battery_kwh: f64,
-    dt_h: &[f64],
-    drops: Option<&ExogenousSocDrops>,
-) -> Vec<f64> {
-    let n = p_ev_kw.len();
-    let mut traj = Vec::with_capacity(n + 1);
-    traj.push(soc_init.clamp(0.0, 1.0));
-    for t in 0..n {
-        let mut next = traj[t] + p_ev_kw[t] * dt_h[t] / battery_kwh;
-        // The drop is floored on its own, matching the live tick's
-        // `apply_return_drop`, so a long trip cannot drive the projection to 0.
-        if let Some(d) = drops {
-            let drop = d.drop_frac_per_slot.get(t).copied().unwrap_or(0.0);
-            if drop > 0.0 {
-                next = (next - drop).max(d.floor_frac);
-            }
-        }
-        traj.push(next.clamp(0.0, 1.0));
-    }
-    traj
 }
 
 /// Future state map for EV at a given SoC: `{"soc": soc}`.

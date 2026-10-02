@@ -62,8 +62,19 @@ pub(crate) fn build_plan_envelopes(
             // `ev-comfort-piecewise-core`: what the user asked for is the firm
             // requirement when there is one, else the energy their bids cover
             // (the bands' total) — there is no single "core" block any more.
-            let energy_needed_kwh = if inputs.e_ev_required_kwh > 0.0 {
-                inputs.e_ev_required_kwh
+            // R-92: an obligation states a target SoC, so the firm energy is what
+            // it needs above the live reading — the largest such demand when more
+            // than one departure is queued.
+            let firm_kwh = inputs
+                .ev_obligations
+                .iter()
+                .map(|o| {
+                    ((o.target_soc - inputs.soc_ev_init.unwrap_or(0.0)) * inputs.ev_battery_kwh)
+                        .max(0.0)
+                })
+                .fold(0.0_f64, f64::max);
+            let energy_needed_kwh = if firm_kwh > 0.0 {
+                firm_kwh
             } else {
                 inputs.ev_segments.iter().map(|s| s.kwh).sum()
             };

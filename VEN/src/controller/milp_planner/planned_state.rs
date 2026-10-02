@@ -6,16 +6,13 @@
 use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::plan::PlanTimeSlot;
 
-use super::asset_port::{
-    battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state,
-};
-use super::types::{MilpInputs, SolveOutput};
+use super::asset_port::{battery_future_state, ev_future_state_at, heater_future_state};
+use super::types::SolveOutput;
 
 pub(super) fn fill_planned_state(
     slots: &mut [PlanTimeSlot],
     n: usize,
     sol: &SolveOutput,
-    inputs: &MilpInputs,
     battery_cfg: Option<&BatteryParams>,
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
@@ -31,21 +28,15 @@ pub(super) fn fill_planned_state(
             );
         }
     }
-    // EV SoC forecast — requires soc_ev_init captured in MilpInputs, and folds in
-    // `ev-usage-forecast`'s exogenous trip drops when the EV declared a forecast.
-    if let (Some(soc_init), Some(ev_cfg)) = (inputs.soc_ev_init, ev_cfg) {
-        let traj = ev_soc_trajectory(
-            &sol.p_ev_kw,
-            soc_init,
-            ev_cfg.battery_kwh,
-            &inputs.dt_h,
-            inputs.ev_soc_drops.as_ref(),
-        );
-        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and traj[]
-        for t in 0..n {
+    // EV SoC forecast — R-93: read straight off the solved `soc_ev` series. The
+    // charging decisions, the trip drops and the floor were all resolved inside
+    // the solve, so there is no integrator here to drift from the plan.
+    if let Some(ev_cfg) = ev_cfg {
+        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and sol.soc_ev[]
+        for t in 0..n.min(sol.soc_ev.len()) {
             slots[t]
                 .planned_state_by_asset
-                .insert(ev_cfg.id.clone(), ev_future_state_at(traj[t]));
+                .insert(ev_cfg.id.clone(), ev_future_state_at(sol.soc_ev[t]));
         }
     }
     // Heater T_tank forecast — e_heat_tank_kwh[t] is stored energy above temp_min_c.

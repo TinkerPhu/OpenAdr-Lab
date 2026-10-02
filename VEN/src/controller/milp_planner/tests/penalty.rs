@@ -38,10 +38,10 @@ fn base_inputs(n: usize) -> MilpInputs {
         eff_bat_dis: None,
         a_ev: vec![false; n],
         ev_mode: MilpLoadMode::MustNotRun,
-        t_ev_dead_step: None,
+        ev_obligations: vec![],
+        ev_battery_kwh: 60.0,
         p_ev_max_kw: 0.0,
         p_ev_min_kw: 0.0,
-        e_ev_required_kwh: 0.0,
         ev_segments: vec![],
         e_ev_extra_max_kwh: 0.0,
         v_ev_extra_eur_kwh: 0.0,
@@ -93,10 +93,10 @@ fn penalty_rule_disabled_by_default_adds_no_slack_and_matches_unmodified_plan() 
     let mut inputs = base_inputs(2);
     inputs.a_ev = vec![true; 2];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(1);
+
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 12.0;
+    set_ev_firm(&mut inputs, 12.0, 1);
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
@@ -116,10 +116,10 @@ fn add_penalty_constraints_splits_load_below_threshold() {
     let mut inputs = base_inputs(2);
     inputs.a_ev = vec![true; 2];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(1);
+
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 12.0;
+    set_ev_firm(&mut inputs, 12.0, 1);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
@@ -153,10 +153,10 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
     let mut inputs = base_inputs(1);
     inputs.a_ev = vec![true; 1];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(0);
+
     inputs.p_ev_max_kw = 12.0;
     inputs.p_ev_min_kw = 0.0;
-    inputs.e_ev_required_kwh = 12.0;
+    set_ev_firm(&mut inputs, 12.0, 0);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
@@ -181,9 +181,9 @@ fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
     let mut inputs = base_inputs(1);
     inputs.a_ev = vec![true; 1];
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.t_ev_dead_step = Some(0);
+
     inputs.p_ev_max_kw = 12.0;
-    inputs.e_ev_required_kwh = 12.0;
+    set_ev_firm(&mut inputs, 12.0, 0);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let weights = p1w();

@@ -1,7 +1,7 @@
 # Technical Debts Register
 
-> **Next ID: R-98.** Use this number for the next new item filed, then increment this
-> line to R-99. (Corrected 2026-09-27: the line still said R-86 while R-87..R-97 were
+> **Next ID: R-99.** Use this number for the next new item filed, then increment this
+> line to R-100. (Corrected 2026-09-27: the line still said R-86 while R-87..R-97 were
 > already issued — exactly the drift the paragraph below warns about.) When resolving and removing an item — even the current highest ID —
 > do NOT decrement this line: it tracks every ID ever issued, not the count of rows
 > currently in the table, so a removed row never frees its number for reuse. This is
@@ -45,12 +45,11 @@ its detail. Re-rate in the item, then here.
 | 🟠 Med-High | R-97 | reliable system | Solves of 20.8 s and 63.6 s against a 60 s per-phase timeout — the mechanism behind GB-38 is one busy host away from recurring. |
 | 🟠 Med-High | R-76 | VTN stimulus | Reservation-capacity reports likely carry swapped or conceptually wrong values, silently; self-consistent tests give no signal. |
 | 🟠 Med-High | GB-42 | VTN stimulus | The **default** stale-rate policy is a stub behaving as `LastKnown`: on a 48 h horizon with ~24 h of rates, half the plan is priced at one repeated number. |
-| 🟠 Med-High | R-93 | VTN stimulus | No per-slot EV SoC variable: the planner cannot reason about SoC mid-horizon, so no post-return recharge planning. Structural blocker under R-92. |
 | 🟡 Medium | R-86 | VTN stimulus | `randomizeStart` parsed but ignored — the whole fleet responds on the same instant, which is what the field exists to prevent. |
 | 🟡 Medium | R-21 | reliable system | `cargo test` heap corruption around the HiGHS tests: undermines the instrument every other conclusion rests on. |
 | 🟡 Medium | R-96 | reliable system | The capacity-limit E2E step waits for a freshly *adopted* plan; cost two 65-minute runs on 2026-09-27 with failures that looked like product defects. |
 | 🟡 Medium | R-87 | VTN stimulus | Stricter than the 3.1 schema on `intervalPeriod.start` — the one failure a conformance lab must not have. |
-| 🟡 Medium | R-92 | VTN stimulus | Only the next departure gets a charging goal, while availability is per-slot. |
+| 🟡 Medium | R-98 | reliable system | The EV variable set is declared twice — the real solve and phase-2's dual extraction — and R-93 widened what the second must mirror. |
 | 🟡 Medium | R-94 | transparent UI | The MILP does not model the heater deadband, so the asset can refuse planned dispatch with nothing on screen saying why. |
 | 🟡 Medium | R-85 | VTN stimulus | Two measurement-report builders with diverging behaviour; resolution already decided, not yet done. |
 | 🟡 Medium | GB-46 | VTN stimulus | Missing VEN-side instrumentation (tariff source event id, effective-limit column), so compliance cannot be proven from the data without harness reconstruction. |
@@ -98,7 +97,7 @@ additive, so it is the natural filler task between larger pieces.
 | R-71 | `#[allow(...)]` without a same-line justification (this repo's own linting rule requires one), found in the assets/simulator area: `assets/mod.rs:350`, `assets/ev_milp.rs:226`, `assets/heater.rs:138`, `simulator/mod.rs:181`, `simulator/plan_context.rs:59`, `simulator/tests.rs:272`, plus `assets/asset_trait.rs:18,32,121` (justified only by a paragraph above the attribute, not on its line). The pattern works correctly right next door in `assets/heater_milp.rs:172,229` and `controller/simulator_port.rs:118,131`, which do have same-line justifications — so the convention is known, just inconsistently applied. A repo-wide grep for just `too_many_arguments` (excluding tests) finds 32 instances total, so this is a fraction of a wider pattern. Found during 2026-09-03 architectural audit. Two of the unjustified sites (`build_milp_context`'s 14 params, `tick`'s 19 params) are candidates for either a same-line justification or a params-struct refactor. | `VEN/src/assets/`, `VEN/src/simulator/` (listed above) | Trivial | Low | None — pure hygiene, mechanical |
 | R-38 | (a) `VEN/Cargo.toml` carries blueprint-era comments (commented-out `openleadr-client` etc.); (b) verify `VTN/data/db` (runtime artifact) is gitignored. | `VEN/Cargo.toml`, `VTN/data/` | Trivial | Low | None — pure hygiene |
 | R-44 | `/health` handler (`routes/system.rs::health`) deep-clones the full `VtnConnectionStatus` and active `Plan` on every poll just to read a couple of fields. Cheap today but grows with `Plan` size; consider a narrower state accessor. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/routes/system.rs` | Trivial | Low | Low — cheap today, future-proofing only |
-| R-73 | **Partially resolved (ev-usage-forecast, 2026-09-26): `EvCharger::soc_trajectory` is consolidated away — `controller/milp_planner/asset_port.rs::ev_soc_trajectory` is now the single EV SoC-trajectory integrator, and it gained the exogenous-drop input that change needed.** Still open for the other three pairs: `Battery::future_state_values`, `EvCharger::future_state_values_at`, `Heater::future_state_values` are never called — `asset_port.rs` has separate, actually-used "Mirrors X" reimplementations (`battery_future_state`, `ev_future_state_at`, `heater_future_state`). Confirmed pre-existing via `git stash` + grep. Currently `#[allow(dead_code)]`'d with a same-line note pointing here. Fix: either delete the remaining dead methods, or delete `asset_port.rs`'s duplicates and make callers use the trait methods directly (diff them before choosing — the EV one had not drifted). | `VEN/src/assets/battery.rs`, `VEN/src/assets/ev.rs`, `VEN/src/assets/heater.rs`, `VEN/src/controller/milp_planner/asset_port.rs` | Trivial | Low | Low — dead code plus a possible silent duplication/drift risk between the two implementations |
+| R-73 | **EV half fully resolved (ev-soc-state-variables, 2026-10-02): there is no EV SoC-trajectory integrator at all any more — R-93 made the plan's SoC curve a solved variable (`EvMilpVars::soc_ev`) and deleted `asset_port::ev_soc_trajectory`, so the two implementations that could drift are both gone.** (Previously partially resolved by ev-usage-forecast 2026-09-26, which consolidated `EvCharger::soc_trajectory` into that now-deleted function.) Still open for the other three pairs: `Battery::future_state_values`, `EvCharger::future_state_values_at`, `Heater::future_state_values` are never called — `asset_port.rs` has separate, actually-used "Mirrors X" reimplementations (`battery_future_state`, `ev_future_state_at`, `heater_future_state`). Confirmed pre-existing via `git stash` + grep. Currently `#[allow(dead_code)]`'d with a same-line note pointing here. Fix: either delete the remaining dead methods, or delete `asset_port.rs`'s duplicates and make callers use the trait methods directly (diff them before choosing — the EV one had not drifted). | `VEN/src/assets/battery.rs`, `VEN/src/assets/ev.rs`, `VEN/src/assets/heater.rs`, `VEN/src/controller/milp_planner/asset_port.rs` | Trivial | Low | Low — dead code plus a possible silent duplication/drift risk between the two implementations |
 | R-74 | Found while adding `shiftable_load` as a new asset type (`shiftable-load-as-asset`): `VEN/ui/src/pages/Dashboard.tsx`'s "Simulation" card dispatches per asset by hardcoded presence checks (`"ev" in sim.data.assets`, `"heater" in ...`, `"pv" in ...`) with no case — and no generic fallback — for `battery`, `base_load`, or the new `shiftable_load`. Pre-existing gap (Battery/BaseLoad were already invisible there before this change), not introduced by it; not fixed as part of that change since it's a UI-layer refactor unrelated to the backend asset-dispatch work. Contrast with `Controller.tsx`/`AssetSpecsTable.tsx`'s `deriveAssetSummaries`, which already has a generic `HARDCODED_IDS`-exclusion fallback loop covering any asset_id it doesn't special-case. Fix: give `Dashboard.tsx`'s Simulation card the same generic fallback (or iterate `sim.data.assets` by `asset_type` rather than a fixed id list). | `VEN/ui/src/pages/Dashboard.tsx` | Small | Low | Low — one dashboard card under-displays some asset kinds; the same data is already visible via Controller/Devices | 
 | R-66 | `run_all_tests.sh`'s GB-24 pre-flight capacity check (`MIN_AVAILABLE_MEM_MB=800`) is a first-pass heuristic from one live `ssh Node2 "free -m"` observation (2026-08-14: 3794 MB total, 2482–2919 MB available with the resident fleet running), not empirically calibrated against an actual degraded run's memory profile. Same class as R-27 (hard-coded tuning constants). May need tuning if it proves too strict (blocks a run that would've been fine) or too loose (still lets a degraded run through). | `run_all_tests.sh` | Trivial | Low | Low — config-flexibility/accuracy concern only, not a functional defect |
 
@@ -266,59 +265,52 @@ horizon (`plan_zones`-derived when set, else `plan_horizon_h`) and have both
 `tasks/planning/cycle.rs` and `usage_sim_plan_ahead.rs` call it, instead of the cycle task
 reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always agreed.
 
-## R-92 — `engage_charge_planning` can only ever target one departure per solve
+## R-92, R-93 — RESOLVED 2026-10-02 (`ev-soc-state-variables`)
 
-**Severity: 🟡 Medium** · Effort Medium · Risk Medium · Gain Medium — the fleet plans around
-the next trip only, so a second departure inside the same horizon gets availability but no
-urgency. Blocked in practice by R-93.
+Both are fixed, together, as their entries predicted ("Pairs naturally with R-92 — both are
+the same 'generalize the EV model' work").
 
-**Where:** `VEN/src/assets/ev_usage_forecast.rs::target_next_predicted_departure`,
-`EvMilpContext.t_dead_step`/`e_core_kwh` (`controller/milp_planner/asset_port.rs`),
-introduced by `ev-usage-forecast` (design.md Non-Goals).
+The EV MILP now carries `soc_ev[t]` over `0..=n` with a per-slot balance equality
+(`VEN/src/assets/ev_milp.rs::constraints`) that folds in charging power and
+`ev-usage-forecast`'s exogenous trip drops, built on the same shape `battery_milp.rs` already
+used for `e_bat`. A charging obligation is a bound on `soc_ev` at its own deadline, and
+`EvMilpContext`/`MilpInputs`/`EvScalars` carry a list of them (`EvObligation`) instead of one
+scalar `(deadline, required energy)` pair — so several departures in one horizon each bind
+their own target, and a recharge after a predicted return is plannable.
 
-`usage_forecast` gives the planner truthful per-slot availability for *every* trip inside the
-horizon — a 30–48 h horizon routinely contains two departures — but the charging *goal* is
-still a single scalar pair (`t_dead_step`, `e_core_kwh`), so only the next departure is
-targeted. The plan is correct (it never charges while the car is away) but not urgent about
-the second trip: a profile that leaves twice in one horizon gets no pre-charge pressure for
-the later one until a replan brings it within "next".
+The scalar pair turned out to live in **three** places, not the two these entries recorded:
+`EvMilpContext`, `MilpInputs` *and* `EvScalars`. All three now share the one `EvObligation`.
 
-**Why it is debt rather than a bug:** the scalar deadline is pre-existing — `usage_sim`'s
-`engage_charge_planning` and every real user session have the same single-deadline shape, so
-nothing regressed. It only became *visible* here, because availability is now per-slot while
-the goal is not.
+Also discharged here: `reachable_energy_kwh` and the pre-solve `min(required, reachable)` floor
+cap are gone, replaced by a penalised per-obligation shortfall slack, so the gap is the model's
+own answer and `ev_diagnostics::firm_shortfall` reports it per obligation, naming the session.
+`asset_port::ev_soc_trajectory` is deleted — the plan's SoC curve is read off the solved
+variables, so no integrator exists to drift from it, which closes the remaining EV half of R-73.
 
-**To resolve:** generalize the pair into a list of (deadline step, core energy) obligations in
-`EvScalars`/`MilpInputs` and make the EV constraint set emit one cumulative-energy constraint
-per obligation instead of one. Materially larger than this change; the availability side needs
-no work, it already handles N trips.
+Pinned by `VEN/src/controller/milp_planner/tests/soc_balance.rs`.
 
-## R-93 — the EV MILP still has no per-slot SoC variable
+## R-98 — the EV variable set is declared in two places
 
-**Severity: 🟠 Medium-High** · Effort Medium-Large · Risk Medium · Gain Medium-High — the
-structural blocker under R-92 and under `clamp_core_to_reachable_energy`: the solver cannot
-reason about SoC mid-horizon, so it cannot plan a post-return recharge at all. Matters most
-when a VTN event lands near an away window.
+**Severity: 🟡 Medium** · Effort Small-Medium · Risk Medium-High · Gain Medium — a silent
+plan/dual divergence class: the two declarations can disagree and nothing fails loudly.
 
-**Where:** `VEN/src/assets/ev_milp.rs` (constraints are total-energy),
-`controller/milp_planner/asset_port.rs::ev_soc_trajectory` (post-solve projection),
-surfaced by `ev-usage-forecast` (design.md Decision 3a, Non-Goals).
+**Where:** `VEN/src/assets/ev_milp.rs::EvMilpContext::declare_vars` (the real one) and
+`VEN/src/controller/milp_planner/solver_duals.rs::declare_fixed_ev_vars` (phase-2 dual
+extraction, which re-declares the same variables with `z_ev_on` pinned).
 
-The EV is modelled as total energy delivered before a deadline; there is no per-slot SoC
-variable and no SoC-balance constraint, so the projected SoC curve — including
-`ev-usage-forecast`'s trip drops — is reconstructed *after* the solve. The solver therefore
-cannot reason about SoC mid-horizon: it cannot plan the recharge that a predicted *return*
-makes possible, only avoid charging while the car is away.
+`declare_fixed_ev_vars` has always re-declared `p_ev`, `z_ev_on`, `e_seg` and `e_ev_extra` by
+hand, because the dual pass needs different bounds on `z_ev_on`. R-93 widened the set it has to
+mirror: `soc_ev`, `drop_unmet`, `shortfall_soc` and `battery_kwh` were added to `EvMilpVars`,
+and `constraints()` — shared by both paths — now references them, so the dual path had to grow
+the same four. Their bounds (the SoC floor capped at the live reading, each slot's drop cap,
+each obligation's shortfall cap) are now written out twice.
 
-**Why it is debt rather than a bug:** every shipped behaviour is correct with the projection
-approach; what is missing is planning capability, not correctness. The clamp in
-`clamp_core_to_reachable_energy` exists because of this shape too — with a real SoC balance
-plus slack the shortfall would be expressible in the model instead of pre-clamped.
+**Why it is debt rather than a bug:** the two copies agree today, and the full suite passes. But
+the only thing keeping them in step is that someone remembers to edit both — exactly the shape
+`one-concept-one-function` exists to prevent, and the bounds involved are no longer trivial.
 
-**To resolve:** add `soc_ev[t]` variables with a balance constraint (charge minus exogenous
-drop, floored at `min_soc`), make the deadline obligation a bound on `soc_ev[t_dead]`, and
-delete the post-solve reconstruction. Pairs naturally with R-92 — both are the same
-"generalize the EV model" work.
+**To resolve:** give `EvMilpContext` one `declare_vars_with(z_on: ZOnPolicy)` (free binary vs.
+pinned continuous) and have both callers use it, so the variable set and its bounds exist once.
 
 ## R-94 — the MILP does not model the heater's thermostat deadband
 

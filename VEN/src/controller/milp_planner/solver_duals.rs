@@ -134,14 +134,53 @@ fn declare_fixed_ev_vars(
         .iter()
         .map(|seg| vars.add(variable().min(0.0).max(seg.kwh)))
         .collect();
+    // R-93: the SoC state and its two slacks are re-declared with the same bounds
+    // `EvMilpContext::declare_vars` gives them, because `constraints()` rebuilds
+    // the balance equality and the per-obligation bounds against them here too.
+    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
+    let floor_frac = inputs
+        .ev_soc_drops
+        .as_ref()
+        .map_or(0.0, |d| d.floor_frac)
+        .min(soc_init)
+        .max(0.0);
+    let soc_ev = (0..=n)
+        .map(|i| {
+            if i == 0 {
+                vars.add(variable().min(soc_init).max(soc_init))
+            } else {
+                vars.add(variable().min(floor_frac).max(1.0))
+            }
+        })
+        .collect();
+    let drop_unmet = (0..n)
+        .map(|t| {
+            let drop = inputs
+                .ev_soc_drops
+                .as_ref()
+                .and_then(|d| d.drop_frac_per_slot.get(t).copied())
+                .unwrap_or(0.0)
+                .max(0.0);
+            vars.add(variable().min(0.0).max(drop))
+        })
+        .collect();
+    let shortfall_soc = inputs
+        .ev_obligations
+        .iter()
+        .map(|o| vars.add(variable().min(0.0).max(o.target_soc.max(0.0))))
+        .collect();
     EvMilpVars {
         p_ev,
+        soc_ev,
+        drop_unmet,
+        shortfall_soc,
         z_ev_on,
         e_seg,
         e_ev_extra,
         delta_ev: vec![],
         delta_ev_ramp: vec![],
         p_min_kw: inputs.p_ev_min_kw,
+        battery_kwh: inputs.ev_battery_kwh,
     }
 }
 

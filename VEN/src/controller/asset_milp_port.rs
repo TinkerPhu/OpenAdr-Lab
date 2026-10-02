@@ -52,11 +52,15 @@ pub struct EvScalars {
     /// `ev-usage-forecast`: exogenous SoC changes to project (see
     /// `EvMilpContext::soc_drops`). `None` when no usage forecast is configured.
     pub soc_drops: Option<crate::controller::milp_planner::asset_port::ExogenousSocDrops>,
-    pub t_dead_step: Option<usize>,
+    /// Every charging obligation inside the horizon (R-92). Same type as
+    /// `EvMilpContext::obligations` and `MilpInputs::ev_obligations` — the
+    /// concept has one definition, carried across these layers unchanged.
+    pub obligations: Vec<crate::controller::milp_planner::asset_port::EvObligation>,
     pub p_max_kw: f64,
     pub p_min_kw: f64,
-    /// Firm requirement [kWh] — a guarantee by `t_dead_step`, 0.0 for a soft request.
-    pub e_required_kwh: f64,
+    /// Usable pack size [kWh] — converts charging power into state of charge in
+    /// the planner's SoC balance.
+    pub battery_kwh: f64,
     /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
     pub segments: Vec<crate::controller::milp_planner::asset_port::EvEnergySegment>,
     pub e_extra_max_kwh: f64,

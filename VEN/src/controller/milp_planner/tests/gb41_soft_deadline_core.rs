@@ -120,10 +120,12 @@ fn inputs_for(site: &Site) -> MilpInputs {
         a_ev: vec![true; n],
         // Soft deadline: nothing guaranteed, the bids decide.
         ev_mode: MilpLoadMode::MayRun,
-        t_ev_dead_step: Some(n - 1),
+        // A soft deadline states no obligation at all: the window is already in
+        // `a_ev`, and the bids decide how far to charge inside it.
+        ev_obligations: vec![],
+        ev_battery_kwh: BATTERY_KWH,
         p_ev_max_kw: P_EV_MAX_KW,
         p_ev_min_kw: 1.4,
-        e_ev_required_kwh: 0.0,
         ev_segments: bands(DEFAULT_CORE_BID, 0.10),
         e_ev_extra_max_kwh: 0.0,
         v_ev_extra_eur_kwh: 0.0,
@@ -167,7 +169,7 @@ fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
     s.push_str(&format!("delivered     {ev_energy:.2} kWh EV\n"));
     s.push_str(&format!(
         "required      {:.2} kWh (0 = soft, the bids decide)\n",
-        inputs.e_ev_required_kwh
+        firm_kwh(inputs)
     ));
     s.push_str("bands         ");
     for b in &inputs.ev_segments {
@@ -289,7 +291,8 @@ fn a_firm_deadline_delivers_its_floor_however_low_the_bid() {
     let site = &SITES[0];
     let mut inputs = inputs_for(site);
     inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.e_ev_required_kwh = TO_TARGET_KWH;
+    let last = inputs.n - 1;
+    set_ev_firm(&mut inputs, TO_TARGET_KWH, last);
     inputs.ev_segments = bands(0.0, 0.0); // no comfort value at all
     let out = solve(&inputs, &realistic_weights(), site);
     let kwh = delivered_kwh(&inputs, &out);
@@ -312,8 +315,7 @@ fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap()
     // Only the first two slots are available, so the window holds at most
     // 2 x 0.5 h x P_EV_MAX_KW — far less than the full requirement.
     inputs.a_ev = (0..inputs.n).map(|t| t < 2).collect();
-    inputs.t_ev_dead_step = Some(1);
-    inputs.e_ev_required_kwh = TO_TARGET_KWH;
+    set_ev_firm(&mut inputs, TO_TARGET_KWH, 1);
     inputs.ev_segments = bands(0.0, 0.0); // the guarantee, not a bid, is on trial
 
     let out = solve(&inputs, &realistic_weights(), site);
@@ -490,8 +492,7 @@ fn ev_inputs_288(segments: Vec<EvEnergySegment>, required_kwh: f64) -> MilpInput
     inputs.p_exp_max_cont_kw = vec![10.0; n];
     inputs.a_ev = vec![true; n];
     inputs.ev_mode = MilpLoadMode::MustRun; // the fleet's mode
-    inputs.t_ev_dead_step = Some(n - 1);
-    inputs.e_ev_required_kwh = required_kwh;
+    set_ev_firm(&mut inputs, required_kwh, n - 1);
     inputs.ev_segments = segments;
     inputs
 }

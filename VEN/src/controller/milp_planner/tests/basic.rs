@@ -93,7 +93,7 @@ fn ev_mask_plugged_no_session_all_true() {
     );
     assert!(inp.a_ev.iter().all(|&v| v));
     assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
-    assert_eq!(inp.t_ev_dead_step, None);
+    assert!(inp.ev_obligations.is_empty());
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn ev_mask_plugged_with_session_deadline() {
         None,
     );
     // deadline = 3600s, step_s=300 → deadline_step = 12
-    let d = inp.t_ev_dead_step.unwrap();
+    let d = inp.ev_obligations[0].deadline_step;
     assert_eq!(d, 12);
     // Slots 0..=12 true, slots 13..23 false
     for t in 0..inp.n {

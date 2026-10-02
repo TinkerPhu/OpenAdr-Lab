@@ -13820,3 +13820,83 @@ never `cmd | grep ...; echo $?`, which reports grep's verdict on its own output.
 construction sites was wrong: all four non-default sites use `..PlannerParams::default()`. The
 estimate came from `grep "PlannerParams {" -A 2`, a window too narrow to reach the `..default()`
 line. Checked rather than assumed, which is why it cost nothing.
+
+---
+
+## R-93 + R-92 — the EV's state of charge becomes part of the solved plan (2026-10-02)
+
+**Why this came first.** The ask was multiple EV charging sessions per VEN: a queue instead of
+today's single `Option<EvSession>`, fed by the usage simulation as a rolling week of trips. The
+plan for that was written and validated as two openspec changes. Then the pre-work check that
+`refactoring` demands — read `TECHNICAL_DEBTS.md` before adding behaviour in an area it lists —
+turned up R-92 and R-93, and R-92's recorded fix was *verbatim* what the queue design had
+independently arrived at: "generalize the pair into a list of (deadline step, core energy)
+obligations". R-93 was already recorded as "the structural blocker under R-92", and closed with
+"Pairs naturally with R-92 — both are the same 'generalize the EV model' work."
+
+The queue design had been about to chain each session's required energy **outside** the solver,
+predicting the SoC at a future session's window start from the trip drop. That would have been a
+*third* implementation of "this EV's future SoC", beside `asset_port::ev_soc_trajectory` and
+`ev_schedule::soc_drop_frac_per_slot` — the exact duplication `one-concept-one-function` exists to
+stop, and it would have shipped with a documented limitation ("pre-charge is capped by the earlier
+target") that was really just R-93 restated as a trade-off. So the model was generalised first,
+and the queue change now adds no planner mechanism at all: it maps each session to one obligation.
+
+**What changed.** `soc_ev[t]` over `0..=n` with one balance equality per slot carrying charging
+power and the exogenous trip drop — built on the shape `battery_milp.rs` already used for `e_bat`
+rather than a second state primitive. An obligation is a bound on `soc_ev` at its own deadline, so
+several departures in one horizon each bind their own target, and the recharge a predicted
+*return* makes possible is now plannable rather than merely not-forbidden.
+`asset_port::ev_soc_trajectory` is deleted: the plan's SoC curve is read off the solved variables,
+so there is no integrator left to drift from it (this also closes R-73's remaining EV half).
+`reachable_energy_kwh` and the pre-solve `min(required, reachable)` floor cap are gone, replaced by
+a penalised per-obligation `shortfall_soc` slack — the gap is now the model's own answer, reported
+per obligation and naming the session, instead of a number something outside the model re-derived.
+
+**The scalar pair lived in three places, not two.** The debt entries named `EvMilpContext` and
+`MilpInputs`; `EvScalars` (`controller/asset_milp_port.rs`) was a third copy, found only by letting
+the compiler enumerate the construction sites after the field was removed. The estimate of how
+much duplication exists is itself worth checking — "two places" was written by someone who had
+looked at two.
+
+**Three defects found by reading rather than by the compiler or the tests.** All three would have
+compiled, and the first two would have passed a suite that did not happen to cover them:
+- `soc_ev[t]` is the state at the *start* of slot `t`, so an obligation must bind
+  `soc_ev[deadline_step + 1]` — the previous cumulative-energy sum ran `0..=t_dead_step`
+  inclusive. Binding at `deadline_step` would have quietly moved every existing deadline one slot
+  earlier.
+- Pinning `soc_ev[0]` to the live reading while lower-bounding the rest at the configured floor is
+  **infeasible** whenever a car sits below that floor (a 2 % pack against a 5 % floor) and cannot
+  charge. A nearly-empty EV would have failed the whole site solve. The floor is now capped at the
+  live reading: its job is to stop a trip draining the pack, never to invent charge.
+- The test bridge `contexts_from_inputs` hardcoded `soc_drops: None`, so every new drop test would
+  have exercised nothing and passed. Found by checking what the fixture actually forwards before
+  trusting a green run.
+
+**A drop deeper than the pack is absorbed, not rejected.** The live tick does
+`(soc - drop).max(floor)`, and `ev_schedule::daily_trip` already notes the clamp "depends on the
+SoC at return, not on the trip alone" — i.e. on what the solver is deciding, so it cannot be
+pre-computed. The model carries a bounded, penalised `drop_unmet[t] <= drop_frac[t]` slack instead,
+which reproduces the floor without making a long trip infeasible. A test pins the other side: a
+drop the pack *can* absorb must land in full, so the slack can never become a way to dodge a trip.
+
+**What did not change, and was the real risk.** Making the band-accounting equality whole-horizon
+(it was bounded by the single deadline) could have moved the totals in any of the six EV mode arms.
+It did not: all 1497 ven-app tests pass with unchanged expectations, GB-41's soft-deadline suite
+included. That was the outcome to verify rather than assume, which is why the arm-by-arm matrix was
+run before anything was called done.
+
+**Key learning — a filter that hides failure is not a cargo problem, it is a pipe problem.** The
+previous entry recorded this lesson three times over for `wsl cargo check` behind `| grep`. It
+recurred here on a different command: `bash scripts/wsl_lock.sh acquire ... | tail -5` reported
+success while the script had correctly exited 2 with "Still held after 540s", because a pipeline's
+status is the *last* command's. Two sessions came within one command of building concurrently on a
+12 GB laptop. The habit generalises past cargo: never read the exit status of anything through a
+pipe.
+
+**Also learned — a cold worktree does not need a cold build.** The first `cargo check` in a fresh
+worktree was killed by the OOM killer partway through the dependency graph (2.7 GB free). The
+dependencies are identical to the main checkout's — same `Cargo.lock` — so pointing
+`CARGO_TARGET_DIR` at `../../VEN/target` reused 5344 warm artefacts and turned a ~10-minute
+memory-hungry build into one crate. The WSL lock is what makes sharing that directory safe between
+sessions.

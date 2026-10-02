@@ -9,7 +9,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::ev_schedule;
 use super::EvCharger;
-use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, ExogenousSocDrops};
+use crate::controller::milp_planner::asset_port::{
+    EvMilpContext, EvMilpMode, EvObligation, ExogenousSocDrops,
+};
 use crate::entities::asset_params::{EvUsageMode, EvUsageSimParams};
 use crate::entities::device_session::EvSession;
 
@@ -109,7 +111,14 @@ impl EvMilpContext {
                 .min(n.saturating_sub(1))
         };
         self.mode = EvMilpMode::MustRun;
-        self.t_dead_step = Some(t_dead);
-        self.e_required_kwh = core_kwh;
+        // One obligation, from the EV's own predicted departure. No session
+        // exists behind it, so it carries no id (R-92: the list is what makes
+        // widening this to every predicted trip in the horizon a loop rather
+        // than a new mechanism).
+        self.obligations = vec![EvObligation {
+            deadline_step: t_dead,
+            target_soc: cfg.soc_target,
+            session_id: None,
+        }];
     }
 }
