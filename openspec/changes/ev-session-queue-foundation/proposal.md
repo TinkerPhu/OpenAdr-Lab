@@ -30,7 +30,8 @@ even though the planner it feeds can, after the prerequisite change, hold severa
   replaced by queue-aware accessors; all three producers, the expirer and the
   canceller move onto them.
 - `EvSession` gains an explicit **charging window start** (the instant the car
-  becomes available for this session). Today a session's window is implicitly
+  becomes available for this session), which a user may state on their request
+  (reusing the existing `earliest_start` field rather than adding an EV-specific one). Today a session's window is implicitly
   "from now until `departure_time`", which is only meaningful for the one
   session that is current. A queued session needs its own start, and the gap
   between one session's departure and the next session's start is exactly where
@@ -61,16 +62,21 @@ even though the planner it feeds can, after the prerequisite change, hold severa
 
 ### Explicitly out of scope
 
-Human-facing conflict resolution — what `POST /user-requests` does when a user
-submits a session overlapping one they already have (reject, or prompt
-"replace that one?") — is a **separate follow-up change**. It builds on this
-change's queue storage and overlap predicate and touches only the route layer
-and the UI; it changes neither storage nor the planner. Until it lands, the
-user-request producer keeps today's externally observable behaviour — a submitted
-session is accepted and displaces any session it overlaps — but it now does so
-explicitly: it asks the queue what the submission conflicts with, removes exactly
-those, then inserts. That is today's silent overwrite made visible at one site,
-and it is the single line the follow-up change replaces with a refusal.
+The *offer* to resolve a conflict — the prompt naming the clashing plan and the
+confirmation that displaces it — is a **separate follow-up change**
+(`ev-session-user-conflict-resolution`), touching only the route layer and the UI.
+
+What is **not** deferred is refusing the conflict in the first place, and letting a
+user state when the vehicle becomes available. Both have to be here: every session a
+user states would otherwise open its window at the submission instant, so two
+submissions always overlap and a user could never hold more than one session no
+matter how the queue is built. Deferring them would ship a queue only the simulated
+schedule could use.
+
+A conflicting submission is therefore refused, with the clashing sessions named.
+Nothing is displaced to make room: a standing weekly plan silently losing to a
+spontaneous one is the failure this work exists to prevent, so until the follow-up
+adds the one-click replacement a user must remove the old plan deliberately.
 
 ## Capabilities
 
