@@ -8,6 +8,7 @@ import {
   roundedTimeTicks,
   niceAxis,
   tickFormatterForStep,
+  POWER_AXIS_WIDTH_PX,
 } from "@lab/charts/axisDomain";
 
 describe("minSpanDomain", () => {
@@ -85,10 +86,16 @@ describe("formatPowerTick", () => {
     expect(formatPowerTick(0)).toBe("0 W");
   });
 
-  it("formats 1kW and above in kW with up to 2 decimals", () => {
+  it("formats 1kW and above in kW with up to 2 decimals, trailing zeros dropped", () => {
     expect(formatPowerTick(2.345)).toBe("2.35 kW");
-    expect(formatPowerTick(-4.4)).toBe("-4.40 kW");
-    expect(formatPowerTick(1)).toBe("1.00 kW");
+    expect(formatPowerTick(-4.4)).toBe("-4.4 kW");
+    expect(formatPowerTick(1)).toBe("1 kW");
+  });
+});
+
+describe("POWER_AXIS_WIDTH_PX", () => {
+  it("is the one width every power-axis chart shares", () => {
+    expect(POWER_AXIS_WIDTH_PX).toBeGreaterThan(0);
   });
 });
 

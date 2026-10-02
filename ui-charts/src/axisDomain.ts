@@ -97,13 +97,21 @@ export const MIN_TARIFF_SPAN_EUR_KWH = 0.02;
 export const MIN_POWER_SPAN_KW = 0.005;
 
 /** Format a power-axis tick/tooltip value [kW] with a fixed, readable rule instead of raw
- * float stringification: Watts (no decimals) below 1 kW, kW (≤2 decimals) at or above —
- * avoids both scientific notation (e.g. "18e-17") and long decimal strings (e.g. ".00025")
- * that plain `${v} kW` labels produced. */
+ * float stringification: Watts (no decimals) below 1 kW, kW (up to 2 decimals, trailing
+ * zeros dropped) at or above — avoids scientific notation (e.g. "18e-17"), long decimal
+ * strings (e.g. ".00025"), and noisy always-2-decimal labels (e.g. "5.00 kW") on axes whose
+ * nice-rounded ticks (see `niceAxis`) commonly land on whole or one-decimal kW values. */
 export function formatPowerTick(valueKw: number): string {
   if (Math.abs(valueKw) < 1) return `${Math.round(valueKw * 1000)} W`;
-  return `${valueKw.toFixed(2)} kW`;
+  return `${Number(valueKw.toFixed(2))} kW`;
 }
+
+/** Width [px] reserved for a power-axis ([kW]/[W], via `formatPowerTick`) Y-axis column —
+ * the one value every power-axis chart (StackedTimeSeriesChart, SiteHeadroomChart,
+ * CapacityForecastChart, AssetTimelineChart) passes as its `YAxis`/`axes[].width`, so they
+ * stay pixel-aligned and a label-width change (like trimming trailing zeros above) only
+ * needs to be re-measured once. Sized for the widest realistic label, "-10 kW". */
+export const POWER_AXIS_WIDTH_PX = 40;
 
 /** Ticks beyond this count are considered too dense to label individually (e.g. a 24h
  * window at 30-min spacing = 48 ticks) — `roundedTimeTicks` falls back to hourly spacing

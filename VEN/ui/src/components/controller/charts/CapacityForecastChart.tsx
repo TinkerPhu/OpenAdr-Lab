@@ -11,6 +11,7 @@ import {
   minSpanDomain,
   MIN_POWER_SPAN_KW,
   formatPowerTick,
+  POWER_AXIS_WIDTH_PX,
 } from "@lab/charts/axisDomain";
 import { formatPowerValue, formatEnergyKwh } from "@lab/charts/unitFormat";
 import { formatExportCapabilityValue } from "./capabilityFormat";
@@ -134,7 +135,7 @@ export function CapacityForecastChart({ curves, height }: CapacityForecastChartP
         axes={[
           {
             id: "power",
-            width: 46,
+            width: POWER_AXIS_WIDTH_PX,
             domain,
             tickFormatter: formatPowerTick,
           },

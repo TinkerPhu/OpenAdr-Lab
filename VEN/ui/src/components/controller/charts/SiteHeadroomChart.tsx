@@ -17,6 +17,7 @@ import {
   MIN_POWER_SPAN_KW,
   roundedTimeTicks,
   formatPowerTick,
+  POWER_AXIS_WIDTH_PX,
 } from "@lab/charts/axisDomain";
 import { formatSignedPowerValue, formatPowerValue } from "@lab/charts/unitFormat";
 import { formatExportCapabilityValue } from "./capabilityFormat";
@@ -228,7 +229,7 @@ export function SiteHeadroomChart({
       xAxisTickFormatter={formatTs}
       xAxisTicks={xAxisTicks}
       axes={[
-        { id: "power", width: 46, domain, tickFormatter: formatPowerTick },
+        { id: "power", width: POWER_AXIS_WIDTH_PX, domain, tickFormatter: formatPowerTick },
       ]}
       series={series}
       bands={[

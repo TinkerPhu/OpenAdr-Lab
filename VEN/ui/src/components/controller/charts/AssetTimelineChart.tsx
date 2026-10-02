@@ -8,6 +8,7 @@ import {
   MIN_POWER_SPAN_KW,
   formatPowerTick,
   roundedTimeTicks,
+  POWER_AXIS_WIDTH_PX,
 } from "@lab/charts/axisDomain";
 import {
   formatPowerValue,
@@ -218,7 +219,7 @@ export function AssetTimelineChart({
   );
 
   const axes: TimeSeriesAxisSpec[] = [
-    { id: "power", width: 46, domain: powerDomain, tickFormatter: formatPowerTick },
+    { id: "power", width: POWER_AXIS_WIDTH_PX, domain: powerDomain, tickFormatter: formatPowerTick },
     { id: "cost", orientation: "right", width: 44, unit: " €/h", domain: costDomain },
     { id: "co2", orientation: "right", width: 44, unit: " g/h", domain: co2Domain },
     ...(stateKey ? [{ id: "state", hidden: true, domain: (stateKey === "soc" ? [0, 1] : [0, 100]) as [number, number] }] : []),
