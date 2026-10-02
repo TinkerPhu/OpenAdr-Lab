@@ -1,0 +1,7 @@
+# Playwright alone, split out of requirements.txt so the 115 MB Chromium download
+# gets its own Docker layer (tests/Dockerfile). Editing any other test dependency
+# then no longer re-downloads the browser.
+#
+# requirements.txt includes this file, so the version constraint is still
+# declared exactly once.
+playwright>=1.40,<2
