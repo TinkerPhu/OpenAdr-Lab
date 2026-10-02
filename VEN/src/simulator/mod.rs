@@ -10,6 +10,7 @@ mod pv_preview;
 pub(crate) mod pv_smoothing;
 pub mod site_headroom;
 mod snapshot;
+pub mod tick_inputs;
 
 use chrono::{DateTime, Utc};
 use rand::{rngs::StdRng, SeedableRng};
@@ -25,6 +26,7 @@ use crate::entities::asset_params::AssetParams;
 use energy::EnergyCounter;
 pub use pv_smoothing::PvSmoothingState;
 pub use snapshot::{SensorInput, SensorSnapshot};
+pub use tick_inputs::TickInputs;
 
 /// Tracks the user-induced base load perturbation between ticks.
 ///
@@ -282,33 +284,34 @@ impl SimState {
     ///   remains the true last resort when neither is available.
     ///
     /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
-    #[allow(clippy::too_many_arguments)]
-    pub fn tick(
-        &mut self,
-        dt_s: f64,
-        setpoints: HashMap<String, f64>,
-        now: DateTime<Utc>,
-        pv_irradiance_override: Option<f64>,
-        pv_tau_s: f64,
-        ambient_temp_c_override: Option<f64>,
-        heater_temp_min_override: Option<f64>,
-        heater_temp_max_override: Option<f64>,
-        base_load_kw_override: Option<f64>,
-        base_load_alpha: f64,
-        ev_plugged_override: Option<bool>,
-        ev_soc_target_override: Option<f64>,
-        weather_pv_kw: Option<f64>,
-        weather_pv_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
-        heater_emergency_curtail_override: Option<bool>,
-        heater_emergency_absorb_override: Option<bool>,
-        pv_generation_limit_override: Option<f64>,
-        pv_curtailment_source: crate::entities::asset_params::PvCurtailmentSource,
-        pv_measured_kw: Option<f64>,
-        base_load_measured_kw: Option<f64>,
-        base_load_heuristic_kw: Option<f64>,
-        base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
-        ev_departure_time: Option<DateTime<Utc>>,
-    ) {
+    pub fn tick(&mut self, inputs: TickInputs) {
+        // Destructured rather than read through `inputs.` so the body below
+        // is unchanged from when these were 25 positional parameters.
+        let TickInputs {
+            dt_s,
+            now,
+            setpoints,
+            pv_irradiance_override,
+            pv_tau_s,
+            pv_generation_limit_override,
+            pv_curtailment_source,
+            pv_measured_kw,
+            weather_pv_kw,
+            weather_pv_forecast,
+            ambient_temp_c_override,
+            heater_temp_min_override,
+            heater_temp_max_override,
+            heater_emergency_curtail_override,
+            heater_emergency_absorb_override,
+            base_load_kw_override,
+            base_load_alpha,
+            base_load_measured_kw,
+            base_load_heuristic_kw,
+            base_load_heuristic,
+            ev_plugged_override,
+            ev_soc_target_override,
+            ev_departure_time,
+        } = inputs;
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
         // Behaviour B — PV perturbation overlay.

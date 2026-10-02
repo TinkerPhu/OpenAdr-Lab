@@ -8,9 +8,7 @@
 //! once `tests.rs` crossed the cap after adding the BL-40 fallback tests.
 
 use super::super::*;
-use crate::entities::asset_params::{
-    ApplianceSpikeParams, AssetParams, BaseLoadParams, PvCurtailmentSource,
-};
+use crate::entities::asset_params::{ApplianceSpikeParams, AssetParams, BaseLoadParams};
 use chrono::TimeZone;
 
 /// A single coffee-time spike (matches the values this session's earlier
@@ -44,31 +42,7 @@ fn tick_applies_appliance_noise_to_base_load_power() {
     let mut sim = base_load_state(0.3);
     let coffee_time = Utc.with_ymd_and_hms(2026, 7, 13, 8, 0, 0).unwrap();
 
-    sim.tick(
-        30.0,
-        HashMap::new(),
-        coffee_time,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs::new(30.0, coffee_time, HashMap::new()));
 
     let entry = sim
         .assets
@@ -91,31 +65,10 @@ fn tick_base_load_kw_override_lands_exactly_regardless_of_appliance_noise() {
     let mut sim = base_load_state(0.3);
     let coffee_time = Utc.with_ymd_and_hms(2026, 7, 13, 8, 0, 0).unwrap();
 
-    sim.tick(
-        30.0,
-        HashMap::new(),
-        coffee_time,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        Some(1.0), // base_load_kw_override
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        base_load_kw_override: Some(1.0),
+        ..TickInputs::new(30.0, coffee_time, HashMap::new())
+    });
 
     let entry = sim
         .assets
@@ -134,31 +87,7 @@ fn tick_at_quiet_hour_stays_close_to_static_baseline() {
     let mut sim = base_load_state(0.3);
     let quiet_time = Utc.with_ymd_and_hms(2026, 7, 13, 3, 0, 0).unwrap();
 
-    sim.tick(
-        30.0,
-        HashMap::new(),
-        quiet_time,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs::new(30.0, quiet_time, HashMap::new()));
 
     let entry = sim
         .assets
@@ -180,31 +109,10 @@ fn tick_uses_heuristic_tier_when_measurement_absent_but_heuristic_present() {
     let coffee_time = Utc.with_ymd_and_hms(2026, 7, 13, 8, 0, 0).unwrap();
     let heuristic_kw = 9.9; // deliberately far from both synthetic and 0
 
-    sim.tick(
-        30.0,
-        HashMap::new(),
-        coffee_time,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None,               // pv_measured_kw
-        None,               // base_load_measured_kw
-        Some(heuristic_kw), // base_load_heuristic_kw
-        None,               // base_load_heuristic
-        None,               // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        base_load_heuristic_kw: Some(heuristic_kw),
+        ..TickInputs::new(30.0, coffee_time, HashMap::new())
+    });
 
     let entry = sim
         .assets
@@ -224,31 +132,7 @@ fn tick_falls_back_to_synthetic_when_neither_measurement_nor_heuristic_present()
     let mut sim = base_load_state(0.3);
     let coffee_time = Utc.with_ymd_and_hms(2026, 7, 13, 8, 0, 0).unwrap();
 
-    sim.tick(
-        30.0,
-        HashMap::new(),
-        coffee_time,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs::new(30.0, coffee_time, HashMap::new()));
 
     let entry = sim
         .assets

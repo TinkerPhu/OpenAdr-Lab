@@ -86,7 +86,7 @@ mod add_remove_asset_tests {
 mod shiftable_load_removal_tests {
     use super::super::*;
     use crate::assets::{ShiftableLoadAsset, ShiftableLoadState};
-    use crate::entities::asset_params::PvCurtailmentSource;
+
     use crate::simulator::energy::EnergyCounter;
 
     fn shiftable_only(power_kw: f64, duration_min: u32) -> SimState {
@@ -116,31 +116,7 @@ mod shiftable_load_removal_tests {
     }
 
     fn run_tick(sim: &mut SimState, dt_s: f64, setpoints: HashMap<String, f64>) {
-        sim.tick(
-            dt_s,
-            setpoints,
-            Utc::now(),
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            PvCurtailmentSource::None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        sim.tick(TickInputs::new(dt_s, Utc::now(), setpoints));
     }
 
     #[test]
@@ -204,7 +180,7 @@ mod port_tests {
 /// runs of the same scenario are never bit-for-bit reproducible.
 mod clock_and_rng_tests {
     use super::super::*;
-    use crate::entities::asset_params::PvCurtailmentSource;
+
     use chrono::{Duration, TimeZone};
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -213,31 +189,7 @@ mod clock_and_rng_tests {
     }
 
     fn run_tick(sim: &mut SimState, now: DateTime<Utc>) {
-        sim.tick(
-            30.0,
-            HashMap::new(),
-            now,
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            PvCurtailmentSource::None,
-            None, // pv_measured_kw
-            None, // base_load_measured_kw
-            None, // base_load_heuristic_kw
-            None, // base_load_heuristic
-            None, // ev_departure_time
-        );
+        sim.tick(TickInputs::new(30.0, now, HashMap::new()));
     }
 
     #[test]
@@ -372,7 +324,7 @@ mod schema_snapshot_tests {
 /// `docs/architecture/forecasting_model.md`).
 mod grid_meter_tests {
     use super::super::*;
-    use crate::entities::asset_params::{AssetParams, BaseLoadParams, PvCurtailmentSource};
+    use crate::entities::asset_params::{AssetParams, BaseLoadParams};
     use chrono::TimeZone;
 
     fn at(h: u32, m: u32) -> DateTime<Utc> {
@@ -391,31 +343,7 @@ mod grid_meter_tests {
     }
 
     fn run_tick(sim: &mut SimState, now: DateTime<Utc>) {
-        sim.tick(
-            30.0,
-            HashMap::new(),
-            now,
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            PvCurtailmentSource::None,
-            None, // pv_measured_kw
-            None, // base_load_measured_kw
-            None, // base_load_heuristic_kw
-            None, // base_load_heuristic
-            None, // ev_departure_time
-        );
+        sim.tick(TickInputs::new(30.0, now, HashMap::new()));
     }
 
     #[test]
@@ -437,7 +365,7 @@ mod grid_meter_tests {
 /// hadn't reached exact zero. It must now stay visible immediately.
 mod pv_weather_blend_tests {
     use super::super::*;
-    use crate::entities::asset_params::{AssetParams, PvCurtailmentSource, PvParams};
+    use crate::entities::asset_params::{AssetParams, PvParams};
 
     fn pv_only(rated_kw: f64) -> SimState {
         SimState::from_params(
@@ -458,31 +386,11 @@ mod pv_weather_blend_tests {
         pv_irradiance_override: Option<f64>,
         weather_pv_kw: Option<f64>,
     ) {
-        sim.tick(
-            30.0,
-            HashMap::new(),
-            now,
+        sim.tick(TickInputs {
             pv_irradiance_override,
-            0.1,
-            None,
-            None,
-            None,
-            None,
-            0.1,
-            None,
-            None,
             weather_pv_kw,
-            None,
-            None,
-            None,
-            None,
-            PvCurtailmentSource::None,
-            None, // pv_measured_kw
-            None, // base_load_measured_kw
-            None, // base_load_heuristic_kw
-            None, // base_load_heuristic
-            None, // ev_departure_time
-        );
+            ..TickInputs::new(30.0, now, HashMap::new())
+        });
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! test proves peek() and tick() can never silently diverge.
 
 use super::super::*;
-use crate::entities::asset_params::{AssetParams, PvCurtailmentSource, PvParams};
+use crate::entities::asset_params::{AssetParams, PvParams};
 use chrono::TimeZone;
 
 fn pv_state(rated_kw: f64) -> SimState {
@@ -61,31 +61,10 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         .peek_pv_kw(now, dt_s, None, pv_tau_s, None, None)
         .expect("PV asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
+    sim.tick(TickInputs {
         pv_tau_s,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
 
     let pv_entry = sim
         .assets
@@ -116,31 +95,10 @@ fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
         .peek_pv_kw(now, dt_s, None, 2847.37, None, None)
         .expect("PV asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
 
     let pv_entry = sim
         .assets
@@ -250,31 +208,11 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         .peek_pv_kw(now, dt_s, None, 2847.37, Some(7.0), None)
         .expect("PV asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        Some(7.0),
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        weather_pv_kw: Some(7.0),
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
 
     let pv_entry = sim
         .assets
@@ -307,31 +245,13 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
     let now = noon();
     let dt_s = 1.0;
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        Some(0.9), // tick 1: override posted
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        Some(5.0), // a live weather value, ignored this tick (forced override wins)
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_irradiance_override: Some(0.9),
+        pv_tau_s: 2847.37,
+        // ignored this tick: the forced override wins
+        weather_pv_kw: Some(5.0),
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
     let pv_after_tick1 = sim
         .assets
         .iter()
@@ -343,31 +263,11 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         "tick 1: forced override=0.9 on a 10 kW array must yield -9.0 kW, got {pv_after_tick1}"
     );
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now + chrono::Duration::seconds(1),
-        None, // tick 2: caller already auto-cleared the one-shot override
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        Some(5.0),
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        weather_pv_kw: Some(5.0),
+        ..TickInputs::new(dt_s, now + chrono::Duration::seconds(1), HashMap::new())
+    });
     let pv_after_tick2 = sim
         .assets
         .iter()
@@ -395,31 +295,11 @@ fn tick_applies_pv_generation_limit_override_to_asset() {
     let mut sim = pv_state(10.0);
     let now = noon(); // full irradiance, would be -10.0 kW unclamped
 
-    sim.tick(
-        1.0,
-        HashMap::new(),
-        now,
-        None,
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(-3.0), // generation limit: at most 3 kW export
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        pv_generation_limit_override: Some(-3.0),
+        ..TickInputs::new(1.0, now, HashMap::new())
+    });
     let pv_power = sim
         .assets
         .iter()
@@ -438,57 +318,16 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
     let now = noon();
 
     // Tick 1: limit active.
-    sim.tick(
-        1.0,
-        HashMap::new(),
-        now,
-        None,
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(-2.0),
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        pv_generation_limit_override: Some(-2.0),
+        ..TickInputs::new(1.0, now, HashMap::new())
+    });
     // Tick 2: no active limit — PV must return to unclamped output.
-    sim.tick(
-        1.0,
-        HashMap::new(),
-        now + chrono::Duration::seconds(1),
-        None,
-        2847.37,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs {
+        pv_tau_s: 2847.37,
+        ..TickInputs::new(1.0, now + chrono::Duration::seconds(1), HashMap::new())
+    });
     let pv_power = sim
         .assets
         .iter()
