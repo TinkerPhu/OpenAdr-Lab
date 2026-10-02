@@ -111,7 +111,7 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         n_slots,
         &cum_s,
         a.now,
-        st.ev_sess.as_ref(),
+        st.ev_sessions.as_slice(), // the EV decides what it can serve
         st.heat_tgt.as_ref(),
         a.asset_params,
         a.planner,
@@ -137,7 +137,7 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         a.asset_params.to_vec(),
         a.now,
         a.trigger,
-        st.ev_sess,
+        st.ev_sessions.upcoming(a.now).cloned(), // next commitment, not just an open window
         st.heat_tgt,
         st.shift_loads,
         st.bl_override,

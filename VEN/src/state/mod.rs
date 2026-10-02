@@ -8,7 +8,9 @@ use crate::entities::capacity::{
 };
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
-use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::device_session::{
+    BaselineOverride, EvSession, EvSessionConflict, EvSessionQueue, HeaterTarget, ShiftableLoad,
+};
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
@@ -112,7 +114,10 @@ pub struct HemsState {
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
     pub site_headroom_forecast: Vec<crate::entities::plan::SiteFlexibilityForecastSlot>, // state/site_headroom_forecast.rs
     pub capacity_curves: Option<(CapacityCurve, CapacityCurve)>, // (import, export) — state/capacity_curves.rs
-    pub ev_session: Option<EvSession>,
+    /// The EV's charging sessions: ordered, non-overlapping, possibly several.
+    /// `EvSessionQueue` owns that invariant - see its doc comment for why the
+    /// three producers cannot be trusted with a bare `Vec`.
+    pub ev_sessions: EvSessionQueue,
     pub heater_target: Option<HeaterTarget>,
     pub shiftable_loads: Vec<ShiftableLoad>,
     pub baseline_override: Option<BaselineOverride>,
@@ -404,7 +409,13 @@ impl AppState {
             let session_id = req.session_id;
             match session_type {
                 Some(SessionType::Ev) => {
-                    hems.ev_session = None;
+                    // By id, like the shiftable-load branch below: cancelling one
+                    // request must not clear a session another request owns. The
+                    // single slot made that impossible to express, so this is a
+                    // correctness fix, not just a migration.
+                    if let Some(sid) = session_id {
+                        hems.ev_sessions.remove(sid);
+                    }
                 }
                 Some(SessionType::Heater) => {
                     hems.heater_target = None;
@@ -441,12 +452,36 @@ impl AppState {
         self.hems.write().await.site_envelope = Some(env);
     }
 
-    pub async fn ev_session(&self) -> Option<EvSession> {
-        self.hems.read().await.ev_session.clone()
+    /// Every queued EV charging session, in window order.
+    pub async fn ev_sessions(&self) -> EvSessionQueue {
+        self.hems.read().await.ev_sessions.clone()
     }
 
-    pub async fn set_ev_session(&self, session: Option<EvSession>) {
-        self.hems.write().await.ev_session = session;
+    /// The session whose charging window contains `now`, if any.
+    ///
+    /// This is what callers asking "is a session active" want. Not "is the queue
+    /// non-empty": under the rolling simulated schedule the queue is almost never
+    /// empty, and conflating the two would pause opportunistic charging forever.
+    pub async fn current_ev_session(&self, now: DateTime<Utc>) -> Option<EvSession> {
+        self.hems.read().await.ev_sessions.current(now).cloned()
+    }
+
+    /// Queue a session, or report every queued session it overlaps.
+    ///
+    /// There is deliberately no `set_ev_sessions`: the checked insert is the only
+    /// way in, so no producer can write an overlapping queue even by accident.
+    pub async fn insert_ev_session(&self, session: EvSession) -> Result<(), EvSessionConflict> {
+        self.hems.write().await.ev_sessions.insert(session)
+    }
+
+    /// Remove one session by id, returning it when it was queued.
+    pub async fn remove_ev_session(&self, id: uuid::Uuid) -> Option<EvSession> {
+        self.hems.write().await.ev_sessions.remove(id)
+    }
+
+    /// Drop every session whose departure has passed; returns how many went.
+    pub async fn expire_ev_sessions(&self, now: DateTime<Utc>) -> usize {
+        self.hems.write().await.ev_sessions.expire(now)
     }
 
     pub async fn heater_target(&self) -> Option<HeaterTarget> {
@@ -616,34 +651,114 @@ mod tests {
         }
     }
 
+    /// An EV session for `[from, to)` hours from now, owned by `id`.
+    fn ev_sess(id: Uuid, from: i64, to: i64) -> crate::entities::device_session::EvSession {
+        let now = Utc::now();
+        crate::entities::device_session::EvSession {
+            mode: Default::default(),
+            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
+            id,
+            target_soc: 0.8,
+            window_start: now + Duration::hours(from),
+            departure_time: now + Duration::hours(to),
+            soft_deadline: false,
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     #[tokio::test]
-    async fn cancel_request_ev_clears_session() {
-        use crate::entities::device_session::EvSession;
+    async fn cancel_request_ev_removes_only_that_requests_session() {
+        // The correctness fix the single slot made impossible: three queued
+        // sessions, cancel the middle one's request, the other two stay.
         let state = AppState::new();
-        let session_id = Uuid::new_v4();
-        let req = make_request(Some(SessionType::Ev), Some(session_id));
+        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        for (sid, from, to) in [(a, 0, 2), (b, 3, 5), (c, 6, 8)] {
+            state
+                .insert_ev_session(ev_sess(sid, from, to))
+                .await
+                .expect("non-overlapping windows must all queue");
+        }
+        let req = make_request(Some(SessionType::Ev), Some(b));
         let req_id = req.id;
         state.upsert_request(req).await;
-        state
-            .set_ev_session(Some(EvSession {
-                mode: Default::default(),
-                origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-                id: session_id,
-                target_soc: 0.8,
-                departure_time: Utc::now() + chrono::Duration::hours(2),
-                soft_deadline: false,
-                budget_eur: None,
-                comfort_rates: vec![],
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-            .await;
 
-        let found = state.cancel_request(req_id).await;
-        assert!(found, "cancel should return true");
-        assert!(state.ev_session().await.is_none(), "ev_session cleared");
+        assert!(state.cancel_request(req_id).await, "cancel returns true");
+
+        let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        assert_eq!(left, vec![a, c], "only the cancelled request's session goes");
         let requests = state.active_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn insert_ev_session_refuses_an_overlap_and_keeps_the_queue() {
+        let state = AppState::new();
+        let first = Uuid::new_v4();
+        state.insert_ev_session(ev_sess(first, 0, 4)).await.unwrap();
+
+        let err = state
+            .insert_ev_session(ev_sess(Uuid::new_v4(), 2, 6))
+            .await
+            .expect_err("an overlapping window must be refused");
+        assert_eq!(err.conflicts, vec![first]);
+        assert_eq!(state.ev_sessions().await.len(), 1, "nothing was added");
+    }
+
+    #[tokio::test]
+    async fn current_ev_session_is_window_based_not_queue_emptiness() {
+        let state = AppState::new();
+        let now = Utc::now();
+        let live = Uuid::new_v4();
+        state.insert_ev_session(ev_sess(live, -1, 1)).await.unwrap();
+        state
+            .insert_ev_session(ev_sess(Uuid::new_v4(), 5, 7))
+            .await
+            .unwrap();
+
+        assert_eq!(state.current_ev_session(now).await.map(|s| s.id), Some(live));
+        // Two sessions queued, yet nothing is current in the gap between them -
+        // which is what keeps opportunistic charging from pausing forever.
+        assert!(
+            state
+                .current_ev_session(now + Duration::hours(3))
+                .await
+                .is_none(),
+            "the gap between sessions has no current session"
+        );
+    }
+
+    #[tokio::test]
+    async fn expire_ev_sessions_drops_several_passed_sessions() {
+        let state = AppState::new();
+        let live = Uuid::new_v4();
+        for (sid, from, to) in [
+            (Uuid::new_v4(), -6, -4),
+            (Uuid::new_v4(), -3, -1),
+            (live, 2, 4),
+        ] {
+            state.insert_ev_session(ev_sess(sid, from, to)).await.unwrap();
+        }
+
+        assert_eq!(state.expire_ev_sessions(Utc::now()).await, 2);
+        let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        assert_eq!(left, vec![live]);
+    }
+
+    #[tokio::test]
+    async fn remove_ev_session_returns_the_session_it_removed() {
+        let state = AppState::new();
+        let id = Uuid::new_v4();
+        state.insert_ev_session(ev_sess(id, 0, 2)).await.unwrap();
+
+        assert_eq!(state.remove_ev_session(id).await.map(|s| s.id), Some(id));
+        assert!(state.ev_sessions().await.is_empty());
+        assert!(
+            state.remove_ev_session(id).await.is_none(),
+            "removing twice is not an error"
+        );
     }
 
     #[tokio::test]
