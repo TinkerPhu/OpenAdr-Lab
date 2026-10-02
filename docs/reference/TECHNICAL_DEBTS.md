@@ -467,6 +467,36 @@ So ~5x for a car that is out, and **the SoC drop size is irrelevant** (20 %, 65 
 together) — the cost is the away window itself, not the energy the trip needs. That kills the
 "large drop means a large charge to place" reading.
 
+**Re-measured after R-93 (2026-10-02), same bench, same machine.** Making the EV's SoC a solved
+variable did not cost solve time — it reduced it, and the away-window penalty this entry was opened
+to explain is largely gone:
+
+| variant | before (min) | after R-93 (min) | status after |
+|---|---|---|---|
+| no EV session | 0.16 s | **0.05 s** | Optimal |
+| firm EV session | 0.26 s | **0.11 s** | GapLimit |
+| forecast, car **home** | 0.19 s | **0.18 s** | GapLimit |
+| forecast, car **away** 20 % | 0.90 s | **0.74 s** | Optimal |
+| forecast, car **away** 65 % | ~0.90 s | **0.15 s** | GapLimit |
+| forecast, car **away** 90 % | ~0.94 s | **0.14 s** | GapLimit |
+| forecast, just returned | 1.02 s | **0.20 s** | GapLimit |
+
+These are 5-repeat minima, the estimator this entry already argued for, and "noise only ever adds
+time" makes a *lower* minimum the trustworthy direction — so the drop is real rather than a quiet
+laptop.
+
+**One caveat, stated rather than buried:** the "after" column reports `GapLimit` on five of seven
+variants, and the earlier table did not record status at all, so part of the speed-up may be the
+solver reaching its 2 % `mip_gap_target` sooner on the new formulation rather than doing less work
+to the same quality. A fair like-for-like needs the gap sweep
+(`bench_mip_gap_quality_sweep`) re-run against the SoC-variable model; until then read the table as
+"no regression, probably a real improvement", not as a certified 5x.
+
+Why it would plausibly be faster: the obligation is now a bound on one `soc_ev` variable instead of
+a cumulative-energy sum over a deadline-masked slot range plus a floor that had to be pre-capped at
+a reachability estimate, and the penalised shortfall slack removes a tight equality that sat next to
+infeasibility. Fewer vacuous rows per away slot, and a relaxation the solver can bound earlier.
+
 **Attempt 1 — tighten the away slots — is not demonstrated.** Away slots declare `p_ev` over the
 full `[0, p_max]` range and force it to zero only through `p_ev[t] <= 0 * z_ev_on[t]`, and their
 `z_ev_on` is a *binary* fixed at 0. Bounding that power to zero directly, declaring those `z`
