@@ -12,12 +12,11 @@ Branch: `050-ev-session-user-conflict-resolution`. Prerequisite:
 - [ ] 1.1 Write failing unit tests in `VEN/src/controller/user_request.rs` for the new `RequestError` variants — a conflict carrying the clashing sessions, and an empty-window error when `earliest_start` is at or after the deadline; confirm they fail
 - [ ] 1.2 Add those `RequestError` variants, carrying the clashing sessions as typed fields (id, window, target) per `docs/guidelines/ERROR_HANDLING.md` and design Decision 2, with a terse one-line `Display`; verify 1.1 passes and `cargo clippy --all-targets --all-features -- -D warnings` is clean
 - [ ] 1.3 Add `replace_session_ids: Option<Vec<Uuid>>` to `CreateUserRequestParams` and verify it deserialises as absent on every existing request body (a test over today's EV, heater and shiftable-load payloads)
-- [ ] 1.4 Write failing tests that `services::user_request::create_ev` maps `earliest_start` to the session's `window_start` and defaults to `now` when absent (design Decision 4), then implement and verify
+
 
 ## 2. The route: refuse, and replace on instruction
 
-- [ ] 2.1 Write failing route tests: an overlapping EV submission with no replace instruction is refused, queues nothing, and leaves the existing session untouched; verify they fail
-- [ ] 2.2 Replace the foundation change's explicit remove-then-insert in `routes/hems/sessions.rs` with the refusal, surfacing the foundation's `insert` conflict result and resolving its ids to full session detail inside the same queue read (design Decision 2); verify 2.1 passes and no displacing path remains
+- [ ] 2.2 Enrich the foundation's refusal: resolve its conflicting ids to full session detail (window, target) inside the same queue read, so the prompt can name the clashing plan without a second, independently-derived account of it (design Decision 2)
 - [ ] 2.3 Write failing tests for the replace path: naming exactly the conflict set succeeds; naming a subset is refused; naming a non-conflicting queued session is refused; naming an id no longer queued is refused — and in every refusal nothing is removed (design Decision 1)
 - [ ] 2.4 Implement replace-then-insert inside one `HemsState` write critical section with the checked `insert` still doing the enforcement, so a failing insert commits no removal (design Decision 3); verify 2.3 passes
 - [ ] 2.5 Write a failing test that a successful replacement triggers a replan (`PlanTrigger::UserRequest`) exactly once, then verify it passes
@@ -29,7 +28,6 @@ Branch: `050-ev-session-user-conflict-resolution`. Prerequisite:
 - [ ] 3.2 Write a failing UI test that a refused submission renders a prompt naming the clashing plan and its departure, then implement it; verify `cd VEN/ui && npm test` passes
 - [ ] 3.3 Write failing UI tests for the two outcomes — declining leaves the queue untouched and keeps the draft amendable; confirming resubmits with exactly the named ids and the new session appears — then implement and verify
 - [ ] 3.4 Verify the prompt lists all clashing plans when a submission conflicts with more than one, and confirming replaces all of them
-- [ ] 3.5 Add the availability-time ("vehicle available from") input to the EV request form, submitting it as `earliest_start`, and verify a UI test covers stated and unstated cases
 - [ ] 3.6 Verify `npx eslint` reports zero errors in `VEN/ui`
 
 ## 4. Use-case coverage

@@ -2,33 +2,15 @@
 
 ## Purpose
 
-When a user submits an EV charging session that overlaps one they already have
-queued, the conflict is surfaced as a decision rather than resolved silently: the
-submission is refused, the clashing plans are named, and only an explicit
-confirmation removes them.
+Turns the refusal `ev-session-queue-foundation` already returns into a decision the
+user can act on in one step: the clashing plans are named back to them, and a single
+confirmation displaces exactly those and queues the new session.
+
+Refusing a conflicting submission, and stating a session's own availability window,
+both belong to the foundation change - without them a user cannot hold two sessions
+at all. What is added here is the offer.
 
 ## ADDED Requirements
-
-### Requirement: A conflicting user submission is refused, not applied
-
-Where a submitted EV charging session's window overlaps the window of a session
-already queued, the system SHALL refuse the submission, SHALL create no new
-session, and SHALL leave every existing session unchanged.
-
-#### Scenario: Overlapping submission changes nothing
-
-- **WHEN** a user submits an EV session whose window overlaps an existing queued session, with no replace instruction
-- **THEN** the submission is refused, no new session is queued, and the existing session is unchanged
-
-#### Scenario: A non-overlapping submission is accepted as before
-
-- **WHEN** a user submits an EV session whose window overlaps nothing queued
-- **THEN** it is queued and no conflict is reported
-
-#### Scenario: A touching submission is accepted
-
-- **WHEN** a user submits an EV session whose window starts exactly at an existing session's departure
-- **THEN** it is queued and no conflict is reported
 
 ### Requirement: The refusal names what it conflicts with
 
@@ -108,24 +90,3 @@ leave the queue untouched if the user declines.
 
 - **WHEN** a submission clashes with two queued plans
 - **THEN** both are named in the prompt and confirming replaces both
-
-### Requirement: A user states when the vehicle becomes available
-
-The EV request surface SHALL let the user state when the vehicle becomes available
-for the requested session, which is that session's charging-window start. Where the
-user does not state it, the window SHALL open at the moment of submission.
-
-#### Scenario: A stated availability time becomes the window start
-
-- **WHEN** a user submits an EV session stating the vehicle is available from a future instant
-- **THEN** the queued session's charging window opens at that instant
-
-#### Scenario: An unstated availability time means now
-
-- **WHEN** a user submits an EV session without stating an availability time
-- **THEN** the queued session's charging window opens at the submission instant
-
-#### Scenario: Stating availability after the deadline is refused
-
-- **WHEN** a user submits an EV session whose stated availability time is at or after its departure
-- **THEN** the submission is refused as an empty charging window and nothing is queued

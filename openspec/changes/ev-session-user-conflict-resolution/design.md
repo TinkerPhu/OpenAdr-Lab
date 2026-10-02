@@ -4,8 +4,10 @@
 
 See `proposal.md` — Why. This change is the second half of a pair:
 `ev-session-queue-foundation` builds the queue, its single overlap authority
-(`EvSessionQueue::conflicts` / `insert`) and its conflict type
-(`EvSessionConflict`, carrying the conflicting session ids). It must land first.
+(`EvSessionQueue::conflicts` / `insert`), its conflict type (`EvSessionConflict`),
+**the refusal itself**, and the `earliest_start` → `window_start` mapping that lets a
+user hold more than one session. It must land first. What remains here is the offer:
+naming the clash back to the user and acting on one confirmation.
 Nothing here re-decides what an overlap is, nor re-derives which sessions clash —
 both are read from the foundation's `insert` result.
 
@@ -99,19 +101,12 @@ and the insertion.
 opens a window in which the user's older plan is gone and the new one is not yet
 queued, and a failing insert would leave them with neither.
 
-### Decision 4 — `earliest_start` is the EV window start; no new field
+### Decision 4 — moved to `ev-session-queue-foundation` (its Decision 10)
 
-`CreateUserRequestParams` already carries `earliest_start` for shiftable loads —
-"the earliest this may begin" is the same concept the EV needs for its charging
-window start. Reusing it keeps one request vocabulary; adding
-`ev_window_start` beside it would be a second name for one concept, the shape
-`one-concept-one-function` forbids. `services::user_request::create_ev` maps it to
-the session's `window_start`, defaulting to `now` when absent (spec: "An unstated
-availability time means now").
-
-An `earliest_start` at or after the request's deadline is refused as an empty
-window — a distinct `RequestError`, since it is a malformed request rather than a
-clash.
+The `earliest_start` → `window_start` mapping belongs to the foundation change:
+without it every stated session opens at the submission instant, so any two overlap
+and the refusal makes a second session impossible. Deferring it here would have left
+a queue only the simulated schedule could use.
 
 ### Decision 5 — The UI prompts; it does not pre-check
 

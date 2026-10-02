@@ -148,13 +148,13 @@ queue is what lets one `insert` serve all three:
   VTN session could block the user from booking their own car. The code is
   preserved and uncalled pending a decision on whether such a command belongs in
   the planner as a constraint instead.
-- *user request* — in this change, preserve today's externally observable
-  behaviour explicitly: ask `conflicts`, remove exactly those sessions, then
-  `insert`. This is the silent overwrite that exists today, now concentrated at one
-  site and visible in one place. It is also precisely the call site the follow-up
-  change (`ev-session-user-conflict-resolution`) replaces with a refusal plus a
-  named conflict, which is why this change leaves it behaving as it does rather
-  than half-building the refusal here.
+- *user request* — **refuse**, surfacing `EvSessionConflict` with the clashing ids.
+  Today's behaviour (last writer wins) is not preserved, deliberately: it is the
+  data loss this work exists to prevent, and preserving it until the follow-up
+  lands would mean knowingly shipping the failure case. The cost is accepted and
+  bounded — until the follow-up adds the prompt, a user whose submission clashes
+  gets a named error and must remove the old plan themselves. Friction beats a plan
+  disappearing unnoticed.
 
 Origin precedence (`EvSessionOrigin`) therefore stays in the producers, where it
 already lives.
@@ -298,6 +298,26 @@ the car leaves) is fed from `current_ev_session(now)`, or the head of the queue
 when none is current. It stays a single instant: the tick only needs the next
 departure, and `is_away_at` already ORs the session departure with the trip
 schedule.
+
+### Decision 10 — `earliest_start` is the user's window start; no new field
+
+`CreateUserRequestParams` already carries `earliest_start` for shiftable loads —
+"the earliest this may begin" is exactly what an EV session's window start is.
+Reusing it keeps one request vocabulary; a second field beside it would be a second
+name for one concept.
+
+`services::user_request::create_ev` maps it to `window_start`, defaulting to `now`
+when absent — which is both today's implicit semantics and the only sensible reading
+of "available from unspecified".
+
+An `earliest_start` at or after the request's deadline is refused as an empty
+window: a distinct error from a clash, because it is a malformed request rather than
+a collision with something else.
+
+*Why this is here rather than in the follow-up change:* without it every stated
+session opens at the submission instant, so any two of them overlap and the refusal
+above would make a second session impossible. The queue would then be usable only
+by the simulated schedule — which is not the capability being asked for.
 
 ## Risks / Trade-offs
 

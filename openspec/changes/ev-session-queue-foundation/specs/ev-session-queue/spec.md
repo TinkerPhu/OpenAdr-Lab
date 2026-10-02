@@ -87,6 +87,55 @@ the next one's window start — SHALL NOT be treated as overlapping.
 - **WHEN** a session whose window precedes every existing session is inserted
 - **THEN** it is placed at the head of the queue and ordering by window start still holds
 
+### Requirement: A user states when the vehicle becomes available
+
+The EV request surface SHALL let the user state when the vehicle becomes available
+for the requested session, which is that session's charging-window start. Where the
+user does not state it, the window SHALL open at the moment of submission.
+
+#### Scenario: A stated availability time becomes the window start
+
+- **WHEN** a user submits an EV session stating the vehicle is available from a future instant
+- **THEN** the queued session's charging window opens at that instant
+
+#### Scenario: An unstated availability time means now
+
+- **WHEN** a user submits an EV session without stating an availability time
+- **THEN** the queued session's charging window opens at the submission instant
+
+#### Scenario: Stating availability after the deadline is refused
+
+- **WHEN** a user submits an EV session whose stated availability time is at or after its departure
+- **THEN** the submission is refused as an empty charging window and nothing is queued
+
+### Requirement: A conflicting user submission is refused, and changes nothing
+
+Where a submitted session's window overlaps one already queued, the submission SHALL
+be refused, no session SHALL be created, and every existing session SHALL be left
+unchanged. The refusal SHALL identify each session it overlaps, so that a caller can
+describe the clash without inspecting the queue separately.
+
+Nothing SHALL be removed to make room for a submission. Displacing a plan the user
+previously committed to, without asking, is the failure this queue exists to prevent
+- a standing weekly plan silently losing to a spontaneous one. Offering the
+replacement instead is `ev-session-user-conflict-resolution`'s job; refusing is this
+change's.
+
+#### Scenario: An overlapping submission leaves the queue untouched
+
+- **WHEN** a user submits a session whose window overlaps an existing queued session
+- **THEN** the submission is refused, nothing is queued, and the existing session is unchanged
+
+#### Scenario: The refusal names every clashing session
+
+- **WHEN** a submission overlaps two queued sessions
+- **THEN** the refusal identifies both
+
+#### Scenario: Non-overlapping submissions are both kept
+
+- **WHEN** a user submits a second session whose window does not overlap the first
+- **THEN** both are queued, which is what lets a user hold several sessions at once
+
 ### Requirement: A stated session outranks a simulated one
 
 A session the user stated SHALL take precedence over one the simulated usage
