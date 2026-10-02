@@ -234,11 +234,6 @@ impl Heater {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        // Off between plan slots; thermostat emergency and plan allocations turn it on.
-        0.0
-    }
-
     pub fn state_values(&self, state: &HeaterState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("temp_c".into(), state.temperature_c);
@@ -315,18 +310,13 @@ impl Heater {
         }
     }
 
-    // control_schema() moved to heater_control_schema.rs (Spec A Phase 2a,
-    // file-size split) — still `impl Heater`, just a separate block/file.
+    // The control schema lives in heater_control_schema.rs (Spec A Phase 2a,
+    // file-size split) as a free function; `impl Asset for Heater`'s
+    // `control_schema` below delegates to it.
 
     pub fn reset(&self, state: &mut HeaterState, values: HashMap<String, f64>) {
         if let Some(&t) = values.get("temp_c") {
             state.temperature_c = t;
-        }
-    }
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        if let Some(&v) = values.get("max_kw") {
-            self.max_kw = v.max(0.0);
         }
     }
 
@@ -363,29 +353,6 @@ impl Heater {
             samples,
             interpolation: Interpolation::Linear,
         }
-    }
-
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        vec![
-            crate::entities::asset::ComfortRate {
-                fill: 0.0,
-                max_marginal_price: 0.30,
-                max_marginal_co2: 0.0,
-            },
-            crate::entities::asset::ComfortRate {
-                fill: 1.0,
-                max_marginal_price: 0.10,
-                max_marginal_co2: 0.0,
-            },
-        ]
-    }
-
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        crate::entities::asset::CompletionPolicy::Continue
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Some(0.10)
     }
 
     /// Constant per-step thermal demand forecast [kW].
@@ -428,27 +395,41 @@ impl Asset for Heater {
     }
 
     fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
+        // Off between plan slots; thermostat emergency and plan allocations turn it on.
+        0.0
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
+        super::heater_control_schema::control_schema()
     }
 
     fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
+        if let Some(&v) = values.get("max_kw") {
+            self.max_kw = v.max(0.0);
+        }
     }
 
     fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
+        vec![
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.30,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.10,
+                max_marginal_co2: 0.0,
+            },
+        ]
     }
 
     fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
+        crate::entities::asset::CompletionPolicy::Continue
     }
 
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        Some(0.10)
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {

@@ -204,6 +204,7 @@ mod tests {
         use crate::assets::base_load::BaseLoad;
         use crate::assets::ev::EvCharger;
         use crate::assets::heater::Heater;
+        use crate::assets::Asset;
         use crate::entities::asset_params::{BaseLoadParams, EvParams, HeaterParams};
 
         let curves: Vec<(&str, Vec<ComfortRate>)> = vec![

@@ -202,10 +202,6 @@ impl EvCharger {
         }
     }
 
-    pub fn default_setpoint(&self) -> f64 {
-        self.default_charge_kw
-    }
-
     pub fn state_values(&self, state: &EvState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("soc".into(), state.soc);
@@ -231,40 +227,9 @@ impl EvCharger {
         HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
     }
 
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![
-            ControlDescriptor {
-                key: "ev_plugged".into(),
-                label: "Plugged In".into(),
-                kind: ControlKind::Switch,
-                min: None,
-                max: None,
-                unit: "".into(),
-                display_scale: None,
-                nullable: false,
-            },
-            ControlDescriptor {
-                key: "ev_soc_target".into(),
-                label: "Charge Target".into(),
-                kind: ControlKind::Slider,
-                min: Some(0.1),
-                max: Some(1.0),
-                unit: "%".into(),
-                display_scale: Some(100.0),
-                nullable: false,
-            },
-        ]
-    }
-
     pub fn reset(&self, state: &mut EvState, values: HashMap<String, f64>) {
         if let Some(&soc) = values.get("soc") {
             state.soc = soc.clamp(0.0, 1.0);
-        }
-    }
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        if let Some(&v) = values.get("max_charge_kw") {
-            self.max_charge_kw = v.max(0.0);
         }
     }
 
@@ -281,36 +246,6 @@ impl EvCharger {
             samples: vec![(now, power), (now + timespan, power)],
             interpolation: Interpolation::Step,
         }
-    }
-
-    /// The bid a session carries when the user expressed none. Re-drawn for
-    /// `ev-comfort-piecewise-core`: the curve is read **marginally** now, so the
-    /// old 0.35 → 0.05 ramp averaged ~0.20 €/kWh and bought almost nothing once
-    /// the 0.22 €/kWh controllable-import malus was added to the tariff. 0.45
-    /// clears a cheap slot (0.06 + 0.22) and a mid one (0.25 + 0.22), declining
-    /// to 0.30 because the last kWh is worth less than the first. Charging at
-    /// any price is a firm deadline's job, not a bid's.
-    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        vec![
-            crate::entities::asset::ComfortRate {
-                fill: 0.0,
-                max_marginal_price: 0.45,
-                max_marginal_co2: 0.0,
-            },
-            crate::entities::asset::ComfortRate {
-                fill: 1.0,
-                max_marginal_price: 0.30,
-                max_marginal_co2: 0.0,
-            },
-        ]
-    }
-
-    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        crate::entities::asset::CompletionPolicy::Stop
-    }
-
-    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        None
     }
 
     pub fn resolve_request_target(
@@ -363,27 +298,68 @@ impl Asset for EvCharger {
     }
 
     fn default_setpoint(&self) -> f64 {
-        Self::default_setpoint(self)
+        self.default_charge_kw
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {
-        Self::control_schema(self)
+        vec![
+            ControlDescriptor {
+                key: "ev_plugged".into(),
+                label: "Plugged In".into(),
+                kind: ControlKind::Switch,
+                min: None,
+                max: None,
+                unit: "".into(),
+                display_scale: None,
+                nullable: false,
+            },
+            ControlDescriptor {
+                key: "ev_soc_target".into(),
+                label: "Charge Target".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.1),
+                max: Some(1.0),
+                unit: "%".into(),
+                display_scale: Some(100.0),
+                nullable: false,
+            },
+        ]
     }
 
     fn update_config(&mut self, values: HashMap<String, f64>) {
-        Self::update_config(self, values)
+        if let Some(&v) = values.get("max_charge_kw") {
+            self.max_charge_kw = v.max(0.0);
+        }
     }
 
+    /// The bid a session carries when the user expressed none. Re-drawn for
+    /// `ev-comfort-piecewise-core`: the curve is read **marginally** now, so the
+    /// old 0.35 → 0.05 ramp averaged ~0.20 €/kWh and bought almost nothing once
+    /// the 0.22 €/kWh controllable-import malus was added to the tariff. 0.45
+    /// clears a cheap slot (0.06 + 0.22) and a mid one (0.25 + 0.22), declining
+    /// to 0.30 because the last kWh is worth less than the first. Charging at
+    /// any price is a firm deadline's job, not a bid's.
     fn default_comfort_rates(&self) -> Vec<ComfortRate> {
-        Self::default_comfort_rates(self)
+        vec![
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.45,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.30,
+                max_marginal_co2: 0.0,
+            },
+        ]
     }
 
     fn default_completion_policy(&self) -> CompletionPolicy {
-        Self::default_completion_policy(self)
+        crate::entities::asset::CompletionPolicy::Stop
     }
 
     fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        Self::default_post_deadline_comfort_bid(self)
+        None
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
