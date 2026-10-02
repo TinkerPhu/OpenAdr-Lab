@@ -9,15 +9,23 @@
 // carried as production imports behind `#[allow(unused_imports)]`: in a test
 // build the children use them, in a production build they do not exist, and
 // neither case needs an allow.
+use chrono::{DateTime, Utc};
+use tracing::warn;
+
+use crate::entities::asset::PlanTrigger;
+use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+use crate::entities::plan::Plan;
+
+/// The test submodules under tests/ reach their fixtures through
+/// `use super::*`, so this module is their import surface. These three are
+/// the only names they need that production code here does not already
+/// import; gated on `cfg(test)` rather than carried behind
+/// `#[allow(unused_imports)]`, so an entry that stops being used becomes a
+/// warning instead of staying invisible.
 #[cfg(test)]
 mod test_prelude {
-    pub use chrono::{DateTime, Duration, Utc};
+    pub use chrono::Duration;
     pub use good_lp::{constraint, Solution, SolverModel};
-    pub use tracing::warn;
-
-    pub use crate::entities::asset::PlanTrigger;
-    pub use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
-    pub use crate::entities::plan::Plan;
 }
 #[cfg(test)]
 use test_prelude::*;
