@@ -690,3 +690,56 @@ phase-2 gap in 15 s when every other class now can**, and whether ven-5 and ven-
 60 s *phase 1* budget is the same cause. The lever recorded earlier for ven-5 (a larger tank or a
 wider band, a hardware change rather than a tolerance change) now has ven-20 as direct evidence
 that it would work.
+
+## ven-17's slow solves are not contention — the heater model is genuinely stuck (2026-10-02)
+
+A prediction made when GB-54 was verified: ven-9, ven-17 and ven-3 hash to offsets 144/149/154 s,
+so they would still collide, and ven-17 — one of the two heaviest VENs — would stay slow for that
+reason. **Wrong on both counts.**
+
+Parsed 2788 solves across 5 h and 17 VENs on Node2, then asked how many other VENs were solving
+**at the instant each solve started**:
+
+| VEN | solves | busy at start, slow half | busy at start, fast half |
+|---|---|---|---|
+| **ven-17** | 60 | **0.00** | **0.00** |
+| **ven-5** | 60 | **0.00** | **0.00** |
+| **ven-14** | 60 | **0.00** | **0.00** |
+| ven-15 | 60 | 0.43 | 0.03 |
+| ven-13 | 60 | 1.10 | 0.87 |
+| ven-19 | 60 | 1.00 | 0.70 |
+| ven-20 | 61 | 1.37 | 1.10 |
+
+ven-17 began **every one of its 60 solves with the host otherwise idle**, and still ran a 24.5 s
+median and a 77 s maximum. GB-54 is giving it a clean start every cycle; the time is the model.
+ven-3 was never relevant — it runs on Node1, a different host, so its offset cannot contend at all.
+
+**A near-miss worth recording, because the first cut of this analysis said the opposite.**
+Counting *overlap across each solve's duration* showed ven-17's slow solves averaging 1.52
+concurrent VENs against 0.00 for its fast ones — an apparently crisp confirmation. It is an
+artefact: a 77 s solve spans 77 s in which to overlap somebody, a 3 s solve spans 3 s, so overlap
+count is mechanically coupled to the duration it is supposed to explain. The slowest solves all
+overlapped ven-10, ven-4, ven-19 and ven-13 — whose offsets (172, 187, 195, 205 s) all fall
+*after* ven-17's 149 s, i.e. they started during ven-17's long solve rather than causing it.
+Measuring concurrency at the start instant removes the coupling and reverses the conclusion.
+
+### What this changes
+
+**Phase-1 TimeLimit on ven-5 and ven-17 is a quality risk, not just a CPU cost, and is worth
+attention.** Unlike a phase-2 TimeLimit — which returns a warm-started incumbent the epsilon cap
+forbids from being worse than phase 1 — a phase-1 TimeLimit returns an incumbent at an unknown
+gap, so the plan may be materially suboptimal and nothing reports by how much (R-65: the achieved
+gap is not observable through `good_lp`).
+
+**And the gap knob does not fix it.** ven-5 already runs `mip_gap_target` 0.30, five times the
+fleet's 0.06, and still reaches 60 s on some instances. So this is the heater formulation itself,
+which is GB-40's original territory and already carries a remediation plan there — dwell-time
+constraints and a continuous power variable bounded by the tier binaries — not a tolerance to be
+loosened further.
+
+**Phase-2 TimeLimit on the heater class remains not worth chasing**, for the reasons recorded
+above: bounded by the epsilon cap, ~0.3 cores on a host at ~17 %, and buying an effect that
+reaches the executed window in 2 of 6 instances, once better and once worse.
+
+ven-20 remains the evidence that the physical lever works: 450 L across a 35 K band, 18.31 kWh of
+slack, 0.14 s phase 1, and it never hits either limit.
