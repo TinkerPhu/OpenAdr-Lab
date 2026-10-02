@@ -338,6 +338,21 @@ export type Plan = {
   /** GB-25 — the solver's configured MIP-gap tolerance at solve time (proxy, not the
    * achieved gap — see docs/reference/TECHNICAL_DEBTS.md). */
   mip_gap_target?: number | null;
+  /** R-97 — per-phase outcome, because `solve_status` above collapses two solves that
+   * behave nothing alike. Phase 2 reports TIME_LIMIT on nearly every heater cycle by
+   * design and is capped so it can never be costlier than phase 1, while a phase-1
+   * TIME_LIMIT means an incumbent at an unknown gap. Absent on plans not produced by
+   * the two-phase solver. */
+  phase_report?: PlanPhaseReport | null;
+};
+
+/** R-97 — see `Plan.phase_report`. Mirrors `entities::plan::PlanPhaseReport`. */
+export type PlanPhaseReport = {
+  phase1_ms: number;
+  phase1_status: SolveStatus;
+  phase2_ms: number;
+  /** Null when phase 2 did not run (epsilon 0.0) or fell back to phase 1. */
+  phase2_status: SolveStatus | null;
 };
 
 /** GB-25 — one row of persisted plan-quality history (`GET /history/plans`). See

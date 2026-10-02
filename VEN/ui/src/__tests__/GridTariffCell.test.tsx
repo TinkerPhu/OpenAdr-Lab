@@ -198,7 +198,15 @@ describe("GridTariffCell — expanded state via global button", () => {
     tariffsData = [];
   });
 
-  it("TariffEnvelopeChart receives hoursBack=1 and hoursForward=48 when global expand button is clicked", async () => {
+  // The page opens with the time range already extended (`Controller.tsx`:
+  // `useState(true)`), so the global button's first click *collapses* to the
+  // default window rather than expanding to 48 h. These two tests used to hard-code
+  // "click once = 48 h", which silently became wrong when that default flipped on
+  // 2026-09-30, and stayed red because the UI suite was not run with that change.
+  // They now assert the toggle's *behaviour* — that it moves between the two
+  // documented windows and back — so a future change to which state comes first
+  // cannot make them wrong again, only a change to what the windows mean.
+  it("global expand button toggles the tariff chart between the two documented windows", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -206,15 +214,29 @@ describe("GridTariffCell — expanded state via global button", () => {
         <ControllerPage />
       </QueryClientProvider>
     );
+
+    const forward = () =>
+      parseFloat(
+        screen.getByTestId("tariff-envelope-chart").getAttribute("data-hours-forward") ?? "-1"
+      );
+    const back = () =>
+      parseFloat(
+        screen.getByTestId("tariff-envelope-chart").getAttribute("data-hours-back") ?? "-1"
+      );
+
+    // DEFAULT_WINDOW and EXTENDED_WINDOW (chartLayout.ts) differ only in the
+    // forward reach: 1 h vs the full 48 h plan horizon. Back is 1 h in both.
+    const initial = forward();
+    expect([1, 48]).toContain(initial);
+    expect(back()).toBe(1);
 
     await user.click(screen.getByTestId("global-time-range-extend-btn"));
-
-    const chart = screen.getByTestId("tariff-envelope-chart");
-    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(1);
-    expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(48);
+    const toggled = forward();
+    expect(toggled).toBe(initial === 48 ? 1 : 48);
+    expect(back()).toBe(1);
   });
 
-  it("TariffEnvelopeChart returns to default window when global expand button is clicked again", async () => {
+  it("the tariff chart returns to its starting window when the button is clicked twice", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -223,12 +245,19 @@ describe("GridTariffCell — expanded state via global button", () => {
       </QueryClientProvider>
     );
 
-    const btn = screen.getByTestId("global-time-range-extend-btn");
-    await user.click(btn); // expand
-    await user.click(btn); // collapse
+    const forward = () =>
+      parseFloat(
+        screen.getByTestId("tariff-envelope-chart").getAttribute("data-hours-forward") ?? "-1"
+      );
 
-    const chart = screen.getByTestId("tariff-envelope-chart");
-    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "0")).toBeGreaterThanOrEqual(1);
-    expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "0")).toBeGreaterThanOrEqual(1);
+    // The previous version asserted only ">= 1" after two clicks, which both windows
+    // satisfy — so it passed whatever the toggle did, including nothing. Asserting a
+    // return to the *starting* value is what actually pins idempotency.
+    const initial = forward();
+    const btn = screen.getByTestId("global-time-range-extend-btn");
+    await user.click(btn);
+    expect(forward()).not.toBe(initial);
+    await user.click(btn);
+    expect(forward()).toBe(initial);
   });
 });

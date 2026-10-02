@@ -213,6 +213,7 @@ fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
         None,
         None,
         &marginal,
+        None,
     );
 
     assert!(

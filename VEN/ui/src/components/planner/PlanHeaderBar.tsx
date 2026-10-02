@@ -65,6 +65,18 @@ export function PlanHeaderBar({ plan }: Props) {
   // from both a clean Optimal solve and the no-plan-at-all Infeasible case.
   const isSuboptimal = plan.solve_status === "TIME_LIMIT" || plan.solve_status === "GAP_LIMIT";
 
+  // R-97 — which phase stopped early, when the plan carries the split. This is the
+  // distinction `solve_status` alone cannot make, and it is not cosmetic: a phase-1
+  // TIME_LIMIT means an incumbent at an unknown gap (the achieved gap is not
+  // observable through good_lp, R-65), so the plan may be materially suboptimal. A
+  // phase-2 TIME_LIMIT is routine — phase 2 runs on a deliberately short budget and
+  // its result is capped so it can never cost more than phase 1 — and on heater
+  // sites it happens on nearly every cycle by design. Showing one warning for both
+  // trained operators to ignore the one that matters.
+  const phases = plan.phase_report;
+  const phase1Capped = phases?.phase1_status === "TIME_LIMIT";
+  const phase2Capped = phases?.phase2_status === "TIME_LIMIT";
+
   return (
     <Box data-testid="plan-header">
       {/* Main summary row */}
@@ -82,12 +94,25 @@ export function PlanHeaderBar({ plan }: Props) {
             />
           </Tooltip>
         )}
+        {phase1Capped && (
+          <Tooltip title="Phase 1 (cost minimisation) ran out of time, so this plan is the best incumbent found at an unknown optimality gap and may be materially more expensive than necessary. Unlike a phase-2 time limit, this one affects plan quality.">
+            <Chip
+              data-testid="plan-phase1-capped-chip"
+              icon={<WarningAmberIcon fontSize="small" />}
+              label="Phase 1 hit time limit"
+              color="warning"
+              size="small"
+            />
+          </Tooltip>
+        )}
         {isSuboptimal && (
           <Tooltip
             title={
-              plan.solve_status === "TIME_LIMIT"
-                ? "The solver found a feasible plan but was cut off by its time limit before certifying optimality."
-                : "The solver found a feasible plan within the configured MIP-gap tolerance but stopped before certifying full optimality."
+              phase2Capped && !phase1Capped
+                ? "Phase 2 (friction smoothing) used its whole budget, which is routine: it runs on a deliberately short time limit and its result is capped so it can never cost more than phase 1. Plan cost is unaffected."
+                : plan.solve_status === "TIME_LIMIT"
+                  ? "The solver found a feasible plan but was cut off by its time limit before certifying optimality."
+                  : "The solver found a feasible plan within the configured MIP-gap tolerance but stopped before certifying full optimality."
             }
           >
             <Chip
@@ -148,6 +173,16 @@ export function PlanHeaderBar({ plan }: Props) {
           <Typography data-testid="plan-solver-ms" variant="caption" color="text.secondary">
             solve: {plan.solver_ms}ms
           </Typography>
+        )}
+        {/* R-97: the per-phase split, so "which half spent the time" is answerable
+            without shell access to a container — the question the 2026-10 solve-cost
+            investigation had to answer from docker logs. */}
+        {phases != null && (
+          <Tooltip title={`Phase 1 (cost): ${phases.phase1_ms}ms, ${phases.phase1_status}. Phase 2 (friction): ${phases.phase2_ms}ms, ${phases.phase2_status ?? "did not run"}.`}>
+            <Typography data-testid="plan-phase-split" variant="caption" color="text.secondary">
+              p1 {phases.phase1_ms}ms · p2 {phases.phase2_ms}ms
+            </Typography>
+          </Tooltip>
         )}
         {plan.mip_gap_target != null && (
           <Tooltip title="Solver's configured MIP-gap tolerance for this cycle — a proxy, not the achieved gap.">

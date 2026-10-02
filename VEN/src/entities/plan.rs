@@ -407,6 +407,20 @@ pub struct Plan {
     /// fallback (WP-T2, `docs/history/project_journal.md, search "WP-T"`).
     #[serde(default = "SolveStatus::default_optimal")]
     pub solve_status: SolveStatus,
+    /// R-97 — what each solver phase did, kept apart because `solve_status`
+    /// above collapses two solves that behave nothing alike. Phase 2 runs on its
+    /// own short budget and reports `TimeLimit` on essentially every heater cycle
+    /// *by design*, so the single field cannot distinguish "phase 1 could not
+    /// solve this site" — a quality problem, since a phase-1 `TimeLimit` returns
+    /// an incumbent at an unknown gap — from "phase 2 stopped as intended", which
+    /// the `phase2_epsilon_eur` cap forbids from being worse than phase 1.
+    ///
+    /// Diagnosing the 2026-10 solve-cost investigation needed exactly this split
+    /// and had to read it out of container logs, which is the gap `ui-transparency`
+    /// exists to prevent. `None` for plans not produced by the two-phase solver
+    /// (the infeasibility fallback, hand-built fixtures) — never a synthesized zero.
+    #[serde(default)]
+    pub phase_report: Option<PlanPhaseReport>,
     /// WP6.3 (BL-09) — penalty rules active for this plan, so a UI client can
     /// render per-slot peak-demand status without deriving it independently.
     /// Empty when the feature is not configured.
@@ -452,9 +466,66 @@ impl Plan {
     }
 }
 
+/// R-97 — per-phase outcome of a two-phase MILP solve, so operators and the UI can
+/// see which half spent the time and which half stopped early. See
+/// `Plan::phase_report` for why one `solve_status` is not enough.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanPhaseReport {
+    /// Wall-clock milliseconds phase 1 (cost minimisation) took.
+    pub phase1_ms: u64,
+    /// How phase 1 terminated. `TimeLimit` here means the plan is an incumbent at
+    /// an unknown gap — `good_lp` does not expose the achieved gap (R-65) — so it
+    /// is a plan-quality signal, not just a cost signal.
+    pub phase1_status: SolveStatus,
+    /// Wall-clock milliseconds phase 2 (friction minimisation) took. `0` when
+    /// phase 2 was skipped because `phase2_epsilon_eur` is 0.0.
+    pub phase2_ms: u64,
+    /// How phase 2 terminated, or `None` when it did not run (epsilon 0.0) or fell
+    /// back to phase 1's solution. `TimeLimit` here is routine and benign: phase 2
+    /// runs on a deliberately short budget and its result is capped so it can never
+    /// be costlier than phase 1.
+    pub phase2_status: Option<SolveStatus>,
+}
+
 #[cfg(test)]
 mod solve_status_tests {
+    use super::PlanPhaseReport;
     use super::SolveStatus;
+
+    /// R-97: the field exists so a UI can tell a phase-1 time limit (a plan-quality
+    /// problem) from a phase-2 one (routine), so it has to survive the wire in a
+    /// shape the UI's `PlanPhaseReport` type matches. A phase 2 that did not run
+    /// must serialize as an explicit null, not as a status that implies it did.
+    #[test]
+    fn phase_report_round_trips_with_a_null_phase2_when_it_did_not_run() {
+        let r = PlanPhaseReport {
+            phase1_ms: 4210,
+            phase1_status: SolveStatus::TimeLimit,
+            phase2_ms: 0,
+            phase2_status: None,
+        };
+        let j = serde_json::to_value(&r).expect("serializes");
+        assert_eq!(j["phase1_status"], "TIME_LIMIT");
+        assert_eq!(j["phase2_status"], serde_json::Value::Null);
+        assert_eq!(
+            serde_json::from_value::<PlanPhaseReport>(j).expect("round trips"),
+            r
+        );
+    }
+
+    /// A plan from before this field existed, or from the infeasibility fallback,
+    /// must still deserialize — the field is additive and absent means "no
+    /// two-phase solve happened", never a synthesized zero.
+    #[test]
+    fn a_plan_without_a_phase_report_still_deserializes_as_none() {
+        #[derive(serde::Deserialize)]
+        struct Probe {
+            #[serde(default)]
+            phase_report: Option<PlanPhaseReport>,
+        }
+        let p: Probe = serde_json::from_str("{}").expect("absent field is allowed");
+        assert!(p.phase_report.is_none());
+    }
 
     #[test]
     fn solve_status_serializes_as_screaming_snake_case() {

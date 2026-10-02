@@ -118,6 +118,8 @@ pub(crate) fn fallback_plan(
         friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
         solve_status: SolveStatus::Infeasible,
+        // No two-phase solve happened, so there is no split to report.
+        phase_report: None,
         penalty_rules_active,
         solver_ms: None,
         mip_gap_target: Some(planner.mip_gap_target),
@@ -143,6 +145,7 @@ pub(crate) fn translate_to_plan(
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
     marginal_cost_eur_per_kwh: &[f64],
+    phase_report: Option<crate::entities::plan::PlanPhaseReport>,
 ) -> Plan {
     let step_s = planner.plan_step_s;
     let n = inputs.n;
@@ -477,6 +480,7 @@ pub(crate) fn translate_to_plan(
         friction_eur,
         cost_breakdown,
         solve_status: map_solve_status(sol.status),
+        phase_report,
         penalty_rules_active,
         solver_ms: None,
         mip_gap_target: Some(planner.mip_gap_target),

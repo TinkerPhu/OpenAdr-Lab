@@ -483,6 +483,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             solve_status: SolveStatus::Optimal,
+            phase_report: None,
             penalty_rules_active: vec![],
             solver_ms: None,
             mip_gap_target: None,
