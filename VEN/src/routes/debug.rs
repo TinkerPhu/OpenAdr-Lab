@@ -16,11 +16,11 @@ use crate::controller::HistoryPort;
 use crate::services::forecast::build_heuristic_forecasts;
 use crate::services::heuristics::{
     base_load_power_kw_at, generate_synthetic_backfill, learn_asset_heuristics, HeuristicsConfig,
+    HEURISTIC_ASSET_IDS,
 };
 use crate::state::AppState;
 use crate::AppCtx;
 
-const PRELOAD_ASSET_IDS: [&str; 1] = ["base_load"];
 const PRELOAD_WINDOW_DAYS: i64 = 28;
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -47,7 +47,7 @@ pub(crate) async fn preload_heuristics(
     let from = now - Duration::days(PRELOAD_WINDOW_DAYS);
     let mut summaries = Vec::new();
 
-    for asset_id in PRELOAD_ASSET_IDS {
+    for asset_id in HEURISTIC_ASSET_IDS {
         let rows =
             generate_synthetic_backfill(asset_id, from, now, base_load_power_kw_at(&base_load));
         let n_rows = rows.len();

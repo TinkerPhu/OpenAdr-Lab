@@ -207,8 +207,11 @@ pub struct PlanCycleInputs {
     pub n_slots: usize,
     pub cum_s: Vec<i64>,
     pub lambda_sw: f64,
-    pub heater_c_terminal_eur_kwh: f64,
-    pub battery_c_terminal_eur_kwh: f64,
+    /// Terminal value of stored energy per asset id, from
+    /// `AssetParams::terminal_value_eur_kwh`. A map rather than one named
+    /// scalar per storage kind: the consumer looks its asset up, so adding a
+    /// storage kind touches neither this struct nor that lookup.
+    pub c_terminal_eur_kwh_by_asset: std::collections::HashMap<String, f64>,
     pub heater_anchor: Vec<Option<f64>>,
 }
 
@@ -263,34 +266,22 @@ pub fn build_plan_cycle_inputs(
         }
     };
 
-    let heater_c_terminal_eur_kwh = asset_params
+    let c_terminal_eur_kwh_by_asset = asset_params
         .iter()
-        .find_map(|p| match p {
-            AssetParams::Heater(h) => Some(
-                h.c_terminal_eur_kwh
-                    .unwrap_or(avg_imp_eur_kwh + planner.c_ctrl_imp_malus_eur_kwh),
-            ),
-            _ => None,
+        .map(|p| {
+            (
+                p.id().to_string(),
+                p.terminal_value_eur_kwh(avg_imp_eur_kwh, planner.c_ctrl_imp_malus_eur_kwh),
+            )
         })
-        .unwrap_or(0.0);
-    let battery_c_terminal_eur_kwh = asset_params
-        .iter()
-        .find_map(|p| match p {
-            AssetParams::Battery(b) => Some(
-                b.c_terminal_eur_kwh
-                    .unwrap_or(avg_imp_eur_kwh * b.round_trip_efficiency),
-            ),
-            _ => None,
-        })
-        .unwrap_or(0.0);
+        .collect();
 
     PlanCycleInputs {
         tariff_ts,
         n_slots,
         cum_s,
         lambda_sw,
-        heater_c_terminal_eur_kwh,
-        battery_c_terminal_eur_kwh,
+        c_terminal_eur_kwh_by_asset,
         heater_anchor,
     }
 }
@@ -1186,6 +1177,16 @@ mod tests {
     use crate::entities::asset_params::{BatteryParams, HeaterParams};
     use crate::entities::plan::PlanZone;
 
+    /// Terminal value for one asset id, or 0.0 when the map has no entry —
+    /// the same read `build_asset_contexts` does.
+    fn terminal_of(inputs: &PlanCycleInputs, asset_id: &str) -> f64 {
+        inputs
+            .c_terminal_eur_kwh_by_asset
+            .get(asset_id)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
     fn tariff_snapshot(
         start: DateTime<Utc>,
         end: DateTime<Utc>,
@@ -1285,15 +1286,15 @@ mod tests {
         // avg_imp_eur_kwh = (0.20 + 0.30) / 2 = 0.25
         let expected_heater = 0.25 + 0.10; // avg + c_ctrl_imp_malus_eur_kwh
         let expected_battery = 0.25 * 0.90; // avg * round_trip_efficiency
+        let heater = terminal_of(&inputs, &HeaterParams::default().id);
+        let battery = terminal_of(&inputs, &BatteryParams::default().id);
         assert!(
-            (inputs.heater_c_terminal_eur_kwh - expected_heater).abs() < 1e-9,
-            "expected heater terminal reward {expected_heater}, got {}",
-            inputs.heater_c_terminal_eur_kwh
+            (heater - expected_heater).abs() < 1e-9,
+            "expected heater terminal reward {expected_heater}, got {heater}"
         );
         assert!(
-            (inputs.battery_c_terminal_eur_kwh - expected_battery).abs() < 1e-9,
-            "expected battery terminal reward {expected_battery}, got {}",
-            inputs.battery_c_terminal_eur_kwh
+            (battery - expected_battery).abs() < 1e-9,
+            "expected battery terminal reward {expected_battery}, got {battery}"
         );
     }
 
@@ -1321,11 +1322,12 @@ mod tests {
         let inputs = build_plan_cycle_inputs(&rates, &planner, &asset_params, None, None, now);
 
         assert_eq!(
-            inputs.heater_c_terminal_eur_kwh, 0.0,
+            terminal_of(&inputs, &HeaterParams::default().id),
+            0.0,
             "profile override Some(0.0) must disable auto-computed heater reward"
         );
         assert!(
-            (inputs.battery_c_terminal_eur_kwh - 0.42).abs() < 1e-9,
+            (terminal_of(&inputs, &BatteryParams::default().id) - 0.42).abs() < 1e-9,
             "profile override must take precedence over auto-computed battery reward"
         );
     }
@@ -1335,8 +1337,10 @@ mod tests {
         let now = fixed_now();
         let planner = PlannerParams::default();
         let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
-        assert_eq!(inputs.heater_c_terminal_eur_kwh, 0.0);
-        assert_eq!(inputs.battery_c_terminal_eur_kwh, 0.0);
+        assert!(
+            inputs.c_terminal_eur_kwh_by_asset.is_empty(),
+            "no assets means no terminal values, and the lookup's own default is 0.0"
+        );
     }
 
     #[test]

@@ -115,8 +115,11 @@ pub fn build_asset_contexts(
     asset_params: &[AssetParams],
     planner: &PlannerParams,
     lambda_sw: f64,
-    heater_c_terminal_eur_kwh: f64,
-    battery_c_terminal_eur_kwh: f64,
+    // Per-asset terminal value of stored energy, keyed by asset id — built
+    // by `services::planning::build_plan_cycle_inputs` from each asset's own
+    // params. Looked up, not branched on: which kinds have one is declared
+    // in `AssetParams::terminal_value_eur_kwh`, not decided here.
+    c_terminal_eur_kwh_by_asset: &std::collections::HashMap<String, f64>,
     heater_anchor: &[Option<f64>],
     // User comfort-curve overrides, by asset id (`AppState::comfort_overrides_map`).
     // Each asset is priced by its override when it has one, its built-in default
@@ -134,14 +137,10 @@ pub fn build_asset_contexts(
     sim_snap
         .iter_assets()
         .filter_map(|(entry, cfg)| {
-            let is_heater = cfg.asset_type_str() == "heater";
-            // Use per-asset c_terminal: heater and battery get their own coefficient;
-            // EV gets 0.0 (deadline constraint handles the charging incentive).
-            let c_terminal = match cfg.asset_type_str() {
-                "heater" => heater_c_terminal_eur_kwh,
-                "battery" => battery_c_terminal_eur_kwh,
-                _ => 0.0,
-            };
+            let c_terminal = c_terminal_eur_kwh_by_asset
+                .get(&entry.id)
+                .copied()
+                .unwrap_or(0.0);
             let comfort_rates = crate::services::comfort::effective_comfort_rates(
                 comfort_overrides,
                 &entry.id,
@@ -163,7 +162,7 @@ pub fn build_asset_contexts(
                 planner.v_ev_free_charge_eur_kwh,
                 lambda_sw,
                 c_terminal,
-                if is_heater {
+                if cfg.accepts_dispatch_anchor() {
                     heater_anchor.to_vec()
                 } else {
                     vec![]
@@ -179,6 +178,18 @@ mod tests {
     use super::*;
     use crate::controller::milp_planner::asset_port::{AssetKind, AssetMilpParams};
     use chrono::TimeZone;
+
+    /// Distinct per-asset terminal values, so a test can tell which one an
+    /// asset actually received. Deliberately *not* built via
+    /// `AssetParams::terminal_value_eur_kwh`: these tests check that
+    /// `build_asset_contexts` routes each asset its own entry, which a map
+    /// derived from the same rule under test could not show.
+    fn terminal_values() -> std::collections::HashMap<String, f64> {
+        std::collections::HashMap::from([
+            (crate::ids::ASSET_HEATER.to_string(), 0.07),
+            (crate::ids::ASSET_BATTERY.to_string(), 0.03),
+        ])
+    }
 
     #[test]
     fn apply_pending_pv_inject_noop_when_no_pv_asset() {
@@ -374,8 +385,7 @@ mod tests {
             &params,
             &planner,
             0.0,
-            0.07,
-            0.03,
+            &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
         );
@@ -438,8 +448,7 @@ mod tests {
             &params,
             &planner,
             0.0,
-            /* heater_c_terminal_eur_kwh */ 0.07,
-            /* battery_c_terminal_eur_kwh */ 0.03,
+            &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
         );
@@ -483,8 +492,7 @@ mod tests {
             &params,
             &planner,
             0.0,
-            0.0,
-            0.0,
+            &std::collections::HashMap::new(),
             &[],
             &std::collections::HashMap::new(),
         );

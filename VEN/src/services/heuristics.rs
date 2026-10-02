@@ -19,6 +19,17 @@ use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::history::TickSample;
 use crate::entities::DomainError;
 
+/// The assets this pipeline learns a heuristic for. Base load is the site's
+/// whole unmetered-consumption story (see
+/// `docs/architecture/forecasting_model.md`); PV forecasting is WP5.3's job,
+/// not this pipeline's.
+///
+/// One list, not one per caller: the daily learner job
+/// (`tasks::heuristics_job`) and the on-demand preload route
+/// (`routes::debug`) each used to declare their own, and a third caller would
+/// have declared a third.
+pub const HEURISTIC_ASSET_IDS: [&str; 1] = [crate::ids::ASSET_BASE_LOAD];
+
 #[derive(Clone, Copy)]
 pub struct HeuristicsConfig {
     /// How far back to query history. Uses whatever's actually available

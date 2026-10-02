@@ -466,7 +466,14 @@ impl Asset for Heater {
     }
 
     fn asset_type_str(&self) -> &'static str {
-        "heater"
+        crate::ids::ASSET_HEATER
+    }
+
+    /// The heater is the one asset whose near-term dispatch the planner pins
+    /// to the current plan — see `services::planning::build_heater_anchor`
+    /// for why an unanchored off-state makes the next solve infeasible.
+    fn accepts_dispatch_anchor(&self) -> bool {
+        true
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

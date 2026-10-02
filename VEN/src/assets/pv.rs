@@ -397,7 +397,14 @@ impl Asset for PvInverter {
     }
 
     fn asset_type_str(&self) -> &'static str {
-        "pv"
+        crate::ids::ASSET_PV
+    }
+
+    /// PV output tracks irradiance, not dispatch: walking it forward through
+    /// a schedule produces a number that means nothing. Its future comes from
+    /// `forecast()`.
+    fn state_follows_dispatch(&self) -> bool {
+        false
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
