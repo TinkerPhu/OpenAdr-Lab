@@ -95,7 +95,8 @@ Code:
 - `VEN/src/entities/device_session.rs` — `EvSession` window start; queue type.
 - `VEN/src/state/mod.rs` — storage, accessors, `cancel_request`.
 - `VEN/src/tasks/sim_tick/usage_sim_plan_ahead.rs` — rolling 7-day producer.
-- `VEN/src/tasks/poll_signals.rs` — VTN (`CHARGE_STATE_SETPOINT`) producer.
+- `VEN/src/tasks/poll_signals.rs` — the VTN `CHARGE_STATE_SETPOINT` producer is
+  **disabled** here (R-100), not migrated: a VTN no longer creates EV sessions.
 - `VEN/src/routes/hems/sessions.rs` — user-request producer; `GET /user-requests`
   per-request session resolution; `VEN/src/routes/hems/ev.rs` — `GET /ev-session`.
 - `VEN/src/tasks/sim_tick/arbiter_glue.rs` — head expiry, `paused_by_active_session`.

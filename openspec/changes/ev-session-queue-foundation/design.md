@@ -19,7 +19,7 @@ change reuses or consolidates):
 | The session itself | `EvSession` — `VEN/src/entities/device_session.rs:30` | Gains a window start |
 | Storage | `HemsState.ev_session: Option<EvSession>` — `VEN/src/state/mod.rs:114`; `AppState::ev_session()`/`set_ev_session()` — `:460`/`:464` | Becomes the queue + queue accessors |
 | Producer 1 — user request | `routes/hems/sessions.rs:358`, via `services::user_request::create_ev` | Inserts into the queue |
-| Producer 2 — VTN `CHARGE_STATE_SETPOINT` | `tasks/poll_signals.rs:117-150` | Inserts / removes by id |
+| ~~Producer 2 — VTN `CHARGE_STATE_SETPOINT`~~ | `tasks/poll_signals.rs` | **Disabled** (R-100): a VTN no longer creates sessions; code preserved, uncalled |
 | Producer 3 — simulated usage | `tasks/sim_tick/usage_sim_plan_ahead.rs::sync_plan_ahead_session` | Maintains a rolling 7-day span |
 | Expiry | `tasks/sim_tick/arbiter_glue.rs::resolve_overlay_enabled:129-136` | Drops passed sessions from the head |
 | Cancellation | `AppState::cancel_request` — `state/mod.rs:423` | Removes that request's session by id |
@@ -119,7 +119,7 @@ between one session's `departure_time` and the next's `window_start` is precisel
 the absence the SoC drop belongs to.
 
 *Why not rename `departure_time` to `window_end`*: it is the user-facing concept
-("when must the car be ready"), it appears in the UI and in the VTN path, and
+("when must the car be ready"), it appears in the UI, and
 `naming-transparency` favours keeping the word the UI uses. `window_start` is
 documented as the opening of the same window.
 
@@ -142,8 +142,12 @@ queue is what lets one `insert` serve all three:
 
 - *simulated usage* — skip the conflicting trip (origin precedence: never displace
   a stated session).
-- *VTN* — as today: it owns the session it created, identified by id, and replaces
-  only that one.
+- *VTN* — **no longer a producer** (R-100). A grid command about an asset's state of
+  charge is an external constraint, not the driver's intent about their own travel,
+  and the queue's non-overlap rule turned that conflation into a live conflict: a
+  VTN session could block the user from booking their own car. The code is
+  preserved and uncalled pending a decision on whether such a command belongs in
+  the planner as a constraint instead.
 - *user request* — in this change, preserve today's externally observable
   behaviour explicitly: ask `conflicts`, remove exactly those sessions, then
   `insert`. This is the silent overwrite that exists today, now concentrated at one

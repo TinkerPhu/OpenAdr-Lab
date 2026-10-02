@@ -55,12 +55,17 @@ the next one's window start — SHALL NOT be treated as overlapping.
 - **WHEN** a session whose window precedes every existing session is inserted
 - **THEN** it is placed at the head of the queue and ordering by window start still holds
 
-### Requirement: Session precedence by origin is preserved
+### Requirement: A stated session outranks a simulated one
 
-A session created by a user request or by the VTN SHALL take precedence over one
-created by the simulated usage schedule. The simulated usage schedule SHALL NOT
-displace, modify or remove a user- or VTN-created session, and SHALL NOT insert
-a session that would conflict with one.
+A session the user stated SHALL take precedence over one the simulated usage
+schedule produced. The simulated schedule SHALL NOT displace, modify or remove a
+user-created session, and SHALL NOT insert a session that would conflict with one.
+
+Only two kinds of session exist: those a user stated, and those the simulated
+usage schedule produced to stand in for a user. A VTN SHALL NOT create an EV
+charging session - a grid command about an asset's state of charge is an external
+constraint, not the driver's intent about their own travel (see R-100 in
+`docs/reference/TECHNICAL_DEBTS.md` for the decision this leaves open).
 
 #### Scenario: Simulated schedule yields to a user session
 
@@ -102,11 +107,6 @@ session from the queue, leaving every other queued session in place.
 
 - **WHEN** a user request owning the second of three queued sessions is cancelled
 - **THEN** that session is removed and the other two remain queued
-
-#### Scenario: A withdrawn VTN charge signal removes only the session it created
-
-- **WHEN** the VTN charge signal that created a session disappears
-- **THEN** that session is removed and sessions of other origins are untouched
 
 ### Requirement: The queue is visible
 
