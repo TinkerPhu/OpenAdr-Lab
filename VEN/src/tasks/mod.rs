@@ -9,8 +9,9 @@ pub mod poll_config;
 pub mod poll_events;
 pub mod poll_programs;
 pub mod poll_reports;
-mod poll_signals;
+pub(crate) mod poll_signals;
 mod progress_ticker;
+pub(crate) mod vtn_charge_state_session;
 pub mod sim_tick;
 pub mod state_persist;
 
