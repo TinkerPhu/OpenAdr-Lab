@@ -126,31 +126,29 @@ pub(crate) async fn tick_once(
                 outcome.heater_emergency_mode,
             );
 
-        sim_guard.tick(
-            dt_s,
-            std::mem::take(&mut outcome.setpoints),
-            now,
-            ctx.inject.pv_irradiance,
-            ctx.inject.pv_tau_s,
-            ctx.inject.ambient_temp_c,
-            ctx.inject.heater_temp_min_c,
-            ctx.inject.heater_temp_max_c,
-            ctx.inject.base_load_kw,
-            ctx.inject.base_load_alpha,
-            ctx.inject.ev_plugged,
-            ctx.inject.ev_soc_target,
-            ctx.weather_pv_kw_now,
-            ctx.weather_pv_forecast.clone(),
-            heater_emergency_curtail,
-            heater_emergency_absorb,
-            resolved_pv_generation_limit.limit_kw,
-            resolved_pv_generation_limit.source,
-            ctx.pv_measured_kw_now,
-            ctx.base_load_measured_kw_now,
-            ctx.base_load_heuristic_kw_now,
-            ctx.base_load_heuristic.clone(),
-            ctx.ev_session.as_ref().map(|s| s.departure_time),
-        );
+        sim_guard.tick(crate::simulator::TickInputs {
+            pv_irradiance_override: ctx.inject.pv_irradiance,
+            pv_tau_s: ctx.inject.pv_tau_s,
+            pv_generation_limit_override: resolved_pv_generation_limit.limit_kw,
+            pv_curtailment_source: resolved_pv_generation_limit.source,
+            pv_measured_kw: ctx.pv_measured_kw_now,
+            weather_pv_kw: ctx.weather_pv_kw_now,
+            weather_pv_forecast: ctx.weather_pv_forecast.clone(),
+            ambient_temp_c_override: ctx.inject.ambient_temp_c,
+            heater_temp_min_override: ctx.inject.heater_temp_min_c,
+            heater_temp_max_override: ctx.inject.heater_temp_max_c,
+            heater_emergency_curtail_override: heater_emergency_curtail,
+            heater_emergency_absorb_override: heater_emergency_absorb,
+            base_load_kw_override: ctx.inject.base_load_kw,
+            base_load_alpha: ctx.inject.base_load_alpha,
+            base_load_measured_kw: ctx.base_load_measured_kw_now,
+            base_load_heuristic_kw: ctx.base_load_heuristic_kw_now,
+            base_load_heuristic: ctx.base_load_heuristic.clone(),
+            ev_plugged_override: ctx.inject.ev_plugged,
+            ev_soc_target_override: ctx.inject.ev_soc_target,
+            ev_departure_time: ctx.ev_session.as_ref().map(|s| s.departure_time),
+            ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
+        });
 
         let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =
             super::finalize::finalize_tick_outputs(&mut sim_guard, &ctx, now);

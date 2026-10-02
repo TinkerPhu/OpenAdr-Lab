@@ -4,7 +4,7 @@
 //! tick() can never silently diverge.
 
 use super::super::*;
-use crate::entities::asset_params::{AssetParams, BaseLoadParams, PvCurtailmentSource};
+use crate::entities::asset_params::{AssetParams, BaseLoadParams};
 use chrono::TimeZone;
 
 fn base_load_state(baseline_kw: f64) -> SimState {
@@ -62,31 +62,11 @@ fn peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier() {
         .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, Some(heuristic_kw))
         .expect("base_load asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
+    sim.tick(TickInputs {
         base_load_alpha,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None,               // pv_measured_kw
-        None,               // base_load_measured_kw
-        Some(heuristic_kw), // base_load_heuristic_kw
-        None,               // base_load_heuristic
-        None,               // ev_departure_time
-    );
+        base_load_heuristic_kw: Some(heuristic_kw),
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
 
     let bl_entry = sim
         .assets
@@ -116,31 +96,10 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
         .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, None)
         .expect("base_load asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
+    sim.tick(TickInputs {
         base_load_alpha,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+        ..TickInputs::new(dt_s, now, HashMap::new())
+    });
 
     let bl_entry = sim
         .assets
@@ -197,31 +156,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
         .peek_base_load_kw(now, dt_s, None, 0.1, None, None)
         .expect("base_load asset is configured");
 
-    sim.tick(
-        dt_s,
-        HashMap::new(),
-        now,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        0.1,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        PvCurtailmentSource::None,
-        None, // pv_measured_kw
-        None, // base_load_measured_kw
-        None, // base_load_heuristic_kw
-        None, // base_load_heuristic
-        None, // ev_departure_time
-    );
+    sim.tick(TickInputs::new(dt_s, now, HashMap::new()));
 
     let bl_entry = sim
         .assets
