@@ -29,6 +29,20 @@ run it selectively to confirm it fails, then implement until green.
 - [ ] 3.2 Change `resolve_overlay_enabled` to use `current_ev_session(now)` for the pause flag and `expire_ev_sessions(now)` for expiry (design Decision 6), and verify the 3.1 tests pass plus the existing arbiter_glue tests stay green
 - [ ] 3.3 Feed `EvCharger.departure_time` / `TickOverrides.ev_departure_time` from the current session, falling back to the queue head (design Decision 8), and verify the existing `simulate_forward` departure tests in `assets/ev_schedule.rs` still pass
 
+## 3b. A session declares its following trip's consumption
+
+Design Decision 9. Without this the change's own planning spec ("the charge the
+vehicle is expected to consume while away SHALL be accounted for between sessions")
+is unsatisfiable for a manually stated series.
+
+- [ ] 3b.1 Write failing tests for the EV's own conversion: `expected_soc_drop_for_distance_scales_with_consumption_and_pack` (120 km at 0.2 kWh/km on a 60 kWh pack = 0.40) and `expected_soc_drop_for_distance_is_clamped_to_a_full_pack`; confirm they fail
+- [ ] 3b.2 Add `consumption_kwh_per_km` and `default_trip_distance_km` to `EvParams` (`entities/asset_params.rs`) and the profile schema, with validation rejecting negative values, and expose the conversion as a method on `EvCharger` - the EV is the only authority for it (`asset-competence-assurance`); verify 3b.1 passes
+- [ ] 3b.3 Add `expected_trip_distance_km: Option<f64>` to `EvSession` and verify the compiler names every construction site (serde default keeps older payloads deserialising, as `mode` already does)
+- [ ] 3b.4 Write and verify a test that an unstated distance resolves to the EV's default **and is reported as defaulted**, not silently substituted (`wire-contracts`: apply the documented default and surface that you did)
+- [ ] 3b.5 Have the simulated producer carry its generated trip's own `soc_drop_pct` rather than the configured default, converted through the same EV function; verify a test that a simulated session's expected consumption matches its trip
+- [ ] 3b.6 Feed the per-session expected drop into the planner's existing `ExogenousSocDrops` so stated and simulated sessions reach the solver by one path, and verify the worked example from Decision 9: two stated sessions 48 h apart, no usage sim, must schedule charging for the second
+- [ ] 3b.7 Verify `python scripts/audit_file_sizes.py` passes - `entities/asset_params.rs` and the profile schema both gain fields
+
 ## 4. Sessions become planner obligations
 
 Depends on `ev-soc-state-variables` being merged: the obligation list, the SoC
