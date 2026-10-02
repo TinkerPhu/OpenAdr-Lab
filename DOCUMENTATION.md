@@ -1052,8 +1052,15 @@ grep "serde_json::Value" VEN/src/vtn.rs
 
 ### 4.4 Module Responsibilities
 
-#### `src/main.rs`
-Entry point. Constructs `AppState` (all runtime state), `AppCtx` (shared application context — cloned by Axum per request), wires the Axum router, and spawns seven background task loops.
+#### `src/main.rs` and `src/boot/`
+Entry point, in four stages: configure, assemble, spawn, serve. `main.rs` is only those four
+calls; each stage is a module under `boot/`. `boot::ports` builds every outbound adapter (VTN
+client, solver, weather MQTT, the two measurement feeds, fleet telemetry, the SQLite history
+store), each of the optional ones falling back to a no-op port when its env var is unset.
+`boot::World` is the assembled result — `AppState` (all runtime state), the domain params, the
+ports and the channels — which the remaining two stages read. `boot::background` spawns every
+supervised task loop; `boot::serve` builds `AppCtx` (cloned by Axum per request), wires the
+router, and owns the SIGTERM/SIGINT shutdown that persists simulator state.
 
 #### `src/state.rs` — AppState
 Thread-safe container with three independently locked sections:
@@ -1273,7 +1280,7 @@ Step 2 — Physics tick  (simulator/mod.rs: SimState::tick())
           PV       → irradiance model + EMA smoothing + export clamp
           BaseLoad → fixed profile lookup
 
-Step 3 — Finalise  (tasks/sim_tick/helpers.rs: finalize_tick_outputs())
+Step 3 — Finalise  (tasks/sim_tick/finalize.rs: finalize_tick_outputs())
   ├─ Push HistoryPoint to each asset's ring buffer
   ├─ Recompute GridState (net_power_kw, import_limit_kw, export_limit_kw)
   └─ Recompute site FlexibilityEnvelope

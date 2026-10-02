@@ -76,7 +76,11 @@ or failing piecemeal later.
 **Source layout (current):**
 ```
 VEN/src/
-  main.rs              — startup, task spawning; routes registered in routes/mod.rs (§4)
+  main.rs              — four lines of orchestration: configure, assemble, spawn, serve
+  boot/                — the composition root those four stages live in: ports.rs builds every
+                         outbound adapter, background.rs spawns every supervised loop,
+                         serve.rs owns the router and the shutdown-persist path, and mod.rs
+                         holds `World`, the assembled state both stages read
   routes/              — HTTP handlers, one module per resource (adapter ring)
   tasks/                — background loops (sim_tick, planning, poll_*, obligation) (adapter ring)
   services/            — planning/user-request/obligation application logic
@@ -212,7 +216,7 @@ accounting is **not** the Dispatcher's responsibility — see Monitor above.
 #### Arbiter: deviation correction and limit enforcement (BL-22, GB-47)
 
 `controller::arbiter` is the single owner of every reactive (non-plan) actuator adjustment. It
-runs two passes per tick from `tasks/sim_tick/helpers.rs::build_tick_setpoints`, both through
+runs two passes per tick from `tasks/sim_tick/setpoints.rs::build_tick_setpoints`, both through
 **one shared lever machinery** (`apply_ranked_levers`: candidate levers → `rank_levers` by marginal
 cost with preemption-margin hysteresis → greedy apply, each lever consuming what it actually
 achieved). What differs between the passes is data (`LeverPolicy`), not a second code path.

@@ -70,10 +70,10 @@ pub trait MeasurementPort: Send + Sync {
 ```
 
 `MqttMeasurementAdapter::spawn(config, translate)` (`measurement.rs`) is
-generic over both the MQTT topic and a `translate: fn(&[u8]) -> Result<MeasurementReading, String>`
-function pointer — it owns the `rumqttc` subscription loop, resubscribe-on-
+generic over both the MQTT topic and a `translate: MeasurementParser`
+function pointer (`fn(&[u8]) -> Result<MeasurementReading, String>`) — it owns the `rumqttc` subscription loop, resubscribe-on-
 `ConnAck`, and 5s backoff-on-error, but has zero knowledge of any device's
-wire format. Two independent instances are constructed in `main.rs`, one per
+wire format. Two independent instances are constructed in `boot::ports`, one per
 signal, each behind its own env-var gate.
 
 ### The one file a downstream deployer needs to edit

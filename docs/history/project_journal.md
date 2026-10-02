@@ -13912,3 +13912,130 @@ dependencies are identical to the main checkout's — same `Cargo.lock` — so p
 `CARGO_TARGET_DIR` at `../../VEN/target` reused 5344 warm artefacts and turned a ~10-minute
 memory-hungry build into one crate. The WSL lock is what makes sharing that directory safe between
 sessions.
+
+## A code-smell sweep through the VEN, and what the smells were hiding (2026-10-03)
+
+A review of `VEN/src` and `VEN/ui` for code and architecture smells, then fixing them rather than
+filing them. Twelve findings, eleven fixed. What is worth recording is not the list but the
+pattern: **almost every smell turned out to be covering something more specific than "this is
+untidy"** — a reachable crash, a drifted copy, a dead branch, an invariant nobody could check.
+
+**The persisted-state crash was found by reading an `unreachable!`, not by a failure.**
+`simulator/persist.rs::load_with_params` reconciled persisted assets against the fresh roster by
+`id` alone, then overwrote every config from the current params. A profile that reuses an id for a
+different asset kind therefore paired a rebuilt config with a persisted state of another variant —
+and every `Asset` method destructures that state and `unreachable!`s on a mismatch, so the VEN
+panics on the first tick, on every boot, from a file `load()` parses cleanly. `profile/validate.rs`
+has no asset-id kind check, so nothing upstream caught it either. The guard is six lines
+(`std::mem::discriminant` per id, fall back to the fresh entry for that asset only) and the test
+that pins it failed before it existed. The 45 `unreachable!("…/state mismatch")` arms across six
+asset kinds are what made the consequence a crash loop instead of a warning; they remain, and are
+the one finding not fixed here (below).
+
+**`cargo check --tests` is not a build check.** The `test_prelude` move was verified with
+`cargo check --tests`, which compiles the `cfg(test)` arm — so it could not see that nine of the
+names moved behind `#[cfg(test)]` were production names. `cargo check` without `--tests` failed on
+all nine. Both configurations have to be checked, and a green `--tests` run says nothing about the
+binary.
+
+**`#[allow(...)]` was load-bearing, and what it bore was dead.** `milp_planner/mod.rs` carried ten
+allow-gated imports with a comment asserting the test submodules needed them via `use super::*`.
+Moving them into a `#[cfg(test)] mod test_prelude` let rustc check that assertion, and most of it
+was false: 11 asset-port context types, 5 milp-interaction types, 8 of 9 plan types and several
+other names were used by nothing at all. The allow had been hiding dead imports, not enabling a
+re-export. Same shape elsewhere: `assets::asset_max_power` had no production caller (every consumer
+wants the whole series, since the sweep-line merge needs every breakpoint), and
+`services::hems::HvacService` could not be called by anything after BL-41 retired the route BL-23
+proposed wiring it to.
+
+**Deleting the dead half of a file nearly deleted the live half.** `services/hems.rs` held
+`HvacService` *and* the project's only `DomainError` to HTTP mapping, under a module name that
+mentions neither. The compiler caught it; a reviewer reading "delete the dead service" would not
+have. The mapping now lives in `routes/error.rs`, where choosing a status code belongs, with the
+tests it never had.
+
+**Four acknowledged copies.** The register's rule is "found twice or more, consolidate", and four
+places had instead written down that they were copies. `state/`'s four
+`Arc<RwLock<RingBuffer<T>>>` feeds — three of whose module docs said "mirrors the X ring pattern" —
+became one `BoundedLog<T>`, with the `ring_evicts_oldest_past_cap` test that existed four times now
+existing once. `day_boundary_crossed` was byte-identical in two task modules, the second commented
+"mirrors `history_sampler`'s"; one `DailyGate`, tested once, including the pre-epoch case
+`div_euclid` is there for and neither copy covered. Every asset defined each of its six
+configuration methods twice — an inherent `pub fn` and an `impl Asset` method whose whole body was
+`Self::X(self)` — 36 forwarders, -135 lines. And `UserRequestService::create_shiftable` was marked
+"not yet wired to a route; shiftable loads are created inline in routes/hems.rs", which is two
+implementations of one concept: **they disagreed**, the route validating that the run fits its
+[earliest_start, latest_end] window and the service not. The service is the one implementation now,
+with that rule and tests for it.
+
+**The UI lint noise was hiding the same thing.** Six `react-refresh/only-export-components`
+warnings looked cosmetic. One of them was `dayRangeIso`, defined byte-identically in `History.tsx`
+and `PlanHistory.tsx` with byte-identical duplicated tests — and its sibling `last24hRangeIso` had
+*drifted*: History's takes the instant from the caller, with a comment explaining that a client
+with OS-clock skew would otherwise query a 24 h window containing no data, while PlanHistory's
+called `new Date()` and had exactly that bug. Another was `PlanPowerStack` importing its data
+builders out of `GridAccumulatedCell.tsx`. A lint that only ever fires on misplaced code is worth
+reading as a placement report.
+
+**One test expectation was changed deliberately.** `PlanHistory.test.tsx` asserted
+`new Date().toISOString().slice(0,10)` — the browser's today — which passed only because the page
+read the browser's clock. Keeping it would have required keeping the bug, and an assertion that
+cannot distinguish the server's clock from the browser's cannot test this at all. It now asserts
+the mocked server day, the way `History.test.tsx` already did. The test's purpose is unchanged;
+this is recorded because silently relaxing an expectation to make a failure go away is the thing
+the convention forbids.
+
+**The file-size cap was being satisfied by the wrong move.** Four `tasks/` files sat at 190-197 of
+their 200 lines, and the files around them said why: "split out of `tick.rs` to keep it under the
+tasks/ file-size cap", "split out of `mod.rs` to keep the tasks/ file-size cap". `tasks/sim_tick/`
+had become 13 files named for *when* they run — `helpers`, `context`, `post_lock`, `arbiter_glue`,
+`finalize` — and `spawn_sim_tick` took 21 parameters, one of them a tuple bundled, in its own
+words, "purely to keep the main.rs call site's line count down". The cap exists to stop logic
+accumulating in the adapter ring, and the response had been to slice the orchestration thinner
+instead of moving out what was never scheduling. So: state injections to `simulator::inject`, the
+capacity composition onto `OadrCapacityState` itself, the comms-loss PV resolver to
+`controller::comms_loss`, the downsampling accumulator to `services::history_sampling`.
+`helpers.rs` — a name that promised nothing — is `setpoints.rs` with one job at 105 lines.
+`main.rs` went from a single 488-line `async fn` at 97.6 % of cap to 44 lines over four named
+stages in `boot/`, which also retired the `let (s, sim, sp, vn, tx, dd, etx, wp, wpp, pvco2, pvm,
+pvme, blm, blme, sn, cl, tp) = (...)` tuples its task spawns opened with.
+
+**`tasks/planning/cycle.rs` is the counter-example, and is left alone.** At 195/200 it is the one
+cap-pressured file whose content really is orchestration in the right ring. Its length comes from
+threading `build_solve_request`'s 29 parameters, so its honest fix is that signature — a separate
+piece of design work, not something to bolt onto a sweep. Splitting it again would have been the
+same mistake this entry is about.
+
+**An invariant nobody could check had already been violated.** `controller/capacity_headroom.rs`
+and `controller/site_headroom.rs` took `&SimState`, called `simulator::forecast` and downcast to
+concrete `BaseLoad`/`PvInverter` — the domain ring importing infra. The four scripted dependency
+rules could not see it: they check `use crate::assets::` in `milp_planner/` and in `entities/`,
+leaving the rest of `controller/` unwatched, and never mentioned `crate::simulator` at all. The
+coupling is also not accidental — `simulator_port.rs` documents why the flattened `SimSnapshot`
+cannot answer PV's achievable range — so a port would have been the wrong fix; both modules moved
+to `simulator/`, beside the `forecast.rs` they already shared. A fifth rule now covers the whole
+ring and both infra modules.
+
+**Key learning — a rule that is checked by a grep in a document is not checked.** Two of these
+findings existed only because the guard was narrower than the rule it claimed to enforce: the ring
+check covered two directories of three, and `.claude/CLAUDE.md` described the file-size allowlist
+as holding `assets/mod.rs` when `ALLOWLIST` is empty and that file is 192/500 production lines. A
+rule worth having is worth a script, and a script worth having is worth a job entry — the prose
+version drifts silently and reads as compliance.
+
+**Key learning — "which assets do X" wants declaring, not matching.** Four places decided something
+about an asset by matching its kind string, so a new asset kind needs those places edited rather
+than just declaring itself. "Which assets learn a heuristic" was declared twice as `["base_load"]`;
+"what a stored kWh is worth at horizon end" had its two per-kind formulas in `services::planning`
+and its re-dispatch by kind string in `plan_context`, a signature that grows a parameter per
+storage kind. These are now one const, one `AssetParams::terminal_value_eur_kwh` declared beside
+the fields it falls back from, and two trait methods (`accepts_dispatch_anchor`,
+`state_follows_dispatch`) that let PV and the heater state their own answers.
+
+**Not fixed, and why.** The asset abstraction still has two type-safety holes: 45
+`unreachable!("…/state mismatch")` arms, because config and state are parallel enums the trait
+cannot pair, and ~15 production `as_any().downcast_ref::<Concrete>()` sites, one of them
+`.unwrap()`ed — the enum dispatch was made untyped rather than removed, so the compiler no longer
+says when a new asset kind needs handling. The fix is a typed handle pairing config with its own
+state type, and it is the largest item here; the persisted-state guard above removes the urgency by
+closing the one reachable path to those panics.
