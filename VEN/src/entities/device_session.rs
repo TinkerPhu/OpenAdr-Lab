@@ -32,7 +32,17 @@ pub struct EvSession {
     pub id: Uuid,
     /// Target SoC (0.0–1.0). E.g. 0.80 = "charge to 80%".
     pub target_soc: f64,
-    /// When the EV must be ready (departure time).
+    /// When this session's charging window opens — the instant the vehicle
+    /// becomes available for it. With `departure_time` it forms the half-open
+    /// window `[window_start, departure_time)`.
+    ///
+    /// Before the queue existed a session's window was implicitly "from now
+    /// until `departure_time`", which is only meaningful for the one session
+    /// that is current. Two queued sessions cannot be checked for overlap
+    /// without it, and the gap between one session's departure and the next
+    /// one's start is exactly the absence a trip's charge loss belongs to.
+    pub window_start: DateTime<Utc>,
+    /// When the EV must be ready (departure time). Closes the window above.
     pub departure_time: DateTime<Utc>,
     /// If true, MILP treats as MayRun (soft reward, best-effort by departure).
     /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
@@ -57,6 +67,126 @@ pub struct EvSession {
     pub comfort_rates: Vec<ComfortRate>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+
+/// Two sessions conflict when their charging windows overlap.
+///
+/// Carries the ids rather than a message: the follow-up change's UI has to name
+/// the clashing plans back to the user, and re-deriving the overlap at that layer
+/// would be a second copy of the rule this type exists to centralise.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvSessionConflict {
+    /// The session that was refused.
+    pub candidate: Uuid,
+    /// Every queued session it overlaps, in window order.
+    pub conflicts: Vec<Uuid>,
+}
+
+impl std::fmt::Display for EvSessionConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "charging window overlaps {} queued session(s)",
+            self.conflicts.len()
+        )
+    }
+}
+
+/// An EV's charging sessions, ordered by window start and never overlapping.
+///
+/// A newtype rather than a bare `Vec` because that invariant is the whole point:
+/// three producers write this queue (a user request, a VTN charge signal, and the
+/// simulated usage schedule), and a bare `Vec` would leave each of them free to
+/// insert at the wrong index or on top of an overlap. The only way in is the
+/// checked `insert`, which makes an overlapping queue unrepresentable rather than
+/// merely untested.
+///
+/// Windows are half-open: one session's `departure_time` may equal the next
+/// one's `window_start` without conflicting, which is the natural encoding of
+/// "the car leaves and comes back" and matches `ev_schedule::active_trip_at`'s
+/// existing `ts >= leave_at && ts < return_at` convention.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EvSessionQueue(Vec<EvSession>);
+
+impl EvSessionQueue {
+    /// Do these two windows overlap? The one definition of the rule.
+    fn overlaps(a: &EvSession, b: &EvSession) -> bool {
+        a.window_start < b.departure_time && b.window_start < a.departure_time
+    }
+
+    /// Every queued session `candidate` would overlap, in window order.
+    ///
+    /// A session already in the queue never conflicts with itself, so re-checking
+    /// one that is being replaced reports only the others.
+    pub fn conflicts(&self, candidate: &EvSession) -> Vec<Uuid> {
+        self.0
+            .iter()
+            .filter(|s| s.id != candidate.id && Self::overlaps(s, candidate))
+            .map(|s| s.id)
+            .collect()
+    }
+
+    /// Insert, keeping the queue ordered by window start and free of overlaps.
+    ///
+    /// What to *do* about a conflict is the producer's policy, not the queue's:
+    /// the simulated schedule skips, the VTN replaces the session it owns by id,
+    /// and the user-facing path prompts. Keeping that decision out of here is what
+    /// lets one `insert` serve all three.
+    pub fn insert(&mut self, session: EvSession) -> Result<(), EvSessionConflict> {
+        let conflicts = self.conflicts(&session);
+        if !conflicts.is_empty() {
+            return Err(EvSessionConflict {
+                candidate: session.id,
+                conflicts,
+            });
+        }
+        let at = self
+            .0
+            .partition_point(|s| s.window_start <= session.window_start);
+        self.0.insert(at, session);
+        Ok(())
+    }
+
+    /// Remove one session by id, returning it when it was queued.
+    pub fn remove(&mut self, id: Uuid) -> Option<EvSession> {
+        let at = self.0.iter().position(|s| s.id == id)?;
+        Some(self.0.remove(at))
+    }
+
+    /// The session whose window contains `now`, if any.
+    ///
+    /// This is what "a session is active" means. Not "the queue is non-empty":
+    /// under a rolling schedule the queue is almost never empty, and treating
+    /// that as active would pause opportunistic charging permanently.
+    pub fn current(&self, now: DateTime<Utc>) -> Option<&EvSession> {
+        self.0
+            .iter()
+            .find(|s| s.window_start <= now && now < s.departure_time)
+    }
+
+    /// Drop every session whose departure has passed; returns how many went.
+    ///
+    /// Nothing else expires a session, so a finished or missed one would
+    /// otherwise keep acting as an obligation forever.
+    pub fn expire(&mut self, now: DateTime<Utc>) -> usize {
+        let before = self.0.len();
+        self.0.retain(|s| s.departure_time > now);
+        before - self.0.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &EvSession> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// A device-centric heater temperature target.
@@ -115,6 +245,7 @@ mod tests {
         let json = r#"{
             "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
             "target_soc": 0.8,
+            "window_start": "2026-07-11T20:00:00Z",
             "departure_time": "2026-07-12T06:00:00Z",
             "created_at": "2026-07-11T20:00:00Z",
             "updated_at": "2026-07-11T20:00:00Z"
@@ -129,6 +260,7 @@ mod tests {
         let session = EvSession {
             id: Uuid::new_v4(),
             target_soc: 0.9,
+            window_start: Utc::now(),
             departure_time: Utc::now(),
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
@@ -193,4 +325,156 @@ pub struct BaselineOverride {
     pub slots: Vec<BaselineSlot>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+
+    // ── EvSessionQueue: the ordered, non-overlapping invariant ──────────────
+
+    fn ts(h: i64) -> DateTime<Utc> {
+        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 7, 20, 0, 0, 0).unwrap()
+            + chrono::Duration::hours(h)
+    }
+
+    /// A session occupying `[from, to)`, firm, user-created.
+    fn sess(from: i64, to: i64) -> EvSession {
+        EvSession {
+            id: Uuid::new_v4(),
+            target_soc: 0.8,
+            window_start: ts(from),
+            departure_time: ts(to),
+            soft_deadline: false,
+            origin: EvSessionOrigin::UserRequest,
+            mode: UserRequestMode::default(),
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: ts(0),
+            updated_at: ts(0),
+        }
+    }
+
+    #[test]
+    fn conflicts_reports_an_overlapping_session() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 8);
+        let a_id = a.id;
+        q.insert(a).expect("first insert cannot conflict");
+        assert_eq!(q.conflicts(&sess(4, 12)), vec![a_id]);
+    }
+
+    #[test]
+    fn conflicts_allows_touching_windows() {
+        // One session's departure is the next one's window start: the car leaves
+        // and comes back. Half-open windows make this a non-conflict.
+        let mut q = EvSessionQueue::default();
+        q.insert(sess(0, 8)).unwrap();
+        assert!(q.conflicts(&sess(8, 16)).is_empty());
+        assert!(q.insert(sess(8, 16)).is_ok());
+        assert_eq!(q.len(), 2);
+    }
+
+    #[test]
+    fn insert_orders_by_window_start() {
+        let mut q = EvSessionQueue::default();
+        q.insert(sess(16, 20)).unwrap();
+        q.insert(sess(0, 4)).unwrap();
+        q.insert(sess(8, 12)).unwrap();
+        let starts: Vec<_> = q.iter().map(|s| s.window_start).collect();
+        assert_eq!(starts, vec![ts(0), ts(8), ts(16)], "ordered by window start");
+    }
+
+    #[test]
+    fn insert_rejects_an_overlap_and_names_every_clash() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 6);
+        let b = sess(6, 12);
+        let (a_id, b_id) = (a.id, b.id);
+        q.insert(a).unwrap();
+        q.insert(b).unwrap();
+
+        // Spans both.
+        let spanning = sess(3, 9);
+        let err = q.insert(spanning).expect_err("an overlap must be refused");
+        assert_eq!(err.conflicts, vec![a_id, b_id]);
+        assert_eq!(q.len(), 2, "a refused insert must change nothing");
+    }
+
+    #[test]
+    fn current_is_the_session_whose_window_contains_now() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 8);
+        let a_id = a.id;
+        q.insert(a).unwrap();
+        q.insert(sess(10, 18)).unwrap();
+
+        assert_eq!(q.current(ts(4)).map(|s| s.id), Some(a_id));
+        // In the gap between two sessions nothing is current, even though the
+        // queue is not empty.
+        assert!(q.current(ts(9)).is_none());
+        // The departure instant itself is outside the half-open window.
+        assert!(q.current(ts(8)).map(|s| s.id) != Some(a_id));
+    }
+
+    #[test]
+    fn expire_drops_every_passed_session() {
+        let mut q = EvSessionQueue::default();
+        q.insert(sess(0, 4)).unwrap();
+        q.insert(sess(4, 8)).unwrap();
+        let live = sess(12, 20);
+        let live_id = live.id;
+        q.insert(live).unwrap();
+
+        assert_eq!(q.expire(ts(10)), 2, "both passed sessions go at once");
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.iter().next().unwrap().id, live_id);
+    }
+
+    #[test]
+    fn remove_takes_only_the_named_session() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 4);
+        let b = sess(4, 8);
+        let c = sess(8, 12);
+        let (a_id, b_id, c_id) = (a.id, b.id, c.id);
+        q.insert(a).unwrap();
+        q.insert(b).unwrap();
+        q.insert(c).unwrap();
+
+        assert_eq!(q.remove(b_id).map(|s| s.id), Some(b_id));
+        let left: Vec<_> = q.iter().map(|s| s.id).collect();
+        assert_eq!(left, vec![a_id, c_id]);
+        assert!(q.remove(b_id).is_none(), "removing twice is not an error");
+    }
+
+    /// The invariant must survive arbitrary interleavings, not just the orders a
+    /// hand-written test happens to try: three producers write this queue.
+    #[test]
+    fn the_invariant_holds_under_interleaved_inserts_removes_and_expiries() {
+        let mut q = EvSessionQueue::default();
+        let mut ids = Vec::new();
+
+        // A deterministic but irregular interleaving: windows that touch, that
+        // overlap, and that sit far apart, with removals and expiries between.
+        for step in 0..40i64 {
+            let from = (step * 7) % 23;
+            let cand = sess(from, from + 3 + (step % 4));
+            if let Ok(()) = q.insert(cand.clone()) {
+                ids.push(cand.id);
+            }
+            if step % 5 == 4 && !ids.is_empty() {
+                let victim = ids.remove(0);
+                q.remove(victim);
+            }
+            if step % 11 == 10 {
+                q.expire(ts(step % 23));
+            }
+
+            // Ordered by window start, and no two windows overlap.
+            let w: Vec<_> = q.iter().map(|s| (s.window_start, s.departure_time)).collect();
+            for pair in w.windows(2) {
+                assert!(pair[0].0 <= pair[1].0, "queue must stay ordered: {w:?}");
+                assert!(
+                    pair[0].1 <= pair[1].0,
+                    "queued windows must never overlap: {w:?}"
+                );
+            }
+        }
+    }
 }
