@@ -1,7 +1,8 @@
 ###############################################################################
 # Dockerfile for running VEN (Rust backend) cargo test coverage (cargo-tarpaulin).
 #
-# Build context: ../VEN  (the VEN directory)
+# Build context: the repo root (see `context: ..` in the compose file) - both
+# the VEN crate and its `lab-core` path dependency have to be reachable.
 # Used by: tests/docker-compose.ven-unit-test.yml (ven-coverage service)
 #
 # Deliberately separate from Dockerfile.ven-unit-test / its cache volumes:
@@ -36,8 +37,19 @@ WORKDIR /app
 
 # Context is the repo root (for `lab-core`, the crate the VEN shares with the
 # BFF), so copy the two crates rather than the whole tree.
+#
+# `lab-core` lands at `/lab-core`, NOT `/app/lab-core`: VEN/Cargo.toml declares
+# `lab-core = { path = "../lab-core" }`, and `..` from the VEN crate root at
+# `/app` is the filesystem root. Copying it inside `/app` put it somewhere cargo
+# never looks, and the build failed before compiling anything with
+# "failed to read `/lab-core/Cargo.toml`" - naming the path it wanted, which is
+# the one used here.
+#
+# The sibling layout is what the path dependency means, so it is reproduced
+# rather than worked around. `/app` stays the VEN crate root so the cache volume
+# mounted at `/app/target` keeps its paths.
 COPY VEN/ ./
-COPY lab-core/ ./lab-core/
+COPY lab-core/ /lab-core/
 
 # Keep parallelism low to avoid OOM linker failures on Node1
 # (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
