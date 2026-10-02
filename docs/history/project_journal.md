@@ -13886,6 +13886,18 @@ It did not: all 1497 ven-app tests pass with unchanged expectations, GB-41's sof
 included. That was the outcome to verify rather than assume, which is why the arm-by-arm matrix was
 run before anything was called done.
 
+**The stated risk was refuted by measurement.** The design's main worry was solve time: `n+1` extra
+continuous variables and `n` extra equalities per EV, on a model R-97 had just measured at 11-13 s
+for phase 2. `bench_ev_session_solve_cost` says the opposite — every variant got faster, and the
+away-window penalty R-97 exists to explain mostly disappeared (just-returned 1.02 s -> 0.20 s,
+away-90 % 0.94 s -> 0.14 s). Plausible reason: an obligation is now a bound on a single `soc_ev`
+variable rather than a cumulative-energy sum over a deadline-masked range plus a floor pre-capped at
+a reachability estimate, so there are fewer vacuous rows and a relaxation the solver can bound
+sooner. Recorded in R-97 **with** the caveat that five of seven variants now stop at `GapLimit` and
+the old table recorded no status, so some of the gain may be reaching the 2 % gap earlier rather
+than less work at equal quality — a like-for-like needs the gap sweep re-run. "No regression,
+probably a real improvement" is as far as the evidence goes, and that is what the entry says.
+
 **Key learning — a filter that hides failure is not a cargo problem, it is a pipe problem.** The
 previous entry recorded this lesson three times over for `wsl cargo check` behind `| grep`. It
 recurred here on a different command: `bash scripts/wsl_lock.sh acquire ... | tail -5` reported
