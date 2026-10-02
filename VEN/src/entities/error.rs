@@ -5,6 +5,20 @@ pub enum DomainError {
     #[error("session conflict: {0}")]
     SessionConflict(String),
 
+    /// An EV charging session whose window overlaps one already queued.
+    ///
+    /// Distinct from `SessionConflict` above, which means "this request is
+    /// already in a terminal state" - a different failure that happens to share
+    /// the word. Typed fields rather than a formatted string because the caller
+    /// has to name the clashing sessions back to the user, and re-deriving the
+    /// overlap at that layer would be a second copy of the rule
+    /// `EvSessionQueue` owns.
+    #[error("EV charging window overlaps {} queued session(s)", .conflicts.len())]
+    EvSessionOverlap {
+        candidate: Uuid,
+        conflicts: Vec<Uuid>,
+    },
+
     #[error("not found: {id}")]
     NotFound { id: Uuid },
 
