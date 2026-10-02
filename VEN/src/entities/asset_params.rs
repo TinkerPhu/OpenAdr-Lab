@@ -380,6 +380,50 @@ pub enum AssetParams {
     BaseLoad(BaseLoadParams),
 }
 
+impl AssetParams {
+    /// This asset's id, as the simulator roster keys it.
+    pub fn id(&self) -> &str {
+        match self {
+            AssetParams::Battery(p) => &p.id,
+            AssetParams::Ev(p) => &p.id,
+            AssetParams::Heater(p) => &p.id,
+            AssetParams::Pv(p) => &p.id,
+            AssetParams::BaseLoad(p) => &p.id,
+        }
+    }
+
+    /// What a kWh still stored in this asset is worth at the end of the
+    /// planning horizon — without it the solver empties every store on the
+    /// last slot, since nothing past the horizon pays for the energy.
+    ///
+    /// Zero for an asset that stores nothing. The EV is deliberately zero
+    /// too: its deadline constraint already carries the charging incentive.
+    ///
+    /// Declared here, beside the `c_terminal_eur_kwh` fields it falls back
+    /// from, rather than as a `match` on the asset kind at each of the two
+    /// call sites that used to need one (`services::planning` computing the
+    /// numbers, `simulator::plan_context` re-dispatching them by kind string).
+    pub fn terminal_value_eur_kwh(
+        &self,
+        avg_import_eur_kwh: f64,
+        ctrl_import_malus_eur_kwh: f64,
+    ) -> f64 {
+        match self {
+            // A tank's stored heat displaces an import it would otherwise
+            // have to make, controllable-import malus included.
+            AssetParams::Heater(h) => h
+                .c_terminal_eur_kwh
+                .unwrap_or(avg_import_eur_kwh + ctrl_import_malus_eur_kwh),
+            // A battery's stored kWh only returns `round_trip_efficiency` of
+            // itself to the site.
+            AssetParams::Battery(b) => b
+                .c_terminal_eur_kwh
+                .unwrap_or(avg_import_eur_kwh * b.round_trip_efficiency),
+            AssetParams::Ev(_) | AssetParams::Pv(_) | AssetParams::BaseLoad(_) => 0.0,
+        }
+    }
+}
+
 /// Minimal asset snapshot for user-request creation.
 /// Built by the adapter layer (routes/hems.rs) from a locked SimState.
 /// Pure domain type — no assets/ or simulator/ imports.

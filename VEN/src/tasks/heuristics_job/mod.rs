@@ -9,13 +9,8 @@ use chrono::{DateTime, Utc};
 use tracing::warn;
 
 use crate::controller::HistoryPort;
-use crate::services::heuristics::{learn_asset_heuristics, HeuristicsConfig};
+use crate::services::heuristics::{learn_asset_heuristics, HeuristicsConfig, HEURISTIC_ASSET_IDS};
 use crate::state::AppState;
-
-/// Currently heuristic-eligible asset_ids. Base load is the site's whole
-/// unmetered-consumption story (see `docs/architecture/forecasting_model.md`);
-/// PV forecasting is WP5.3's job, not this pipeline's.
-const HEURISTIC_ASSET_IDS: [&str; 1] = ["base_load"];
 
 /// Returns `true` (and records `now`'s UTC calendar day) exactly the first
 /// time this is called for a given day — mirrors `history_sampler`'s

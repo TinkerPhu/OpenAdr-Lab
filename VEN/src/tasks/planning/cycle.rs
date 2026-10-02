@@ -89,8 +89,7 @@ pub(super) async fn run_plan_cycle(
         n_slots,
         cum_s,
         lambda_sw,
-        heater_c_terminal_eur_kwh,
-        battery_c_terminal_eur_kwh,
+        c_terminal_eur_kwh_by_asset,
         heater_anchor,
     } = crate::services::planning::build_plan_cycle_inputs(
         &st.rates,
@@ -113,8 +112,7 @@ pub(super) async fn run_plan_cycle(
         asset_params,
         planner,
         lambda_sw,
-        heater_c_terminal_eur_kwh,
-        battery_c_terminal_eur_kwh,
+        &c_terminal_eur_kwh_by_asset,
         &heater_anchor,
         &state.comfort_overrides_map().await,
     );

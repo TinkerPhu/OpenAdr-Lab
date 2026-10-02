@@ -240,6 +240,30 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::asset_type_str() only applies to AssetConfig-backed asset kinds")
     }
 
+    /// Whether this asset's future state follows from what it is told to do.
+    ///
+    /// False for an asset whose state is driven from outside — PV's output
+    /// tracks irradiance, so walking it forward through a dispatch schedule
+    /// produces a number that means nothing. Such an asset's "state later" is
+    /// its state now; the forecast comes from its own `forecast()` instead.
+    ///
+    /// A trait question rather than `cfg.asset_type_str() == "pv"` at the one
+    /// call site that cares: whether simulating an asset forward is
+    /// meaningful is a fact about the asset, and the next exogenous asset
+    /// kind should not need that call site to be edited
+    /// (`declare-dont-branch`).
+    fn state_follows_dispatch(&self) -> bool {
+        true
+    }
+
+    /// Whether the planner may pin this asset's near-term dispatch to the
+    /// current plan (`services::planning::build_heater_anchor`). Only the
+    /// heater has an anchor today; the call site used to ask
+    /// `asset_type_str() == "heater"`.
+    fn accepts_dispatch_anchor(&self) -> bool {
+        false
+    }
+
     /// Recover this asset's concrete type from a `&dyn Asset`/`Box<dyn Asset>`
     /// — for the handful of call sites that need one specific asset kind
     /// (e.g. a PV-only sim-inject handler), not a generic `Asset` operation.

@@ -132,7 +132,7 @@ pub fn resolve_plan_state_at(
     let boundaries = remaining_boundaries(&future_slots);
     sim.iter_assets()
         .map(|(entry, cfg)| {
-            if cfg.asset_type_str() == "pv" {
+            if !cfg.state_follows_dispatch() {
                 return (entry.id.clone(), entry.state.clone());
             }
             let traj = simulated_trajectory(entry, cfg, &future_slots);
