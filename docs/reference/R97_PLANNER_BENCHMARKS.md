@@ -617,3 +617,76 @@ battery+EV — and it now has a measured price tag on both sides rather than onl
 Note this is a *different* argument from the retracted "phase 2 fails only on battery+EV": the
 heater VENs hit the phase-2 TimeLimit too, and whether that is contention or real is still
 unmeasured on the bench for that class.
+
+## Post-GB-54: phase 2's problem is the heater class, not battery+EV (2026-10-02)
+
+Re-measured 7 h after GB-54 reached production, 6 consecutive solves per VEN. This is the
+measurement the retraction above said had to come before any phase-2 budget decision, and it
+inverts the answer.
+
+| VEN | assets | phase 1 median | phase 1 worst | phase 2 TimeLimit |
+|---|---|---|---|---|
+| ven-13 | battery, EV | 0.57 s | 0.9 s | 2 / 6 |
+| ven-16 | battery, EV | 0.51 s | 1.0 s | 1 / 6 |
+| ven-19 | battery, EV, PV | 1.6 s | 2.4 s | **0 / 6** |
+| ven-4 | battery, PV | 1.4 s | 2.6 s | 0 / 6 |
+| ven-6 | battery, PV | 0.55 s | 1.7 s | 0 / 6 |
+| **ven-20** | **heater (450 L)** | **0.14 s** | 0.18 s | **0 / 6** |
+| ven-12 | EV, heater | 1.8 s | 2.6 s | 4 / 6 |
+| ven-10 | heater (space, 18-23 C) | 1.8 s | 2.4 s | 6 / 6 |
+| ven-15 | heater, PV (200 L) | 2.4 s | 3.2 s | 6 / 6 |
+| ven-14 | battery, heater (300 L) | 4.2 s | 10.0 s | 6 / 6 |
+| ven-17 | battery, heater, PV (250 L) | 6.0 s | **60.1 s** | 6 / 6 |
+| ven-5 | battery, EV, heater (150 L) | 5.0 s | **60.1 s** | 6 / 6 |
+
+**GB-54 did most of the work on battery+EV.** Before it, all four battery+EV VENs hit the phase-2
+TimeLimit on *every* sample; now it is 3 of 18. Phase 1 fell with it — ven-19 from a 12.6 s median
+to 1.6 s (8x), ven-13 2.4 s to 0.57 s, ven-16 1.3 s to 0.51 s. The remaining gap to the bench's
+0.2 s is ordinary residual load, not a different regime.
+
+**So options B and C were indeed fixes for a problem that was about to disappear.** Cutting
+`phase2_solver_timeout_s` or zeroing epsilon on battery+EV is no longer warranted: phase 2
+converges there. Holding that decision for one measurement was the right call, and it is the
+second time in this investigation that acting on a contended reading would have produced a
+permanent change to fix a transient cause.
+
+**The phase-2 problem is now entirely the heater class**: 34 of 42 samples at TimeLimit across
+ven-5/10/12/14/15/17, against 3 of 18 everywhere else. This is the exact inverse of the claim
+retracted above ("phase 2 fails to converge on exactly one class, battery+EV"), which was built on
+contended data. The heater class is also where phase 1 still occasionally exhausts its own 60 s
+budget — ven-17 twice and ven-5 once in these 12 samples.
+
+### ven-20 is the control the fleet has been missing
+
+ven-20 is a heater VEN that solves phase 1 in **0.14 s** and never hits the phase-2 TimeLimit,
+while every other heater VEN does both. Its tank:
+
+| VEN | volume | band | thermal slack |
+|---|---|---|---|
+| **ven-20** | **450 L** | **40-75 C (35 K)** | **18.31 kWh** |
+| ven-14 | 300 L | 45-65 C (20 K) | 6.98 kWh |
+| ven-17 | 250 L | 45-65 C (20 K) | 5.81 kWh |
+| ven-15 | 200 L | 42-62 C (20 K) | 4.65 kWh |
+| ven-5 | 150 L | 45-65 C (20 K) | 3.49 kWh |
+
+ven-20 carries **2.6x the slack of the next-largest tank** and is 20-50x faster. That is the
+tank-slack result reproduced on uncontended production data, which is what the retraction asked
+for — the bench had shown it monotone across three repeats, and the earlier production attempt
+could not be trusted.
+
+**It does not isolate slack from asset count**, and should not be read as doing so: ven-20 is also
+the only heater VEN with no battery, PV or EV beside it. Slack and asset count both point the same
+way here, and this measurement cannot separate them. What it does establish is that a heater VEN
+*can* be trivially fast, so "heaters are inherently hard" is not the explanation.
+
+ven-10 is excluded from that table deliberately — it is a **space** heater (18-23 C, no
+`volume_l`), a different asset shape whose thermal mass is not a tank volume, so its 5 K band is
+not comparable to a cylinder's.
+
+### What this makes the next question
+
+Not "should phase 2's budget be cut" — it should not — but **why the heater model cannot close its
+phase-2 gap in 15 s when every other class now can**, and whether ven-5 and ven-17 exhausting a
+60 s *phase 1* budget is the same cause. The lever recorded earlier for ven-5 (a larger tank or a
+wider band, a hardware change rather than a tolerance change) now has ven-20 as direct evidence
+that it would work.
