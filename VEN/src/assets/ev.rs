@@ -432,7 +432,7 @@ impl MilpParticipant for EvCharger {
         n: usize,
         cum_s: &[i64],
         now: DateTime<Utc>,
-        ev_session: Option<&EvSession>,
+        ev_sessions: &[EvSession],
         _heater_target: Option<&HeaterTarget>,
         comfort_rates: &[crate::entities::asset::ComfortRate],
         ev_min_charge_kw: f64,
@@ -451,7 +451,7 @@ impl MilpParticipant for EvCharger {
             n,
             cum_s,
             now,
-            ev_session,
+            ev_sessions,
             comfort_rates,
             ev_min_charge_kw,
             v_ev_extra_eur_kwh,
@@ -462,7 +462,7 @@ impl MilpParticipant for EvCharger {
         );
         // ev-usage-forecast: the asset's own predicted availability, ANDed into
         // the mask above. No-op unless this EV declared `usage_forecast`.
-        ctx.apply_usage_forecast(self, n, cum_s, now, ev_session);
+        ctx.apply_usage_forecast(self, n, cum_s, now, ev_sessions);
         Box::new(ctx)
     }
 }

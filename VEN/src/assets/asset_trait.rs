@@ -390,7 +390,7 @@ pub trait MilpParticipant {
         n: usize,
         cum_s: &[i64],
         now: DateTime<Utc>,
-        ev_session: Option<&EvSession>,
+        ev_sessions: &[EvSession],
         heater_target: Option<&HeaterTarget>,
         // The asset's effective comfort curve (user override, else built-in
         // default). Empty when the asset has none.
