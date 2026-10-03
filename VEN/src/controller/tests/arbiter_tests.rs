@@ -35,6 +35,8 @@ fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetS
         max_discharge_kw: 0.0,
         v2g_capable: false,
         battery_kwh: 60.0,
+        consumption_kwh_per_km: 0.18,
+        default_trip_distance_km: 40.0,
         soc_target,
         soc_target_profile: soc_target,
         default_charge_kw: 0.0,

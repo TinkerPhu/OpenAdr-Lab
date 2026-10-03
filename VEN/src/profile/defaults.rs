@@ -54,6 +54,14 @@ pub(super) fn default_history_retention_days() -> u32 {
 }
 
 /// R-59: market-practice default (grid-code style comms-loss curtailment).
+/// A mid-size EV's real-world consumption [kWh/km].
+pub(super) fn default_ev_consumption_kwh_per_km() -> f64 {
+    0.18
+}
+/// A typical day's driving [km], used when a session states no distance.
+pub(super) fn default_ev_trip_distance_km() -> f64 {
+    40.0
+}
 pub(super) fn default_comms_loss_max_power_pct() -> f64 {
     0.7
 }

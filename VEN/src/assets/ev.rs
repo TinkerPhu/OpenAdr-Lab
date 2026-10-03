@@ -521,6 +521,8 @@ mod tests {
             max_discharge_kw: 0.0,
             v2g_capable: false,
             battery_kwh: 40.0,
+            consumption_kwh_per_km: 0.18,
+            default_trip_distance_km: 40.0,
             soc_target: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
@@ -712,6 +714,8 @@ mod tests {
             soc_target: 1.0,
             soc_target_profile: 1.0,
             battery_kwh: 10.0,
+            consumption_kwh_per_km: 0.18,
+            default_trip_distance_km: 40.0,
             ..ev
         };
         for _ in 0..1000 {
@@ -747,6 +751,8 @@ mod tests {
             max_discharge_kw: 10.0,
             v2g_capable: true,
             battery_kwh: 10.0,
+            consumption_kwh_per_km: 0.18,
+            default_trip_distance_km: 40.0,
             soc_target: 1.0,
             soc_target_profile: 1.0,
             default_charge_kw: 0.0,

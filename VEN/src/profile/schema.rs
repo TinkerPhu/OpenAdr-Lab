@@ -45,6 +45,8 @@ impl AssetProfile {
                 max_discharge_kw: c.max_discharge_kw,
                 initial_soc: c.initial_soc,
                 battery_kwh: c.battery_kwh,
+                consumption_kwh_per_km: c.consumption_kwh_per_km,
+                default_trip_distance_km: c.default_trip_distance_km,
                 soc_target: c.soc_target,
                 default_charge_kw: c.default_charge_kw,
                 min_charge_kw: c.min_charge_kw,
@@ -243,6 +245,13 @@ pub struct EvConfig {
     pub initial_soc: f64,
     #[serde(default = "super::defaults::default_ev_battery")]
     pub battery_kwh: f64,
+    /// Energy used per km driven [kWh/km]; converts a session's stated trip
+    /// distance into the charge that trip consumes.
+    #[serde(default = "super::defaults::default_ev_consumption_kwh_per_km")]
+    pub consumption_kwh_per_km: f64,
+    /// Distance assumed for a trip the user did not quantify [km].
+    #[serde(default = "super::defaults::default_ev_trip_distance_km")]
+    pub default_trip_distance_km: f64,
     #[serde(default = "super::defaults::default_ev_soc_target")]
     pub soc_target: f64,
     #[serde(default)]

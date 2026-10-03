@@ -158,6 +158,21 @@ impl Profile {
                             c.soc_target
                         ));
                     }
+                    // A negative consumption would turn driving into charging, and a
+                    // negative default distance into a negative drop - both silently
+                    // wrong in a plan rather than loudly wrong at startup.
+                    if c.consumption_kwh_per_km < 0.0 {
+                        errors.push(format!(
+                            "ev.consumption_kwh_per_km must be ≥ 0.0, got {}",
+                            c.consumption_kwh_per_km
+                        ));
+                    }
+                    if c.default_trip_distance_km < 0.0 {
+                        errors.push(format!(
+                            "ev.default_trip_distance_km must be ≥ 0.0, got {}",
+                            c.default_trip_distance_km
+                        ));
+                    }
                     if c.max_discharge_kw < 0.0 {
                         errors.push(format!(
                             "ev.max_discharge_kw must be ≥ 0.0, got {}",

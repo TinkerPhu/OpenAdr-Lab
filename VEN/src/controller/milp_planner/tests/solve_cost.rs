@@ -52,6 +52,8 @@ fn bench_profile(with_heater: bool) -> Profile {
         max_discharge_kw: 0.0,
         initial_soc: 0.30,
         battery_kwh: 75.0,
+        consumption_kwh_per_km: 0.18,
+        default_trip_distance_km: 40.0,
         soc_target: 0.80,
         default_charge_kw: 0.0,
         min_charge_kw: 0.0,
