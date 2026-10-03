@@ -534,6 +534,15 @@ export type CreateUserRequestBody = {
   mode?: UserRequestMode;
   // MAX_COST (WP4.1-c): total charging-cost ceiling in €
   budget_eur?: number;
+  /**
+   * EV only: the queued sessions this submission means to displace.
+   *
+   * Omitted = displace nothing, so a clash is refused — the default and the safe
+   * answer. Sent, it must be exactly the ids the refusal quoted back as
+   * `replaceable_session_ids`, so the confirmation refers to the plans the user was
+   * actually shown rather than to whatever clashes by the time the server acts.
+   */
+  replace_session_ids?: string[];
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
