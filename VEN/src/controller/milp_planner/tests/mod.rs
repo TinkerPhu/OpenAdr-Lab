@@ -401,7 +401,7 @@ fn build_asset_contexts(
     profile: &Profile,
     snap: &SimSnapshot,
     now: DateTime<Utc>,
-    ev_sessions: &[crate::entities::device_session::EvSession],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     tariffs: &TariffTimeSeries,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
@@ -463,7 +463,7 @@ fn build_asset_contexts(
                     n,
                     &cum_s,
                     now,
-                    ev_sessions,
+                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
                     heater_target,
                     &[],
                     ev_min_kw,
@@ -504,7 +504,7 @@ fn build_asset_contexts(
                     n,
                     &cum_s,
                     now,
-                    ev_sessions,
+                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
                     heater_target,
                     &[],
                     ev_min_kw,
@@ -541,7 +541,7 @@ fn build_asset_contexts(
                     n,
                     &cum_s,
                     now,
-                    ev_sessions,
+                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
                     heater_target,
                     &[],
                     ev_min_kw,
@@ -810,7 +810,7 @@ fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_sessions: &[crate::entities::device_session::EvSession],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
     baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
@@ -825,7 +825,7 @@ fn run_planner(
         &profile.assets,
         now,
         trigger,
-        ev_sessions,
+        ev_session,
         heater_target,
         shiftable_loads,
         baseline_override,
@@ -845,10 +845,11 @@ fn bmi(
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     now: DateTime<Utc>,
-    ev_sessions: &[crate::entities::device_session::EvSession],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> MilpInputs {
-    let ctxs = build_asset_contexts(profile, sim, now, ev_sessions, heater_target, tariffs);
+    let ev_sessions: Vec<_> = ev_session.cloned().into_iter().collect();
+    let ctxs = build_asset_contexts(profile, sim, now, &ev_sessions, heater_target, tariffs);
     build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None)
 }
 
