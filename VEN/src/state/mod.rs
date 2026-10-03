@@ -723,7 +723,13 @@ mod tests {
             .insert_ev_session(ev_sess(Uuid::new_v4(), 2, 6))
             .await
             .expect_err("an overlapping window must be refused");
-        assert_eq!(err.conflicts, vec![first]);
+        // `conflicts` now carries the clashing sessions themselves, not their ids, so
+        // a caller can describe the clash without reading the queue a second time.
+        // The assertion is unchanged in intent: exactly that one session clashed.
+        assert_eq!(
+            err.conflicts.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![first]
+        );
         assert_eq!(state.ev_sessions().await.len(), 1, "nothing was added");
     }
 

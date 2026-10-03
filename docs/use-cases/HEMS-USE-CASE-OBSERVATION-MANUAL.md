@@ -934,13 +934,31 @@ applied but not displayed as if you had typed it.
 the gaps between them are when the car is away. Where a stated trip consumes charge, the
 plan buys it back — a second session two days out is planned for, not ignored.
 
+### When a new plan clashes with one you already have
+
+The case this is built for: a standing weekly plan you have stopped thinking about, then a
+spontaneous trip whose charging window overlaps it. Both deadlines cannot be met — the car
+is physically away for part of one window — so the VEN does not guess which plan you meant.
+
+The dialog stays open and tells you **which** plan is in the way, by its window and target
+rather than as a count, and offers two things:
+
+- **Remove it and continue** — the clashing plan is cancelled and the new one queued, as one
+  step. With several clashes it is all of them or none; a half-resolved overlap is still an
+  overlap.
+- **Keep it, let me change this** — nothing is submitted and nothing is removed. Your draft
+  stays as you typed it, so you can move the window instead of starting again.
+
+If your charging plans change while the prompt is open — the simulated schedule queues a
+trip, another tab submits, the old plan expires — the confirmation is refused rather than
+applied to whatever happens to clash by then, and the prompt re-renders saying the plans
+changed while you were deciding. What gets removed is only ever what you were shown.
+
 ### What you should NOT see
 
-A second plan silently replacing the first. Submitting a session that overlaps one you
-already have is **refused**, and the refusal names the plan it clashes with; nothing is
-created and nothing is removed. Until the one-click "replace that one?" offer lands
-(`ev-session-user-conflict-resolution`), removing the old plan is a deliberate act —
-friction, chosen over a committed plan disappearing unnoticed.
+A second plan silently replacing the first, and equally: a plan vanishing because something
+else decided it was in the way. Nothing is removed without a confirmation that names it. A
+request whose session you displaced shows as `Cancelled`, not as a request with no session.
 
 ### Raw check
 
@@ -948,9 +966,17 @@ friction, chosen over a committed plan disappearing unnoticed.
 simulated usage schedule created (those have no linked user request, so they do not
 appear under `GET /user-requests`).
 
+A clashing `POST /user-requests` answers `409` with `kind` naming which refusal it is, each
+clashing session's window and target, and `replaceable_session_ids` — the exact set a
+confirmation must send back as `replace_session_ids`. Sending a different set is refused, so
+the confirmation can only ever mean what the prompt showed.
+
 Behaviour is pinned by `tests/features/ven_user_request.feature` ("A user holds two
-charging sessions with non-overlapping windows", "An overlapping second session is
-refused and changes nothing").
+charging sessions with non-overlapping windows", "An overlapping second session is refused
+and changes nothing", "The refusal names the standing plan it conflicts with", "Confirming
+the replacement displaces the standing plan and queues the new one", "A replace instruction
+naming an unqueued session removes nothing") and, for the dialog itself, by
+`VEN/ui/src/__tests__/Devices.test.tsx`.
 
 
 ## How to set a comfort curve (Devices → Comfort Curve)

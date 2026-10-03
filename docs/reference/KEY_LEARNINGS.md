@@ -2771,3 +2771,35 @@ Two habits from this:
 - **`wsl --shutdown` is the cheapest gigabyte available.** It released 1.4 GB instantly
   here. WSL restarts on the next invocation, paying only a cold-start, so there is no
   reason to leave an idle VM resident while something else needs the RAM.
+
+## A refusal nobody renders is indistinguishable from success (2026-10-04)
+
+049 added a `409` for an EV charging session that overlaps one already queued — a deliberate,
+designed refusal whose whole purpose is to tell the user something. It shipped with no UI.
+
+`EvCard.handleConfirm` called `postRequest({...})` without `await` or `.catch` and then closed
+the dialog unconditionally. `usePostRequest` declared no `onError`. The `Alert` on the Devices
+page reports `useRequests()` — the *fetch* — not the mutation. So the refusal was an unhandled
+promise rejection, the dialog closed exactly as it does on success, and the user's plan was
+silently not created. Heater and shiftable loads had the identical shape.
+
+Why nothing caught it:
+
+- The backend tests asserted the 409. Correct, and no help: they end at the status code.
+- The UI tests mocked `postRequest` as `vi.fn()`, which resolves. Every test exercised the
+  happy path, so "what happens when it rejects" was never a case.
+- `no-half-built-features` is usually read as "don't add an endpoint with no caller". This was
+  the subtler form: the caller existed, but one of the endpoint's two *outcomes* had no
+  surface. An error path is part of the interface.
+
+The fix that generalises: closing the dialog is what **success** does, not what clicking does.
+Expressed once, in a shared `useSubmitRequest`, instead of three cards each remembering to
+await. A rule that lives in one place cannot be forgotten in the second and third copy.
+
+Two habits worth keeping:
+
+- When adding an error response, name what renders it in the same change — and if the answer
+  is "the existing error display", open it and check that it is wired to the call you mean.
+  "There is an Alert on that page" was true here and still wrong.
+- Mock a rejection at least once per submit path. A test suite where the mock always resolves
+  cannot tell a handled failure from an ignored one.

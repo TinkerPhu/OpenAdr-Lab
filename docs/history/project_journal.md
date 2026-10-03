@@ -14144,3 +14144,78 @@ pattern-based edit landed in the wrong struct: tests inserted inside `BaselineOv
 (because the file does not end with its test module), and `window_start` added to four
 `EvCharger` literals (which also have a `departure_time`). Both were found by writing a check
 for the enclosing struct rather than by trusting the edit — the second one *before* compiling.
+
+## 2026-10-04 — Clearing three debts, then the EV conflict offer (050)
+
+**Why the debts first.** 051 is about to edit `state/mod.rs` and `assets/ev.rs` again, and the
+Small/Trivial rule wants that debt gone before new behaviour lands, not after. `audit_debt_gate.py`
+had flagged R-39, R-47 and R-73 against the 049 branch and I deferred them with commit-message
+lines; clearing them was the price of that deferral, paid before the next feature rather than
+forgotten.
+
+**R-73 was not the debt it looked like.** The register offered two fixes — delete the dead
+`future_state_values*` methods, or delete `asset_port.rs`'s "Mirrors ..." copies and have callers
+use the trait methods — and told me to diff them first. The diff showed the copies were identical,
+so the interesting question was why they existed at all. The answer is structural:
+`controller/milp_planner` may never import `crate::assets::` (`ven-architecture`), so the port
+layer had no way to call the asset method. The register's second option was never possible. The
+heater had already solved it properly — its conversion lives in `entities::asset_params`, which
+both rings may import — so battery and EV now do the same and `asset_port` delegates. Worth
+recording: the duplication was a *boundary* artefact, and the fix was to put the shared rule in the
+ring both sides can reach, not to pick a winner.
+
+Coverage moved with the implementation rather than dying with the deleted methods, and
+`asset_port`'s three functions — the ones `planned_state.rs` actually calls — gained tests they had
+never had. A dead method with tests and a live function without them is a coverage report that
+flatters the wrong code.
+
+**R-39 asked for a decision, so it got one.** `EvSettings` moved to `entities/`: two booleans whose
+meaning is the same whether they arrive from a route, a tick, or a restored snapshot. `HemsState`
+stayed in `state/`, by the same test applied the other way — its field list is defined by what must
+survive a restart, and moving it would make `entities/` the owner of the persistence schema.
+
+**R-47** grouped the four flat diagnostic fields into `DiagnosticsState`. Deliberately four
+independent locks inside one struct, not one lock over all four: they are written by four unrelated
+tasks and sharing a lock would couple them into each other's contention for nothing. Every caller
+already went through an accessor, which is why nothing outside `state/` changed — and why this
+stayed Small.
+
+**The flaky planner scenario was not flaky.** One E2E run failed "Plan header shows trigger badge
+and summary values" while the two sibling scenarios running the identical step passed immediately
+after. That alternation was the diagnosis: `step_expand_diagnostics` *toggled* the Diagnostics
+accordion, and `go_planner()` is in-app navigation, so the accordion keeps whatever React state the
+previous scenario left. The step's own docstring claimed "collapsed by default" — true only of a
+fresh page load. So it expanded for a scenario arriving collapsed and collapsed one arriving open,
+and which scenario failed depended on execution order. The step now ensures its end state, matching
+`controller_steps.py::_expand_ev_right_section`, which had checked `aria-label` before clicking all
+along. Two different planner scenarios had failed earlier in the same session and then passed; that
+was this, and I had been treating it as noise.
+
+Also found while there: `main` was not `cargo fmt`-clean. Eight of the ten files needing formatting
+came in with 049, which I merged having run only the python audits and E2E. The pre-merge list names
+`cargo fmt`; I skipped it.
+
+**050 — the clash becomes a question.** 049 refused an overlapping submission and named the ids.
+What was missing was the offer. `EvSessionQueue::replace` displaces exactly the named sessions
+all-or-nothing, with the checked `insert` still enforcing the invariant, and the instruction carries
+ids rather than a boolean `force` for the `If-Match` reason: a boolean authorises removing whatever
+clashes when the server gets to it, which is not what the user saw and agreed to.
+
+Both state accessors resolve clashing ids to whole sessions inside the guard that detected the
+clash. Resolving them afterwards would make the prompt a second, independently derived account of
+the thing it is explaining — free to disagree with the refusal that produced it.
+
+**Two things the work turned up that were not in the plan.** First, `EvCard` swallowed every
+submission failure: `postRequest` called with no `await` and no `.catch`, then the dialog closed
+regardless, and `Devices.tsx`'s `Alert` reports the *fetch*, not the mutation. So 049's 409 — which
+exists precisely to tell the user something — was an unhandled promise rejection the user never
+saw. Heater and shiftable loads had the identical shape. Fixed by making "closing the dialog is
+what *success* does" a rule in one shared hook rather than three remembered copies. Second, a
+successful replace left the displaced sessions' `UserRequest`s Active, pointing at sessions that no
+longer existed, which `GET /user-requests` would have rendered as requests with no session at all.
+Both were found by reading the code around the change rather than by any failing test.
+
+**Issues this branch filed, fixed and deferred.** Fixed: R-39, R-47, R-73, the toggling E2E step,
+`main`'s formatting, the swallowed-submission-error gap, the orphaned-request gap. Filed: none —
+everything found was under the one-hour bar the `issues` rule sets for fixing in place. Deferred:
+none.
