@@ -43,6 +43,27 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 204
     And the EV session is cleared after cancellation
 
+  # --- Several charging sessions at once (ev-session-queue) ---
+
+  # The capability itself: a household EV has a sequence of departures, and before
+  # the queue a second request simply displaced the first.
+  Scenario: A user holds two charging sessions with non-overlapping windows
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 10 hours, departing in 20 hours
+    Then the response status is 201
+    And the EV session queue holds 2 sessions
+    And the queued EV sessions do not overlap
+
+  # The protection: a standing plan silently losing to a spontaneous one is the
+  # failure this work exists to prevent, so the clash is refused rather than applied.
+  Scenario: An overlapping second session is refused and changes nothing
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 4 hours, departing in 12 hours
+    Then the response status is 409
+    And the EV session queue holds 1 sessions
+
   # --- Non-storage asset rejection ---
 
   Scenario: Request for a non-storage asset is rejected

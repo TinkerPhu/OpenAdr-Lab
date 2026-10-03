@@ -134,15 +134,20 @@ def step_net_power_reaches(context, target_kw, seconds, tol):
 @then("the VEN ev-session has target_soc {soc:f} within {seconds:d} seconds")
 def step_ev_session_target(context, soc, seconds):
     def fetch():
+        # `/ev-session` returns the whole queue (ev-session-queue): an EV may hold
+        # several sessions, so this looks for one with the expected target rather
+        # than assuming a single object.
         resp = ven_get("/ev-session")
         if not resp.ok:
             return None
         try:
             body = resp.json()
         except ValueError:
-            # No session yet -> empty/non-JSON body; keep polling.
             return None
-        return body if isinstance(body, dict) else None
+        if not isinstance(body, list):
+            return None
+        match = [s for s in body if abs(s.get("target_soc", -1) - soc) < 1e-6]
+        return match[0] if match else None
 
     poll_until(
         fetch,
