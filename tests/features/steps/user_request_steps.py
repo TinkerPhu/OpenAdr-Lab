@@ -26,6 +26,7 @@ def step_post_user_request(context, asset_id, soc, hours):
         ],
         "completion_policy": "STOP",
     }
+    context.last_ev_payload = payload
     r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
@@ -56,6 +57,9 @@ def step_post_ev_request_with_window(context, from_h, to_h):
         ],
         "completion_policy": "STOP",
     }
+    # Kept so a confirmed replacement resubmits the SAME request plus the
+    # instruction, rather than a fresh one that might differ.
+    context.last_ev_payload = payload
     r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
@@ -64,6 +68,56 @@ def step_post_ev_request_with_window(context, from_h, to_h):
     except Exception:
         context.last_response_json = None
         context.last_created_request = None
+
+
+@then("the refusal names {count:d} conflicting session")
+@then("the refusal names {count:d} conflicting sessions")
+def step_refusal_names_conflicts(context, count):
+    """The point of the refusal: the user is told *which* plan clashes.
+
+    Asserted on the body rather than only on the status, because a 409 that says
+    only "something clashed" is the hostile rejection this change exists to replace.
+    """
+    body = context.last_response_json
+    assert body is not None, "refusal had no JSON body"
+    assert body.get("kind") in ("ev_session_conflict", "ev_replace_rejected"), (
+        f"refusal must declare its kind, got {body.get('kind')!r}"
+    )
+    conflicts = body.get("conflicts") or []
+    assert len(conflicts) == count, f"expected {count} named conflict(s), got {conflicts}"
+    for c in conflicts:
+        for field in ("id", "window_start", "departure_time", "target_soc"):
+            assert field in c, f"a named conflict must carry {field}: {c}"
+    # What a confirmation must echo back, quoted by the server.
+    ids = body.get("replaceable_session_ids") or []
+    assert sorted(ids) == sorted(c["id"] for c in conflicts)
+    context.replaceable_session_ids = ids
+
+
+@when("I resubmit that request replacing the named sessions")
+def step_resubmit_replacing(context):
+    """Confirm the replacement, echoing back exactly the ids the refusal quoted."""
+    payload = dict(context.last_ev_payload)
+    payload["replace_session_ids"] = context.replaceable_session_ids
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+    except Exception:
+        context.last_response_json = None
+
+
+@when("I resubmit that request replacing a session that is not queued")
+def step_resubmit_stale(context):
+    """A confirmation that went stale must remove nothing."""
+    payload = dict(context.last_ev_payload)
+    payload["replace_session_ids"] = ["00000000-0000-0000-0000-000000000000"]
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+    except Exception:
+        context.last_response_json = None
 
 
 @then("the EV session queue holds {count:d} sessions")

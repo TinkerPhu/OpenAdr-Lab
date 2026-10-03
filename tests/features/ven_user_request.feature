@@ -64,6 +64,49 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 409
     And the EV session queue holds 1 sessions
 
+  # The user's own case: a standing weekly plan they have stopped thinking about,
+  # then a spontaneous trip whose window overlaps it. One of the two deadlines
+  # cannot be met - the car is physically away - so the refusal must say which
+  # plan is in the way rather than leave them to go and find it.
+  Scenario: The refusal names the standing plan it conflicts with
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 4 hours, departing in 12 hours
+    Then the response status is 409
+    And the refusal names 1 conflicting session
+    And the EV session queue holds 1 sessions
+
+  Scenario: Confirming the replacement displaces the standing plan and queues the new one
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 4 hours, departing in 12 hours
+    Then the response status is 409
+    And the refusal names 1 conflicting session
+    When I resubmit that request replacing the named sessions
+    Then the response status is 201
+    And the EV session queue holds 1 sessions
+    And the queued EV sessions do not overlap
+
+  # A confirmation that no longer describes the queue must remove nothing: the
+  # whole failure being prevented is a commitment disappearing unnoticed, and a
+  # stale instruction is exactly how that would happen one round-trip later.
+  Scenario: A replace instruction naming an unqueued session removes nothing
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 4 hours, departing in 12 hours
+    Then the response status is 409
+    When I resubmit that request replacing a session that is not queued
+    Then the response status is 409
+    And the EV session queue holds 1 sessions
+
+  # The queue stays usable by hand: no prompt where there is no clash.
+  Scenario: A non-overlapping second plan is accepted with no conflict reported
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    When I POST an EV user request available in 10 hours, departing in 20 hours
+    Then the response status is 201
+    And the EV session queue holds 2 sessions
+
   # --- Non-storage asset rejection ---
 
   Scenario: Request for a non-storage asset is rejected

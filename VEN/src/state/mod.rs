@@ -621,6 +621,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replace_ev_sessions_cancels_the_requests_it_displaced() {
+        // A displaced plan's request must go with it. Leaving it Active would put a
+        // commitment in the list pointing at a session that no longer exists, which
+        // GET /user-requests renders as a request with no session at all.
+        let state = AppState::new();
+        let (standing, untouched) = (Uuid::new_v4(), Uuid::new_v4());
+        state.insert_ev_session(ev_sess(standing, 0, 6)).await.unwrap();
+        state.insert_ev_session(ev_sess(untouched, 12, 18)).await.unwrap();
+        let standing_req = make_request(Some(SessionType::Ev), Some(standing));
+        let untouched_req = make_request(Some(SessionType::Ev), Some(untouched));
+        let (standing_req_id, untouched_req_id) = (standing_req.id, untouched_req.id);
+        state.upsert_request(standing_req).await;
+        state.upsert_request(untouched_req).await;
+
+        let spontaneous = Uuid::new_v4();
+        let removed = state
+            .replace_ev_sessions(&[standing], ev_sess(spontaneous, 3, 9))
+            .await
+            .expect("naming exactly the conflict set is accepted");
+        assert_eq!(removed.len(), 1);
+
+        let requests = state.active_requests().await;
+        let status = |id: Uuid| {
+            requests
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| r.status.clone())
+                .expect("request still listed")
+        };
+        assert_eq!(status(standing_req_id), UserRequestStatus::Cancelled);
+        assert_eq!(
+            status(untouched_req_id),
+            UserRequestStatus::Active,
+            "a request whose session was never displaced is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_ev_sessions_refused_leaves_requests_and_queue_alone() {
+        let state = AppState::new();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        state.insert_ev_session(ev_sess(a, 0, 6)).await.unwrap();
+        state.insert_ev_session(ev_sess(b, 6, 12)).await.unwrap();
+        let req = make_request(Some(SessionType::Ev), Some(a));
+        let req_id = req.id;
+        state.upsert_request(req).await;
+
+        // Spans both, names only one: a partial instruction.
+        let refusal = state
+            .replace_ev_sessions(&[a], ev_sess(Uuid::new_v4(), 3, 9))
+            .await
+            .expect_err("a partial instruction must be refused");
+        // The refusal carries the current conflict set so a re-prompt is truthful.
+        assert_eq!(refusal.conflicts.len(), 2);
+
+        assert_eq!(state.ev_sessions().await.len(), 2, "queue untouched");
+        let requests = state.active_requests().await;
+        assert_eq!(
+            requests.iter().find(|r| r.id == req_id).unwrap().status,
+            UserRequestStatus::Active,
+            "a refused replace cancels nothing"
+        );
+    }
+
+    #[tokio::test]
     async fn cancel_request_ev_removes_only_that_requests_session() {
         // The correctness fix the single slot made impossible: three queued
         // sessions, cancel the middle one's request, the other two stay.
