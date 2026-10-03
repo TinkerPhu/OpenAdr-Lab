@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use super::{SessionDetail, UserRequestWithSession};
 use crate::controller::user_request::{
-    ComfortRateParams, CreateUserRequestParams, RequestDeadlineParams,
+    ClashingSession, ComfortRateParams, CreateUserRequestParams, RequestDeadlineParams,
+    RequestError,
 };
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::AssetRequestSlice;
@@ -49,6 +50,15 @@ pub struct CreateUserRequestBody {
     pub target_temp_c: Option<f64>,
     // ── Request mode (BL-28) — omitted = BY_DEADLINE (legacy behaviour) ─────
     pub mode: Option<UserRequestMode>,
+    /// EV only: the queued sessions this submission intends to displace.
+    ///
+    /// Absent means "displace nothing" — a clash is then refused, which is the
+    /// default and the safe answer. Present, it must name exactly the sessions the
+    /// candidate clashes with, so the confirmation refers to the plans the user was
+    /// actually shown rather than to whatever happens to clash when the server gets
+    /// around to it (`ev-session-conflict-resolution`).
+    #[serde(default)]
+    pub replace_session_ids: Option<Vec<uuid::Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +122,7 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
             soft_deadline: b.soft_deadline,
             target_temp_c: b.target_temp_c,
             mode: b.mode,
+            replace_session_ids: b.replace_session_ids,
         }
     }
 }
@@ -314,25 +325,42 @@ pub async fn post_requests(
     };
 
     if UserRequestService::is_ev(&body) {
+        // Read before `body` is moved: a stated instruction is what separates
+        // "refuse the clash" from "displace exactly these".
+        let replace_ids = body.replace_session_ids.clone();
         match UserRequestService::create_ev(body, &asset_data, now) {
             Ok((user_req, session)) => {
-                // Refuse a clash; never displace. A standing plan silently losing to
-                // a spontaneous one is the failure this queue exists to prevent, so
-                // the submission is rejected with the clashing sessions named and
-                // nothing is touched. `ev-session-user-conflict-resolution` turns
-                // this refusal into a one-click "replace that one?" offer; until it
-                // lands the user removes the old plan deliberately.
-                if let Err(conflict) = ctx.state.insert_ev_session(session.clone()).await {
-                    warn!(
-                        "POST /user-requests (EV) refused: overlaps {:?}",
-                        conflict.conflicts
-                    );
+                // A clash is never displaced silently. Without an instruction the
+                // submission is refused with the clashing plans named, so the user is
+                // offered the replacement instead of a search; with one, exactly the
+                // named sessions go, atomically, and only if they are still exactly
+                // what this session clashes with.
+                let outcome = match &replace_ids {
+                    Some(ids) => ctx
+                        .state
+                        .replace_ev_sessions(ids, session.clone())
+                        .await
+                        .map(|_| ())
+                        .map_err(|refusal| RequestError::EvReplaceRejected {
+                            rejection: refusal.rejection,
+                            conflicts: refusal.conflicts.iter().map(ClashingSession::of).collect(),
+                        }),
+                    None => ctx
+                        .state
+                        .insert_ev_session(session.clone())
+                        .await
+                        .map_err(|clash| RequestError::EvSessionsConflict {
+                            conflicts: clash.conflicts.iter().map(ClashingSession::of).collect(),
+                        }),
+                };
+                if let Err(e) = outcome {
+                    warn!("POST /user-requests (EV) refused: {e}");
+                    if let Some(resp) = super::ev_conflict::conflict_response(&e) {
+                        return resp;
+                    }
                     return (
-                        StatusCode::CONFLICT,
-                        Json(serde_json::json!({
-                            "error": conflict.to_string(),
-                            "conflicts": conflict.conflicts,
-                        })),
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(serde_json::json!({ "error": e.to_string() })),
                     )
                         .into_response();
                 }

@@ -281,6 +281,7 @@ mod tests {
             expected_trip_distance_km: None,
             soft_deadline: None,
             target_temp_c: None,
+            replace_session_ids: None,
         };
         let now = Utc::now();
         let (req, load) = UserRequestService::create_shiftable(body, now).unwrap();
@@ -313,7 +314,8 @@ mod tests {
             tolerance_min: None,
             soft_deadline: None,
             target_temp_c: None,
-        }
+        },
+        replace_session_ids: None,
     }
 
     /// A 2 h run inside a 1 h window cannot be placed. The route used to check
@@ -656,6 +658,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            replace_session_ids: None,
         };
         let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
         assert_eq!(req.asset_id, ids::ASSET_EV);
@@ -694,6 +697,7 @@ mod tests {
             soft_deadline: None,
             target_temp_c: None,
             mode: Some(UserRequestMode::Asap),
+            replace_session_ids: None,
         };
         let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
         assert_eq!(req.mode, UserRequestMode::Asap);
@@ -729,6 +733,7 @@ mod tests {
             soft_deadline: None,
             target_temp_c: Some(55.0),
             mode: None,
+            replace_session_ids: None,
         };
         let (req, target) =
             UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
@@ -763,6 +768,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            replace_session_ids: None,
         };
         let result = UserRequestService::create_ev(body, &[ev_slice(0.5)], now);
         assert!(matches!(
@@ -800,6 +806,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: Some(55.0),
+            replace_session_ids: None,
         };
         let (req, target) =
             UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
@@ -831,6 +838,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            replace_session_ids: None,
         };
         assert!(UserRequestService::is_shiftable(&base));
 
@@ -838,7 +846,8 @@ mod tests {
             asset_id: ids::ASSET_EV.to_string(),
             power_kw: None,
             duration_min: None,
-            ..base
+            ..base,
+            replace_session_ids: None,
         };
         assert!(UserRequestService::is_ev(&ev_body));
         assert!(!UserRequestService::is_shiftable(&ev_body));

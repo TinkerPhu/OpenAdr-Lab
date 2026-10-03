@@ -101,6 +101,94 @@ impl std::fmt::Display for EvSessionConflict {
     }
 }
 
+/// A refused insert, with the clashing sessions themselves rather than their ids.
+///
+/// `EvSessionQueue::insert` answers in ids, which is right for the queue: it is the
+/// overlap authority and ids are all the invariant needs. But a caller that has to
+/// *describe* the clash needs the plans, and resolving ids to sessions afterwards
+/// means reading the queue a second time - so the account the user is shown could
+/// disagree with the refusal that produced it. This type exists so the resolution
+/// happens inside the same critical section that detected the clash.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvSessionClash {
+    /// The session that was refused.
+    pub candidate: Uuid,
+    /// Every queued session it overlaps, in window order.
+    pub conflicts: Vec<EvSession>,
+}
+
+impl std::fmt::Display for EvSessionClash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "charging window overlaps {} queued session(s)",
+            self.conflicts.len()
+        )
+    }
+}
+
+/// Why a replace instruction was refused.
+///
+/// The instruction names the sessions the user agreed to lose, and it is checked
+/// against the conflict set the queue derives *now*, not the one the refusal
+/// reported earlier. The queue can move between the two (a simulated session
+/// landing, another tab submitting, a plan expiring), so this is a precondition
+/// in the `If-Match` sense: the confirmation must still describe the situation it
+/// was given. Anything else is refused and re-prompted rather than guessed at,
+/// because guessing is exactly how a standing commitment disappears unnoticed -
+/// the failure the queue exists to prevent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EvSessionReplaceRejection {
+    /// Ids that are not in the queue at all.
+    NotQueued { ids: Vec<Uuid> },
+    /// The instruction is not exactly the candidate's conflict set: `missing` are
+    /// clashes it failed to name, `extra` are sessions it named that the candidate
+    /// does not actually clash with. Both are refusals - a partial instruction
+    /// would leave an overlap, and an over-broad one would delete a plan the user
+    /// never needed to lose.
+    NotTheConflictSet { missing: Vec<Uuid>, extra: Vec<Uuid> },
+    /// The candidate still clashed once the named sessions were removed. Removing
+    /// every overlapping session cannot leave an overlap, so this is unreachable
+    /// today; it exists so the checked `insert` stays the only authority on the
+    /// invariant rather than this function assuming its result.
+    StillConflicts(EvSessionConflict),
+}
+
+impl std::fmt::Display for EvSessionReplaceRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotQueued { ids } => {
+                write!(f, "{} named session(s) are no longer queued", ids.len())
+            }
+            Self::NotTheConflictSet { missing, extra } => write!(
+                f,
+                "replace instruction names the wrong sessions ({} unnamed clash(es), {} named without clashing)",
+                missing.len(),
+                extra.len()
+            ),
+            Self::StillConflicts(c) => write!(f, "{c}"),
+        }
+    }
+}
+
+/// A refused replace, with the candidate's *current* conflict set in full.
+///
+/// Same reason as `EvSessionClash`: a rejection has to be re-prompted, and the
+/// prompt must describe the queue as it is now - which is precisely what the stale
+/// instruction got wrong. Carrying the conflicts with the rejection means the
+/// caller never has to read the queue again to explain why it said no.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvReplaceRefusal {
+    pub rejection: EvSessionReplaceRejection,
+    pub conflicts: Vec<EvSession>,
+}
+
+impl std::fmt::Display for EvReplaceRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.rejection)
+    }
+}
+
 /// An EV's charging sessions, ordered by window start and never overlapping.
 ///
 /// A newtype rather than a bare `Vec` because that invariant is the whole point:
@@ -155,6 +243,58 @@ impl EvSessionQueue {
             .partition_point(|s| s.window_start <= session.window_start);
         self.0.insert(at, session);
         Ok(())
+    }
+
+    /// Displace exactly the sessions named by `replace_ids` and queue `session`.
+    ///
+    /// The whole operation is all-or-nothing: on any refusal the queue is left
+    /// untouched, and the insertion is still the checked `insert` above, so this
+    /// function adds a precondition and never a second copy of the overlap rule.
+    /// `replace_ids` must name exactly the candidate's current conflict set - see
+    /// `EvSessionReplaceRejection` for why naming fewer or more is refused rather
+    /// than reconciled.
+    ///
+    /// Returns the displaced sessions, so a caller can report what it removed.
+    pub fn replace(
+        &mut self,
+        replace_ids: &[Uuid],
+        session: EvSession,
+    ) -> Result<Vec<EvSession>, EvSessionReplaceRejection> {
+        let not_queued: Vec<Uuid> = replace_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.0.iter().any(|s| s.id == *id))
+            .collect();
+        if !not_queued.is_empty() {
+            return Err(EvSessionReplaceRejection::NotQueued { ids: not_queued });
+        }
+
+        let clashing = self.conflicts(&session);
+        let missing: Vec<Uuid> = clashing
+            .iter()
+            .copied()
+            .filter(|id| !replace_ids.contains(id))
+            .collect();
+        let extra: Vec<Uuid> = replace_ids
+            .iter()
+            .copied()
+            .filter(|id| !clashing.contains(id))
+            .collect();
+        if !missing.is_empty() || !extra.is_empty() {
+            return Err(EvSessionReplaceRejection::NotTheConflictSet { missing, extra });
+        }
+
+        let removed: Vec<EvSession> = replace_ids.iter().filter_map(|id| self.remove(*id)).collect();
+        match self.insert(session) {
+            Ok(()) => Ok(removed),
+            Err(conflict) => {
+                // Put back what was taken: a refused replace must change nothing.
+                for s in removed {
+                    let _ = self.insert(s);
+                }
+                Err(EvSessionReplaceRejection::StillConflicts(conflict))
+            }
+        }
     }
 
     /// Remove one session by id, returning it when it was queued.
@@ -522,6 +662,120 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── replace: the one-click "replace that one?" path (050) ────────────────
+
+    #[test]
+    fn replace_displaces_exactly_the_named_conflict_and_queues_the_candidate() {
+        let mut q = EvSessionQueue::default();
+        let standing = sess(0, 6);
+        let standing_id = standing.id;
+        q.insert(standing).unwrap();
+        q.insert(sess(12, 18)).unwrap();
+
+        let spontaneous = sess(3, 9);
+        let spontaneous_id = spontaneous.id;
+        let removed = q
+            .replace(&[standing_id], spontaneous)
+            .expect("naming exactly the conflict set is accepted");
+
+        assert_eq!(removed.iter().map(|s| s.id).collect::<Vec<_>>(), vec![standing_id]);
+        let ids: Vec<_> = q.iter().map(|s| s.id).collect();
+        assert!(ids.contains(&spontaneous_id), "the candidate is queued");
+        assert!(!ids.contains(&standing_id), "the named session is gone");
+        assert_eq!(q.len(), 2, "the untouched session stays");
+    }
+
+    #[test]
+    fn replace_refuses_a_partial_instruction_and_removes_nothing() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 6);
+        let b = sess(6, 12);
+        let (a_id, b_id) = (a.id, b.id);
+        q.insert(a).unwrap();
+        q.insert(b).unwrap();
+
+        // Spans both, but names only one.
+        let err = q
+            .replace(&[a_id], sess(3, 9))
+            .expect_err("a partial instruction must be refused");
+        assert_eq!(
+            err,
+            EvSessionReplaceRejection::NotTheConflictSet {
+                missing: vec![b_id],
+                extra: vec![],
+            }
+        );
+        assert_eq!(q.len(), 2, "a refused replace must remove nothing");
+    }
+
+    #[test]
+    fn replace_refuses_naming_a_session_it_does_not_clash_with() {
+        let mut q = EvSessionQueue::default();
+        let clashing = sess(0, 6);
+        let innocent = sess(12, 18);
+        let (clashing_id, innocent_id) = (clashing.id, innocent.id);
+        q.insert(clashing).unwrap();
+        q.insert(innocent).unwrap();
+
+        let err = q
+            .replace(&[clashing_id, innocent_id], sess(3, 9))
+            .expect_err("naming a non-conflicting session must be refused");
+        assert_eq!(
+            err,
+            EvSessionReplaceRejection::NotTheConflictSet {
+                missing: vec![],
+                extra: vec![innocent_id],
+            }
+        );
+        assert_eq!(q.len(), 2, "a refused replace must remove nothing");
+    }
+
+    #[test]
+    fn replace_refuses_an_id_that_is_no_longer_queued() {
+        let mut q = EvSessionQueue::default();
+        let standing = sess(0, 6);
+        let standing_id = standing.id;
+        q.insert(standing).unwrap();
+        let stale = uuid::Uuid::new_v4();
+
+        let err = q
+            .replace(&[standing_id, stale], sess(3, 9))
+            .expect_err("a stale id must be refused");
+        assert_eq!(
+            err,
+            EvSessionReplaceRejection::NotQueued { ids: vec![stale] }
+        );
+        assert_eq!(q.len(), 1, "a refused replace must remove nothing");
+    }
+
+    #[test]
+    fn replace_displaces_several_clashes_all_or_nothing() {
+        let mut q = EvSessionQueue::default();
+        let a = sess(0, 6);
+        let b = sess(6, 12);
+        let (a_id, b_id) = (a.id, b.id);
+        q.insert(a).unwrap();
+        q.insert(b).unwrap();
+
+        let spanning = sess(3, 9);
+        let spanning_id = spanning.id;
+        let removed = q.replace(&[a_id, b_id], spanning).expect("both named");
+        assert_eq!(removed.len(), 2);
+        assert_eq!(q.iter().map(|s| s.id).collect::<Vec<_>>(), vec![spanning_id]);
+    }
+
+    #[test]
+    fn replace_with_no_conflicts_and_no_names_is_a_plain_insert() {
+        let mut q = EvSessionQueue::default();
+        q.insert(sess(0, 6)).unwrap();
+        let later = sess(12, 18);
+        let later_id = later.id;
+        let removed = q.replace(&[], later).expect("nothing clashes");
+        assert!(removed.is_empty());
+        assert_eq!(q.len(), 2);
+        assert!(q.iter().any(|s| s.id == later_id));
     }
 }
 

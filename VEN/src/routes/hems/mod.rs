@@ -2,6 +2,7 @@ mod arbiter;
 mod baseline_override;
 mod comfort;
 mod ev;
+mod ev_conflict;
 mod flexibility;
 mod history;
 mod misc;

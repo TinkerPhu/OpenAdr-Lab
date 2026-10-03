@@ -2746,3 +2746,28 @@ A lease is a guess about how long work takes, not a record of whether it is stil
 The lock survived its owner because nothing ties it to a live process — which is the price of
 making it a plain directory on the remote host, and worth it, but it means a stale lock is a
 normal outcome to be diagnosed rather than an anomaly.
+
+## WSL cargo and a remote test run do not fit in this host together (2026-10-04)
+
+`memory-budget` says to check free RAM before a WSL cargo build. I did — 1.7 GB free,
+above the ~1 GB floor — and started a `cargo check` while `run_all_tests.sh --e2e` was
+already running. The harness then killed three background tasks for low memory.
+
+The floor is not the whole rule. What matters is free RAM *minus what the new work will
+take*: a `cargo check -j 2` of this workspace grows `vmmem` by well over a gigabyte, so
+1.7 GB free is not 1.7 GB of headroom, it is roughly zero. And `run_all_tests.sh --e2e`
+looks remote but is not free locally — it keeps a driver, an ssh session and a log tail
+on this machine for the whole ~50 minutes.
+
+What survived is the useful part of the diagnosis: the E2E run itself was untouched,
+because the work happens on Node2. Only the local waiter died, and the suite kept writing
+its log. So the recovery is to re-arm the waiter, not to restart the suite — check whether
+the log is still growing before assuming a kill lost the run.
+
+Two habits from this:
+
+- **Serialise local heavy work.** One WSL cargo invocation at a time, and none while an
+  E2E/resilience run is in flight. There is no second core of memory to spend.
+- **`wsl --shutdown` is the cheapest gigabyte available.** It released 1.4 GB instantly
+  here. WSL restarts on the next invocation, paying only a cold-start, so there is no
+  reason to leave an idle VM resident while something else needs the RAM.

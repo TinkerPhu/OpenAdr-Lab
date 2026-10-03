@@ -10,6 +10,7 @@
 use crate::entities::asset::ComfortRate;
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::design_vocabulary::UserRequestMode;
+use crate::entities::device_session::EvSessionReplaceRejection;
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -42,6 +43,9 @@ pub struct CreateUserRequestParams {
     pub target_temp_c: Option<f64>,
     // ── Request mode (BL-28) — omitted = BY_DEADLINE (legacy behaviour) ─────
     pub mode: Option<UserRequestMode>,
+    /// EV only: the queued sessions this submission intends to displace. `None` =
+    /// displace nothing, so a clash is refused (`ev-session-conflict-resolution`).
+    pub replace_session_ids: Option<Vec<uuid::Uuid>>,
 }
 
 #[derive(Debug)]
@@ -74,6 +78,45 @@ pub enum RequestError {
         earliest_start: DateTime<Utc>,
         latest_end: DateTime<Utc>,
     },
+    /// The EV charging window overlaps sessions already queued, and the
+    /// submission did not state that it meant to displace them.
+    ///
+    /// Carries each clashing session in full, not just its id: the caller has to
+    /// name the plan back to the user ("your plan for Tue 06:00"), and looking the
+    /// ids up separately would make that prompt a second, independently derived
+    /// account of the very thing it is explaining - free to disagree with it.
+    EvSessionsConflict { conflicts: Vec<ClashingSession> },
+    /// A replace instruction was stated but does not match the queue. Carries the
+    /// queue's own rejection so the caller can re-prompt with current truth.
+    EvReplaceRejected {
+        rejection: EvSessionReplaceRejection,
+        conflicts: Vec<ClashingSession>,
+    },
+}
+
+/// A queued EV session a submission clashes with, reduced to what a prompt needs.
+///
+/// Deliberately not the whole `EvSession`: this crosses a boundary to be rendered,
+/// and the comfort curve, mode and budget of someone else's plan are not the user's
+/// business when all they are being asked is which of two plans to keep.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClashingSession {
+    pub id: uuid::Uuid,
+    pub window_start: DateTime<Utc>,
+    pub departure_time: DateTime<Utc>,
+    pub target_soc: f64,
+}
+
+impl ClashingSession {
+    /// Reduce a queued session to the fields a conflict prompt renders.
+    pub fn of(s: &crate::entities::device_session::EvSession) -> Self {
+        Self {
+            id: s.id,
+            window_start: s.window_start,
+            departure_time: s.departure_time,
+            target_soc: s.target_soc,
+        }
+    }
 }
 
 impl std::fmt::Display for RequestError {
@@ -86,6 +129,12 @@ impl std::fmt::Display for RequestError {
                 f,
                 "charging window is empty: available from {earliest_start} but due by {latest_end}"
             ),
+            RequestError::EvSessionsConflict { conflicts } => write!(
+                f,
+                "charging window overlaps {} queued session(s)",
+                conflicts.len()
+            ),
+            RequestError::EvReplaceRejected { rejection, .. } => write!(f, "{rejection}"),
         }
     }
 }
@@ -253,7 +302,8 @@ mod tests {
             soft_deadline: None,
             target_temp_c: None,
             mode: None,
-        }
+        },
+        replace_session_ids: None,
     }
 
     #[test]

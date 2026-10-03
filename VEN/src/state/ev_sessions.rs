@@ -10,7 +10,9 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::entities::device_session::{EvSession, EvSessionConflict, EvSessionQueue};
+use crate::entities::device_session::{
+    EvReplaceRefusal, EvSession, EvSessionClash, EvSessionQueue,
+};
 
 use super::AppState;
 
@@ -33,13 +35,54 @@ impl AppState {
     ///
     /// There is deliberately no `set_ev_sessions`: the checked insert is the only
     /// way in, so no producer can write an overlapping queue even by accident.
-    pub async fn insert_ev_session(&self, session: EvSession) -> Result<(), EvSessionConflict> {
-        self.hems.write().await.ev_sessions.insert(session)
+    pub async fn insert_ev_session(&self, session: EvSession) -> Result<(), EvSessionClash> {
+        let mut hems = self.hems.write().await;
+        match hems.ev_sessions.insert(session) {
+            Ok(()) => Ok(()),
+            // Resolved under the same guard that detected the clash, so what a
+            // caller reports cannot have drifted from what was refused.
+            Err(conflict) => Err(EvSessionClash {
+                candidate: conflict.candidate,
+                conflicts: conflict
+                    .conflicts
+                    .iter()
+                    .filter_map(|id| hems.ev_sessions.iter().find(|s| s.id == *id).cloned())
+                    .collect(),
+            }),
+        }
     }
 
     /// Remove one session by id, returning it when it was queued.
     pub async fn remove_ev_session(&self, id: uuid::Uuid) -> Option<EvSession> {
         self.hems.write().await.ev_sessions.remove(id)
+    }
+
+    /// Displace exactly the named sessions and queue `session`, atomically.
+    ///
+    /// One write critical section, so a concurrent submission cannot interleave
+    /// between the removal and the insertion and leave the user with neither
+    /// their old plan nor their new one. The enforcement is still
+    /// `EvSessionQueue::replace`, which is still built on the checked `insert`:
+    /// this method contributes the lock, not a second opinion about overlap.
+    pub async fn replace_ev_sessions(
+        &self,
+        replace_ids: &[uuid::Uuid],
+        session: EvSession,
+    ) -> Result<Vec<EvSession>, EvReplaceRefusal> {
+        let mut hems = self.hems.write().await;
+        let clashing = hems.ev_sessions.conflicts(&session);
+        match hems.ev_sessions.replace(replace_ids, session) {
+            Ok(removed) => Ok(removed),
+            // The conflict set is read under the same guard as the attempt, so a
+            // re-prompt describes the queue the refusal was actually about.
+            Err(rejection) => Err(EvReplaceRefusal {
+                rejection,
+                conflicts: clashing
+                    .iter()
+                    .filter_map(|id| hems.ev_sessions.iter().find(|s| s.id == *id).cloned())
+                    .collect(),
+            }),
+        }
     }
 
     /// Drop every session whose departure has passed; returns how many went.
