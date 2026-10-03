@@ -7,9 +7,25 @@ merged first.** This change consumes its `EvSessionQueue::insert` /
 Branch: `050-ev-session-user-conflict-resolution`. Prerequisite:
 `049-ev-session-queue-foundation` merged to main. Test-first throughout.
 
+## 0. The refusal is currently invisible (found 2026-10-04)
+
+049 shipped the 409 refusal with no UI for it, which is a `no-half-built-features` gap:
+`EvCard.handleConfirm` calls `postRequest({...})` with no `await` and no `.catch`, then closes
+the dialog immediately; `usePostRequest` declares no `onError`; and the `Alert` in
+`Devices.tsx` reports `useRequests()` (the fetch), not the mutation. So a refused EV
+submission today is an unhandled promise rejection: the dialog closes and the user is told
+nothing at all. Fix the generic path first, so the conflict prompt in §3 is an improvement on
+a working error surface rather than the only thing that ever reports a failure.
+
+- [ ] 0.1 Write a failing UI test that a rejected `postRequest` surfaces a visible error in the
+      EV dialog and that the dialog stays open, then make `handleConfirm` await and catch;
+      verify `cd VEN/ui && npm test` passes
+- [ ] 0.2 Verify the same gap in `HeaterCard` and `ShiftableLoadsCard` (both take
+      `postRequest` the same way) and fix whichever share it — sweep rule, not just the EV
+
 ## 1. Request validation and the conflict error
 
-- [ ] 1.1 Write failing unit tests in `VEN/src/controller/user_request.rs` for the new `RequestError` variants — a conflict carrying the clashing sessions, and an empty-window error when `earliest_start` is at or after the deadline; confirm they fail
+- [ ] 1.1 Write failing unit tests in `VEN/src/controller/user_request.rs` for the new `RequestError::EvSessionsConflict` variant carrying the clashing sessions; confirm they fail. (`EmptyChargingWindow` already exists — 049 added it, so only the conflict variant is new here.)
 - [ ] 1.2 Add those `RequestError` variants, carrying the clashing sessions as typed fields (id, window, target) per `docs/guidelines/ERROR_HANDLING.md` and design Decision 2, with a terse one-line `Display`; verify 1.1 passes and `cargo clippy --all-targets --all-features -- -D warnings` is clean
 - [ ] 1.3 Add `replace_session_ids: Option<Vec<Uuid>>` to `CreateUserRequestParams` and verify it deserialises as absent on every existing request body (a test over today's EV, heater and shiftable-load payloads)
 
