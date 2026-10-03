@@ -347,6 +347,11 @@ same step, and the two disagreed — so the next step is to read the actual resp
 (or the 502 it may be getting: `tests/entrypoint.sh` documents nginx caching a stale BFF IP, which
 turns every `/api/*` call into a 502 and would present exactly as an empty chart).
 
+> **Both sentences above are wrong, corrected 2026-10-03 — see "The mechanism" below.** The page
+> does *not* ask for 15 min at 5 s; it opens on 24 h at 900 s. And the 502 theory is dead. They are
+> left in place rather than deleted because two attempts were aimed at them, and a reader who finds
+> only the conclusion cannot tell which leads were already spent.
+
 **To resolve:** find the real condition and wait for *that*, or fix the page if the answer is that
 it never recovers without a reload. Raising the 60 s timeout is not a fix — it hides a rule nobody
 has written down.
@@ -380,12 +385,49 @@ comparison is worth, so it is recorded as evidence and not as a fix. **Do not cl
 green run**; close it when the diagnostic has fired and named the condition, or after enough full
 runs that the old failure rate would have shown.
 
-*What the pattern now argues against.* Data latency was the leading hypothesis and fits badly: the
-two single-feature runs on a freshly built stack — the worst case for an empty store — both
-passed 6/6, while the failure occurred in a full suite where 40 minutes of scenarios had already
-filled the store. If the store being cold were the cause, those results would be the other way
-round. Contention or cross-scenario interference fits better; the grounds on which the entry above
-rejected contention compared *a different scenario's* re-run, not this one under two loads.
+*An argument made here on 2026-10-03 and withdrawn the same day.* It read: data latency fits
+badly, because the two single-feature runs on a freshly built stack both passed while the failure
+happened in a full suite where the store was already full — so contention fits better. **The
+comparison was confounded**: those single-feature runs had the precondition step and the failing
+run did not, so two variables moved at once. Recorded because the conclusion ("force reproduction
+under load") was acted on, and because an invalid comparison that *sounds* controlled is the
+failure mode R-97 is also about.
+
+**The mechanism, found by reading `Fleet.tsx` rather than by another run (2026-10-03).**
+
+```tsx
+const WINDOWS = [{minutes: 15, stepSeconds: 5}, …, {minutes: 1440, stepSeconds: 900}];
+const [windowIndex, setWindowIndex] = useState(3);   // opens on 24 h / 900 s
+```
+
+The page opens on **24 h at 900 s steps**, not the 15 min at 5 s this entry recorded. The probe
+waits on **10 min at 5 s**. Same endpoint, a question **144x apart in window and 180x apart in
+step**. `fleet_store::group_and_resample` builds each VEN's series from the rows that exist and
+then `resample_uniform(step, Mean)`s it, so a store holding a few minutes of telemetry yields
+**zero 900 s buckets** while yielding plenty of 5 s ones. `FleetPowerChart` renders
+`fleet-chart-empty` *instead of* the chart whenever `rows.length == 0`.
+
+That one fact accounts for every observation this entry collected:
+
+| Observation | Accounted for |
+|---|---|
+| "the step passed and the chart was still empty" | rows at 5 s, none at 900 s — both true at once |
+| fails early in a run, passes in the `@isolated` pass minutes later | the store crosses one 900 s bucket |
+| "elapsed time is the variable" | that is the variable, and now it has a rule |
+| failed at load 7.31 *and* 2.33 | load-independent, as recorded |
+| reproduces without any of `048-ev-soc-state-variables` | unrelated, as recorded |
+
+**Resolved for the test (2026-10-03, option B):** the scenario now drives the page's own window
+selector to "15 min" before asserting, so elapsed time stops being a variable instead of being
+waited out. Assertions unchanged. The diagnostic added the day before had copied this entry's wrong
+15 min / 5 s figure and would have reported counts for a query the page never makes — also fixed.
+
+**What stays open, and it may be the more useful half.** An operator opening Fleet on a freshly
+started VTN reads *"No telemetry stored for the last 1440 minutes"* — which is false: telemetry
+exists, there is just less than one bucket of it. The page cannot distinguish "the store is still
+filling" from "nothing is reporting", and it defaults to the window where that is most likely.
+Deciding whether the default window is right, and whether that empty state should say something
+truer, is a product question and is what remains of R-99.
 
 ## R-94 — the MILP does not model the heater's thermostat deadband
 
