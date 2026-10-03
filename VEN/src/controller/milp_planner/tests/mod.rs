@@ -720,7 +720,7 @@ fn push_shiftable_load_contexts(
             n,
             &cum_s,
             now,
-            None,
+            &[],
             None,
             &[],
             0.0,
