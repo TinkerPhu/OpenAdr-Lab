@@ -63,6 +63,8 @@ const mockActiveRequest = {
   updated_at: "2024-01-01T10:00:00Z",
   session: {
     type: "ev", id: "sess-ev-01", target_soc: 0.9,
+    window_start: new Date(Date.now() - 3600_000).toISOString(),
+    expected_trip_distance_km: null,
     departure_time: new Date(Date.now() + 3_600_000).toISOString(),
     soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null,
     created_at: "2024-01-01T08:00:00Z", updated_at: "2024-01-01T10:00:00Z",

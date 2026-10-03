@@ -68,7 +68,9 @@ const USAGE_MODE_DISPLAY: Record<EvUsageMode, { label: string; planningChip: str
 // ── Props ────────────────────────────────────────────────────────────────────
 
 export type EvCardProps = {
-  request: UserRequestWithSession | undefined;
+  /** Every active EV request, in window order. An EV may hold several queued
+   *  sessions; showing only the first would hide plans the planner is serving. */
+  requests: UserRequestWithSession[];
   evSettings: EvSettings | undefined;
   /** ev-usage-simulation / ev-usage-forecast diagnostics; undefined while
    * loading, null when the EV has no usage schedule configured (the common
@@ -84,7 +86,7 @@ export type EvCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function EvCard(props: EvCardProps) {
-  const { request, evSettings, usageSim, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
+  const { requests, evSettings, usageSim, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
@@ -92,8 +94,12 @@ export function EvCard(props: EvCardProps) {
   const [softDeadline, setSoftDeadline] = useState(false);
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
   const [budgetEur, setBudgetEur] = useState("2.00");
+  // Empty = "available now" and "use the EV's own default distance" - the two
+  // things a user may state but usually will not.
+  const [availableFrom, setAvailableFrom] = useState("");
+  const [tripDistanceKm, setTripDistanceKm] = useState("");
 
-  const session = request?.session?.type === "ev" ? request.session : null;
+  const queued = requests.filter((r) => r.session?.type === "ev");
   const paused = evSettings?.paused_by_active_session ?? false;
   const oppEnabled = evSettings?.opportunistic_charging_enabled ?? false;
 
@@ -108,6 +114,8 @@ export function EvCard(props: EvCardProps) {
       mode,
       budget_eur: mode === "MAX_COST" ? Number(budgetEur) : undefined,
       completion_policy: "CONTINUE",
+      earliest_start: availableFrom ? new Date(availableFrom).toISOString() : undefined,
+      expected_trip_distance_km: tripDistanceKm ? Number(tripDistanceKm) : undefined,
       deadlines: [{
         latest_end: dt.toISOString(),
         max_total_cost_eur: null,
@@ -123,34 +131,68 @@ export function EvCard(props: EvCardProps) {
     <Card sx={{ height: "100%" }} data-testid="ev-card">
       <CardHeader title="EV Charging" />
       <CardContent>
-        {session && request ? (
+        {queued.length > 0 ? (
           <Box data-testid="ev-active-view">
-            <Chip label="ACTIVE" color="success" size="small" data-testid="ev-status-chip" sx={{ mb: 1 }} />
-            <Typography data-testid="ev-target-soc">
-              → {(session.target_soc * 100).toFixed(0)}% SoC
-            </Typography>
-            <Typography data-testid="ev-departure">
-              Depart: {fmtDate(session.departure_time)}
-            </Typography>
-            {session.soft_deadline && (
-              <Chip label="Soft deadline" size="small" data-testid="ev-soft-deadline-chip" sx={{ mt: 0.5 }} />
-            )}
-            {session.mode !== "BY_DEADLINE" && (
-              <Chip label={session.mode} size="small" data-testid="ev-mode-chip" sx={{ mt: 0.5, ml: 0.5 }} />
-            )}
-            <Typography data-testid="ev-estimated-cost" sx={{ mt: 0.5 }}>
-              Est. €{request.estimated_cost_eur.toFixed(2)}
-            </Typography>
+            {queued.map((req) => {
+              const session = req.session?.type === "ev" ? req.session : null;
+              if (!session) return null;
+              return (
+                <Box
+                  key={req.id}
+                  data-testid={`ev-session-${session.id}`}
+                  sx={{ mb: 1.5, pb: 1.5, borderBottom: "1px solid", borderColor: "divider" }}
+                >
+                  <Chip label="ACTIVE" color="success" size="small" data-testid="ev-status-chip" sx={{ mb: 1 }} />
+                  <Typography data-testid="ev-target-soc">
+                    → {(session.target_soc * 100).toFixed(0)}% SoC
+                  </Typography>
+                  {/* The window, not just the deadline: with several sessions queued
+                      "depart 08:00" alone does not say which one a reader is looking
+                      at, nor when the car is free to charge for it. */}
+                  <Typography data-testid="ev-window" variant="body2" color="text.secondary">
+                    {fmtDate(session.window_start)} → {fmtDate(session.departure_time)}
+                  </Typography>
+                  <Typography data-testid="ev-departure">
+                    Depart: {fmtDate(session.departure_time)}
+                  </Typography>
+                  {session.expected_trip_distance_km != null && (
+                    <Typography data-testid="ev-trip-distance" variant="body2" color="text.secondary">
+                      Trip after: {session.expected_trip_distance_km} km
+                    </Typography>
+                  )}
+                  {session.soft_deadline && (
+                    <Chip label="Soft deadline" size="small" data-testid="ev-soft-deadline-chip" sx={{ mt: 0.5 }} />
+                  )}
+                  {session.mode !== "BY_DEADLINE" && (
+                    <Chip label={session.mode} size="small" data-testid="ev-mode-chip" sx={{ mt: 0.5, ml: 0.5 }} />
+                  )}
+                  <Typography data-testid="ev-estimated-cost" sx={{ mt: 0.5 }}>
+                    Est. €{req.estimated_cost_eur.toFixed(2)}
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size="small"
+                    sx={{ mt: 1 }}
+                    data-testid="ev-unplan-btn"
+                    disabled={isDeleting}
+                    onClick={() => deleteRequest(req.id)}
+                  >
+                    Unplan
+                  </Button>
+                </Box>
+              );
+            })}
+            {/* Queueing another session is the capability itself; without this the
+                queue would be reachable only through the API. */}
             <Button
               variant="outlined"
-              color="warning"
               size="small"
-              sx={{ mt: 1 }}
-              data-testid="ev-unplan-btn"
-              disabled={isDeleting}
-              onClick={() => deleteRequest(request.id)}
+              data-testid="ev-plan-another-btn"
+              disabled={isPosting}
+              onClick={() => setDialogOpen(true)}
             >
-              Unplan
+              Plan another
             </Button>
           </Box>
         ) : (
@@ -237,6 +279,15 @@ export function EvCard(props: EvCardProps) {
             data-testid="ev-soc-slider"
           />
           <TextField
+            label="Available from"
+            type="datetime-local"
+            value={availableFrom}
+            onChange={(e) => setAvailableFrom(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            helperText="When the car is back and can charge. Leave empty for now."
+            inputProps={{ lang: "de", "data-testid": "ev-available-from-input" }}
+          />
+          <TextField
             label="Departure"
             type="datetime-local"
             value={departure}
@@ -244,6 +295,15 @@ export function EvCard(props: EvCardProps) {
             InputLabelProps={{ shrink: true }}
             inputProps={{ lang: "de" }}
             data-testid="ev-departure-input"
+          />
+          <TextField
+            label="Trip after departure (km)"
+            type="number"
+            value={tripDistanceKm}
+            onChange={(e) => setTripDistanceKm(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            helperText="How far you will drive. Leave empty to use this car's usual distance."
+            inputProps={{ min: 0, step: 10, "data-testid": "ev-trip-distance-input" }}
           />
           <FormControlLabel
             label="Soft deadline"
