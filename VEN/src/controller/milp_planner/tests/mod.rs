@@ -246,6 +246,8 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
             max_discharge_kw: v("max_discharge_kw"),
             v2g_capable: v("max_discharge_kw") > 0.0,
             battery_kwh: v("battery_kwh"),
+            consumption_kwh_per_km: 0.18,
+            default_trip_distance_km: 40.0,
             soc_target: v("soc_target"),
             soc_target_profile: v("soc_target"),
             default_charge_kw: ev.default_setpoint_kw,
