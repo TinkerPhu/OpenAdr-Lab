@@ -2718,3 +2718,31 @@ the compiler caught it one commit later.
 it. A module named after a feature rather than a responsibility is where unrelated live
 code goes to hide. The mapping now lives in `routes/error.rs`, where choosing a status
 code belongs.
+
+## Cleaning up a worktree can leak the lock a run still holds (2026-10-03)
+
+Workflow rule 5 says to remove a merged worktree as soon as the merge is confirmed. A
+detached `run_all_tests.sh` launched *from* that worktree releases the host lock at the
+end by calling `scripts/docker_host_lock.sh` — resolved relative to the directory it was
+started in. Remove the worktree before that release runs and it fails with
+
+    bash: .../worktrees/<gone>/scripts/docker_host_lock.sh: No such file or directory
+
+The suite itself had already passed; only the release was lost. The lock then sat on Node2
+for the rest of its 180-minute lease, with an owner string naming a path that no longer
+existed — so `release` could not match it either, because owner identity is
+`user@host:<worktree path>`. The next run simply queued behind a dead holder.
+
+Two things follow:
+
+- **Finish the run before removing its worktree.** A completed suite is not a finished
+  process; its cleanup still needs the directory it was launched from.
+- **An unexpected "HELD" is worth reading, not just waiting on.** The holder string names a
+  path. If that path does not exist, the lock is garbage regardless of its lease, and the
+  honest fix is to verify nothing is running on the host (`docker ps` for the test runner)
+  and remove the lock directory (`/tmp/openadr_<host>.lock`) rather than wait out the lease.
+
+A lease is a guess about how long work takes, not a record of whether it is still running.
+The lock survived its owner because nothing ties it to a live process — which is the price of
+making it a plain directory on the remote host, and worth it, but it means a stale lock is a
+normal outcome to be diagnosed rather than an anomaly.
