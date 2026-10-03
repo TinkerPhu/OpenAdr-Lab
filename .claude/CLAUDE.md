@@ -245,6 +245,17 @@ refactoring: before adding a feature in an area listed in docs/reference/TECHNIC
 check that file first. If the relevant debt is Small or Trivial effort, refactor it before
 adding new behaviour. All tests must pass before and after any refactor. Record newly
 discovered debt in TECHNICAL_DEBTS.md immediately — do not let debt accumulate silently.
+issues: every open issue (R-* in TECHNICAL_DEBTS.md, GB-*/BL-* in BACKLOG.md) carries
+Severity (S1-S4), Kind, Cost and Why-open. Kinds and their weights (higher = more important)
+live in docs/reference/ISSUE_KINDS.md; priority is derived from kind weight, then severity,
+never hand-set.
+  - Cost under ~1 hour: fix it in the current branch. Do not file it. Do not ignore it.
+  - Cost Small or more: file it with all four fields. Why-open is one of needs-decision |
+    needs-evidence | too-big; a row without one is rejected, and too-big names its first step.
+  - Nothing is deleted for age. Only a fix, or an explicit decision recorded in the commit
+    message, removes a row.
+  - A branch's final report states issues filed, fixed and deferred, so intake and output
+    stay visible.
 The Small/Trivial rule is a gate, not advice: before merging a branch run
 `python scripts/audit_debt_gate.py`. It lists every open Small/Trivial row whose
 `Affected files` this branch touched and fails until each is either fixed (row deleted from
