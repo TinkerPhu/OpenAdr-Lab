@@ -25,19 +25,19 @@ pub struct TaskStatus {
 impl AppState {
     /// Snapshot of every task that has been (re)spawned at least once.
     pub async fn task_statuses(&self) -> HashMap<String, TaskStatus> {
-        self.task_status.read().await.clone()
+        self.diagnostics.task_status.read().await.clone()
     }
 
     /// Record that `name`'s wrapped future has just been (re)spawned.
     pub async fn record_task_started(&self, name: &str, now: DateTime<Utc>) {
-        let mut guard = self.task_status.write().await;
+        let mut guard = self.diagnostics.task_status.write().await;
         guard.entry(name.to_string()).or_default().last_run_ts = Some(now);
     }
 
     /// Record that `name`'s wrapped future just completed — `success: false`
     /// for a panic, `true` for the unusual case it returned `Ok(())`.
     pub async fn record_task_completed(&self, name: &str, success: bool) {
-        let mut guard = self.task_status.write().await;
+        let mut guard = self.diagnostics.task_status.write().await;
         let entry = guard.entry(name.to_string()).or_default();
         entry.last_success = Some(success);
         entry.restart_count += 1;

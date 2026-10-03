@@ -54,13 +54,13 @@ impl VtnConnectionStatus {
 impl AppState {
     /// Current VTN reachability snapshot for `/health` and `/vtn/status`.
     pub async fn vtn_connection_status(&self) -> VtnConnectionStatus {
-        self.vtn_connection.read().await.clone()
+        self.diagnostics.vtn_connection.read().await.clone()
     }
 
     /// Record a successful VTN poll — clears any prior error and resets the
     /// backoff detail to zero (mirrors the poll loop's own reset-on-success).
     pub async fn record_vtn_poll_success(&self, now: DateTime<Utc>) {
-        let mut guard = self.vtn_connection.write().await;
+        let mut guard = self.diagnostics.vtn_connection.write().await;
         guard.connected = true;
         guard.last_success_ts = Some(now);
         guard.last_error = None;
@@ -74,7 +74,7 @@ impl AppState {
         error: String,
         backoff_s: f64,
     ) {
-        let mut guard = self.vtn_connection.write().await;
+        let mut guard = self.diagnostics.vtn_connection.write().await;
         guard.connected = false;
         guard.last_error = Some(error);
         guard.current_backoff_s = backoff_s;
@@ -82,12 +82,12 @@ impl AppState {
 
     /// Whether the last state-persist write succeeded.
     pub async fn storage_ok(&self) -> bool {
-        *self.storage_ok.read().await
+        *self.diagnostics.storage_ok.read().await
     }
 
     /// Record the outcome of a state-persist write attempt.
     pub async fn set_storage_ok(&self, ok: bool) {
-        *self.storage_ok.write().await = ok;
+        *self.diagnostics.storage_ok.write().await = ok;
     }
 }
 

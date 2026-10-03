@@ -64,7 +64,7 @@ its detail. Re-rate in the item, then here.
 | 🟡 Medium | GB-46 | VTN stimulus | Missing VEN-side instrumentation (tariff source event id, effective-limit column), so compliance cannot be proven from the data without harness reconstruction. |
 | 🟡 Medium | GB-52 | reliable system | The E2E broker runs anonymous while production requires credentials — the test bed does not exercise the auth path. |
 | 🔵 Low | R-74 | transparent UI | The Dashboard Simulation card hardcodes ev/heater/pv; battery, base load and shiftable loads are invisible there. Small, and the generic pattern already exists in `Controller.tsx`. |
-| 🔵 Low | R-77, R-90, R-89, R-33, R-71, R-36, R-38, R-39, R-44, R-47, R-48, R-66, R-73, R-91, R-95 | — | Hygiene, naming, dead code, coverage gaps and future-proofing. Do opportunistically, per this file's own "refactor first if Trivial/Small" rule. |
+| 🔵 Low | R-77, R-90, R-89, R-33, R-71, R-36, R-38, R-44, R-48, R-66, R-91, R-95 | — | Hygiene, naming, dead code, coverage gaps and future-proofing. Do opportunistically, per this file's own "refactor first if Trivial/Small" rule. |
 | 🔵 Low | GB-43, GB-39, GB-12 | — | Aspirational or cosmetic (V2G modelling, dark mode, docs alignment). |
 
 **Note on R-74:** rated Low because the same data is visible on Controller/Devices — but it is
@@ -94,8 +94,6 @@ additive, so it is the natural filler task between larger pieces.
 
 | ID | Description | Affected files | Effort | Risk | Gain |
 |----|-------------|----------------|--------|------|------|
-| R-39 | `state/mod.rs` mixes app wiring (`AppState`) with domain-ish value types (`EvSettings`, `HemsState`). Decide whether the two value types move to entities/ (as `AssetLedgerEntry` did) or stay — record the conclusion either way. | `VEN/src/state/mod.rs` | Trivial | Mechanical | Low — architecture clarity, no behavior change |
-| R-47 | **Narrowed 2026-10-03.** `AppState` had 17 `Arc<RwLock<..>>` fields, four of them near-identical bounded rings (notifications, event log, report submissions, flexibility history) each with its own cap const, accessor pair and duplicated `ring_evicts_oldest_past_cap` test — three of the four module docs said outright that they mirrored one of the others. Those four are now one `state::bounded_log::BoundedLog<T>`, tested once, so a new bounded diagnostic feed is a field and a cap rather than a module. **Still open:** the flat diagnostic fields proper (`vtn_connection`, `storage_ok`, `task_status`, `wire_rejections`) have no grouping, so they still grow linearly with every observability WP — a `diagnostics: DiagnosticsState` sub-struct. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/state/mod.rs` | Small | Low | Low-Medium — prevents compounding maintenance debt on every future observability WP |
 
 ### Code & repo hygiene
 
@@ -106,7 +104,6 @@ additive, so it is the natural filler task between larger pieces.
 | R-71 | **Re-scoped 2026-10-03 after a measured pass: 50 unjustified `#[allow(...)]` sites down to 42, and the whole `unused_imports` class is gone.** The original entry listed 9 sites in the assets/simulator area; a repo-wide count found 50, of which 13 were `unused_imports`. Those were not a hygiene problem: `milp_planner/mod.rs`'s ten were suppressing a correct dead-code warning (most of the names were used by nothing — see the 2026-10-03 journal entry), and the rest became `#[cfg(test)]` re-exports, which makes the claim checkable instead of asserted. Three `dead_code` allows covered genuinely dead items, now deleted (`asset_max_power`, `HvacService`) or wired up (`UserRequestService::create_shiftable`). **What remains: 42 sites, 26 of them `clippy::too_many_arguments`** — i.e. mostly a parameter-list problem, not a comment problem. `Simulator::tick` (25 params) and `spawn_sim_tick` (21) are discharged via `simulator::TickInputs` and `boot::World`; the biggest left are `MilpParticipant::build_milp_context` (18, trait-mandated and justified on its line in most impls) and `build_solve_request` (29, which is also R-40's `cycle.rs` entry). Fix the signature where there is a real parameter object to name, and add the same-line justification only where the breadth is genuinely trait-mandated. | `VEN/src` (run `grep -rn "#\[allow(" VEN/src --include="*.rs" | grep -v tests/ | grep -v "// "`) | Small | Low | Low — the dead-code half is done; the rest is signature work |
 | R-38 | (a) `VEN/Cargo.toml` carries blueprint-era comments (commented-out `openleadr-client` etc.); (b) verify `VTN/data/db` (runtime artifact) is gitignored. | `VEN/Cargo.toml`, `VTN/data/` | Trivial | Low | None — pure hygiene |
 | R-44 | `/health` handler (`routes/system.rs::health`) deep-clones the full `VtnConnectionStatus` and active `Plan` on every poll just to read a couple of fields. Cheap today but grows with `Plan` size; consider a narrower state accessor. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/routes/system.rs` | Trivial | Low | Low — cheap today, future-proofing only |
-| R-73 | **EV half fully resolved (ev-soc-state-variables, 2026-10-02): there is no EV SoC-trajectory integrator at all any more — R-93 made the plan's SoC curve a solved variable (`EvMilpVars::soc_ev`) and deleted `asset_port::ev_soc_trajectory`, so the two implementations that could drift are both gone.** (Previously partially resolved by ev-usage-forecast 2026-09-26, which consolidated `EvCharger::soc_trajectory` into that now-deleted function.) Still open for the other three pairs: `Battery::future_state_values`, `EvCharger::future_state_values_at`, `Heater::future_state_values` are never called — `asset_port.rs` has separate, actually-used "Mirrors X" reimplementations (`battery_future_state`, `ev_future_state_at`, `heater_future_state`). Confirmed pre-existing via `git stash` + grep. Currently `#[allow(dead_code)]`'d with a same-line note pointing here. Fix: either delete the remaining dead methods, or delete `asset_port.rs`'s duplicates and make callers use the trait methods directly (diff them before choosing — the EV one had not drifted). | `VEN/src/assets/battery.rs`, `VEN/src/assets/ev.rs`, `VEN/src/assets/heater.rs`, `VEN/src/controller/milp_planner/asset_port.rs` | Trivial | Low | Low — dead code plus a possible silent duplication/drift risk between the two implementations |
 | R-74 | Found while adding `shiftable_load` as a new asset type (`shiftable-load-as-asset`): `VEN/ui/src/pages/Dashboard.tsx`'s "Simulation" card dispatches per asset by hardcoded presence checks (`"ev" in sim.data.assets`, `"heater" in ...`, `"pv" in ...`) with no case — and no generic fallback — for `battery`, `base_load`, or the new `shiftable_load`. Pre-existing gap (Battery/BaseLoad were already invisible there before this change), not introduced by it; not fixed as part of that change since it's a UI-layer refactor unrelated to the backend asset-dispatch work. Contrast with `Controller.tsx`/`AssetSpecsTable.tsx`'s `deriveAssetSummaries`, which already has a generic `HARDCODED_IDS`-exclusion fallback loop covering any asset_id it doesn't special-case. Fix: give `Dashboard.tsx`'s Simulation card the same generic fallback (or iterate `sim.data.assets` by `asset_type` rather than a fixed id list). | `VEN/ui/src/pages/Dashboard.tsx` | Small | Low | Low — one dashboard card under-displays some asset kinds; the same data is already visible via Controller/Devices | 
 | R-66 | `run_all_tests.sh`'s GB-24 pre-flight capacity check (`MIN_AVAILABLE_MEM_MB=800`) is a first-pass heuristic from one live `ssh Node2 "free -m"` observation (2026-08-14: 3794 MB total, 2482–2919 MB available with the resident fleet running), not empirically calibrated against an actual degraded run's memory profile. Same class as R-27 (hard-coded tuning constants). May need tuning if it proves too strict (blocks a run that would've been fine) or too loose (still lets a degraded run through). | `run_all_tests.sh` | Trivial | Low | Low — config-flexibility/accuracy concern only, not a functional defect |
 
@@ -273,6 +270,38 @@ which is also the shape the fix above should aim for.
 horizon (`plan_zones`-derived when set, else `plan_horizon_h`) and have both
 `tasks/planning/cycle.rs` and `usage_sim_plan_ahead.rs` call it, instead of the cycle task
 reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always agreed.
+
+## R-39, R-47, R-73 — RESOLVED 2026-10-03 (`refactor/state-grouping-and-dead-asset-methods`)
+
+Cleared together because 051 is about to edit `state/mod.rs` and `assets/ev.rs` again, and the
+Small/Trivial rule wanted them gone before new behaviour landed, not after.
+
+**R-39** asked for a decision and got one. `EvSettings` is a domain value — two booleans whose
+meaning is the same whether they arrive from a route, a tick, or a restored snapshot — so it moved
+to `entities/ev_settings.rs`, re-exported from `state` for the callers that already look there.
+`HemsState` stayed in `state/`, by the same test applied the other way: its field list is defined
+by what must survive a restart, which is a persistence concern, and moving it would make
+`entities/` the owner of the storage schema.
+
+**R-47**'s remaining half is done: the four flat diagnostic fields (`vtn_connection`,
+`wire_rejections`, `storage_ok`, `task_status`) are now `state::diagnostics::DiagnosticsState`, so
+the next observability feed is a field in that struct rather than a fifth `Arc<RwLock<..>>` on the
+application root. Deliberately four independent locks inside one struct, not one lock over all
+four: they are written by four unrelated tasks and a shared lock would couple them into each
+other's contention for nothing. Every caller already went through an accessor
+(`vtn_connection_status()`, `storage_ok()`, `wire_rejections()`, `task_statuses()`), so no call
+site outside `state/` changed — which is also why this stayed Small.
+
+**R-73** is fully closed. The three dead `future_state_values*` methods on `Battery`, `EvCharger`
+and `Heater` are gone. The duplication existed because `controller/milp_planner` may never import
+`crate::assets::` (`ven-architecture`), so `asset_port.rs` had to carry its own copy — the register's
+suggested alternative, "make callers use the trait methods directly", was structurally impossible.
+The durable fix was the one the heater already demonstrated: the conversion lives in
+`entities::asset_params` (`battery_soc_from_energy`, `ev_soc_clamped`, beside the existing
+`heater_temp_c_from_energy`), which both rings may import, and `asset_port.rs` delegates to it. The
+deleted methods' tests moved onto those shared functions, and `asset_port`'s three — the ones
+`planned_state.rs` actually calls, which had no tests at all — gained coverage for the map key each
+is read by.
 
 ## R-92, R-93 — RESOLVED 2026-10-02 (`ev-soc-state-variables`)
 

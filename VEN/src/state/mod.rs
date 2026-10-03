@@ -24,9 +24,10 @@ mod arbiter;
 mod bounded_log;
 mod capacity_curves;
 mod connection;
+mod diagnostics;
+mod ev_sessions;
 mod event_log;
 mod flexibility_history;
-mod ev_sessions;
 mod grid_signals;
 mod heuristics;
 mod obligations;
@@ -40,24 +41,14 @@ mod wire_health;
 
 pub use arbiter::ArbiterDiagnostics;
 pub use connection::VtnConnectionStatus;
+pub use diagnostics::DiagnosticsState;
 pub use event_log::EventLogEntry;
 pub use task_status::TaskStatus;
 
-/// User-controllable settings for the opportunistic EV charging overlay.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EvSettings {
-    /// When true (default), the dispatcher routes live PV surplus to the EV when
-    /// no EvSession is active. Automatically paused while an EvSession exists.
-    #[serde(default = "bool_true")]
-    pub opportunistic_charging_enabled: bool,
-    /// Derived: true while any EvSession is active. Set by tick loop, not user-settable.
-    #[serde(default)]
-    pub paused_by_active_session: bool,
-}
-
-fn bool_true() -> bool {
-    true
-}
+/// R-39: a domain value, so it lives in `entities::ev_settings`. Re-exported here
+/// because `HemsState` holds one and the state layer is where callers already look
+/// for it; the definition is not duplicated.
+pub use crate::entities::ev_settings::EvSettings;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PollingState {
@@ -149,18 +140,11 @@ pub struct AppState {
     /// persisted through SettingsPort, re-seeded at startup).
     pub comfort_overrides:
         Arc<RwLock<std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>>>,
-    /// WP-T1: VTN reachability, written by `tasks::poll_events`, read by
-    /// `GET /health` and `GET /vtn/status`.
-    pub vtn_connection: Arc<RwLock<VtnConnectionStatus>>,
-    /// Objects the VTN sent that we refused, keyed by resource. See
-    /// `state/wire_health.rs`.
-    pub wire_rejections: Arc<RwLock<std::collections::BTreeMap<String, String>>>,
-    /// WP-T1: whether the last state-persist write succeeded, written by
-    /// `tasks::state_persist`, read by `GET /health`.
-    pub storage_ok: Arc<RwLock<bool>>,
-    /// WP-T3: per-task restart/outcome status, written by `tasks::supervised_spawn`,
-    /// read by `GET /tasks/status`. Keyed by task name; entries created lazily.
-    pub task_status: Arc<RwLock<std::collections::HashMap<String, TaskStatus>>>,
+    /// What the VEN knows about its own health: VTN reachability, refused wire
+    /// objects, the last persist outcome, per-task restart status. Grouped so the
+    /// next observability feed joins a family instead of becoming a fifth flat
+    /// field here (R-47) — see `state/diagnostics.rs`.
+    pub diagnostics: DiagnosticsState,
     /// WP-T4: VEN-operational event log — deliberately separate from
     /// `notifications` (see `state/event_log.rs`).
     pub event_log: bounded_log::BoundedLog<EventLogEntry>,
@@ -213,10 +197,7 @@ impl AppState {
             })),
             notifications: bounded_log::BoundedLog::new(NOTIFICATION_RING_CAP),
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
-            wire_rejections: Arc::new(RwLock::new(std::collections::BTreeMap::new())),
-            storage_ok: Arc::new(RwLock::new(true)),
-            task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            diagnostics: DiagnosticsState::new(),
             event_log: bounded_log::BoundedLog::new(event_log::EVENT_LOG_RING_CAP),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
             report_windows: Arc::new(RwLock::new(Default::default())),
