@@ -115,7 +115,10 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
 /// GET /user-requests — list all user requests with embedded session details.
 pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
     let requests = ctx.state.active_requests().await;
-    let ev = ctx.state.ev_session().await;
+    // The whole queue: each request resolves to the session it owns, by id. Matching
+    // against one global session meant that with several queued, only whichever
+    // happened to be stored could ever be shown - the rest reported no session at all.
+    let ev = ctx.state.ev_sessions().await;
     let heater = ctx.state.heater_target().await;
     let loads = ctx.state.shiftable_loads().await;
 
@@ -125,8 +128,8 @@ pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
             let session = req.session_id.and_then(|sid| {
                 match req.session_type {
                     Some(SessionType::Ev) => ev
-                        .as_ref()
-                        .filter(|s| s.id == sid)
+                        .iter()
+                        .find(|s| s.id == sid)
                         .cloned()
                         .map(SessionDetail::Ev),
                     Some(SessionType::Heater) => heater
@@ -141,7 +144,7 @@ pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
                         .map(SessionDetail::ShiftableLoad),
                     None => {
                         // Legacy: try all session types by id match
-                        if let Some(s) = ev.as_ref().filter(|s| s.id == sid) {
+                        if let Some(s) = ev.iter().find(|s| s.id == sid) {
                             return Some(SessionDetail::Ev(s.clone()));
                         }
                         if let Some(t) = heater.as_ref().filter(|t| t.id == sid) {
@@ -309,7 +312,26 @@ pub async fn post_requests(
     if UserRequestService::is_ev(&body) {
         match UserRequestService::create_ev(body, &asset_data, now) {
             Ok((user_req, session)) => {
-                ctx.state.set_ev_session(Some(session.clone())).await;
+                // Refuse a clash; never displace. A standing plan silently losing to
+                // a spontaneous one is the failure this queue exists to prevent, so
+                // the submission is rejected with the clashing sessions named and
+                // nothing is touched. `ev-session-user-conflict-resolution` turns
+                // this refusal into a one-click "replace that one?" offer; until it
+                // lands the user removes the old plan deliberately.
+                if let Err(conflict) = ctx.state.insert_ev_session(session.clone()).await {
+                    warn!(
+                        "POST /user-requests (EV) refused: overlaps {:?}",
+                        conflict.conflicts
+                    );
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(serde_json::json!({
+                            "error": conflict.to_string(),
+                            "conflicts": conflict.conflicts,
+                        })),
+                    )
+                        .into_response();
+                }
                 ctx.state.upsert_request(user_req.clone()).await;
                 ctx.state
                     .push_controller_event(

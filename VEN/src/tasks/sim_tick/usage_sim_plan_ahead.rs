@@ -215,7 +215,7 @@ mod tests {
         let sim = sim_with(params);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
         sync_plan_ahead_session(&state, &sim, now).await;
-        assert!(state.ev_session().await.is_none());
+        assert!(state.ev_sessions().await.is_empty());
     }
 
     #[tokio::test]
@@ -224,7 +224,7 @@ mod tests {
         let sim = sim_with(ev_params_with_plan_ahead(false));
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
         sync_plan_ahead_session(&state, &sim, now).await;
-        assert!(state.ev_session().await.is_none());
+        assert!(state.ev_sessions().await.is_empty());
     }
 
     #[tokio::test]
