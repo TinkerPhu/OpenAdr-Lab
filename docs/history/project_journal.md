@@ -14064,3 +14064,83 @@ Numbers are in `docs/reference/R97_PLANNER_BENCHMARKS.md`.
 clock.** When phase 2 runs out of budget, a stronger signal for the thing you want removed
 (starts) lets the solver find it within the budget. A larger budget finds the same plan at
 twice the CPU. Weights that act on something else (ramp) buy smoothness at the cost of service.
+
+---
+
+## 049 — an EV holds a queue of charging sessions (2026-10-03)
+
+**What was asked for:** multiple EV charging sessions per VEN — settable by hand, used by
+the simulation to stand in for a user, and planned for across the horizon. Overlaps are a
+user input mistake, not concurrency: one charge point, one car.
+
+**What was there:** `HemsState.ev_session: Option<EvSession>`, one slot, every writer
+overwriting it. A second request displaced the first silently.
+
+### The queue
+
+`EvSessionQueue` is a newtype over `Vec<EvSession>`, not a bare `Vec`, because the
+ordered/non-overlapping invariant is the whole point and three producers write it. The only
+way in is a checked `insert`, so an overlapping queue is unrepresentable rather than merely
+untested. Windows are half-open `[window_start, departure_time)`, which makes "one session's
+departure is the next one's window start" a non-conflict — the car leaves and comes back —
+matching `active_trip_at`'s existing convention.
+
+Conflict *policy* stays with each producer: the simulated schedule skips and fills the gaps
+around a stated session; a user's clashing submission is refused with the clashing sessions
+named. Keeping that out of the queue is what lets one `insert` serve them all.
+
+### Three things the plan got wrong, found by checking rather than by tests
+
+1. **The VTN was a session producer.** It created `EvSession`s — the same object a user's own
+   request creates, distinguished only by `origin`. The queue made the cost concrete: sessions
+   may not overlap, so a grid signal could block the user from booking their own car. Disabled
+   on the user's instruction, code preserved uncalled, recorded as R-100. The specs had to be
+   corrected too: they still said "a user request or the VTN".
+2. **The user's primary ask would have landed last.** As split, 049 gave every stated session
+   `window_start = now`, so any two overlapped and only 050 let a user state a window — the
+   simulation could hold a week of sessions while a human still could not create two. The
+   refusal and the `earliest_start` → `window_start` mapping moved into 049.
+3. **049's own planning spec was unsatisfiable.** It said "the charge the vehicle is expected
+   to consume while away SHALL be accounted for between sessions", but `EvSession` carried no
+   consumption field, so for a manually stated series the planner assumed the car returned as
+   it left. Added as step 3b.
+
+### The bug step 3b's worked example exposed
+
+Two stated sessions, both wanting 0.80, car starting at 0.80, a 30 % trip between them.
+`firm_required_kwh` measured demand as `target_soc - soc_init` — "nothing needed". The
+guarantee band was zero-width, `ev_energy == bought` forced every charging variable to zero,
+and the whole requirement was absorbed by the shortfall slack. **The plan charged not at
+all** — precisely the failure the stated distance exists to prevent. It now measures from the
+live SoC *minus what the trips before that deadline consume*.
+
+### A live regression, caught by the user, not by the tests
+
+Mid-way through, the deployed VEN-1 showed its EV charging to 100 % against an 80 % target
+with no trip drop visible at all — 41 charging slots, 28.1 kWh, zero decreases in 288 slots.
+Cause: R-93 (merged earlier this session) had made the band-accounting equality
+whole-horizon, and `ev_energy_segments` prices bands from the current SoC to a *full* pack.
+Beyond-target buying escaped its deadline confinement, so the solver bought it across all
+48 h and refilled the predicted drop in the very slot it occurred. Fixed by bounding
+`energy_expr` at the latest obligation's deadline, shipped and redeployed separately from
+049; VEN-1 now holds flat at 0.800.
+
+**The uncomfortable part:** I flagged that whole-horizon equality as the design's main risk,
+ran the arm-by-arm mode matrix, saw it green, and concluded it was safe. It took a real fleet
+profile — forecast mode, a trip two days out, a 48 h horizon — to expose it. A test matrix
+that covers every *arm* can still miss the interaction between an arm and a horizon.
+
+**Key learning — a check whose failure reads as success.** Three variants bit me in one
+session: `| tail -5` hiding a lock script's exit 2 (two sessions one command from building
+concurrently), `grep -c DONE` matching BuildKit's own `#20 DONE` output, and `grep -c X ||
+echo 0` yielding `"0
+0"` for a no-match, which compares unequal to `"0"` and reads as
+success. The existing KEY_LEARNINGS entry covered the first and did not stop the other two.
+The rule that covers all three: never read a status through a pipe, and never let a filter's
+*absence of output* stand for success — assert on a positive signal instead.
+
+**Also learned — let the compiler enumerate, but verify what the regex did.** Twice a
+pattern-based edit landed in the wrong struct: tests inserted inside `BaselineOverride`
+(because the file does not end with its test module), and `window_start` added to four
+`EvCharger` literals (which also have a `departure_time`). Both were found by writing a check
+for the enclosing struct rather than by trusting the edit — the second one *before* compiling.

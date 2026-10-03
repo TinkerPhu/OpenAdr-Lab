@@ -354,12 +354,28 @@ Step/LOCF hold; slots with no tariff data at all fall back to hardcoded defaults
 #### 2.3.1 Session Intent in the MILP
 
 Device sessions (`EvSession`, `HeaterTarget`, `ShiftableLoad`) provide user intent as solver
-constraints — the solver does not iterate over session objects directly:
+constraints — the solver does not iterate over session objects directly.
+
+An EV holds a **queue** of charging sessions (`EvSessionQueue`, `entities/device_session.rs`),
+ordered by window start and never overlapping — a household EV has a sequence of departures,
+not one. Each session's window is the half-open `[window_start, departure_time)`, so one
+session's departure may be the next one's window start (the car leaves and comes back) without
+the two conflicting. The invariant is enforced by construction: the only way in is a checked
+`insert`, which returns the ids it clashes with rather than displacing anything, so an
+overlapping queue is unrepresentable rather than merely untested.
+
+Three things write that queue — a user request, the simulated usage schedule, and (disabled,
+see R-100) the VTN. What to *do* about a conflict is each producer's own policy: the simulated
+schedule skips and fills the gaps around a stated session, while a user's clashing submission
+is refused with the clashing sessions named. Keeping that decision out of the queue is what
+lets one `insert` serve them all.
 
 | Session field | MILP use |
 |---|---|
 | `EvSession.soft_deadline` | `false` → `MilpLoadMode::MustRun`; `true` → `MayRun` |
+| `EvSession.window_start` | → per-slot availability: chargeable inside any session's window, nowhere else |
 | `EvSession.departure_time` | → an `EvObligation`'s `deadline_step` (one per departure) |
+| `EvSession.expected_trip_distance_km` | → via `EvCharger::expected_trip_drop`, the SoC the following trip consumes |
 | `HeaterTarget` presence | present → `MustRun` (hard deadline); absent → `MayRun` (autonomous, no deadline) |
 | `HeaterTarget.ready_by` | → horizon constraint step `t_dead_step` |
 | `EvSession.target_soc` | → that `EvObligation`'s `target_soc`, bound on `soc_ev` at its deadline |
@@ -831,10 +847,15 @@ that answers "is this EV here right now" — OR-ing the existing
 trip's window — so both the live tick (`apply_usage_sim_tick`) and
 `simulate_forward`'s forecast ask the same question the same way. An opt-in
 "plan ahead" setting reuses `EvSession` directly rather than adding a second
-planner-facing deadline concept: when enabled, the EV's next simulated leave
-is written as a `SimulatedUsage`-origin session (`tasks::sim_tick::
-usage_sim_plan_ahead`), but only when no real user/VTN session is active — a
-real session always wins and is never touched by the simulated schedule.
+planner-facing deadline concept: when enabled, a **rolling seven days** of
+predicted trips are queued as `SimulatedUsage`-origin sessions
+(`tasks::sim_tick::usage_sim_plan_ahead`), one per trip, topped up each tick.
+Each session's window opens at the *previous* trip's return — the car cannot
+charge while it is out — and the imminent one opens at `now`; walking the trips
+in order is what supplies that without a second notion of "when is the car home".
+The producer is idempotent by construction, since it runs every tick: a trip
+already queued is skipped. A stated session always wins — the simulated schedule
+skips any trip that clashes with one and places the rest of the week around it.
 
 **EV usage forecast** (`ev-usage-forecast`) is the alternative class to
 `usage_sim`, chosen per EV profile (`usage_forecast:` instead of `usage_sim:`;
