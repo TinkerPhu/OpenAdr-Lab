@@ -7,6 +7,7 @@
               R_ASSETS["assets.rs\nGET /forecast/:id\n/history/:id\n/capability/:id"]
               R_REPORTS["reports.rs\nGET/POST /reports"]
               R_TRACE["trace.rs\nGET /trace/events"]
+              R_ERR["error.rs\nDomainError → HTTP status\n(the one presentation-boundary mapping)"]
           end
           subgraph TASKS["tasks/"]
               T_SIMTICK["spawn_sim_tick()\ntick_once()"]
@@ -22,6 +23,7 @@
               T_PROGRESS["spawn_progress_ticker()"]
               T_FLEETTRACE["fleet_trace::spawn()\npublishes controller trace"]
               T_SUPERVISE["supervised_spawn()\nrestarts any loop that dies"]
+              T_DAILY["daily_gate.rs\nDailyGate — one UTC-day gate,\nshared by history_sampler + heuristics_job"]
           end
       end
 
@@ -29,7 +31,8 @@
           SVC_PLAN["PlanningService\nadopt_if_warranted()\nevaluate_acceptance_gate()"]
           SVC_UREQ["UserRequestService\ncreate_ev()\ncreate_heater()\ncancel()"]
           SVC_OBLIG["ObligationService\ncheck_and_fulfill()"]
-          SVC_HEMS["EvSessionService\nHvacService"]
+          SVC_HEMS["EvSessionService"]
+          SVC_HSAMP["history_sampling.rs\nHistorySampler — 1-min downsample\n(was tasks/history_sampler/accumulator.rs)"]
       end
 
       subgraph DOMAIN["🎯 Domain / Controller"]
@@ -47,7 +50,7 @@
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()"]
               C_PORT_MILP["≪trait≫\nAssetMilpContext\nbuild_variables()\nextract_solution()"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
-              C_ENVELOPE["site_headroom.rs\ncompute_site_headroom()"]
+              C_COMMSLOSS["comms_loss.rs\nCommsLossState\npv_generation_limit()"]
               C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
               C_PORT_TELEM["≪trait≫\nTelemetryPort\npublish()\nsample_due(now)"]
               C_ACCUM["report_accumulator.rs\nappend + bounded trim"]
@@ -56,6 +59,7 @@
               C_MILP["milp_planner/\nrun_planner()\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
           end
           RPTWIN["state/report_windows.rs\nper-(event,payload) interval windows"]
+          BLOG["state/bounded_log.rs\nBoundedLog&lt;T&gt; — notifications,\nevent log, report submissions,\nflexibility history"]
           STATE["AppState\nactive_plan\nactive_requests\nev_session\ncapacity_state\ncontroller_trace\ntariff_ledger"]
       end
 
@@ -70,6 +74,10 @@
               A_PV["PvInverter\nPvState"]
               A_BASE["BaseLoad\nBaseLoadState"]
               A_GRID["Grid\nGridState"]
+              SIM_HEADROOM["site_headroom.rs\ncapacity_headroom.rs\ntake &SimState, so infra not domain"]
+              SIM_INJECT["inject.rs\napply_state_injections()"]
+              SIM_TICKIN["tick_inputs.rs\nTickInputs — one named\nobject for tick's 25 inputs"]
+              OWNSTATE["assets/own_state.rs\nown::&lt;S&gt;(state)\nthe config/state pairing,\ndeclared once, checked once"]
           end
           VTN_CLIENT["vtn.rs\nVtnClient\nOAuth2 HTTP client"]
           PROFILE["profile.rs\nProfileConfig\nBatteryParams\nEvParams\nHeaterParams"]
@@ -79,7 +87,8 @@
       end
 
       subgraph ENTRY["🚀 Entry / Context"]
-          MAIN["main.rs\nbuild_domain_params()"]
+          MAIN["main.rs\nconfigure · assemble · spawn · serve"]
+          BOOT["boot/\nports.rs — every outbound adapter\nbackground.rs — every supervised loop\nserve.rs — router + shutdown persist\nWorld — the assembled state\nbuild_domain_params()"]
           APPCTX["AppCtx\nstate: AppState\nvtn: VtnClient ⚠️ \nsim: Arc<Mutex<SimState>> ⚠️ \ntrigger_tx\nplanner_event_tx\
       end
 
@@ -101,7 +110,7 @@
       T_PLANNING --> SVC_PLAN
       T_PLANNING --> C_PORT_SIM
       T_PLANNING --> C_MILP
-      T_PLANNING --> C_ENVELOPE
+      T_SIMTICK --> SIM_HEADROOM
       T_EVENTS --> C_OAADR
       T_EVENTS --> C_PORT_VTN
       T_REPORTS --> C_REPORTER
