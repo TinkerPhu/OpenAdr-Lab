@@ -11,6 +11,7 @@ use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
+mod assemble;
 mod cycle;
 mod cycle_state;
 

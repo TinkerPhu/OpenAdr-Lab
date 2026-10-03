@@ -13,11 +13,7 @@ use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
-use crate::services::planning::PlanCycleInputs;
-use crate::simulator::plan_context::{
-    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot,
-    resolve_base_load_forecast_kw, resolve_pv_forecast_kw,
-};
+use crate::simulator::plan_context::{apply_pending_pv_inject, clone_sim_snapshot};
 use crate::simulator::SimState;
 use crate::state::AppState;
 
@@ -54,10 +50,6 @@ pub(super) async fn run_plan_cycle(
     let (trigger_reason, trigger_event_ids) = (reason.as_str(), signal.event_ids.as_slice());
     // One read of the world, before anything is solved against it.
     let st = super::cycle_state::read_cycle_state(state, active_objective).await;
-    let capacity = state.capacity_state().await;
-    let capacity_schedule = state.planned_capacity_limits().await;
-    let alert_windows = state.alert_windows().await;
-    let simple_windows = state.simple_windows().await;
     // Clone SimState snapshot so the Mutex is released immediately.
     // MILP solving takes 18-60s on Node1 ARM64; holding the lock would
     // block sim ticks and /capability reads for the entire duration.
@@ -81,81 +73,27 @@ pub(super) async fn run_plan_cycle(
     // ── Run blocking HiGHS solve off the async runtime ────────────
     let solve_start = std::time::Instant::now();
 
-    // Read before the blocking solve so heater tiers pin to the last adopted plan.
-    let anchor_until = state.anchor_until().await;
+    // The plan in force: the heater anchor pins against it, and the adoption
+    // gate needs the same value again after the solve.
     let current_plan = state.active_plan().await;
-    let PlanCycleInputs {
-        tariff_ts,
-        n_slots,
-        cum_s,
-        lambda_sw,
-        c_terminal_eur_kwh_by_asset,
-        heater_anchor,
-    } = crate::services::planning::build_plan_cycle_inputs(
-        &st.rates,
-        planner,
-        asset_params,
-        current_plan.as_ref(),
-        anchor_until,
-        now,
-    );
-
-    // Assembled here, not at the reads above, because `tariffs` is the
-    // stale-rate-processed series `build_plan_cycle_inputs` just returned.
-    let grid = crate::entities::grid_signals::GridSignals {
-        tariffs: tariff_ts,
-        capacity,
-        capacity_schedule,
-        alert_windows,
-        simple_windows,
-    };
-
-    // Build per-asset MILP contexts from live simulator state.
-    // This happens before spawn_blocking so asset states are captured at this instant.
-    let asset_contexts = build_asset_contexts(
-        &sim_snap,
-        n_slots,
-        &cum_s,
-        now,
-        st.ev_sess.as_ref(),
-        st.heat_tgt.as_ref(),
-        asset_params,
-        planner,
-        lambda_sw,
-        &c_terminal_eur_kwh_by_asset,
-        &heater_anchor,
-        &state.comfort_overrides_map().await,
-    );
-
-    // Live PvInverter's own weather/decay-aware forecast; None with no live "pv" asset.
-    let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_snap, n_slots, &cum_s, now);
-    // Live BaseLoad's own heuristic-aware forecast; None with no live "base_load" asset.
-    let base_load_live_forecast_kw = resolve_base_load_forecast_kw(&sim_snap, n_slots, &cum_s, now);
-
-    // R-50: build_solve_request resolves the weather-sourced PV forecast internally.
-    let solve_req = crate::services::planning::build_solve_request(
-        asset_contexts,
-        grid,
-        planner.clone(),
-        grid_max_import_kw,
-        grid_max_export_kw,
-        asset_params.to_vec(),
-        now,
-        trigger.clone(),
-        st.ev_sess,
-        st.heat_tgt,
-        st.shift_loads,
-        st.bl_override,
-        Some(st.obj),
-        st.pv_forecast_override,
-        pv_live_forecast_kw,
-        base_load_live_forecast_kw,
-        weather,
-        weather_pv_params,
-        wall_now,
-        &cum_s,
-        n_slots,
-        history.as_ref(),
+    let obj = st.obj;
+    let solve_req = super::assemble::assemble_solve_request(
+        super::assemble::SolveAssembly {
+            state,
+            sim_snap: &sim_snap,
+            planner,
+            asset_params,
+            grid_max_import_kw,
+            grid_max_export_kw,
+            weather,
+            weather_pv_params,
+            history: history.as_ref(),
+            now,
+            wall_now,
+            trigger: trigger.clone(),
+            current_plan: current_plan.as_ref(),
+        },
+        st,
     )
     .await;
     let mut plan = crate::services::PlanningService::solve_plan(solver, solve_req).await;
@@ -185,7 +123,7 @@ pub(super) async fn run_plan_cycle(
         planner.gate_switch_penalty_eur,
         crate::services::planning::heater_stage_size_kw(asset_params),
         solver_ms,
-        st.obj,
+        obj,
         state,
         event_tx,
         wall_now, // gate decay measures real plan age; aligned `now` can lag replan_s
