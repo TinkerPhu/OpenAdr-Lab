@@ -438,11 +438,10 @@ fn export_cap_forces_pv_curtailment_without_soft_violation() {
     // Cap far below that so curtailment is the only zero-cost relief.
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, noon, None, None, &tariffs),
-        &tariffs,
-        &no_capacity(),
-        &export_limit_schedule(1.0, noon),
-        &[],
-        &[],
+        &crate::entities::grid_signals::GridSignals {
+            capacity_schedule: export_limit_schedule(1.0, noon),
+            ..test_grid(&tariffs, &no_capacity())
+        },
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,

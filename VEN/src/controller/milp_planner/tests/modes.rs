@@ -273,11 +273,7 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
     let opp = ev_session_with_mode(now, UserRequestMode::Opportunistic);
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&opp), None, &tariffs),
-        &tariffs,
-        &no_capacity(),
-        &[],
-        &[],
-        &[],
+        &test_grid(&tariffs, &no_capacity()),
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,

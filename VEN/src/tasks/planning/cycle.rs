@@ -100,6 +100,16 @@ pub(super) async fn run_plan_cycle(
         now,
     );
 
+    // Assembled here, not at the reads above, because `tariffs` is the
+    // stale-rate-processed series `build_plan_cycle_inputs` just returned.
+    let grid = crate::entities::grid_signals::GridSignals {
+        tariffs: tariff_ts,
+        capacity,
+        capacity_schedule,
+        alert_windows,
+        simple_windows,
+    };
+
     // Build per-asset MILP contexts from live simulator state.
     // This happens before spawn_blocking so asset states are captured at this instant.
     let asset_contexts = build_asset_contexts(
@@ -125,11 +135,7 @@ pub(super) async fn run_plan_cycle(
     // R-50: build_solve_request resolves the weather-sourced PV forecast internally.
     let solve_req = crate::services::planning::build_solve_request(
         asset_contexts,
-        tariff_ts,
-        capacity,
-        capacity_schedule,
-        alert_windows,
-        simple_windows,
+        grid,
         planner.clone(),
         grid_max_import_kw,
         grid_max_export_kw,

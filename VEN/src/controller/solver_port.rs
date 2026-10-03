@@ -7,11 +7,10 @@ use chrono::{DateTime, Utc};
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::grid_signals::GridSignals;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
-use crate::entities::tariff_snapshot::TariffTimeSeries;
 use lab_core::time_series::TimeSeries;
 
 /// Fully-owned inputs for one planning-cycle solve. Built by the caller
@@ -19,17 +18,11 @@ use lab_core::time_series::TimeSeries;
 /// run on a blocking thread.
 pub struct SolveRequest {
     pub asset_contexts: Vec<Box<dyn AssetMilpContext>>,
-    pub tariffs: TariffTimeSeries,
-    pub capacity: OadrCapacityState,
-    /// GB-48: priority-resolved capacity-limit schedule (`planned_capacity_limits`)
-    /// — the planner caps each slot by the tightest limit overlapping it.
-    pub capacity_schedule: Vec<CapacitySnapshot>,
-    /// WP3.1 (BL-04): active grid-alert windows — planner clamps the
-    /// contractual import cap to 0 for slots overlapping any of these.
-    pub alert_windows: Vec<AlertWindow>,
-    /// WP3.2: active SIMPLE load-shed windows (levels 1–3) — planner clamps
-    /// the per-slot import cap per level; see `SimpleWindow`.
-    pub simple_windows: Vec<SimpleWindow>,
+    /// What the grid is telling this site: prices, the limits in force, the
+    /// scheduled ones, and the alert/SIMPLE windows. One value rather than
+    /// five, because `state/grid_signals.rs` had already named this group and
+    /// this boundary used to flatten it back out.
+    pub grid: GridSignals,
     pub planner: PlannerParams,
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,

@@ -287,14 +287,16 @@ fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
     let n = 12;
     let mut inputs = ev_inputs(n, 20.0, 0.50);
     inputs.p_ev_max_kw = 2.0; // 1 h slots -> 2 kWh per slot
-    // Firm obligation by slot 1: 2 kWh. The window 0..=1 can absorb at most 4 kWh.
+                              // Firm obligation by slot 1: 2 kWh. The window 0..=1 can absorb at most 4 kWh.
     inputs.ev_obligations = ev_firm_kwh(20.0, 0.50, 2.0, 1);
     // Bands that would sell 10 kWh - half the pack - cheaply, exactly as
     // `ev_energy_segments` builds them all the way to a full pack.
-    inputs.ev_segments = vec![crate::controller::milp_planner::asset_port::EvEnergySegment {
-        kwh: 10.0,
-        eur_per_kwh: 5.0,
-    }];
+    inputs.ev_segments = vec![
+        crate::controller::milp_planner::asset_port::EvEnergySegment {
+            kwh: 10.0,
+            eur_per_kwh: 5.0,
+        },
+    ];
 
     let sol = solve(&inputs);
     let total_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots

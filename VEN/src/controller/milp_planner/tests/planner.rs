@@ -184,11 +184,7 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
 
     let plan = super::super::run_planner(
         build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &tariffs,
-        &no_capacity(),
-        &[],
-        &[],
-        &[],
+        &test_grid(&tariffs, &no_capacity()),
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
@@ -290,11 +286,7 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
         }]);
         let plan = super::super::run_planner(
             build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-            &tariffs,
-            &no_capacity(),
-            &[],
-            &[],
-            &[],
+            &test_grid(&tariffs, &no_capacity()),
             &profile.planner,
             profile.grid.max_import_kw,
             profile.grid.max_export_kw,
@@ -976,11 +968,10 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
     // path is exercised end-to-end through a genuine HiGHS solve.
     let plan = super::super::run_planner(
         ctxs,
-        &tariffs,
-        &no_capacity(),
-        &[],
-        std::slice::from_ref(&alert),
-        &[],
+        &crate::entities::grid_signals::GridSignals {
+            alert_windows: vec![alert.clone()],
+            ..test_grid(&tariffs, &no_capacity())
+        },
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
