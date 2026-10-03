@@ -57,10 +57,24 @@ fn availability_from_sessions(
 ) -> Vec<bool> {
     (0..n)
         .map(|t| {
-            let at = now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+            // A slot is chargeable when a session's window OVERLAPS it, not when the
+            // window contains the slot's start. Those differ for the slot in progress:
+            // GB-54 aligns a plan's `now` to the slot grid, so a session created at
+            // 15:25 sits inside a slot that began at 15:00. Testing the slot's start
+            // locked the EV out of the whole current slot — up to an hour of charging
+            // lost every time a user planned one, and the first slot is exactly where
+            // dispatch acts.
+            let slot_start =
+                now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+            let slot_end = now
+                + chrono::Duration::seconds(
+                    cum_s.get(t + 1).copied().unwrap_or_else(|| {
+                        cum_s.get(t).copied().unwrap_or(0)
+                    }),
+                );
             sessions
                 .iter()
-                .any(|s| s.window_start <= at && at < s.departure_time)
+                .any(|s| s.window_start < slot_end && slot_start < s.departure_time)
         })
         .collect()
 }
@@ -361,5 +375,66 @@ impl EvMilpContext {
             ctx.soc_drops = stated_drops;
         }
         ctx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::device_session::EvSessionOrigin;
+    use chrono::{Duration, TimeZone};
+
+    fn sess(window_start: DateTime<Utc>, departure: DateTime<Utc>) -> EvSession {
+        EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.9,
+            window_start,
+            departure_time: departure,
+            expected_trip_distance_km: None,
+            soft_deadline: false,
+            origin: EvSessionOrigin::UserRequest,
+            mode: Default::default(),
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: window_start,
+            updated_at: window_start,
+        }
+    }
+
+    /// The regression this pins cost up to an hour of charging per planned session on
+    /// the live fleet, and it is the third bug of the same family: GB-54 aligns a
+    /// plan's `now` to the slot grid, so a session created at 15:25 belongs to a slot
+    /// that began at 15:00. Asking "does the window contain the slot's *start*" locked
+    /// the EV out of the whole slot in progress — the one slot dispatch actually acts
+    /// on. A slot is chargeable when the window *overlaps* it.
+    #[test]
+    fn availability_includes_the_slot_a_window_opens_partway_through() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 3, 15, 0, 0).unwrap();
+        let n = 4;
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+        // Created 25 minutes into slot 0, as a user request mid-slot is.
+        let s = sess(now + Duration::minutes(25), now + Duration::hours(3));
+
+        let mask = availability_from_sessions(std::slice::from_ref(&s), n, &cum_s, now);
+
+        assert!(mask[0], "the slot the window opens inside must be chargeable");
+        assert!(mask[1] && mask[2], "and the slots fully inside it");
+    }
+
+    #[test]
+    fn availability_excludes_slots_outside_every_window() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 3, 15, 0, 0).unwrap();
+        let n = 6;
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+        // Away until 17:00, back for 17:00-19:00 only.
+        let s = sess(now + Duration::hours(2), now + Duration::hours(4));
+
+        let mask = availability_from_sessions(std::slice::from_ref(&s), n, &cum_s, now);
+
+        assert_eq!(
+            mask,
+            vec![false, false, true, true, false, false],
+            "chargeable only where the window overlaps"
+        );
     }
 }

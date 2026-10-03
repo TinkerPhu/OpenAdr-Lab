@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::assets::ev::EvCharger;
 use crate::assets::ev_schedule::next_trip_after;
-use crate::entities::asset_params::{EvUsageMode, EvUsageSimParams};
+use crate::entities::asset_params::EvUsageMode;
 use crate::entities::device_session::{EvSession, EvSessionOrigin};
 use crate::ids::ASSET_EV;
 use crate::simulator::SimState;
