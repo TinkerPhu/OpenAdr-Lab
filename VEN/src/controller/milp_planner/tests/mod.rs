@@ -848,8 +848,7 @@ fn bmi(
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> MilpInputs {
-    let ev_sessions: Vec<_> = ev_session.cloned().into_iter().collect();
-    let ctxs = build_asset_contexts(profile, sim, now, &ev_sessions, heater_target, tariffs);
+    let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
     build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None)
 }
 
