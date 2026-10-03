@@ -314,8 +314,8 @@ mod tests {
             tolerance_min: None,
             soft_deadline: None,
             target_temp_c: None,
-        },
-        replace_session_ids: None,
+            replace_session_ids: None,
+        }
     }
 
     /// A 2 h run inside a 1 h window cannot be placed. The route used to check
@@ -846,8 +846,8 @@ mod tests {
             asset_id: ids::ASSET_EV.to_string(),
             power_kw: None,
             duration_min: None,
-            ..base,
             replace_session_ids: None,
+            ..base
         };
         assert!(UserRequestService::is_ev(&ev_body));
         assert!(!UserRequestService::is_shiftable(&ev_body));
