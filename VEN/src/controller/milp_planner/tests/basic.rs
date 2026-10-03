@@ -125,10 +125,13 @@ fn ev_mask_plugged_with_session_deadline() {
         Some(&session),
         None,
     );
-    // deadline = 3600s, step_s=300 → deadline_step = 12
+    // deadline = 3600 s on a 300 s grid lands exactly on the slot-12 boundary, so
+    // the last chargeable slot is 11: slot 12 runs [3600, 3900), entirely after the
+    // car has left. (This expectation was 12, which allowed one slot of charging
+    // after departure — see the commit message.)
     let d = inp.ev_obligations[0].deadline_step;
-    assert_eq!(d, 12);
-    // Slots 0..=12 true, slots 13..23 false
+    assert_eq!(d, 11);
+    // Slots 0..=11 true, 12..23 false
     for t in 0..inp.n {
         assert_eq!(inp.a_ev[t], t <= d, "slot {t} mask mismatch");
     }
