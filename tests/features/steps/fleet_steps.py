@@ -151,13 +151,65 @@ def step_navigate_fleet(context):
     context.ui.page.wait_for_selector('[data-testid="fleet-total-card"]', timeout=30000)
 
 
+def _fleet_chart_diagnosis(page, minutes=15, step_seconds=5):
+    """Why the chart is not there, asked of the browser rather than guessed.
+
+    R-99: this scenario failed three times with nothing but "selector not
+    found", and each failure cost a full E2E run to dismiss. The two facts
+    that separate every candidate explanation are both cheap to get, and
+    neither was being collected:
+
+    - whether `fleet-chart-empty` is rendered. `FleetPowerChart` renders it
+      *instead of* the chart while `rows.length === 0`, so its presence means
+      "no data" and its absence means the component never rendered at all.
+    - what the page's own `/api/fleet/power` fetch returns. The probe step
+      talks to the BFF directly, container-to-container; the browser goes
+      through the UI's nginx proxy. A passing probe therefore says nothing
+      about what the page received, which is exactly the gap R-99 records as
+      unknown. Running the fetch *in the page* uses the app's own transport.
+    """
+    empty = page.locator('[data-testid="fleet-chart-empty"]').count() > 0
+    card = page.locator('[data-testid="fleet-total-card"]').count() > 0
+    try:
+        seen = page.evaluate(
+            """async ([minutes, stepSeconds]) => {
+                const from = new Date(Date.now() - minutes * 60000).toISOString();
+                const r = await fetch(
+                    `/api/fleet/power?from=${encodeURIComponent(from)}&stepSeconds=${stepSeconds}`
+                );
+                if (!r.ok) return { status: r.status };
+                const b = await r.json();
+                return {
+                    status: r.status,
+                    fleet_points: (b.fleet || []).length,
+                    vens: (b.vens || []).length,
+                    ven_samples: (b.vens || []).reduce(
+                        (n, v) => n + (v.samples || []).length, 0),
+                };
+            }""",
+            [minutes, step_seconds],
+        )
+    except Exception as e:  # the page itself may be broken; say so rather than mask it
+        seen = {"evaluate_failed": str(e)[:200]}
+    return (
+        f"fleet-chart-empty rendered: {empty}; fleet-total-card present: {card}; "
+        f"the page's own /api/fleet/power ({minutes} min, step {step_seconds}s) "
+        f"returned: {seen}"
+    )
+
+
 @then("the fleet chart has a line for every reporting VEN")
 def step_fleet_chart_has_a_line_per_ven(context):
     page = context.ui.page
     # The chart draws from the stored history, which the store writes a little
     # after the live feed shows a VEN -- so wait for the chart rather than
     # asserting against whatever happens to be rendered first.
-    page.wait_for_selector('[data-testid="fleet-power-chart"]', timeout=60000)
+    try:
+        page.wait_for_selector('[data-testid="fleet-power-chart"]', timeout=60000)
+    except Exception as e:
+        raise AssertionError(
+            f"the fleet chart never rendered. {_fleet_chart_diagnosis(page)}"
+        ) from e
 
     reporting = [
         v["venName"]
