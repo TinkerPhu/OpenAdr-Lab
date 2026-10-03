@@ -24,7 +24,7 @@
       "interval_days": 7,
       "last_run": "2026-10-03T10:56:03Z",
       "last_status": "finding (exit 1)",
-      "notes": "Also checked by .github/workflows/openspec-version-check.yml, which files an issue. This entry is the local half: it catches the update while someone is actually here to apply it."
+      "notes": "The only check: there is no CI."
     },
     {
       "id": "base-image-digests",
