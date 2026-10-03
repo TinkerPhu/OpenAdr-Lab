@@ -92,7 +92,7 @@ fn spawn_sim_tick(w: &World) {
         w.comms_loss,
         w.ports.telemetry.clone(),
     );
-    let (gi, ge, horizon_h) = (w.grid_max_import_kw, w.grid_max_export_kw, w.plan_horizon_h);
+    let (gi, ge) = (w.grid_max_import_kw, w.grid_max_export_kw);
     tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, w.state.clone(), move || {
         tasks::spawn_sim_tick(
             s.clone(),
@@ -113,7 +113,6 @@ fn spawn_sim_tick(w: &World) {
             cl,
             (gi, ge),
             tp.clone(),
-            horizon_h,
         )
     });
 }

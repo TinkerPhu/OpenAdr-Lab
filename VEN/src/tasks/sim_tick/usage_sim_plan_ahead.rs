@@ -8,36 +8,32 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::assets::ev::EvCharger;
-use crate::assets::ev_schedule::{active_trip_at, UsageTrip};
+use crate::assets::ev_schedule::next_trip_after;
 use crate::entities::asset_params::{EvUsageMode, EvUsageSimParams};
 use crate::entities::device_session::{EvSession, EvSessionOrigin};
 use crate::ids::ASSET_EV;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
-/// Looks ahead (bounded by `plan_horizon_h`) for the next scheduled trip when
-/// none is active right now — a thin wrapper over the shared
-/// `ev_schedule::next_trip_after`, which `usage_forecast` also uses.
-fn next_trip_within_horizon(
-    cfg: &EvUsageSimParams,
-    seed_tag: u64,
-    now: DateTime<Utc>,
-    plan_horizon_h: u64,
-) -> Option<UsageTrip> {
-    let horizon_end = now + Duration::hours(plan_horizon_h as i64);
-    crate::assets::ev_schedule::next_trip_after(cfg, seed_tag, now, horizon_end)
-}
+/// How far ahead the simulated schedule keeps sessions queued.
+///
+/// A week: long enough that the planner sees a realistic sequence of departures
+/// rather than only the next one, short enough that the queue stays small (the
+/// generator produces at most one trip per calendar day, so at most seven).
+/// Topped up every tick, so the span rolls rather than being filled once.
+const ROLLING_WINDOW_DAYS: i64 = 7;
 
-/// Writes a simulated-origin `EvSession` for the EV's next scheduled leave
-/// when plan-ahead is enabled, a trip falls within `plan_horizon_h`, and no
-/// real (user/VTN) session is currently active. A no-op in every other case,
-/// including when disabled or unconfigured — today's behavior, unchanged.
-pub(crate) async fn sync_plan_ahead_session(
-    state: &AppState,
-    sim: &SimState,
-    now: DateTime<Utc>,
-    plan_horizon_h: u64,
-) {
+/// Keeps a rolling week of simulated-origin `EvSession`s queued, one per predicted
+/// trip, so the planner sees a sequence of departures rather than only the next.
+/// A no-op when plan-ahead is disabled or unconfigured, or under the forecast usage
+/// class (which hands the planner its deadline directly, writing no session).
+///
+/// Deliberately not bounded by the planner's horizon: the queue is what the planner
+/// reads *from*, and it outliving the horizon is the point - sessions beyond it
+/// simply contribute no obligation this cycle. Taking `plan_horizon_h` here also
+/// made this function disagree with the cycle task about what the horizon is
+/// (R-91), a mismatch that now cannot arise.
+pub(crate) async fn sync_plan_ahead_session(state: &AppState, sim: &SimState, now: DateTime<Utc>) {
     let Some((_, cfg)) = sim.find_asset(ASSET_EV) else {
         return;
     };
@@ -58,29 +54,23 @@ pub(crate) async fn sync_plan_ahead_session(
         return;
     }
 
-    let trip = active_trip_at(usage_sim, ev.usage_sim_seed_tag, now).or_else(|| {
-        next_trip_within_horizon(usage_sim, ev.usage_sim_seed_tag, now, plan_horizon_h)
-    });
-    let Some(trip) = trip else {
-        return;
-    };
-    if trip.leave_at > now + Duration::hours(plan_horizon_h as i64) {
-        return;
-    }
+    // A rolling week, not just the next trip. The generator is a pure function of
+    // (config, day, seed), so "the schedule" is already infinite and reproducible -
+    // what was missing was somewhere to put more than one of it.
+    let horizon_end = now + Duration::days(ROLLING_WINDOW_DAYS);
 
-    let existing = state.ev_session().await;
-    match &existing {
-        // A real user/VTN session is active — it always wins; never touched.
-        Some(s) if s.origin != EvSessionOrigin::SimulatedUsage => return,
-        // Already reflects this exact trip — nothing to refresh.
-        Some(s) if s.departure_time == trip.leave_at => return,
-        _ => {}
-    }
-
-    state
-        .set_ev_session(Some(EvSession {
+    // Each trip's session may charge from when the car got home - the previous
+    // trip's return - up to this trip's departure. The first one starts now: the car
+    // is either home already or mid-trip, and either way now is when charging may
+    // begin. Walking the trips in order is what lets each session's window start at
+    // the previous return without a second notion of "when is the car home".
+    let mut cursor = now;
+    let mut window_open = now;
+    while let Some(trip) = next_trip_after(usage_sim, ev.usage_sim_seed_tag, cursor, horizon_end) {
+        let session = EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: ev.soc_target_profile,
+            window_start: window_open.max(now),
             departure_time: trip.leave_at,
             soft_deadline: false,
             mode: Default::default(),
@@ -89,8 +79,31 @@ pub(crate) async fn sync_plan_ahead_session(
             comfort_rates: vec![],
             created_at: now,
             updated_at: now,
-        }))
-        .await;
+        };
+
+        // Idempotent by construction: a tick that re-derives a trip already queued
+        // must change nothing, and this runs every tick.
+        let already_queued = state
+            .ev_sessions()
+            .await
+            .iter()
+            .any(|s| s.departure_time == trip.leave_at);
+        if !already_queued {
+            // A conflict means a stated session already covers this window. The
+            // simulated schedule yields - it stands in for a user, so it never
+            // displaces one - and the remaining trips are still placed around it.
+            if let Err(conflict) = state.insert_ev_session(session).await {
+                tracing::debug!(
+                    leave_at = %trip.leave_at,
+                    conflicts = ?conflict.conflicts,
+                    "simulated EV session skipped: a stated session covers this window"
+                );
+            }
+        }
+
+        window_open = trip.return_at;
+        cursor = trip.leave_at;
+    }
 }
 
 #[cfg(test)]
@@ -132,18 +145,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn writes_a_simulated_session_when_plan_ahead_enabled_and_trip_in_horizon() {
+    async fn queues_a_session_for_every_predicted_trip_in_the_rolling_week() {
         let state = AppState::new();
+        // leave_probability 1.0, so this profile leaves every single day.
         let sim = sim_with(ev_params_with_plan_ahead(true));
-        // 2026-07-20 06:00 -- the day's 08:00 leave is 2h ahead, well within 48h.
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
-        sync_plan_ahead_session(&state, &sim, now, 48).await;
-        let session = state.ev_session().await.expect("session must be written");
-        assert_eq!(session.origin, EvSessionOrigin::SimulatedUsage);
+
+        sync_plan_ahead_session(&state, &sim, now).await;
+
+        let sessions = state.ev_sessions().await;
+        assert_eq!(sessions.len(), 7, "one per day of the rolling week");
+        assert!(sessions
+            .iter()
+            .all(|s| s.origin == EvSessionOrigin::SimulatedUsage));
+        // The first is today's 08:00 leave; the rest follow one day apart.
+        let departures: Vec<_> = sessions.iter().map(|s| s.departure_time).collect();
         assert_eq!(
-            session.departure_time,
+            departures[0],
             Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap()
         );
+        for pair in departures.windows(2) {
+            assert_eq!(pair[1] - pair[0], Duration::days(1));
+        }
+    }
+
+    /// Each session may charge from when the car got home, so a later session's
+    /// window opens at the previous trip's return - not at `now`, which would claim
+    /// the car is available while it is still out.
+    #[tokio::test]
+    async fn a_later_session_opens_its_window_at_the_previous_trips_return() {
+        let state = AppState::new();
+        let sim = sim_with(ev_params_with_plan_ahead(true));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+
+        sync_plan_ahead_session(&state, &sim, now).await;
+
+        let sessions = state.ev_sessions().await;
+        let v: Vec<_> = sessions.iter().collect();
+        assert_eq!(v[0].window_start, now, "the imminent one starts now");
+        // The profile returns 8h after leaving, so the second window opens at 16:00.
+        assert_eq!(
+            v[1].window_start,
+            Utc.with_ymd_and_hms(2026, 7, 20, 16, 0, 0).unwrap()
+        );
+    }
+
+    /// Runs every tick, so re-deriving the same week must add nothing.
+    #[tokio::test]
+    async fn repeated_ticks_queue_no_duplicates() {
+        let state = AppState::new();
+        let sim = sim_with(ev_params_with_plan_ahead(true));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+
+        sync_plan_ahead_session(&state, &sim, now).await;
+        let first: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        sync_plan_ahead_session(&state, &sim, now).await;
+        let second: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+
+        assert_eq!(first, second, "a second tick must change nothing");
     }
 
     #[tokio::test]
@@ -155,7 +214,7 @@ mod tests {
         params.usage_sim.as_mut().unwrap().mode = EvUsageMode::Forecast;
         let sim = sim_with(params);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
-        sync_plan_ahead_session(&state, &sim, now, 48).await;
+        sync_plan_ahead_session(&state, &sim, now).await;
         assert!(state.ev_session().await.is_none());
     }
 
@@ -164,7 +223,7 @@ mod tests {
         let state = AppState::new();
         let sim = sim_with(ev_params_with_plan_ahead(false));
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
-        sync_plan_ahead_session(&state, &sim, now, 48).await;
+        sync_plan_ahead_session(&state, &sim, now).await;
         assert!(state.ev_session().await.is_none());
     }
 
@@ -176,6 +235,7 @@ mod tests {
         let real = EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.95,
+            window_start: now,
             departure_time: now + Duration::hours(1),
             soft_deadline: false,
             mode: Default::default(),
@@ -185,37 +245,36 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        state.set_ev_session(Some(real.clone())).await;
-        sync_plan_ahead_session(&state, &sim, now, 48).await;
-        let after = state.ev_session().await.unwrap();
-        assert_eq!(after.id, real.id, "real session must be untouched");
+        state.insert_ev_session(real.clone()).await.unwrap();
+        sync_plan_ahead_session(&state, &sim, now).await;
+
+        let sessions = state.ev_sessions().await;
+        assert!(
+            sessions.iter().any(|s| s.id == real.id),
+            "the stated session must be untouched"
+        );
+        // It yields only where it clashes: the rest of the week is still placed.
+        assert!(
+            sessions.len() > 1,
+            "simulated sessions must fill the gaps around it, got {}",
+            sessions.len()
+        );
     }
 
+    /// A day the profile predicts no trip for simply has no session - the week is
+    /// not padded to seven.
     #[tokio::test]
-    async fn refreshes_a_previously_simulated_session_for_a_new_trip() {
+    async fn a_day_without_a_predicted_trip_gets_no_session() {
         let state = AppState::new();
-        let sim = sim_with(ev_params_with_plan_ahead(true));
+        let mut params = ev_params_with_plan_ahead(true);
+        // Never leaves: the generator rolls against this probability per day.
+        params.usage_sim.as_mut().unwrap().weekday.leave_probability = 0.0;
+        params.usage_sim.as_mut().unwrap().weekend.leave_probability = 0.0;
+        let sim = sim_with(params);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
-        let stale = EvSession {
-            id: uuid::Uuid::new_v4(),
-            target_soc: 0.8,
-            departure_time: now - Duration::hours(3), // a past, stale trip
-            soft_deadline: false,
-            mode: Default::default(),
-            origin: EvSessionOrigin::SimulatedUsage,
-            budget_eur: None,
-            comfort_rates: vec![],
-            created_at: now,
-            updated_at: now,
-        };
-        let stale_id = stale.id;
-        state.set_ev_session(Some(stale)).await;
-        sync_plan_ahead_session(&state, &sim, now, 48).await;
-        let after = state.ev_session().await.unwrap();
-        assert_ne!(after.id, stale_id, "must be replaced with the fresh trip");
-        assert_eq!(
-            after.departure_time,
-            Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap()
-        );
+
+        sync_plan_ahead_session(&state, &sim, now).await;
+
+        assert!(state.ev_sessions().await.is_empty());
     }
 }
