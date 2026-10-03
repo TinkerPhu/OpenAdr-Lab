@@ -27,6 +27,7 @@ impl UserRequestService {
         // earliest this may begin" is exactly what a charging window's start is.
         // Absent means available now, which is what the single-slot era implied.
         let stated_window_start = body.earliest_start;
+        let expected_trip_distance_km = body.expected_trip_distance_km;
         let mut req = create_from_body(body, asset_data, now)?;
 
         let departure = req
@@ -46,6 +47,7 @@ impl UserRequestService {
             id: Uuid::new_v4(),
             target_soc,
             window_start,
+            expected_trip_distance_km,
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
@@ -407,6 +409,7 @@ mod tests {
             id: Uuid::new_v4(),
             target_soc: 0.8,
             window_start: Utc::now(),
+            expected_trip_distance_km: None,
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
             budget_eur: None,

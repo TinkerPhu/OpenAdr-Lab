@@ -555,6 +555,7 @@ fn ev_planned_state_soc_populated() {
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         window_start: now,
+        expected_trip_distance_km: None,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,

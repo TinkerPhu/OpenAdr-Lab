@@ -210,6 +210,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.7,
             window_start: ts(7200),
+            expected_trip_distance_km: None,
             departure_time: ts(10800),
             soft_deadline: false,
             origin: crate::entities::device_session::EvSessionOrigin::UserRequest,

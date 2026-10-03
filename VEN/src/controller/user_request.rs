@@ -33,6 +33,9 @@ pub struct CreateUserRequestParams {
     pub power_kw: Option<f64>,
     pub duration_min: Option<u32>,
     pub earliest_start: Option<DateTime<Utc>>,
+    /// EV only: distance expected after this session's departure [km]. Absent means
+    /// the user did not say, and the EV's own default fills it visibly.
+    pub expected_trip_distance_km: Option<f64>,
     pub latest_end: Option<DateTime<Utc>>,
     // ── Per-device overrides (Plan D) ────────────────────────────────────────
     pub soft_deadline: Option<bool>,
@@ -245,6 +248,7 @@ mod tests {
             power_kw: None,
             duration_min: None,
             earliest_start: None,
+            expected_trip_distance_km: None,
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
