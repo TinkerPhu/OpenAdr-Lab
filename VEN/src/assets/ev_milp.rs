@@ -1011,7 +1011,7 @@ mod milp_context_trait_tests {
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.40,
-            window_start: Utc::now() - chrono::Duration::days(365),
+            window_start: now,
             departure_time: now + ChronoDuration::hours(4),
             soft_deadline: false,
             mode: crate::entities::design_vocabulary::UserRequestMode::ByDeadline,
@@ -1174,7 +1174,7 @@ mod milp_context_trait_tests {
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.3,
-            window_start: Utc::now() - chrono::Duration::days(365),
+            window_start: Utc::now(),
             departure_time: now + chrono::Duration::hours(2),
             soft_deadline: true,
             mode: UserRequestMode::ByDeadline,
@@ -1315,7 +1315,7 @@ mod milp_context_trait_tests {
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.3,
-            window_start: Utc::now() - chrono::Duration::days(365),
+            window_start: now,
             departure_time: now + chrono::Duration::hours(2),
             soft_deadline: true,
             mode: UserRequestMode::ByDeadline,

@@ -406,7 +406,7 @@ mod tests {
             origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             id: Uuid::new_v4(),
             target_soc: 0.8,
-            window_start: Utc::now() - chrono::Duration::days(365),
+            window_start: Utc::now(),
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
             budget_eur: None,
