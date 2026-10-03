@@ -351,6 +351,42 @@ turns every `/api/*` call into a 502 and would present exactly as an empty chart
 it never recovers without a reload. Raising the 60 s timeout is not a fix — it hides a rule nobody
 has written down.
 
+**Update 2026-10-03 — two candidates eliminated, one instrumented, still open.**
+
+*The 502 theory above is already mitigated and should not cost another run.*
+`tests/nginx-test.conf` carries `resolver 127.0.0.11 valid=5s ipv6=off` with a *variable*
+upstream (`set $bff_upstream` then `proxy_pass $bff_upstream`), which is exactly the construct
+that makes nginx re-resolve rather than cache an IP at startup. The warning in
+`tests/entrypoint.sh` describes a hazard this config already answers.
+
+*Why the existing precondition step could be satisfied while the chart stayed empty.* The probe
+calls `http://test-bff:8090/api/fleet/power` **directly**, container-to-container
+(`features/helpers/api_client.py`'s `BFF_BASE_URL`); the browser fetches `/api/*` **through the
+UI's nginx proxy**. They are different transports, so a passing probe cannot speak for what the
+page received. That asymmetry — not the window size — is why "wait for history, then assert on
+the chart" did not hold.
+
+*The scenario now diagnoses itself* (`fleet_steps.py::_fleet_chart_diagnosis`). On timeout it
+reports whether `fleet-chart-empty` is rendered (present = no data, absent = the component never
+rendered — two different bugs the bare selector timeout could not distinguish) and what
+`/api/fleet/power` returns **when fetched inside the page**, i.e. over the app's own transport.
+The next occurrence names its own cause instead of costing a run.
+
+*Evidence so far, and why this stays open.* With the precondition in place the full suite passed
+297/0 (+15 isolated) on 2026-10-03, where the run immediately before it — same host, no
+precondition — failed this one scenario. That is one green against one red, on a scenario already
+known to be non-deterministic. This register's own R-97 is a long account of what a one-sample
+comparison is worth, so it is recorded as evidence and not as a fix. **Do not close this on a
+green run**; close it when the diagnostic has fired and named the condition, or after enough full
+runs that the old failure rate would have shown.
+
+*What the pattern now argues against.* Data latency was the leading hypothesis and fits badly: the
+two single-feature runs on a freshly built stack — the worst case for an empty store — both
+passed 6/6, while the failure occurred in a full suite where 40 minutes of scenarios had already
+filled the store. If the store being cold were the cause, those results would be the other way
+round. Contention or cross-scenario interference fits better; the grounds on which the entry above
+rejected contention compared *a different scenario's* re-run, not this one under two loads.
+
 ## R-94 — the MILP does not model the heater's thermostat deadband
 
 **Severity: 🟡 Medium** · Effort Small-Medium · Risk Medium · Gain Medium — a new plan/actual
