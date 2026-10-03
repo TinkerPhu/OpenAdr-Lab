@@ -17,6 +17,7 @@ fn ev_session_with_mode(
         // soc 0.2 → 0.3 on 60 kWh = 6 kWh core; feasible within the 2 h horizon at 7.4 kW.
         target_soc: 0.3,
         window_start: now,
+        expected_trip_distance_km: None,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,

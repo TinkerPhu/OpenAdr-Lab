@@ -424,6 +424,7 @@ fn time_ev_solve_at(
         id: uuid::Uuid::new_v4(),
         target_soc: 0.80,
         window_start: now,
+        expected_trip_distance_km: None,
         departure_time: now + chrono::Duration::hours(12),
         soft_deadline: false,
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,

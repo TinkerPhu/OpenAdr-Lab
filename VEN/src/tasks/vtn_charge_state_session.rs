@@ -68,6 +68,7 @@ pub(crate) async fn apply_vtn_charge_state_session(
                     // The signal commands a target by a window end; the vehicle is
                     // chargeable from now, which is what the single slot implied.
                     window_start: now,
+                    expected_trip_distance_km: None,
                     departure_time: window_end,
                     soft_deadline: false,
                     // VTN-commanded charge target with a window end == a deadline.

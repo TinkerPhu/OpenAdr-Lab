@@ -44,6 +44,15 @@ pub struct EvSession {
     pub window_start: DateTime<Utc>,
     /// When the EV must be ready (departure time). Closes the window above.
     pub departure_time: DateTime<Utc>,
+    /// Distance the vehicle is expected to travel after this session's departure
+    /// [km]. `None` = the user did not say, and the EV's configured default is used
+    /// — visibly, not silently (see `EvCharger::expected_trip_drop`).
+    ///
+    /// Distance rather than a state-of-charge percentage because that is what a
+    /// driver knows: "about 120 km", not "38 % of my pack". Converting it needs the
+    /// consumption rate and the pack size, both of which the EV owns.
+    #[serde(default)]
+    pub expected_trip_distance_km: Option<f64>,
     /// If true, MILP treats as MayRun (soft reward, best-effort by departure).
     /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
     #[serde(default)]
@@ -266,6 +275,7 @@ mod tests {
             id: Uuid::new_v4(),
             target_soc: 0.9,
             window_start: Utc::now(),
+            expected_trip_distance_km: None,
             departure_time: Utc::now(),
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
@@ -323,6 +333,7 @@ mod tests {
             id: Uuid::new_v4(),
             target_soc: 0.8,
             window_start: ts(from),
+            expected_trip_distance_km: None,
             departure_time: ts(to),
             soft_deadline: false,
             origin: EvSessionOrigin::UserRequest,

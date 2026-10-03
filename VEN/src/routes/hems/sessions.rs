@@ -40,6 +40,9 @@ pub struct CreateUserRequestBody {
     pub power_kw: Option<f64>,
     pub duration_min: Option<u32>,
     pub earliest_start: Option<DateTime<Utc>>,
+    /// EV only: km expected after this session's departure. Absent = use the EV's
+    /// own default, and say so in the plan rather than substituting silently.
+    pub expected_trip_distance_km: Option<f64>,
     pub latest_end: Option<DateTime<Utc>>,
     // ── Per-device overrides (Plan D) ────────────────────────────────────────
     pub soft_deadline: Option<bool>,
@@ -104,6 +107,7 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
             power_kw: b.power_kw,
             duration_min: b.duration_min,
             earliest_start: b.earliest_start,
+            expected_trip_distance_km: b.expected_trip_distance_km,
             latest_end: b.latest_end,
             soft_deadline: b.soft_deadline,
             target_temp_c: b.target_temp_c,
@@ -223,6 +227,7 @@ pub async fn post_requests(
                 power_kw: load.power_kw,
                 duration_min: load.duration_min,
                 earliest_start: load.earliest_start,
+                expected_trip_distance_km: None,
                 latest_end: load.latest_end,
             }),
         ) {
