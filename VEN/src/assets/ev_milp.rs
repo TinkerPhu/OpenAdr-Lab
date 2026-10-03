@@ -1045,8 +1045,13 @@ mod milp_context_trait_tests {
         );
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, std::slice::from_ref(&session));
 
+        // Departure is exactly 4 h on an hourly grid, so the last chargeable slot
+        // is 3: slot 4 runs [4 h, 5 h), entirely after the car has left. (Was 4,
+        // the same boundary off-by-one corrected in `slot_at`.) What this test is
+        // about is unchanged: the stated session's deadline wins over the
+        // forecast's, whatever slot that lands on.
         assert_eq!(
-            ctx.obligations[0].deadline_step, 4,
+            ctx.obligations[0].deadline_step, 3,
             "the real session's deadline wins"
         );
         assert!(
