@@ -1288,6 +1288,17 @@ outes/sim.rs causes a T1+T2 double-solve race:
   errors for a command that never ran — `$?` is **grep's** status, and grep is happy to find
   nothing. A bench was declared "compiles clean" on that basis. Capture the output to a file or
   variable first, check the real exit code, and only then filter.
+- **Generalised again (2026-10-03): the rule is "never let an absent output mean success".**
+  Two more variants in one session, after the entry below was already written: `grep -c DONE
+  build.log` matched BuildKit's own `#20 DONE 13.7s` lines, so a build-finished poll fired
+  instantly and twice reported a still-running build as complete; and `grep -c X f || echo 0`
+  prints `0` *and* exits non-zero for a no-match, so the `||` appends a second `0` and the
+  variable is `"0
+0"` — which compares unequal to `"0"` and reads as success. Both are the
+  same shape as the cargo and lock-script cases: a filter that finds nothing is
+  indistinguishable from a filter that found what you wanted. Assert on a positive signal
+  (`awk 'END{print c}'` with an explicit counter, a sentinel that cannot collide with the
+  tool's own vocabulary), and check the real exit code separately.
 - **Generalised (2026-10-02): this is a pipe problem, not a cargo problem.** The same failure
   recurred on an unrelated command — `bash scripts/wsl_lock.sh acquire ... | tail -5` reported
   success while the script had correctly exited 2 with "Still held after 540s", because a
@@ -1302,6 +1313,22 @@ outes/sim.rs causes a T1+T2 double-solve race:
   is, so `CARGO_TARGET_DIR=<main checkout>/VEN/target cargo check` reused 5344 warm artefacts and
   compiled one crate instead of the graph. Hold the WSL lock while doing it: cargo's own file lock
   on the target dir makes sharing safe between sessions, but only serialised.
+
+## Editing by pattern (2026-10-03)
+
+- **A pattern-based edit needs a check for where it landed, not just that it applied.**
+  Adding a struct field across ~25 construction sites by regex put it in the wrong struct
+  twice in one session: tests inserted inside `BaselineOverride` (the insertion anchored on
+  "the file's last closing brace", but `device_session.rs` does not end with its test module),
+  and `window_start` added to four `EvCharger` literals (which also have a `departure_time`
+  field, so a `departure_time:`-anchored regex matched them too). The second was caught
+  *before* compiling by writing a loop that re-reads each insertion point and names the
+  nearest enclosing `struct {`, and reverting the ones that did not say `EvSession`. The
+  compiler would have caught both eventually — the point is that the check costs seconds and
+  the misplaced edit cost a confusing cascade of unrelated errors (a lost `Serialize` derive
+  surfacing as two axum `IntoResponse` failures in routes with nothing to do with EVs).
+  Prefer anchoring on something unique to the target (a distinctive sibling field, the
+  struct name itself) over a field name shared across types.
 
 ## Sustained-Commitment Capacity Forecast (flexibility-capacity-forecast, 2026-08-21)
 

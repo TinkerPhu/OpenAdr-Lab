@@ -57,6 +57,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-13 VTN Direct Override | ✅ Full (proxy signal) | VTN IMPORT_CAPACITY_LIMIT event | Simulation + Trace |
 | UC-14 Thermal Feedback Loop | ✅ Full | Simulation: ambient_temp_c slider | Simulation HeaterCard + Controller |
 | UC-17 EV That Leaves on a Schedule | ✅ Full | Profile: `usage_forecast:` on the EV asset | Devices: EV card + Controller: EV chart |
+| UC-18 Several Charging Sessions at Once | ✅ Full | Devices → EV card → Plan Charging, then Plan another | Devices: EV card + Controller: EV chart |
 
 > **Two cases not fully observable:**
 > - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the User Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
@@ -897,6 +898,60 @@ absence is fact, so those slots stay at zero either way.
 **Covered by:** `tests/features/ev_usage_forecast.feature`
 
 ---
+
+## UC-18: Several Charging Sessions at Once (ev-session-queue)
+
+**What it shows:** a household EV has a *sequence* of departures — Monday's commute,
+Wednesday's, a weekend trip — and the planner can hold and plan for all of them at once
+rather than only the next.
+
+**Why it used to be impossible:** the VEN stored exactly one EV session, so a second
+request silently displaced the first. The usual way to meet that failure was to set a
+standing weekly plan, forget it, and later add a spontaneous trip — at which point the
+standing plan was gone with nothing on screen saying so.
+
+### Setup
+
+Nothing to configure. Devices → EV card → **Plan Charging**, then **Plan another** for
+each further session.
+
+Two fields matter for a second session:
+
+- **Available from** — when the car is back and can charge for *this* session. Leave it
+  empty for "now". Two sessions both starting "now" necessarily overlap, so this is what
+  makes a second one possible at all.
+- **Trip after departure (km)** — how far you will drive afterwards. Leave it empty to use
+  the car's own configured distance.
+
+### What to observe
+
+**Devices → EV card:** one block per queued session, each with its own target, its window
+(`available → departure`), its departure, a stated trip distance where you gave one, and
+its own **Unplan**. A session with no stated distance shows none — the car's default is
+applied but not displayed as if you had typed it.
+
+**Controller → EV chart:** charging appears inside each session's window and nowhere else;
+the gaps between them are when the car is away. Where a stated trip consumes charge, the
+plan buys it back — a second session two days out is planned for, not ignored.
+
+### What you should NOT see
+
+A second plan silently replacing the first. Submitting a session that overlaps one you
+already have is **refused**, and the refusal names the plan it clashes with; nothing is
+created and nothing is removed. Until the one-click "replace that one?" offer lands
+(`ev-session-user-conflict-resolution`), removing the old plan is a deliberate act —
+friction, chosen over a committed plan disappearing unnoticed.
+
+### Raw check
+
+`GET /ev-session` returns the whole queue in window order, including sessions the
+simulated usage schedule created (those have no linked user request, so they do not
+appear under `GET /user-requests`).
+
+Behaviour is pinned by `tests/features/ven_user_request.feature` ("A user holds two
+charging sessions with non-overlapping windows", "An overlapping second session is
+refused and changes nothing").
+
 
 ## How to set a comfort curve (Devices → Comfort Curve)
 
