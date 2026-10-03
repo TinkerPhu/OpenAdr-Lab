@@ -107,6 +107,23 @@ fn make_tariffs(imp: f64, exp: f64, co2_g: f64) -> TariffTimeSeries {
     TariffTimeSeries::from_snapshots(&[snap])
 }
 
+/// `GridSignals` for a planner test: prices and the limits in force, with no
+/// schedule and no alert/SIMPLE windows — what almost every test wants. A
+/// test that needs one of the three names just that one through struct-update
+/// syntax, rather than every call site spelling out three empty vectors.
+pub(super) fn test_grid(
+    tariffs: &TariffTimeSeries,
+    capacity: &OadrCapacityState,
+) -> crate::entities::grid_signals::GridSignals {
+    crate::entities::grid_signals::GridSignals {
+        tariffs: tariffs.clone(),
+        capacity: capacity.clone(),
+        capacity_schedule: vec![],
+        alert_windows: vec![],
+        simple_windows: vec![],
+    }
+}
+
 fn no_capacity() -> OadrCapacityState {
     OadrCapacityState {
         import_limit_kw: None,
@@ -801,11 +818,7 @@ fn run_planner(
 ) -> Plan {
     super::run_planner(
         asset_contexts,
-        tariffs,
-        capacity,
-        &[],
-        &[],
-        &[],
+        &test_grid(tariffs, capacity),
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,

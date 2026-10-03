@@ -25,6 +25,10 @@ use crate::entities::plan::Plan;
 #[cfg(test)]
 mod test_prelude {
     pub use chrono::Duration;
+    // Still named by the test module through `use super::*`, but no longer
+    // by production code here: `run_planner` takes a `GridSignals` now.
+    pub use crate::entities::capacity::OadrCapacityState;
+    pub use crate::entities::tariff_snapshot::TariffTimeSeries;
     pub use good_lp::{constraint, Solution, SolverModel};
 }
 #[cfg(test)]
@@ -39,9 +43,7 @@ use crate::entities::asset_params::AssetParams;
 use crate::entities::asset_params::{
     BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
-use crate::entities::capacity::OadrCapacityState;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
-use crate::entities::tariff_snapshot::TariffTimeSeries;
 
 pub mod asset_port;
 mod envelopes;
@@ -108,11 +110,7 @@ fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
 #[allow(clippy::too_many_arguments)]
 pub fn run_planner(
     mut asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
-    tariffs: &TariffTimeSeries,
-    capacity: &OadrCapacityState,
-    capacity_schedule: &[crate::entities::capacity::CapacitySnapshot],
-    alert_windows: &[crate::entities::capacity::AlertWindow],
-    simple_windows: &[crate::entities::capacity::SimpleWindow],
+    grid: &crate::entities::grid_signals::GridSignals,
     planner: &PlannerParams,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
@@ -158,6 +156,16 @@ pub fn run_planner(
     let heater = heater_params(asset_params);
     let pv = pv_params(asset_params);
     let base_load = base_load_params(asset_params);
+    // Destructured here rather than pushed into `build_milp_inputs`: that is
+    // an internal function one layer below the port, and grouping it reaches
+    // ~45 test call sites. The port's own surface is what gained the name.
+    let crate::entities::grid_signals::GridSignals {
+        tariffs,
+        capacity,
+        capacity_schedule,
+        alert_windows,
+        simple_windows,
+    } = grid;
     let inputs = build_milp_inputs(
         &asset_contexts,
         tariffs,
@@ -251,11 +259,7 @@ impl crate::controller::SolverPort for MilpSolver {
     fn solve(&self, req: crate::controller::SolveRequest) -> Plan {
         run_planner(
             req.asset_contexts,
-            &req.tariffs,
-            &req.capacity,
-            &req.capacity_schedule,
-            &req.alert_windows,
-            &req.simple_windows,
+            &req.grid,
             &req.planner,
             req.grid_max_import_kw,
             req.grid_max_export_kw,

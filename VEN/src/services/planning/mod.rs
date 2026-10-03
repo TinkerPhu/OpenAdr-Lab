@@ -8,8 +8,8 @@ use crate::controller::SolverPort;
 use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
-use crate::entities::capacity::{AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::grid_signals::GridSignals;
 use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
@@ -134,11 +134,7 @@ async fn resolve_diurnal_reference_for_cycle(
 #[allow(clippy::too_many_arguments)]
 pub async fn build_solve_request(
     asset_contexts: Vec<Box<dyn AssetMilpContext>>,
-    tariffs: TariffTimeSeries,
-    capacity: OadrCapacityState,
-    capacity_schedule: Vec<CapacitySnapshot>,
-    alert_windows: Vec<AlertWindow>,
-    simple_windows: Vec<SimpleWindow>,
+    grid: GridSignals,
     planner: PlannerParams,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
@@ -174,11 +170,7 @@ pub async fn build_solve_request(
         resolve_diurnal_reference_for_cycle(history, now).await;
     SolveRequest {
         asset_contexts,
-        tariffs,
-        capacity,
-        capacity_schedule,
-        alert_windows,
-        simple_windows,
+        grid,
         planner,
         grid_max_import_kw,
         grid_max_export_kw,
@@ -504,6 +496,9 @@ pub fn evaluate_acceptance_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Test-only here since `build_solve_request` stopped naming it:
+    // the five grid signals travel as one `GridSignals` now.
+    use crate::entities::capacity::OadrCapacityState;
     use chrono::{Duration, TimeZone};
     use uuid::Uuid;
 
@@ -514,11 +509,13 @@ mod tests {
 
         let req = SolveRequest {
             asset_contexts: vec![],
-            tariffs: TariffTimeSeries::from_snapshots(&[]),
-            capacity: OadrCapacityState::default(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
-            simple_windows: vec![],
+            grid: GridSignals {
+                tariffs: TariffTimeSeries::from_snapshots(&[]),
+                capacity: OadrCapacityState::default(),
+                capacity_schedule: vec![],
+                alert_windows: vec![],
+                simple_windows: vec![],
+            },
             planner: PlannerParams::default(),
             grid_max_import_kw: 10.0,
             grid_max_export_kw: 10.0,
