@@ -884,4 +884,36 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("ev-conflict-sess-other")).toBeInTheDocument();
     expect(screen.queryByTestId("ev-conflict-sess-standing")).toBeNull();
   });
+  it("offers a plain resubmission when the plan being replaced has gone", async () => {
+    // The clash expired while the prompt was open: the instruction named a session
+    // that no longer clashes, so the server refuses - but there is nothing left to
+    // remove, and offering "remove it" would name nothing and be refused again.
+    const user = userEvent.setup();
+    const c = clash("sess-expired", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    mockPostRequest
+      .mockRejectedValueOnce(new EvSessionConflictError("overlaps 1", [c], [c.id]))
+      .mockRejectedValueOnce(
+        new EvSessionConflictError("stale", [], [], {
+          reason: "not_the_conflict_set",
+          missing: [],
+          extra: [c.id],
+        }),
+      )
+      .mockResolvedValueOnce({});
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    await screen.findByTestId("ev-conflict-prompt");
+    await user.click(screen.getByTestId("ev-conflict-replace-btn"));
+
+    const prompt = await screen.findByTestId("ev-conflict-prompt");
+    expect(prompt).toHaveTextContent(/no longer there/i);
+    const retry = screen.getByTestId("ev-conflict-replace-btn");
+    expect(retry).toHaveTextContent("Submit again");
+
+    await user.click(retry);
+    // No instruction: there is nothing to displace.
+    expect(mockPostRequest.mock.calls[2][0].replace_session_ids).toBeUndefined();
+    await waitFor(() => expect(screen.queryByTestId("ev-dialog")).toBeNull());
+  });
 });
