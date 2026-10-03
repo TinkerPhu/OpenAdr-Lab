@@ -7,6 +7,8 @@
 
 use chrono::{DateTime, Utc};
 
+use super::heater::HeaterState;
+use super::own_state::own;
 use super::{AssetState, Heater, MilpParticipant, Thermostat, TickOverridable};
 use crate::assets::TickOverrides;
 use crate::entities::device_session::{EvSession, HeaterTarget};
@@ -83,9 +85,7 @@ impl Thermostat for Heater {
     /// (`as_thermostat() -> Option<&dyn Thermostat>`) already handles; within
     /// this arm the original always returned `Some(...)`.
     fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64 {
-        let AssetState::Heater(s) = state else {
-            unreachable!("Heater/state mismatch")
-        };
+        let s: &HeaterState = own(state);
         if s.temperature_c < target_c {
             self.max_kw
         } else {

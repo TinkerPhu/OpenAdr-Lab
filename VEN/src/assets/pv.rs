@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     TickOverridable, TickOverrides, Trajectory,
@@ -264,24 +265,18 @@ impl PvInverter {
 
 impl Asset for PvInverter {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let s: &PvState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::Pv(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::Pv(s) = state else {
-            unreachable!()
-        };
+        let s: &PvState = own(state);
         self.capability_inner(s)
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::Pv(s) = state else {
-            unreachable!()
-        };
+        let s: &PvState = own(state);
         self.flexibility_floor_inner(s)
     }
 
@@ -361,23 +356,17 @@ impl Asset for PvInverter {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let s: &PvState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let s: &mut PvState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let s: &PvState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 
@@ -437,9 +426,7 @@ impl Asset for PvInverter {
         if direction == CommitmentDirection::Import {
             return 0.0;
         }
-        let AssetState::Pv(s) = state else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let s: &PvState = own(state);
         let inputs = self.live_power_inputs();
         let uncurtailed_kw = self.uncurtailed_power_kw(&inputs);
         if tier == LimitTier::Physical {

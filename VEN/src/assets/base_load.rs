@@ -4,6 +4,7 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     TickOverridable, TickOverrides,
@@ -278,24 +279,18 @@ impl BaseLoad {
 
 impl Asset for BaseLoad {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!("BaseLoad/state mismatch")
-        };
+        let s: &BaseLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::BaseLoad(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!()
-        };
+        let s: &BaseLoadState = own(state);
         self.capability_inner(s)
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!()
-        };
+        let s: &BaseLoadState = own(state);
         self.flexibility_floor_inner(s)
     }
 
@@ -358,23 +353,17 @@ impl Asset for BaseLoad {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!("BaseLoad/state mismatch")
-        };
+        let s: &BaseLoadState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!("BaseLoad/state mismatch")
-        };
+        let s: &mut BaseLoadState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::BaseLoad(s) = state else {
-            unreachable!("BaseLoad/state mismatch")
-        };
+        let s: &BaseLoadState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 

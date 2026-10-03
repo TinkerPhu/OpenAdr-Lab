@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
 };
@@ -191,24 +192,18 @@ impl ShiftableLoadAsset {
 
 impl Asset for ShiftableLoadAsset {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::ShiftableLoad(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         self.capability_inner(s)
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         self.flexibility_floor_inner(s)
     }
 
@@ -237,23 +232,17 @@ impl Asset for ShiftableLoadAsset {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &mut ShiftableLoadState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 
@@ -278,9 +267,7 @@ impl Asset for ShiftableLoadAsset {
     }
 
     fn is_removable(&self, state: &AssetState) -> bool {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         self.is_finished(s)
     }
 
@@ -310,9 +297,7 @@ impl Asset for ShiftableLoadAsset {
         t1: DateTime<Utc>,
         t_end: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, f64)> {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
         let start = if s.started {
             t1
         } else {
@@ -372,9 +357,7 @@ impl MilpParticipant for ShiftableLoadAsset {
         _heater_anchor: Vec<Option<f64>>,
         _w_ghg_eur_kg: f64,
     ) -> Box<dyn AssetMilpContext> {
-        let AssetState::ShiftableLoad(s) = state else {
-            unreachable!("ShiftableLoadAsset/state mismatch")
-        };
+        let s: &ShiftableLoadState = own(state);
 
         // Maps a non-negative offset_s to the latest slot index t where
         // cum_s[t] <= offset_s. Mirrors `inputs.rs`'s pre-Spec-B helper of

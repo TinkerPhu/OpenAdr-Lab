@@ -13928,9 +13928,8 @@ and every `Asset` method destructures that state and `unreachable!`s on a mismat
 panics on the first tick, on every boot, from a file `load()` parses cleanly. `profile/validate.rs`
 has no asset-id kind check, so nothing upstream caught it either. The guard is six lines
 (`std::mem::discriminant` per id, fall back to the fresh entry for that asset only) and the test
-that pins it failed before it existed. The 45 `unreachable!("…/state mismatch")` arms across six
-asset kinds are what made the consequence a crash loop instead of a warning; they remain, and are
-the one finding not fixed here (below).
+that pins it failed before it existed. The 38 `"…/state mismatch"` panic arms across six asset
+kinds are what made the consequence a crash loop instead of a warning; they are addressed below.
 
 **`cargo check --tests` is not a build check.** The `test_prelude` move was verified with
 `cargo check --tests`, which compiles the `cfg(test)` arm — so it could not see that nine of the
@@ -14032,10 +14031,16 @@ storage kind. These are now one const, one `AssetParams::terminal_value_eur_kwh`
 the fields it falls back from, and two trait methods (`accepts_dispatch_anchor`,
 `state_follows_dispatch`) that let PV and the heater state their own answers.
 
-**Not fixed, and why.** The asset abstraction still has two type-safety holes: 45
-`unreachable!("…/state mismatch")` arms, because config and state are parallel enums the trait
-cannot pair, and ~15 production `as_any().downcast_ref::<Concrete>()` sites, one of them
-`.unwrap()`ed — the enum dispatch was made untyped rather than removed, so the compiler no longer
-says when a new asset kind needs handling. The fix is a typed handle pairing config with its own
-state type, and it is the largest item here; the persisted-state guard above removes the urgency by
-closing the one reachable path to those panics.
+**The asset abstraction's two type-safety holes, and how far they were closed.** Config and state
+are parallel enums the `Asset` trait cannot pair, so every method opened by destructuring
+`&AssetState` and panicking on a mismatch — 38 such arms. And 12 production
+`as_any().downcast_ref::<Concrete>()` sites recover the concrete type anyway: the enum dispatch was
+made untyped rather than removed, so the compiler no longer says when a new asset kind needs
+handling. (All 12 handle absence gracefully, via `let Some(..) else` or `?`; none is `unwrap`ed.)
+
+Full type safety needs an associated-state redesign of the trait, which is its own change. What was
+done instead is to make the pairing declared once and checked once: `OwnState` states where each
+state type sits inside `AssetState`, and `own::<S>(state)` is the single place the pairing is
+verified — 38 panic sites to one, with a message that names the variant it got rather than only the
+one it wanted. Combined with the persisted-state guard above, which closes the one reachable path to
+that panic, the practical risk is gone even though the compile-time guarantee is not yet there.

@@ -16,6 +16,7 @@ use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 
 use super::ev::{EvCharger, EvState};
+use super::own_state::own;
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
 use crate::entities::asset_params::EvUsageSimParams;
 
@@ -294,9 +295,7 @@ impl EvCharger {
         initial: &AssetState,
         setpoints: &[(DateTime<Utc>, f64)],
     ) -> Trajectory {
-        let AssetState::Ev(_) = initial else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let _: &EvState = own(initial);
         let mut state = initial.clone();
         let mut points = Vec::new();
         let mut was_away = false;
