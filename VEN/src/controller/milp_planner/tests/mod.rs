@@ -154,6 +154,8 @@ fn make_profile() -> Profile {
             AssetProfile::Ev(EvConfig {
                 id: "ev".into(),
                 max_charge_kw: 7.4,
+                consumption_kwh_per_km: 0.18,
+                default_trip_distance_km: 40.0,
                 max_discharge_kw: 0.0,
                 initial_soc: 0.2,
                 battery_kwh: 60.0,
