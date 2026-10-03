@@ -50,10 +50,9 @@ def path_tokens(cell):
     return out
 
 
-def parse_kind_rank(text):
-    """Kind -> rank (0 = highest) from the numbered, backticked list in ISSUE_KINDS.md."""
-    kinds = re.findall(r"^\s*\d+\.\s*`([a-z-]+)`", text, re.M)
-    return {k: i for i, k in enumerate(kinds)}
+def parse_kind_weights(text):
+    """Kind -> weight (higher = more important) from the `N. \`kind\`` lines of ISSUE_KINDS.md."""
+    return {k: int(n) for n, k in re.findall(r"^\s*(\d+)\.\s*`([a-z-]+)`", text, re.M)}
 
 
 def parse_rows(text):
@@ -83,9 +82,9 @@ def parse_rows(text):
     return rows
 
 
-def sort_by_priority(rows, kind_rank):
-    """Kind rank first (unknown last), then severity S1..S4 (unknown last), then id."""
-    return sorted(rows, key=lambda r: (kind_rank.get(r.kind, len(kind_rank)), r.severity or "S9", r.id))
+def sort_by_priority(rows, kind_weight):
+    """Kind weight descending (unknown last), then severity S1..S4 (unknown last), then id."""
+    return sorted(rows, key=lambda r: (-kind_weight.get(r.kind, -1), r.severity or "S9", r.id))
 
 
 def _is_exempt(path):
@@ -170,10 +169,10 @@ def main():
         print(f"DEFERRED  {rid}  {why}  (allowed, not preferred: fix it when you are in the file)")
     try:
         with open(KINDS_DOC, encoding="utf-8") as f:
-            kind_rank = parse_kind_rank(f.read())
+            kind_weight = parse_kind_weights(f.read())
     except OSError:
-        kind_rank = {}
-    for row in sort_by_priority(out.unresolved, kind_rank):
+        kind_weight = {}
+    for row in sort_by_priority(out.unresolved, kind_weight):
         tag = " ".join(t for t in (row.severity, row.kind) if t)
         print(f"OPEN      {row.id} [{row.effort}{', ' + tag if tag else ''}]  touched: {', '.join(matched_files(row, changed))}")
     if out.unresolved:
