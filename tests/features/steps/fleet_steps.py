@@ -151,7 +151,7 @@ def step_navigate_fleet(context):
     context.ui.page.wait_for_selector('[data-testid="fleet-total-card"]', timeout=30000)
 
 
-def _fleet_chart_diagnosis(page, minutes=15, step_seconds=5):
+def _fleet_chart_diagnosis(page, minutes=1440, step_seconds=900):
     """Why the chart is not there, asked of the browser rather than guessed.
 
     R-99: this scenario failed three times with nothing but "selector not
@@ -162,11 +162,14 @@ def _fleet_chart_diagnosis(page, minutes=15, step_seconds=5):
     - whether `fleet-chart-empty` is rendered. `FleetPowerChart` renders it
       *instead of* the chart while `rows.length === 0`, so its presence means
       "no data" and its absence means the component never rendered at all.
-    - what the page's own `/api/fleet/power` fetch returns. The probe step
-      talks to the BFF directly, container-to-container; the browser goes
-      through the UI's nginx proxy. A passing probe therefore says nothing
-      about what the page received, which is exactly the gap R-99 records as
-      unknown. Running the fetch *in the page* uses the app's own transport.
+    - what the page's own `/api/fleet/power` fetch returns, asked with the
+      page's own parameters. `Fleet.tsx` opens on `WINDOWS[3]`
+      (`useState(3)`) = **24 h at 900 s steps** -- not the 15 min at 5 s that
+      R-99's text records. The probe step waits on 10 min at 5 s, so it and
+      the chart ask questions 144x apart in window and 180x apart in step,
+      which is why a passing probe never implied a rendered chart. The probe
+      also talks to the BFF directly while the browser goes through nginx;
+      running the fetch *in the page* settles both differences at once.
     """
     empty = page.locator('[data-testid="fleet-chart-empty"]').count() > 0
     card = page.locator('[data-testid="fleet-total-card"]').count() > 0
