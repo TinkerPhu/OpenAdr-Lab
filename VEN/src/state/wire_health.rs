@@ -16,7 +16,7 @@ impl AppState {
     /// clears the entry, so a resource that starts parsing cleanly again stops
     /// being reported as degraded.
     pub async fn set_wire_rejections(&self, resource: &str, summary: Option<String>) {
-        let mut w = self.wire_rejections.write().await;
+        let mut w = self.diagnostics.wire_rejections.write().await;
         match summary {
             Some(s) => {
                 w.insert(resource.to_string(), s);
@@ -29,7 +29,7 @@ impl AppState {
 
     /// What the VTN has sent that we refused, latest state per resource.
     pub async fn wire_rejections(&self) -> BTreeMap<String, String> {
-        self.wire_rejections.read().await.clone()
+        self.diagnostics.wire_rejections.read().await.clone()
     }
 
     /// GB-49: record (or clear) that this VEN's own token lacks VEN scopes.

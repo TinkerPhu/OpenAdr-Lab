@@ -35,7 +35,7 @@ pub(crate) use state_persist::spawn_state_persist;
 /// `JoinHandle` that drives the task to completion (or panic).
 ///
 /// WP-T3 (`docs/history/project_journal.md, search "WP-T"`): records each (re)start and
-/// completion on `state.task_status` for `GET /tasks/status` — the only place
+/// completion on `state.diagnostics.task_status` for `GET /tasks/status` — the only place
 /// `supervised_spawn`'s restart behavior was previously observable was the log.
 pub(crate) fn supervised_spawn(
     name: &'static str,

@@ -7,6 +7,7 @@ pub mod capacity_curve;
 pub mod design_vocabulary;
 pub mod device_session;
 pub mod error;
+pub mod ev_settings;
 pub mod grid_signals;
 pub mod history;
 pub mod measurement;
