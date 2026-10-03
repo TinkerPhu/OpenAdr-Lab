@@ -100,7 +100,9 @@ pub(crate) async fn sync_plan_ahead_session(state: &AppState, sim: &SimState, no
             if let Err(conflict) = state.insert_ev_session(session).await {
                 tracing::debug!(
                     leave_at = %trip.leave_at,
-                    conflicts = ?conflict.conflicts,
+                    // Ids, not whole sessions: the clash carries the sessions so a prompt can
+                    // describe them, but a log line wants the identity, not the payload.
+                    conflicts = ?conflict.conflicts.iter().map(|s| s.id).collect::<Vec<_>>(),
                     "simulated EV session skipped: a stated session covers this window"
                 );
             }

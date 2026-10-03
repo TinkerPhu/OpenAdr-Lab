@@ -370,6 +370,31 @@ schedule skips and fills the gaps around a stated session, while a user's clashi
 is refused with the clashing sessions named. Keeping that decision out of the queue is what
 lets one `insert` serve them all.
 
+A user may then resolve the clash in one step. `EvSessionQueue::replace(replace_ids, session)`
+displaces exactly the named sessions and queues the candidate, all-or-nothing, with the same
+checked `insert` still doing the enforcement — so this adds a precondition, never a second
+copy of the overlap rule. The precondition is the ids, not a boolean "force": the instruction
+must name exactly the candidate's *current* conflict set, because the queue can move between
+the refusal and the confirmation (a simulated session landing, another tab submitting, a plan
+expiring) and a boolean would authorise removing whatever happens to clash by then.
+`EvSessionReplaceRejection` distinguishes naming an unqueued id, naming the wrong set
+(`missing`/`extra`), and the unreachable guard where an insert still clashes. This is an
+`If-Match` precondition in everything but name.
+
+Both state accessors resolve the clashing ids to whole sessions **inside the write guard that
+detected the clash** (`EvSessionClash`, `EvReplaceRefusal`), and `replace_ev_sessions`
+additionally marks each displaced session's `UserRequest` `Cancelled` in that same guard —
+the pairing `cancel_request` makes from the other direction. Reading the queue again
+afterwards would make the prompt a second, independently derived account of the thing it is
+explaining, free to disagree with the refusal that produced it; leaving the requests Active
+would leave commitments in `GET /user-requests` pointing at sessions that no longer exist.
+The `409` body declares which refusal it is in a `kind` field and quotes
+`replaceable_session_ids`, so a client branches on a declared value and echoes the server's
+own set rather than deriving it (`wire-contracts`). Response shaping lives in
+`routes/hems/ev_conflict.rs`; the UI side is one shared `useSubmitRequest` hook, because
+"closing the dialog is what success does" is a rule that belongs in one place rather than in
+each device card.
+
 | Session field | MILP use |
 |---|---|
 | `EvSession.soft_deadline` | `false` → `MilpLoadMode::MustRun`; `true` → `MayRun` |
