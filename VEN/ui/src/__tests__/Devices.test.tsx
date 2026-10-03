@@ -37,6 +37,8 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
       type: "ev",
       id: "sess-ev-001",
       target_soc: 0.8,
+      window_start: new Date(Date.now() - 3600_000).toISOString(),
+      expected_trip_distance_km: null,
       departure_time: "2026-04-12T07:00:00Z",
       soft_deadline: false,
       mode: "BY_DEADLINE",
@@ -268,6 +270,60 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("ev-active-view")).toBeInTheDocument();
     expect(screen.getByTestId("ev-target-soc")).toHaveTextContent("80%");
     expect(screen.getByTestId("ev-unplan-btn")).toBeInTheDocument();
+  });
+
+  // The capability itself: an EV may hold several queued sessions, and a card that
+  // showed only the first would hide plans the planner is already serving.
+  it("shows every queued EV session, each with its own window", () => {
+    mockRequestsData.mockReturnValue([
+      makeEvRequest({
+        id: "ur-ev-mon",
+        session: {
+          type: "ev", id: "sess-mon", target_soc: 0.8,
+          window_start: "2026-04-06T18:00:00Z", departure_time: "2026-04-07T07:00:00Z",
+          expected_trip_distance_km: 120, soft_deadline: false, mode: "BY_DEADLINE",
+          budget_eur: null, created_at: "2026-04-06T12:00:00Z", updated_at: "2026-04-06T12:00:00Z",
+        },
+      }),
+      makeEvRequest({
+        id: "ur-ev-wed",
+        session: {
+          type: "ev", id: "sess-wed", target_soc: 0.9,
+          window_start: "2026-04-07T18:00:00Z", departure_time: "2026-04-08T07:00:00Z",
+          expected_trip_distance_km: null, soft_deadline: false, mode: "BY_DEADLINE",
+          budget_eur: null, created_at: "2026-04-06T12:00:00Z", updated_at: "2026-04-06T12:00:00Z",
+        },
+      }),
+    ]);
+    renderPage();
+
+    expect(screen.getByTestId("ev-session-sess-mon")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-session-sess-wed")).toBeInTheDocument();
+    // Each row carries its own target, not a shared one.
+    expect(within(screen.getByTestId("ev-session-sess-mon")).getByTestId("ev-target-soc"))
+      .toHaveTextContent("80%");
+    expect(within(screen.getByTestId("ev-session-sess-wed")).getByTestId("ev-target-soc"))
+      .toHaveTextContent("90%");
+    // A stated trip distance is shown; an unstated one says nothing rather than
+    // presenting the EV's default as if the user had typed it.
+    expect(within(screen.getByTestId("ev-session-sess-mon")).getByTestId("ev-trip-distance"))
+      .toHaveTextContent("120 km");
+    expect(within(screen.getByTestId("ev-session-sess-wed")).queryByTestId("ev-trip-distance"))
+      .toBeNull();
+    // And queueing another must be reachable from the card.
+    expect(screen.getByTestId("ev-plan-another-btn")).toBeInTheDocument();
+  });
+
+  it("sends the stated availability and trip distance when planning", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.type(screen.getByTestId("ev-trip-distance-input"), "150");
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ expected_trip_distance_km: 150 }),
+    );
   });
 
   // 3. Click Plan Charging opens dialog

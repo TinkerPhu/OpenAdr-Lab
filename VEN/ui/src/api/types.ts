@@ -518,10 +518,14 @@ export type CreateUserRequestBody = {
     min_completion: number | null;
   }>;
   comfort_rates: null;
-  // WM shiftable-load fields (optional)
+  // WM shiftable-load fields (optional) — `earliest_start` is shared with the EV,
+  // where it means the instant the vehicle becomes available for the session.
   power_kw?: number;
   duration_min?: number;
   earliest_start?: string;
+  /** EV only: km expected after this session's departure. Omitted = use the EV's
+   *  own configured default. */
+  expected_trip_distance_km?: number;
   latest_end?: string;
   // Per-device overrides (Plan D)
   soft_deadline?: boolean;
@@ -537,7 +541,13 @@ export type CreateUserRequestBody = {
 export type EvSession = {
   id: string;
   target_soc: number;
+  /** When the vehicle becomes available for this session; with `departure_time` it
+   *  forms the half-open charging window [window_start, departure_time). */
+  window_start: string;
   departure_time: string;
+  /** Distance expected after this session's departure, in km. `null` = the user did
+   *  not say, and the EV's own configured default is used. */
+  expected_trip_distance_km: number | null;
   /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
   soft_deadline: boolean;
   mode: UserRequestMode;

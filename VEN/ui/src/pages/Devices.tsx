@@ -41,9 +41,16 @@ export function DevicesPage() {
   const putEvMut = usePutEvSettings();
   const putArbiterMut = usePutArbiterSettings();
 
-  const evRequest = allRequests.find(
-    (r) => r.session_type === "ev" && r.status === "ACTIVE",
-  );
+  // Every active EV request, in window order - an EV may hold several queued
+  // sessions, and `.find()` showed only whichever came first while the rest were
+  // invisible on screen despite being planned for (`ui-transparency`).
+  const evRequests = allRequests
+    .filter((r) => r.session_type === "ev" && r.status === "ACTIVE")
+    .sort((a, b) => {
+      const aw = a.session?.type === "ev" ? a.session.window_start : "";
+      const bw = b.session?.type === "ev" ? b.session.window_start : "";
+      return aw.localeCompare(bw);
+    });
   const heaterRequest = allRequests.find(
     (r) => r.session_type === "heater" && r.status === "ACTIVE",
   );
@@ -64,7 +71,7 @@ export function DevicesPage() {
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
           <EvCard
-            request={evRequest}
+            requests={evRequests}
             evSettings={evSettings}
             usageSim={evUsageSim}
             postRequest={postMut.mutateAsync}

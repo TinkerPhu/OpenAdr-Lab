@@ -32,7 +32,8 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     budget_eur: null,
     created_at: "2026-04-04T08:00:00Z",
     updated_at: "2026-04-04T10:00:00Z",
-    session: { type: "ev", id: "sess-ev-01", target_soc: 0.9, departure_time: departure, soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null, created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z" },
+    session: { type: "ev", id: "sess-ev-01", target_soc: 0.9, departure_time: departure,
+      window_start: "2026-04-04T08:00:00Z", expected_trip_distance_km: null, soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null, created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z" },
     ...overrides,
   };
 }
