@@ -331,7 +331,7 @@ impl MilpParticipant for Battery {
         _n: usize,
         _cum_s: &[i64],
         _now: DateTime<Utc>,
-        _ev_session: Option<&EvSession>,
+        _ev_sessions: &[EvSession],
         _heater_target: Option<&HeaterTarget>,
         _comfort_rates: &[crate::entities::asset::ComfortRate],
         _ev_min_charge_kw: f64,

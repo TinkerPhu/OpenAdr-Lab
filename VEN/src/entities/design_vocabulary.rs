@@ -26,6 +26,24 @@ pub enum UserRequestMode {
     Opportunistic,  // use only free/surplus energy, no deadline
 }
 
+impl UserRequestMode {
+    /// Does this mode promise a target by a deadline, as opposed to bidding for it?
+    ///
+    /// Only the cost-aware deadline modes do. The `*_FREE` and `OPPORTUNISTIC`
+    /// modes are gated by whatever surplus exists, so they cannot promise anything;
+    /// `MAX_COST` is capped by a budget rather than bounded by a deadline. Declared
+    /// here, beside the variants, so a new mode has to answer the question rather
+    /// than quietly inherit an answer from a `match` arm somewhere else
+    /// (`declare-dont-branch`).
+    ///
+    /// A firm *mode* is still not a firm obligation on its own: `EvSession`'s
+    /// `soft_deadline` can waive it, in which case the comfort curve decides how far
+    /// to charge.
+    pub fn states_a_firm_deadline(&self) -> bool {
+        matches!(self, Self::ByDeadline | Self::Asap)
+    }
+}
+
 /// BY_DEADLINE is the pre-mode implicit behaviour: cost-aware completion by a
 /// deadline. Payloads without the field must keep behaving exactly as before.
 impl Default for UserRequestMode {

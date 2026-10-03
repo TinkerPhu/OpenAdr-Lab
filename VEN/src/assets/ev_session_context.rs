@@ -12,11 +12,77 @@ use chrono::{DateTime, Utc};
 
 use super::EvCharger;
 use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, EvObligation};
+use crate::entities::device_session::EvSession;
 
 /// WP4.1-c MAX_COST: per-kWh completion reward — an order of magnitude above any
 /// real tariff so the solver charges toward the target regardless of price, with
 /// the budget constraint (not the price) doing the capping.
 const BUDGET_CHARGE_REWARD_EUR_KWH: f64 = 5.0;
+
+
+/// The horizon slot an instant falls in, clamped to the horizon's ends.
+///
+/// The `partition_point` idiom this replaces was written out twice - here and in
+/// `ev_usage_forecast::target_next_predicted_departure` - and a deadline landing on
+/// the wrong slot is invisible in a plan until something charges a slot too late.
+/// One implementation, two callers (`one-concept-one-function`).
+pub(super) fn slot_at(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
+    if secs_from_now <= 0 {
+        return 0;
+    }
+    cum_s
+        .partition_point(|&s| s <= secs_from_now)
+        .saturating_sub(1)
+        .min(n.saturating_sub(1))
+}
+
+/// Slots in which *some* queued session's charging window is open.
+///
+/// Generalises the single session's "every slot up to the deadline": with a queue
+/// the vehicle is chargeable inside any session's window and nowhere else, so the
+/// gaps between sessions - when the car is away - are closed by construction rather
+/// than by a separate rule.
+fn availability_from_sessions(
+    sessions: &[EvSession],
+    n: usize,
+    cum_s: &[i64],
+    now: DateTime<Utc>,
+) -> Vec<bool> {
+    (0..n)
+        .map(|t| {
+            let at = now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+            sessions
+                .iter()
+                .any(|s| s.window_start <= at && at < s.departure_time)
+        })
+        .collect()
+}
+
+/// One obligation per queued session that states a *firm* target and departs inside
+/// the horizon.
+///
+/// A soft deadline states none: under `ev-comfort-piecewise-core` it is a preference
+/// priced per kWh by the user's curve, not a guarantee, and the free/opportunistic
+/// modes are gated by surplus rather than by a deadline. Sessions departing beyond
+/// the horizon contribute nothing to *this* cycle; the next one will see them.
+fn obligations_from_sessions(
+    sessions: &[EvSession],
+    n: usize,
+    cum_s: &[i64],
+    now: DateTime<Utc>,
+) -> Vec<EvObligation> {
+    let horizon_end_s = cum_s.get(n.saturating_sub(1)).copied().unwrap_or(0);
+    sessions
+        .iter()
+        .filter(|s| !s.soft_deadline && s.mode.states_a_firm_deadline())
+        .filter(|s| (s.departure_time - now).num_seconds() <= horizon_end_s)
+        .map(|s| EvObligation {
+            deadline_step: slot_at(cum_s, n, (s.departure_time - now).num_seconds()),
+            target_soc: s.target_soc,
+            session_id: Some(s.id),
+        })
+        .collect()
+}
 
 impl EvMilpContext {
     /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
@@ -27,7 +93,7 @@ impl EvMilpContext {
         n: usize,
         cum_s: &[i64],
         now: DateTime<Utc>,
-        ev_session: Option<&crate::entities::device_session::EvSession>,
+        ev_sessions: &[EvSession],
         comfort_rates: &[crate::entities::asset::ComfortRate],
         min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
@@ -75,7 +141,11 @@ impl EvMilpContext {
         if !plugged && !forecast_presence {
             return base;
         }
-        let Some(session) = ev_session else {
+        // The head session keeps today's role: it supplies the mode, the comfort
+        // curve and the valuation. Sessions behind it contribute obligations only -
+        // their bands would have to be priced from a starting SoC the solver has not
+        // decided yet (design Decision 5).
+        let Some(session) = ev_sessions.first() else {
             // Plugged, no session: slots available but no charging obligation.
             //
             // The bands are still built, because they do not depend on a deadline
@@ -110,18 +180,14 @@ impl EvMilpContext {
             };
         };
         let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
-        let secs = (session.departure_time - now).num_seconds();
-        let t_dead = if secs <= 0 {
-            0
-        } else {
-            cum_s
-                .partition_point(|&s| s <= secs)
-                .saturating_sub(1)
-                .min(n.saturating_sub(1))
-        };
-        let deadline_mask: Vec<bool> = (0..n).map(|t| t <= t_dead).collect();
+        let t_dead = slot_at(cum_s, n, (session.departure_time - now).num_seconds());
+        // Chargeable inside any queued session's window, nowhere else. For a single
+        // session this is the old "every slot up to the deadline"; for a queue it
+        // also closes the gaps when the car is away, without a second rule saying so.
+        let deadline_mask = availability_from_sessions(ev_sessions, n, cum_s, now);
+        let obligations = obligations_from_sessions(ev_sessions, n, cum_s, now);
 
-        match session.mode {
+        let mut ctx = match session.mode {
             // WP4.1 (BL-28) OPPORTUNISTIC / ASAP_FREE: no deadline, no core
             // obligation - all charging is optional "extra" up to the session
             // target, rewarded per charged kWh but gated to free energy via
@@ -161,10 +227,6 @@ impl EvMilpContext {
                 mode: EvMilpMode::MustRun,
                 a_ev: deadline_mask,
                 soc_drops: None,
-                // Free energy may simply not exist, so BY_DEADLINE_FREE states no
-                // obligation at all: its window is already expressed by `a_ev`,
-                // and a guarantee it cannot honour would be a promise, not a goal.
-                obligations: Vec::new(),
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
                 free_only: true,
@@ -198,18 +260,7 @@ impl EvMilpContext {
                     },
                     a_ev: deadline_mask,
                     soc_drops: None,
-                    // A firm deadline guarantees the target; a soft one states no
-                    // obligation and lets its comfort bids decide how far to go.
-                    obligations: if session.soft_deadline {
-                        Vec::new()
-                    } else {
-                        vec![EvObligation {
-                            deadline_step: t_dead,
-                            target_soc: session.target_soc,
-                            session_id: Some(session.id),
-                        }]
-                    },
-                    segments,
+                        segments,
                     // Inert here: this arm prices per band, so nothing may also
                     // be bought through `e_ev_extra`.
                     e_extra_max_kwh: 0.0,
@@ -223,6 +274,12 @@ impl EvMilpContext {
                     ..base
                 }
             }
-        }
+        };
+        // Set once, for every arm: the list is already filtered per session, so an
+        // opportunistic or budget-capped *head* contributes none of its own while a
+        // firm session queued behind it still does. Setting this per arm silently
+        // dropped exactly that case.
+        ctx.obligations = obligations;
+        ctx
     }
 }

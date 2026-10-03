@@ -176,6 +176,11 @@ impl EvSessionQueue {
         before - self.0.len()
     }
 
+    /// The queued sessions in window order, for callers that take a slice.
+    pub fn as_slice(&self) -> &[EvSession] {
+        &self.0
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &EvSession> {
         self.0.iter()
     }

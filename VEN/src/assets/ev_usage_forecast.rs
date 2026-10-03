@@ -44,7 +44,7 @@ impl EvMilpContext {
         n: usize,
         cum_s: &[i64],
         now: DateTime<Utc>,
-        ev_session: Option<&EvSession>,
+        ev_sessions: &[EvSession],
     ) {
         let Some(usage) = cfg
             .usage_sim
@@ -69,10 +69,10 @@ impl EvMilpContext {
             floor_frac: usage.min_soc_after_drop_pct / 100.0,
         });
 
-        // A real user/VTN session already said what this EV is charging for;
-        // the forecast never overrides a stated goal (availability above still
-        // applies either way — that is fact, not preference).
-        if usage.engage_charge_planning && ev_session.is_none() {
+        // A stated session already says what this EV is charging for; the forecast
+        // never overrides a stated goal. Availability above still applies either
+        // way - that is fact, not preference.
+        if usage.engage_charge_planning && ev_sessions.is_empty() {
             self.target_next_predicted_departure(cfg, usage, n, cum_s, now);
         }
     }
