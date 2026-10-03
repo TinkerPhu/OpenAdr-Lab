@@ -72,7 +72,24 @@ impl AppState {
         let mut hems = self.hems.write().await;
         let clashing = hems.ev_sessions.conflicts(&session);
         match hems.ev_sessions.replace(replace_ids, session) {
-            Ok(removed) => Ok(removed),
+            Ok(removed) => {
+                // A displaced session's request is cancelled with it, in the same
+                // critical section. The user asked for that plan to go, and leaving
+                // its request Active would leave a commitment in the list pointing at
+                // a session that no longer exists - which `GET /user-requests` would
+                // then render as a request with no session at all. Same pairing
+                // `cancel_request` makes from the other direction.
+                for s in &removed {
+                    if let Some(req) = hems
+                        .active_requests
+                        .iter_mut()
+                        .find(|r| r.session_id == Some(s.id))
+                    {
+                        req.status = crate::entities::user_request::UserRequestStatus::Cancelled;
+                    }
+                }
+                Ok(removed)
+            }
             // The conflict set is read under the same guard as the attempt, so a
             // re-prompt describes the queue the refusal was actually about.
             Err(rejection) => Err(EvReplaceRefusal {
