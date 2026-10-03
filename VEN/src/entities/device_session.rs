@@ -304,27 +304,6 @@ mod tests {
         let l: ShiftableLoad = serde_json::from_str(json).unwrap();
         assert_eq!(l.mode, UserRequestMode::ByDeadline);
     }
-}
-
-/// A single slot in a baseline override.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaselineSlot {
-    /// Start time of the slot (aligned to planning grid).
-    pub slot_start: DateTime<Utc>,
-    /// Additive power adjustment [kW]. Positive = more load.
-    pub add_kw: f64,
-}
-
-/// User-specified additive adjustments to the non-controllable baseline.
-///
-/// E.g. "I know the dishwasher will run 1.5 kW from 14:00–15:00".
-/// Applied in `build_milp_inputs()` as `p_base_kw[t] += add_kw`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaselineOverride {
-    pub id: Uuid,
-    pub slots: Vec<BaselineSlot>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
 
     // ── EvSessionQueue: the ordered, non-overlapping invariant ──────────────
 
@@ -477,4 +456,25 @@ pub struct BaselineOverride {
             }
         }
     }
+}
+
+/// A single slot in a baseline override.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaselineSlot {
+    /// Start time of the slot (aligned to planning grid).
+    pub slot_start: DateTime<Utc>,
+    /// Additive power adjustment [kW]. Positive = more load.
+    pub add_kw: f64,
+}
+
+/// User-specified additive adjustments to the non-controllable baseline.
+///
+/// E.g. "I know the dishwasher will run 1.5 kW from 14:00–15:00".
+/// Applied in `build_milp_inputs()` as `p_base_kw[t] += add_kw`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaselineOverride {
+    pub id: Uuid,
+    pub slots: Vec<BaselineSlot>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
