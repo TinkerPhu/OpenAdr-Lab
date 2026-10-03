@@ -227,13 +227,6 @@ impl EvCharger {
     // The plan's SoC curve is now solved (`EvMilpVars::soc_ev`), so no integrator
     // exists anywhere to drift from it.
 
-    /// State values for a future MILP time slot given the SoC at the start of
-    /// that slot. Returns `{"soc": <0..1>}`.
-    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::ev_future_state_at is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
-    pub fn future_state_values_at(soc: f64) -> HashMap<String, f64> {
-        HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
-    }
-
     pub fn reset(&self, state: &mut EvState, values: HashMap<String, f64>) {
         if let Some(&soc) = values.get("soc") {
             state.soc = soc.clamp(0.0, 1.0);
@@ -861,19 +854,6 @@ mod tests {
     // drop at its own slot, the floor) are now properties of the plan the solver
     // produces, so they are asserted against a real solve rather than against a
     // helper that no longer exists.
-
-    #[test]
-    fn future_state_values_at_returns_soc() {
-        let vals = EvCharger::future_state_values_at(0.65);
-        let soc = vals["soc"];
-        assert!((soc - 0.65).abs() < 1e-9, "expected soc=0.65, got {soc}");
-    }
-
-    #[test]
-    fn future_state_values_at_clamps() {
-        assert_eq!(EvCharger::future_state_values_at(-0.1)["soc"], 0.0);
-        assert_eq!(EvCharger::future_state_values_at(1.5)["soc"], 1.0);
-    }
 
     // Capacity-forecast (openspec/changes/flexibility-capacity-forecast) needs
     // max_discharge_kw and min_soc alongside the already-present soc_target and
