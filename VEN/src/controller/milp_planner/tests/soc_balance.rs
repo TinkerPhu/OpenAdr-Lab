@@ -346,10 +346,13 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
 
     let sol = solve(&inputs);
 
+    // A drop declared for slot 4 appears at the boundary AFTER it: the balance
+    // constraint is soc_ev[t+1] == soc_ev[t] + charge - drop, the same convention
+    // `a_predicted_drop_lands_at_its_own_slot` above already pins.
     assert!(
-        sol.soc_ev[4] < 0.55,
+        sol.soc_ev[5] < 0.55,
         "the trip must actually cost the pack, got {}",
-        sol.soc_ev[4]
+        sol.soc_ev[5]
     );
     assert!(
         sol.p_ev_kw.iter().skip(4).sum::<f64>() > 1.0,
