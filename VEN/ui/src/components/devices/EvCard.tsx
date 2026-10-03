@@ -11,6 +11,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Alert,
   Divider,
   FormControlLabel,
   Slider,
@@ -28,6 +29,7 @@ import type {
   UserRequestWithSession,
 } from "../../api/types";
 import { ModeSelect } from "./ModeSelect";
+import { useSubmitRequest } from "./useSubmitRequest";
 import { dateToLocalInputValue } from "../../utils/datetimeLocal";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,14 +100,20 @@ export function EvCard(props: EvCardProps) {
   // things a user may state but usually will not.
   const [availableFrom, setAvailableFrom] = useState("");
   const [tripDistanceKm, setTripDistanceKm] = useState("");
+  // A submission can fail in two quite different ways: a plain error to report,
+  // or a clash only the user can resolve. The shared hook keeps both, and makes
+  // closing the dialog something success does rather than something the click does.
+  const { submit: submitRequest, error: submitError, conflict, clear: clearSubmit } =
+    useSubmitRequest(postRequest);
 
   const queued = requests.filter((r) => r.session?.type === "ev");
   const paused = evSettings?.paused_by_active_session ?? false;
   const oppEnabled = evSettings?.opportunistic_charging_enabled ?? false;
 
-  function handleConfirm() {
+  /** The draft as a request body; `replaceIds` is set only on a confirmed replace. */
+  function draftBody(replaceIds?: string[]): CreateUserRequestBody {
     const dt = new Date(departure);
-    postRequest({
+    return {
       asset_id: "ev",
       target_soc: targetSoc / 100,
       target_energy_kwh: null,
@@ -123,8 +131,23 @@ export function EvCard(props: EvCardProps) {
         min_completion: targetSoc / 100,
       }],
       comfort_rates: null,
-    });
-    setDialogOpen(false);
+      replace_session_ids: replaceIds,
+    };
+  }
+
+  /**
+   * Submit, and keep the dialog open on anything that needs the user.
+   *
+   * The dialog used to close the instant Confirm was pressed, with the promise
+   * unobserved — so a refusal was an unhandled rejection and the user was told
+   * nothing at all. Closing is now what success does, not what clicking does.
+   */
+  async function submit(replaceIds?: string[]) {
+    await submitRequest(draftBody(replaceIds), () => setDialogOpen(false));
+  }
+
+  function handleConfirm() {
+    void submit();
   }
 
   return (
@@ -266,9 +289,62 @@ export function EvCard(props: EvCardProps) {
       )}
 
       {/* Plan EV Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} data-testid="ev-dialog">
+      <Dialog
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+          clearSubmit();
+        }}
+        data-testid="ev-dialog"
+      >
         <DialogTitle>Plan EV Charging</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 300, pt: 2 }}>
+          {submitError && (
+            <Alert severity="error" data-testid="ev-submit-error">
+              {submitError}
+            </Alert>
+          )}
+          {conflict && (
+            <Alert severity="warning" data-testid="ev-conflict-prompt">
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {conflict.isStaleConfirmation
+                  ? "Your charging plans changed while you were deciding. This request now conflicts with:"
+                  : "This charging request conflicts with a plan you already have:"}
+              </Typography>
+              {conflict.conflicts.map((c) => (
+                <Typography
+                  key={c.id}
+                  variant="body2"
+                  data-testid={`ev-conflict-${c.id}`}
+                  sx={{ fontWeight: 500 }}
+                >
+                  {fmtDate(c.window_start)} → {fmtDate(c.departure_time)} — to{" "}
+                  {Math.round(c.target_soc * 100)}%
+                </Typography>
+              ))}
+              <Box sx={{ display: "flex", gap: 1, mt: 1.5 }}>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="warning"
+                  data-testid="ev-conflict-replace-btn"
+                  disabled={isPosting}
+                  onClick={() => void submit(conflict.replaceableSessionIds)}
+                >
+                  {conflict.conflicts.length > 1
+                    ? `Remove all ${conflict.conflicts.length} and continue`
+                    : "Remove it and continue"}
+                </Button>
+                <Button
+                  size="small"
+                  data-testid="ev-conflict-keep-btn"
+                  onClick={clearSubmit}
+                >
+                  Keep it, let me change this
+                </Button>
+              </Box>
+            </Alert>
+          )}
           <Typography gutterBottom>Target SoC: {targetSoc}%</Typography>
           <Slider
             value={targetSoc}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -16,6 +17,7 @@ import {
 import type { CreateUserRequestBody, UserRequestMode, UserRequestWithSession } from "../../api/types";
 import { ModeSelect } from "./ModeSelect";
 import { dateToLocalInputValue } from "../../utils/datetimeLocal";
+import { useSubmitRequest } from "./useSubmitRequest";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ export function HeaterCard(props: HeaterCardProps) {
   const { request, postRequest, deleteRequest, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { submit: submitRequest, error: submitError } = useSubmitRequest(postRequest);
   const [tempC, setTempC] = useState("55");
   const [readyBy, setReadyBy] = useState(defaultDateTime(4));
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
@@ -59,7 +62,7 @@ export function HeaterCard(props: HeaterCardProps) {
 
   function handleConfirm() {
     const dt = new Date(readyBy);
-    postRequest({
+    void submitRequest({
       asset_id: "heater",
       target_soc: null,
       target_energy_kwh: null,
@@ -74,8 +77,7 @@ export function HeaterCard(props: HeaterCardProps) {
         min_completion: 1.0,
       }],
       comfort_rates: null,
-    });
-    setDialogOpen(false);
+    }, () => setDialogOpen(false));
   }
 
   return (
@@ -130,6 +132,11 @@ export function HeaterCard(props: HeaterCardProps) {
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} data-testid="heater-dialog">
         <DialogTitle>Set Heater Target</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 300, pt: 2 }}>
+          {submitError && (
+            <Alert severity="error" data-testid="heater-submit-error">
+              {submitError}
+            </Alert>
+          )}
           <TextField
             label="Target Temperature (°C)"
             type="number"

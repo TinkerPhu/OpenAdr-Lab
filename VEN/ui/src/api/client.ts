@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 import { debugLog } from "../utils/debugLog";
+import { parseEvSessionConflict } from "./evSessionConflict";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -480,7 +481,16 @@ export class VenApi {
 
   async postRequest(body: CreateUserRequestBody): Promise<UserRequestWithSession> {
     const r = await this.jsonReq("POST", "/user-requests", body);
-    if (!r.ok) throw new Error((await r.text()) || `POST /user-requests failed: ${r.status}`);
+    if (!r.ok) {
+      const text = await r.text();
+      // A clash is not a malformed request, and the caller has to offer the user a
+      // choice rather than report a failure — so it arrives as its own error type
+      // carrying the clashing plans. The server declares which case it is in
+      // `kind`; we branch on that, never on the status code alone or on the prose.
+      const conflict = parseEvSessionConflict(text);
+      if (conflict) throw conflict;
+      throw new Error(text || `POST /user-requests failed: ${r.status}`);
+    }
     return r.json();
   }
 

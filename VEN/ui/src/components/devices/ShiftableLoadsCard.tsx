@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -20,6 +21,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import type { CreateUserRequestBody, UserRequestMode, UserRequestWithSession } from "../../api/types";
 import { ModeSelect } from "./ModeSelect";
 import { dateToLocalInputValue } from "../../utils/datetimeLocal";
+import { useSubmitRequest } from "./useSubmitRequest";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
   const { loads, postRequest, deleteRequest, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { submit: submitRequest, error: submitError } = useSubmitRequest(postRequest);
   const [assetId, setAssetId] = useState("wm");
   const [powerKw, setPowerKw] = useState("2.0");
   const [durationMin, setDurationMin] = useState("60");
@@ -63,7 +66,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
 
   function handleConfirm() {
-    postRequest({
+    void submitRequest({
       asset_id: assetId,
       target_soc: null,
       target_energy_kwh: null,
@@ -76,8 +79,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
       duration_min: Number(durationMin),
       earliest_start: new Date(earliestStart).toISOString(),
       latest_end: new Date(latestEnd).toISOString(),
-    });
-    setDialogOpen(false);
+    }, () => setDialogOpen(false));
   }
 
   return (
@@ -135,6 +137,11 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} data-testid="shiftable-dialog">
         <DialogTitle>Add Shiftable Load</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 300, pt: 2 }}>
+          {submitError && (
+            <Alert severity="error" data-testid="shiftable-submit-error">
+              {submitError}
+            </Alert>
+          )}
           <TextField
             label="Asset ID"
             value={assetId}

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DevicesPage } from "../pages/Devices";
+import { EvSessionConflictError } from "../api/evSessionConflict";
 import type {
   UserRequestWithSession, EvSettings, EvUsageSimState, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
 } from "../api/types";
@@ -744,5 +745,141 @@ describe("DevicesPage", () => {
     renderPage();
     expect(screen.getByTestId("ev-usage-sim-section")).toBeInTheDocument();
     expect(screen.queryByTestId("ev-plan-ahead-chip")).toBeNull();
+  });
+  // ── Submission failures are visible at all (050 §0) ───────────────────────
+  // Before 050 the dialog closed on click and the promise was never observed, so
+  // every refusal - including the EV clash the queue exists to report - was an
+  // unhandled rejection the user never saw.
+
+  it("shows a submission failure and keeps the EV dialog open", async () => {
+    const user = userEvent.setup();
+    mockPostRequest.mockRejectedValueOnce(new Error("upstream exploded"));
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+
+    expect(await screen.findByTestId("ev-submit-error")).toHaveTextContent("upstream exploded");
+    expect(screen.getByTestId("ev-dialog")).toBeInTheDocument();
+  });
+
+  it("closes the EV dialog only when the submission succeeded", async () => {
+    const user = userEvent.setup();
+    mockPostRequest.mockResolvedValueOnce({});
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+
+    expect(screen.queryByTestId("ev-submit-error")).toBeNull();
+    expect(screen.queryByTestId("ev-dialog")).toBeNull();
+  });
+
+  // ── The conflict prompt (050 §3) ──────────────────────────────────────────
+
+  function clash(id: string, start: string, departure: string, target = 0.8) {
+    return { id, window_start: start, departure_time: departure, target_soc: target };
+  }
+
+  it("prompts with the clashing plan instead of just refusing", async () => {
+    const user = userEvent.setup();
+    const c = clash("sess-standing", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    mockPostRequest.mockRejectedValueOnce(
+      new EvSessionConflictError("overlaps 1", [c], [c.id]),
+    );
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+
+    const prompt = await screen.findByTestId("ev-conflict-prompt");
+    expect(prompt).toHaveTextContent(/conflicts with a plan you already have/i);
+    // The clashing plan is named, not merely counted.
+    expect(screen.getByTestId("ev-conflict-sess-standing")).toHaveTextContent("80%");
+    expect(screen.getByTestId("ev-conflict-replace-btn")).toBeInTheDocument();
+  });
+
+  it("declining the prompt removes nothing and leaves the draft editable", async () => {
+    const user = userEvent.setup();
+    const c = clash("sess-standing", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    mockPostRequest.mockRejectedValueOnce(
+      new EvSessionConflictError("overlaps 1", [c], [c.id]),
+    );
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    await screen.findByTestId("ev-conflict-prompt");
+
+    await user.click(screen.getByTestId("ev-conflict-keep-btn"));
+
+    expect(screen.queryByTestId("ev-conflict-prompt")).toBeNull();
+    // Exactly one submission: declining must not have re-sent anything.
+    expect(mockPostRequest).toHaveBeenCalledTimes(1);
+    // The draft survives, so the user can amend rather than retype.
+    expect(screen.getByTestId("ev-dialog")).toBeInTheDocument();
+  });
+
+  it("confirming resubmits with exactly the ids the refusal quoted", async () => {
+    const user = userEvent.setup();
+    const c = clash("sess-standing", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    mockPostRequest
+      .mockRejectedValueOnce(new EvSessionConflictError("overlaps 1", [c], [c.id]))
+      .mockResolvedValueOnce({});
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    await screen.findByTestId("ev-conflict-prompt");
+
+    await user.click(screen.getByTestId("ev-conflict-replace-btn"));
+
+    expect(mockPostRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ replace_session_ids: ["sess-standing"] }),
+    );
+    // The first attempt stated no instruction: nothing is displaced unasked.
+    expect(mockPostRequest.mock.calls[0][0].replace_session_ids).toBeUndefined();
+  });
+
+  it("lists every clashing plan and replaces all of them together", async () => {
+    const user = userEvent.setup();
+    const a = clash("sess-a", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    const b = clash("sess-b", "2026-10-06T06:00:00Z", "2026-10-06T09:00:00Z", 0.6);
+    mockPostRequest
+      .mockRejectedValueOnce(new EvSessionConflictError("overlaps 2", [a, b], [a.id, b.id]))
+      .mockResolvedValueOnce({});
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    await screen.findByTestId("ev-conflict-prompt");
+
+    expect(screen.getByTestId("ev-conflict-sess-a")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-conflict-sess-b")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-conflict-replace-btn")).toHaveTextContent("Remove all 2");
+
+    await user.click(screen.getByTestId("ev-conflict-replace-btn"));
+    expect(mockPostRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ replace_session_ids: ["sess-a", "sess-b"] }),
+    );
+  });
+
+  it("re-prompts with current truth when the confirmation went stale", async () => {
+    const user = userEvent.setup();
+    const c = clash("sess-standing", "2026-10-06T04:00:00Z", "2026-10-06T06:00:00Z");
+    const moved = clash("sess-other", "2026-10-06T05:00:00Z", "2026-10-06T07:00:00Z");
+    mockPostRequest
+      .mockRejectedValueOnce(new EvSessionConflictError("overlaps 1", [c], [c.id]))
+      .mockRejectedValueOnce(
+        new EvSessionConflictError("stale", [moved], [moved.id], {
+          reason: "not_the_conflict_set",
+          missing: [moved.id],
+          extra: [c.id],
+        }),
+      );
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    await screen.findByTestId("ev-conflict-prompt");
+    await user.click(screen.getByTestId("ev-conflict-replace-btn"));
+
+    const prompt = await screen.findByTestId("ev-conflict-prompt");
+    expect(prompt).toHaveTextContent(/changed while you were deciding/i);
+    expect(screen.getByTestId("ev-conflict-sess-other")).toBeInTheDocument();
+    expect(screen.queryByTestId("ev-conflict-sess-standing")).toBeNull();
   });
 });
