@@ -98,9 +98,9 @@ class Evaluate(unittest.TestCase):
 
 
 KINDS_DOC = """intro text
-1. `bug` — wrong
-2. `wire-contract` — wire
-3. `style` — naming
+10. `bug` — wrong
+7. `wire-contract` — wire
+4. `style` — naming
 not a kind line
 """
 
@@ -114,8 +114,8 @@ TYPED = """| ID | Description | Affected files | Severity | Kind | Cost | Why op
 
 
 class Classification(unittest.TestCase):
-    def test_kind_rank_follows_document_order(self):
-        self.assertEqual(gate.parse_kind_rank(KINDS_DOC), {"bug": 0, "wire-contract": 1, "style": 2})
+    def test_kind_weights_are_the_leading_numbers(self):
+        self.assertEqual(gate.parse_kind_weights(KINDS_DOC), {"bug": 10, "wire-contract": 7, "style": 4})
 
     def test_typed_table_is_read_by_header(self):
         rows = {r.id: r for r in gate.parse_rows(TYPED)}
@@ -126,8 +126,8 @@ class Classification(unittest.TestCase):
         row = gate.parse_rows(REGISTER)[0]
         self.assertEqual((row.kind, row.severity), (None, None))
 
-    def test_sort_is_kind_rank_then_severity_then_unknown_last(self):
-        rank = gate.parse_kind_rank(KINDS_DOC)
+    def test_sort_is_kind_weight_then_severity_then_unknown_last(self):
+        rank = gate.parse_kind_weights(KINDS_DOC)
         rows = gate.parse_rows(TYPED) + gate.parse_rows(REGISTER)[:1]
         order = [r.id for r in gate.sort_by_priority(rows, rank)]
         self.assertEqual(order, ["R-4", "R-2", "R-3", "R-1", "R-89"])
