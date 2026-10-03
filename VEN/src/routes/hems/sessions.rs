@@ -227,7 +227,6 @@ pub async fn post_requests(
                 power_kw: load.power_kw,
                 duration_min: load.duration_min,
                 earliest_start: load.earliest_start,
-                expected_trip_distance_km: None,
                 latest_end: load.latest_end,
             }),
         ) {
