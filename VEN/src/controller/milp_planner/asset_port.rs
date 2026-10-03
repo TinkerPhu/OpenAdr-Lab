@@ -295,9 +295,8 @@ pub use crate::controller::asset_milp_port::{
 // eliminating the need to import `crate::assets::*` from within milp_planner.
 
 /// Future state map for battery: `{"soc": e_kwh / capacity_kwh}`.
-/// Mirrors `Battery::future_state_values()`.
 pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f64> {
-    let soc = (e_kwh / capacity_kwh).clamp(0.0, 1.0);
+    let soc = crate::entities::asset_params::battery_soc_from_energy(e_kwh, capacity_kwh);
     HashMap::from([("soc".into(), soc)])
 }
 
@@ -360,13 +359,14 @@ pub struct ExogenousSocDrops {
 }
 
 /// Future state map for EV at a given SoC: `{"soc": soc}`.
-/// Mirrors `EvCharger::future_state_values_at()`.
 pub fn ev_future_state_at(soc: f64) -> HashMap<String, f64> {
-    HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
+    HashMap::from([(
+        "soc".into(),
+        crate::entities::asset_params::ev_soc_clamped(soc),
+    )])
 }
 
 /// Future state map for heater from tank energy above T_min: `{"temp_c": ...}`.
-/// Mirrors `Heater::future_state_values()`.
 pub fn heater_future_state(
     e_tank_kwh: f64,
     temp_min_c: f64,
@@ -378,4 +378,38 @@ pub fn heater_future_state(
         thermal_mass_kwh_per_c,
     );
     HashMap::from([("temp_c".into(), temp_c)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These three functions are what `planned_state.rs` actually calls to turn a
+    // solved energy variable into the state the plan displays, and they carried no
+    // tests of their own — the coverage sat on the asset-side duplicates R-73
+    // deleted. The conversions themselves are pinned in
+    // `entities::asset_params`; what is asserted here is the key each map is read
+    // by, which is the part a caller depends on.
+
+    #[test]
+    fn battery_future_state_is_read_by_soc() {
+        let m = battery_future_state(5.0, 10.0);
+        assert_eq!(m.len(), 1);
+        assert!((m["soc"] - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ev_future_state_at_is_read_by_soc() {
+        let m = ev_future_state_at(0.65);
+        assert_eq!(m.len(), 1);
+        assert!((m["soc"] - 0.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn heater_future_state_is_read_by_temp_c() {
+        // 2 kWh above an 18 C floor at 2 kWh/C -> 19 C.
+        let m = heater_future_state(2.0, 18.0, 2.0);
+        assert_eq!(m.len(), 1);
+        assert!((m["temp_c"] - 19.0).abs() < 1e-9);
+    }
 }

@@ -208,6 +208,26 @@ pub fn heater_temp_c_from_energy(e_kwh: f64, temp_min_c: f64, thermal_mass_kwh_p
     temp_min_c + e_kwh / thermal_mass_kwh_per_c
 }
 
+// ── Stored energy to state of charge ─────────────────────────────────────────
+// These live here, beside the heater's own energy/temperature pair above, so that
+// one implementation serves both rings. `assets/` may import `entities/` and so
+// may `controller/`, but `controller/milp_planner` must never import
+// `crate::assets::` (`ven-architecture`) — which is why reading a solved energy
+// variable back as a state of charge previously existed twice, once on the asset
+// and once as a "Mirrors ..." copy in `milp_planner::asset_port`. The copies were
+// identical; the boundary, not a behaviour difference, is what produced them
+// (R-73).
+
+/// State of charge (0..1) from the energy stored in a battery.
+pub fn battery_soc_from_energy(e_kwh: f64, capacity_kwh: f64) -> f64 {
+    (e_kwh / capacity_kwh).clamp(0.0, 1.0)
+}
+
+/// A vehicle's state of charge held to the 0..1 a fraction of a pack can be.
+pub fn ev_soc_clamped(soc: f64) -> f64 {
+    soc.clamp(0.0, 1.0)
+}
+
 // ── PV ───────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -495,5 +515,33 @@ mod tests {
         let (temp_c, temp_min_c, mass) = (23.5, 18.0, 2.5);
         let e_kwh = heater_energy_above_min_kwh(temp_c, temp_min_c, mass);
         assert!((heater_temp_c_from_energy(e_kwh, temp_min_c, mass) - temp_c).abs() < 1e-9);
+    }
+
+    // ── Stored energy to state of charge ─────────────────────────────────────
+    // Carried over from `Battery::future_state_values` and
+    // `EvCharger::future_state_values_at` when R-73 deleted those duplicates:
+    // the assertions follow the implementation they were always about.
+
+    #[test]
+    fn battery_soc_from_energy_is_the_stored_fraction() {
+        // 5 kWh of a 10 kWh pack -> half charged.
+        assert!((battery_soc_from_energy(5.0, 10.0) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn battery_soc_from_energy_clamps_both_ends() {
+        assert_eq!(battery_soc_from_energy(-1.0, 10.0), 0.0);
+        assert_eq!(battery_soc_from_energy(15.0, 10.0), 1.0);
+    }
+
+    #[test]
+    fn ev_soc_clamped_passes_a_valid_fraction_through() {
+        assert!((ev_soc_clamped(0.65) - 0.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ev_soc_clamped_clamps_both_ends() {
+        assert_eq!(ev_soc_clamped(-0.1), 0.0);
+        assert_eq!(ev_soc_clamped(1.5), 1.0);
     }
 }

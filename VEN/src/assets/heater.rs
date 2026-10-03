@@ -267,19 +267,6 @@ impl Heater {
         m
     }
 
-    /// State values for a future MILP time slot, given the thermal energy stored
-    /// above `temp_min_c` at the start of that slot (kWh).
-    /// Returns `{"temp_c": <temperature>}`.
-    #[allow(dead_code)] // pre-existing, unrelated to Spec A: asset_port.rs::heater_future_state is a separate "Mirrors" reimplementation; found while removing AssetConfig, not fixed here (R-73)
-    pub fn future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64> {
-        let temp_c = crate::entities::asset_params::heater_temp_c_from_energy(
-            e_tank_kwh,
-            self.temp_min_c,
-            self.thermal_mass_kwh_per_c,
-        );
-        HashMap::from([("temp_c".into(), temp_c)])
-    }
-
     /// Create a plan trajectory starting from the current live state.
     /// Returns `None` if `live_state` is not a heater state.
     pub fn plan_trajectory(
@@ -1111,34 +1098,6 @@ mod tests {
         let q_dem = heater.forecast_demand_kw(80.0); // ambient well above T_mid
                                                      // draw 0.5 + 0.003×(60-80) = 0.5 - 0.06 = 0.44 → positive; still ≥ 0
         assert!(q_dem >= 0.0, "q_dem must be non-negative, got {q_dem}");
-    }
-
-    // T016: Heater::future_state_values returns correct temp_c.
-    #[test]
-    fn future_state_values_mid_energy() {
-        let h = default_heater(); // thermal_mass_kwh_per_c = 2.0, temp_min_c = 20.0
-                                  // 2.0 kWh stored → temp = 20.0 + 2.0 / 2.0 = 21.0 °C
-        let vals = h.future_state_values(2.0);
-        let temp_c = vals["temp_c"];
-        assert!(
-            (temp_c - 21.0).abs() < 1e-9,
-            "expected temp_c=21.0, got {temp_c}"
-        );
-    }
-
-    #[test]
-    fn future_state_values_zero_energy() {
-        let h = default_heater();
-        let vals = h.future_state_values(0.0);
-        assert!((vals["temp_c"] - h.temp_min_c).abs() < 1e-9);
-    }
-
-    #[test]
-    fn future_state_values_returns_only_temp_c() {
-        let h = default_heater();
-        let vals = h.future_state_values(1.0);
-        assert_eq!(vals.len(), 1, "expected exactly one key");
-        assert!(vals.contains_key("temp_c"));
     }
 
     // ── ceiling deadband (thermostat_delta_c) ────────────────────────────
