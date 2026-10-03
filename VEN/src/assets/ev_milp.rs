@@ -167,11 +167,36 @@ impl EvMilpContext {
     /// Several obligations have several deadlines, so there is no single one to
     /// bound it by.
     pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: &[f64]) -> Expression {
+        let last = self.band_accounting_last_step(n);
         let mut expr = Expression::from(0.0);
         for (t, &dt) in dt_h.iter().enumerate().take(n) {
-            expr += dt * v.p_ev[t];
+            if t <= last {
+                expr += dt * v.p_ev[t];
+            }
         }
         expr
+    }
+
+    /// Last step whose charging may be paid for out of the comfort bands.
+    ///
+    /// The latest obligation's deadline, or the whole horizon when there is no
+    /// obligation at all (plain opportunistic charging, which has no deadline to be
+    /// bounded by).
+    ///
+    /// Why this bound exists: `ev_comfort::ev_energy_segments` prices bands from the
+    /// current state of charge all the way to a *full* pack, the part above
+    /// `soc_target` at `v_ev_extra_eur_kwh`. R-93 briefly made this sum whole-horizon,
+    /// which let the solver buy that beyond-target energy across all 48 h instead of
+    /// only before the deadline. On the fleet that charged a VEN to 100 % against an
+    /// 80 % target and refilled the predicted trip's drop in the very slot it
+    /// occurred, so the planned state-of-charge curve showed no dip at all.
+    fn band_accounting_last_step(&self, n: usize) -> usize {
+        self.obligations
+            .iter()
+            .map(|o| o.deadline_step)
+            .max()
+            .unwrap_or_else(|| n.saturating_sub(1))
+            .min(n.saturating_sub(1))
     }
 
     /// The firm energy the bands must be able to cover [kWh]: the most any single
