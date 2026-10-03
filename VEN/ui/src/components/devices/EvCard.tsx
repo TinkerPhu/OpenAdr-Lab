@@ -307,9 +307,11 @@ export function EvCard(props: EvCardProps) {
           {conflict && (
             <Alert severity="warning" data-testid="ev-conflict-prompt">
               <Typography variant="body2" sx={{ mb: 1 }}>
-                {conflict.isStaleConfirmation
-                  ? "Your charging plans changed while you were deciding. This request now conflicts with:"
-                  : "This charging request conflicts with a plan you already have:"}
+                {conflict.conflicts.length === 0
+                  ? "The plan you were replacing is no longer there. Nothing needs removing — submit again to queue this one."
+                  : conflict.isStaleConfirmation
+                    ? "Your charging plans changed while you were deciding. This request now conflicts with:"
+                    : "This charging request conflicts with a plan you already have:"}
               </Typography>
               {conflict.conflicts.map((c) => (
                 <Typography
@@ -323,24 +325,38 @@ export function EvCard(props: EvCardProps) {
                 </Typography>
               ))}
               <Box sx={{ display: "flex", gap: 1, mt: 1.5 }}>
+                {/* Nothing clashes any more - the plan expired or was deleted while the
+                    prompt was open - so the action is a plain resubmission, not a
+                    removal. Offering "remove it" here would name nothing and be
+                    refused again. */}
                 <Button
                   size="small"
                   variant="contained"
                   color="warning"
                   data-testid="ev-conflict-replace-btn"
                   disabled={isPosting}
-                  onClick={() => void submit(conflict.replaceableSessionIds)}
+                  onClick={() =>
+                    void submit(
+                      conflict.conflicts.length === 0
+                        ? undefined
+                        : conflict.replaceableSessionIds,
+                    )
+                  }
                 >
-                  {conflict.conflicts.length > 1
-                    ? `Remove all ${conflict.conflicts.length} and continue`
-                    : "Remove it and continue"}
+                  {conflict.conflicts.length === 0
+                    ? "Submit again"
+                    : conflict.conflicts.length > 1
+                      ? `Remove all ${conflict.conflicts.length} and continue`
+                      : "Remove it and continue"}
                 </Button>
                 <Button
                   size="small"
                   data-testid="ev-conflict-keep-btn"
                   onClick={clearSubmit}
                 >
-                  Keep it, let me change this
+                  {conflict.conflicts.length === 0
+                    ? "Cancel"
+                    : "Keep it, let me change this"}
                 </Button>
               </Box>
             </Alert>
