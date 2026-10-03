@@ -1195,7 +1195,7 @@ mod milp_context_trait_tests {
                 was_away_by_usage_sim: false,
             });
             let ctx = EvMilpContext::from_state(
-            &state,
+                &state,
                 &cfg,
                 4,
                 &cum_s,

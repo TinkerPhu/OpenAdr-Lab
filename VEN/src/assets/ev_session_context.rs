@@ -21,7 +21,6 @@ use crate::entities::device_session::EvSession;
 /// the budget constraint (not the price) doing the capping.
 const BUDGET_CHARGE_REWARD_EUR_KWH: f64 = 5.0;
 
-
 /// The horizon slot an instant falls in, clamped to the horizon's ends.
 ///
 /// The `partition_point` idiom this replaces was written out twice - here and in
@@ -64,13 +63,13 @@ fn availability_from_sessions(
             // locked the EV out of the whole current slot — up to an hour of charging
             // lost every time a user planned one, and the first slot is exactly where
             // dispatch acts.
-            let slot_start =
-                now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
+            let slot_start = now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
             let slot_end = now
                 + chrono::Duration::seconds(
-                    cum_s.get(t + 1).copied().unwrap_or_else(|| {
-                        cum_s.get(t).copied().unwrap_or(0)
-                    }),
+                    cum_s
+                        .get(t + 1)
+                        .copied()
+                        .unwrap_or_else(|| cum_s.get(t).copied().unwrap_or(0)),
                 );
             sessions
                 .iter()
@@ -96,9 +95,10 @@ fn obligations_from_sessions(
     // cum_s[n], not cum_s[n-1]. Using the latter silently dropped any session
     // departing in the final slot - including the common case of a deadline set
     // exactly at the horizon's end.
-    let horizon_end_s = cum_s.get(n).copied().unwrap_or_else(|| {
-        cum_s.last().copied().unwrap_or(0)
-    });
+    let horizon_end_s = cum_s
+        .get(n)
+        .copied()
+        .unwrap_or_else(|| cum_s.last().copied().unwrap_or(0));
     sessions
         .iter()
         .filter(|s| !s.soft_deadline && s.mode.states_a_firm_deadline())
@@ -110,7 +110,6 @@ fn obligations_from_sessions(
         })
         .collect()
 }
-
 
 /// The charge each queued session's following trip is expected to consume, placed at
 /// the slot the vehicle is next available — i.e. the *next* session's window start.
@@ -260,15 +259,18 @@ impl EvMilpContext {
         // a *stated* series self-describing when no such schedule exists.
         let (trip_drops, any_defaulted) =
             trip_drops_between_sessions(ev_sessions, cfg, n, cum_s, now);
-        let stated_drops = trip_drops.iter().any(|d| *d > 0.0).then(|| ExogenousSocDrops {
-            drop_frac_per_slot: trip_drops,
-            // Stated sessions declare no floor of their own; the EV's usage config
-            // owns that number when it has one.
-            floor_frac: cfg
-                .usage_sim
-                .as_ref()
-                .map_or(0.0, |u| u.min_soc_after_drop_pct / 100.0),
-        });
+        let stated_drops = trip_drops
+            .iter()
+            .any(|d| *d > 0.0)
+            .then(|| ExogenousSocDrops {
+                drop_frac_per_slot: trip_drops,
+                // Stated sessions declare no floor of their own; the EV's usage config
+                // owns that number when it has one.
+                floor_frac: cfg
+                    .usage_sim
+                    .as_ref()
+                    .map_or(0.0, |u| u.min_soc_after_drop_pct / 100.0),
+            });
         if any_defaulted {
             tracing::debug!(
                 "EV session trip consumption defaulted to {} km (no distance stated)",
@@ -349,7 +351,7 @@ impl EvMilpContext {
                     },
                     a_ev: deadline_mask,
                     soc_drops: None,
-                        segments,
+                    segments,
                     // Inert here: this arm prices per band, so nothing may also
                     // be bought through `e_ev_extra`.
                     e_extra_max_kwh: 0.0,
@@ -417,7 +419,10 @@ mod tests {
 
         let mask = availability_from_sessions(std::slice::from_ref(&s), n, &cum_s, now);
 
-        assert!(mask[0], "the slot the window opens inside must be chargeable");
+        assert!(
+            mask[0],
+            "the slot the window opens inside must be chargeable"
+        );
         assert!(mask[1] && mask[2], "and the slots fully inside it");
     }
 

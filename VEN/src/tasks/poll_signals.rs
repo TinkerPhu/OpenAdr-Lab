@@ -120,7 +120,6 @@ pub(crate) async fn apply_signal_changes(
     alerts_changed || simple_changed
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

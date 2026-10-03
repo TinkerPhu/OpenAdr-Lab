@@ -543,7 +543,6 @@ mod tests {
         let (_, actual) = bat.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
-
 }
 
 #[cfg(test)]

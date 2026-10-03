@@ -11,9 +11,9 @@ pub mod poll_programs;
 pub mod poll_reports;
 pub(crate) mod poll_signals;
 mod progress_ticker;
-pub(crate) mod vtn_charge_state_session;
 pub mod sim_tick;
 pub mod state_persist;
+pub(crate) mod vtn_charge_state_session;
 
 pub(crate) use heuristics_job::spawn_heuristics_job;
 pub(crate) use history_sampler::spawn_history_sampler;
