@@ -97,5 +97,41 @@ class Evaluate(unittest.TestCase):
         self.assertEqual(out.unresolved, [])
 
 
+KINDS_DOC = """intro text
+1. `bug` — wrong
+2. `wire-contract` — wire
+3. `style` — naming
+not a kind line
+"""
+
+TYPED = """| ID | Description | Affected files | Severity | Kind | Cost | Why open |
+|----|-------------|----------------|----------|------|------|----------|
+| R-1 | a | `VEN/src/a/b/x.rs` | S3 | style | Small | too-big |
+| R-2 | b | `VEN/src/a/b/y.rs` | S1 | wire-contract | Small | needs-decision |
+| R-3 | c | `VEN/src/a/b/z.rs` | S2 | wire-contract | Small | needs-decision |
+| R-4 | d | `VEN/src/a/b/w.rs` | S1 | bug | Trivial | too-big |
+"""
+
+
+class Classification(unittest.TestCase):
+    def test_kind_rank_follows_document_order(self):
+        self.assertEqual(gate.parse_kind_rank(KINDS_DOC), {"bug": 0, "wire-contract": 1, "style": 2})
+
+    def test_typed_table_is_read_by_header(self):
+        rows = {r.id: r for r in gate.parse_rows(TYPED)}
+        self.assertEqual((rows["R-2"].kind, rows["R-2"].severity), ("wire-contract", "S1"))
+        self.assertEqual(rows["R-2"].paths, ["VEN/src/a/b/y.rs"])
+
+    def test_untyped_rows_have_no_kind(self):
+        row = gate.parse_rows(REGISTER)[0]
+        self.assertEqual((row.kind, row.severity), (None, None))
+
+    def test_sort_is_kind_rank_then_severity_then_unknown_last(self):
+        rank = gate.parse_kind_rank(KINDS_DOC)
+        rows = gate.parse_rows(TYPED) + gate.parse_rows(REGISTER)[:1]
+        order = [r.id for r in gate.sort_by_priority(rows, rank)]
+        self.assertEqual(order, ["R-4", "R-2", "R-3", "R-1", "R-89"])
+
+
 if __name__ == "__main__":
     unittest.main()
