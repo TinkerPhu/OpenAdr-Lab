@@ -1314,6 +1314,34 @@ outes/sim.rs causes a T1+T2 double-solve race:
   compiled one crate instead of the graph. Hold the WSL lock while doing it: cargo's own file lock
   on the target dir makes sharing safe between sessions, but only serialised.
 
+## An aligned `now` is not wall-clock `now` (2026-10-03)
+
+- **GB-54 aligns a replan's `now` to the slot grid, so it can sit *before* real time —
+  and every "is X inside this instant" test is then wrong for the slot in progress.**
+  Three separate bugs in one change, all this root:
+  1. `EvSessionQueue::current(now)` returned `None` for a session created at 15:25 when
+     the plan's `now` was 15:00, so the planner saw no session and dropped its whole
+     flexibility envelope. Fixed by giving the planner `upcoming(now)` — "the next
+     commitment", whether its window has opened or not — and documenting why the two
+     differ.
+  2. Slot availability asked whether a window contained the slot's *start*, which
+     excluded the slot a mid-slot session begins inside. That cost up to a full slot of
+     charging per planned session, and slot 0 is the one dispatch acts on, so the EV sat
+     idle while the plan said "charge later". Fixed to an overlap test:
+     `window_start < slot_end && slot_start < departure_time`.
+  3. `slot_at` used `<=`, so a deadline landing exactly on a boundary returned the slot
+     that *starts* there — one slot after the car has gone.
+  The symptom is never "wrong time": it is a missing envelope, an absent ledger entry, a
+  plan that charges one slot late. **When a time-keyed value looks absent, check whether
+  the instant you compared against is the aligned one or the wall clock.** And prefer
+  interval-vs-interval comparisons to instant-in-interval ones wherever a slot grid is
+  involved.
+- **Corollary on diagnosis:** two of the three were invisible to 1548 passing unit tests
+  because the fixtures pass `now` and the session's own timestamps from the same clock.
+  Only a live VEN — plugged, 7 kW available, SoC 0.05, `setpoint_kw` 0.0 — showed it. A
+  test whose fixture builds every timestamp from one `now` cannot catch a bug about two
+  clocks disagreeing.
+
 ## Editing by pattern (2026-10-03)
 
 - **A pattern-based edit needs a check for where it landed, not just that it applied.**
