@@ -278,6 +278,7 @@ mod tests {
             interruptible: None,
             tolerance_min: None,
             earliest_start: None,
+            expected_trip_distance_km: None,
             soft_deadline: None,
             target_temp_c: None,
         };
@@ -299,6 +300,7 @@ mod tests {
             power_kw: Some(2.0),
             duration_min: Some(duration_min),
             earliest_start: Some(Utc::now()),
+            expected_trip_distance_km: None,
             latest_end: Some(Utc::now() + chrono::Duration::hours(window_h)),
             target_soc: None,
             target_energy_kwh: None,
@@ -820,6 +822,7 @@ mod tests {
             power_kw: Some(1.0),
             duration_min: Some(30),
             earliest_start: None,
+            expected_trip_distance_km: None,
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,

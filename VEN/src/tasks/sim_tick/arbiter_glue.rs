@@ -267,6 +267,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.8,
             window_start: ts(-1000),
+            expected_trip_distance_km: None,
             departure_time,
             soft_deadline: false,
             mode: Default::default(),
