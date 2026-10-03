@@ -175,6 +175,20 @@ impl EvSessionQueue {
             .find(|s| s.window_start <= now && now < s.departure_time)
     }
 
+    /// The session this plan is for: the earliest one that has not departed yet.
+    ///
+    /// Distinct from `current` on purpose. `current` answers "is a window open right
+    /// now", which is what the live tick and the opportunistic-charging pause need.
+    /// A *planner* asking the same question gets the wrong answer, because GB-54
+    /// aligns a replan's `now` to the slot grid, so it can sit before wall-clock
+    /// time: a session created at 14:20 against a plan starting at 14:00 is not yet
+    /// "current", and treating it as absent dropped its flexibility envelope from
+    /// the plan entirely. What a plan wants is the next commitment it must serve,
+    /// whether its window has opened yet or not.
+    pub fn upcoming(&self, now: DateTime<Utc>) -> Option<&EvSession> {
+        self.0.iter().find(|s| s.departure_time > now)
+    }
+
     /// Drop every session whose departure has passed; returns how many went.
     ///
     /// Nothing else expires a session, so a finished or missed one would
@@ -405,6 +419,37 @@ mod tests {
         assert!(q.current(ts(9)).is_none());
         // The departure instant itself is outside the half-open window.
         assert!(q.current(ts(8)).map(|s| s.id) != Some(a_id));
+    }
+
+    /// The grid-lag case that cost a plan its flexibility envelope: GB-54 aligns a
+    /// replan's `now` to the slot grid, so it can sit *before* wall-clock time. A
+    /// session created at 14:20 against a plan whose `now` is 14:00 is not yet
+    /// "current", and treating that as "no session" dropped it from the plan.
+    #[test]
+    fn upcoming_finds_a_session_whose_window_has_not_opened_yet() {
+        let mut q = EvSessionQueue::default();
+        let later = sess(2, 10);
+        let later_id = later.id;
+        q.insert(later).unwrap();
+
+        // Grid-aligned plan time sits before the session's window start.
+        assert!(q.current(ts(0)).is_none(), "its window has not opened");
+        assert_eq!(
+            q.upcoming(ts(0)).map(|s| s.id),
+            Some(later_id),
+            "but it is the commitment this plan must serve"
+        );
+    }
+
+    #[test]
+    fn upcoming_skips_a_session_that_has_already_departed() {
+        let mut q = EvSessionQueue::default();
+        q.insert(sess(-8, -2)).unwrap();
+        let live = sess(4, 12);
+        let live_id = live.id;
+        q.insert(live).unwrap();
+
+        assert_eq!(q.upcoming(ts(0)).map(|s| s.id), Some(live_id));
     }
 
     #[test]

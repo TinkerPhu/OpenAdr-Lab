@@ -21,6 +21,9 @@ Feature: EV usage forecast fed to the planner (ev-usage-forecast)
     Then the plan allocates no EV power while the EV is predicted away
     And the plan allocates EV power in the home window around the predicted trip
 
+  # Unchanged in intent: under the forecast class the predicted deadline reaches the
+  # planner directly, so no session is written. Only the shape of the answer changed -
+  # `/ev-session` returns the queue, so "nothing invented" is an empty queue rather
+  # than a 204 (ev-session-queue).
   Scenario: No charge session is invented to carry the predicted deadline
-    When I GET /ev-session from the VEN
-    Then the response status is 204
+    Then the EV session queue stays empty for 10 seconds

@@ -76,6 +76,43 @@ def step_ev_queue_holds(context, count):
     context.ev_sessions = sessions
 
 
+@when("I poll the EV session queue until it has at least {count:d} session")
+@when("I poll the EV session queue until it has at least {count:d} sessions")
+def step_poll_ev_queue(context, count):
+    """The simulated schedule writes on a tick, so this waits rather than checks once."""
+    deadline = time.time() + 60
+    sessions = []
+    while time.time() < deadline:
+        r = ven_get("/ev-session")
+        if r.status_code == 200:
+            sessions = r.json()
+            if isinstance(sessions, list) and len(sessions) >= count:
+                context.ev_sessions = sessions
+                return
+        time.sleep(3)
+    raise AssertionError(f"expected >= {count} queued sessions within 60s, last saw {sessions}")
+
+
+@then('every queued EV session has origin "{origin}"')
+def step_ev_queue_origin(context, origin):
+    assert context.ev_sessions, "no sessions captured"
+    wrong = [s for s in context.ev_sessions if s.get("origin") != origin]
+    assert not wrong, f"sessions with unexpected origin: {wrong}"
+
+
+@then("the EV session queue stays empty for {seconds:d} seconds")
+def step_ev_queue_stays_empty(context, seconds):
+    """Asserts an absence, so it has to wait rather than check once: a session the VEN
+    might create would appear on its next poll, not instantly."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        r = ven_get("/ev-session")
+        assert r.status_code == 200, f"GET /ev-session returned {r.status_code}"
+        sessions = r.json()
+        assert sessions == [], f"expected no EV sessions, got {sessions}"
+        time.sleep(2)
+
+
 @then("the queued EV sessions do not overlap")
 def step_ev_queue_no_overlap(context):
     sessions = sorted(context.ev_sessions, key=lambda s: s["window_start"])
