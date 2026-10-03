@@ -1265,7 +1265,7 @@ mod milp_context_trait_tests {
                 4,
                 &cum_s,
                 chrono::Utc::now(),
-                None,
+                &[],
                 &[],
                 0.0,
                 1.0,
