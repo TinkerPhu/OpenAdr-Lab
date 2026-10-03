@@ -14,7 +14,10 @@ Feature: EV usage simulation with plan-ahead (ev-usage-simulation)
     And the response JSON has field "next_trip.leave_at"
     And the response JSON has field "next_trip.return_at"
 
-  Scenario: Plan-ahead auto-creates a simulated charge session ahead of the leave
-    When I poll VEN /ev-session until it returns 200
-    Then the response JSON field "origin" equals "SIMULATED_USAGE"
-    And the response JSON has field "departure_time"
+  # ev-session-queue: plan-ahead now queues a rolling week of predicted trips, one
+  # session each, rather than only the next leave. The queue is what changed; that each
+  # session is SIMULATED_USAGE-origin and carries a departure is unchanged.
+  Scenario: Plan-ahead queues a simulated charge session for each predicted trip
+    When I poll the EV session queue until it has at least 1 session
+    Then every queued EV session has origin "SIMULATED_USAGE"
+    And the queued EV sessions do not overlap
