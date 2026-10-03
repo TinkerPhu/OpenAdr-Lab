@@ -36,6 +36,56 @@ def step_post_user_request(context, asset_id, soc, hours):
         context.last_created_request = None
 
 
+@when('I POST an EV user request available in {from_h:d} hours, departing in {to_h:d} hours')
+def step_post_ev_request_with_window(context, from_h, to_h):
+    """A session with a stated charging window — what lets a user hold more than one.
+
+    Without `earliest_start` every stated session opens at the submission instant,
+    so any two of them overlap and the second is refused.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "asset_id": "ev",
+        "target_soc": 0.8,
+        "earliest_start": (now + timedelta(hours=from_h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "deadlines": [
+            {
+                "latest_end": (now + timedelta(hours=to_h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "min_completion": 0.8,
+            }
+        ],
+        "completion_policy": "STOP",
+    }
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@then("the EV session queue holds {count:d} sessions")
+def step_ev_queue_holds(context, count):
+    r = ven_get("/ev-session")
+    assert r.status_code == 200, f"GET /ev-session returned {r.status_code}"
+    sessions = r.json()
+    assert isinstance(sessions, list), f"expected a list of sessions, got {type(sessions)}"
+    assert len(sessions) == count, f"expected {count} queued sessions, got {len(sessions)}: {sessions}"
+    context.ev_sessions = sessions
+
+
+@then("the queued EV sessions do not overlap")
+def step_ev_queue_no_overlap(context):
+    sessions = sorted(context.ev_sessions, key=lambda s: s["window_start"])
+    for earlier, later in zip(sessions, sessions[1:]):
+        assert earlier["departure_time"] <= later["window_start"], (
+            f"sessions overlap: {earlier['window_start']}..{earlier['departure_time']} "
+            f"then {later['window_start']}..{later['departure_time']}"
+        )
+
+
 @when('I POST a user request for asset "{asset_id}" with target_soc {soc:f} and max_cost {cost:f} EUR')
 def step_post_user_request_with_budget(context, asset_id, soc, cost):
     latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
