@@ -3,17 +3,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppCtx;
 
-/// GET /ev-session — returns the currently active EvSession (204 if none), read-only.
+/// GET /ev-session — every queued EV charging session, in window order, read-only.
+///
+/// Returns the whole queue rather than one session: an EV may now hold several, and
+/// a surface that showed only the current one would make the rest invisible
+/// (`ui-transparency`). An empty queue is an empty list, not 204 — "no sessions" is
+/// an answer, and a caller rendering a list should not have to special-case it.
 ///
 /// Kept after BL-41 (which removed the write-side `/ev-session` CRUD, superseded by
-/// `/user-requests`) because a VTN-issued CHARGE_STATE_SETPOINT event creates an
-/// EvSession directly (`tasks/poll_signals.rs`) with no linked UserRequest — so it is
-/// invisible to `GET /user-requests`. This is the only observable surface for that case.
+/// `/user-requests`) because a session need not have a linked `UserRequest`: the
+/// simulated usage schedule creates its own, so they are invisible to
+/// `GET /user-requests`. This is the only observable surface for those.
 pub async fn get_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.ev_session().await {
-        Some(s) => Json(s).into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
-    }
+    let sessions: Vec<_> = ctx.state.ev_sessions().await.iter().cloned().collect();
+    Json(sessions).into_response()
 }
 
 /// GET /ev-settings — returns the current EV overlay settings.

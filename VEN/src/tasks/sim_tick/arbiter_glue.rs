@@ -126,16 +126,17 @@ pub(crate) async fn resolve_overlay_enabled(
     state: &crate::state::AppState,
     now: DateTime<Utc>,
 ) -> bool {
-    let ev_sess_tick = state.ev_session().await;
-    if ev_sess_tick
-        .as_ref()
-        .is_some_and(|s| s.departure_time <= now)
-    {
-        state.set_ev_session(None).await;
-    }
-    let ev_sess_tick = state.ev_session().await;
+    // Every session whose departure has passed goes, not just the head: a queue can
+    // have several behind a tick that was late or a VEN that was asleep.
+    state.expire_ev_sessions(now).await;
+
+    // "Active" means a session's window is open *now* - deliberately not "the queue
+    // is non-empty". Under the rolling simulated schedule the queue is almost never
+    // empty, so the old emptiness test would pause opportunistic charging forever,
+    // including in the gaps between sessions when the car is sitting at home and
+    // free to soak up surplus.
     let ev_settings_tick = state.ev_settings().await;
-    let session_active = ev_sess_tick.is_some();
+    let session_active = state.current_ev_session(now).await.is_some();
     if ev_settings_tick.paused_by_active_session != session_active {
         state
             .set_ev_settings(crate::state::EvSettings {
@@ -257,12 +258,15 @@ mod tests {
         assert_eq!(state.limit_active_lever().await, None);
     }
 
+    /// A session open from well before `ts(0)` until `departure_time`, so the tests
+    /// below vary only the thing they are about: whether that departure has passed.
     fn make_ev_session(
         departure_time: DateTime<Utc>,
     ) -> crate::entities::device_session::EvSession {
         crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.8,
+            window_start: ts(-1000),
             departure_time,
             soft_deadline: false,
             mode: Default::default(),
@@ -279,23 +283,53 @@ mod tests {
     #[tokio::test]
     async fn resolve_overlay_enabled_keeps_a_not_yet_expired_session() {
         let state = AppState::new();
-        state.set_ev_session(Some(make_ev_session(ts(100)))).await;
+        state
+            .insert_ev_session(make_ev_session(ts(100)))
+            .await
+            .unwrap();
 
         let enabled = resolve_overlay_enabled(&state, ts(0)).await;
 
         assert!(!enabled, "a live session must still suppress the overlay");
-        assert!(state.ev_session().await.is_some());
+        assert!(state.current_ev_session(ts(0)).await.is_some());
         assert!(state.ev_settings().await.paused_by_active_session);
     }
 
+    /// The trap the queue would otherwise spring: with a rolling schedule the queue
+    /// is almost never empty, so "a session exists" would pause opportunistic
+    /// charging forever. What matters is whether a window is open *now*.
+    #[tokio::test]
+    async fn resolve_overlay_enabled_does_not_pause_in_the_gap_between_sessions() {
+        let state = AppState::new();
+        let mut later = make_ev_session(ts(1000));
+        later.window_start = ts(500);
+        state.insert_ev_session(later).await.unwrap();
+
+        let enabled = resolve_overlay_enabled(&state, ts(0)).await;
+
+        assert!(
+            enabled,
+            "a session queued for later must not suppress the overlay now"
+        );
+        assert!(!state.ev_settings().await.paused_by_active_session);
+        assert_eq!(
+            state.ev_sessions().await.len(),
+            1,
+            "and it must still be queued - not current is not the same as expired"
+        );
+    }
+
     /// A session whose `departure_time` has already passed is never expired
-    /// by anything else (only explicit cancel or a vanished VTN signal) — it
+    /// by anything else (only an explicit cancel) — it
     /// must be cleared here so it stops permanently pausing opportunistic
     /// charging and stops hiding the EV from the headroom forecast.
     #[tokio::test]
     async fn resolve_overlay_enabled_clears_an_expired_session() {
         let state = AppState::new();
-        state.set_ev_session(Some(make_ev_session(ts(-1)))).await;
+        state
+            .insert_ev_session(make_ev_session(ts(-1)))
+            .await
+            .unwrap();
         state
             .set_ev_settings(crate::state::EvSettings {
                 opportunistic_charging_enabled: true,
@@ -310,7 +344,7 @@ mod tests {
             "an expired session must no longer suppress the overlay"
         );
         assert!(
-            state.ev_session().await.is_none(),
+            state.ev_sessions().await.is_empty(),
             "expired session must be cleared from state"
         );
         assert!(!state.ev_settings().await.paused_by_active_session);
