@@ -743,3 +743,54 @@ reaches the executed window in 2 of 6 instances, once better and once worse.
 
 ven-20 remains the evidence that the physical lever works: 450 L across a 35 K band, 18.31 kWh of
 slack, 0.14 s phase 1, and it never hits either limit.
+
+## Phase-2 startup penalty: a per-asset-mix setting, not a fleet default (2026-10-03)
+
+**Trigger.** ven-1's live plan (2026-10-03T10:40Z, battery + EV + PV) had one-slot battery
+dropouts at 14:10 and a 0.28 / 2.74 kW make-up blip at 16:45-16:55 local. At 14:10 the EV took
+its 1.4 kW minimum while 3.4 kW was exported, which is strictly worse than charging the
+battery. It sat inside phase 1's 2 % gap, and phase 2 had stopped at its 15 s TimeLimit
+before it could merge the runs. In production, ven-1's phase 2 hit TimeLimit in 48 of 104
+cycles that morning.
+
+**`bench_ven1_spikes`** (class 1, `tests/phase2_spikes.rs`) replays that plan's per-slot PV,
+base load and tariffs. First 8 h, battery starts / summed |Δnet|:
+
+| Variant | Phase 2 | Battery starts | Ramp |
+|---|---|---|---|
+| production: startup 0.01, 15 s | TimeLimit 15.0 s | 2 | 15.4 kW |
+| budget 60 s / 180 s | Optimal 30.6 / 35.9 s | 1 | 7.0 kW |
+| **startup ×10 (0.10), 15 s** | TimeLimit 14.8 s | **1** | **7.3 kW** |
+| ramp ×10, 15 s | TimeLimit | 1 | 7.3 kW, but the EV run is cut short |
+| phase-2 gap 0.20 | TimeLimit | 2 | 15.4 kW |
+| phase-1 gap 0.005 / 0.001 | (phase 1 only) | 2 | 26.6 kW, identical plan |
+
+Tightening phase 1 does not help: its plan stays the same at every gap. The leftovers are
+phase 2's to remove, and a 0.10 startup weight gets phase 2 there inside the existing budget.
+Phase 2's cost cap is unchanged, so the plan cannot get dearer.
+
+**Live after setting 0.10 on ven-1** (restart 11:28Z): phase 2 finished within budget on every
+cycle (Optimal/GapLimit, 6-13 s), and every sampled plan had one battery run and zero one-slot
+blips. This is confounded with today's instance getting easier: phase 1 also fell to < 1 s.
+
+**`bench_fleet_startup_penalty`** (class 2, every real `ven-N.yaml`, ven-1's tariffs, each
+profile's own PV/state, 15 s budget) compared 0.01 with 0.10:
+
+- **No change in 17 of 20 profiles.** The first-8 h shape and the first-25-min dispatch are
+  identical. That includes ven-1 and ven-19 on this synthetic instance, so the ven-1 gain is
+  instance-dependent. It appears when battery and EV share a PV surplus near a run boundary.
+- **ven-12 (EV + heater) got worse.** Phase 2 went from GapLimit 9.5 s to TimeLimit 15.1 s,
+  and the first 25 min of EV energy moved from 0.831 to 0.766 kWh.
+- Battery-only (ven-4/6) and battery + EV without PV (ven-16) already merge their runs at
+  0.01 (ven-4: 5 → 1, ven-16: 5 → 1).
+- On every heater VEN, phase 2 time is spent on the relay, which these weights do not reach.
+
+**Decision:** 0.10 for battery + EV + PV without a heater (ven-1, ven-19), default elsewhere.
+The guidance table lives in `VEN/profiles/README.md` "Planner smoothing by asset mix".
+
+**Side observation, not acted on:** `friction_eur` reads 1 049 / 9 054 / 2 067 on
+ven-7/18/19 here. The EV's R-93 integrity slacks (`DROP_UNMET_PENALTY_EUR`,
+`SHORTFALL_PENALTY_EUR`) sit in the EV objective in both phases. They are therefore part of
+phase 2's "friction" as well as the cap. That does not change decisions, since the cap holds
+them too, but it makes `friction_eur` useless as a smoothing metric whenever a trip forces a
+shortfall.

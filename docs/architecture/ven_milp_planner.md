@@ -218,6 +218,8 @@ All planner configuration lives in `VEN/src/profile.rs → PlannerConfig`. Key p
 | `plan_adoption_decay_s` | 1500 | After this many seconds without adoption, force-adopt |
 | `gate_switch_penalty_eur` | 0.0 | Added cost per Zone-A-equivalent heater switch in adoption gate |
 | `phase2_epsilon_eur` | 0.02 | Phase 2 may not increase total cost beyond this slack |
+| `phase2_solver_timeout_s` | 15 | Phase 2's own wall-clock budget; on expiry the plan keeps phase 1 leftovers it has not yet removed |
+| `c_bat_startup_eur` / `c_ev_startup_eur` | 0.01 | Phase-2 cost per battery / EV run start; set per asset mix, see `VEN/profiles/README.md` "Planner smoothing by asset mix" |
 | `c_ctrl_imp_malus_eur_kwh` | 0.22 | Malus added to import price to discourage unnecessary import |
 | `solver_timeout_s` | 60 | HiGHS wall-time limit per phase |
 

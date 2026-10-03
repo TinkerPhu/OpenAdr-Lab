@@ -14044,3 +14044,23 @@ state type sits inside `AssetState`, and `own::<S>(state)` is the single place t
 verified — 38 panic sites to one, with a message that names the variant it got rather than only the
 one it wanted. Combined with the persisted-state guard above, which closes the one reachable path to
 that panic, the practical risk is gone even though the compile-time guarantee is not yet there.
+
+## Battery spikes on Node1's ven-1: phase-2 startup penalty set per asset mix (2026-10-03)
+
+**What.** ven-1's plan showed one-slot battery dropouts and make-up blips in the afternoon PV
+surplus. I replayed the live plan offline (`bench_ven1_spikes`, `tests/phase2_spikes.rs`): the
+leftovers come from phase 1 and survive because phase 2 stops at its 15 s budget
+(`phase2_solver_timeout_s`, R-97) before merging the runs. Raising the phase-2 startup weights
+from 0.01 to 0.10 gets phase 2 there inside the same 15 s. Raising the budget to ~30 s also
+works but costs Node1 CPU. Ramp weights flatten the battery but cut the EV run short.
+
+**Why per asset mix, not fleet-wide.** `bench_fleet_startup_penalty` ran every real profile:
+0.10 changes nothing on 17 of 20, and makes EV + heater (ven-12) lose phase-2 convergence. The
+handover only exists where a battery and an EV share a PV surplus, so 0.10 went to ven-1 and
+ven-19 only. The rule table is in `VEN/profiles/README.md` "Planner smoothing by asset mix".
+Numbers are in `docs/reference/R97_PLANNER_BENCHMARKS.md`.
+
+**Key learning — a time-limited smoothing phase is tuned through its weights, not only its
+clock.** When phase 2 runs out of budget, a stronger signal for the thing you want removed
+(starts) lets the solver find it within the budget. A larger budget finds the same plan at
+twice the CPU. Weights that act on something else (ramp) buy smoothness at the cost of service.
