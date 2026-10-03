@@ -199,13 +199,26 @@ impl EvMilpContext {
             .min(n.saturating_sub(1))
     }
 
-    /// The firm energy the bands must be able to cover [kWh]: the most any single
-    /// obligation demands above the live SoC. Only used to size the unpriced
-    /// guarantee band — a promise is not conditional on a bid.
+    /// The firm energy the bands must be able to cover [kWh]. Only used to size the
+    /// unpriced guarantee band — a promise is not conditional on a bid.
+    ///
+    /// An obligation's demand is measured from the live state of charge *minus what
+    /// the trips before its deadline will consume*, not from the live reading alone.
+    /// Measuring from `soc_init` only is right for one session and wrong the moment a
+    /// trip sits between two: a car starting at 0.80, asked for 0.80 again after a
+    /// 30 % trip, demanded "nothing" — so the band was zero-width, `ev_energy ==
+    /// bought` forced every charging variable to zero, and the whole requirement was
+    /// absorbed by the shortfall slack instead. The plan charged not at all, which is
+    /// precisely the failure a stated trip distance exists to prevent.
     pub fn firm_required_kwh(&self) -> f64 {
         self.obligations
             .iter()
-            .map(|o| ((o.target_soc - self.soc_init) * self.battery_kwh).max(0.0))
+            .map(|o| {
+                let consumed: f64 = (0..o.deadline_step.saturating_add(1))
+                    .map(|t| self.drop_frac_at(t))
+                    .sum();
+                ((o.target_soc - self.soc_init + consumed) * self.battery_kwh).max(0.0)
+            })
             .fold(0.0_f64, f64::max)
     }
 
