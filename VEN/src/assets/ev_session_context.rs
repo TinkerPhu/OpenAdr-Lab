@@ -191,7 +191,6 @@ impl EvMilpContext {
             };
         };
         let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
-        let t_dead = slot_at(cum_s, n, (session.departure_time - now).num_seconds());
         // Chargeable inside any queued session's window, nowhere else. For a single
         // session this is the old "every slot up to the deadline"; for a queue it
         // also closes the gaps when the car is away, without a second rule saying so.
