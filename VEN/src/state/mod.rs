@@ -9,7 +9,7 @@ use crate::entities::capacity::{
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
-    BaselineOverride, EvSession, EvSessionConflict, EvSessionQueue, HeaterTarget, ShiftableLoad,
+    BaselineOverride, EvSessionQueue, HeaterTarget, ShiftableLoad,
 };
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
