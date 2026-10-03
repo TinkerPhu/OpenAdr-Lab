@@ -114,7 +114,7 @@ pub(crate) async fn sync_plan_ahead_session(state: &AppState, sim: &SimState, no
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::asset_params::{EvParams, EvUsageDayParams};
+    use crate::entities::asset_params::{EvParams, EvUsageDayParams, EvUsageSimParams};
     use chrono::{NaiveTime, TimeZone};
 
     fn always_leaves_at(hour: u32) -> EvUsageDayParams {
