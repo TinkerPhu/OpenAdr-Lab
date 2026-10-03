@@ -27,6 +27,10 @@ pub struct EvCharger {
     /// `max_discharge_kw` is already zeroed in `from_params` when false.
     pub v2g_capable: bool,
     pub battery_kwh: f64,
+    /// Energy used per kilometre driven [kWh/km] — see `EvParams`.
+    pub consumption_kwh_per_km: f64,
+    /// Distance assumed for an unquantified trip [km] — see `EvParams`.
+    pub default_trip_distance_km: f64,
     /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
     pub soc_target: f64,
     /// Original profile value — used for snap-back when inject override is released.
@@ -101,6 +105,8 @@ impl EvCharger {
             min_charge_kw: cfg.min_charge_kw,
             response_delay_s: cfg.response_delay_s,
             departure_time: None,
+            consumption_kwh_per_km: cfg.consumption_kwh_per_km,
+            default_trip_distance_km: cfg.default_trip_distance_km,
             usage_sim: cfg.usage_sim.clone(),
             usage_sim_seed_tag: usage_sim_seed_tag(&cfg.id),
         }

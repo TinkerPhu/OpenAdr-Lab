@@ -31,6 +31,52 @@ pub struct UsageTrip {
     pub soc_drop_pct: f64,
 }
 
+
+/// What a trip is expected to cost the pack, and whether the distance behind it was
+/// stated or defaulted.
+///
+/// The provenance travels with the number on purpose. A defaulted 40 km and a stated
+/// 40 km produce the same drop but mean different things to whoever reads the plan,
+/// and `wire-contracts` requires that applying a documented default be surfaced
+/// rather than assumed silently.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExpectedTripDrop {
+    /// Fraction of the pack the trip is expected to consume (0..1).
+    pub soc_drop_frac: f64,
+    /// The distance used [km], whether stated or defaulted.
+    pub distance_km: f64,
+    /// True when the EV's configured default supplied the distance.
+    pub defaulted: bool,
+}
+
+impl EvCharger {
+    /// What a trip of `distance_km` is expected to consume, as a fraction of pack.
+    ///
+    /// The EV is the only authority for this conversion
+    /// (`asset-competence-assurance`): it owns both the consumption rate and the
+    /// pack size, and a route, interface or planner doing its own
+    /// `km × kWh/km ÷ battery_kwh` would be a second copy of the rule.
+    ///
+    /// `None` means the caller had no stated distance, and the EV's configured
+    /// default is used — flagged as such in the result.
+    pub fn expected_trip_drop(&self, distance_km: Option<f64>) -> ExpectedTripDrop {
+        let defaulted = distance_km.is_none();
+        let distance_km = distance_km
+            .unwrap_or(self.default_trip_distance_km)
+            .max(0.0);
+        let frac = if self.battery_kwh > 0.0 {
+            (distance_km * self.consumption_kwh_per_km / self.battery_kwh).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        ExpectedTripDrop {
+            soc_drop_frac: frac,
+            distance_km,
+            defaulted,
+        }
+    }
+}
+
 /// FNV-1a over the EV's configured `id`, so two distinct EVs with identical
 /// `usage_sim` config still draw independent day-to-day sequences (mirrors
 /// `base_load.rs`'s per-spike `seed_tag`, just derived from a string here
@@ -588,5 +634,52 @@ mod usage_sim_tests {
                 trip.soc_drop_pct
             );
         }
+    }
+
+    // ── expected_trip_drop: the EV's own distance-to-SoC conversion ──────────
+
+    fn ev_with(consumption_kwh_per_km: f64, default_trip_distance_km: f64, battery_kwh: f64) -> EvCharger {
+        EvCharger::from_params(&crate::entities::asset_params::EvParams {
+            battery_kwh,
+            consumption_kwh_per_km,
+            default_trip_distance_km,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn expected_trip_drop_scales_with_consumption_and_pack() {
+        // 120 km at 0.2 kWh/km = 24 kWh; on a 60 kWh pack that is 40 %.
+        let ev = ev_with(0.2, 40.0, 60.0);
+        let drop = ev.expected_trip_drop(Some(120.0));
+        assert!((drop.soc_drop_frac - 0.40).abs() < 1e-9, "got {}", drop.soc_drop_frac);
+        assert_eq!(drop.distance_km, 120.0);
+        assert!(!drop.defaulted, "a stated distance is not a default");
+    }
+
+    #[test]
+    fn expected_trip_drop_falls_back_to_the_configured_default_and_says_so() {
+        let ev = ev_with(0.2, 50.0, 60.0);
+        let drop = ev.expected_trip_drop(None);
+        // 50 km at 0.2 on 60 kWh = 1/6 of the pack.
+        assert!((drop.soc_drop_frac - 10.0 / 60.0).abs() < 1e-9);
+        assert_eq!(drop.distance_km, 50.0);
+        assert!(
+            drop.defaulted,
+            "applying the default must be visible, not silent"
+        );
+    }
+
+    #[test]
+    fn expected_trip_drop_cannot_exceed_a_full_pack() {
+        // 5000 km would need far more than the pack holds.
+        let ev = ev_with(0.2, 40.0, 60.0);
+        assert_eq!(ev.expected_trip_drop(Some(5000.0)).soc_drop_frac, 1.0);
+    }
+
+    #[test]
+    fn expected_trip_drop_treats_a_negative_distance_as_no_distance() {
+        let ev = ev_with(0.2, 40.0, 60.0);
+        assert_eq!(ev.expected_trip_drop(Some(-10.0)).soc_drop_frac, 0.0);
     }
 }

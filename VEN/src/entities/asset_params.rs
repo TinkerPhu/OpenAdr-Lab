@@ -51,6 +51,18 @@ pub struct EvParams {
     /// (vehicle-to-grid) discharge. False by default — `max_discharge_kw` is
     /// otherwise inert (see `EvCharger::from_params`).
     pub v2g_capable: bool,
+    /// Energy this vehicle uses per kilometre driven [kWh/km].
+    ///
+    /// Converts a session's stated trip distance into the charge the trip will
+    /// consume. Per-km rather than Europe's more familiar kWh/100 km because every
+    /// call site wants the per-km figure and a stray factor of 100 is a bug waiting
+    /// to happen; a UI may still present it per 100 km.
+    pub consumption_kwh_per_km: f64,
+    /// Distance assumed for a trip the user did not quantify [km].
+    ///
+    /// A suggestion, not a silent substitution: where it is applied the plan says
+    /// so, rather than reporting a defaulted number as if it had been stated.
+    pub default_trip_distance_km: f64,
     /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
     /// `None` means this EV never leaves — today's behavior, unchanged.
     pub usage_sim: Option<EvUsageSimParams>,
@@ -69,6 +81,10 @@ impl Default for EvParams {
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             v2g_capable: false,
+            // ~0.18 kWh/km is a mid-size EV's real-world figure; 40 km is a
+            // typical day's driving. Both are profile-overridable.
+            consumption_kwh_per_km: 0.18,
+            default_trip_distance_km: 40.0,
             usage_sim: None,
         }
     }
