@@ -161,8 +161,8 @@ NEVER stop docker containers that are not involved in this project without askin
 branching: feature branches use the pattern NNN-whatever-case-description where NNN is the
 openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
 Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
-DCO sign-off is enforced by CI — do not add co-author footers (see rule above).
-Merge only after all CI checks pass: cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
+Commits are signed off (-s); do not add co-author footers (see rule above).
+Merge only after all of these pass (run manually): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
 lines), and E2E tests green on Node1.
 
@@ -198,10 +198,8 @@ build:
   Node1 single svc : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build ven"
   Node2 docker     : ssh Node2 "cd /srv/docker/openadr_lab && docker compose build"
   Always use wsl (via bash -lc) for Rust compilation — native Windows cargo lacks cmake/HiGHS.
-  CI: .github/workflows/ holds three workflows — pre-pr-checks-splittasks.yml
-  (fmt/clippy/audit/DCO on PR), file_size_audit-splittasks.yml (scripts/audit_file_sizes.py
-  on push/PR), e2e-tests.yml (manual dispatch only). Still run linting + tests manually
-  before merging — these workflows don't yet block merges.
+  There is no CI: .github/workflows/ was removed (it never worked). Every check is a
+  manual pre-merge command; run them yourself.
 
 determinism: any code path that depends on the current date/time must accept an injectable
 clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Applied in the MILP
