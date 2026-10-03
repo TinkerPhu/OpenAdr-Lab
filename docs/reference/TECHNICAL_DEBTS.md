@@ -32,7 +32,7 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 
 ---
 
-## Cross-register priority view (2026-09-27)
+## Cross-register priority view (2026-09-27, R-99 row added 2026-10-03)
 
 One ordered list across **both** registers — this file (`R-*`) and `docs/BACKLOG.md` (`GB-*`) —
 because the two rate things differently: debts carry a priority emoji, while the backlog's last
@@ -54,6 +54,7 @@ its detail. Re-rate in the item, then here.
 | 🟡 Medium | R-96 | reliable system | The capacity-limit E2E step waits for a freshly *adopted* plan; cost two 65-minute runs on 2026-09-27 with failures that looked like product defects. |
 | 🟡 Medium | R-87 | VTN stimulus | Stricter than the 3.1 schema on `intervalPeriod.start` — the one failure a conformance lab must not have. |
 | 🟡 Medium | R-98 | reliable system | The EV variable set is declared twice — the real solve and phase-2's dual extraction — and R-93 widened what the second must mirror. |
+| 🟡 Medium | R-99 | reliable system | **Test half resolved 2026-10-03**; what is left is a product question. The Fleet page opens on a 24 h / 900 s window and shows "No telemetry stored for the last 1440 minutes" on a freshly started VTN — which is false, there is just less than one bucket of it. It cannot tell "the store is still filling" from "nothing is reporting". |
 | 🟡 Medium | R-94 | transparent UI | The MILP does not model the heater deadband, so the asset can refuse planned dispatch with nothing on screen saying why. |
 | 🟡 Medium | R-85 | VTN stimulus | Two measurement-report builders with diverging behaviour; resolution already decided, not yet done. |
 | 🟡 Medium | GB-46 | VTN stimulus | Missing VEN-side instrumentation (tariff source event id, effective-limit column), so compliance cannot be proven from the data without harness reconstruction. |
