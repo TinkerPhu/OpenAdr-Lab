@@ -29,7 +29,8 @@ MIN_REASON_CHARS = 8
 # (`VEN/src` is the whole VEN crate; the debt it sits in is about the crate, not a file).
 MIN_DIR_COMPONENTS = 3
 
-Row = namedtuple("Row", "id effort paths")
+Row = namedtuple("Row", "id effort paths severity kind", defaults=(None, None))
+KINDS_DOC = "docs/reference/ISSUE_KINDS.md"
 Outcome = namedtuple("Outcome", "unresolved resolved deferred")
 
 
@@ -49,16 +50,42 @@ def path_tokens(cell):
     return out
 
 
+def parse_kind_rank(text):
+    """Kind -> rank (0 = highest) from the numbered, backticked list in ISSUE_KINDS.md."""
+    kinds = re.findall(r"^\s*\d+\.\s*`([a-z-]+)`", text, re.M)
+    return {k: i for i, k in enumerate(kinds)}
+
+
 def parse_rows(text):
+    """Open rows of gated effort. Column positions come from the table header when it names
+    them (`Affected files`, `Effort`/`Cost`, `Severity`, `Kind`); the older tables have no
+    such columns for severity/kind and keep files in column 2, effort in column 3."""
     rows = []
+    cols = {"files": 2, "effort": 3}
     for line in text.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] == "ID":
+            low = [c.lower() for c in cells]
+            cols = {"files": 2, "effort": 3}
+            for key, names in (("files", ("affected files",)), ("effort", ("effort", "cost")),
+                               ("severity", ("severity",)), ("kind", ("kind",))):
+                for n in names:
+                    if n in low:
+                        cols[key] = low.index(n)
+            continue
         if len(cells) < 5 or not re.fullmatch(r"R-\d+", cells[0]):
             continue
-        effort = cells[3].split(" ")[0].lower().rstrip(",.;")
-        if effort in GATED_EFFORTS:
-            rows.append(Row(cells[0], effort, path_tokens(cells[2])))
+        effort = cells[cols["effort"]].split(" ")[0].lower().rstrip(",.;")
+        if effort not in GATED_EFFORTS:
+            continue
+        pick = lambda k: cells[cols[k]] if k in cols and cols[k] < len(cells) else None  # noqa: E731
+        rows.append(Row(cells[0], effort, path_tokens(cells[cols["files"]]), pick("severity"), pick("kind")))
     return rows
+
+
+def sort_by_priority(rows, kind_rank):
+    """Kind rank first (unknown last), then severity S1..S4 (unknown last), then id."""
+    return sorted(rows, key=lambda r: (kind_rank.get(r.kind, len(kind_rank)), r.severity or "S9", r.id))
 
 
 def _is_exempt(path):
@@ -140,9 +167,15 @@ def main():
     for rid in out.resolved:
         print(f"RESOLVED  {rid}  (removed from the register in this branch)")
     for rid, why in out.deferred.items():
-        print(f"DEFERRED  {rid}  {why}")
-    for row in out.unresolved:
-        print(f"OPEN      {row.id} [{row.effort}]  touched: {', '.join(matched_files(row, changed))}")
+        print(f"DEFERRED  {rid}  {why}  (allowed, not preferred: fix it when you are in the file)")
+    try:
+        with open(KINDS_DOC, encoding="utf-8") as f:
+            kind_rank = parse_kind_rank(f.read())
+    except OSError:
+        kind_rank = {}
+    for row in sort_by_priority(out.unresolved, kind_rank):
+        tag = " ".join(t for t in (row.severity, row.kind) if t)
+        print(f"OPEN      {row.id} [{row.effort}{', ' + tag if tag else ''}]  touched: {', '.join(matched_files(row, changed))}")
     if out.unresolved:
         print(
             "\nFix each OPEN debt in this branch and delete its row, or add a commit-message line\n"
