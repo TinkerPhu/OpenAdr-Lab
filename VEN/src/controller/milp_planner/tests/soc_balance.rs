@@ -267,3 +267,41 @@ fn charging_while_away_is_never_scheduled() {
         );
     }
 }
+
+/// The fleet regression R-93 caused: comfort bands are priced from the current state
+/// of charge all the way to a FULL pack, so once the band-accounting sum became
+/// whole-horizon the solver bought that beyond-target energy everywhere - charging a
+/// VEN to 100 % against an 80 % target and refilling the predicted trip's drop in the
+/// very slot it happened, leaving the planned curve with no dip at all.
+///
+/// Observed on VEN-1 before the fix: 0.673 -> 1.000, 41 charging slots, zero
+/// decreases across 288 slots despite a predicted 22 % drop.
+#[test]
+fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
+    let n = 12;
+    let mut inputs = ev_inputs(n, 20.0, 0.50);
+    // One firm obligation early on, to 0.60 - well short of a full pack.
+    inputs.ev_obligations = ev_firm_kwh(20.0, 0.50, 2.0, 3);
+    // Bands that would happily sell energy all the way to full, cheaply, exactly as
+    // `ev_energy_segments` builds them.
+    inputs.ev_segments = vec![crate::controller::milp_planner::asset_port::EvEnergySegment {
+        kwh: 10.0,
+        eur_per_kwh: 5.0,
+    }];
+
+    let sol = solve(&inputs);
+
+    // Charging may serve the obligation up to its deadline, and must not continue
+    // buying beyond-target energy for the rest of the horizon.
+    let after: f64 = sol.p_ev_kw.iter().skip(5).sum();
+    assert!(
+        after < 1e-6,
+        "no charging may be bought after the last deadline, got {:?}",
+        sol.p_ev_kw
+    );
+    assert!(
+        sol.soc_ev[n] < 0.95,
+        "must not fill to a full pack against a 0.60 target, got {}",
+        sol.soc_ev[n]
+    );
+}
