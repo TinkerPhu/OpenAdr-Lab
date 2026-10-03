@@ -22,6 +22,11 @@ impl UserRequestService {
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, EvSession), RequestError> {
         let soft_deadline = body.soft_deadline;
+        // When the vehicle becomes available for this session. Reuses the request's
+        // existing `earliest_start` rather than adding an EV-specific field: "the
+        // earliest this may begin" is exactly what a charging window's start is.
+        // Absent means available now, which is what the single-slot era implied.
+        let stated_window_start = body.earliest_start;
         let mut req = create_from_body(body, asset_data, now)?;
 
         let departure = req
@@ -30,10 +35,17 @@ impl UserRequestService {
             .map(|d| d.latest_end)
             .unwrap_or_else(|| now + chrono::Duration::hours(8));
         let target_soc = req.target_soc.unwrap_or(0.9);
+        let window_start = stated_window_start.unwrap_or(now);
+        if window_start >= departure {
+            return Err(RequestError::EmptyChargingWindow {
+                earliest_start: window_start,
+                latest_end: departure,
+            });
+        }
         let session = EvSession {
             id: Uuid::new_v4(),
             target_soc,
-            window_start: Utc::now() - chrono::Duration::days(365),
+            window_start,
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
@@ -403,7 +415,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         let session_id = ev_session.id;
-        state.set_ev_session(Some(ev_session)).await;
+        state.insert_ev_session(ev_session).await.unwrap();
 
         let req = UserRequest {
             mode: Default::default(),
@@ -437,8 +449,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
-        // EV session must be cleared.
-        assert!(state.ev_session().await.is_none());
+        // The cancelled request's own session must be gone from the queue.
+        assert!(state.ev_sessions().await.is_empty());
     }
 
     /// shiftable-load-as-asset design.md D6: a shiftable load that has

@@ -64,6 +64,13 @@ pub enum RequestError {
     UnknownAsset(String),
     NoDeadlines,
     ZeroEnergy,
+    /// `earliest_start` at or after the deadline: the charging window is empty, so
+    /// no amount of planning could serve it. Distinct from a clash with another
+    /// session - this request is malformed on its own terms.
+    EmptyChargingWindow {
+        earliest_start: DateTime<Utc>,
+        latest_end: DateTime<Utc>,
+    },
 }
 
 impl std::fmt::Display for RequestError {
@@ -72,6 +79,10 @@ impl std::fmt::Display for RequestError {
             RequestError::UnknownAsset(id) => write!(f, "unknown asset '{id}'"),
             RequestError::NoDeadlines => write!(f, "at least one deadline is required"),
             RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative (asset may already be at or above the target SoC)"),
+            RequestError::EmptyChargingWindow { earliest_start, latest_end } => write!(
+                f,
+                "charging window is empty: available from {earliest_start} but due by {latest_end}"
+            ),
         }
     }
 }
