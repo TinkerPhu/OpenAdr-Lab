@@ -109,6 +109,44 @@ def vtn_value_leaks() -> "list[str]":
     return hits
 
 
+
+# Services that hold a concrete `SimState` today, against the rule in rule 6.
+# A ratchet, not an amnesty: anything outside this set fails, so the count can
+# only go down. Remove an entry when that service moves behind the port --
+# never add one without deciding rule 6's fate first.
+SIMSTATE_KNOWN = {
+    # Threads the sim into `simulator::site_headroom::compute_site_headroom`,
+    # which needs `&SimState` and `Asset::max_effort_setpoint` directly.
+    "VEN/src/services/forecast.rs",
+    # Mutates the asset roster: a shiftable load becomes a real `SimState`
+    # entry at acceptance and is removed on cancel.
+    "VEN/src/services/user_request.rs",
+}
+
+
+def simstate_in_services() -> "list[str]":
+    """Rule 6, as a ratchet.
+
+    Reporting the two known holders on every run would make this audit
+    permanently red, and a check that always fails is one nobody reads --
+    which is how rules 2 and 3 came to miss `controller/` for months. So the
+    known ones are listed here and reported as context; only a *new* one
+    fails.
+    """
+    hits = []
+    for f in rust_files(VEN_SRC / "services"):
+        rel = str(f.relative_to(REPO_ROOT)).replace(os.sep, "/")
+        if rel in SIMSTATE_KNOWN:
+            continue
+        for n, line in code_lines(f):
+            if re.search(r"\bSimState\b", line):
+                hits.append(f"  {rel}:{n}: {line.strip()}")
+    if not hits:
+        print("      (known, tracked: " + ", ".join(sorted(
+            r.rsplit("/", 1)[-1] for r in SIMSTATE_KNOWN)) + " -- see rule 6)")
+    return hits
+
+
 CHECKS = [
     ("profile in inner rings",
      lambda: forbid("profile", [VEN_SRC / "entities", VEN_SRC / "controller",
@@ -122,6 +160,7 @@ CHECKS = [
     ("infra reached from the controller ring",
      lambda: forbid("infra", [VEN_SRC / "controller"],
                     r"crate::(assets|simulator)\b")),
+    ("new concrete SimState in the application ring", simstate_in_services),
 ]
 
 
