@@ -318,12 +318,17 @@ fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
 /// Without the stated drop the planner believes the car returns exactly as it left,
 /// so it charges for the first deadline and schedules NOTHING for the second - the
 /// car sits well under target on the second morning, with the cheap overnight slots
-/// unused. With it, the second session's charging reappears.
+/// unused.
+///
+/// The assertion is on energy, not on the shape of the curve: given the chance, the
+/// solver legitimately pre-charges before the trip rather than after it, so the
+/// state of charge need never visibly dip. What distinguishes "the trip was
+/// accounted for" from "the trip was ignored" is that ~30 % of the pack gets bought
+/// at all, and that the second deadline is still met afterwards.
 #[test]
 fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     let n = 12;
     let mut inputs = ev_inputs(n, 20.0, 0.80);
-    // Both sessions want 0.80; the car starts there, so only the trip creates work.
     inputs.ev_obligations = vec![
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 1,
@@ -336,7 +341,7 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
             session_id: None,
         },
     ];
-    // The trip between them costs 30 % of the pack, landing when the car is back.
+    // The trip between them costs 30 % of a 20 kWh pack = 6 kWh.
     let mut drop_frac_per_slot = vec![0.0; n];
     drop_frac_per_slot[4] = 0.30;
     inputs.ev_soc_drops = Some(ExogenousSocDrops {
@@ -345,23 +350,21 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     });
 
     let sol = solve(&inputs);
+    let charged_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots
 
-    // A drop declared for slot 4 appears at the boundary AFTER it: the balance
-    // constraint is soc_ev[t+1] == soc_ev[t] + charge - drop, the same convention
-    // `a_predicted_drop_lands_at_its_own_slot` above already pins.
     assert!(
-        sol.soc_ev[5] < 0.55,
-        "the trip must actually cost the pack, got {}",
-        sol.soc_ev[5]
-    );
-    assert!(
-        sol.p_ev_kw.iter().skip(4).sum::<f64>() > 1.0,
-        "charging must resume after the trip to serve the second deadline, got {:?}",
+        charged_kwh > 5.0,
+        "the trip's 6 kWh must be charged back for, got {charged_kwh:.2} kWh from {:?}",
         sol.p_ev_kw
     );
     assert!(
         sol.soc_ev[11] >= 0.80 - 1e-3,
-        "the second session's target must be met, got {}",
+        "the second session's target must still be met, got {}",
         sol.soc_ev[11]
+    );
+    assert!(
+        sol.ev_shortfall_kwh.iter().all(|kwh| *kwh < 1e-3),
+        "nothing should be given up as shortfall here, got {:?}",
+        sol.ev_shortfall_kwh
     );
 }
