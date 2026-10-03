@@ -847,6 +847,7 @@ mod gb41_soft_deadline_core;
 mod heater;
 mod modes;
 mod penalty;
+mod phase2_spikes;
 mod planner;
 mod pv;
 mod soc_balance;

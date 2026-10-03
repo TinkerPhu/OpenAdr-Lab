@@ -59,3 +59,48 @@ polling:
 Startup delay is `events_secs × (startup_jitter_fixed_pct + drawn_random_pct) / 100`,
 applied once before each poll loop's first request — see `docs/architecture/VEN_ARCHITECTURE.md`
 D-07 for the full mechanism.
+
+## Planner smoothing by asset mix
+
+The planner solves twice. Phase 1 finds the cheapest plan. Phase 2 then
+smooths it: it minimises battery/EV starts and ramps, plus heater relay
+switches, without letting the cost rise more than `phase2_epsilon_eur` above
+phase 1's. Phase 2 has its own wall-clock budget, `phase2_solver_timeout_s`
+(default 15 s). When it runs out of time, the plan keeps whatever phase 1
+leftovers it has not yet removed. On a chart these show up as one-slot battery
+spikes or dropouts.
+
+The smoothing weights are fleet defaults, and **no single value suits every VEN**.
+A 10x startup penalty (`0.10` instead of `0.01`) removes battery spikes on a
+battery + EV + PV site. It changes nothing on 17 other profiles, and on EV +
+heater it costs phase 2 its convergence (`bench_fleet_startup_penalty`, see
+`docs/reference/R97_PLANNER_BENCHMARKS.md`). So set it per asset mix:
+
+| Asset mix | VENs | `c_bat_startup_eur` / `c_ev_startup_eur` | Why |
+|---|---|---|---|
+| battery + EV + PV, no heater | ven-1, ven-19 | **0.10** | Battery and EV compete for the same PV surplus. Phase 1 hands it back and forth slot by slot (the EV's 1.4 kW minimum makes a single-slot EV run look as good as a battery slot), and at 0.01 phase 2 cannot merge those runs within 15 s. At 0.10 it can. |
+| battery + EV, no PV | ven-13, ven-16 | default (0.01) | Without surplus there is no handover. Phase 2 already merges the battery runs at 0.01 (ven-16: 5 starts → 1). |
+| battery (+ PV) | ven-4, ven-6 | default | Phase 2 converges in 2-4 s and merges the runs at 0.01. 0.10 gives the identical plan. |
+| any mix with a heater | ven-2, 3, 5, 10, 12, 14, 15, 17, 18, 20 | default | Phase 2 time is spent on the heater's relay, which these weights do not touch. On EV + heater (ven-12), 0.10 turned phase 2 from GapLimit into TimeLimit. Heater smoothing is tuned with `phase2_epsilon_eur` and `mip_gap_target` instead (see the R-97 sections of the benchmark doc). |
+| EV (+ PV) only, PV only | ven-7, 8, 9, 11 | default | No battery. EV runs are already contiguous. |
+
+How to set it, in the profile's `planner:` section:
+
+```yaml
+planner:
+  c_bat_startup_eur: 0.10   # EUR per battery run start, phase 2 only
+  c_ev_startup_eur: 0.10    # EUR per EV charging-run start, phase 2 only
+```
+
+Both weights act only in phase 2, whose plan cost is capped at phase 1's
+optimum + `phase2_epsilon_eur`. Raising them therefore cannot make the plan
+more expensive. They only change which of the near-equal-cost plans phase 2
+picks, and how quickly it closes. Do **not** raise the ramp penalties
+(`c_*_ramp_eur_kw`) for this. At 10x they also flattened the battery, but they
+cut the EV's charging run short (`bench_ven1_spikes`).
+
+To check a profile change against a live instance, copy the shape of
+`bench_ven1_spikes` in
+`VEN/src/controller/milp_planner/tests/phase2_spikes.rs`. It replays one
+live plan's per-slot PV, base load and tariffs offline. For the whole fleet,
+run `bench_fleet_startup_penalty` (`FLEET_ONLY=ven-1,ven-19` narrows it).
