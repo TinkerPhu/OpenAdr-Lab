@@ -554,6 +554,7 @@ fn ev_planned_state_soc_populated() {
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
+        window_start: Utc::now() - chrono::Duration::days(365),
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,

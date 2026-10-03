@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 
 use super::poll_signals::SignalPrevs;
-use crate::services::planning::{PlanTrigger, PlanTriggerSignal};
+use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::state::AppState;
 
 /// WP3.4's VTN charge-state path: turn a `CHARGE_STATE_SETPOINT` into an
@@ -31,7 +31,7 @@ use crate::state::AppState;
 /// the planner as a *constraint* weighed against the user's sessions. That
 /// decision is recorded as debt; it is not this function's to make.
 #[allow(dead_code)] // disabled on purpose; see the doc comment above
-async fn apply_vtn_charge_state_session(
+pub(crate) async fn apply_vtn_charge_state_session(
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTriggerSignal>,
     charge_state: Option<(f64, DateTime<Utc>, String)>,
