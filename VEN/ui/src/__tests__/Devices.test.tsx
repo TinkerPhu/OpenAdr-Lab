@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -770,7 +770,9 @@ describe("DevicesPage", () => {
     await user.click(screen.getByTestId("ev-dialog-confirm"));
 
     expect(screen.queryByTestId("ev-submit-error")).toBeNull();
-    expect(screen.queryByTestId("ev-dialog")).toBeNull();
+    // Closing happens after the awaited post resolves, and MUI keeps the node
+    // mounted through its exit transition — so this is a settle, not a snapshot.
+    await waitFor(() => expect(screen.queryByTestId("ev-dialog")).toBeNull());
   });
 
   // ── The conflict prompt (050 §3) ──────────────────────────────────────────

@@ -109,7 +109,9 @@ impl std::fmt::Display for EvSessionConflict {
 /// means reading the queue a second time - so the account the user is shown could
 /// disagree with the refusal that produced it. This type exists so the resolution
 /// happens inside the same critical section that detected the clash.
-#[derive(Debug, Clone, PartialEq)]
+// No PartialEq: it would require it on EvSession, and nothing compares two
+// of these - callers read the clashing sessions, they do not equate refusals.
+#[derive(Debug, Clone)]
 pub struct EvSessionClash {
     /// The session that was refused.
     pub candidate: Uuid,
@@ -177,7 +179,9 @@ impl std::fmt::Display for EvSessionReplaceRejection {
 /// prompt must describe the queue as it is now - which is precisely what the stale
 /// instruction got wrong. Carrying the conflicts with the rejection means the
 /// caller never has to read the queue again to explain why it said no.
-#[derive(Debug, Clone, PartialEq)]
+// No PartialEq: it would require it on EvSession, and nothing compares two
+// of these - callers read the clashing sessions, they do not equate refusals.
+#[derive(Debug, Clone)]
 pub struct EvReplaceRefusal {
     pub rejection: EvSessionReplaceRejection,
     pub conflicts: Vec<EvSession>,
