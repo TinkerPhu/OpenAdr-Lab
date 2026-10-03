@@ -30,8 +30,13 @@ pub(super) fn slot_at(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
     if secs_from_now <= 0 {
         return 0;
     }
+    // Strictly-before, not at-or-before: an instant landing exactly on a slot
+    // boundary belongs to the slot that ENDS there, not the one that starts there.
+    // With `<=`, a departure at 3600 s on a 300 s grid returned slot 12 - which
+    // runs [3600, 3900), entirely after the car has gone. The interior case is
+    // unchanged: a departure at 3700 s still returns slot 12, the slot it falls in.
     cum_s
-        .partition_point(|&s| s <= secs_from_now)
+        .partition_point(|&s| s < secs_from_now)
         .saturating_sub(1)
         .min(n.saturating_sub(1))
 }
@@ -71,7 +76,13 @@ fn obligations_from_sessions(
     cum_s: &[i64],
     now: DateTime<Utc>,
 ) -> Vec<EvObligation> {
-    let horizon_end_s = cum_s.get(n.saturating_sub(1)).copied().unwrap_or(0);
+    // `cum_s` holds n+1 boundaries: cum_s[t] starts slot t, so the horizon ENDS at
+    // cum_s[n], not cum_s[n-1]. Using the latter silently dropped any session
+    // departing in the final slot - including the common case of a deadline set
+    // exactly at the horizon's end.
+    let horizon_end_s = cum_s.get(n).copied().unwrap_or_else(|| {
+        cum_s.last().copied().unwrap_or(0)
+    });
     sessions
         .iter()
         .filter(|s| !s.soft_deadline && s.mode.states_a_firm_deadline())
