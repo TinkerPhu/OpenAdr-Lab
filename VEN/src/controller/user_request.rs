@@ -302,8 +302,8 @@ mod tests {
             soft_deadline: None,
             target_temp_c: None,
             mode: None,
-        },
-        replace_session_ids: None,
+            replace_session_ids: None,
+        }
     }
 
     #[test]
