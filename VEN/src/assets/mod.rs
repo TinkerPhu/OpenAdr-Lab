@@ -18,6 +18,7 @@ mod heater_milp;
 mod heater_thermostat;
 mod history;
 mod max_power;
+pub(crate) mod own_state;
 pub mod pv;
 mod pv_schedule;
 pub mod shiftable_load;

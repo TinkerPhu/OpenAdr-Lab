@@ -8,6 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use lab_core::time_series::{Interpolation, TimeSeries};
 
+use super::own_state::own;
 use super::pv::{PvInverter, PvPowerInputs, PvState};
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
@@ -187,9 +188,7 @@ impl PvInverter {
         initial: &AssetState,
         setpoints: &[(DateTime<Utc>, f64)],
     ) -> Trajectory {
-        let AssetState::Pv(_) = initial else {
-            unreachable!("PvInverter/state mismatch")
-        };
+        let _: &PvState = own(initial);
         let Some(&(t0, _)) = setpoints.first() else {
             return Trajectory { points: vec![] };
         };

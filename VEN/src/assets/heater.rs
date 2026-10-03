@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
     Thermostat, TickOverridable,
@@ -366,31 +367,23 @@ impl Heater {
 
 impl Asset for Heater {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::Heater(s) = state else {
-            unreachable!("Heater/state mismatch")
-        };
+        let s: &HeaterState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::Heater(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::Heater(s) = state else {
-            unreachable!()
-        };
+        let s: &HeaterState = own(state);
         self.capability_inner(s)
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::Heater(s) = state else {
-            unreachable!()
-        };
+        let s: &HeaterState = own(state);
         self.flexibility_floor_inner(s)
     }
 
     fn forced_power_kw(&self, state: &AssetState) -> Option<f64> {
-        let AssetState::Heater(s) = state else {
-            unreachable!()
-        };
+        let s: &HeaterState = own(state);
         self.thermostat_forced_kw(s)
     }
 
@@ -433,23 +426,17 @@ impl Asset for Heater {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::Heater(s) = state else {
-            unreachable!("Heater/state mismatch")
-        };
+        let s: &HeaterState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::Heater(s) = state else {
-            unreachable!("Heater/state mismatch")
-        };
+        let s: &mut HeaterState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::Heater(s) = state else {
-            unreachable!("Heater/state mismatch")
-        };
+        let s: &HeaterState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 

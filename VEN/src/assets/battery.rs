@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
     RequestResolvable,
@@ -222,24 +223,18 @@ impl Battery {
 
 impl Asset for Battery {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &BatteryState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::Battery(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::Battery(s) = state else {
-            unreachable!()
-        };
+        let s: &BatteryState = own(state);
         self.capability_inner(s)
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::Battery(s) = state else {
-            unreachable!()
-        };
+        let s: &BatteryState = own(state);
         self.flexibility_floor_inner(s)
     }
 
@@ -284,23 +279,17 @@ impl Asset for Battery {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &BatteryState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &mut BatteryState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &BatteryState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 
@@ -372,18 +361,14 @@ impl RequestResolvable for Battery {
         target_soc: Option<f64>,
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &BatteryState = own(state);
         Self::resolve_request_target(self, s, target_soc, desired_power_kw)
     }
 
     /// Moved here verbatim from `AssetConfig::available_storage_kwh`'s Battery
     /// arm (no prior `Battery`-only inherent method existed for this).
     fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
-        let AssetState::Battery(s) = state else {
-            unreachable!("Battery/state mismatch")
-        };
+        let s: &BatteryState = own(state);
         Some((
             (s.soc - self.min_soc).max(0.0) * self.capacity_kwh,
             (1.0 - s.soc).max(0.0) * self.capacity_kwh,

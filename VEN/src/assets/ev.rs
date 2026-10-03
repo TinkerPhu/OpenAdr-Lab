@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::ev_schedule::usage_sim_seed_tag;
+use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
@@ -266,17 +267,13 @@ impl EvCharger {
 
 impl Asset for EvCharger {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
         (AssetState::Ev(ns), p)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
-        let AssetState::Ev(s) = state else {
-            unreachable!()
-        };
+        let s: &EvState = own(state);
         self.capability_inner(s)
     }
 
@@ -291,9 +288,7 @@ impl Asset for EvCharger {
     }
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        let AssetState::Ev(s) = state else {
-            unreachable!()
-        };
+        let s: &EvState = own(state);
         self.flexibility_floor_inner(s)
     }
 
@@ -363,23 +358,17 @@ impl Asset for EvCharger {
     }
 
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         Self::state_values(self, s)
     }
 
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &mut EvState = own_mut(state);
         Self::reset(self, s, values)
     }
 
     fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         Self::forecast(self, s, timespan, now)
     }
 
@@ -485,9 +474,7 @@ impl RequestResolvable for EvCharger {
         target_soc: Option<f64>,
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         Self::resolve_request_target(self, s, target_soc, desired_power_kw)
     }
 
@@ -495,9 +482,7 @@ impl RequestResolvable for EvCharger {
     /// (no prior `EvCharger`-only inherent method existed for this). `None`
     /// for an unplugged EV, matching the original match's `if s.plugged` guard.
     fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         if !s.plugged {
             return None;
         }
@@ -510,9 +495,7 @@ impl RequestResolvable for EvCharger {
     /// Moved here verbatim from `AssetConfig::surplus_charge_kw`'s only real
     /// arm (EV is the only asset kind that absorbs surplus today).
     fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
-        let AssetState::Ev(s) = state else {
-            unreachable!("EvCharger/state mismatch")
-        };
+        let s: &EvState = own(state);
         if s.plugged && s.soc < self.soc_target {
             Some(surplus_kw.min(self.max_charge_kw))
         } else {
