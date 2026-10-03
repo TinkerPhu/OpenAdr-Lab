@@ -49,7 +49,12 @@ pub(crate) async fn apply_vtn_charge_state_session(
             // signal whose target merely differed would overwrite a *user's*
             // session - a bug the slot made easy and the queue makes avoidable.
             let own = match prevs.charge_state_session {
-                Some(id) => state.ev_sessions().await.iter().find(|s| s.id == id).cloned(),
+                Some(id) => state
+                    .ev_sessions()
+                    .await
+                    .iter()
+                    .find(|s| s.id == id)
+                    .cloned(),
                 None => None,
             };
             let differs = own.as_ref().is_none_or(|s| {

@@ -78,7 +78,6 @@ pub struct EvSession {
     pub updated_at: DateTime<Utc>,
 }
 
-
 /// Two sessions conflict when their charging windows overlap.
 ///
 /// Carries the ids rather than a message: the follow-up change's UI has to name
@@ -386,7 +385,11 @@ mod tests {
         q.insert(sess(0, 4)).unwrap();
         q.insert(sess(8, 12)).unwrap();
         let starts: Vec<_> = q.iter().map(|s| s.window_start).collect();
-        assert_eq!(starts, vec![ts(0), ts(8), ts(16)], "ordered by window start");
+        assert_eq!(
+            starts,
+            vec![ts(0), ts(8), ts(16)],
+            "ordered by window start"
+        );
     }
 
     #[test]
@@ -507,7 +510,10 @@ mod tests {
             }
 
             // Ordered by window start, and no two windows overlap.
-            let w: Vec<_> = q.iter().map(|s| (s.window_start, s.departure_time)).collect();
+            let w: Vec<_> = q
+                .iter()
+                .map(|s| (s.window_start, s.departure_time))
+                .collect();
             for pair in w.windows(2) {
                 assert!(pair[0].0 <= pair[1].0, "queue must stay ordered: {w:?}");
                 assert!(

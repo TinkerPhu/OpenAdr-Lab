@@ -639,7 +639,11 @@ mod tests {
         assert!(state.cancel_request(req_id).await, "cancel returns true");
 
         let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
-        assert_eq!(left, vec![a, c], "only the cancelled request's session goes");
+        assert_eq!(
+            left,
+            vec![a, c],
+            "only the cancelled request's session goes"
+        );
         let requests = state.active_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }
@@ -669,7 +673,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(state.current_ev_session(now).await.map(|s| s.id), Some(live));
+        assert_eq!(
+            state.current_ev_session(now).await.map(|s| s.id),
+            Some(live)
+        );
         // Two sessions queued, yet nothing is current in the gap between them -
         // which is what keeps opportunistic charging from pausing forever.
         assert!(
@@ -690,7 +697,10 @@ mod tests {
             (Uuid::new_v4(), -3, -1),
             (live, 2, 4),
         ] {
-            state.insert_ev_session(ev_sess(sid, from, to)).await.unwrap();
+            state
+                .insert_ev_session(ev_sess(sid, from, to))
+                .await
+                .unwrap();
         }
 
         assert_eq!(state.expire_ev_sessions(Utc::now()).await, 2);

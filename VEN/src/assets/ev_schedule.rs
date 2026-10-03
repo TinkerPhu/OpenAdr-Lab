@@ -31,7 +31,6 @@ pub struct UsageTrip {
     pub soc_drop_pct: f64,
 }
 
-
 /// What a trip is expected to cost the pack, and whether the distance behind it was
 /// stated or defaulted.
 ///
@@ -638,7 +637,11 @@ mod usage_sim_tests {
 
     // ── expected_trip_drop: the EV's own distance-to-SoC conversion ──────────
 
-    fn ev_with(consumption_kwh_per_km: f64, default_trip_distance_km: f64, battery_kwh: f64) -> EvCharger {
+    fn ev_with(
+        consumption_kwh_per_km: f64,
+        default_trip_distance_km: f64,
+        battery_kwh: f64,
+    ) -> EvCharger {
         EvCharger::from_params(&crate::entities::asset_params::EvParams {
             battery_kwh,
             consumption_kwh_per_km,
@@ -652,7 +655,11 @@ mod usage_sim_tests {
         // 120 km at 0.2 kWh/km = 24 kWh; on a 60 kWh pack that is 40 %.
         let ev = ev_with(0.2, 40.0, 60.0);
         let drop = ev.expected_trip_drop(Some(120.0));
-        assert!((drop.soc_drop_frac - 0.40).abs() < 1e-9, "got {}", drop.soc_drop_frac);
+        assert!(
+            (drop.soc_drop_frac - 0.40).abs() < 1e-9,
+            "got {}",
+            drop.soc_drop_frac
+        );
         assert_eq!(drop.distance_km, 120.0);
         assert!(!drop.defaulted, "a stated distance is not a default");
     }
