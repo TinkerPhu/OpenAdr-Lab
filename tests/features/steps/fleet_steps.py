@@ -151,6 +151,32 @@ def step_navigate_fleet(context):
     context.ui.page.wait_for_selector('[data-testid="fleet-total-card"]', timeout=30000)
 
 
+@when('I select the fleet "{label}" window')
+def step_select_fleet_window(context, label):
+    """Drive the page's own window selector (R-99).
+
+    The Fleet page opens on `WINDOWS[3]` — 24 h at 900 s steps — and the
+    chart renders `fleet-chart-empty` *instead of itself* until that query
+    returns rows. A store holding only a few minutes of telemetry resamples
+    to zero 900 s buckets, so on a young stack the chart cannot appear, and
+    appears later purely because time passed. That is what made this
+    scenario fail early in a run and pass minutes later with no code change.
+
+    Narrowing to a window the store fills in seconds removes the dependency
+    on elapsed time rather than waiting it out. It is also a real user
+    action the page already supports, not a test-only hook.
+    """
+    page = context.ui.page
+    # MUI Select: click the wrapping div (parent of the hidden input) to open
+    # the dropdown, then pick the item by its label — same pattern as
+    # `helpers/ui.py::create_event`'s program select.
+    page.locator('[data-testid="fleet-window-select"]').locator("..").click()
+    page.locator(f'li[role="option"]:has-text("{label}")').click()
+    # The selector closing is not the query returning; the chart re-renders
+    # from a fresh fetch, so let the caller's own wait cover that.
+    page.wait_for_selector('li[role="option"]', state="detached", timeout=10000)
+
+
 def _fleet_chart_diagnosis(page, minutes=1440, step_seconds=900):
     """Why the chart is not there, asked of the browser rather than guessed.
 
