@@ -28,13 +28,21 @@ def step_expand_diagnostics(context):
     to it asynchronously — wait for the wrapper's actual height, not just
     the class, or content stays clipped to 0px and every element inside
     reads as not-visible to Playwright even though the class already says
-    expanded."""
+    expanded.
+
+    The step ensures the end state rather than toggling. "Collapsed by
+    default" is true of a fresh page load, but `go_planner()` is in-app
+    navigation, so the accordion keeps whatever React state the previous
+    scenario left behind. A blind click therefore *closed* it on about every
+    other run and the wait below then timed out on a class that had just been
+    removed - which is what made this family of planner scenarios fail in
+    alternation rather than consistently."""
     page = context.browser_page
-    accordion = page.wait_for_selector(tid("planner-diagnostics-accordion"), timeout=45000)
-    accordion.click()
-    page.wait_for_selector(
-        f'{tid("planner-diagnostics-accordion")}.Mui-expanded', timeout=10000
-    )
+    sel = tid("planner-diagnostics-accordion")
+    accordion = page.wait_for_selector(sel, timeout=45000)
+    if "Mui-expanded" not in (accordion.get_attribute("class") or ""):
+        accordion.click()
+        page.wait_for_selector(f"{sel}.Mui-expanded", timeout=10000)
     page.wait_for_function(
         """() => {
             const root = document.querySelector('[data-testid="planner-diagnostics-accordion"] .MuiCollapse-root');
