@@ -56,7 +56,6 @@ mod tests {
             // watching: the no-op port is the same one a VEN outside a
             // monitored fleet runs with.
             std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
-            48, // plan_horizon_h
         )
         .await;
         // passes if no panic
@@ -213,7 +212,6 @@ mod tests {
             // watching: the no-op port is the same one a VEN outside a
             // monitored fleet runs with.
             std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
-            48, // plan_horizon_h
         )
         .await;
 

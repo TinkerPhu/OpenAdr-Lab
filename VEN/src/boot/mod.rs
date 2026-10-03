@@ -51,7 +51,6 @@ pub struct World {
 
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    pub plan_horizon_h: u64,
     /// BL-17: PV embodied carbon is a per-asset profile scalar resolved once
     /// at startup, same pattern as `min_ev_charge_kw` in
     /// `simulator/plan_context.rs`.
@@ -160,7 +159,6 @@ impl World {
             persist_path: cfg.persist_path.clone(),
             grid_max_import_kw: profile.grid.max_import_kw,
             grid_max_export_kw: profile.grid.max_export_kw,
-            plan_horizon_h: profile.planner.plan_horizon_h,
             pv_co2_g_kwh: pv_co2_g_kwh(&asset_params),
             weather_pv_params: profile.weather_pv_params(),
             pv_measurement_enabled: profile.pv_measurement_enabled(),
