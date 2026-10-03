@@ -11,7 +11,9 @@
 use chrono::{DateTime, Utc};
 
 use super::EvCharger;
-use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, EvObligation};
+use crate::controller::milp_planner::asset_port::{
+    EvMilpContext, EvMilpMode, EvObligation, ExogenousSocDrops,
+};
 use crate::entities::device_session::EvSession;
 
 /// WP4.1-c MAX_COST: per-kWh completion reward — an order of magnitude above any
@@ -93,6 +95,48 @@ fn obligations_from_sessions(
             session_id: Some(s.id),
         })
         .collect()
+}
+
+
+/// The charge each queued session's following trip is expected to consume, placed at
+/// the slot the vehicle is next available — i.e. the *next* session's window start.
+///
+/// This is what makes a manually stated series self-describing. Without it the
+/// planner believes the car returns exactly as it left: two stated sessions 48 h
+/// apart would see the first charged to target, the trip between them cost nothing,
+/// and the second need no charging at all.
+///
+/// The EV performs every conversion (`asset-competence-assurance`); this only places
+/// the results on the grid. `defaulted` rides along so the caller can report that a
+/// configured default stood in for a distance the user never gave.
+fn trip_drops_between_sessions(
+    sessions: &[EvSession],
+    cfg: &EvCharger,
+    n: usize,
+    cum_s: &[i64],
+    now: DateTime<Utc>,
+) -> (Vec<f64>, bool) {
+    let mut drops = vec![0.0; n];
+    let mut any_defaulted = false;
+    for pair in sessions.windows(2) {
+        let (departs, returns) = (&pair[0], &pair[1]);
+        let drop = cfg.expected_trip_drop(departs.expected_trip_distance_km);
+        if drop.soc_drop_frac <= 0.0 {
+            continue;
+        }
+        any_defaulted |= drop.defaulted;
+        // The drop lands when the car is back and chargeable again, which is the next
+        // session's window start - the same "first slot at or after the return"
+        // convention `ev_schedule::soc_drop_frac_per_slot` already uses.
+        let at = slot_at(cum_s, n, (returns.window_start - now).num_seconds());
+        // Slot 0 never carries a drop: a return already in the past is reflected in
+        // the live state of charge the plan starts from, and counting it again would
+        // charge the trip twice.
+        if at > 0 {
+            drops[at] += drop.soc_drop_frac;
+        }
+    }
+    (drops, any_defaulted)
 }
 
 impl EvMilpContext {
@@ -196,6 +240,27 @@ impl EvMilpContext {
         // also closes the gaps when the car is away, without a second rule saying so.
         let deadline_mask = availability_from_sessions(ev_sessions, n, cum_s, now);
         let obligations = obligations_from_sessions(ev_sessions, n, cum_s, now);
+        // What the trips between these sessions are expected to cost the pack. Under
+        // the forecast usage class `apply_usage_forecast` overwrites this with the
+        // EV's own predicted schedule, which is the richer source; this is what makes
+        // a *stated* series self-describing when no such schedule exists.
+        let (trip_drops, any_defaulted) =
+            trip_drops_between_sessions(ev_sessions, cfg, n, cum_s, now);
+        let stated_drops = trip_drops.iter().any(|d| *d > 0.0).then(|| ExogenousSocDrops {
+            drop_frac_per_slot: trip_drops,
+            // Stated sessions declare no floor of their own; the EV's usage config
+            // owns that number when it has one.
+            floor_frac: cfg
+                .usage_sim
+                .as_ref()
+                .map_or(0.0, |u| u.min_soc_after_drop_pct / 100.0),
+        });
+        if any_defaulted {
+            tracing::debug!(
+                "EV session trip consumption defaulted to {} km (no distance stated)",
+                cfg.default_trip_distance_km
+            );
+        }
 
         let mut ctx = match session.mode {
             // WP4.1 (BL-28) OPPORTUNISTIC / ASAP_FREE: no deadline, no core
@@ -290,6 +355,11 @@ impl EvMilpContext {
         // firm session queued behind it still does. Setting this per arm silently
         // dropped exactly that case.
         ctx.obligations = obligations;
+        // Same reasoning as the obligations above: set once for every arm rather than
+        // per arm, so no mode can silently lose the drops.
+        if ctx.soc_drops.is_none() {
+            ctx.soc_drops = stated_drops;
+        }
         ctx
     }
 }

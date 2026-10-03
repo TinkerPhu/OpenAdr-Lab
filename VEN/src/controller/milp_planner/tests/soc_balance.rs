@@ -311,3 +311,54 @@ fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
         "bands may only be bought inside the deadline window (<=4 kWh), got {total_kwh}"
     );
 }
+
+/// Design Decision 9's worked example, which is the whole reason a session states a
+/// trip distance: two stated sessions with a trip between them.
+///
+/// Without the stated drop the planner believes the car returns exactly as it left,
+/// so it charges for the first deadline and schedules NOTHING for the second - the
+/// car sits well under target on the second morning, with the cheap overnight slots
+/// unused. With it, the second session's charging reappears.
+#[test]
+fn a_stated_trip_between_two_sessions_is_charged_back_for() {
+    let n = 12;
+    let mut inputs = ev_inputs(n, 20.0, 0.80);
+    // Both sessions want 0.80; the car starts there, so only the trip creates work.
+    inputs.ev_obligations = vec![
+        crate::controller::milp_planner::asset_port::EvObligation {
+            deadline_step: 1,
+            target_soc: 0.80,
+            session_id: None,
+        },
+        crate::controller::milp_planner::asset_port::EvObligation {
+            deadline_step: 10,
+            target_soc: 0.80,
+            session_id: None,
+        },
+    ];
+    // The trip between them costs 30 % of the pack, landing when the car is back.
+    let mut drop_frac_per_slot = vec![0.0; n];
+    drop_frac_per_slot[4] = 0.30;
+    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+        drop_frac_per_slot,
+        floor_frac: 0.05,
+    });
+
+    let sol = solve(&inputs);
+
+    assert!(
+        sol.soc_ev[4] < 0.55,
+        "the trip must actually cost the pack, got {}",
+        sol.soc_ev[4]
+    );
+    assert!(
+        sol.p_ev_kw.iter().skip(4).sum::<f64>() > 1.0,
+        "charging must resume after the trip to serve the second deadline, got {:?}",
+        sol.p_ev_kw
+    );
+    assert!(
+        sol.soc_ev[11] >= 0.80 - 1e-3,
+        "the second session's target must be met, got {}",
+        sol.soc_ev[11]
+    );
+}
