@@ -600,7 +600,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n); // starts fully available
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
 
         // 08:00-17:00 away -> slots 8..=16 unavailable, the rest available.
         for (t, &ok) in ctx.a_ev.iter().enumerate() {
@@ -621,7 +621,7 @@ mod milp_context_trait_tests {
 
         let mut ctx = make_must_run(n);
         let before = ctx.a_ev.clone();
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
         assert_eq!(
             ctx.a_ev, before,
             "usage_sim mode must leave the mask exactly as from_state built it"
@@ -641,7 +641,7 @@ mod milp_context_trait_tests {
 
         let mut ctx = make_must_run(n);
         ctx.a_ev = vec![false; n]; // everything already ruled out upstream
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
         assert!(
             ctx.a_ev.iter().all(|&a| !a),
             "AND must never turn an unavailable slot back on"
@@ -658,7 +658,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
 
         let drops = ctx.soc_drops.expect("forecast mode must record drops");
         assert_eq!(drops.drop_frac_per_slot.len(), n);
@@ -689,7 +689,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
         assert!(
             ctx.soc_drops.is_none(),
             "usage_sim must not feed drops into the projection"
@@ -728,7 +728,7 @@ mod milp_context_trait_tests {
             n,
             cum_s,
             now,
-            None,
+            &[],
             comfort_rates,
             0.0,
             1.0,
@@ -737,7 +737,7 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
-        ctx.apply_usage_forecast(cfg, n, cum_s, now, None);
+        ctx.apply_usage_forecast(cfg, n, cum_s, now, &[]);
         ctx
     }
 
@@ -828,7 +828,7 @@ mod milp_context_trait_tests {
             n,
             &cum_s,
             now,
-            None,
+            &[],
             &[],
             0.0,
             1.0,
@@ -837,7 +837,7 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
 
         assert!(
             !ctx.a_ev[0],
@@ -886,7 +886,7 @@ mod milp_context_trait_tests {
             n,
             &cum_s,
             now,
-            None,
+            &[],
             &[],
             0.0,
             1.0,
@@ -895,7 +895,7 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
         assert!(
             ctx.a_ev.iter().all(|&a| !a),
             "no forecast: an unplugged EV contributes nothing"
@@ -1034,7 +1034,7 @@ mod milp_context_trait_tests {
             n,
             &cum_s,
             now,
-            Some(&session),
+            std::slice::from_ref(&session),
             &[],
             0.0,
             1.0,
@@ -1043,7 +1043,7 @@ mod milp_context_trait_tests {
             0.0,
             0.0,
         );
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, Some(&session));
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, std::slice::from_ref(&session));
 
         assert_eq!(
             ctx.obligations[0].deadline_step, 4,
@@ -1074,7 +1074,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, None);
+        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
         let AssetMilpParams::Ev(scalars) =
             crate::controller::milp_planner::AssetMilpContext::milp_params(&ctx, n, now)
         else {
@@ -1202,7 +1202,7 @@ mod milp_context_trait_tests {
             24,
             &cum_s,
             now,
-            Some(&session),
+            std::slice::from_ref(&session),
             &[],
             0.0,
             1.0,
@@ -1260,7 +1260,7 @@ mod milp_context_trait_tests {
                 was_away_by_usage_sim: false,
             });
             let ctx = EvMilpContext::from_state(
-                &state,
+            &state,
                 &cfg,
                 4,
                 &cum_s,
@@ -1332,7 +1332,7 @@ mod milp_context_trait_tests {
             24,
             &cum_s,
             now,
-            Some(&session),
+            std::slice::from_ref(&session),
             &[],
             0.0,
             0.42, // v_ev_extra_eur_kwh
