@@ -19,6 +19,9 @@
 >
 > **Rule:** Before adding a feature in an affected area, check this file first.
 > Refactor the relevant debt before adding new behaviour if effort is Small or Trivial.
+> Enforced by `python scripts/audit_debt_gate.py` (tests: `scripts/test_audit_debt_gate.py`):
+> a branch that touches a Small/Trivial row's `Affected files` must delete the row or carry a
+> `Debt-deferred: R-NN: <reason>` commit line. Keep `Affected files` as backticked paths.
 >
 > IDs are stable and never reused; gaps in the numbering are resolved items
 > (resolutions live in `docs/history/project_journal.md` and git history).

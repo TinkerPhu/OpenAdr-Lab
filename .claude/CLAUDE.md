@@ -247,6 +247,12 @@ refactoring: before adding a feature in an area listed in docs/reference/TECHNIC
 check that file first. If the relevant debt is Small or Trivial effort, refactor it before
 adding new behaviour. All tests must pass before and after any refactor. Record newly
 discovered debt in TECHNICAL_DEBTS.md immediately — do not let debt accumulate silently.
+The Small/Trivial rule is a gate, not advice: before merging a branch run
+`python scripts/audit_debt_gate.py`. It lists every open Small/Trivial row whose
+`Affected files` this branch touched and fails until each is either fixed (row deleted from
+the register in the branch) or deferred with a commit-message line
+`Debt-deferred: R-NN: <why not now>`. Write `Affected files` as backticked repo-relative
+paths (tokens broader than three path components, e.g. `VEN/src`, match nothing).
 
 When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
 
