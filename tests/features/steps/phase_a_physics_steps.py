@@ -218,7 +218,8 @@ def step_capability_max_import_lt(context, threshold):
 def step_remember_export_baseline(context):
     """How much PV there is to silence, measured rather than assumed.
 
-    The residual after an override is a fraction of the natural output, so the
+    The scenario sets this with a full-irradiance override first, so it holds at any
+    hour. The residual after the zero override is a fraction of the output, so the
     assertion has to be a fraction too - see
     `step_capability_max_export_is_fraction_of_baseline`.
     """
@@ -226,7 +227,7 @@ def step_remember_export_baseline(context):
     assert data is not None, "No capability JSON in context (request failed?)"
     context.pv_export_baseline = abs(data.get("max_export_kw") or 0.0)
     assert context.pv_export_baseline > 0.1, (
-        "this scenario needs the sun up to be meaningful; natural PV export is "
+        "there is no PV output to silence: the full-irradiance override left export at "
         f"{context.pv_export_baseline} kW"
     )
 
