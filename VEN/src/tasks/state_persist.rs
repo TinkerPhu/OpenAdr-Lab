@@ -3,9 +3,13 @@
 use crate::state::AppState;
 use tracing::error;
 
+/// How often the in-memory state is written to disk.
+const PERSIST_INTERVAL_S: u64 = 15;
+
 pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(PERSIST_INTERVAL_S));
         loop {
             interval.tick().await;
             match state.to_json().await {

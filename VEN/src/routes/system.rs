@@ -4,7 +4,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::entities::plan::{Plan, SolveStatus};
+use crate::entities::plan::SolveStatus;
 use crate::state::{TaskStatus, VtnConnectionStatus};
 use crate::AppCtx;
 
@@ -129,8 +129,8 @@ fn build_health_response(
 
 /// A missing plan (VEN just started, nothing adopted yet) is not degraded — only
 /// an actually-infeasible adopted plan is.
-fn plan_is_ok(plan: Option<&Plan>) -> bool {
-    !matches!(plan, Some(p) if p.solve_status == SolveStatus::Infeasible)
+fn plan_is_ok(solve_status: Option<SolveStatus>) -> bool {
+    solve_status != Some(SolveStatus::Infeasible)
 }
 
 /// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): componentised health, replacing the
@@ -142,7 +142,7 @@ fn plan_is_ok(plan: Option<&Plan>) -> bool {
 pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
     let vtn = ctx.state.vtn_connection_status().await;
     let storage_ok = ctx.state.storage_ok().await;
-    let plan = ctx.state.active_plan().await;
+    let plan_solve_status = ctx.state.active_plan_solve_status().await;
     let wire_rejections = ctx.state.wire_rejections().await;
     // `None` when this VEN does not publish at all, which must not read as a
     // failure -- see the field's doc comment.
@@ -153,7 +153,7 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
     Json(build_health_response(
         &vtn,
         storage_ok,
-        plan_is_ok(plan.as_ref()),
+        plan_is_ok(plan_solve_status),
         ctx.comms_loss_debounce_s,
         &wire_rejections,
         telemetry_connected,
@@ -243,6 +243,7 @@ pub async fn get_metrics(State(ctx): State<AppCtx>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::plan::Plan;
 
     fn healthy_vtn() -> VtnConnectionStatus {
         VtnConnectionStatus {
@@ -426,8 +427,21 @@ mod tests {
 
     #[test]
     fn health_planner_component_degraded_when_active_plan_infeasible() {
-        assert!(!plan_is_ok(Some(&make_plan("INFEASIBLE"))));
-        assert!(plan_is_ok(Some(&make_plan("OPTIMAL"))));
+        assert!(!plan_is_ok(Some(make_plan("INFEASIBLE").solve_status)));
+        assert!(plan_is_ok(Some(make_plan("OPTIMAL").solve_status)));
+    }
+
+    /// R-44: /health needs one enum, so it must not deep-clone the adopted `Plan` to read it.
+    #[tokio::test]
+    async fn active_plan_solve_status_reads_the_status_alone() {
+        let state = crate::state::AppState::new();
+        assert_eq!(state.active_plan_solve_status().await, None);
+
+        state.set_active_plan(Some(make_plan("INFEASIBLE"))).await;
+        assert_eq!(
+            state.active_plan_solve_status().await,
+            Some(SolveStatus::Infeasible)
+        );
     }
 
     #[test]
