@@ -116,6 +116,7 @@ impl MockEvCtx {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustNotRun,
                 soc_init: 0.0,
+                soc_max: 1.0,
                 a_ev: vec![false; n],
                 soc_drops: None,
                 obligations: vec![],
@@ -143,6 +144,7 @@ impl MockEvCtx {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustRun,
                 soc_init: 0.0,
+                soc_max: 1.0,
                 a_ev: vec![true; n],
                 soc_drops: None,
                 obligations: vec![EvObligation {

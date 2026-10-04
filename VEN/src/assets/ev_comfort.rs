@@ -34,22 +34,34 @@ pub(super) fn ev_energy_segments(
     rates: &[ComfortRate],
     soc_init: f64,
     soc_target: f64,
+    soc_max: f64,
     battery_kwh: f64,
     v_ev_core_eur_kwh: f64,
     v_ev_extra_eur_kwh: f64,
     w_ghg_eur_kg: f64,
 ) -> Vec<EvEnergySegment> {
     let start = soc_init.clamp(0.0, 1.0);
-    if battery_kwh <= 0.0 || start >= 1.0 {
+    // The vehicle's charge limit, not a full pack, is where the bands stop.
+    // `EvCharger::capability_inner` reports zero import capability at or above it, so
+    // a band beyond it prices energy the charger will refuse — a plan promising charge
+    // that never arrives. ven-2 was planned to 0.998 against a 0.85 limit while a week
+    // of measurements never once exceeded 0.850.
+    let ceiling = soc_max.clamp(0.0, 1.0);
+    if battery_kwh <= 0.0 || start >= ceiling {
         return Vec::new();
     }
 
     // Fill levels that bound the bands: the range ends, plus every curve
     // breakpoint inside it (or the target, when no curve was expressed).
-    let mut bounds: Vec<f64> = vec![start, 1.0];
+    //
+    // The target stays a *breakpoint* rather than becoming the bound: a session may ask
+    // for less than the vehicle can hold, and the energy between the two is real,
+    // reachable, and worth less than the requested charge — which is exactly what the
+    // two prices below express.
+    let mut bounds: Vec<f64> = vec![start, ceiling];
     if rates.is_empty() {
         let target = soc_target.clamp(0.0, 1.0);
-        if target > start && target < 1.0 {
+        if target > start && target < ceiling {
             bounds.push(target);
         }
     } else {
@@ -57,7 +69,7 @@ pub(super) fn ev_energy_segments(
             rates
                 .iter()
                 .map(|r| r.fill)
-                .filter(|&f| f > start && f < 1.0),
+                .filter(|&f| f > start && f < ceiling),
         );
     }
     bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -79,7 +91,7 @@ pub(super) fn ev_energy_segments(
             fine.push(lo + (hi - lo) * (k as f64) / (steps as f64));
         }
     }
-    fine.push(*bounds.last().unwrap_or(&1.0));
+    fine.push(*bounds.last().unwrap_or(&ceiling));
     let bounds = fine;
 
     let fine_bands = bounds.windows(2).filter_map(|w| {
@@ -148,8 +160,37 @@ mod tests {
 
     const BATTERY_KWH: f64 = 50.0;
 
+    /// A vehicle with no charge limit below full, so the existing expectations below
+    /// are unchanged: the limit is a new dimension, not a new meaning for the old ones.
     fn segments(rates: &[ComfortRate], soc_init: f64, soc_target: f64) -> Vec<EvEnergySegment> {
-        ev_energy_segments(rates, soc_init, soc_target, BATTERY_KWH, 1.0, 0.10, 0.5)
+        ev_energy_segments(
+            rates,
+            soc_init,
+            soc_target,
+            1.0,
+            BATTERY_KWH,
+            1.0,
+            0.10,
+            0.5,
+        )
+    }
+
+    fn segments_limited(
+        rates: &[ComfortRate],
+        soc_init: f64,
+        soc_target: f64,
+        soc_max: f64,
+    ) -> Vec<EvEnergySegment> {
+        ev_energy_segments(
+            rates,
+            soc_init,
+            soc_target,
+            soc_max,
+            BATTERY_KWH,
+            1.0,
+            0.10,
+            0.5,
+        )
     }
 
     #[test]
@@ -263,5 +304,74 @@ mod tests {
             (total_eur - 10.0).abs() < 1e-6,
             "expected the area under the curve (10 EUR), got {total_eur}"
         );
+    }
+
+    // ── The vehicle's charge limit bounds the bands ───────────────────────────
+    //
+    // `EvCharger::capability_inner` reports zero import capability at or above
+    // `soc_target`, so energy above it cannot be delivered. Pricing a band there made
+    // the planner promise charge the charger then refused: ven-2 was planned to 0.998
+    // against a 0.85 limit, and a week of 1-minute history (10,078 samples) never once
+    // measured above 0.850.
+
+    #[test]
+    fn no_band_prices_energy_above_the_charge_limit() {
+        // Limit and goal coincide, which is the fleet's own configuration.
+        let segs = segments_limited(&[], 0.64, 0.85, 0.85);
+        let total: f64 = segs.iter().map(|s| s.kwh).sum();
+        assert!(
+            (total - BATTERY_KWH * 0.21).abs() < 1e-9,
+            "expected only 0.64 -> 0.85, got {total} kWh: {segs:?}"
+        );
+        assert!(
+            segs.iter().all(|s| (s.eur_per_kwh - 1.0).abs() < 1e-9),
+            "with nothing above the goal there is no cheaper tier to buy: {segs:?}"
+        );
+    }
+
+    #[test]
+    fn a_goal_below_the_limit_keeps_its_cheaper_tier() {
+        // The two-tier structure is not the bug and is not removed: a session may ask
+        // for less than the vehicle can hold, and that gap is real and reachable.
+        let segs = segments_limited(&[], 0.30, 0.60, 0.85);
+        let core: f64 = segs
+            .iter()
+            .filter(|s| (s.eur_per_kwh - 1.0).abs() < 1e-9)
+            .map(|s| s.kwh)
+            .sum();
+        let extra: f64 = segs
+            .iter()
+            .filter(|s| (s.eur_per_kwh - 0.10).abs() < 1e-9)
+            .map(|s| s.kwh)
+            .sum();
+        assert!(
+            (core - BATTERY_KWH * 0.30).abs() < 1e-9,
+            "to the goal: {segs:?}"
+        );
+        assert!(
+            (extra - BATTERY_KWH * 0.25).abs() < 1e-9,
+            "goal to the limit, never past it: {segs:?}"
+        );
+    }
+
+    #[test]
+    fn a_curve_is_clipped_at_the_limit_too() {
+        // A user's curve may express bids up to a full pack; the vehicle still will not
+        // accept them, so those breakpoints must not create bands.
+        let segs = segments_limited(
+            &[pt(0.0, 0.50, 0.0), pt(0.9, 0.20, 0.0), pt(1.0, 0.05, 0.0)],
+            0.40,
+            0.80,
+            0.80,
+        );
+        let total: f64 = segs.iter().map(|s| s.kwh).sum();
+        assert!((total - BATTERY_KWH * 0.40).abs() < 1e-9, "{segs:?}");
+    }
+
+    #[test]
+    fn a_vehicle_already_at_its_limit_has_nothing_to_value() {
+        assert!(segments_limited(&[], 0.85, 0.85, 0.85).is_empty());
+        // And above it — a limit lowered under a fuller pack — is not negative energy.
+        assert!(segments_limited(&[], 0.92, 0.85, 0.85).is_empty());
     }
 }
