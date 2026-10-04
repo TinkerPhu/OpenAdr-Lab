@@ -3000,3 +3000,40 @@ Two rules fall out:
 
 Adding a required field to a widely-fixtured type is the shape to watch for — the compiler finds
 every site, but only if someone runs it over the test tree before pushing.
+
+---
+
+## behave's dry-run is a local gate, and it is free (2026-10-04)
+
+`tests/entrypoint.sh` runs `behave --dry-run` and **aborts the whole E2E suite** if any step
+is undefined or ambiguous. So a single sentence/pattern mismatch costs a full remote round trip —
+build included, ~20 minutes — to discover something a local command finds in a second:
+
+```bash
+cd tests && PYTHONIOENCODING=utf-8 python -m behave --dry-run --format null --no-summary
+```
+
+(`PYTHONIOENCODING` matters on Windows: without it the run dies on a `≈` in a step name with
+`UnicodeEncodeError`, which looks like a failure of the suite rather than of the console.)
+
+The mismatch that cost the round trip: a step declared `{pct:f}` while its feature wrote
+`at most 2 percent`. In the `parse` library `f` is *fixed-point* and requires a decimal point,
+so `2` does not match and the step reports as **undefined even though it is defined four lines
+away**. Verified directly rather than guessed:
+
+```python
+parse.parse('… at most {pct:f} percent …', '… at most 2 percent …')  -> None
+parse.parse('… at most {pct:g} percent …', '… at most 2 percent …')  -> {'pct': 2.0}
+```
+
+Rules:
+
+- **Prefer `{x:g}` over `{x:f}`** for any numeric step argument. `g` accepts `2` and `2.0` and
+  still yields a float, so the feature author cannot phrase the number wrongly. `f` makes the
+  decimal point load-bearing in prose, which is a trap with no upside.
+- **Run the dry-run before pushing anything that touches `tests/features/`.** It is the only
+  check that proves every sentence still resolves, and it also catches a *new* step pattern that
+  is ambiguous against an existing one.
+- A hand-rolled approximation of it is not good enough: a parse-based scan written here reported
+  ~14 unresolved sentences where behave reported one, because it cannot see `use_step_matcher`
+  or wrapped feature prose. Use the real thing.
