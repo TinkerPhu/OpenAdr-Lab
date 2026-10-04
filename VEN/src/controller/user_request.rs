@@ -91,6 +91,15 @@ pub enum RequestError {
     EvSessionsConflict {
         conflicts: Vec<ClashingSession>,
     },
+    /// Half of a trip estimate. A distance with no return time is energy with no
+    /// instant to apply it to; a return time with no distance is an instant with no
+    /// energy. Neither half can be planned for, and completing it by guessing is
+    /// exactly what this project removed, so the submission is refused and says
+    /// which part is missing.
+    IncompleteTripEstimate {
+        has_distance: bool,
+        has_return_time: bool,
+    },
     /// A replace instruction was stated but does not match the queue. Carries the
     /// queue's own rejection so the caller can re-prompt with current truth.
     EvReplaceRejected {
@@ -313,7 +322,6 @@ mod tests {
             soft_deadline: None,
             target_temp_c: None,
             mode: None,
-            expected_return_time: None,
             replace_session_ids: None,
         }
     }

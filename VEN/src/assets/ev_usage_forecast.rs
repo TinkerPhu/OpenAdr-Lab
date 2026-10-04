@@ -42,7 +42,7 @@ impl EvMilpContext {
         n: usize,
         cum_s: &[i64],
         now: DateTime<Utc>,
-        ev_session: Option<&EvSession>,
+        ev_sessions: &[EvSession],
     ) {
         let Some(usage) = cfg
             .usage_sim
@@ -51,10 +51,11 @@ impl EvMilpContext {
         else {
             return;
         };
-        // A real user/VTN session already said what this EV is charging for; the
-        // forecast never overrides a stated goal. Availability and consumption below
-        // apply either way — those are fact, not preference.
-        let firm = usage.engage_charge_planning && ev_session.is_none();
+        // A stated session already said what this EV is charging for; the forecast
+        // never overrides a stated goal. Availability and consumption below apply
+        // either way — those are fact, not preference, and a session asking for a slot
+        // cannot make the car present for it.
+        let firm = usage.engage_charge_planning && ev_sessions.is_empty();
         let uses = predicted_uses(cfg, usage, n, cum_s, now, firm);
         let derived = ev_trip_series::plan_inputs(&uses, n, cum_s, now);
 
