@@ -627,8 +627,14 @@ mod tests {
         // GET /user-requests renders as a request with no session at all.
         let state = AppState::new();
         let (standing, untouched) = (Uuid::new_v4(), Uuid::new_v4());
-        state.insert_ev_session(ev_sess(standing, 0, 6)).await.unwrap();
-        state.insert_ev_session(ev_sess(untouched, 12, 18)).await.unwrap();
+        state
+            .insert_ev_session(ev_sess(standing, 0, 6))
+            .await
+            .unwrap();
+        state
+            .insert_ev_session(ev_sess(untouched, 12, 18))
+            .await
+            .unwrap();
         let standing_req = make_request(Some(SessionType::Ev), Some(standing));
         let untouched_req = make_request(Some(SessionType::Ev), Some(untouched));
         let (standing_req_id, untouched_req_id) = (standing_req.id, untouched_req.id);
