@@ -40,6 +40,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
       target_soc: 0.8,
       window_start: new Date(Date.now() - 3600_000).toISOString(),
       expected_trip_distance_km: null,
+      expected_return_time: null,
       departure_time: "2026-04-12T07:00:00Z",
       soft_deadline: false,
       mode: "BY_DEADLINE",
@@ -282,7 +283,8 @@ describe("DevicesPage", () => {
         session: {
           type: "ev", id: "sess-mon", target_soc: 0.8,
           window_start: "2026-04-06T18:00:00Z", departure_time: "2026-04-07T07:00:00Z",
-          expected_trip_distance_km: 120, soft_deadline: false, mode: "BY_DEADLINE",
+          expected_trip_distance_km: 120, expected_return_time: "2026-04-07T17:00:00Z",
+          soft_deadline: false, mode: "BY_DEADLINE",
           budget_eur: null, created_at: "2026-04-06T12:00:00Z", updated_at: "2026-04-06T12:00:00Z",
         },
       }),
@@ -291,7 +293,8 @@ describe("DevicesPage", () => {
         session: {
           type: "ev", id: "sess-wed", target_soc: 0.9,
           window_start: "2026-04-07T18:00:00Z", departure_time: "2026-04-08T07:00:00Z",
-          expected_trip_distance_km: null, soft_deadline: false, mode: "BY_DEADLINE",
+          expected_trip_distance_km: null, expected_return_time: null,
+          soft_deadline: false, mode: "BY_DEADLINE",
           budget_eur: null, created_at: "2026-04-06T12:00:00Z", updated_at: "2026-04-06T12:00:00Z",
         },
       }),
