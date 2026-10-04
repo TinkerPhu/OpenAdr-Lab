@@ -132,6 +132,31 @@ def evaluate(rows, changed, head_ids, base_ids, deferrals):
     return Outcome(unresolved, resolved, deferred)
 
 
+_ID = r"(?:R|GB|BL)-\d+"
+_RESOLVED = r"(?:\*\*)?(?:RESOLVED|Resolved|CLOSED|Closed)(?![a-z])"
+
+
+def find_resolved_ids(text):
+    """IDs of rows (or `## R-n -- RESOLVED` sections) that announce their own resolution.
+
+    Workflow rule 3: a resolved item leaves the register in the commit that resolves it. A row
+    whose description *starts* with Resolved/Closed is the residue of that not happening; a row
+    that merely mentions a resolution further in is still open and is not flagged.
+    """
+    found = []
+    for line in text.splitlines():
+        head = re.match(r"^##\s+((?:%s)(?:,\s*%s)*)\s+\S\s+%s" % (_ID, _ID, _RESOLVED), line)
+        if head:
+            found += re.findall(_ID, head.group(1))
+            continue
+        row = re.match(r"^\|[^|]*?\|?\s*(%s)\s*\|\s*(?:[^|]*\|\s*)?%s" % (_ID, _RESOLVED), line)
+        if row is None:
+            row = re.match(r"^\|\s*(%s)\s*\|\s*%s" % (_ID, _RESOLVED), line)
+        if row:
+            found.append(row.group(1))
+    return found
+
+
 def _git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", check=True).stdout
 
@@ -163,6 +188,12 @@ def main():
     out = evaluate(parse_rows(head_text) + [r for r in parse_rows(base_text) if r.id not in _ids(head_text)],
                    changed, _ids(head_text), _ids(base_text), parse_deferrals(messages))
 
+    stale = []
+    for path in (REGISTER, "docs/BACKLOG.md"):
+        with open(path, encoding="utf-8") as f:
+            stale += find_resolved_ids(f.read())
+    for rid in stale:
+        print(f"STALE     {rid}  says it is resolved but is still in the register: delete it")
     for rid in out.resolved:
         print(f"RESOLVED  {rid}  (removed from the register in this branch)")
     for rid, why in out.deferred.items():
@@ -175,6 +206,8 @@ def main():
     for row in sort_by_priority(out.unresolved, kind_weight):
         tag = " ".join(t for t in (row.severity, row.kind) if t)
         print(f"OPEN      {row.id} [{row.effort}{', ' + tag if tag else ''}]  touched: {', '.join(matched_files(row, changed))}")
+    if stale and not out.unresolved:
+        return 0 if args.warn else 1
     if out.unresolved:
         print(
             "\nFix each OPEN debt in this branch and delete its row, or add a commit-message line\n"
