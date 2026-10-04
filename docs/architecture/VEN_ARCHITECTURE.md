@@ -443,6 +443,29 @@ the curve, the current SoC, the target and the pack size, never on a deadline. B
 forecast path left `segments` empty and fell back to the flat `v_ev_extra_eur_kwh` reward, so the
 fleet's own charge planning bypassed the curve entirely.
 
+**The vehicle's charge limit bounds everything.** `EvCharger::capability_inner` reports zero
+import capability at or above `soc_target`, which makes it an absolute limit rather than a
+preference — ven-2 logged 10,078 samples with a maximum of 85.00 % against exactly that
+configured limit. `EvMilpContext` therefore declares `soc_max` from the asset's own value, and
+three things read it so the model cannot plan charge the charger will refuse:
+
+- `declare_vars` bounds `soc_ev` by it, so above-limit charge is *unrepresentable* rather than
+  merely unrewarded. The bound is held at or above `soc_init`, so a limit lowered under a fuller
+  pack stays solvable instead of infeasible — a pack does not discharge itself to comply.
+- `firm_required_kwh` measures an obligation against what is reachable. Without this the unpriced
+  guarantee band `declare_vars` adds for an uncovered requirement would put the same energy
+  straight back, and a session asking 0.95 of a 0.85 vehicle would still be planned to 0.95.
+- `ev_comfort::ev_energy_segments` bounds its band range by it and clips curve breakpoints to it
+  (`EvBandRange { init, target, max }` — grouped because the goal and the limit are easy to
+  confuse, and the original defect was exactly that confusion: the range ran to a full pack with
+  the limit demoted to a price breakpoint).
+
+`soc_target` remains a *breakpoint* inside that range, not the range's end: a session asking for
+less than the vehicle can hold still prices the gap between request and limit at
+`v_ev_extra_eur_kwh`, because that energy is real and reachable. A session target *above* the
+limit is reported rather than substituted — the requirement stops at the limit and the gap
+surfaces through `shortfall_soc`.
+
 A **firm** deadline is the only guarantee: `constraints` adds
 `soc_ev[deadline_step + 1] + shortfall_soc >= target_soc` for each `EvObligation`, where
 `shortfall_soc` is a slack priced far above any tariff or bid. A requirement the window cannot

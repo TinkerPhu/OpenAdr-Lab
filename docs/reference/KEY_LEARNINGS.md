@@ -2803,3 +2803,59 @@ Two habits worth keeping:
   "There is an Alert on that page" was true here and still wrong.
 - Mock a rejection at least once per submit path. A test suite where the mock always resolves
   cannot tell a handled failure from an ignored one.
+
+## When a plan exceeds a stated target, ask what bounds the quantity (2026-10-04)
+
+Twice now a user has reported an EV plan charging past its configured target: VEN-1 to 100 %
+against 0.80, then ven-2 to 99.8 % against 0.85. The first time I found a real defect — the
+whole-horizon band equality let above-target energy escape the deadline — fixed it with
+`band_accounting_last_step`, verified the symptom was gone on VEN-1, and recorded it as resolved.
+
+It was not resolved. That fix bounded *when* the energy could be bought. Nothing bounded *how
+much*: `ev_comfort::ev_energy_segments` opened its band range with `vec![start, 1.0]` and priced
+everything above the target at `v_ev_extra_eur_kwh`. With PV surplus the marginal cost is about
+zero, so that tier was always worth buying to a full pack. The same bug came back on a different
+VEN with a different-looking symptom.
+
+The useful question, asked in order:
+
+1. **What bounds the quantity?** A target that is exceeded means some upper bound is missing or
+   wrong. Find the bound before looking at scheduling, pricing or timing.
+2. **Does anything else enforce the same bound?** If a second place already enforces it, the two
+   will disagree. Here `EvCharger::capability_inner` enforced the limit absolutely while the
+   planner did not know it existed.
+3. **Can the model even represent the violation?** If it can, something eventually will. Bounding
+   `soc_ev` by the limit makes above-limit charge unrepresentable rather than merely unrewarded —
+   which is a stronger guarantee than any penalty.
+
+And a check that would have caught both reports in a minute: **compare the plan against measured
+history, not against the code.** ven-2's own `/history/ticks` had 10,078 EV samples with a maximum
+of 85.00 % and 43 % of them pinned exactly at the limit. A plan projecting 99.8 % against that
+record is provably unexecutable, and no amount of reading the planner would have been as quick or
+as conclusive. When a plan and a measurement disagree, the measurement is the specification.
+
+Corollary for "fixed" claims: verifying that a *symptom* disappeared on the VEN that reported it is
+not verification that the cause is gone. The second report is the cost of that shortcut.
+
+## Write replacement anchors against the formatted file (2026-10-04)
+
+Three times in one session a programmatic edit silently did nothing because its anchor was written
+against the pre-`cargo fmt` shape of the code:
+
+- `EvSessionsConflict { conflicts: Vec<ClashingSession> },` had already been split across lines, so
+  adding a variant after it matched nothing — while the `Display` arm for that variant went in
+  fine. A match arm for a variant that does not exist at least fails loudly.
+- Two test helpers calling `ev_energy_segments(a, b, c, d, …)` on one line had become a multi-line
+  call, so a grouped-argument rewrite skipped them and they kept passing the old arity.
+
+The failure mode is the worst kind: the edit reports success, the file looks plausible, and only
+the compiler disagrees — 15 minutes later on the one host that can build this workspace.
+
+Two habits:
+
+- **Run `cargo fmt` first, then read the file, then write the anchor.** The formatter is what
+  decides where the line breaks are; writing anchors from memory of how the code "looks" is writing
+  them against a shape that may not exist.
+- **Assert the replacement count.** A `replace(old, new, 1)` that matches nothing is indistinguishable
+  from success unless the script checks. `assert old in s` before replacing costs one line and turns
+  a silent miss into an immediate, local failure.
