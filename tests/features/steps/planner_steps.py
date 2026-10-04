@@ -366,7 +366,12 @@ def step_charges_before_every_departure(context):
         prev_soc, soc = series[i - 1][2], series[i][2]
         if prev_soc is None or soc is None:
             continue
-        if soc < prev_soc - 0.02 and series[i][1] <= 1e-6:
+        # No "and the slot charges nothing": the vehicle is HOME at its return, so the
+        # planner may well charge in that very slot - which is what hid the drop and
+        # made this scenario report zero. Charging can only raise the state of charge,
+        # so any net fall beyond the noise floor is a trip's consumption. (A V2G
+        # discharge could also lower it; this profile's EV has none.)
+        if soc < prev_soc - 0.02:
             drops.append(i)
     assert len(drops) >= 2, (
         "this scenario needs a horizon with at least two predicted trips to be "
