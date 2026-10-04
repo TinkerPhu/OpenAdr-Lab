@@ -29,12 +29,17 @@ Feature: Phase A — Asset physics and capability coverage
 
   # ── Block B: UserOverrides paths ──────────────────────────────────────────
 
+  # The residual after the override decays back toward the natural sin model, so its
+  # size tracks how much sun there is - the bound has to be a fraction of that, not a
+  # fixed number of kW, or the scenario passes in the morning and fails at midday.
   Scenario: pv_irradiance override to zero silences PV output
-    When I POST a sim override setting pv_irradiance to 0.0
+    When I GET /capability/pv from the VEN
+    And I remember max_export_kw as the pre-override baseline
+    And I POST a sim override setting pv_irradiance to 0.0
     And I wait 5 seconds for the sim to tick
     And I GET /capability/pv from the VEN
     Then the response status is 200
-    And the capability max_export_kw magnitude is less than 0.01
+    And the capability max_export_kw magnitude is at most 2 percent of the baseline
     And the capability max_import_kw is less than 0.01
 
   Scenario: pv_irradiance override to full produces nonzero PV export

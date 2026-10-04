@@ -214,6 +214,49 @@ def step_capability_max_import_lt(context, threshold):
     )
 
 
+@when("I remember max_export_kw as the pre-override baseline")
+def step_remember_export_baseline(context):
+    """How much PV there is to silence, measured rather than assumed.
+
+    The residual after an override is a fraction of the natural output, so the
+    assertion has to be a fraction too - see
+    `step_capability_max_export_is_fraction_of_baseline`.
+    """
+    data = context.last_response_json
+    assert data is not None, "No capability JSON in context (request failed?)"
+    context.pv_export_baseline = abs(data.get("max_export_kw") or 0.0)
+    assert context.pv_export_baseline > 0.1, (
+        "this scenario needs the sun up to be meaningful; natural PV export is "
+        f"{context.pv_export_baseline} kW"
+    )
+
+
+@then("the capability max_export_kw magnitude is at most {pct:f} percent of the baseline")
+def step_capability_max_export_is_fraction_of_baseline(context, pct):
+    """Scale-free, because the quantity being bounded is not scale-free.
+
+    A one-shot pv_irradiance override auto-clears after one tick and the offset then
+    EMA-decays back toward the natural sin model over a ~300 s window, so a few
+    seconds later there is always a small residual - and its SIZE is proportional to
+    how much sun there is at that moment. An absolute bound therefore passes in the
+    morning and fails near solar noon: observed 2026-10-04, the same scenario passed
+    at 10:06Z with ~2.5 kW of natural export and failed at 10:58Z with 3.34 kW, where
+    the residual was 0.0125 kW against a fixed 0.01 kW threshold. Both readings are
+    the same ~0.4 % of natural output, which is what the bound should have been
+    measuring all along.
+    """
+    data = context.last_response_json
+    assert data is not None, "No capability JSON in context (request failed?)"
+    actual = abs(data.get("max_export_kw") or 0.0)
+    baseline = getattr(context, "pv_export_baseline", None)
+    assert baseline, "no pre-override baseline was remembered"
+    limit = baseline * pct / 100.0
+    assert actual <= limit, (
+        f"expected |max_export_kw| <= {pct}% of the {baseline:.3f} kW baseline "
+        f"({limit:.4f} kW), got {actual:.4f} kW"
+    )
+
+
 @then("the capability max_export_kw magnitude is less than {threshold:f}")
 def step_capability_max_export_magnitude_lt(context, threshold):
     """A one-shot pv_irradiance override auto-clears after 1 tick and its offset
