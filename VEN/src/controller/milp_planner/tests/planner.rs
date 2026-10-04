@@ -841,6 +841,16 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         ) {
             self.inner.declare_vars_into_pool(n, c_s, c_r, vars, pool);
         }
+        fn declare_pinned_vars_into_pool(
+            &self,
+            n: usize,
+            winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+            vars: &mut ProblemVariables,
+            pool: &mut MilpVarPool,
+        ) {
+            self.inner
+                .declare_pinned_vars_into_pool(n, winning, vars, pool);
+        }
         fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
             let mut cs = self.inner.constraints(pool, n, dt_h);
             // Contradiction: require p_ch[0] ≥ 9999 while battery bounds p_ch[0] ≤ 5 kW
@@ -1452,4 +1462,108 @@ fn run_planner_ev_planned_plugged_is_one_when_plugged_without_a_session() {
         planned.iter().all(|(_, plugged)| *plugged == 1.0),
         "plugged and nothing states a departure: present for the whole horizon"
     );
+}
+
+/// R-98: the marginal-cost pass pinned `y_shift[j] = 1` for every valid start `j` the load
+/// *ran* in, not the one it *started* in. A 60-min load on a 30-min grid runs two slots, both
+/// valid starts, so the pass pinned two starts against the model's "exactly one start" row:
+/// the dual LP was infeasible whenever a multi-slot shiftable load was scheduled.
+#[test]
+fn marginal_cost_solves_with_a_multi_slot_shiftable_load_scheduled() {
+    let now = fixed_now();
+    let mut profile = make_profile_1800s();
+    profile
+        .assets
+        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    // 60-min load, 120-min window -> valid starts {0, 1, 2}; flat tariff -> starts at 0.
+    let load = make_shiftable(now, 60, 120);
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
+    let inputs = build_milp_inputs(
+        &ctxs,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        std::slice::from_ref(&load),
+        None,
+    );
+    let weights = build_phase1_weights(&profile, PlannerObjective::MinCost);
+
+    let winning = solve_phase1(&inputs, &weights, &ctxs, 60.0).expect("phase1 solve failed");
+    let running = winning.p_shiftable_kw[0]
+        .iter()
+        .filter(|&&kw| kw > 0.01)
+        .count();
+    assert_eq!(
+        running, 2,
+        "the load must run two slots for this test to say anything"
+    );
+
+    let marginal = solve_marginal_costs(&inputs, &weights, &ctxs, &winning, 60.0);
+    assert!(
+        marginal.is_ok(),
+        "the dual LP must pin the winning start, not every running slot: {:?}",
+        marginal.err()
+    );
+}
+
+/// R-98: one marginal-cost pass over a site with every asset kind taking part — battery,
+/// EV with a firm obligation, heater and a two-slot shiftable load — solves and prices
+/// every slot.
+#[test]
+fn marginal_cost_solves_with_every_asset_kind_active() {
+    let now = fixed_now();
+    let profile = make_profile_1800s();
+    let mut sim = make_snap_from_profile(&profile);
+    set_ev_plugged(&mut sim, true);
+    set_battery_soc(&mut sim, 0.3);
+    let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
+        id: uuid::Uuid::new_v4(),
+        target_soc: 0.8,
+        window_start: now,
+        expected_trip_distance_km: None,
+        expected_return_time: None,
+        departure_time: now + Duration::hours(2),
+        soft_deadline: false,
+        budget_eur: None,
+        comfort_rates: vec![],
+        created_at: now,
+        updated_at: now,
+    };
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let load = make_shiftable(now, 60, 120);
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);
+    push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
+    let inputs = build_milp_inputs(
+        &ctxs,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        std::slice::from_ref(&load),
+        None,
+    );
+    let weights = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let kinds: Vec<_> = ctxs.iter().map(|c| c.asset_kind()).collect();
+    for kind in [
+        AssetKind::Battery,
+        AssetKind::Ev,
+        AssetKind::Heater,
+        AssetKind::ShiftableLoad,
+    ] {
+        assert!(
+            kinds.contains(&kind),
+            "{kind:?} must take part, got {kinds:?}"
+        );
+    }
+
+    let winning = solve_phase1(&inputs, &weights, &ctxs, 60.0).expect("phase1 solve failed");
+    let marginal = solve_marginal_costs(&inputs, &weights, &ctxs, &winning, 60.0)
+        .expect("the dual LP must solve with every asset kind declared by its own context");
+    assert_eq!(marginal.len(), inputs.n);
 }

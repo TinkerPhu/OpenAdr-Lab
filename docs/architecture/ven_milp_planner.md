@@ -274,6 +274,18 @@ per-slot shadow price on the power-balance constraint, computed once per plannin
 the winning MILP solve: the same problem is re-solved as a pure LP with every binary decision
 fixed to the winning solution's values, and the constraint's dual value is read off that solve.
 
+- **Same model, decisions pinned** (`controller/milp_planner/solver_duals.rs`): every asset
+  declares its own variables for the pass through the required
+  `AssetMilpContext::declare_pinned_vars_into_pool`, which calls the same `declare_vars_with`
+  the plan used with `ModeDecisions::Pinned` — the mode decisions (battery `u_bat`, EV
+  `z_ev_on`, heater stage and ready flag, each shiftable load's start) become continuous
+  variables fixed to `SolveOutput::mode_decisions`, read off the winning solution. Every other
+  variable and bound is the plan's own, so the priced model cannot drift from the planned one.
+  (Before R-98 the pass hand-declared its own copies; they drifted until the LP was infeasible
+  on every VEN and the marginal cost was always the fallback tariff.) Pinned by each asset's
+  `declare_pinned_vars_is_the_free_declaration_*` test and by
+  `tests/planner.rs::marginal_cost_solves_with_every_asset_kind_active`.
+
 - **Read-only diagnostic**: never influences `p_imp`/`p_exp` or any allocation — only computed
   after the winning solve is already final.
 - **No binding constraint** → equals the slot's plain `import_tariff_eur_kwh` (within solver

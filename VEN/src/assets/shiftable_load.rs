@@ -6,6 +6,7 @@ use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
 };
+use crate::controller::milp_planner::asset_port::{pinned_binary, ModeDecisions};
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, ShiftableLoadMilpContext, ShiftableLoadScalars,
 };
@@ -434,21 +435,17 @@ impl AssetMilpContext for ShiftableLoadMilpContext {
         vars: &mut good_lp::ProblemVariables,
         pool: &mut crate::controller::milp_interactions::MilpVarPool,
     ) {
-        use good_lp::variable;
-        let y_shift = self
-            .valid_start_slots
-            .iter()
-            .map(|_| vars.add(variable().binary()))
-            .collect();
-        pool.shiftable.push(
-            crate::controller::milp_interactions::ShiftableLoadMilpVars {
-                asset_id: self.asset_id.clone(),
-                power_kw: self.power_kw,
-                duration_slots: self.duration_slots,
-                valid_start_slots: self.valid_start_slots.clone(),
-                y_shift,
-            },
-        );
+        self.declare_vars_with(vars, pool, ModeDecisions::Free);
+    }
+
+    fn declare_pinned_vars_into_pool(
+        &self,
+        _n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut good_lp::ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        self.declare_vars_with(vars, pool, ModeDecisions::Pinned(winning));
     }
 
     /// Exactly one start slot must be chosen — the hard-window requirement
@@ -491,6 +488,43 @@ impl AssetMilpContext for ShiftableLoadMilpContext {
         _c_ramp_eur_kw: f64,
     ) -> good_lp::Expression {
         good_lp::Expression::from(0.0)
+    }
+}
+
+impl ShiftableLoadMilpContext {
+    /// The one shiftable-load variable declaration (R-98): one start choice per valid
+    /// start slot, free for the plan, fixed to the winning *start* for the marginal-cost
+    /// pass. (The pass once re-derived starts from the slots the load ran in, which pins
+    /// two starts for a two-slot run and makes "exactly one start" infeasible.)
+    fn declare_vars_with(
+        &self,
+        vars: &mut good_lp::ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+        modes: ModeDecisions,
+    ) {
+        use good_lp::variable;
+        let winning = match modes {
+            ModeDecisions::Free => None,
+            ModeDecisions::Pinned(w) => Some(w.y_shift.get(&self.asset_id)),
+        };
+        let y_shift = (0..self.valid_start_slots.len())
+            .map(|i| match winning {
+                None => vars.add(variable().binary()),
+                Some(row) => {
+                    let v = pinned_binary(row.and_then(|r| r.get(i).copied()));
+                    vars.add(variable().min(v).max(v))
+                }
+            })
+            .collect();
+        pool.shiftable.push(
+            crate::controller::milp_interactions::ShiftableLoadMilpVars {
+                asset_id: self.asset_id.clone(),
+                power_kw: self.power_kw,
+                duration_slots: self.duration_slots,
+                valid_start_slots: self.valid_start_slots.clone(),
+                y_shift,
+            },
+        );
     }
 }
 
@@ -792,5 +826,42 @@ mod tests {
             trajectory.points.iter().all(|p| p.power_kw == 0.0),
             "a run that can't start within the window must contribute nothing"
         );
+    }
+
+    /// R-98: the marginal-cost pass declares a shiftable load through the plan's own
+    /// declaration, with exactly the winning *start* pinned — not every slot it runs in.
+    #[test]
+    fn declare_pinned_vars_pins_the_winning_start_only() {
+        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
+        use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+        let ctx = ShiftableLoadMilpContext {
+            asset_id: "wm".into(),
+            power_kw: 2.0,
+            duration_slots: 2,
+            valid_start_slots: vec![0, 1, 2],
+        };
+        let n = 4;
+        let winning = WinningModeDecisions {
+            y_shift: HashMap::from([("wm".to_string(), vec![0.0, 1.0, 0.0])]),
+            ..Default::default()
+        };
+        let declared = |pinned: bool| {
+            let mut vars = good_lp::variables!();
+            let mut pool = empty_pool(&mut vars, n);
+            if pinned {
+                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
+            } else {
+                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+            }
+            pool.shiftable.len() * 10 + pool.shiftable[0].y_shift.len()
+        };
+        assert_eq!(declared(true), declared(false));
+
+        let range = bound_range(|vars| {
+            let mut pool = empty_pool(vars, n);
+            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
+            pool.shiftable.remove(0).y_shift
+        });
+        assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
     }
 }

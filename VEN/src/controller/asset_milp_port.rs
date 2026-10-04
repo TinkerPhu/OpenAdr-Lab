@@ -4,6 +4,8 @@
 //! but consumed by domain-level `controller::solver_port::SolveRequest`. Moved here
 //! so the domain layer no longer reaches into infra for its own port trait;
 //! `milp_planner::asset_port` re-exports these for its existing internal callers.
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 
 /// Discriminant for the MILP-capable asset types.
@@ -110,6 +112,40 @@ pub enum AssetMilpParams {
     Unknown,
 }
 
+/// The winning solution's mode decisions — the variables the marginal-cost pass pins so
+/// the rest of the model is a pure LP. Values as solved; each asset rounds its own.
+#[derive(Debug, Clone, Default)]
+pub struct WinningModeDecisions {
+    /// Battery charge (1) / discharge (0) direction per slot.
+    pub u_bat: Vec<f64>,
+    /// EV charger on (1) / off (0) per slot.
+    pub z_ev_on: Vec<f64>,
+    /// Heater stage index per slot.
+    pub y_heat: Vec<f64>,
+    /// Heater "ready by the deadline" reward flag.
+    pub z_heat_ready: f64,
+    /// Each shiftable load's start choice, one value per valid start slot, keyed by asset id.
+    pub y_shift: HashMap<String, Vec<f64>>,
+}
+
+/// How an asset declares its mode decisions: as the integers the solver chooses (the
+/// plan), or fixed to a winning solution's values (the marginal-cost pass). Every other
+/// variable and bound is declared the same way in both, by the same function.
+#[derive(Debug, Clone, Copy)]
+pub enum ModeDecisions<'a> {
+    Free,
+    Pinned(&'a WinningModeDecisions),
+}
+
+/// A pinned 0/1 decision: the solved value rounded to the nearest of the two.
+pub fn pinned_binary(solved: Option<f64>) -> f64 {
+    if solved.unwrap_or(0.0) > 0.5 {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 /// Port trait for MILP-capable assets. Enables trait-object dispatch in solver phases,
 /// eliminating direct imports of concrete asset types from `controller/milp_planner/`.
 ///
@@ -134,6 +170,20 @@ pub trait AssetMilpContext: Send + Sync {
         n: usize,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
+        vars: &mut good_lp::ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    );
+
+    /// Marginal-cost dual pass: declare exactly the variables `declare_vars_into_pool`
+    /// declares, with every mode decision fixed to `winning`'s value as a continuous
+    /// variable (HiGHS returns no duals for a model with any integer column). Required,
+    /// not defaulted: a second, hand-written declaration of an asset's variables is what
+    /// drifted until the dual LP was infeasible on every VEN (R-98), so an asset that
+    /// takes part in the plan must say how it is priced by the same declaration.
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &WinningModeDecisions,
         vars: &mut good_lp::ProblemVariables,
         pool: &mut crate::controller::milp_interactions::MilpVarPool,
     );

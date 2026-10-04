@@ -1062,6 +1062,42 @@ fn marginal_cost_reflects_binding_import_violation_penalty() {
     );
 }
 
+/// R-98: the dual pass declared the EV's variables from its own hand-written copy, which
+/// lacked the zero-priced band a firm obligation gets when no bid covers it. With the
+/// winning plan's on/off decisions pinned, every "on" slot forces at least the minimum
+/// charging power, and that energy had no band to be bought through: the dual LP was
+/// infeasible and every VEN with such an EV fell back to the plain tariff.
+#[test]
+fn marginal_cost_solves_for_an_ev_with_an_unpriced_firm_obligation() {
+    let n = 4;
+    let mut inputs = make_solver_inputs(n, 0.5);
+    inputs.a_ev = vec![true; n];
+    inputs.ev_mode = MilpLoadMode::MustRun;
+    inputs.ev_battery_kwh = 10.0;
+    inputs.soc_ev_init = Some(0.0);
+    inputs.p_ev_max_kw = 7.2;
+    inputs.p_ev_min_kw = 1.4;
+    inputs.ev_segments = vec![]; // no comfort bid: the guarantee is the only band
+    inputs.e_ev_extra_max_kwh = 0.0;
+    inputs.ev_obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
+
+    let contexts = contexts_from_inputs(&inputs);
+    let weights = make_phase1_weights();
+    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
+    assert!(
+        winning.z_ev_on.iter().any(|&z| z > 0.5),
+        "the firm obligation must make the winning plan charge, z_ev_on {:?}",
+        winning.z_ev_on
+    );
+
+    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0);
+    assert!(
+        marginal.is_ok(),
+        "the dual LP must solve the same EV model the winning plan did: {:?}",
+        marginal.err()
+    );
+}
+
 /// The configured `mip_gap_target` must reach both the solver and the produced
 /// `Plan`. Before it was configurable this value was the hardcoded
 /// `MIP_GAP_TARGET` const, so `Plan.mip_gap_target` — which the UI renders and

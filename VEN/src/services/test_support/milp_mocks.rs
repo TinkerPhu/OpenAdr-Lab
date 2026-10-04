@@ -72,6 +72,17 @@ impl AssetMilpContext for MockBatteryCtx {
         pool.bat = Some(self.ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut MilpVarPool,
+    ) {
+        self.ctx
+            .declare_pinned_vars_into_pool(n, winning, vars, pool);
+    }
+
     fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         BatteryMilpContext::constraints(&self.ctx, pool.bat.as_ref().unwrap(), n, dt_h)
     }
@@ -213,6 +224,17 @@ impl AssetMilpContext for MockEvCtx {
         pool.ev = Some(self.ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut MilpVarPool,
+    ) {
+        self.ctx
+            .declare_pinned_vars_into_pool(n, winning, vars, pool);
+    }
+
     fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         EvMilpContext::constraints(&self.ctx, pool.ev.as_ref().unwrap(), n, dt_h)
     }
@@ -313,6 +335,17 @@ impl AssetMilpContext for MockHeaterCtx {
         pool: &mut MilpVarPool,
     ) {
         pool.heater = Some(self.ctx.declare_vars(n, vars));
+    }
+
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut MilpVarPool,
+    ) {
+        self.ctx
+            .declare_pinned_vars_into_pool(n, winning, vars, pool);
     }
 
     fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {

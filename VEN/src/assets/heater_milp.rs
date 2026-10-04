@@ -7,7 +7,8 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 
 use super::Heater;
 use crate::controller::milp_planner::asset_port::{
-    HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+    pinned_binary, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+    ModeDecisions,
 };
 
 /// Map a planned heater power [kW] to a stage index.
@@ -28,6 +29,18 @@ fn kw_to_stage(kw: f64, p_step_kw: f64, n_stages: f64) -> Option<f64> {
 impl HeaterMilpContext {
     /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
+        self.declare_vars_with(n, vars, ModeDecisions::Free)
+    }
+
+    /// The one heater variable declaration (R-98): the plan and the marginal-cost pass
+    /// differ only in how the stage index and the ready flag are declared. Pinned, the
+    /// winning stage already respects any anchor and `MustNotRun`, so it is used as is.
+    pub fn declare_vars_with(
+        &self,
+        n: usize,
+        vars: &mut ProblemVariables,
+        modes: ModeDecisions,
+    ) -> HeaterMilpVars {
         let must_not = self.mode == HeaterMilpMode::MustNotRun;
         let n_stages = self.n_stages as f64;
 
@@ -40,6 +53,17 @@ impl HeaterMilpContext {
         // exclusion rows.
         let y_heat = (0..n)
             .map(|t| {
+                if let ModeDecisions::Pinned(w) = modes {
+                    // Nearest reachable stage, not 0/1: y is a general integer.
+                    let v = w
+                        .y_heat
+                        .get(t)
+                        .copied()
+                        .unwrap_or(0.0)
+                        .round()
+                        .clamp(0.0, n_stages);
+                    return vars.add(variable().min(v).max(v));
+                }
                 let anchor = self.anchored_kw.get(t).copied().flatten().and_then(|kw| {
                     let st = kw_to_stage(kw, self.p_step_kw, n_stages);
                     if st.is_none() {
@@ -63,7 +87,13 @@ impl HeaterMilpContext {
 
         // z_heat_ready: binary reward flag for MayRun with deadline; fixed 0 otherwise.
         let z_heat_ready = if self.mode == HeaterMilpMode::MayRun && self.t_dead_step.is_some() {
-            vars.add(variable().binary())
+            match modes {
+                ModeDecisions::Free => vars.add(variable().binary()),
+                ModeDecisions::Pinned(w) => {
+                    let v = pinned_binary(Some(w.z_heat_ready));
+                    vars.add(variable().min(v).max(v))
+                }
+            }
         } else {
             vars.add(variable().min(0.0).max(0.0))
         };
@@ -390,6 +420,16 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         pool.heater = Some(self.declare_vars(n, vars));
     }
 
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.heater = Some(self.declare_vars_with(n, vars, ModeDecisions::Pinned(winning)));
+    }
+
     fn constraints(
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
@@ -610,11 +650,11 @@ mod milp_tests {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
     use crate::controller::milp_planner::{
         AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
     };
-    use good_lp::{variable, variables};
+    use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+    use good_lp::variables;
 
     fn make_ctx() -> HeaterMilpContext {
         HeaterMilpContext {
@@ -632,24 +672,6 @@ mod milp_context_trait_tests {
             anchored_kw: vec![],
             comfort_full_reward_eur_kwh: 0.0,
             comfort_full_co2_reward_eur_kwh: 0.0,
-        }
-    }
-
-    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
-        let grid = GridMilpVars {
-            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
-            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        };
-        MilpVarPool {
-            grid,
-            bat: None,
-            ev: None,
-            heater: None,
-            shiftable: vec![],
         }
     }
 
@@ -1264,5 +1286,38 @@ mod milp_context_trait_tests {
             cfg.thermal_mass_kwh_per_c,
         );
         assert!((future["temp_c"] - 20.5).abs() < 1e-9);
+    }
+
+    /// R-98: the marginal-cost pass declares the heater through the plan's own
+    /// declaration, with the stage index fixed to the nearest reachable stage.
+    #[test]
+    fn declare_pinned_vars_is_the_free_declaration_with_the_stage_fixed() {
+        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
+        let ctx = make_ctx();
+        let n = 4;
+        let top = ctx.n_stages as f64;
+        let winning = WinningModeDecisions {
+            y_heat: vec![0.0, 1.4, 1.6, top + 3.0],
+            ..Default::default()
+        };
+        let shape = |pinned: bool| {
+            let mut vars = variables!();
+            let mut pool = empty_pool(&mut vars, n);
+            if pinned {
+                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
+            } else {
+                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+            }
+            let v = pool.heater.expect("heater declared");
+            (v.y_heat.len(), v.e_tank.len(), v.s_low.len(), v.sw.len())
+        };
+        assert_eq!(shape(true), shape(false));
+
+        let range = bound_range(|vars| {
+            let mut pool = empty_pool(vars, n);
+            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
+            pool.heater.expect("heater declared").y_heat
+        });
+        assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (top, top)]);
     }
 }

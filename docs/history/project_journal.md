@@ -14520,3 +14520,34 @@ edit, is what caught it; the task list alone would have built the wrong thing we
   `api/bffContext.ts` and `bandGeometry` to `utils/signalBandGeometry.ts`. The "Stage 5 —"
   doc prefixes are gone. Part (d), the >60 s heater test, is a choice about what that test
   proves, so it became R-103 instead of a silent change.
+
+### R-98 — the marginal-cost pass declared its own copy of the model, and it drifted (2026-10-04)
+
+**Found by the 052 deploy.** Every VEN, old builds included, logged `marginal-cost dual LP
+failed, falling back to tariff` (`Infeasible`) roughly every planning cycle, so the per-slot
+marginal cost the deviation arbiter ranks its levers by was always the plain tariff. The
+register entry for R-98 still said the two copies "agree today".
+
+**Cause.** `solve_marginal_costs` re-solves the plan as a pure LP with every mode decision
+pinned. The constraints and objective were shared, but the *variables* were declared a second
+time by four hand-written functions in `solver_duals.rs`, one per asset kind. Two had drifted
+into infeasibility: the EV copy lacked the zero-priced guarantee band a firm obligation gets
+when no bid covers it (pinned "on" slots forced energy no band could buy), and the shiftable
+copy pinned a start flag for every slot the load *ran* in, so a two-slot run pinned two starts
+against "exactly one start". The battery and heater copies agreed only by convention.
+
+**Fix.** One declaration per asset with a `ModeDecisions` policy (`Free` for the plan,
+`Pinned` for the pass), reached through a required trait method
+`AssetMilpContext::declare_pinned_vars_into_pool`, and the winning decisions recorded on
+`SolveOutput::mode_decisions` instead of re-derived from power. The four copies are deleted.
+Both infeasible cases were red first (`marginal_cost_solves_for_an_ev_with_an_unpriced_firm_obligation`,
+`marginal_cost_solves_with_a_multi_slot_shiftable_load_scheduled`, both failing with
+`Infeasible`). The duplicated `empty_pool` test helper (three byte-identical copies) moved to
+`services/test_support/milp_pool.rs` with a `bound_range` check the structural tests use.
+
+**Key learning — sharing constraints over separately declared variables is still a duplicate.**
+The code looked consolidated: one `constraints()`, one `objective()`. But a constraint is only
+the same constraint if it ranges over the same variables with the same bounds, and those lived
+in two places. A fallback that turns a solver error into a plausible default (the tariff) hid
+the failure for weeks; a warning nobody alerts on is not a signal.
+
