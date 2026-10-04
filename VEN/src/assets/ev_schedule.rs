@@ -328,11 +328,6 @@ mod usage_sim_tests {
         }
     }
 
-    /// Hourly slot grid: `cum_s[t] = t * 3600`.
-    fn hourly_slots(n: usize) -> Vec<i64> {
-        (0..n as i64).map(|t| t * 3600).collect()
-    }
-
     // 2026-07-20 is a Monday.
     fn monday() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 7, 20).unwrap()

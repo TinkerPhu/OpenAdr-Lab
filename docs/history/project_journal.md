@@ -14279,3 +14279,82 @@ would have reintroduced it, the unbounded `soc_ev`, and a `too_many_arguments` l
 grouped `EvBandRange` that makes the goal/limit confusion harder to repeat. Filed: none. Deferred:
 none. One test expectation changed with its reasoning recorded in place — the old number asserted
 the bug.
+## 2026-10-04 — Every trip in the horizon gets planned for (051)
+
+**The finding, and how it was found.** The user looked at the deployed VEN UI and said the EV
+plans showed either a continuously rising SoC or a continuously falling one, never both. I
+checked all twenty VENs, explained most of it correctly (a Saturday, weekend
+`leave_probability` between 0.15 and 0.9, so many VENs genuinely had no trip in the horizon),
+and then they asked a sharper question: *why is there no charging session planned before
+ven-12's second trip?* That one had no innocent answer.
+
+ven-12's live plan: charge once overnight to 0.800, hold flat through Sunday's trip to 0.698,
+hold flat again through Monday's to 0.570. Two trips, one charge. The forecast class emitted
+exactly **one** `EvObligation`, from `next_trip_after` — the next departure only. Later trips in
+the horizon got a truthful availability mask and a projected SoC drop, so the plan *showed* them
+honestly, and nothing asked it to recharge for them. It is a convincing-looking plan that quietly
+under-forecasts site demand by every trip but one.
+
+I had written that limitation myself, as Decision 7 of `ev-soc-state-variables`, and recorded
+R-92 as RESOLVED because the *mechanism* was general (`obligations` is a list, `soc_ev[t]` is a
+per-slot variable). What I had not done was widen the producer. The register entry read as though
+both halves were done.
+
+**The correction that mattered more than the bug.** The user also said, of their own earlier
+decision: *"I must have made wrong decisions along the way."* They had asked for a default trip
+distance with the word "suggested"; I built it as a silent backend fallback, so a session with no
+stated distance invented a drop from `default_trip_distance_km`. And a *stated* distance was
+placed at the **next session's** `window_start`, because the UI never collected a return time —
+so via `sessions.windows(2)` a lone session's distance did nothing at all, and the last session
+of any queue had its distance silently ignored. The field looked like it worked and mostly did
+not.
+
+Their rule, once stated plainly, is better than what I had built: an estimate is optional, and
+with none given the planner projects nothing and waits for the measured return. Nothing is
+assumed on the user's behalf.
+
+**What the change actually is.** Six derivations became one. The MILP consumes three EV
+quantities, and the stated-session queue and the usage forecast each derived all three
+independently; the differences between those copies *were* the two defects. Both producers now
+state only a series of `ExpectedVehicleUse`, and `ev_trip_series::plan_inputs` is the single place
+that turns a series into a mask, a drop profile and an obligation list. Deleted outright:
+`availability_per_slot`, `soc_drop_frac_per_slot`, `availability_from_sessions`,
+`obligations_from_sessions`, `trip_drops_between_sessions`, and a second copy of `slot_at` I had
+just created myself.
+
+Three decisions are worth keeping visible:
+
+- `ExpectedTripConsumption` **pairs** the return time with the consumption instead of leaving two
+  independent `Option`s, so the half-stated case is unrepresentable below the boundary that parses
+  a submission — and therefore has to be enforced in exactly one place.
+- Availability is the union of charging windows **plus a tail after a known final return**.
+  Without the tail a vehicle is unchargeable from its last return to the horizon edge even though
+  it is home; with it, a final use whose return is *unknown* contributes no tail, which is the
+  honest answer rather than an oversight.
+- Each use's drop lands at its **own** return. That is what deletes the `windows(2)` pairing and
+  with it both silent-no-op holes.
+
+**Two bugs caught before they shipped, neither in the plan.** First, `next_trip_after` only
+yields departures *after* the cursor, so the trip the car is already on would have been skipped
+entirely: a replan landing mid-trip would have marked the rest of the away period chargeable and
+lost that trip's cost. GB-54 makes mid-trip replanning the normal case, not an edge one. The
+active trip now contributes consumption only — a zero-width window no slot can overlap, not firm.
+Second, my own tasks file said to delete `most_recently_ended_trip` as "already dead", on the
+strength of a grep that excluded `ev_schedule.rs` itself; it is reached from `ended_trip_at`,
+which the live tick uses to apply a return drop exactly once. Deleting it would have broken the
+simulation.
+
+**Issues this branch fixed, filed and deferred.** Fixed: the single-obligation forecast (R-92's
+remaining half), the silent distance default, the `windows(2)` mistiming, the mid-trip gap, a
+`#[serde(default)]` orphaned onto the wrong field by my own removal script, and a
+`RequestError` field that could never be read. Filed: none — everything found was inside the
+one-hour bar the `issues` rule sets for fixing in place. Deferred: none.
+
+**Key learning, recorded separately.** A pattern-based edit that matches `TypeName {` also matches
+`-> TypeName {` in a function signature; brace-matching from there lands *outside* the literal. And
+a struct-literal field insertion anchored on a *shared* field name (`expected_trip_distance_km`
+appears on both `EvSession` and `CreateUserRequestParams`) lands in the wrong struct. Both
+happened here. What caught them was writing a verification pass — reconstruct each insertion's
+enclosing type by tracking brace depth — *before* compiling, which found ten wrong placements in
+one case and zero in the other. The compiler would have found them too, but twenty minutes later
+and one ARM64 build at a time.

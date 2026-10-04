@@ -315,16 +315,61 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("ev-plan-another-btn")).toBeInTheDocument();
   });
 
-  it("sends the stated availability and trip distance when planning", async () => {
+  // Unchanged in purpose - the stated values must reach the body - but a distance
+  // alone is no longer a submittable estimate, so the test states the pair. It used
+  // to pass because the backend silently completed it from a configured default;
+  // that default is gone.
+  it("sends the stated availability and the whole trip estimate when planning", async () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(screen.getByTestId("ev-plan-btn"));
     await user.type(screen.getByTestId("ev-trip-distance-input"), "150");
+    await user.type(screen.getByTestId("ev-trip-return-input"), "2026-10-06T18:00");
     await user.click(screen.getByTestId("ev-dialog-confirm"));
 
     expect(mockPostRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ expected_trip_distance_km: 150 }),
+      expect.objectContaining({
+        expected_trip_distance_km: 150,
+        expected_return_time: expect.stringContaining("2026-10-06"),
+      }),
     );
+  });
+
+  it("will not submit half a trip estimate", async () => {
+    // A distance with no return time is energy with no instant to apply it to, so
+    // Confirm is refused rather than the missing half being guessed at.
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.type(screen.getByTestId("ev-trip-distance-input"), "150");
+
+    expect(screen.getByTestId("ev-trip-estimate-error")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-dialog-confirm")).toBeDisabled();
+    expect(mockPostRequest).not.toHaveBeenCalled();
+  });
+
+  it("submits with no trip estimate at all, assuming nothing", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+
+    const body = mockPostRequest.mock.calls[0][0];
+    expect(body.expected_trip_distance_km).toBeUndefined();
+    expect(body.expected_return_time).toBeUndefined();
+  });
+
+  it("clearing one half of the estimate re-enables Confirm", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.type(screen.getByTestId("ev-trip-distance-input"), "150");
+    expect(screen.getByTestId("ev-dialog-confirm")).toBeDisabled();
+
+    await user.clear(screen.getByTestId("ev-trip-distance-input"));
+
+    expect(screen.queryByTestId("ev-trip-estimate-error")).toBeNull();
+    expect(screen.getByTestId("ev-dialog-confirm")).not.toBeDisabled();
   });
 
   // 3. Click Plan Charging opens dialog
