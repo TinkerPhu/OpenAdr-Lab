@@ -14219,3 +14219,63 @@ Both were found by reading the code around the change rather than by any failing
 `main`'s formatting, the swallowed-submission-error gap, the orphaned-request gap. Filed: none —
 everything found was under the one-hour bar the `issues` rule sets for fixing in place. Deferred:
 none.
+
+## 2026-10-04 — The charge limit was not a limit (ven-2 planned to 99.8 %)
+
+**The report.** The user looked at ven-2's Controller tab: an EV departure at 19:25 local and a
+plan charging to 100 % against a configured 85 % target. *"this seams wrong… analyze and assess
+critically."*
+
+**What the plan actually did.** ven-2 is `soc_target: 0.85` on a 55 kWh pack, live SoC 0.640. The
+plan charged to **0.998**, 54 slots above 0.851, no warnings. The energy accounting named the cause
+exactly: 0.640→0.850 is 11.55 kWh priced at `v_ev_core_eur_kwh` (1.00 €/kWh), 0.850→1.000 is
+8.25 kWh priced at `v_ev_extra_eur_kwh` (0.10 €/kWh), total 19.8 kWh — and the plan's rise was
+19.69 kWh. It bought essentially every band. The charge sat in a smooth 1.4→3.55 kW ramp across
+Monday 10:50–16:35 local, i.e. midday solar: with PV surplus the marginal cost is about zero, so
+0.10 €/kWh of modelled value always wins.
+
+**Why it was a bug and not aggressive optimisation.** `EvCharger::capability_inner` returns
+`max_import_kw: 0.0` at or above `soc_target`. The field's own doc comment calls it *"Active SOC
+ceiling — charging stops at this level (BMS limit)"*. A week of ven-2's own 1-minute history
+settled it: 10,078 EV samples, **maximum 85.00 %**, never once higher, with 43 % of samples pinned
+exactly at the limit. The plan was promising about 8 kWh the charger refuses — unexecutable
+fiction, not a stretch goal. The cost of that is four-fold: the UI's SoC curve is wrong (which is
+what the user saw), the site demand forecast overstates EV load, the plan's cost and CO2 figures
+include energy never bought, and dispatch commands power the asset rejects, leaving the deviation
+arbiter chasing an error that cannot close.
+
+This is `one-concept-one-function` in its plainest form. *"How far may this EV charge"* was
+answered in two places with two different answers — `capability_inner` said the limit,
+`ev_comfort::ev_energy_segments` opened with `vec![start, 1.0]` and demoted the limit to a price
+breakpoint — and the difference between the copies was the bug.
+
+**The fix is structural.** A clamp at the band builder alone would not have held:
+`declare_vars` adds an *unpriced* "guarantee band" for any firm requirement the priced bands do not
+cover, so a session asking 0.95 of a 0.85 car would have had the same energy put straight back.
+So `EvMilpContext` now declares `soc_max`, built once from the asset's own limit, and three things
+read it: `declare_vars` bounds `soc_ev` by it (above-limit charge becomes unrepresentable, not
+merely unrewarded), `firm_required_kwh` measures an obligation against what is reachable, and
+`ev_energy_segments` bounds its bands and clips curve breakpoints to it. The bound is held at or
+above `soc_init` so a limit lowered under a fuller pack stays solvable rather than infeasible.
+
+The two-tier structure was deliberately kept. `soc_target` remains a *breakpoint*, so a session
+asking for less than the vehicle can hold still prices the gap between request and limit at the
+cheaper rate — that energy is real and reachable. Only the upper bound was wrong.
+
+A session target above the vehicle's limit is now reported rather than silently substituted: the
+bands and the requirement stop at the limit, so the gap appears through `shortfall_soc` and an
+`EV_CORE_ENERGY_UNMET` warning naming that departure.
+
+**My earlier fix for this was incomplete, and I should have noticed.** When the same user reported
+VEN-1 charging to 100 % against an 80 % target earlier in the same session, I diagnosed the
+band-horizon equality and shipped `band_accounting_last_step`. That bounded *when* above-target
+energy could be bought, not *whether* it should exist. I fixed a timing symptom, declared it
+resolved, and the magnitude cause resurfaced on a different VEN days later. The lesson is in
+KEY_LEARNINGS: when a plan exceeds a stated target, ask what *bounds* the quantity before asking
+what *schedules* it.
+
+**Issues fixed, filed and deferred.** Fixed: the above-limit band span, the guarantee band that
+would have reintroduced it, the unbounded `soc_ev`, and a `too_many_arguments` lint turned into a
+grouped `EvBandRange` that makes the goal/limit confusion harder to repeat. Filed: none. Deferred:
+none. One test expectation changed with its reasoning recorded in place — the old number asserted
+the bug.
