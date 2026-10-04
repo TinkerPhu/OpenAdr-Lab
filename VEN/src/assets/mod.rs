@@ -9,6 +9,7 @@ mod ev_milp;
 mod ev_milp_accessors;
 pub(crate) mod ev_schedule;
 mod ev_session_context;
+pub mod ev_trip_series;
 mod ev_usage_forecast;
 pub mod grid;
 pub mod heater;
