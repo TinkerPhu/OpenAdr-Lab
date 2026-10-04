@@ -37,7 +37,6 @@ impl UserRequestService {
                 (km, back) => {
                     return Err(RequestError::IncompleteTripEstimate {
                         has_distance: km.is_some(),
-                        has_return_time: back.is_some(),
                     })
                 }
             };
