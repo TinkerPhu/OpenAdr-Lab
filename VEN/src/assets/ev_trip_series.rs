@@ -184,7 +184,17 @@ pub fn plan_inputs(
         if c.soc_drop_frac <= 0.0 {
             continue;
         }
-        let at = return_slot(cum_s, n, (c.return_at - now).num_seconds());
+        // A return beyond the horizon is not this plan's business. `return_slot`
+        // clamps to the last slot, which would book the charge loss inside the horizon
+        // at a time the vehicle has not actually got back - and with a daily trip the
+        // next day's return is routinely just past the edge, so the plan would subtract
+        // two trips' worth of charge while modelling one. The next cycle, whose horizon
+        // reaches further, places it properly.
+        let secs = (c.return_at - now).num_seconds();
+        if secs >= horizon_end_s {
+            continue;
+        }
+        let at = return_slot(cum_s, n, secs);
         // Slot 0 never carries a drop: a return already in the past is reflected in
         // the live state of charge the plan starts from, and counting it again would
         // charge the trip twice.
@@ -428,5 +438,48 @@ mod tests {
                 .filter(|(_, d)| **d > 0.0)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn a_return_beyond_the_horizon_is_not_booked_inside_it() {
+        // `return_slot` clamps to the last slot, so without an explicit guard a trip
+        // returning after the horizon ends would have its charge loss recorded in the
+        // final slot - at a time the vehicle has not actually got back. With a daily
+        // trip the next day's return sits just past the edge routinely, so the plan
+        // would subtract two trips' worth of charge while modelling one.
+        let n = 12; // 12 h horizon
+        let cum = grid(n);
+        let inside = ExpectedVehicleUse {
+            window_start: at(0),
+            departure_at: at(2),
+            target_soc: 0.8,
+            firm: true,
+            consumption: Some(ExpectedTripConsumption {
+                return_at: at(6),
+                soc_drop_frac: 0.20,
+            }),
+            session_id: None,
+        };
+        let beyond = ExpectedVehicleUse {
+            window_start: at(6),
+            departure_at: at(11),
+            target_soc: 0.8,
+            firm: true,
+            consumption: Some(ExpectedTripConsumption {
+                return_at: at(30), // long after the horizon ends
+                soc_drop_frac: 0.25,
+            }),
+            session_id: None,
+        };
+        let out = plan_inputs(&[inside, beyond], n, &cum, now());
+        let total: f64 = out.drop_frac_per_slot.iter().sum();
+        assert!(
+            (total - 0.20).abs() < 1e-9,
+            "only the return inside the horizon counts, got {total}: {:?}",
+            out.drop_frac_per_slot
+        );
+        assert!((out.drop_frac_per_slot[6] - 0.20).abs() < 1e-9);
+        // The departure itself still binds, because it IS inside the horizon.
+        assert_eq!(out.obligations.len(), 2);
     }
 }
