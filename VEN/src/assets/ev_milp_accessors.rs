@@ -89,6 +89,21 @@ impl EvMilpContext {
     /// bought` forced every charging variable to zero, and the whole requirement was
     /// absorbed by the shortfall slack instead. The plan charged not at all, which is
     /// precisely the failure a stated trip distance exists to prevent.
+    /// The highest state of charge the plan may reach: the vehicle's charge limit,
+    /// never below the state it is already in.
+    ///
+    /// A limit below the live reading is not a contradiction to resolve here — a user
+    /// can lower the limit on a car that is already fuller, and the pack does not
+    /// discharge itself to comply. Clamping up keeps that case solvable; the model
+    /// simply cannot add to it.
+    pub fn soc_ceiling(&self) -> f64 {
+        self.soc_max.clamp(0.0, 1.0).max(self.soc_init)
+    }
+
+    /// Energy a firm obligation needs, measured against what the vehicle can actually
+    /// hold. An obligation above the charge limit is not quietly turned into extra
+    /// energy to buy: the requirement stops at the ceiling, and the gap between what
+    /// was asked and what is reachable surfaces through `shortfall_soc` instead.
     pub fn firm_required_kwh(&self) -> f64 {
         self.obligations
             .iter()
@@ -96,7 +111,8 @@ impl EvMilpContext {
                 let consumed: f64 = (0..o.deadline_step.saturating_add(1))
                     .map(|t| self.drop_frac_at(t))
                     .sum();
-                ((o.target_soc - self.soc_init + consumed) * self.battery_kwh).max(0.0)
+                let reachable = o.target_soc.min(self.soc_ceiling());
+                ((reachable - self.soc_init + consumed) * self.battery_kwh).max(0.0)
             })
             .fold(0.0_f64, f64::max)
     }

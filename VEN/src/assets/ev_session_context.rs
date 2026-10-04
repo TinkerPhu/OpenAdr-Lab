@@ -180,6 +180,9 @@ impl EvMilpContext {
         let base = Self {
             mode: EvMilpMode::MustNotRun,
             soc_init: current_soc,
+            // One declared ceiling for the whole context, so no arm below can plan past
+            // what `capability_inner` will accept.
+            soc_max: cfg.soc_target,
             a_ev: vec![false; n],
             soc_drops: None,
             obligations: Vec::new(),
@@ -234,6 +237,7 @@ impl EvMilpContext {
                 segments: super::ev_comfort::ev_energy_segments(
                     comfort_rates,
                     current_soc,
+                    cfg.soc_target,
                     cfg.soc_target,
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
@@ -338,6 +342,10 @@ impl EvMilpContext {
                     &session.comfort_rates,
                     current_soc,
                     session.target_soc,
+                    // The vehicle's limit, not the request's: a session asking for more
+                    // than the charger accepts does not make the charger accept it. The
+                    // gap surfaces as a reported shortfall, not as energy to buy.
+                    cfg.soc_target,
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
                     v_ev_extra_eur_kwh,

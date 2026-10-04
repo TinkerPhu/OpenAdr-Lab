@@ -55,7 +55,12 @@ impl EvMilpContext {
                 if i == 0 {
                     vars.add(variable().min(self.soc_init).max(self.soc_init))
                 } else {
-                    vars.add(variable().min(floor_frac).max(1.0))
+                    // The charge limit is the upper bound, not a full pack: above it
+                    // the charger reports no import capability at all, so planning
+                    // past it promises energy that will be refused. Held at or above
+                    // `soc_init` so a vehicle already over its limit (a lowered limit,
+                    // an injected state) stays feasible rather than unsolvable.
+                    vars.add(variable().min(floor_frac).max(self.soc_ceiling()))
                 }
             })
             .collect();
@@ -1041,6 +1046,7 @@ mod milp_context_trait_tests {
         EvMilpContext {
             mode: EvMilpMode::MustRun,
             soc_init: 0.0,
+            soc_max: 1.0,
             a_ev: vec![true; n],
             soc_drops: None,
             obligations: vec![EvObligation {
@@ -1316,6 +1322,7 @@ mod milp_context_trait_tests {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
             soc_init: 0.0,
+            soc_max: 1.0,
             a_ev: vec![true; 4],
             soc_drops: None,
             obligations: vec![],
@@ -1345,6 +1352,7 @@ mod milp_context_trait_tests {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MustNotRun,
             soc_init: 0.0,
+            soc_max: 1.0,
             a_ev: vec![false; 4],
             soc_drops: None,
             obligations: vec![],
@@ -1376,6 +1384,7 @@ mod milp_context_trait_tests {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
             soc_init: 0.0,
+            soc_max: 1.0,
             a_ev: a_ev.clone(),
             soc_drops: None,
             obligations: vec![],

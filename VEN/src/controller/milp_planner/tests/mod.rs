@@ -633,6 +633,7 @@ fn contexts_from_inputs(
             ctx: EvMilpContext {
                 mode,
                 soc_init: inputs.soc_ev_init.unwrap_or(0.0),
+                soc_max: 1.0,
                 a_ev: inputs.a_ev.clone(),
                 // Forwarded, not dropped: R-93 put the trip drops inside the SoC
                 // balance, so a fixture that declares them must see them in the model.

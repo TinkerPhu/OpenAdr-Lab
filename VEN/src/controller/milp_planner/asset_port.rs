@@ -82,6 +82,17 @@ pub struct EvMilpContext {
     pub mode: EvMilpMode,
     /// Live SoC at plan time, reported by the EV itself (seeds the plan's EV SoC forecast).
     pub soc_init: f64,
+    /// The highest state of charge this vehicle will accept (0..1) — its configured
+    /// charge limit, which `EvCharger::capability_inner` enforces absolutely by
+    /// reporting zero import capability at or above it.
+    ///
+    /// Declared here so the model cannot plan energy the charger will refuse. It used
+    /// to be implicit, and the two answers disagreed: `capability_inner` stopped at
+    /// the limit while `ev_comfort::ev_energy_segments` priced bands all the way to a
+    /// full pack, so a plan would promise charge the asset then rejected — ven-2 was
+    /// planned to 0.998 against a 0.85 limit while a week of measurements never once
+    /// exceeded 0.850.
+    pub soc_max: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0).
     pub a_ev: Vec<bool>,
     /// `ev-usage-forecast`: exogenous SoC changes the plan must project but
