@@ -58,11 +58,6 @@ pub struct EvParams {
     /// call site wants the per-km figure and a stray factor of 100 is a bug waiting
     /// to happen; a UI may still present it per 100 km.
     pub consumption_kwh_per_km: f64,
-    /// Distance assumed for a trip the user did not quantify [km].
-    ///
-    /// A suggestion, not a silent substitution: where it is applied the plan says
-    /// so, rather than reporting a defaulted number as if it had been stated.
-    pub default_trip_distance_km: f64,
     /// Simulated daily leave/return usage pattern (`ev-usage-simulation`).
     /// `None` means this EV never leaves — today's behavior, unchanged.
     pub usage_sim: Option<EvUsageSimParams>,
@@ -84,7 +79,6 @@ impl Default for EvParams {
             // ~0.18 kWh/km is a mid-size EV's real-world figure; 40 km is a
             // typical day's driving. Both are profile-overridable.
             consumption_kwh_per_km: 0.18,
-            default_trip_distance_km: 40.0,
             usage_sim: None,
         }
     }

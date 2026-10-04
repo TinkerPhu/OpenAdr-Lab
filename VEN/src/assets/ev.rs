@@ -29,8 +29,6 @@ pub struct EvCharger {
     pub battery_kwh: f64,
     /// Energy used per kilometre driven [kWh/km] — see `EvParams`.
     pub consumption_kwh_per_km: f64,
-    /// Distance assumed for an unquantified trip [km] — see `EvParams`.
-    pub default_trip_distance_km: f64,
     /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
     pub soc_target: f64,
     /// Original profile value — used for snap-back when inject override is released.
@@ -106,7 +104,6 @@ impl EvCharger {
             response_delay_s: cfg.response_delay_s,
             departure_time: None,
             consumption_kwh_per_km: cfg.consumption_kwh_per_km,
-            default_trip_distance_km: cfg.default_trip_distance_km,
             usage_sim: cfg.usage_sim.clone(),
             usage_sim_seed_tag: usage_sim_seed_tag(&cfg.id),
         }
@@ -515,7 +512,6 @@ mod tests {
             v2g_capable: false,
             battery_kwh: 40.0,
             consumption_kwh_per_km: 0.18,
-            default_trip_distance_km: 40.0,
             soc_target: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
@@ -708,7 +704,6 @@ mod tests {
             soc_target_profile: 1.0,
             battery_kwh: 10.0,
             consumption_kwh_per_km: 0.18,
-            default_trip_distance_km: 40.0,
             ..ev
         };
         for _ in 0..1000 {
@@ -745,7 +740,6 @@ mod tests {
             v2g_capable: true,
             battery_kwh: 10.0,
             consumption_kwh_per_km: 0.18,
-            default_trip_distance_km: 40.0,
             soc_target: 1.0,
             soc_target_profile: 1.0,
             default_charge_kw: 0.0,

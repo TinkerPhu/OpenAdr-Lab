@@ -18,6 +18,7 @@ fn ev_session_with_mode(
         target_soc: 0.3,
         window_start: now,
         expected_trip_distance_km: None,
+        expected_return_time: None,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,

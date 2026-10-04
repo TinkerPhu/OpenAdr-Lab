@@ -611,6 +611,7 @@ mod tests {
             target_soc: 0.8,
             window_start: now + Duration::hours(from),
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: now + Duration::hours(to),
             soft_deadline: false,
             budget_eur: None,

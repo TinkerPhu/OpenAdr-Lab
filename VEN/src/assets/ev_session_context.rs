@@ -10,6 +10,7 @@
 
 use chrono::{DateTime, Utc};
 
+use super::ev_trip_series;
 use super::EvCharger;
 use crate::controller::milp_planner::asset_port::{
     EvMilpContext, EvMilpMode, EvObligation, ExogenousSocDrops,
@@ -21,135 +22,41 @@ use crate::entities::device_session::EvSession;
 /// the budget constraint (not the price) doing the capping.
 const BUDGET_CHARGE_REWARD_EUR_KWH: f64 = 5.0;
 
-/// The horizon slot an instant falls in, clamped to the horizon's ends.
+/// One queued session states one expected use of the vehicle.
 ///
-/// The `partition_point` idiom this replaces was written out twice - here and in
-/// `ev_usage_forecast::target_next_predicted_departure` - and a deadline landing on
-/// the wrong slot is invisible in a plan until something charges a slot too late.
-/// One implementation, two callers (`one-concept-one-function`).
-pub(super) fn slot_at(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
-    if secs_from_now <= 0 {
-        return 0;
-    }
-    // Strictly-before, not at-or-before: an instant landing exactly on a slot
-    // boundary belongs to the slot that ENDS there, not the one that starts there.
-    // With `<=`, a departure at 3600 s on a 300 s grid returned slot 12 - which
-    // runs [3600, 3900), entirely after the car has gone. The interior case is
-    // unchanged: a departure at 3700 s still returns slot 12, the slot it falls in.
-    cum_s
-        .partition_point(|&s| s < secs_from_now)
-        .saturating_sub(1)
-        .min(n.saturating_sub(1))
-}
-
-/// Slots in which *some* queued session's charging window is open.
-///
-/// Generalises the single session's "every slot up to the deadline": with a queue
-/// the vehicle is chargeable inside any session's window and nowhere else, so the
-/// gaps between sessions - when the car is away - are closed by construction rather
-/// than by a separate rule.
-fn availability_from_sessions(
+/// This is the whole of the session producer's job: say what is expected, and let
+/// `ev_trip_series` decide what that means for the plan. The consumption is `Some`
+/// only when the user stated BOTH a distance and a return time — the pair is what
+/// makes a drop placeable, and the route boundary refuses a half-stated one, so
+/// reaching here with one of the two is already impossible.
+fn uses_from_sessions(
     sessions: &[EvSession],
-    n: usize,
-    cum_s: &[i64],
-    now: DateTime<Utc>,
-) -> Vec<bool> {
-    (0..n)
-        .map(|t| {
-            // A slot is chargeable when a session's window OVERLAPS it, not when the
-            // window contains the slot's start. Those differ for the slot in progress:
-            // GB-54 aligns a plan's `now` to the slot grid, so a session created at
-            // 15:25 sits inside a slot that began at 15:00. Testing the slot's start
-            // locked the EV out of the whole current slot — up to an hour of charging
-            // lost every time a user planned one, and the first slot is exactly where
-            // dispatch acts.
-            let slot_start = now + chrono::Duration::seconds(cum_s.get(t).copied().unwrap_or(0));
-            let slot_end = now
-                + chrono::Duration::seconds(
-                    cum_s
-                        .get(t + 1)
-                        .copied()
-                        .unwrap_or_else(|| cum_s.get(t).copied().unwrap_or(0)),
-                );
-            sessions
-                .iter()
-                .any(|s| s.window_start < slot_end && slot_start < s.departure_time)
-        })
-        .collect()
-}
-
-/// One obligation per queued session that states a *firm* target and departs inside
-/// the horizon.
-///
-/// A soft deadline states none: under `ev-comfort-piecewise-core` it is a preference
-/// priced per kWh by the user's curve, not a guarantee, and the free/opportunistic
-/// modes are gated by surplus rather than by a deadline. Sessions departing beyond
-/// the horizon contribute nothing to *this* cycle; the next one will see them.
-fn obligations_from_sessions(
-    sessions: &[EvSession],
-    n: usize,
-    cum_s: &[i64],
-    now: DateTime<Utc>,
-) -> Vec<EvObligation> {
-    // `cum_s` holds n+1 boundaries: cum_s[t] starts slot t, so the horizon ENDS at
-    // cum_s[n], not cum_s[n-1]. Using the latter silently dropped any session
-    // departing in the final slot - including the common case of a deadline set
-    // exactly at the horizon's end.
-    let horizon_end_s = cum_s
-        .get(n)
-        .copied()
-        .unwrap_or_else(|| cum_s.last().copied().unwrap_or(0));
+    cfg: &EvCharger,
+) -> Vec<ev_trip_series::ExpectedVehicleUse> {
     sessions
         .iter()
-        .filter(|s| !s.soft_deadline && s.mode.states_a_firm_deadline())
-        .filter(|s| (s.departure_time - now).num_seconds() <= horizon_end_s)
-        .map(|s| EvObligation {
-            deadline_step: slot_at(cum_s, n, (s.departure_time - now).num_seconds()),
+        .map(|s| ev_trip_series::ExpectedVehicleUse {
+            window_start: s.window_start,
+            departure_at: s.departure_time,
             target_soc: s.target_soc,
+            // A soft deadline is a preference priced by the curve, and the
+            // free/opportunistic modes are gated by surplus rather than a deadline:
+            // neither states a guarantee.
+            firm: !s.soft_deadline && s.mode.states_a_firm_deadline(),
+            consumption: match (s.expected_trip_distance_km, s.expected_return_time) {
+                (Some(km), Some(return_at)) => {
+                    Some(ev_trip_series::ExpectedTripConsumption {
+                        return_at,
+                        // The EV performs every conversion
+                        // (`asset-competence-assurance`); this only carries the result.
+                        soc_drop_frac: cfg.expected_trip_drop_frac(km),
+                    })
+                }
+                _ => None,
+            },
             session_id: Some(s.id),
         })
         .collect()
-}
-
-/// The charge each queued session's following trip is expected to consume, placed at
-/// the slot the vehicle is next available — i.e. the *next* session's window start.
-///
-/// This is what makes a manually stated series self-describing. Without it the
-/// planner believes the car returns exactly as it left: two stated sessions 48 h
-/// apart would see the first charged to target, the trip between them cost nothing,
-/// and the second need no charging at all.
-///
-/// The EV performs every conversion (`asset-competence-assurance`); this only places
-/// the results on the grid. `defaulted` rides along so the caller can report that a
-/// configured default stood in for a distance the user never gave.
-fn trip_drops_between_sessions(
-    sessions: &[EvSession],
-    cfg: &EvCharger,
-    n: usize,
-    cum_s: &[i64],
-    now: DateTime<Utc>,
-) -> (Vec<f64>, bool) {
-    let mut drops = vec![0.0; n];
-    let mut any_defaulted = false;
-    for pair in sessions.windows(2) {
-        let (departs, returns) = (&pair[0], &pair[1]);
-        let drop = cfg.expected_trip_drop(departs.expected_trip_distance_km);
-        if drop.soc_drop_frac <= 0.0 {
-            continue;
-        }
-        any_defaulted |= drop.defaulted;
-        // The drop lands when the car is back and chargeable again, which is the next
-        // session's window start - the same "first slot at or after the return"
-        // convention `ev_schedule::soc_drop_frac_per_slot` already uses.
-        let at = slot_at(cum_s, n, (returns.window_start - now).num_seconds());
-        // Slot 0 never carries a drop: a return already in the past is reflected in
-        // the live state of charge the plan starts from, and counting it again would
-        // charge the trip twice.
-        if at > 0 {
-            drops[at] += drop.soc_drop_frac;
-        }
-    }
-    (drops, any_defaulted)
 }
 
 impl EvMilpContext {
@@ -257,19 +164,19 @@ impl EvMilpContext {
         // Chargeable inside any queued session's window, nowhere else. For a single
         // session this is the old "every slot up to the deadline"; for a queue it
         // also closes the gaps when the car is away, without a second rule saying so.
-        let deadline_mask = availability_from_sessions(ev_sessions, n, cum_s, now);
-        let obligations = obligations_from_sessions(ev_sessions, n, cum_s, now);
-        // What the trips between these sessions are expected to cost the pack. Under
-        // the forecast usage class `apply_usage_forecast` overwrites this with the
-        // EV's own predicted schedule, which is the richer source; this is what makes
-        // a *stated* series self-describing when no such schedule exists.
-        let (trip_drops, any_defaulted) =
-            trip_drops_between_sessions(ev_sessions, cfg, n, cum_s, now);
-        let stated_drops = trip_drops
+        // The stated series, through the one derivation that serves both producers.
+        // Availability, consumption and obligations all come from the same walk, so a
+        // session cannot be chargeable by one rule and obliged by another.
+        let uses = uses_from_sessions(ev_sessions, cfg);
+        let derived = ev_trip_series::plan_inputs(&uses, n, cum_s, now);
+        let deadline_mask = derived.available_per_slot;
+        let obligations = derived.obligations;
+        let stated_drops = derived
+            .drop_frac_per_slot
             .iter()
             .any(|d| *d > 0.0)
             .then(|| ExogenousSocDrops {
-                drop_frac_per_slot: trip_drops,
+                drop_frac_per_slot: derived.drop_frac_per_slot,
                 // Stated sessions declare no floor of their own; the EV's usage config
                 // owns that number when it has one.
                 floor_frac: cfg
@@ -277,12 +184,6 @@ impl EvMilpContext {
                     .as_ref()
                     .map_or(0.0, |u| u.min_soc_after_drop_pct / 100.0),
             });
-        if any_defaulted {
-            tracing::debug!(
-                "EV session trip consumption defaulted to {} km (no distance stated)",
-                cfg.default_trip_distance_km
-            );
-        }
 
         let mut ctx = match session.mode {
             // WP4.1 (BL-28) OPPORTUNISTIC / ASAP_FREE: no deadline, no core
@@ -398,6 +299,14 @@ mod tests {
     use crate::entities::device_session::EvSessionOrigin;
     use chrono::{Duration, TimeZone};
 
+    /// Built from the real asset rather than hand-assembled
+    /// (`asset-competence-assurance`): these tests only need it to satisfy the
+    /// mapper's signature, but a fixture that invents an asset's config is the same
+    /// violation as code that does.
+    fn ev_cfg() -> EvCharger {
+        EvCharger::from_params(&crate::entities::asset_params::EvParams::default())
+    }
+
     fn sess(window_start: DateTime<Utc>, departure: DateTime<Utc>) -> EvSession {
         EvSession {
             id: uuid::Uuid::new_v4(),
@@ -405,6 +314,7 @@ mod tests {
             window_start,
             departure_time: departure,
             expected_trip_distance_km: None,
+            expected_return_time: None,
             soft_deadline: false,
             origin: EvSessionOrigin::UserRequest,
             mode: Default::default(),
@@ -429,7 +339,8 @@ mod tests {
         // Created 25 minutes into slot 0, as a user request mid-slot is.
         let s = sess(now + Duration::minutes(25), now + Duration::hours(3));
 
-        let mask = availability_from_sessions(std::slice::from_ref(&s), n, &cum_s, now);
+        let uses = uses_from_sessions(std::slice::from_ref(&s), &ev_cfg());
+        let mask = ev_trip_series::plan_inputs(&uses, n, &cum_s, now).available_per_slot;
 
         assert!(
             mask[0],
@@ -446,7 +357,8 @@ mod tests {
         // Away until 17:00, back for 17:00-19:00 only.
         let s = sess(now + Duration::hours(2), now + Duration::hours(4));
 
-        let mask = availability_from_sessions(std::slice::from_ref(&s), n, &cum_s, now);
+        let uses = uses_from_sessions(std::slice::from_ref(&s), &ev_cfg());
+        let mask = ev_trip_series::plan_inputs(&uses, n, &cum_s, now).available_per_slot;
 
         assert_eq!(
             mask,

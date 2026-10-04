@@ -76,6 +76,7 @@ pub(crate) async fn sync_plan_ahead_session(state: &AppState, sim: &SimState, no
             // carried straight through below rather than round-tripped through
             // kilometres and back, which would only invite the two to disagree.
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: trip.leave_at,
             soft_deadline: false,
             mode: Default::default(),
@@ -244,6 +245,7 @@ mod tests {
             target_soc: 0.95,
             window_start: now,
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: now + Duration::hours(1),
             soft_deadline: false,
             mode: Default::default(),

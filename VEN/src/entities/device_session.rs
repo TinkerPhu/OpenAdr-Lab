@@ -53,6 +53,17 @@ pub struct EvSession {
     /// consumption rate and the pack size, both of which the EV owns.
     #[serde(default)]
     pub expected_trip_distance_km: Option<f64>,
+    /// When the vehicle is expected back from that trip. `None` = the user did not
+    /// say.
+    ///
+    /// Paired with `expected_trip_distance_km`: both or neither. A distance with no
+    /// return time is energy with no instant to apply it to, and a return time with
+    /// no distance is an instant with no energy, so the half-stated combination is
+    /// refused at the route boundary rather than carried into the planner. With
+    /// neither, the plan projects no drop at all and holds the state of charge flat
+    /// until the real return is measured — nothing is invented on the user's behalf.
+    #[serde(default)]
+    pub expected_return_time: Option<DateTime<Utc>>,
     /// If true, MILP treats as MayRun (soft reward, best-effort by departure).
     /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
     #[serde(default)]
@@ -439,6 +450,7 @@ mod tests {
             target_soc: 0.9,
             window_start: Utc::now(),
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: Utc::now(),
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
@@ -497,6 +509,7 @@ mod tests {
             target_soc: 0.8,
             window_start: ts(from),
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: ts(to),
             soft_deadline: false,
             origin: EvSessionOrigin::UserRequest,
