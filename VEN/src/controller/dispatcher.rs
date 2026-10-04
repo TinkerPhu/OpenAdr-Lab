@@ -224,7 +224,6 @@ mod tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            default_trip_distance_km: 40.0,
             soc_target,
             soc_target_profile: soc_target,
             default_charge_kw: 0.0,

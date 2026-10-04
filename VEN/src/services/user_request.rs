@@ -414,6 +414,7 @@ mod tests {
             target_soc: 0.8,
             window_start: Utc::now(),
             expected_trip_distance_km: None,
+            expected_return_time: None,
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
             budget_eur: None,

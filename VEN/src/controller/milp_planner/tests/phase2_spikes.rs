@@ -47,7 +47,6 @@ fn ven1_profile() -> Profile {
                 initial_soc: 0.745,
                 battery_kwh: 60.0,
                 consumption_kwh_per_km: 0.18,
-                default_trip_distance_km: 40.0,
                 soc_target: 0.80,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
