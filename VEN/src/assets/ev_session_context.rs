@@ -236,9 +236,11 @@ impl EvMilpContext {
                 soc_drops: None,
                 segments: super::ev_comfort::ev_energy_segments(
                     comfort_rates,
-                    current_soc,
-                    cfg.soc_target,
-                    cfg.soc_target,
+                    super::ev_comfort::EvBandRange {
+                        init: current_soc,
+                        target: cfg.soc_target,
+                        max: cfg.soc_target,
+                    },
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
                     v_ev_extra_eur_kwh,
@@ -340,12 +342,14 @@ impl EvMilpContext {
                 // so a bid covering part of the energy buys that part (GB-41).
                 let segments = super::ev_comfort::ev_energy_segments(
                     &session.comfort_rates,
-                    current_soc,
-                    session.target_soc,
-                    // The vehicle's limit, not the request's: a session asking for more
-                    // than the charger accepts does not make the charger accept it. The
-                    // gap surfaces as a reported shortfall, not as energy to buy.
-                    cfg.soc_target,
+                    super::ev_comfort::EvBandRange {
+                        init: current_soc,
+                        target: session.target_soc,
+                        // The vehicle's limit, not the request's: a session asking for
+                        // more than the charger accepts does not make it accept it. The
+                        // gap surfaces as a reported shortfall, not as energy to buy.
+                        max: cfg.soc_target,
+                    },
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
                     v_ev_extra_eur_kwh,

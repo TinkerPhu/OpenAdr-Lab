@@ -709,11 +709,16 @@ mod milp_context_trait_tests {
             !ctx.segments.is_empty(),
             "a forecast-driven charge must carry priced bands, got none"
         );
-        // soc 0.30 -> full on a 60 kWh pack = 42 kWh, all of it priced by the curve.
+        // Changed with the charge-limit fix, and the old number was the bug: this read
+        // "bands must span soc_init..1.0 (42 kWh)", which is energy the charger refuses
+        // at or above soc_target. The test's subject is the assertion below - that a
+        // forecast-driven charge is priced by the user's curve rather than the profile
+        // default - and that is untouched. Only the span is corrected:
+        // soc 0.30 -> the 0.80 limit on a 60 kWh pack = 30 kWh.
         let total: f64 = ctx.segments.iter().map(|s| s.kwh).sum();
         assert!(
-            (total - 42.0).abs() < 1e-6,
-            "bands must span soc_init..1.0 (42 kWh), got {total}"
+            (total - 30.0).abs() < 1e-6,
+            "bands must span soc_init..soc_target (30 kWh), got {total}"
         );
         // Every bid must come from the curve's range, not from the profile default.
         for s in &ctx.segments {
