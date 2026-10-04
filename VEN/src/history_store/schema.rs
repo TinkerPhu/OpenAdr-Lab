@@ -187,9 +187,19 @@ ALTER TABLE grid_samples ADD COLUMN up_kw REAL;
 ALTER TABLE grid_samples ADD COLUMN down_kw REAL;
 ";
 
-/// ev-plugged-band: fraction of the window an asset reported itself plugged in (0..1),
-/// mean-shaped like `soc_pct`. `NULL` for assets with no `plugged` state and for every
-/// row written before this version — see `entities::history::TickSample::plugged`.
+/// ev-plugged-band: `plugged` is the fraction of the window an asset reported itself plugged
+/// in (0..1), mean-shaped like `soc_pct`; `NULL` for assets with no `plugged` state and for
+/// every row written before this version.
+///
+/// R-101: `curtailment_source` changes from the names `'plan'`/`'capacity'` to the live
+/// `PvCurtailmentSource::as_f64()` code, so the History page reads it with the timeline's
+/// classifier. A TEXT column would store a code as text, so the old column is renamed,
+/// converted into a REAL one and dropped (SQLite >= 3.35, bundled by rusqlite).
 pub(super) const SCHEMA_V12: &str = "
 ALTER TABLE tick_samples ADD COLUMN plugged REAL;
+ALTER TABLE tick_samples RENAME COLUMN curtailment_source TO curtailment_source_name;
+ALTER TABLE tick_samples ADD COLUMN curtailment_source REAL;
+UPDATE tick_samples SET curtailment_source = CASE curtailment_source_name
+    WHEN 'plan' THEN 1.0 WHEN 'capacity' THEN 2.0 END;
+ALTER TABLE tick_samples DROP COLUMN curtailment_source_name;
 ";

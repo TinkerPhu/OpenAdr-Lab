@@ -154,6 +154,8 @@ export function HistoryPage() {
           ...(row.temperature_c !== null ? { temp_c: row.temperature_c } : {}),
           // `!= null`, not `!== null`: a VEN that predates the column omits the key.
           ...(row.plugged != null ? { plugged: row.plugged } : {}),
+          ...(row.generation_limit_kw != null ? { generation_limit_kw: row.generation_limit_kw } : {}),
+          ...(row.curtailment_source != null ? { curtailment_source: row.curtailment_source } : {}),
         },
       });
       map.set(row.asset_id, points);

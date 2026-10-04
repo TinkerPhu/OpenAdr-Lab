@@ -203,11 +203,13 @@ already governs. `PvState` (not the live `PvInverter` config) carries `export_li
 `resolve_pv_export_limit_kw`'s tighter-of-two comparison produced the value, tagged at the moment
 it's resolved) so a historical reconstruction of a past tick reports what was actually active
 then, not the current live value. Both are sampled into long-term history
-(`tick_samples.export_limit_kw` / `curtailment_source`, schema v5) — within a 1-minute downsample
+(`tick_samples.generation_limit_kw` / `curtailment_source`, schema v5, numeric since v12) — within a 1-minute downsample
 window, a live capacity-sourced event always wins over a plan-sourced or unlimited majority, so a
 brief unplanned curtailment is never averaged away. The Controller page's PV timeline chart shades
 three states: hardware-capped (neutral — the inverter's own ceiling, not a real loss), planned
 imposed curtailment (amber, past and future), and unplanned imposed curtailment (red, past only).
+The History page shades planned and unplanned curtailment from the stored rows, whose
+`curtailment_source` is the same numeric code the live timeline carries.
 See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
 
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md) · [chart_diagrams.md § Special features](docs/architecture/chart_diagrams.md)

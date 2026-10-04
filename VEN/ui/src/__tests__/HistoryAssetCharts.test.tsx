@@ -30,6 +30,10 @@ const mockTicks = [
   { ts: T0 + 2 * minute, asset_id: "ev", power_kw: 0, soc_pct: 42, temperature_c: null, plugged: null },
   { ts: T0, asset_id: "heater", power_kw: 1.2, soc_pct: null, temperature_c: 55, plugged: null },
   { ts: T0, asset_id: "wm", power_kw: 0.4, soc_pct: null, temperature_c: null, plugged: null },
+  {
+    ts: T0, asset_id: "pv", power_kw: -2.0, soc_pct: null, temperature_c: null, plugged: null,
+    generation_limit_kw: -2.0, curtailment_source: 2,
+  },
 ];
 
 vi.mock("../api/hooks", () => ({
@@ -79,6 +83,13 @@ describe("HistoryPage — per-asset chart props", () => {
     const ev = propsFor("#2196F3");
     expect(ev.shadings).toBe(assetChartSpec("ev").shadings);
     expect(ev.shadingMaxGapMs).toBe(5 * minute);
+  });
+
+  it("passes a PV row's stored curtailment through, so History can shade it", () => {
+    const pv = propsFor("#FFC107");
+    const data = pv.data as Point[];
+    expect(data[0].values).toMatchObject({ generation_limit_kw: -2.0, curtailment_source: 2 });
+    expect(pv.shadings).toBe(assetChartSpec("pv").shadings);
   });
 
   it("takes each asset's state line from its declaration, not from the data", () => {
