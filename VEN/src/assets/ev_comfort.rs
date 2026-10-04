@@ -178,9 +178,11 @@ mod tests {
     fn segments(rates: &[ComfortRate], soc_init: f64, soc_target: f64) -> Vec<EvEnergySegment> {
         ev_energy_segments(
             rates,
-            soc_init,
-            soc_target,
-            1.0,
+            EvBandRange {
+                init: soc_init,
+                target: soc_target,
+                max: 1.0,
+            },
             BATTERY_KWH,
             1.0,
             0.10,
@@ -196,9 +198,11 @@ mod tests {
     ) -> Vec<EvEnergySegment> {
         ev_energy_segments(
             rates,
-            soc_init,
-            soc_target,
-            soc_max,
+            EvBandRange {
+                init: soc_init,
+                target: soc_target,
+                max: soc_max,
+            },
             BATTERY_KWH,
             1.0,
             0.10,
