@@ -2859,3 +2859,32 @@ Two habits:
 - **Assert the replacement count.** A `replace(old, new, 1)` that matches nothing is indistinguishable
   from success unless the script checks. `assert old in s` before replacing costs one line and turns
   a silent miss into an immediate, local failure.
+## Verify a bulk edit's placement before compiling, not after (2026-10-04)
+
+Adding one field to every literal of a struct looks mechanical and is not. Two mechanisms put
+the field in the wrong place during 051, and a third nearly did:
+
+- **`TypeName {` also matches a function signature.** `-> CreateUserRequestParams {` is
+  indistinguishable from a literal opening by text, so brace-matching from the match lands on the
+  *function's* closing brace and the field is inserted after the literal has already closed. 3 of
+  10 insertions were wrong.
+- **A field name shared by two structs anchors into both.** `expected_trip_distance_km` exists on
+  `EvSession` *and* `CreateUserRequestParams`, so "insert after that line" put an EV-session field
+  into 10 request-param literals. The same shape as the earlier `window_start`-into-`EvCharger`
+  slip: the anchor was not unique to the target.
+- **An attribute is part of the field.** A removal pass that strips preceding `///` lines but not
+  `#[serde(default = "...")]` leaves the attribute behind, where it silently attaches to the
+  *next* field. Here that produced a duplicate-attribute error; with a plain `#[serde(default)]`
+  it would have compiled and changed behaviour.
+
+What works is a verification pass written *before* the compile: for each inserted line, walk
+backwards tracking brace depth and report the enclosing type. It takes a minute, is reusable, and
+is the only check that distinguishes "inside the literal I meant" from "inside the file I meant".
+A naive "nearest preceding `Type {`" is not enough — it reports a *closed* nested literal
+(`RequestDeadlineParams` inside `CreateUserRequestParams`) and produces false alarms, which are as
+bad as misses because they train you to ignore the check. Track the depth.
+
+The compiler finds all of this eventually. The point is the cost of "eventually": on a project
+whose only full Rust build is a 15-minute ARM64 docker run, each round trip is expensive enough
+that a 60-second local check pays for itself the first time it fires. Prefer anchors that cannot
+be ambiguous — a field unique to the target struct — and when none exists, verify rather than hope.
