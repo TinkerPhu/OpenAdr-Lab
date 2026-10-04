@@ -104,25 +104,33 @@ def _latest_report_intervals(context):
     return intervals
 
 
-@then('the latest VEN-1 report for the event has a "{ptype}" payload with a non-negative number value')
-def step_report_payload_non_negative(context, ptype):
+def _numeric_payload_values(context, ptype):
+    """Every value of every `ptype` payload in the latest report, each asserted numeric."""
     intervals = _latest_report_intervals(context)
     payloads = [p for iv in intervals for p in iv.get("payloads", []) if p.get("type") == ptype]
     assert payloads, f"No '{ptype}' payload in report intervals: {intervals}"
-    for p in payloads:
-        value = p["values"][0]
+    values = [p["values"][0] for p in payloads]
+    for value in values:
         assert isinstance(value, (int, float)), f"'{ptype}' value not numeric: {value!r}"
+    return values
+
+
+@then('the latest VEN-1 report for the event has a "{ptype}" payload with a number value')
+def step_report_payload_numeric(context, ptype):
+    # Sign-agnostic on purpose: USAGE and BASELINE sum PV in, so a site that generates more
+    # than it consumes legitimately reports a negative value (R-89).
+    _numeric_payload_values(context, ptype)
+
+
+@then('the latest VEN-1 report for the event has a "{ptype}" payload with a non-negative number value')
+def step_report_payload_non_negative(context, ptype):
+    for value in _numeric_payload_values(context, ptype):
         assert value >= 0, f"'{ptype}' value negative: {value}"
 
 
 @then('the latest VEN-1 report for the event has a "{ptype}" payload with a value above {floor:g}')
 def step_report_payload_above(context, ptype, floor):
-    intervals = _latest_report_intervals(context)
-    payloads = [p for iv in intervals for p in iv.get("payloads", []) if p.get("type") == ptype]
-    assert payloads, f"No '{ptype}' payload in report intervals: {intervals}"
-    for p in payloads:
-        value = p["values"][0]
-        assert isinstance(value, (int, float)), f"'{ptype}' value not numeric: {value!r}"
+    for value in _numeric_payload_values(context, ptype):
         assert value > floor, f"'{ptype}' value {value} is not above {floor}"
 
 

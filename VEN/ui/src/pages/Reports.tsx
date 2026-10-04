@@ -89,6 +89,12 @@ export function ReportsPage() {
     });
   }, [reports, query]);
 
+  // One scan per report when the data changes, not one per row per render (R-49).
+  const latestSubmissionByReport = useMemo(
+    () => new Map(filtered.map((r) => [r.id, latestSubmissionFor(r, submissions)])),
+    [filtered, submissions],
+  );
+
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
   // Derive programID from selected event
@@ -284,7 +290,7 @@ export function ReportsPage() {
                 <TableCell sx={{ fontFamily: "monospace" }}>{r.eventID ?? "—"}</TableCell>
                 <TableCell>{r.createdDateTime ?? "—"}</TableCell>
                 <TableCell>
-                  <ReportStatusChip submission={latestSubmissionFor(r, submissions)} />
+                  <ReportStatusChip submission={latestSubmissionByReport.get(r.id) ?? null} />
                 </TableCell>
                 <TableCell>
                   <Tooltip title="Edit report">

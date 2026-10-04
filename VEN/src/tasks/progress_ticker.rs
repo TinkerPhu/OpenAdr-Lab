@@ -3,7 +3,10 @@ use tokio::task::JoinHandle;
 
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 
-/// Spawn a 1 s progress-ticker that emits `PlannerEvent::SolvingProgress` while a plan
+/// Cadence of `SolvingProgress` events while a solve is in flight.
+const PROGRESS_TICK_S: u64 = 1;
+
+/// Spawn a `PROGRESS_TICK_S` progress-ticker that emits `PlannerEvent::SolvingProgress` while a plan
 /// solve is in flight. Returns the task handle and a cancel sender — send on the sender
 /// then `.await` the handle to shut it down cleanly before continuing the plan cycle.
 pub(super) fn spawn_progress_ticker(
@@ -12,7 +15,7 @@ pub(super) fn spawn_progress_ticker(
     let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
         let start = std::time::Instant::now();
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(PROGRESS_TICK_S));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut iteration: u32 = 0;
         loop {

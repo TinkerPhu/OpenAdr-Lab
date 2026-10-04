@@ -44,7 +44,7 @@ Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
     And I create an event for the saved program with a reportDescriptor of type "BASELINE" reporting every 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to submit an obligation-driven report for the event
-    Then the latest VEN-1 report for the event has a "BASELINE" payload with a non-negative number value
+    Then the latest VEN-1 report for the event has a "BASELINE" payload with a number value
     And every interval of the latest report has a "DATA_QUALITY" payload with value "HEURISTIC"
 
   @r-43

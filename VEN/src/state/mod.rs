@@ -11,7 +11,7 @@ use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
     BaselineOverride, EvSessionQueue, HeaterTarget, ShiftableLoad,
 };
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample};
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample, SolveStatus};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
 use crate::simulator::SensorSnapshot;
@@ -339,6 +339,17 @@ impl AppState {
 
     pub async fn active_plan(&self) -> Option<Plan> {
         self.hems.read().await.active_plan.clone()
+    }
+
+    /// The adopted plan's solve status alone — for pollers (`/health`) that need one enum
+    /// and must not deep-clone the whole `Plan` to read it.
+    pub async fn active_plan_solve_status(&self) -> Option<SolveStatus> {
+        self.hems
+            .read()
+            .await
+            .active_plan
+            .as_ref()
+            .map(|p| p.solve_status)
     }
 
     pub async fn set_active_plan(&self, plan: Option<Plan>) {
