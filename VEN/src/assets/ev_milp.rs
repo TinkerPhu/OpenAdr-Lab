@@ -525,7 +525,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Forecast);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap(); // Monday 00:00
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n); // starts fully available
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
@@ -545,7 +548,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Simulated); // same schedule, other class
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
         let before = ctx.a_ev.clone();
@@ -565,7 +571,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Forecast);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
         ctx.a_ev = vec![false; n]; // everything already ruled out upstream
@@ -583,7 +592,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Forecast);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
@@ -614,7 +626,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Simulated);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
@@ -687,7 +702,10 @@ mod milp_context_trait_tests {
         cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         // A curve the user could have drawn: 0.50 falling to 0.10 as the pack fills.
         let curve = vec![
@@ -843,7 +861,10 @@ mod milp_context_trait_tests {
         cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
         assert_eq!(
@@ -885,7 +906,12 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
-        assert_eq!(ctx.obligations[0].deadline_step, 2);
+        // 1, not 2: a departure landing exactly on a boundary must be met by the slot
+        // that ENDS there. 049 corrected this for stated sessions and left the forecast
+        // path on the old at-or-before rule; one shared helper now applies it to both.
+        // The window below is unchanged - slots 0 and 1, 14.8 kWh - because it is
+        // inclusive and `a_ev`-filtered, so slot 2 was never counted anyway.
+        assert_eq!(ctx.obligations[0].deadline_step, 1);
         assert!(
             (ctx.firm_required_kwh() - 30.0).abs() < 1e-6,
             "the requirement is what the user asked for, got {}",
@@ -908,7 +934,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Forecast); // engage_charge_planning: false
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let ctx = ctx_from_state(&cfg, n, &cum_s, now);
         assert!(
@@ -937,7 +966,10 @@ mod milp_context_trait_tests {
         cfg.usage_sim.as_mut().unwrap().engage_charge_planning = true;
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         // A real request: 40 % by 04:00 — a different target AND deadline than
         // the forecast's (80 % by 08:00).
@@ -1011,7 +1043,10 @@ mod milp_context_trait_tests {
         let cfg = ev_with_usage(EvUsageMode::Forecast);
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
         let n = 24;
-        let cum_s: Vec<i64> = (0..n as i64).map(|t| t * 3600).collect();
+        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
+        // end. These fixtures used n entries, matching the forecast path's old
+        // `cum_s[n-1]` read, which was a slot short of the real horizon.
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let mut ctx = make_must_run(n);
         ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
