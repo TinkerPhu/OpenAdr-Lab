@@ -2977,3 +2977,26 @@ Two things generalise:
   (`up_kw: -8.0, down_kw: 3.0`, negative because that is what an exporting site looks like). When
   a function's job is to route N values to N named destinations, every fixture value must be
   distinct, and distinct in a way that encodes the direction's own convention.
+
+---
+
+## A type error in a test fixture can block every branch's E2E (2026-10-04)
+
+`npm run build` in `VEN/ui` runs `tsc` before `vite build`, and `tsconfig` covers
+`src/__tests__/`. So five test fixtures missing a newly-required `EvSession` field made the
+production build exit 2 → the `test-ven-ui` docker target fail → **the whole E2E suite fail before
+behave started**, on `main` and every branch off it. It surfaced as `0 passed 1 failed` with a
+docker build log, not as a type error, and cost a full queued run to discover.
+
+Two rules fall out:
+
+- **Anything the production build typechecks is production-blocking, whatever directory it is in.**
+  A `tsc` complaint under `__tests__/` ranks *above* a failing assertion, not below it: the
+  assertion costs one test, this costs the only gate that can verify VTN-facing wire behaviour.
+- **Before queuing a remote suite, run the build the remote will run.** `npx tsc --noEmit` and
+  `npm run build` are ~20 s locally; the E2E round trip is 30-65 minutes plus waiting on a host
+  lock. Running the cheap gate first is not belt-and-braces, it is the difference between one
+  attempt and two.
+
+Adding a required field to a widely-fixtured type is the shape to watch for — the compiler finds
+every site, but only if someone runs it over the test tree before pushing.

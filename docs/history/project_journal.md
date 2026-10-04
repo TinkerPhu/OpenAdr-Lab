@@ -14424,10 +14424,27 @@ asserting the comfortable zero the existing scenario already covers.
 **Issue — `main` was red on arrival, twice, from the 051 EV work.** `cargo test -p ven-app --bins`
 did not compile: `ev_milp.rs:881` called `super::ev_schedule::next_trip_after` from inside
 `mod tests`, where `super::` is `ev_milp`, not `assets`. Fixed here (one path) because no VEN test
-could run at all otherwise. Separately `ev_usage_forecast::a_trip_already_under_way_is_neither_chargeable_nor_free`
-fails, and `VEN/ui` has TypeScript errors in four EV-session test fixtures missing a newly-required
-`expected_return_time`. Both verified present on `main` with only the compile fix applied, both in
-another session's active area (`openspec/changes/ev-plugged-band/` is in the tree untracked), and
-the EV one is a real semantic question — whether a mid-trip forecast projects the whole trip's SoC
-drop or only the remainder — so it is reported rather than decided unilaterally under the session
-that owns it.
+could run at all otherwise. Two more followed, both verified present on `main` with only the compile fix applied, both from the
+same session's active area (`openspec/changes/ev-plugged-band/` sits in the tree untracked).
+
+*`expected_return_time` became a required field of `EvSession` and five fixtures across three test
+files were not updated.* This was not cosmetic: `tsc` covers `src/__tests__/`, so `npm run build`
+exits 2, which fails the `test-ven-ui` docker target, which fails **the entire E2E suite** — it
+never reaches behave. That is how it was found: the first queued E2E run died in the UI build, 113
+seconds in, with the suite reporting "0 passed 1 failed". So a type error confined to test fixtures
+had taken out the only gate that can verify VTN-facing wire behaviour, for every branch. Fixed here
+because it blocked R-76's own verification; `null` in four of them, and a real return time in the
+fifth, whose 120 km trip distance the field's own doc says must be paired with one.
+
+*`ev_usage_forecast::a_trip_already_under_way_is_neither_chargeable_nor_free` fails* (expects the
+active trip's whole SoC drop, gets 0.4455). Left alone deliberately: it is a real semantic
+question — does a mid-trip forecast project the whole trip's drop or only the remainder? — and this
+project's own rule is that changing a test's expectations requires explaining the reasoning and the
+alternatives, not a silent patch. That belongs to the session that owns the EV work.
+
+**Key learning — a lint-class error in a test fixture can be a release-blocking defect.** The
+instinct is to rank a `tsc` complaint in `__tests__/` below a failing assertion. Here it was
+strictly worse: the failing assertion cost one test, the fixture type error cost the whole E2E
+suite on every branch, and it presented as an opaque docker build failure rather than as a type
+error. Anything the production build typechecks is production-blocking regardless of which
+directory it lives in.
