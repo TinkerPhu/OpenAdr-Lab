@@ -872,28 +872,42 @@ needed). `VEN/profiles/usage_forecast_test.yaml` is a ready-made example.
 - With planning engaged: **Charge planning engaged (forecast)**
 - A line: `Next departure (forecast): <leave> → back <return> (−NN% SoC)`
 
-**Controller → EV chart:**
-- `plan_ev` is non-zero *before* the predicted departure and flat zero across the whole away
-  window — not just up to the departure, which is what a session-carried deadline would show
-- the projected EV SoC trace steps **down** at the return slot by the trip's drop, floored at
+**Controller → EV chart:** the shape to look for is **rise, fall, rise, fall** — not one rise
+and a long coast.
+
+- `plan_ev` is non-zero before each predicted departure and flat zero across every away window,
+  not merely up to the first departure
+- the projected EV SoC steps **down** at each return by that trip's drop, floored at
   `min_soc_after_drop_pct`
-- if the horizon reaches past the return, `plan_ev` may also be non-zero **after** it: the SoC
-  curve is solved rather than reconstructed, so the planner can schedule the recharge the return
-  makes possible instead of only avoiding the away window
+- between two trips the plan charges again, in the cheapest hours of that gap. A 48 h horizon
+  over a daily commute therefore shows two departures, two drops, and charging before both
+
+If you see the SoC rise once and then coast downward through every later trip, that is the
+regression this use case exists to catch: it means later departures are not binding a target.
 
 **Controller → Plan card warnings:**
-- If the remaining time before departure cannot deliver the target, an `EV_CORE_ENERGY_UNMET`
-  warning appears and the plan still solves, charging as far as the window allows — it is never
-  rejected and never fails the solve.
+- If the remaining time before a departure cannot deliver the target, an `EV_CORE_ENERGY_UNMET`
+  warning appears, naming that departure, and the plan still solves — charging as far as the
+  window allows. It is never rejected and never fails the solve.
 
-**Raw check:** `GET /ev-usage-sim` → `{mode: "forecast", engage_charge_planning, next_trip}`;
-`GET /ev-session` → `204` (nothing is invented to carry the predicted deadline).
+**Raw check:** `GET /ev-usage-sim` → `{mode: "forecast", engage_charge_planning, next_trip}`.
+`GET /ev-session` returns an **empty queue**: under this class the planner is told directly and
+no session is invented to carry a predicted deadline.
 
 ### What you should NOT see
-A `SIMULATED_USAGE`-origin EV session. That is the `usage_sim` class's mechanism; under
-`usage_forecast` the planner is told directly. A real user/VTN request, if you create one, still
-outranks the prediction for the *target and deadline* — but not for availability: the car's
-absence is fact, so those slots stay at zero either way.
+
+A `SIMULATED_USAGE`-origin EV session — that is the `usage_sim` class's mechanism.
+
+Charging during any away window, including while the car is out *right now*: a replan that lands
+mid-trip still knows the vehicle is gone and still subtracts what that trip costs.
+
+A real user request, if you create one, outranks the prediction for the *goal*. It does not
+outrank it for availability or for what a trip costs: the car's absence is fact, so those slots
+stay at zero either way.
+
+With `engage_charge_planning: false` you should see the away windows and the SoC drops exactly as
+above, and **no charging driven by them** — the facts are stated either way; only the goal is
+conditional.
 
 **Covered by:** `tests/features/ev_usage_forecast.feature`
 
@@ -915,24 +929,32 @@ standing plan was gone with nothing on screen saying so.
 Nothing to configure. Devices → EV card → **Plan Charging**, then **Plan another** for
 each further session.
 
-Two fields matter for a second session:
+Fields that matter for a second session:
 
 - **Available from** — when the car is back and can charge for *this* session. Leave it
   empty for "now". Two sessions both starting "now" necessarily overlap, so this is what
   makes a second one possible at all.
-- **Trip after departure (km)** — how far you will drive afterwards. Leave it empty to use
-  the car's own configured distance.
+- **The trip after this one (optional)** — a **Distance** and a **Back by**, together. Both
+  or neither: Confirm is disabled while only one is filled, because half an estimate cannot
+  be planned for — a distance with no return time is energy with no instant to apply it to.
+
+Leaving both empty is the ordinary case and costs you nothing. The plan then projects **no**
+drop for that trip and holds the charge flat until the car really returns and its state of
+charge is measured. Nothing is assumed on your behalf; there is no "usual distance" standing
+in for what you did not say.
 
 ### What to observe
 
 **Devices → EV card:** one block per queued session, each with its own target, its window
-(`available → departure`), its departure, a stated trip distance where you gave one, and
-its own **Unplan**. A session with no stated distance shows none — the car's default is
-applied but not displayed as if you had typed it.
+(`available → departure`), its departure, and its own **Unplan**. Where you gave an estimate
+the block reads `Trip after: 120 km, back by <time>`. Where you gave none, it shows nothing —
+because nothing was assumed.
 
 **Controller → EV chart:** charging appears inside each session's window and nowhere else;
-the gaps between them are when the car is away. Where a stated trip consumes charge, the
-plan buys it back — a second session two days out is planned for, not ignored.
+the gaps between them are when the car is away. Where you *stated* a trip, the SoC steps down
+at the return you gave and the plan buys that charge back before the next departure — a second
+session two days out is planned for, not ignored. Where you stated none, the curve holds flat
+across the departure: the plan is not pretending to know what the trip cost.
 
 ### When a new plan clashes with one you already have
 

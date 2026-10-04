@@ -96,9 +96,11 @@ pub enum RequestError {
     /// energy. Neither half can be planned for, and completing it by guessing is
     /// exactly what this project removed, so the submission is refused and says
     /// which part is missing.
+    ///
+    /// One field, not two: this variant exists only for the exclusive-or case, so
+    /// "the distance was given" already says the return time was the missing half.
     IncompleteTripEstimate {
         has_distance: bool,
-        has_return_time: bool,
     },
     /// A replace instruction was stated but does not match the queue. Carries the
     /// queue's own rejection so the caller can re-prompt with current truth.
@@ -143,7 +145,7 @@ impl std::fmt::Display for RequestError {
                 f,
                 "charging window is empty: available from {earliest_start} but due by {latest_end}"
             ),
-            RequestError::IncompleteTripEstimate { has_distance, .. } => write!(
+            RequestError::IncompleteTripEstimate { has_distance } => write!(
                 f,
                 "a trip estimate needs both a distance and a return time; the {} is missing",
                 if *has_distance { "return time" } else { "distance" }

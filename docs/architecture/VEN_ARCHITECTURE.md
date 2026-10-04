@@ -397,13 +397,13 @@ each device card.
 
 | Session field | MILP use |
 |---|---|
-| `EvSession.soft_deadline` | `false` → `MilpLoadMode::MustRun`; `true` → `MayRun` |
-| `EvSession.window_start` | → per-slot availability: chargeable inside any session's window, nowhere else |
-| `EvSession.departure_time` | → an `EvObligation`'s `deadline_step` (one per departure) |
-| `EvSession.expected_trip_distance_km` | → via `EvCharger::expected_trip_drop`, the SoC the following trip consumes |
+| `EvSession.soft_deadline` | `false` → the use is `firm` (an obligation); `true` → `MayRun`, priced by the curve, no obligation |
+| `EvSession.window_start` | → an `ExpectedVehicleUse`'s charging window; chargeable where a window overlaps the slot, nowhere else |
+| `EvSession.departure_time` | → the use's `departure_at`, hence one `EvObligation` per firm departure |
+| `EvSession.expected_trip_distance_km` + `expected_return_time` | → the use's `consumption`, converted by `EvCharger::expected_trip_drop_frac` and placed at the stated return. A pair: neither half alone is planned for, and neither stated means no drop at all |
 | `HeaterTarget` presence | present → `MustRun` (hard deadline); absent → `MayRun` (autonomous, no deadline) |
 | `HeaterTarget.ready_by` | → horizon constraint step `t_dead_step` |
-| `EvSession.target_soc` | → that `EvObligation`'s `target_soc`, bound on `soc_ev` at its deadline |
+| `EvSession.target_soc` | → the use's `target_soc`, bound on `soc_ev` at that obligation's deadline |
 | `HeaterTarget.target_temp_c` | → thermal requirement |
 
 Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
@@ -884,48 +884,76 @@ same override stages each window's command before integrating it, because
 command one window late (covered by `ev.rs`'s
 `simulate_forward_applies_each_window_command_from_its_start`).
 
-**EV usage simulation** (`ev-usage-simulation`) extends the same availability
-primitive with a second, independent source: a profile-configured, opt-in
-daily leave/return trip (`assets::ev_schedule::daily_trip`), deterministic per
-calendar day (seeded like `base_load.rs`'s appliance-noise jitter), with
-weekday/weekend variants and a gaussian SoC drop applied once at return,
-floored at a configured minimum. `EvCharger::is_away_at` is the one place
-that answers "is this EV here right now" — OR-ing the existing
-`EvSession.departure_time` deadline with the currently-active simulated
-trip's window — so both the live tick (`apply_usage_sim_tick`) and
-`simulate_forward`'s forecast ask the same question the same way. An opt-in
-"plan ahead" setting reuses `EvSession` directly rather than adding a second
-planner-facing deadline concept: when enabled, a **rolling seven days** of
-predicted trips are queued as `SimulatedUsage`-origin sessions
-(`tasks::sim_tick::usage_sim_plan_ahead`), one per trip, topped up each tick.
-Each session's window opens at the *previous* trip's return — the car cannot
-charge while it is out — and the imminent one opens at `now`; walking the trips
-in order is what supplies that without a second notion of "when is the car home".
-The producer is idempotent by construction, since it runs every tick: a trip
-already queued is skipped. A stated session always wins — the simulated schedule
-skips any trip that clashes with one and places the rest of the week around it.
+**One derivation, two producers.** The EV MILP consumes exactly three quantities: a per-slot
+availability mask (`a_ev`), the exogenous state-of-charge drops it must project but cannot
+decide (`soc_drops`), and the list of charging obligations. Two things know what a vehicle is
+expected to do — the stated-session queue and the EV's own usage schedule — and both state only
+that: a series of `ExpectedVehicleUse` (`assets/ev_trip_series.rs`), each entry a charging
+window, a departure with a target, whether that departure is a *guarantee*, and what the trip
+after it is expected to cost, when that is known. `ev_trip_series::plan_inputs` is the single
+place that turns such a series into the three quantities.
 
-**EV usage forecast** (`ev-usage-forecast`) is the alternative class to
-`usage_sim`, chosen per EV profile (`usage_forecast:` instead of `usage_sim:`;
-declaring both is a validation error). The schedule fields and the physics are
-identical — what differs is what the planner is told. Under `usage_sim` the MILP
-learns nothing about a future trip except through the session `plan-ahead`
-writes; under `usage_forecast` the EV hands the planner the schedule itself:
-`EvMilpContext::apply_usage_forecast` (`assets/ev_usage_forecast.rs`, called
-from `EvCharger::build_milp_context`) ANDs `ev_schedule::availability_per_slot`
-into the existing per-slot `a_ev` mask, so every predicted-away slot is bounded
-to zero charging power for the whole horizon — including the car's *return*
-inside the same solve, which the session mechanism's one-sided deadline cannot
-express. The trip's SoC drop is carried as `ExogenousSocDrops` into the
-solver's own SoC balance (R-93), so the plan's EV SoC curve shows the dip the
-trip will cause rather than a flat hold — and, because the drop is inside the
-model rather than applied afterwards, the solver can plan the recharge the
-*return* makes possible. With
-`engage_charge_planning`, the target and deadline are set directly on the MILP
-context from the next predicted departure — no `EvSession` is written at all
-(session-writing stays the `usage_sim` class's mechanism), and a real user/VTN
-session always outranks the prediction for the *goal* while the availability
-mask still applies, because availability is fact, not preference.
+Three rules live in that one place:
+
+- **Availability is the union of the charging windows, plus a tail after a known final return.**
+  Without the tail a vehicle is unchargeable from its last return to the horizon edge even
+  though it is home. With it, a final use whose return is *unknown* contributes no tail, which
+  is the honest answer rather than an omission: nothing said the car came back. Overlap decides
+  a slot, not containment of its start — GB-54 aligns a plan's `now` to the slot grid, so a
+  session created at 15:25 belongs to a slot that began at 15:00, and testing the start locked
+  the EV out of the one slot dispatch actually acts on.
+- **A trip's consumption lands at its own return.** Not at the next session's window start,
+  which is what the session path used to borrow as a return time — and why a lone session's
+  stated distance did nothing at all. Slot 0 never carries a drop: a return already in the past
+  is in the live state of charge the plan starts from.
+- **Every firm departure inside the horizon binds its own obligation**, independently of the
+  others. A soft departure, and the free/opportunistic request modes, state none — a preference
+  priced by the comfort curve is not a promise — but still contribute their window and their
+  consumption, because availability and what a trip costs are facts regardless of whether a goal
+  is guaranteed.
+
+**EV usage simulation** (`ev-usage-simulation`) simulates the physics: a profile-configured,
+opt-in daily leave/return trip (`assets::ev_schedule::daily_trip`), deterministic per calendar
+day, with weekday/weekend variants and a gaussian SoC drop applied once at return, floored at a
+configured minimum. `EvCharger::is_away_at` is the one place that answers "is this EV here right
+now". An opt-in plan-ahead setting keeps a **rolling seven days** of predicted trips queued as
+`SimulatedUsage`-origin sessions (`tasks::sim_tick::usage_sim_plan_ahead`), one per trip, topped
+up each tick and idempotent by construction. A stated session always wins: the simulated
+schedule skips any trip that clashes with one and places the rest of the week around it.
+
+**EV usage forecast** (`ev-usage-forecast`) is the alternative class, chosen per EV profile
+(`usage_forecast:` instead of `usage_sim:`; declaring both is a validation error). The schedule
+fields and the physics are identical — what differs is what the planner is told. Under
+`usage_sim` the MILP learns about a future trip only through the session plan-ahead writes;
+under `usage_forecast` the EV hands the planner the schedule itself, as a series of expected
+uses walked straight off the generator (`EvMilpContext::apply_usage_forecast`, called from
+`EvCharger::build_milp_context`). Every predicted trip in the horizon is one use, so every
+departure binds its own target and the gap between two trips is a recharge window.
+
+Two details of that walk matter:
+
+- `next_trip_after` only yields departures *after* the cursor, so the trip the car is already on
+  would be skipped — and GB-54 makes a replan landing mid-trip the normal case, not an edge one.
+  An active trip therefore contributes consumption only: a zero-width window no slot can
+  overlap, not firm, with its drop at its return and the first chargeable window opening there.
+- `engage_charge_planning` decides only whether those departures are guarantees. With it off the
+  uses are still stated — the car is still away, the trip still costs what it costs — but
+  nothing is firm, so no obligation binds. That is one field on the series, not a second code
+  path.
+
+The predicted mask is **ANDed** into whatever `from_state`'s plugged/session logic produced,
+never substituted for it: a session asking for a slot cannot make the car present for it. And a
+real user session outranks the prediction for the *goal* while the availability and consumption
+still apply, because those are fact and only the goal is preference.
+
+**A trip the user describes.** A stated session may carry an expected trip distance and an
+expected return time. They are a pair — both or neither — enforced once, at the boundary that
+parses a submission (`RequestError::IncompleteTripEstimate`), so the domain type below it
+carries a whole estimate or none and no reader has to remember the half-stated case. With
+neither, the plan projects no drop and holds the state of charge flat until the real return is
+measured. Nothing is substituted: the EV converts a *stated* distance into a SoC fraction
+(`EvCharger::expected_trip_drop_frac`, the single authority for that conversion —
+`asset-competence-assurance`) and has no default distance to fall back on.
 
 Masking can leave a goal that no remaining slot can reach, which would make the entire site solve
 infeasible if the target were a hard bound. Each obligation therefore carries its own penalised
