@@ -427,12 +427,26 @@ export type DispatchWindow = {
   event_id: string;
 };
 
+/**
+ * Additional grid capacity this VEN is requesting beyond its contracted
+ * allowance (R-76) — what goes out as the `IMPORT_RESERVATION_CAPACITY` /
+ * `EXPORT_RESERVATION_CAPACITY` report payloads. Both are >= 0; zero means
+ * nothing to ask for, which is the normal case while no VTN program issues
+ * subscription or reservation events. `null` before the first headroom
+ * computation.
+ */
+export type ReservationRequest = {
+  import_kw: number;
+  export_kw: number;
+};
+
 /** WP4.6: GET /signals — one-round-trip aggregate for the grid-signal strip. */
 export type SignalsState = {
   alerts: AlertWindow[];
   simple: SimpleWindow[];
   dispatch: DispatchWindow[];
   capacity: OadrCapacityState;
+  reservation_request: ReservationRequest | null;
 };
 
 /** WP4.3 (BL-20): user-facing notification severity. */

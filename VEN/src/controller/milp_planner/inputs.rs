@@ -77,22 +77,11 @@ pub(crate) fn build_milp_inputs(
         }
     }
     // ── Per-step grid arrays ──────────────────────────────────────────────────
-    // WP3.3 (§8.10): subscription + reservation form a contracted allowance
-    // that binds when tighter than the event limit / physical bound and is
-    // inactive when looser. A reservation without a subscription (or vice
-    // versa) counts alone.
-    let allowance = |sub: Option<f64>, res: Option<f64>| match (sub, res) {
-        (None, None) => f64::INFINITY,
-        (s, r) => s.unwrap_or(0.0) + r.unwrap_or(0.0),
-    };
-    let imp_allowance = allowance(
-        capacity.import_subscription_kw,
-        capacity.import_reservation_kw,
-    );
-    let exp_allowance = allowance(
-        capacity.export_subscription_kw,
-        capacity.export_reservation_kw,
-    );
+    // WP3.3 (§8.10): subscription + reservation form one contracted allowance
+    // — the rule itself now lives on `OadrCapacityState`, since the
+    // reservation request the VEN reports back asks the same question (R-76).
+    let imp_allowance = capacity.import_allowance_kw();
+    let exp_allowance = capacity.export_allowance_kw();
     // GB-48: a slot's contractual cap is the tightest scheduled limit
     // overlapping it (never planning through the capped part of a coarse
     // slot, like alerts/SIMPLE), else the physical bound, and never above the

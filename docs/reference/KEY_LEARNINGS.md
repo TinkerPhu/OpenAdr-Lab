@@ -2948,3 +2948,32 @@ And the part no lock can fix: the hosts have one working tree each and `run_all_
 resets it to the caller's branch, so *holding the lock is the only thing* that makes a suite
 run meaningful. Checking `status` before starting is not politeness, it is correctness -
 recorded as `one-checkout-per-host` in `.claude/CLAUDE.md`.
+
+---
+
+## A unit migration can plant a bug while correctly fixing one (R-76, 2026-10-04)
+
+`site-capacity-seam-unification` made `SiteFlexibilityEnvelope`'s `up_kw`/`down_kw` signed, which
+was right. At each reporting boundary it then added `.abs()` to convert back to a magnitude, with
+a comment explaining the conversion — which was wrong in one of those places, because `up_kw`
+legitimately goes **positive** when a site is net-importing even under a sustained Export
+commitment. The magnitude of that is a net *import*, and it went out on the wire labelled export
+capacity.
+
+The migration reasoned correctly from "this field is now signed" to "a consumer wanting a
+magnitude must convert" and skipped the question in between: *is a magnitude what this consumer
+wants, and is this field's sign ever informative?* It was — a sign flip here means "cannot export
+at all", which is exactly the case `.abs()` erases.
+
+Two things generalise:
+
+- **`.abs()` on a signed domain quantity deserves the same scrutiny as a cast.** It is not a unit
+  conversion, it is a claim that the sign carries no information. Where a sign can flip for a
+  physical reason, write the floor that means what you want (`(-x).max(0.0)` for "capability in
+  the export direction") rather than the magnitude that merely has the right type.
+- **A test fixture that is self-consistent proves nothing about direction.** The two tests guarding
+  these arms used `up_kw: 5.0, down_kw: 3.0` and asserted 5.0 and 3.0 — they pinned the wiring to
+  itself. The defect was caught the moment a fixture used values distinguishable *per direction*
+  (`up_kw: -8.0, down_kw: 3.0`, negative because that is what an exporting site looks like). When
+  a function's job is to route N values to N named destinations, every fixture value must be
+  distinct, and distinct in a way that encodes the direction's own convention.

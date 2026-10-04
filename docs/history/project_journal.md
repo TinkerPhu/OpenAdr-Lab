@@ -14358,3 +14358,76 @@ happened here. What caught them was writing a verification pass — reconstruct 
 enclosing type by tracking brace depth — *before* compiling, which found ten wrong placements in
 one case and zero in the other. The compiler would have found them too, but twenty minutes later
 and one ARM64 build at a time.
+
+---
+
+## 2026-10-04 — R-76: the reservation-capacity report said the wrong thing three ways
+
+**What I did.** Fixed R-76, open since 2026-09-07 and rated 🟠 Med-High. It was filed as
+"reservation-capacity reports *likely* carry swapped or conceptually wrong values, silently;
+self-consistent tests give no signal". All three doubts in that sentence turned out to be
+justified, and there was a third defect nobody had named.
+
+**Confirming it before fixing it.** The entry's own evidence had rotted: it argued the swap from
+field doc comments (`up_kw`: "ability to reduce consumption") that
+`site-capacity-seam-unification` had since rewritten — `up_kw` is now the *signed net power under
+a sustained Export commitment*. So the prose justification was stale even though the conclusion
+held. Rather than re-argue from comments I wrote a test asserting that
+`IMPORT_RESERVATION_CAPACITY` derives from the import direction, with deliberately distinct
+magnitudes per direction (`up_kw: -8.0, down_kw: 3.0`) so a swap could not pass by coincidence. It
+failed with `got 8`. That is the whole of R-76's first half, and it took one test rather than
+another round of reading.
+
+**The three defects.**
+
+1. *Crossed directions.* The `IMPORT_` payload read the Export-commitment field and vice versa.
+2. *Wrong quantity.* OpenADR 3.1 Table 2 defines these payloads as "Amount of additional
+   import/export capacity **requested**", each with a companion `*_RESERVATION_FEE` for what the
+   VEN will pay. That is a VEN-initiated request to raise its contracted allowance — not the live
+   headroom the code was sending. The register suspected this; the spec settles it.
+3. *`.abs()` masking a sign flip.* Nobody had named this one. `up_kw` legitimately goes positive
+   when non-exportable draw (base load) exceeds what is exportable — the site is net-importing
+   even under a sustained Export commitment. Taking its magnitude reported that net *import* as
+   export capacity. The `.abs()` was added in good faith by the signedness migration, which
+   correctly observed the field was now signed and incorrectly concluded a magnitude was wanted.
+
+**What the fix rests on, and it was already in the repo.** The inbound half of this mechanism
+exists and works: `IMPORT_CAPACITY_RESERVATION` / `*_SUBSCRIPTION` **events** parse into
+`OadrCapacityState` and bind the planner's slot caps (WP3.3 §8.10). So "additional capacity
+requested" has a well-defined meaning here — capability beyond the contracted allowance — and the
+loop closes with the grant the VTN already issues. `report_payload.rs` had even recorded the right
+spec definition in a comment (*"Spec: additional import/export capacity requested — a power"*)
+while the reporter two files away ignored it.
+
+`entities::reservation_request::ReservationRequest::from_headroom` is the whole quantity: each
+direction's max-effort capability read **in its own sign**, less that direction's allowance,
+floored at zero. An undeclared allowance is `INFINITY`, so it yields zero through the same
+arithmetic with no branch of its own, and a direction the site cannot serve contributes zero by
+construction rather than by `.abs()`. `reporter.rs` is left a mapper: one named field per payload
+type, which is the shape that makes a future crossing visible.
+
+**The allowance rule was a closure.** `subscription + reservation`, with either counting alone and
+`INFINITY` when neither is declared, lived inside `build_milp_inputs`. A second caller made it a
+`one-concept-one-function` problem, so it moved onto `OadrCapacityState`, which owns the fields.
+The planner's existing `reservation_allowance_binds_when_tighter_and_is_inactive_when_looser` test
+passing unchanged is what says the move was behaviour-preserving.
+
+**Key learning — the honest value here is zero, and that is the point.** No program in this lab
+issues subscription or reservation events, so nothing binds, so there is nothing to request. The
+fix makes a live report go from a crossed, wrong-quantity number to `0.0`. That *looks* like a
+regression in information and is the opposite: the old number was telling a VTN something untrue
+about a mechanism this VEN was not participating in. A payload whose value is structurally always
+zero is also a payload whose tests can pass forever without touching the interesting path — which
+is why the `@r-76` BDD scenario grants a 0.5 kW allowance to force a non-zero request rather than
+asserting the comfortable zero the existing scenario already covers.
+
+**Issue — `main` was red on arrival, twice, from the 051 EV work.** `cargo test -p ven-app --bins`
+did not compile: `ev_milp.rs:881` called `super::ev_schedule::next_trip_after` from inside
+`mod tests`, where `super::` is `ev_milp`, not `assets`. Fixed here (one path) because no VEN test
+could run at all otherwise. Separately `ev_usage_forecast::a_trip_already_under_way_is_neither_chargeable_nor_free`
+fails, and `VEN/ui` has TypeScript errors in four EV-session test fixtures missing a newly-required
+`expected_return_time`. Both verified present on `main` with only the compile fix applied, both in
+another session's active area (`openspec/changes/ev-plugged-band/` is in the tree untracked), and
+the EV one is a real semantic question — whether a mid-trip forecast projects the whole trip's SoC
+drop or only the remainder — so it is reported rather than decided unilaterally under the session
+that owns it.

@@ -24,7 +24,7 @@ export function GridSignalStrip() {
   const { data } = useSignals();
   if (!data) return null;
 
-  const { alerts, simple, dispatch, capacity } = data;
+  const { alerts, simple, dispatch, capacity, reservation_request } = data;
   const maxSimple = simple.reduce((m, w) => Math.max(m, w.level), 0);
   const activeDispatch = dispatch[0];
   const capParts: string[] = [];
@@ -33,6 +33,13 @@ export function GridSignalStrip() {
     capParts.push(`subscription ${capacity.import_subscription_kw} kW`);
   if (capacity.import_reservation_kw != null)
     capParts.push(`reservation ${capacity.import_reservation_kw} kW`);
+  // R-76: the outbound half — what this VEN is asking the VTN for, shown next
+  // to the allowance it is measured against. Only when actually asking: a zero
+  // request is the normal case and would be noise on every page load.
+  if (reservation_request != null && reservation_request.import_kw > 0)
+    capParts.push(`requesting +${reservation_request.import_kw} kW import`);
+  if (reservation_request != null && reservation_request.export_kw > 0)
+    capParts.push(`requesting +${reservation_request.export_kw} kW export`);
 
   const anyActive =
     alerts.length > 0 || maxSimple > 0 || activeDispatch != null || capParts.length > 0;

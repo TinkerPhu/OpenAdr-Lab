@@ -48,7 +48,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-04 Day-Ahead Price Update | ✅ Full | VTN PRICE event | Controller: Rate chart |
 | UC-05 Favorable Far-Horizon | ✅ Full | VTN cheap-window PRICE event | Controller: Rate chart + Packets |
 | UC-06 Grid Emergency Alert | ✅ Full | VTN IMPORT_CAPACITY_LIMIT=0 | Simulation setpoints + Trace |
-| UC-07 Capacity Reservation | ⚠️ Partial — VEN→VTN reservation not implemented | VTN IMPORT_CAPACITY_LIMIT | Controller: Capacity card |
+| UC-07 Capacity Reservation | ⚠️ Partial — the VEN asks for capacity, but not at a price | VTN IMPORT_CAPACITY_LIMIT | Controller: Capacity card, grid-signal strip |
 | UC-08 EV Disconnects Mid-Charge | ✅ Full | Simulation: unplug EV toggle | Controller: Packets (PAUSED) |
 | UC-09 Tier Fallback | ✅ Full | User Requests page → New User Request (tight budget) | Controller: Plan card warnings |
 | UC-10 Peak Demand Penalty | ⚠️ Partial — no penalty rule UI | Simulation: raise base_load_w | Controller: Power chart (EV steps down) |
@@ -413,8 +413,28 @@ The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 of
 - Trigger `CAPACITY_CHANGE` on next replan
 - If EV would have charged at 7 kW but site baseline is 0.5 kW: effective limit for EV = 5 − 0.5 = 4.5 kW. The plan allocates accordingly.
 
-### What is NOT observable
-The scenario in Step5 where the VEN computes that reservation would pay off (€0.80 fee for 5 kW reservation) and sends a capacity request to the VTN. That economic evaluation and outgoing API call are not yet implemented.
+### The VEN asking for more capacity (R-76, 2026-10-04)
+
+Half of Step5 is now observable. When a VTN event declares an import subscription or
+reservation that binds below what the site can physically draw, the VEN reports the shortfall as
+`IMPORT_RESERVATION_CAPACITY` — the spec's "amount of additional import capacity requested" — on
+any obligation asking for that payload type.
+
+**Controller → grid-signal strip:**
+- the Capacity chip gains `requesting +N kW import` beside the `subscription`/`reservation` it is
+  measured against, where N is the site's max-effort capability less the contracted allowance
+
+**What this is not:** live site headroom. Those are different quantities, and reporting headroom
+here was the R-76 defect. The chip and the payload stay silent at `0` whenever no allowance is
+declared — the normal state in this lab, where no program issues subscription or reservation
+events. To see a non-zero request, grant an allowance below the profile's physical rating, the way
+`tests/features/ven_reporting_out.feature`'s `@r-76` scenario does with 0.5 kW.
+
+### What is still NOT observable
+The other half of Step5: the **economics**. The VEN does not evaluate whether a reservation would
+pay off, and does not send the companion `IMPORT_RESERVATION_FEE` saying what it would pay (€0.80
+for 5 kW in the scenario). It reports what it wants, not what that want is worth to it — so a VTN
+cannot price the request. That evaluation is unimplemented.
 
 ---
 

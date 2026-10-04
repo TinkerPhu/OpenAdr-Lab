@@ -55,6 +55,36 @@ impl OadrCapacityState {
         }
         out
     }
+
+    /// The contracted import allowance (kW), or `INFINITY` when the VTN has
+    /// declared neither a subscription nor a reservation.
+    ///
+    /// WP3.3 (§8.10): subscription + reservation form one contracted allowance
+    /// that binds when tighter than the event limit / physical bound and is
+    /// inactive when looser. Either one counts alone. `INFINITY` is the honest
+    /// "uncapped" value here, not a sentinel: it makes the `.min(allowance)` at
+    /// the planner's slot cap and the "is anything binding?" question below
+    /// both come out right without either caller special-casing `None`.
+    ///
+    /// Lives on the entity because two rings now ask it — the planner's slot
+    /// cap (`controller::milp_planner::inputs`) and the reservation request the
+    /// VEN reports back (`entities::reservation_request`). It was a closure
+    /// inside `build_milp_inputs` while the planner was the only caller.
+    pub fn import_allowance_kw(&self) -> f64 {
+        Self::allowance(self.import_subscription_kw, self.import_reservation_kw)
+    }
+
+    /// The contracted export allowance (kW). See `import_allowance_kw`.
+    pub fn export_allowance_kw(&self) -> f64 {
+        Self::allowance(self.export_subscription_kw, self.export_reservation_kw)
+    }
+
+    fn allowance(subscription_kw: Option<f64>, reservation_kw: Option<f64>) -> f64 {
+        match (subscription_kw, reservation_kw) {
+            (None, None) => f64::INFINITY,
+            (s, r) => s.unwrap_or(0.0) + r.unwrap_or(0.0),
+        }
+    }
 }
 
 #[cfg(test)]

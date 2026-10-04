@@ -13,6 +13,7 @@ use tokio_stream::StreamExt;
 
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::history::LedgerPeriod;
+use crate::entities::reservation_request::ReservationRequest;
 use crate::entities::PlannerObjective;
 use crate::AppCtx;
 use lab_core::time_window::TimeWindow;
@@ -96,11 +97,22 @@ pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
         .into_iter()
         .filter(|w| !w.is_ended(now))
         .collect();
+    // R-76: what the VEN is asking the VTN for, alongside what the VTN has
+    // granted it. `ui-transparency` — this goes out on the wire as
+    // `*_RESERVATION_CAPACITY`, so it must be readable here too; the strip
+    // shows it next to the subscription and reservation it is measured against.
+    let capacity = ctx.state.capacity_state().await;
+    let reservation_request = ctx
+        .state
+        .site_envelope()
+        .await
+        .map(|env| ReservationRequest::from_headroom(&env, &capacity));
     Json(serde_json::json!({
         "alerts": alerts,
         "simple": simple,
         "dispatch": dispatch,
-        "capacity": ctx.state.capacity_state().await,
+        "capacity": capacity,
+        "reservation_request": reservation_request,
     }))
 }
 
