@@ -177,6 +177,13 @@ Commits are signed off (-s); do not add co-author footers (see rule above).
 Merge only after all of these pass (run manually): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
 lines), and E2E tests green on Node1.
+Touched anything under tests/features/? Run `python scripts/audit_step_definitions.py`
+BEFORE queuing a remote suite. `tests/entrypoint.sh` aborts the whole E2E run if any step
+is undefined or ambiguous, so one sentence/pattern mismatch costs the full ~20-minute
+round trip to discover; this finds it in a second and also catches a new step pattern that
+is ambiguous against an existing one. A step can be defined and still report undefined —
+`{x:f}` is fixed-point and needs a decimal point, so a feature writing `2` does not match
+it. Prefer `{x:g}` for numeric step arguments.
 
 testing: full guide at docs/guidelines/TESTING.md. Four suites:
   1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
