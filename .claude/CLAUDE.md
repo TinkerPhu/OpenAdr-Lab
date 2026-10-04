@@ -194,9 +194,16 @@ keep domain and application layer tests meaningful.
 build:
   local VEN Rust : wsl bash -lc "cd <VEN> && cargo build"  (or cargo check for fast syntax check)
   local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
-  Node1 docker     : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build"
-  Node1 single svc : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build ven"
-  Node2 docker     : ssh Node2 "cd /srv/docker/openadr_lab && docker compose build"
+  There is NO compose file at the repo root on either host, and no service named `ven`.
+  Each stack has its own file and its own service names, so a build or deploy names both:
+    Node1 VEN stack  : ssh Node1 "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2"
+                       (services: ven-1, ven-2, ven-3, ui — one per deployed VEN)
+    Node1 VTN stack  : ssh Node1 "cd /srv/docker/openadr_lab/VTN && docker compose build vtn"
+                       (services: db, lab-mqtt, vtn, bff, ui)
+    Node2 VEN fleet  : ssh Node2 "cd /srv/docker/openadr_lab/VEN/scale_out/node2 && docker compose build ven-7"
+                       (services: ven-4 .. ven-20)
+    Deploy one VEN   : same directory, `docker compose up -d --build ven-2`
+  Redeploying one VEN restarts only that container; the rest of the fleet keeps running.
   Always use wsl (via bash -lc) for Rust compilation — native Windows cargo lacks cmake/HiGHS.
   There is no CI: .github/workflows/ was removed (it never worked). Every check is a
   manual pre-merge command; run them yourself.
