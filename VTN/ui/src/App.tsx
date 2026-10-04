@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import {
   AppBar, Box, Button, Chip, Container, Stack, Toolbar, Typography,
@@ -15,18 +15,7 @@ import { SignalsPage } from "./pages/Signals";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { debugLog } from "./utils/debugLog";
-
-type BffContextType = {
-  api: BffApi;
-};
-
-const BffContext = createContext<BffContextType | null>(null);
-
-export function useBffContext(): BffContextType {
-  const ctx = useContext(BffContext);
-  if (!ctx) throw new Error("useBffContext must be used within BffProvider");
-  return ctx;
-}
+import { BffContext } from "./api/bffContext";
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();

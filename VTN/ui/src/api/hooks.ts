@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useBffContext } from "../App";
+import { useBffContext } from "./bffContext";
 import type { EventInput, ProgramInput } from "./types";
 import { debugLog } from "../utils/debugLog";
 

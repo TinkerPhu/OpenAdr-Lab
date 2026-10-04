@@ -14511,3 +14511,12 @@ edit, is what caught it; the task list alone would have built the wrong thing we
   charging; a departure with a stated return is a real absence in every mode.
   `UserRequestMode::charges_until_departure` is the one place that says which modes' deadline
   closes the window. `test_mode_opportunistic_has_no_deadline_constraint` passes unchanged.
+- *R-36 — lint/doc hygiene bundle, flagged by the debt gate because this branch touched its
+  files.* `design_vocabulary.rs` lost its module-wide `#![allow(dead_code)]`: the compiler named
+  13 sketch types as unused, each now carries its own justified allow, and the header no longer
+  claims every type is unreferenced (six are live). The sketches were not deleted, because
+  `docs/BACKLOG.md` records keeping them as a decision. VTN/ui's two
+  `react-refresh/only-export-components` warnings went by moving `useBffContext` to
+  `api/bffContext.ts` and `bandGeometry` to `utils/signalBandGeometry.ts`. The "Stage 5 —"
+  doc prefixes are gone. Part (d), the >60 s heater test, is a choice about what that test
+  proves, so it became R-103 instead of a silent change.

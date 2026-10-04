@@ -1,4 +1,4 @@
-/// Stage 5 — User Request Manager: creates UserRequests from domain params.
+/// User Request Manager: creates UserRequests from domain params.
 ///
 /// Validates the request, resolves target energy from asset state, and
 /// produces a UserRequest that links to an EvSession or HeaterTarget.

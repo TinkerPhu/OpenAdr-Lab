@@ -1,4 +1,4 @@
-/// Stage 5 — UserRequest: the user-facing representation of an energy task.
+/// UserRequest: the user-facing representation of an energy task.
 ///
 /// A UserRequest captures the user's intent (deadline tiers, budget) and
 /// links to the generated device session (EvSession, HeaterTarget, or ShiftableLoad).

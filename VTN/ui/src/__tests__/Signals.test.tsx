@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
-import { SignalsPage, bandGeometry } from "../pages/Signals";
+import { SignalsPage } from "../pages/Signals";
+import { bandGeometry } from "../utils/signalBandGeometry";
 import type { FleetSignals } from "../api/types";
 
 const mockSignals: FleetSignals = {

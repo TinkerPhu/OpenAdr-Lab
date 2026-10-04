@@ -1,14 +1,16 @@
-//! Design vocabulary — type-level sketches of features not yet implemented.
+//! Design vocabulary — shared domain enums and types, plus type-level sketches of
+//! features not yet implemented.
 //!
-//! Every type in this module is unreferenced outside its own definition. None of it
-//! describes current VEN behaviour — do not cite any of these as shipped behaviour in
-//! docs or elsewhere. Each type has a tracked implementation plan in `docs/BACKLOG.md`
-//! (see the BL-14 through BL-3x range for the item covering it).
+//! Two kinds of item live here. The live ones (`UserRequestMode`, `StaleRatePolicy`,
+//! `ForecastSource`, `UserNotificationSeverity`, `AssetHeuristics`, `AssetForecast`,
+//! `TimeRange`) are used by running code. The sketches are unreferenced on purpose and
+//! each carries its own `#[allow(dead_code)]`: none of them describes current VEN
+//! behaviour, so do not cite one as shipped behaviour in docs or elsewhere. Each has a
+//! tracked implementation plan in `docs/BACKLOG.md` (see the BL-14 through BL-3x range).
 //!
 //! `PowerAdjustability` moved to `entities::asset` (BL-27) once it became live,
 //! referenced code — `AssetProfile` below still uses it via that import, but the
 //! enum itself is no longer a sketch.
-#![allow(dead_code)]
 
 use crate::entities::asset::{ComfortRate, PowerAdjustability};
 use chrono::{DateTime, Utc};
@@ -63,6 +65,7 @@ impl Default for UserRequestMode {
 /// Used in capacity requests: which direction we're requesting from VTN (§1.6).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum FlexibilityDirection {
     Import, // requesting additional import capacity
     Export, // requesting additional export capacity
@@ -71,6 +74,7 @@ pub enum FlexibilityDirection {
 /// Rate type: how the rate is measured (§1.7).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum RateType {
     PerKwh, // €/kWh or gCO2/kWh — per-timeslot optimization
     PerKw,  // €/kW — capacity-based rate (translated to constraints before optimization)
@@ -79,6 +83,7 @@ pub enum RateType {
 /// Rate unit: what the rate is denominated in (§1.8).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum RateUnit {
     Eur,
     Usd,
@@ -115,6 +120,7 @@ pub enum ForecastSource {
 /// Type of external data source (§1.12).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum ExternalDataSourceType {
     Weather,         // temperature, cloud cover, wind
     Irradiation,     // solar irradiation forecast
@@ -133,6 +139,7 @@ pub enum UserNotificationSeverity {
 /// Condition that triggers a penalty rule check (§6.7).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum PenaltyCondition {
     PeakDemandExceeded,   // any timestep power > threshold_kW during period
     EnergyBudgetExceeded, // total consumption > threshold_kWh during period
@@ -142,6 +149,7 @@ pub enum PenaltyCondition {
 
 /// Power range for an asset: minimum and maximum controllable power (§2.3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct PowerRange {
     pub min_kw: f64,
     pub max_kw: f64,
@@ -153,6 +161,7 @@ pub struct PowerRange {
 
 /// Static configuration of a device — set at installation/configuration time (§3.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct AssetProfile {
     pub asset_id: String,
     pub asset_type: crate::entities::asset::AssetType,
@@ -173,6 +182,7 @@ pub struct AssetProfile {
 
 /// Default value curve for an asset (used when no user-provided bid is given).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct DefaultValueCurve {
     pub rates: Vec<ComfortRate>,
 }
@@ -249,6 +259,7 @@ pub struct TimeRange {
 
 /// Per-asset accumulated ledger for the current billing period (§3.7).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct AssetLedger {
     pub asset_id: String,
     pub period_start: Option<DateTime<Utc>>,
@@ -265,6 +276,7 @@ pub struct AssetLedger {
 
 /// External data source for weather, irradiation, or CO2 forecasts (§2.11).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct ExternalDataSource {
     pub source_id: String,
     pub source_type: ExternalDataSourceType,
@@ -278,6 +290,7 @@ pub struct ExternalDataSource {
 /// Status of an ExternalDataSource's last fetch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub enum ExternalDataFetchStatus {
     Ok,
     Stale,
@@ -287,6 +300,7 @@ pub enum ExternalDataFetchStatus {
 
 /// Trigger condition thresholds for a PenaltyRule (§6.8).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct PenaltyThreshold {
     /// kW threshold for PEAK_DEMAND_EXCEEDED and EXPORT_LIMIT_EXCEEDED
     pub threshold_kw: Option<f64>,
@@ -301,6 +315,7 @@ pub struct PenaltyThreshold {
 /// Models a periodic/conditional charge triggered by threshold breach (§6.6).
 /// Treated as binary barriers by the Planner: if allocation would cross threshold → add full penalty cost.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
 pub struct PenaltyRule {
     pub rule_id: String,
     pub description: String,

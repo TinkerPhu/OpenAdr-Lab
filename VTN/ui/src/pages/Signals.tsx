@@ -3,9 +3,9 @@ import {
   Alert, MenuItem, Paper, Stack, TextField, Tooltip, Typography,
 } from "@mui/material";
 import { useFleetSignals } from "../api/hooks";
-import type { SignalBand } from "../api/types";
 import { venColor } from "../utils/venColor";
 import { byVenName } from "../utils/venOrder";
+import { bandGeometry } from "../utils/signalBandGeometry";
 
 const WINDOWS = [
   { minutes: 60, label: "1 hour" },
@@ -27,19 +27,6 @@ const TYPE_COLORS: Record<string, string> = {
 const TYPE_FALLBACK = "#546e7a";
 
 const colorForType = (t: string) => TYPE_COLORS[t] ?? TYPE_FALLBACK;
-
-/** Where a band sits on a 0–100% row, given the window it is drawn in. */
-export function bandGeometry(band: SignalBand, fromMs: number, toMs: number) {
-  const span = Math.max(toMs - fromMs, 1);
-  const start = Math.max(Date.parse(band.from), fromMs);
-  const end = Math.min(Date.parse(band.to), toMs);
-  return {
-    leftPct: ((start - fromMs) / span) * 100,
-    // Never zero-width: a five-second dispatch in a 24-hour window is still
-    // something an operator has to be able to see and hover.
-    widthPct: Math.max(((end - start) / span) * 100, 0.4),
-  };
-}
 
 /**
  * §1: every signal the fleet was sent, resolved per VEN.
