@@ -208,7 +208,7 @@ window, a live capacity-sourced event always wins over a plan-sourced or unlimit
 brief unplanned curtailment is never averaged away. The Controller page's PV timeline chart shades
 three states: hardware-capped (neutral — the inverter's own ceiling, not a real loss), planned
 imposed curtailment (amber, past and future), and unplanned imposed curtailment (red, past only).
-See `openspec/changes/pv-curtailment-history/`.
+See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
 
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md) · [chart_diagrams.md § Special features](docs/architecture/chart_diagrams.md)
 

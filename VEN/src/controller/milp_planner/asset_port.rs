@@ -369,12 +369,21 @@ pub struct ExogenousSocDrops {
     pub floor_frac: f64,
 }
 
-/// Future state map for EV at a given SoC: `{"soc": soc}`.
-pub fn ev_future_state_at(soc: f64) -> HashMap<String, f64> {
-    HashMap::from([(
-        "soc".into(),
-        crate::entities::asset_params::ev_soc_clamped(soc),
-    )])
+/// Future state map for EV in one plan slot: `{"soc": soc, "plugged": 1.0 | 0.0}`.
+///
+/// `plugged` is the slot's entry of the availability mask the solve ran under
+/// (`EvMilpContext::a_ev`) — the EV's own prediction of whether it is there to charge,
+/// from its live plug state, its stated sessions and its usage forecast. Same key and
+/// encoding as the live `EvCharger::state_values`, so a measured point and a planned
+/// one are read by one rule.
+pub fn ev_future_state_at(soc: f64, plugged: bool) -> HashMap<String, f64> {
+    HashMap::from([
+        (
+            "soc".into(),
+            crate::entities::asset_params::ev_soc_clamped(soc),
+        ),
+        ("plugged".into(), if plugged { 1.0 } else { 0.0 }),
+    ])
 }
 
 /// Future state map for heater from tank energy above T_min: `{"temp_c": ...}`.
@@ -411,9 +420,17 @@ mod tests {
 
     #[test]
     fn ev_future_state_at_is_read_by_soc() {
-        let m = ev_future_state_at(0.65);
-        assert_eq!(m.len(), 1);
+        let m = ev_future_state_at(0.65, true);
         assert!((m["soc"] - 0.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ev_future_state_at_is_read_by_plugged() {
+        // Same key and encoding as the live `EvCharger::state_values`, so a past
+        // point and a planned one are read by one rule.
+        assert_eq!(ev_future_state_at(0.5, true)["plugged"], 1.0);
+        assert_eq!(ev_future_state_at(0.5, false)["plugged"], 0.0);
+        assert_eq!(ev_future_state_at(0.5, false).len(), 2);
     }
 
     #[test]

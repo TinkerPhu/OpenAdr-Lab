@@ -1369,3 +1369,87 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         env.estimated_cost_eur
     );
 }
+
+/// Runs the planner for the 1800 s profile with the EV's plug state and an optional
+/// session, and returns the planned `plugged` value of every slot with its start.
+fn planned_ev_plugged(
+    plugged: bool,
+    session: Option<&crate::entities::device_session::EvSession>,
+) -> Vec<(DateTime<Utc>, f64)> {
+    let now = fixed_now();
+    let profile = make_profile_1800s();
+    let mut sim = make_snap_from_profile(&profile);
+    set_ev_plugged(&mut sim, plugged);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, session, None, &tariffs),
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        session,
+        None,
+        &[],
+        None,
+        None,
+    );
+    plan.slots
+        .iter()
+        .map(|slot| (slot.start, slot.planned_state_by_asset["ev"]["plugged"]))
+        .collect()
+}
+
+#[test]
+fn run_planner_ev_planned_plugged_ends_at_a_stated_departure() {
+    let now = fixed_now();
+    // Half-way through the 2 h (4 x 1800 s) horizon: two slots before it, two after.
+    let departure = now + Duration::hours(1);
+    let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
+        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
+        id: uuid::Uuid::new_v4(),
+        target_soc: 0.8,
+        window_start: now,
+        expected_trip_distance_km: None,
+        expected_return_time: None,
+        departure_time: departure,
+        soft_deadline: false,
+        budget_eur: None,
+        comfort_rates: vec![],
+        created_at: now,
+        updated_at: now,
+    };
+    let planned = planned_ev_plugged(true, Some(&session));
+    assert!(
+        planned.iter().any(|(start, _)| *start >= departure),
+        "the horizon must reach past the departure for this test to say anything"
+    );
+    for (start, plugged) in planned {
+        let expected = if start < departure { 1.0 } else { 0.0 };
+        assert_eq!(
+            plugged, expected,
+            "slot starting {start}: present until the stated departure, away after it"
+        );
+    }
+}
+
+#[test]
+fn run_planner_ev_planned_plugged_is_zero_when_unplugged() {
+    let planned = planned_ev_plugged(false, None);
+    assert!(!planned.is_empty());
+    assert!(
+        planned.iter().all(|(_, plugged)| *plugged == 0.0),
+        "unplugged with no usage forecast: nothing says the vehicle comes back"
+    );
+}
+
+#[test]
+fn run_planner_ev_planned_plugged_is_one_when_plugged_without_a_session() {
+    let planned = planned_ev_plugged(true, None);
+    assert!(!planned.is_empty());
+    assert!(
+        planned.iter().all(|(_, plugged)| *plugged == 1.0),
+        "plugged and nothing states a departure: present for the whole horizon"
+    );
+}

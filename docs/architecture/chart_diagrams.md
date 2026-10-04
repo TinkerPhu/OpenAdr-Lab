@@ -16,6 +16,7 @@ ui-charts/src/                 shared by both UIs (imported as @lab/charts/*)
   types.ts                  ZoneDef, COLOR_NOW — chart concepts, not app concepts
   NowLine.tsx                the "NOW" reference line
   ZoneShading.tsx            zone background shading
+  StateShading.tsx           point-classified time-range shading (PV curtailment, EV unplugged)
   tooltipStyle.ts            shared tooltip container styling
   EmptyState.tsx             shared "no data" message treatment
   useLegendToggle.ts          local per-series show/hide state for interactive legends
@@ -144,6 +145,26 @@ paints in child order, so `backgroundAreas` is spliced before the grid and the s
 `extraReferenceAreas` lands after the lines. A backdrop in the overlay slot paints over the
 curves. `dayNightBands()` is the same calculation without React, which is what the tests read.
 
+### `StateShading.tsx`
+
+The third time-range shading primitive, and the only one that reads the data: `ZoneShading`
+paints fixed plan zones, `DayNightShading` is a function of time alone, `StateShading` asks
+each row what state it is in and shades every contiguous run of the same state.
+
+A chart declares a `StateShadingSpec`: `classify(values, isFuture)` returning
+`{kind, weight}` or `null`, a `styles` entry per kind (`rgb`, `alpha`, optional
+`dashedOutline` for a predicted state), and a `layer` (`"background"` or `"overlay"`).
+`stateShadingRuns()` is the whole calculation without React, which is what the tests read
+(`VEN/ui/src/__tests__/stateShading.test.ts`): a run starts at its first row and ends at the
+first row in a different state, splits when kind or weight changes, extends one step at the
+end of the data, and with `maxGapMs` set does not span a hole in the samples.
+`renderStateShading()` folds the weight into the fill's alpha and pins `fillOpacity={1}`,
+for the reason `DayNightShading` does. Each area carries the class
+`state-shading-<spec key>-<kind>`, which is what a browser test selects.
+
+Not to be confused with `TimeSeriesChart`'s `bands` (`TimeSeriesBandSpec`): that shades
+between a lower and an upper *value*, this shades a *time range*.
+
 ### `NowLine.tsx` / `ZoneShading.tsx`
 
 `renderNowLine(yAxisId, nowMs)` and `renderZoneShading(yAxisId, zones)` are **functions
@@ -243,9 +264,9 @@ fallback-only), else `String(value)`.
 
 Used by:
 - **`AssetTimelineChart`** (Controller cells, History) — power/cost/CO2/hidden-state
-  axes; forecast near/far overlay lines (conditionally rendered); PV curtailment shading
-  passed via `extraReferenceAreas` (kept as `AssetTimelineChart`'s own asset-specific
-  classification logic, not a shared chart concern — see "Special features" below).
+  axes; forecast near/far overlay lines (conditionally rendered); per-asset state shading
+  (`shadings` prop, see "Special features" below), routed to `backgroundAreas` or
+  `extraReferenceAreas` by each declaration's `layer`.
   `interactiveLegend` enabled.
 - **`TariffChart`** (Controller Grid Tariff cell, History) — tariff/cost/CO2 3-axis
   split (see "Special features"); its own domain-clipping/carry-forward logic for
@@ -341,15 +362,26 @@ domain not straddling zero — so every single-sign axis (PV export revenue in �
 g/h, a strictly-positive tariff in €/kWh) silently fell back to recharts ticking the raw
 domain, producing labels like `-0.31275 €/h`, and each caller had to remember to opt in.
 
-**PV curtailment shading** (`AssetTimelineChart`, `pvCurtailment` prop) — classifies
-each point as hardware-capped (neutral shading), planned imposed curtailment (amber), or
-unplanned imposed curtailment (red, past only), from `values.generation_limit_kw`/
-`curtailment_source`/`inverter_max_kw` (past points) or `values.pv_forecast_kw` (future/
-plan points). See `openspec` history for `pv-curtailment-history` for the underlying
-data model; the classification and zone-building logic (`classifyPvPoint`,
-`buildCurtailmentZones`) lives in `AssetTimelineChart.tsx` itself, passed to
-`TimeSeriesChart` via the generic `extraReferenceAreas` prop rather than being a shared
-chart-kit concern, since it's specific to this one asset's domain model.
+**Per-asset chart declarations** (`VEN/ui/src/components/controller/assetChartSpecs.ts`) —
+what an asset's chart draws beyond its power line is declared once per asset and looked up
+by `assetChartSpec(assetId)`: its `stateKey` (SoC or tank temperature) and its `shadings`.
+Controller cells (`AssetMidSection`) and the History page both pass the result to
+`AssetTimelineChart`; neither branches on the asset id. Two shadings are declared:
+
+- **PV curtailment** (`overlay`) — classifies each point as hardware-capped (neutral),
+  planned imposed curtailment (amber), or unplanned imposed curtailment (red, past only),
+  from `values.generation_limit_kw`/`curtailment_source`/`inverter_max_kw` (past points)
+  or `values.pv_forecast_kw` (future/plan points).
+- **EV unplugged** (`background`, in the EV's own blue) — the band marks *absence*: no band
+  means the EV is there to charge, like every always-present asset. It reads
+  `values.plugged` (1 = plugged), the EV's own vocabulary on every surface: measured on
+  past points and the now-point (a 0..1 fraction once a resampling bucket or a history
+  minute spans an unplug), and the plan's predicted presence on future points (the
+  availability mask the solve ran under, written next to the planned `soc`). Opacity is
+  proportional to `1 − plugged`. Past runs are "Unplugged"; future runs are "Predicted
+  away", lighter and with a dashed outline. A point with no `plugged` value draws nothing,
+  so rows persisted before the column existed read as plugged. The History page passes
+  `shadingMaxGapMs` (5 min against one-minute rows) so a band never spans VEN downtime.
 
 **Forecast-accuracy overlay** (`AssetTimelineChart`, `nearForecast`/`farForecast` props,
 History page only, for PV/base_load) — near-lead and far-lead forecast

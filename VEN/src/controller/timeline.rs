@@ -1274,4 +1274,91 @@ mod tests {
         // power_kw must also still be present
         assert!(p.values.contains_key("power_kw"), "power_kw key missing");
     }
+
+    // ev-plugged-band: the plan's predicted presence reaches the EV's future points.
+    #[test]
+    fn planned_plugged_merged_into_future_ev_point_values() {
+        let now = ts(0);
+        let known = make_known(&["ev"]);
+        let snap = make_timeline_snap(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "ev", 0.0, now);
+        slot.planned_state_by_asset.insert(
+            "ev".to_string(),
+            std::collections::HashMap::from([
+                ("soc".to_string(), 0.6_f64),
+                ("plugged".to_string(), 0.0_f64),
+            ]),
+        );
+        plan.slots.push(slot);
+
+        let result = build_asset_timeline(
+            "ev",
+            &known,
+            &snap,
+            Some(&plan),
+            now,
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].values.get("plugged").copied(), Some(0.0));
+        assert!(result[0].values.contains_key("soc"));
+    }
+
+    // A plan stored before `plugged` was written carries only `soc`: the point then has
+    // no `plugged` key at all, rather than a default that would claim a presence.
+    #[test]
+    fn future_ev_point_has_no_plugged_key_when_the_plan_carries_none() {
+        let now = ts(0);
+        let known = make_known(&["ev"]);
+        let snap = make_timeline_snap(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "ev", 0.0, now);
+        slot.planned_state_by_asset.insert(
+            "ev".to_string(),
+            std::collections::HashMap::from([("soc".to_string(), 0.6_f64)]),
+        );
+        plan.slots.push(slot);
+
+        let result = build_asset_timeline(
+            "ev",
+            &known,
+            &snap,
+            Some(&plan),
+            now,
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].values.contains_key("plugged"));
+    }
+
+    // The measured `plugged` is 1.0/0.0 per tick; a bucket spanning an unplug reports the
+    // fraction of the bucket the vehicle was plugged in for.
+    #[test]
+    fn resample_plugged_is_the_time_weighted_fraction_of_the_bucket() {
+        let points = vec![
+            AssetTimelinePoint {
+                ts: ts(0),
+                values: [("plugged".into(), 1.0)].into(),
+            },
+            AssetTimelinePoint {
+                ts: ts(5),
+                values: [("plugged".into(), 0.0)].into(),
+            },
+        ];
+        let grid = vec![ts(0)]; // single bucket [0, 10)
+        let result = resample_to_grid(&points, &grid, 10);
+        let vals = result[0].as_ref().unwrap();
+        assert!((vals["plugged"] - 0.5).abs() < 0.01);
+    }
 }

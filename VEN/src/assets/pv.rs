@@ -43,7 +43,7 @@ pub struct PvInverter {
     pub rated_kw: f64,
     /// Inverter's true AC output capability (kW); distinct from `rated_kw` (DC panel peak).
     /// DC potential is clamped to this before any commanded `generation_limit_kw` — see
-    /// `openspec/changes/pv-curtailment-history/`. Defaults to `rated_kw` (no hardware ceiling
+    /// `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History). Defaults to `rated_kw` (no hardware ceiling
     /// below panel peak).
     ///
     /// `#[serde(default)]`: `PvInverter` is part of the persisted `sim_state.json` blob, and

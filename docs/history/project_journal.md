@@ -14448,3 +14448,47 @@ strictly worse: the failing assertion cost one test, the fixture type error cost
 suite on every branch, and it presented as an opaque docker build failure rather than as a type
 error. Anything the production build typechecks is production-blocking regardless of which
 directory it lives in.
+
+### EV plugged state on the Control and History charts (`052-ev-plugged-band`, 2026-10-04)
+
+**What.** The EV charts now shade the periods in which the EV is *not* plugged in. Past:
+measured, from the EV's own `plugged` state value (the Control page's last hour from the
+in-memory timeline, the History page from a new `tick_samples.plugged` column, schema v12,
+the fraction of each minute plugged in). Future: the plan's predicted presence, written next
+to the planned SoC in `planned_state_by_asset["ev"]` and drawn lighter with a dashed outline.
+One wire name, `plugged` (1 = plugged), everywhere; only the chart inverts it.
+
+**Why absence, not presence.** A band for "plugged" would tint exactly the region where the
+charging curve is read, and would make the EV the only asset with a band in its normal
+state. Shading absence keeps "no band = available" true for every asset and puts the colour
+where the power line is flat at zero anyway. The cost, accepted by the user: a point with no
+value (rows from before v12, VEN downtime) draws nothing and so reads as plugged.
+
+**The design changed between proposal and implementation, because main did.** The proposal
+was written against a main where `a_ev` was a charging window that closed at a session
+deadline, so it planned a second "presence" mask next to it. Before implementation started,
+049 and 051 made a session a statement of an expected vehicle use and moved the mask's
+derivation into `ev_trip_series::plan_inputs`, where it is presence by definition. The
+second mask would have duplicated that and contradicted the plan's own SoC drop at the
+stated return. So the implementation exposes `a_ev` unchanged: three lines in the planner
+instead of a refactor of `EvMilpContext`.
+
+**One shading helper.** `ui-charts/src/StateShading.tsx` is the point-classified sibling of
+`ZoneShading` and `DayNightShading`. PV curtailment's bespoke classifier-plus-run-builder in
+`AssetTimelineChart` moved onto it, and what each asset's chart draws is declared once in
+`assetChartSpecs.ts` — which also removed the two different rules for an asset's state line
+(Controller branched on the asset id, History inferred it from the data).
+
+**Key learning — recharts halves a `ReferenceArea` fill by default.** `fillOpacity` defaults
+to 0.5. The old curtailment colours (`rgba(…,0.15)`) were therefore drawn at 0.075, and a
+helper that computes an alpha must pin `fillOpacity={1}` or every value is silently halved.
+`DayNightShading` already knew this; the curtailment code did not, and its alphas were
+re-stated at their real, halved values when they moved so the PV chart looks as before.
+
+**Key learning — a design written against a moving area needs re-reading at apply time.**
+The review of this proposal correctly found that `a_ev` was not presence. Four days of EV
+work later the opposite was true. Re-reading the code the design names, before the first
+edit, is what caught it; the task list alone would have built the wrong thing well.
+
+**Filed:** R-101 (History cannot show PV curtailment; string vs numeric `curtailment_source`),
+R-102 (non-deadline sessions stay chargeable past a stated departure).

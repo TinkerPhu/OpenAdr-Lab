@@ -140,6 +140,18 @@ Click **Submit**. The new row appears in the User Requests table with status **A
 - If a PRICE event is active: you can see the price step at the peak→off-peak boundary
 - Without a PRICE event: flat rate is used (no visible step)
 
+**Controller → EV cell chart (blue background band = EV not plugged in):**
+- No band: the EV is plugged in, the same as every asset that is always present
+- Left of NOW, solid blue band ("Unplugged"): the EV was measured unplugged. A lighter band
+  means it was plugged in for part of that interval
+- Right of NOW, lighter band with a dashed outline ("Predicted away"): the plan expects the
+  EV to be gone — after the request's departure time (07:00 here), until a stated return
+- No charging is ever planned under a band; that is the answer to "why doesn't it charge here?"
+- Without a usage forecast the future follows the present: unplug the EV on the
+  **Simulation** controls and, after the next plan, the whole future is shaded
+- **History** page, EV chart: the same band for the day, from the stored one-minute
+  samples. Days recorded before this was stored show no band at all
+
 **Controller → Status bar (Plan card):**
 - Trigger: `USER_REQUEST`
 - Firm cost shows 0 (EV not yet in FIRM zone)

@@ -395,6 +395,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         };
         port.append_tick_samples(std::slice::from_ref(&row))
             .unwrap();
@@ -413,6 +414,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             },
             TickSample {
                 ts: ts(9999),
@@ -422,6 +424,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             },
         ])
         .unwrap();
@@ -441,6 +444,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         }])
         .unwrap();
         port.append_grid_sample(&GridSample {
@@ -473,6 +477,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         };
         let b = TickSample {
             ts: ts(2),
@@ -482,6 +487,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         };
         port.append_tick_samples(&[a.clone(), b.clone()]).unwrap();
         assert_eq!(port.appended_ticks(), vec![a, b]);
@@ -526,6 +532,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             }],
             60,
         )
@@ -551,6 +558,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             }],
             60,
         )
@@ -574,6 +582,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         };
         port.reconcile_forecast_actuals(std::slice::from_ref(&tick), 60)
             .unwrap();

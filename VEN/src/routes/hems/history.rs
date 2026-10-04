@@ -363,4 +363,29 @@ mod tests {
         };
         assert!(resolve_range(&params).is_err());
     }
+
+    // `get_history_ticks` returns `Json(rows)` verbatim, so the wire shape of a row is the
+    // serialised `TickSample`. The UI tells "not plugged" (0) from "no value" (null) by this
+    // field, so it must be present on every row rather than omitted when empty.
+    #[test]
+    fn history_tick_row_serializes_plugged_on_every_row() {
+        let row = |plugged| crate::entities::history::TickSample {
+            ts: ts(60),
+            asset_id: "ev".into(),
+            power_kw: 0.0,
+            soc_pct: Some(50.0),
+            temperature_c: None,
+            generation_limit_kw: None,
+            curtailment_source: None,
+            plugged,
+        };
+        let with_value = serde_json::to_value(row(Some(0.25))).unwrap();
+        assert_eq!(with_value["plugged"], serde_json::json!(0.25));
+        let without = serde_json::to_value(row(None)).unwrap();
+        assert!(
+            without.as_object().unwrap().contains_key("plugged"),
+            "a row without a value still carries the key"
+        );
+        assert!(without["plugged"].is_null());
+    }
 }

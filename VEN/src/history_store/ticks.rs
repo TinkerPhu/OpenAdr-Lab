@@ -16,6 +16,7 @@ pub(super) type TickSampleRow = (
     Option<f64>,
     Option<f64>,
     Option<String>,
+    Option<f64>,
 );
 
 pub(super) fn append(conn: &mut Connection, rows: &[TickSample]) -> Result<(), DomainError> {
@@ -26,8 +27,8 @@ pub(super) fn append(conn: &mut Connection, rows: &[TickSample]) -> Result<(), D
         let mut stmt = tx
             .prepare(
                 "INSERT INTO tick_samples
-                    (ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source, plugged)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )
             .map_err(|e| DomainError::StorageError(format!("prepare insert: {e}")))?;
         for row in rows {
@@ -39,6 +40,7 @@ pub(super) fn append(conn: &mut Connection, rows: &[TickSample]) -> Result<(), D
                 row.temperature_c,
                 row.generation_limit_kw,
                 row.curtailment_source,
+                row.plugged,
             ])
             .map_err(|e| DomainError::StorageError(format!("insert tick sample: {e}")))?;
         }
@@ -56,12 +58,12 @@ pub(super) fn query(
 ) -> Result<Vec<TickSample>, DomainError> {
     let (sql, asset_filter): (&str, Option<&str>) = match asset_id {
         Some(id) => (
-            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source
+            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source, plugged
              FROM tick_samples WHERE ts >= ?1 AND ts < ?2 AND asset_id = ?3 ORDER BY ts ASC",
             Some(id),
         ),
         None => (
-            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source
+            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source, plugged
              FROM tick_samples WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC",
             None,
         ),
@@ -78,6 +80,7 @@ pub(super) fn query(
             row.get(4)?,
             row.get(5)?,
             row.get(6)?,
+            row.get(7)?,
         ))
     };
     let raw: Vec<_> = if let Some(id) = asset_filter {
@@ -99,6 +102,7 @@ pub(super) fn query(
                 temperature_c,
                 generation_limit_kw,
                 curtailment_source,
+                plugged,
             )|
              -> Result<TickSample, DomainError> {
                 Ok(TickSample {
@@ -109,6 +113,7 @@ pub(super) fn query(
                     temperature_c,
                     generation_limit_kw,
                     curtailment_source,
+                    plugged,
                 })
             },
         )

@@ -3037,3 +3037,20 @@ Rules:
 - A hand-rolled approximation of it is not good enough: a parse-based scan written here reported
   ~14 unresolved sentences where behave reported one, because it cannot see `use_step_matcher`
   or wrapped feature prose. Use the real thing.
+
+## Recharts `ReferenceArea` halves its fill; a design ages faster than its review (052-ev-plugged-band)
+
+- **`ReferenceArea` defaults `fillOpacity` to 0.5.** A fill of `rgba(…, 0.15)` is drawn at
+  0.075. Any code that *computes* an alpha (proportional shading, a day/night wash) must set
+  `fillOpacity={1}` or every value is silently halved. `ui-charts/src/StateShading.tsx` and
+  `DayNightShading.tsx` both pin it; moving existing colours onto such a helper means
+  restating them at their real, halved value so nothing changes on screen.
+- **Shade the exception, not the normal state.** A band for "EV plugged in" tints the region
+  where the curve is read and makes one asset look different in its ordinary state. A band
+  for "unplugged" keeps "no band = available" true for every asset. The price is that
+  missing data reads as the normal state — decide that consciously.
+- **Re-read the code a design names before the first edit.** The proposal's review found,
+  correctly, that the planner's EV mask was a charging window and not a presence forecast.
+  By apply time 049/051 had made it exactly a presence forecast. The planned second mask
+  would have been a duplicate that contradicted the plan's own SoC curve. A reviewed design
+  is a statement about the code on the day of the review.

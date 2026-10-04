@@ -32,8 +32,8 @@ use crate::entities::history::{
 };
 use crate::entities::DomainError;
 use schema::{
-    SCHEMA_V1, SCHEMA_V10, SCHEMA_V11, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
+    SCHEMA_V1, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5,
+    SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
 };
 
 type GridSampleRow = (
@@ -139,6 +139,10 @@ impl SqliteHistoryStore {
         if version < 11 {
             conn.execute_batch(SCHEMA_V11)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v11: {e}")))?;
+        }
+        if version < 12 {
+            conn.execute_batch(SCHEMA_V12)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v12: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -514,6 +518,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: Some(0.5),
             },
             TickSample {
                 ts: ts(1060),
@@ -523,6 +528,7 @@ mod tests {
                 temperature_c: Some(55.0),
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             },
         ];
         store.append_tick_samples(&rows).unwrap();
@@ -544,6 +550,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 },
                 TickSample {
                     ts: ts(1000),
@@ -553,6 +560,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 },
             ])
             .unwrap();
@@ -662,6 +670,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 },
                 TickSample {
                     ts: ts(10_000),
@@ -671,6 +680,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 },
             ])
             .unwrap();
@@ -712,6 +722,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             }])
             .unwrap();
         let deleted = store.prune_before(ts(100)).unwrap();
@@ -761,6 +772,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 }],
                 60,
             )
@@ -788,6 +800,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 }],
                 60,
             )
@@ -812,6 +825,7 @@ mod tests {
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         };
         store
             .reconcile_forecast_actuals(std::slice::from_ref(&tick), 60)
@@ -852,6 +866,7 @@ mod tests {
                     temperature_c: None,
                     generation_limit_kw: None,
                     curtailment_source: None,
+                    plugged: None,
                 }],
                 60,
             )
@@ -899,6 +914,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             }])
             .unwrap();
         let rows = store.query_ticks(ts(0), ts(1000), None).unwrap();
@@ -1336,5 +1352,37 @@ mod tests {
             "pre-migration row reads back NULL, not a zero sentinel"
         );
         assert_eq!(rows[0].down_kw, None);
+    }
+
+    #[test]
+    fn migrate_v11_to_v12_keeps_tick_rows_and_reads_plugged_as_null() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.execute_batch(schema::SCHEMA_V4).unwrap();
+        conn.execute_batch(schema::SCHEMA_V5).unwrap();
+        conn.execute_batch(schema::SCHEMA_V6).unwrap();
+        conn.execute_batch(schema::SCHEMA_V7).unwrap();
+        conn.execute_batch(schema::SCHEMA_V8).unwrap();
+        conn.execute_batch(schema::SCHEMA_V9).unwrap();
+        conn.execute_batch(schema::SCHEMA_V10).unwrap();
+        conn.execute_batch(schema::SCHEMA_V11).unwrap();
+        conn.pragma_update(None, "user_version", 11).unwrap();
+        conn.execute(
+            "INSERT INTO tick_samples (ts, asset_id, power_kw, soc_pct) VALUES (?1, 'ev', 3.5, 42.0)",
+            params![100_i64],
+        )
+        .unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v11→v12 migration");
+        let rows = store
+            .query_ticks(from_unix(0).unwrap(), from_unix(200).unwrap(), None)
+            .unwrap();
+        assert_eq!(rows.len(), 1, "existing row survives the column addition");
+        assert_eq!(
+            rows[0].plugged, None,
+            "pre-migration row reads back NULL, not a 0 that would read as away"
+        );
     }
 }

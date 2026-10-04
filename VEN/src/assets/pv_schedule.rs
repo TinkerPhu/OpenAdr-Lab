@@ -47,7 +47,7 @@ impl PvInverter {
             }
         };
         // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
-        // see openspec/changes/pv-curtailment-history/.
+        // see docs/reference/KEY_LEARNINGS.md (PV Curtailment History).
         -dc_potential_kw.min(self.inverter_max_kw) // negative = export
     }
 
