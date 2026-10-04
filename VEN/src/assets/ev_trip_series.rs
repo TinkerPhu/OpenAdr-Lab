@@ -68,19 +68,38 @@ pub struct EvPlanInputs {
     pub obligations: Vec<EvObligation>,
 }
 
-/// Index of the slot containing `secs_from_now`.
+/// The slot a *deadline* falls in: the one that ENDS at or after `secs_from_now`.
 ///
-/// Strictly-before, not at-or-before: an instant landing exactly on a slot boundary
-/// belongs to the slot that ENDS there, not the one that starts there. With `<=`, a
-/// departure at 3600 s on a 300 s grid returned slot 12 — which runs [3600, 3900),
-/// entirely after the car has gone.
-fn slot_at(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
+/// An instant landing exactly on a slot boundary belongs to the slot that ends there,
+/// not the one that starts there. A departure at 3600 s on a 300 s grid is slot 11,
+/// which runs [3300, 3600) — slot 12 runs [3600, 3900), entirely after the car has
+/// gone, so being "ready by" slot 12 is too late.
+fn deadline_slot(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
     if secs_from_now <= 0 {
         return 0;
     }
     cum_s
         .partition_point(|&s| s < secs_from_now)
         .saturating_sub(1)
+        .min(n.saturating_sub(1))
+}
+
+/// The slot a *return* lands in: the first one that STARTS at or after
+/// `secs_from_now`.
+///
+/// The opposite boundary rule to `deadline_slot`, and deliberately so. A deadline asks
+/// "which slot must I be ready by", a return asks "from which slot is the charge
+/// already gone" — and the vehicle is only back once a slot begins at or after it.
+/// Sharing one helper between the two put every boundary-aligned drop exactly one slot
+/// early, which is what the drop-placement tests caught. This is also the convention
+/// the deleted `ev_schedule::soc_drop_frac_per_slot` used, by asking each slot whether
+/// a trip had ended at or before its start.
+fn return_slot(cum_s: &[i64], n: usize, secs_from_now: i64) -> usize {
+    if secs_from_now <= 0 {
+        return 0;
+    }
+    cum_s
+        .partition_point(|&s| s < secs_from_now)
         .min(n.saturating_sub(1))
 }
 
@@ -147,7 +166,7 @@ pub fn plan_inputs(
         if c.soc_drop_frac <= 0.0 {
             continue;
         }
-        let at = slot_at(cum_s, n, (c.return_at - now).num_seconds());
+        let at = return_slot(cum_s, n, (c.return_at - now).num_seconds());
         // Slot 0 never carries a drop: a return already in the past is reflected in
         // the live state of charge the plan starts from, and counting it again would
         // charge the trip twice.
@@ -162,7 +181,7 @@ pub fn plan_inputs(
         .filter(|u| u.firm)
         .filter(|u| (u.departure_at - now).num_seconds() <= horizon_end_s)
         .map(|u| EvObligation {
-            deadline_step: slot_at(cum_s, n, (u.departure_at - now).num_seconds()),
+            deadline_step: deadline_slot(cum_s, n, (u.departure_at - now).num_seconds()),
             target_soc: u.target_soc,
             session_id: u.session_id,
         })
@@ -356,5 +375,40 @@ mod tests {
         assert_eq!(out.available_per_slot, vec![false; n]);
         assert_eq!(out.drop_frac_per_slot, vec![0.0; n]);
         assert!(out.obligations.is_empty());
+    }
+
+    #[test]
+    fn a_deadline_and_a_return_on_the_same_boundary_land_in_different_slots() {
+        // The two instants need OPPOSITE boundary rules, and sharing one helper between
+        // them put every boundary-aligned drop a slot early. A departure at +9 h must be
+        // met by the slot that ENDS at 9 h (slot 8); a return at +9 h means the charge is
+        // gone from the slot that STARTS at 9 h (slot 9).
+        let n = 24;
+        let cum = grid(n);
+        let depart_then_return = ExpectedVehicleUse {
+            window_start: at(0),
+            departure_at: at(9),
+            target_soc: 0.8,
+            firm: true,
+            consumption: Some(ExpectedTripConsumption {
+                return_at: at(9),
+                soc_drop_frac: 0.2,
+            }),
+            session_id: None,
+        };
+        let out = plan_inputs(&[depart_then_return], n, &cum, now());
+        assert_eq!(
+            out.obligations[0].deadline_step, 8,
+            "ready by the slot ending at 9 h"
+        );
+        assert!(
+            (out.drop_frac_per_slot[9] - 0.2).abs() < 1e-9,
+            "the drop belongs to the slot starting at 9 h, got {:?}",
+            out.drop_frac_per_slot
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| **d > 0.0)
+                .collect::<Vec<_>>()
+        );
     }
 }

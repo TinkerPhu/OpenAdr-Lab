@@ -34,7 +34,7 @@ impl UserRequestService {
             match (body.expected_trip_distance_km, body.expected_return_time) {
                 (Some(km), Some(back)) => (Some(km), Some(back)),
                 (None, None) => (None, None),
-                (km, back) => {
+                (km, _back) => {
                     return Err(RequestError::IncompleteTripEstimate {
                         has_distance: km.is_some(),
                     })
