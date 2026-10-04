@@ -248,8 +248,6 @@ pub struct EvConfig {
     /// distance into the charge that trip consumes.
     #[serde(default = "super::defaults::default_ev_consumption_kwh_per_km")]
     pub consumption_kwh_per_km: f64,
-    /// Distance assumed for a trip the user did not quantify [km].
-    #[serde(default = "super::defaults::default_ev_trip_distance_km")]
     #[serde(default = "super::defaults::default_ev_soc_target")]
     pub soc_target: f64,
     #[serde(default)]

@@ -37,6 +37,9 @@ pub struct CreateUserRequestParams {
     /// EV only: distance expected after this session's departure [km]. Absent means
     /// the user did not say, and the EV's own default fills it visibly.
     pub expected_trip_distance_km: Option<f64>,
+    /// EV only: when the vehicle is expected back from that trip. Paired with the
+    /// distance above - both or neither.
+    pub expected_return_time: Option<DateTime<Utc>>,
     pub latest_end: Option<DateTime<Utc>>,
     // ── Per-device overrides (Plan D) ────────────────────────────────────────
     pub soft_deadline: Option<bool>,
@@ -130,6 +133,11 @@ impl std::fmt::Display for RequestError {
             RequestError::EmptyChargingWindow { earliest_start, latest_end } => write!(
                 f,
                 "charging window is empty: available from {earliest_start} but due by {latest_end}"
+            ),
+            RequestError::IncompleteTripEstimate { has_distance, .. } => write!(
+                f,
+                "a trip estimate needs both a distance and a return time; the {} is missing",
+                if *has_distance { "return time" } else { "distance" }
             ),
             RequestError::EvSessionsConflict { conflicts } => write!(
                 f,
@@ -300,10 +308,12 @@ mod tests {
             duration_min: None,
             earliest_start: None,
             expected_trip_distance_km: None,
+            expected_return_time: None,
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
             mode: None,
+            expected_return_time: None,
             replace_session_ids: None,
         }
     }
