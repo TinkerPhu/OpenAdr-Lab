@@ -100,6 +100,7 @@ export function EvCard(props: EvCardProps) {
   // things a user may state but usually will not.
   const [availableFrom, setAvailableFrom] = useState("");
   const [tripDistanceKm, setTripDistanceKm] = useState("");
+  const [tripReturn, setTripReturn] = useState("");
   // A submission can fail in two quite different ways: a plain error to report,
   // or a clash only the user can resolve. The shared hook keeps both, and makes
   // closing the dialog something success does rather than something the click does.
@@ -109,6 +110,13 @@ export function EvCard(props: EvCardProps) {
   const queued = requests.filter((r) => r.session?.type === "ev");
   const paused = evSettings?.paused_by_active_session ?? false;
   const oppEnabled = evSettings?.opportunistic_charging_enabled ?? false;
+
+  // Exactly one of the pair filled in. Checked here rather than only server-side so
+  // the user is told before a round trip - but the server refuses it too, because a
+  // client is not the place a domain rule lives.
+  const hasDistance = tripDistanceKm.trim() !== "";
+  const hasReturn = tripReturn.trim() !== "";
+  const tripEstimateIncomplete = hasDistance !== hasReturn;
 
   /** The draft as a request body; `replaceIds` is set only on a confirmed replace. */
   function draftBody(replaceIds?: string[]): CreateUserRequestBody {
@@ -124,6 +132,7 @@ export function EvCard(props: EvCardProps) {
       completion_policy: "CONTINUE",
       earliest_start: availableFrom ? new Date(availableFrom).toISOString() : undefined,
       expected_trip_distance_km: tripDistanceKm ? Number(tripDistanceKm) : undefined,
+      expected_return_time: tripReturn ? new Date(tripReturn).toISOString() : undefined,
       deadlines: [{
         latest_end: dt.toISOString(),
         max_total_cost_eur: null,
@@ -181,6 +190,8 @@ export function EvCard(props: EvCardProps) {
                   {session.expected_trip_distance_km != null && (
                     <Typography data-testid="ev-trip-distance" variant="body2" color="text.secondary">
                       Trip after: {session.expected_trip_distance_km} km
+                      {session.expected_return_time != null &&
+                        `, back by ${fmtDate(session.expected_return_time)}`}
                     </Typography>
                   )}
                   {session.soft_deadline && (
@@ -388,15 +399,48 @@ export function EvCard(props: EvCardProps) {
             inputProps={{ lang: "de" }}
             data-testid="ev-departure-input"
           />
-          <TextField
-            label="Trip after departure (km)"
-            type="number"
-            value={tripDistanceKm}
-            onChange={(e) => setTripDistanceKm(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            helperText="How far you will drive. Leave empty to use this car's usual distance."
-            inputProps={{ min: 0, step: 10, "data-testid": "ev-trip-distance-input" }}
-          />
+          {/* One optional estimate, not two independent fields. Half of it cannot be
+              used: a distance with no return time is energy with nowhere to land, and
+              a return time with no distance is an instant with no energy. Say both,
+              or say neither and the plan simply holds the charge flat until the car
+              is really back. */}
+          <Box
+            data-testid="ev-trip-estimate-group"
+            sx={{ display: "flex", flexDirection: "column", gap: 2, p: 1.5, border: 1, borderColor: "divider", borderRadius: 1 }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              The trip after this one (optional)
+            </Typography>
+            <TextField
+              label="Distance (km)"
+              type="number"
+              value={tripDistanceKm}
+              onChange={(e) => setTripDistanceKm(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              error={tripEstimateIncomplete}
+              inputProps={{ min: 0, step: 10, "data-testid": "ev-trip-distance-input" }}
+            />
+            <TextField
+              label="Back by"
+              type="datetime-local"
+              value={tripReturn}
+              onChange={(e) => setTripReturn(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              error={tripEstimateIncomplete}
+              inputProps={{ lang: "de", "data-testid": "ev-trip-return-input" }}
+            />
+            {tripEstimateIncomplete ? (
+              <Typography variant="body2" color="error" data-testid="ev-trip-estimate-error">
+                Give both, or leave both empty — a distance needs a return time to be
+                planned for.
+              </Typography>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Leave both empty and the plan waits for the real return instead of
+                guessing what the trip costs.
+              </Typography>
+            )}
+          </Box>
           <FormControlLabel
             label="Soft deadline"
             control={
@@ -420,7 +464,12 @@ export function EvCard(props: EvCardProps) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)} data-testid="ev-dialog-cancel">Cancel</Button>
-          <Button variant="contained" onClick={handleConfirm} data-testid="ev-dialog-confirm" disabled={isPosting}>
+          <Button
+            variant="contained"
+            onClick={handleConfirm}
+            data-testid="ev-dialog-confirm"
+            disabled={isPosting || tripEstimateIncomplete}
+          >
             Confirm
           </Button>
         </DialogActions>

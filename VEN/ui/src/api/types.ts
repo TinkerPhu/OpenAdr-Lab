@@ -526,6 +526,15 @@ export type CreateUserRequestBody = {
   /** EV only: km expected after this session's departure. Omitted = use the EV's
    *  own configured default. */
   expected_trip_distance_km?: number;
+  /**
+   * EV only: when the car is expected back from that trip.
+   *
+   * Paired with `expected_trip_distance_km` — both or neither. The server refuses a
+   * half-stated estimate: a distance with no return time is energy with no instant to
+   * apply it to. With neither, the plan projects no drop and waits for the measured
+   * return rather than inventing one.
+   */
+  expected_return_time?: string;
   latest_end?: string;
   // Per-device overrides (Plan D)
   soft_deadline?: boolean;
@@ -557,6 +566,8 @@ export type EvSession = {
   /** Distance expected after this session's departure, in km. `null` = the user did
    *  not say, and the EV's own configured default is used. */
   expected_trip_distance_km: number | null;
+  /** When the car is expected back from that trip; null = not stated. */
+  expected_return_time: string | null;
   /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
   soft_deadline: boolean;
   mode: UserRequestMode;

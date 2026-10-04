@@ -44,6 +44,10 @@ pub struct CreateUserRequestBody {
     /// EV only: km expected after this session's departure. Absent = use the EV's
     /// own default, and say so in the plan rather than substituting silently.
     pub expected_trip_distance_km: Option<f64>,
+    /// EV only: when the car is expected back from that trip. Paired with the
+    /// distance above; a half-stated estimate is refused rather than completed by a
+    /// guess.
+    pub expected_return_time: Option<DateTime<Utc>>,
     pub latest_end: Option<DateTime<Utc>>,
     // ── Per-device overrides (Plan D) ────────────────────────────────────────
     pub soft_deadline: Option<bool>,
@@ -118,6 +122,7 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
             duration_min: b.duration_min,
             earliest_start: b.earliest_start,
             expected_trip_distance_km: b.expected_trip_distance_km,
+            expected_return_time: b.expected_return_time,
             latest_end: b.latest_end,
             soft_deadline: b.soft_deadline,
             target_temp_c: b.target_temp_c,

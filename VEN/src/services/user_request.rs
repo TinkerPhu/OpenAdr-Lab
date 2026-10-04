@@ -27,7 +27,20 @@ impl UserRequestService {
         // earliest this may begin" is exactly what a charging window's start is.
         // Absent means available now, which is what the single-slot era implied.
         let stated_window_start = body.earliest_start;
-        let expected_trip_distance_km = body.expected_trip_distance_km;
+        // The pair is enforced once, here, at the boundary that parses a submission.
+        // Below this line the domain type carries a whole estimate or none, so no
+        // reader downstream has to remember to check for the half-stated case.
+        let (expected_trip_distance_km, expected_return_time) =
+            match (body.expected_trip_distance_km, body.expected_return_time) {
+                (Some(km), Some(back)) => (Some(km), Some(back)),
+                (None, None) => (None, None),
+                (km, back) => {
+                    return Err(RequestError::IncompleteTripEstimate {
+                        has_distance: km.is_some(),
+                        has_return_time: back.is_some(),
+                    })
+                }
+            };
         let mut req = create_from_body(body, asset_data, now)?;
 
         let departure = req
@@ -48,6 +61,7 @@ impl UserRequestService {
             target_soc,
             window_start,
             expected_trip_distance_km,
+            expected_return_time,
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
@@ -281,6 +295,7 @@ mod tests {
             expected_trip_distance_km: None,
             soft_deadline: None,
             target_temp_c: None,
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let now = Utc::now();
@@ -314,6 +329,7 @@ mod tests {
             tolerance_min: None,
             soft_deadline: None,
             target_temp_c: None,
+            expected_return_time: None,
             replace_session_ids: None,
         }
     }
@@ -659,6 +675,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
@@ -698,6 +715,7 @@ mod tests {
             soft_deadline: None,
             target_temp_c: None,
             mode: Some(UserRequestMode::Asap),
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
@@ -734,6 +752,7 @@ mod tests {
             soft_deadline: None,
             target_temp_c: Some(55.0),
             mode: None,
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let (req, target) =
@@ -769,6 +788,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let result = UserRequestService::create_ev(body, &[ev_slice(0.5)], now);
@@ -807,6 +827,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: Some(55.0),
+            expected_return_time: None,
             replace_session_ids: None,
         };
         let (req, target) =
@@ -839,6 +860,7 @@ mod tests {
             latest_end: None,
             soft_deadline: None,
             target_temp_c: None,
+            expected_return_time: None,
             replace_session_ids: None,
         };
         assert!(UserRequestService::is_shiftable(&base));
@@ -847,6 +869,7 @@ mod tests {
             asset_id: ids::ASSET_EV.to_string(),
             power_kw: None,
             duration_min: None,
+            expected_return_time: None,
             replace_session_ids: None,
             ..base
         };

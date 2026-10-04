@@ -12,9 +12,7 @@ use chrono::{DateTime, Utc};
 
 use super::ev_trip_series;
 use super::EvCharger;
-use crate::controller::milp_planner::asset_port::{
-    EvMilpContext, EvMilpMode, EvObligation, ExogenousSocDrops,
-};
+use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, ExogenousSocDrops};
 use crate::entities::device_session::EvSession;
 
 /// WP4.1-c MAX_COST: per-kWh completion reward — an order of magnitude above any
