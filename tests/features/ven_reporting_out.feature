@@ -24,7 +24,7 @@ Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
   @r-76
   Scenario: A binding import allowance makes the VEN ask for more capacity
     Given I create a program named "reservation-request-test" and save its ID
-    And I create an event for the saved program granting 0.5 kW import capacity with a reportDescriptor of type "IMPORT_RESERVATION_CAPACITY" reporting every 5 seconds
+    And I create an event for the saved program granting 2 kW import capacity with a reportDescriptor of type "IMPORT_RESERVATION_CAPACITY" reporting every 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to submit an obligation-driven report for the event
     Then the latest VEN-1 report for the event has a "IMPORT_RESERVATION_CAPACITY" payload with a value above 0

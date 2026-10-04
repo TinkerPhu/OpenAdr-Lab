@@ -428,7 +428,7 @@ any obligation asking for that payload type.
 here was the R-76 defect. The chip and the payload stay silent at `0` whenever no allowance is
 declared — the normal state in this lab, where no program issues subscription or reservation
 events. To see a non-zero request, grant an allowance below the profile's physical rating, the way
-`tests/features/ven_reporting_out.feature`'s `@r-76` scenario does with 0.5 kW.
+`tests/features/ven_reporting_out.feature`'s `@r-76` scenario does with 2 kW.
 
 ### What is still NOT observable
 The other half of Step5: the **economics**. The VEN does not evaluate whether a reservation would

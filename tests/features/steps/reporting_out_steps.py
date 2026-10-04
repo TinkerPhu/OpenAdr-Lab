@@ -79,6 +79,11 @@ def step_create_capacity_granting_event_with_descriptor(context, kw, ptype, secs
     outbound `IMPORT_RESERVATION_CAPACITY` report non-zero: with no allowance
     declared at all nothing binds, so the honest request is 0 and the scenario
     would assert nothing.
+
+    Pick a value above the profile's base load (`test.yaml`: 0.5 kW) and well
+    below its 25 kW import rating. The allowance also caps the *planner's*
+    slots, so an allowance at or under base load leaves the solve no room for
+    anything else -- that would test infeasibility handling, not reporting.
     """
     _create_event_with_descriptor(
         context,
