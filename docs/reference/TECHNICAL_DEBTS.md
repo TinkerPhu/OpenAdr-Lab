@@ -378,6 +378,18 @@ and `constraints()` — shared by both paths — now references them, so the dua
 the same four. Their bounds (the SoC floor capped at the live reading, each slot's drop cap,
 each obligation's shortfall cap) are now written out twice.
 
+**Why a second thing waits on this (added 2026-10-04, R-76 follow-up).** `solver_duals` reads a
+shadow price off each slot's *power-balance* row only (`power_balance_refs`). Pricing an
+`IMPORT_RESERVATION_FEE` — the spec's companion to the `IMPORT_RESERVATION_CAPACITY` report R-76
+fixed, "amount per unit of import capacity that the VEN is willing to pay" — wants the dual on the
+*import-capacity* row instead, which nothing extracts today. That is the economically correct
+number (marginal willingness to pay for one more kW of allowance) and it would come from the same
+solve as the request, so one concept with one source. It is deliberately not attempted before
+this entry is settled: adding a second dual to a declaration that is already written out twice
+would widen exactly the divergence R-98 is about. Until then the VEN reports what capacity it
+wants and not what it is worth, which `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`'s
+UC-07 states plainly rather than leaving implied.
+
 **Why it is debt rather than a bug:** the two copies agree today, and the full suite passes. But
 the only thing keeping them in step is that someone remembers to edit both — exactly the shape
 `one-concept-one-function` exists to prevent, and the bounds involved are no longer trivial.

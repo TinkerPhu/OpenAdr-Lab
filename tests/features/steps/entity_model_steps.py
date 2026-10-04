@@ -55,20 +55,55 @@ def step_wait_seconds(context, seconds):
     time.sleep(seconds)
 
 
-@when('I poll VEN {path} until field "{field}" is present')
-def step_poll_ven_field_present(context, path, field):
-    """Poll a VEN endpoint until a dotted field path is non-None."""
+def _poll_ven_fields_present(context, path, fields, timeout):
+    """Poll a VEN endpoint until EVERY dotted field path is non-None.
+
+    The one implementation behind both the singular and plural step phrasings
+    below.
+
+    Polling for one field and then asserting a *second* one is a race, because
+    `then the response JSON has field` re-reads the snapshot this poll stored
+    rather than re-fetching: the snapshot is whichever response the first field
+    happened to appear in, and the asset that accumulates second is simply
+    absent from it. UC-12c failed exactly that way on a loaded host --- `pv`
+    (driven by an irradiance override) lands at once while `ev` waits for the
+    dispatcher to allocate and the simulator to integrate --- and passed on an
+    idle one, which is the signature of a test race rather than a defect.
+
+    So the fix is waiting for the right thing, not waiting longer. The plural
+    form does get a larger budget, for the structural reason that it waits on
+    several independent asynchronous arrivals and the slowest governs; it is
+    not a tolerance for lateness in any one of them.
+    """
+    wanted = [f.strip() for f in fields.split(",") if f.strip()]
+    assert wanted, f"no field names given: {fields!r}"
+
     def fetch():
         r = ven_get(path)
         r.raise_for_status()
         return r.json()
 
+    def all_present(data):
+        return all(_resolve_nested(data, f) is not None for f in wanted)
+
     context.last_response_json = poll_until(
         fetch,
-        lambda data: _resolve_nested(data, field) is not None,
-        timeout=15,
-        description=f"VEN {path} field '{field}' is present",
+        all_present,
+        timeout=timeout,
+        description=f"VEN {path} fields {wanted} all present",
     )
+
+
+@when('I poll VEN {path} until fields "{fields}" are present')
+def step_poll_ven_fields_present(context, path, fields):
+    """Comma-separated field paths, all of which must be present together."""
+    _poll_ven_fields_present(context, path, fields, timeout=30)
+
+
+@when('I poll VEN {path} until field "{field}" is present')
+def step_poll_ven_field_present(context, path, field):
+    """Single field; keeps its historical 15 s budget."""
+    _poll_ven_fields_present(context, path, field, timeout=15)
 
 
 @when('I poll VEN {path} until field "{field}" equals {expected:f}')

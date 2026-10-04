@@ -54,6 +54,8 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     When I POST a sim override with full PV irradiance
     And I wait for the VEN /plan to have an EV allocation in slots
-    And I poll VEN /ledger until field "pv" is present
+    # Both, together: polling for one and asserting the other reads whichever
+    # snapshot the first arrived in, and the second asset is absent from it.
+    And I poll VEN /ledger until fields "ev,pv" are present
     Then the response JSON has field "ev"
     And the response JSON has field "pv"
