@@ -55,7 +55,15 @@ op="$1"; owner="$2"; lease_min="$3"; desc="$4"; host="$5"
 lock="/tmp/openadr_$(echo "$host" | tr '[:upper:]' '[:lower:]').lock"
 now=$(date +%s)
 expiry=$(( now + lease_min * 60 ))
-write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner"; }
+# Written via a temp file and renamed: a plain `>` truncates in place, so a
+# concurrent reader can see an empty or half-written file. rename(2) is atomic
+# within one filesystem, so a reader sees the old owner or the new one, never a
+# partial record.
+write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner.$$" && mv -f "$lock/owner.$$" "$lock/owner"; }
+# True only for an expiry we actually parsed. "Could not read it" is not the
+# same answer as "it expired", and conflating the two is what let two acquirers
+# both believe they held the lock.
+valid_expiry() { case "${cur_expiry:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 read_owner()  { cur_owner=$(sed -n 1p "$lock/owner" 2>/dev/null)
                 cur_expiry=$(sed -n 2p "$lock/owner" 2>/dev/null)
                 cur_desc=$(sed -n 3p "$lock/owner" 2>/dev/null)
@@ -67,12 +75,25 @@ case "$op" in
     if mkdir "$lock" 2>/dev/null; then write_owner; echo "ACQUIRED (lease ${lease_min}min)"; exit 0; fi
     read_owner
     if [ "$cur_owner" = "$owner" ]; then write_owner; echo "ACQUIRED (re-entrant, lease renewed ${lease_min}min)"; exit 0; fi
-    if [ -z "$cur_expiry" ] || [ "$now" -ge "$cur_expiry" ]; then
+    if valid_expiry; then
+        if [ "$now" -ge "$cur_expiry" ]; then
+            write_owner
+            echo "ACQUIRED (stole dead lock from ${cur_owner:-unknown}, lease expired $(( -left_min ))min ago: ${cur_desc:-?})"
+            exit 0
+        fi
+        held_msg "HELD"; exit 1
+    fi
+    # Owner missing or unparsable. Either the winner of the mkdir is still writing
+    # it (microseconds) or it died between the mkdir and the write (forever).
+    # Waiting is right for the first and wrong for the second, so the lock's own
+    # age decides; anything younger than the grace period is a claim in flight.
+    lock_age=$(( now - $(stat -c %Y "$lock" 2>/dev/null || echo "$now") ))
+    if [ "$lock_age" -ge 120 ]; then
         write_owner
-        echo "ACQUIRED (stole dead lock from ${cur_owner:-unknown}, lease expired $(( -left_min ))min ago: ${cur_desc:-?})"
+        echo "ACQUIRED (stole a lock whose owner was never written, ${lock_age}s old)"
         exit 0
     fi
-    held_msg "HELD"; exit 1 ;;
+    echo "HELD by an acquirer still writing its claim (${lock_age}s old) - rerun"; exit 1 ;;
   release)
     [ -d "$lock" ] || { echo "NOT LOCKED"; exit 0; }
     read_owner
@@ -86,7 +107,9 @@ case "$op" in
   status)
     [ -d "$lock" ] || { echo "FREE"; exit 0; }
     read_owner
-    if [ "$now" -ge "${cur_expiry:-0}" ]; then
+    if ! valid_expiry; then
+        echo "HELD (owner unreadable - an acquirer mid-write, or one that died before writing)"
+    elif [ "$now" -ge "$cur_expiry" ]; then
         echo "DEAD (stealable) — was $cur_owner: ${cur_desc:-no description} (lease expired $(( -left_min ))min ago)"
     else
         held_msg "HELD"

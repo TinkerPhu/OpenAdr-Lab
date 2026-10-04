@@ -2912,3 +2912,39 @@ replacing a per-slot predicate with an index, write down what happens at each en
 range and at an exact boundary *before* trusting it — those were three separate failing tests,
 one of which (two trips' drop counted as one) would have silently corrupted every mid-trip
 replan on the fleet.
+
+## A mutex whose metadata is written non-atomically is not a mutex (2026-10-04)
+
+Two sessions both logged `ACQUIRED (lease 180min)` for Node2 within the same second, then
+one of them reset the host's checkout to its own branch while the other was still building
+against the previous one. The suite that was interrupted was testing `main`; the other was
+testing a feature branch.
+
+`mkdir` really is an atomic mutex, and that part was right. The hole was everything after it:
+
+```sh
+write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner"; }   # truncates in place
+...
+if [ -z "$cur_expiry" ] || [ "$now" -ge "$cur_expiry" ]; then write_owner   # steals
+```
+
+A `>` redirect truncates before it writes, so a reader arriving mid-write sees an empty
+file. The acquirer then read "no expiry" as "the holder crashed" and stole a lock that had
+been held for microseconds. The mutex was sound; the *claim* it protected was not, and the
+recovery path turned an unreadable claim into a free one.
+
+Three things generalise:
+
+- **"I could not read it" is not "it expired".** Any recovery path keyed on absent data will
+  eventually fire on data that is merely in flight. Validate before deciding: parse the
+  expiry, and treat an unparsable one as *held by someone unknown*.
+- **Publish metadata atomically.** Write to `owner.$$` and `mv` it into place; rename(2)
+  gives a reader the old record or the new one, never a torn one.
+- **A liveness escape hatch still needs a bound, not a guess.** An owner file that never
+  appears would deadlock forever under the stricter rule, so the lock directory's own mtime
+  decides: younger than the grace period is a claim in flight, older is a dead acquirer.
+
+And the part no lock can fix: the hosts have one working tree each and `run_all_tests.sh`
+resets it to the caller's branch, so *holding the lock is the only thing* that makes a suite
+run meaningful. Checking `status` before starting is not politeness, it is correctness -
+recorded as `one-checkout-per-host` in `.claude/CLAUDE.md`.

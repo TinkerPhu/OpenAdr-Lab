@@ -55,6 +55,18 @@ contention, since each holds its own lock. Same lease semantics and default
 submodule initialized, so all four suites (`--rust`, `--e2e`, `--resilience`, and the
 full run_all_tests.sh) run there too, not just `--rust`.
 
+one-checkout-per-host: each docker host has a SINGLE working tree at
+/srv/docker/openadr_lab, and `run_all_tests.sh` resets it to the branch of whoever
+invoked it. So two sessions cannot run a suite on the same host at once even when the
+lock works: the second `git reset --hard` pulls the tree out from under the first one's
+build, and both E2E runs would also collide on the shared compose project name
+(`openadr-test`) and its container names. The lock is what makes this safe - hold it for
+the whole run, and read `status` before assuming a host is free. Two sessions CAN work
+in parallel by taking different hosts (one on Node1, one on Node2); they cannot share
+one. Observed 2026-10-04: two sessions both believed they held Node2, one testing main
+and the other its own branch, and the checkout ended up on the second branch while the
+first was still building.
+
 test-host-preference: this project now has two build/test-capable docker hosts (Node1,
 Node2) alongside local WSL. Prefer Node2 for build/test runs (`DOCKER_HOST=Node2 bash
 run_all_tests.sh ...`) — Node1 also runs the always-on production VTN/BFF/VEN stack, so
