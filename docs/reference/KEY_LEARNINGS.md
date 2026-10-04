@@ -2888,3 +2888,27 @@ The compiler finds all of this eventually. The point is the cost of "eventually"
 whose only full Rust build is a 15-minute ARM64 docker run, each round trip is expensive enough
 that a 60-second local check pays for itself the first time it fires. Prefer anchors that cannot
 be ambiguous — a field unique to the target struct — and when none exists, verify rather than hope.
+
+## A predicate over slots is self-limiting; an index is not (2026-10-04)
+
+051 replaced several "ask each slot a question" formulations with "compute the slot index"
+ones, and produced three distinct edge-case defects from that one move:
+
+| the old question | the index that replaced it | what broke |
+| --- | --- | --- |
+| "has a trip ended at or before this slot's start?" | `return_slot(return_at)` | a return *past the horizon* was clamped into the last slot by `.min(n-1)`, so a mid-trip replan subtracted two trips' charge while modelling one |
+| "is the vehicle away at this slot's start?" | window-overlap test | a window clipping a slot's end marked it chargeable, so the plan drew full power through a slot the car is away for most of |
+| both of the above | one shared `slot_at` | deadlines and returns need *opposite* boundary rules, so every boundary-aligned drop landed a slot early |
+
+The pattern: a predicate evaluated per slot cannot place anything outside the horizon, cannot
+disagree with itself at a boundary, and cannot be reused for two different questions by
+accident — the slot loop supplies the bounds for free. An index computation has none of those
+properties, so each one needs its range guard and its boundary convention stated explicitly,
+and two different questions need two differently-named functions.
+
+Indexing is still the right choice here: it is O(uses) instead of O(slots x uses) and it is
+what let one derivation serve both producers. But the conversion is not mechanical. When
+replacing a per-slot predicate with an index, write down what happens at each end of the
+range and at an exact boundary *before* trusting it — those were three separate failing tests,
+one of which (two trips' drop counted as one) would have silently corrupted every mid-trip
+replan on the fleet.
