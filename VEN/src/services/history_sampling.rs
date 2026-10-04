@@ -26,12 +26,16 @@ struct AssetAcc {
     soc_pct_n: u32,
     temperature_c_sum: f64,
     temperature_c_n: u32,
+    /// Mean-shaped like `soc_pct`: each sample is 1.0 or 0.0, so the window mean is the
+    /// fraction of the window the asset was plugged in.
+    plugged_sum: f64,
+    plugged_n: u32,
     n: u32,
     /// PV curtailment: not a mean (categorical + intermittent). Tracks the highest-priority
     /// source seen this window (0=none, 1=plan, 2=capacity — matches
     /// `PvCurtailmentSource::as_f64()`) and the tightest limit value observed for that priority,
     /// so a brief capacity-sourced event is never masked by a plan-sourced or unlimited
-    /// majority within the same window. See `openspec/changes/pv-curtailment-history/`.
+    /// majority within the same window. See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
     curtailment_priority: u8,
     curtailment_limit_kw: Option<f64>,
 }
@@ -113,6 +117,10 @@ impl HistorySampler {
                 acc.temperature_c_sum += temp;
                 acc.temperature_c_n += 1;
             }
+            if let Some(plugged) = snap.val("plugged") {
+                acc.plugged_sum += plugged;
+                acc.plugged_n += 1;
+            }
             if let Some(limit_kw) = snap.val("generation_limit_kw") {
                 let priority = snap.val("curtailment_source").unwrap_or(0.0) as u8;
                 match priority.cmp(&acc.curtailment_priority) {
@@ -189,6 +197,7 @@ impl HistorySampler {
                     1 => Some("plan".to_string()),
                     _ => None,
                 },
+                plugged: (acc.plugged_n > 0).then(|| acc.plugged_sum / acc.plugged_n as f64),
             })
             .collect();
 
@@ -612,6 +621,38 @@ mod tests {
             (ticks[0].generation_limit_kw.unwrap() - (-1.5)).abs() < 1e-9,
             "the tighter (less negative) value within the same priority must win, got {:?}",
             ticks[0].generation_limit_kw
+        );
+    }
+
+    #[test]
+    fn flush_plugged_is_the_window_mean_of_the_plugged_state() {
+        let mut sampler = HistorySampler::new();
+        for (i, plugged) in [1.0, 1.0, 0.0, 0.0].into_iter().enumerate() {
+            let now = ts(i as i64 * 10);
+            let mut sim = snap(now, 1.0, Some(0.5));
+            sim.assets
+                .get_mut("ev")
+                .unwrap()
+                .values
+                .insert("plugged".to_string(), plugged);
+            sampler.record(now, &sim, &[], &[], None);
+        }
+        let (ticks, _) = sampler.flush().expect("a partial window still flushes");
+        assert_eq!(
+            ticks[0].plugged,
+            Some(0.5),
+            "plugged for half the window's samples"
+        );
+    }
+
+    #[test]
+    fn flush_plugged_is_none_for_an_asset_without_a_plugged_state() {
+        let mut sampler = HistorySampler::new();
+        sampler.record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[], &[], None);
+        let (ticks, _) = sampler.flush().unwrap();
+        assert_eq!(
+            ticks[0].plugged, None,
+            "no `plugged` value reported: nothing to record, never a 0 that reads as away"
         );
     }
 }

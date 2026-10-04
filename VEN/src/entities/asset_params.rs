@@ -270,7 +270,7 @@ impl PvParams {
 
 /// Which source produced the currently-resolved PV generation limit. `None` means neither
 /// the plan nor a live capacity source is imposing a limit. On a tie (plan and capacity
-/// resolve to the same limit value), `Plan` wins — see `openspec/changes/pv-curtailment-history/`.
+/// resolve to the same limit value), `Plan` wins — see `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
 /// R-59: `CommsLoss` is listed last so it wins exact ties over every other source, including
 /// `Manual` — a comms-loss safety fallback should win against a possibly-stale manual override
 /// left over from before the VTN became unreachable.

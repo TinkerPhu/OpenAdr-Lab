@@ -1,7 +1,7 @@
 # Technical Debts Register
 
-> **Next ID: R-101.** Use this number for the next new item filed, then increment this
-> line to R-102. (R-98 came from `048-ev-soc-state-variables` and R-99 from
+> **Next ID: R-103.** Use this number for the next new item filed, then increment this
+> line to R-104. (R-101 and R-102 were issued and fixed on `052-ev-plugged-band`.) (R-98 came from `048-ev-soc-state-variables` and R-99 from
 > `fix/fleet-chart-precondition`, both merged; R-100 is issued on this branch for the
 > disabled VTN session path. The line counts every ID ever issued, so on a merge keep
 > the higher number rather than the one either branch alone would suggest.) (Corrected

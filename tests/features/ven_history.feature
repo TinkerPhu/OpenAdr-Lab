@@ -97,6 +97,13 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     And the response JSON has field "current"
     And the response JSON has field "closed_periods"
 
+  # ev-plugged-band: the one-minute sampler records the fraction of the minute the EV
+  # was plugged in, which is what the History page's EV chart shades from.
+  @history
+  Scenario: Persisted EV history rows carry the plugged fraction
+    When I poll /history/ticks for an "ev" row with a numeric "plugged" within 150s
+    Then every polled history row carries "plugged" as a fraction between 0 and 1 or null
+
   @ven-ui
   Scenario: The History UI page opens via the nav bar
     Given I open the VEN-1 History UI

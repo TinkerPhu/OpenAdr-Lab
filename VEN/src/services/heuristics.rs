@@ -223,6 +223,7 @@ pub fn generate_synthetic_backfill(
             temperature_c: None,
             generation_limit_kw: None,
             curtailment_source: None,
+            plugged: None,
         });
         ts += Duration::minutes(1);
     }

@@ -96,7 +96,7 @@ pub struct ResolvedPvGenerationLimit {
 /// exact moment, so curtailment can be recorded as planned/unplanned/arbiter-driven/manual
 /// without ever reconstructing past plans. On an exact tie, the later-listed source in
 /// `candidates` below wins (preserves the pre-existing "plan wins ties over capacity" rule —
-/// see `openspec/changes/pv-curtailment-history/` — and extends it so arbiter wins ties over
+/// see `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History) — and extends it so arbiter wins ties over
 /// both, and manual — the most deliberate/explicit source — wins ties over all three).
 pub fn resolve_pv_generation_limit_kw(
     plan: Option<&Plan>,

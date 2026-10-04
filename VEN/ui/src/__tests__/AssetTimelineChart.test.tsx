@@ -2,8 +2,8 @@
  * AssetTimelineChart — PV curtailment shading
  *
  * Verifies the three curtailment states (hardware-capped, planned, unplanned) render
- * distinct ReferenceArea bands, and that uncurtailed data renders none. See
- * openspec/changes/pv-curtailment-history/.
+ * distinct ReferenceArea bands, and that uncurtailed data renders none. The
+ * classification itself is declared in components/controller/assetChartSpecs.ts.
  */
 import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -47,9 +47,12 @@ vi.mock("recharts", () => ({
 }));
 
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
+import { assetChartSpec } from "../components/controller/assetChartSpecs";
 import type { ForecastAccuracySample } from "../api/types";
 
 const now = new Date("2026-01-01T12:00:00Z").getTime();
+const pvShadings = assetChartSpec("pv").shadings;
+const evShadings = assetChartSpec("ev").shadings;
 const minute = 60_000;
 
 function point(offsetMs: number, values: Record<string, number>): AssetTimelinePoint {
@@ -79,7 +82,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
       point(-2 * minute, { power_kw: -3.0 }),
       point(-1 * minute, { power_kw: -3.0 }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(0);
   });
 
@@ -88,7 +91,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
       point(-2 * minute, { power_kw: -5.0, inverter_max_kw: 5.0 }),
       point(-1 * minute, { power_kw: -5.0, inverter_max_kw: 5.0 }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("120,120,120");
   });
@@ -102,7 +105,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
         inverter_max_kw: 5.0,
       }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("120,120,120");
   });
@@ -116,7 +119,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
         inverter_max_kw: 5.0,
       }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("230,160,20");
   });
@@ -130,7 +133,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
         inverter_max_kw: 5.0,
       }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("210,30,30");
   });
@@ -144,7 +147,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
         inverter_max_kw: 5.0,
       }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("210,30,30");
   });
@@ -158,25 +161,25 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
         inverter_max_kw: 5.0,
       }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("210,30,30");
   });
 
   it("renders a planned band for a future slot where pv_used_kw is below pv_forecast_kw", () => {
     const data = [point(2 * minute, { power_kw: -3.0, pv_forecast_kw: 5.0 })];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(1);
     expect(referenceAreas[0].fill).toContain("230,160,20");
   });
 
   it("renders no band for a future slot where pv_used_kw equals pv_forecast_kw", () => {
     const data = [point(2 * minute, { power_kw: -5.0, pv_forecast_kw: 5.0 })];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
     expect(referenceAreas).toHaveLength(0);
   });
 
-  it("does not shade curtailment for non-PV charts (pvCurtailment omitted)", () => {
+  it("does not shade curtailment for a chart that declares no shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -2.0,
@@ -191,6 +194,80 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
 });
 
 // forecast-accuracy-tracking (task 6.3)
+describe("AssetTimelineChart — EV unplugged shading", () => {
+  beforeEach(() => {
+    referenceAreas.length = 0;
+  });
+
+  const render_ = (data: AssetTimelinePoint[]) =>
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={evShadings} />);
+
+  it("renders no band while the EV is plugged in", () => {
+    render_([
+      point(-2 * minute, { power_kw: 3, plugged: 1 }),
+      point(2 * minute, { power_kw: 3, plugged: 1 }),
+    ]);
+    expect(referenceAreas).toHaveLength(0);
+  });
+
+  it("renders no band for points that carry no plugged value", () => {
+    render_([point(-2 * minute, { power_kw: 0 }), point(2 * minute, { power_kw: 0 })]);
+    expect(referenceAreas).toHaveLength(0);
+  });
+
+  it("shades a measured unplugged period and a predicted one distinctly", () => {
+    render_([
+      point(-2 * minute, { power_kw: 0, plugged: 0 }),
+      point(-1 * minute, { power_kw: 0, plugged: 0 }),
+      point(1 * minute, { power_kw: 0, plugged: 0 }),
+      point(2 * minute, { power_kw: 0, plugged: 0 }),
+    ]);
+    expect(referenceAreas).toHaveLength(2);
+    const [measured, predicted] = referenceAreas;
+    expect(measured.className).toBe("state-shading-ev-unplugged");
+    expect(predicted.className).toBe("state-shading-ev-predicted_away");
+    expect(measured.x2).toBe(now + 1 * minute);
+    expect(predicted.x1).toBe(now + 1 * minute);
+    expect(predicted.fill).not.toBe(measured.fill);
+    expect(measured.strokeDasharray).toBeUndefined();
+    expect(predicted.strokeDasharray).toBeDefined();
+  });
+
+  it("shades a half-plugged bucket at half the opacity of a fully unplugged one", () => {
+    render_([
+      point(-3 * minute, { power_kw: 0, plugged: 0 }),
+      point(-2 * minute, { power_kw: 0, plugged: 0.5 }),
+      point(-1 * minute, { power_kw: 0, plugged: 1 }),
+    ]);
+    expect(referenceAreas).toHaveLength(2);
+    const alpha = (fill: unknown) => Number(String(fill).match(/,([\d.]+)\)$/)![1]);
+    expect(alpha(referenceAreas[1].fill)).toBeCloseTo(alpha(referenceAreas[0].fill) / 2, 4);
+    expect(referenceAreas[0].fillOpacity).toBe(1);
+  });
+
+  it("does not span a hole in the data when shadingMaxGapMs is given", () => {
+    render(
+      <AssetTimelineChart
+        data={[
+          point(-200 * minute, { power_kw: 0, plugged: 0 }),
+          point(-199 * minute, { power_kw: 0, plugged: 0 }),
+          point(-10 * minute, { power_kw: 0, plugged: 0 }),
+          point(-9 * minute, { power_kw: 0, plugged: 1 }),
+        ]}
+        color="#000"
+        nowMs={now}
+        hoursBack={24}
+        hoursForward={0}
+        shadings={evShadings}
+        shadingMaxGapMs={5 * minute}
+      />,
+    );
+    expect(referenceAreas).toHaveLength(2);
+    expect(referenceAreas[0].x2).toBe(now - 198 * minute);
+    expect(referenceAreas[1].x1).toBe(now - 10 * minute);
+  });
+});
+
 describe("AssetTimelineChart — near/far forecast overlay", () => {
   beforeEach(() => {
     lines.length = 0;
@@ -346,7 +423,7 @@ describe("AssetTimelineChart — rounded Y-axis labels on a PV-shaped cell", () 
       point(-2 * minute, { power_kw: -3.17, cost_rate_eur_h: -0.4172, co2_rate_g_h: -617.3 }),
       point(-1 * minute, { power_kw: -2.83, cost_rate_eur_h: -0.3311, co2_rate_g_h: -498.1 }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
 
     const visible = yAxes.filter((a) => a.ticks !== undefined);
     expect(visible.length).toBe(3);
@@ -363,7 +440,7 @@ describe("AssetTimelineChart — rounded Y-axis labels on a PV-shaped cell", () 
       point(-2 * minute, { power_kw: -3.17, cost_rate_eur_h: -0.4172, co2_rate_g_h: -617.3 }),
       point(-1 * minute, { power_kw: -2.83, cost_rate_eur_h: -0.3311, co2_rate_g_h: -498.1 }),
     ];
-    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} shadings={pvShadings} />);
 
     for (const axis of yAxes.filter((a) => a.ticks !== undefined)) {
       const format = axis.tickFormatter as (v: number) => string;

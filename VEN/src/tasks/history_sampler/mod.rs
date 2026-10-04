@@ -287,6 +287,7 @@ mod tests {
                 temperature_c: None,
                 generation_limit_kw: None,
                 curtailment_source: None,
+                plugged: None,
             }],
             GridSample {
                 ts: ts(0),

@@ -17,3 +17,8 @@ Feature: Controller V2 — Simulation Controls
   Scenario: Toggling EV plugged switch triggers a POST to sim override
     When I toggle the EV plugged switch in the controller V2 EV cell
     Then the EV plugged state changes in VEN-1 sim override
+
+  @ven-ui
+  Scenario: Unplugging the EV shades its timeline chart
+    When I POST a sim override setting ev_plugged to false
+    Then the EV timeline chart shows an unplugged band

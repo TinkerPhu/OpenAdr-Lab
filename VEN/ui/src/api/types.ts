@@ -800,6 +800,9 @@ export type HistoryTickSample = {
   power_kw: number;
   soc_pct: number | null;
   temperature_c: number | null;
+  /** Fraction of the minute the asset reported itself plugged in (0..1, 1 = plugged).
+   * `null` for assets with no plugged state and for rows written before the column existed. */
+  plugged: number | null;
 };
 
 export type HistoryGridSample = {

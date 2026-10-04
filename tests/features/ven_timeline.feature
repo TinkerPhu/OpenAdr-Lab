@@ -56,3 +56,14 @@ Feature: VEN Asset Timeline Endpoints
   Scenario: Future heater timeline points carry planner T_tank forecast
     When I poll /timeline/heater for future points with "temp_c" key within 90s
     Then the response has at least one future point with values key "temp_c"
+
+  # ev-plugged-band: the plan's predicted presence rides next to the planned SoC.
+  Scenario: Future EV timeline points carry the predicted plugged state
+    When I poll /timeline/ev for future points with "plugged" key within 90s
+    Then the response has at least one future point with values key "plugged"
+
+  # ev-plugged-band: the measured plug state is on the now-point, 1 = plugged.
+  Scenario: Unplugging the EV shows on the EV timeline's now-point
+    When I POST a sim override setting ev_plugged to false
+    And I poll the /timeline/ev now-point until "plugged" equals 0 within 30s
+    Then the polled now-point has "plugged" equal to 0

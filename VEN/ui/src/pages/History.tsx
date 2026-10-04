@@ -13,8 +13,13 @@ import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvel
 import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
 import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
+import { assetChartSpec } from "../components/controller/assetChartSpecs";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
 import type { ForecastAccuracySample, SiteFlexibilitySample } from "../api/types";
+
+/** History rows are one-minute means (`history_sampling.rs`). Rows further apart than this
+ * mean the VEN was not sampling — a shading must not paint a state across that hole. */
+const HISTORY_MAX_GAP_MS = 5 * 60_000;
 
 /** forecast-accuracy-tracking: only these three assets get near/far forecast samples
  * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
@@ -147,6 +152,8 @@ export function HistoryPage() {
           power_kw: row.power_kw,
           ...(row.soc_pct !== null ? { soc: row.soc_pct / 100 } : {}),
           ...(row.temperature_c !== null ? { temp_c: row.temperature_c } : {}),
+          // `!= null`, not `!== null`: a VEN that predates the column omits the key.
+          ...(row.plugged != null ? { plugged: row.plugged } : {}),
         },
       });
       map.set(row.asset_id, points);
@@ -249,8 +256,7 @@ export function HistoryPage() {
       />
 
       {[...ticksByAsset.entries()].map(([assetId, points]) => {
-        const hasSoc = points.some((p) => p.values?.soc !== undefined);
-        const hasTemp = points.some((p) => p.values?.temp_c !== undefined);
+        const chartSpec = assetChartSpec(assetId);
         const isForecastTracked = (FORECAST_TRACKED_ASSETS as readonly string[]).includes(assetId);
         const forecast = isForecastTracked ? forecastByAsset[assetId] : undefined;
         return (
@@ -262,7 +268,9 @@ export function HistoryPage() {
               nowMs={toMs}
               hoursBack={24}
               hoursForward={0}
-              stateKey={hasSoc ? "soc" : hasTemp ? "temp_c" : undefined}
+              stateKey={chartSpec.stateKey}
+              shadings={chartSpec.shadings}
+              shadingMaxGapMs={HISTORY_MAX_GAP_MS}
               nearForecast={forecast?.filter((s) => s.lead_kind === "near")}
               farForecast={forecast?.filter((s) => s.lead_kind === "far")}
               xAxisTickIntervalMinutes={30}

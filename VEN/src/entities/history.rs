@@ -22,13 +22,18 @@ pub struct TickSample {
     /// `None` when no source commanded any limit during the whole window — never a sentinel
     /// value. Within a window, the highest-priority source (capacity > plan) determines both
     /// this and `curtailment_source`, so a brief unplanned event is never masked by surrounding
-    /// plan-sourced or unlimited samples. See `openspec/changes/pv-curtailment-history/`.
+    /// plan-sourced or unlimited samples. See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
     #[serde(default)]
     pub generation_limit_kw: Option<f64>,
     /// Source of `generation_limit_kw`: `"plan"` or `"capacity"`. `None` iff `generation_limit_kw` is
     /// `None`.
     #[serde(default)]
     pub curtailment_source: Option<String>,
+    /// Fraction of this window the asset reported itself plugged in (0..1; 1 = the whole
+    /// window). `None` for an asset that reports no `plugged` state, and for rows written
+    /// before schema v12 — never a 0, which would read as "away".
+    #[serde(default)]
+    pub plugged: Option<f64>,
 }
 
 /// Site-level grid exchange and prevailing tariff over a 1-minute downsample window.

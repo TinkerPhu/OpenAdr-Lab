@@ -13,6 +13,7 @@ pub(super) fn fill_planned_state(
     slots: &mut [PlanTimeSlot],
     n: usize,
     sol: &SolveOutput,
+    a_ev: &[bool],
     battery_cfg: Option<&BatteryParams>,
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
@@ -31,12 +32,16 @@ pub(super) fn fill_planned_state(
     // EV SoC forecast — R-93: read straight off the solved `soc_ev` series. The
     // charging decisions, the trip drops and the floor were all resolved inside
     // the solve, so there is no integrator here to drift from the plan.
+    // Predicted presence is `a_ev[t]`, the mask that solve ran under: a slot missing
+    // from it was never chargeable, which is what "not plugged" means to the plan.
     if let Some(ev_cfg) = ev_cfg {
-        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and sol.soc_ev[]
+        #[allow(clippy::needless_range_loop)] // t indexes slots[], sol.soc_ev[] and a_ev[]
         for t in 0..n.min(sol.soc_ev.len()) {
-            slots[t]
-                .planned_state_by_asset
-                .insert(ev_cfg.id.clone(), ev_future_state_at(sol.soc_ev[t]));
+            let plugged = a_ev.get(t).copied().unwrap_or(false);
+            slots[t].planned_state_by_asset.insert(
+                ev_cfg.id.clone(),
+                ev_future_state_at(sol.soc_ev[t], plugged),
+            );
         }
     }
     // Heater T_tank forecast — e_heat_tank_kwh[t] is stored energy above temp_min_c.

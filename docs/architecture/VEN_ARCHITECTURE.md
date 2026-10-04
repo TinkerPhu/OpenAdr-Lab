@@ -1589,7 +1589,13 @@ impl TimeSeries {
 - **Obligation reports** (`controller/reporter.rs`): `resample_uniform` buckets net site
   power onto the obligation's `intervalPeriod` grid; SoC is sampled at each interval end.
 - **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
-  averaging for the UI chart.
+  averaging for the UI chart. An asset's state values travel with its power: past points
+  carry the asset's own `state_values` (so the EV's `plugged`, 1.0/0.0 per tick, resamples
+  to the fraction of the bucket it was plugged in), and future points carry the plan's
+  `planned_state_by_asset` — for the EV `{soc, plugged}`, where `plugged` is the per-slot
+  availability mask the solve ran under (`EvMilpContext::a_ev`: live plug state, stated
+  sessions, usage forecast). The persisted one-minute history (`tick_samples`) records the
+  same `plugged` as a window mean, `NULL` for assets that report none.
 
 **Time windows** (`entities/time_window.rs`, R-83): every window-shaped thing in the VEN —
 alert/SIMPLE/dispatch windows, capacity and tariff segments, an event's timed intervals, a

@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 11;
+pub(super) const SCHEMA_VERSION: i64 = 12;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -185,4 +185,11 @@ CREATE INDEX idx_plan_history_created_at ON plan_history(created_at);
 pub(super) const SCHEMA_V11: &str = "
 ALTER TABLE grid_samples ADD COLUMN up_kw REAL;
 ALTER TABLE grid_samples ADD COLUMN down_kw REAL;
+";
+
+/// ev-plugged-band: fraction of the window an asset reported itself plugged in (0..1),
+/// mean-shaped like `soc_pct`. `NULL` for assets with no `plugged` state and for every
+/// row written before this version — see `entities::history::TickSample::plugged`.
+pub(super) const SCHEMA_V12: &str = "
+ALTER TABLE tick_samples ADD COLUMN plugged REAL;
 ";
