@@ -872,8 +872,27 @@ mod milp_context_trait_tests {
             EvMilpMode::MustRun,
             "a target must be planned for"
         );
-        // Departs 08:00 -> deadline is the 08:00 slot.
-        assert_eq!(ctx.obligations[0].deadline_step, 8);
+        // Derived from the trip rather than hard-coded. The departure carries +/-10 min
+        // of jitter, so whether 08:00 lands in slot 7 or 8 is a property of the seed,
+        // not of the behaviour under test - and a literal 8 asserts the seed. What is
+        // actually required is that the deadline is the slot the departure falls in:
+        // its window must bracket the departure, so being ready by it means being ready
+        // before the car leaves.
+        let trip = super::ev_schedule::next_trip_after(
+            cfg.usage_sim.as_ref().unwrap(),
+            cfg.usage_sim_seed_tag,
+            now,
+            now + chrono::Duration::seconds(cum_s[n]),
+        )
+        .expect("a trip inside the horizon");
+        let step = ctx.obligations[0].deadline_step;
+        let slot_end = now + chrono::Duration::seconds(cum_s[step + 1]);
+        let slot_start = now + chrono::Duration::seconds(cum_s[step]);
+        assert!(
+            slot_start < trip.leave_at && trip.leave_at <= slot_end,
+            "deadline slot {step} [{slot_start}, {slot_end}] must bracket the departure {}",
+            trip.leave_at
+        );
         // soc 0.30 -> soc_target 0.80 over a 60 kWh pack = 30 kWh.
         assert!(
             (ctx.firm_required_kwh() - 30.0).abs() < 1e-9,
