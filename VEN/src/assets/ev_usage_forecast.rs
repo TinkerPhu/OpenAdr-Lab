@@ -150,6 +150,25 @@ fn predicted_uses(
         window_open = trip.return_at;
         cursor = trip.leave_at;
     }
+    // A vehicle with no trip left in the horizon is at home for the rest of it, and
+    // that has to be said rather than left implicit: an empty series means "no windows"
+    // to the derivation, which would mark every slot unchargeable. A profile with a low
+    // `leave_probability` genuinely has days with no trip at all, so this is the common
+    // case and not an edge one — getting it wrong would have been worse than the defect
+    // this change set out to fix, since the vehicle could never charge.
+    //
+    // Nothing to be ready for, so not firm; nothing consumed, so no drop. It states a
+    // fact — the car is here — and no goal.
+    if window_open < horizon_end {
+        uses.push(ExpectedVehicleUse {
+            window_start: window_open,
+            departure_at: horizon_end,
+            target_soc: cfg.soc_target,
+            firm: false,
+            consumption: None,
+            session_id: None,
+        });
+    }
     uses
 }
 

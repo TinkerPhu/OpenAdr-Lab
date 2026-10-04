@@ -147,15 +147,33 @@ pub fn plan_inputs(
     }
     let available_per_slot = (0..n)
         .map(|t| {
-            // Overlap, not "the window contains the slot's start": GB-54 aligns a
-            // plan's `now` to the slot grid, so a session created at 15:25 sits
-            // inside a slot that began at 15:00. Testing the start locked the EV out
-            // of the whole slot in progress — and the first slot is exactly where
-            // dispatch acts.
             let (slot_start, slot_end) = slot_bounds(cum_s, t, now);
-            windows
-                .iter()
-                .any(|(open, close)| *open < slot_end && slot_start < *close)
+            windows.iter().any(|(open, close)| {
+                // A window must already be open when the slot starts — except in the
+                // slot in progress, where a window opening part-way through still
+                // counts. Those are two different situations, not one rule with an
+                // exception:
+                //
+                // GB-54 aligns a plan's `now` to the slot grid, so a session created
+                // at 15:25 belongs to a slot that began at 15:00. Requiring the window
+                // to pre-date the slot start locked the EV out of the whole slot in
+                // progress — up to an hour of charging lost, in the one slot dispatch
+                // actually acts on.
+                //
+                // Later slots are a different question. Treating a mid-slot opening as
+                // chargeable there would let the plan draw full power through a slot
+                // the vehicle is away for most of — promising charge the charger
+                // refuses, which is exactly the class of defect the charge-limit fix
+                // removed. So from slot 1 on, the vehicle must be present at the
+                // slot's start, which is also what `is_away_at` answers and therefore
+                // what the live tick will do.
+                let opened_in_time = if t == 0 {
+                    *open < slot_end
+                } else {
+                    *open <= slot_start
+                };
+                opened_in_time && slot_start < *close
+            })
         })
         .collect();
 
