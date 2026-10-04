@@ -42,13 +42,16 @@ def step_expand_diagnostics(context):
     accordion = page.wait_for_selector(sel, timeout=45000)
     if "Mui-expanded" not in (accordion.get_attribute("class") or ""):
         accordion.click()
-        page.wait_for_selector(f"{sel}.Mui-expanded", timeout=10000)
+        # 45 s like every other wait in this file: the class flips synchronously with
+        # the click, but on a loaded host the click itself can land late. Observed
+        # 2026-10-04 on Node2: the accordion was expanded when the 10 s wait expired.
+        page.wait_for_selector(f"{sel}.Mui-expanded", timeout=45000)
     page.wait_for_function(
         """() => {
             const root = document.querySelector('[data-testid="planner-diagnostics-accordion"] .MuiCollapse-root');
             return root && root.getBoundingClientRect().height > 10;
         }""",
-        timeout=10000,
+        timeout=45000,
     )
 
 
