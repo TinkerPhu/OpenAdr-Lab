@@ -32,8 +32,8 @@ struct AssetAcc {
     plugged_n: u32,
     n: u32,
     /// PV curtailment: not a mean (categorical + intermittent). Tracks the highest-priority
-    /// source seen this window (0=none, 1=plan, 2=capacity — matches
-    /// `PvCurtailmentSource::as_f64()`) and the tightest limit value observed for that priority,
+    /// source seen this window (`PvCurtailmentSource::as_f64()`: 0 none, 1 plan, 2 capacity,
+    /// 3 arbiter, 4 manual, 5 comms-loss — persisted as that same code) and the tightest limit value observed for that priority,
     /// so a brief capacity-sourced event is never masked by a plan-sourced or unlimited
     /// majority within the same window. See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
     curtailment_priority: u8,
@@ -192,11 +192,8 @@ impl HistorySampler {
                 temperature_c: (acc.temperature_c_n > 0)
                     .then(|| acc.temperature_c_sum / acc.temperature_c_n as f64),
                 generation_limit_kw: acc.curtailment_limit_kw,
-                curtailment_source: match acc.curtailment_priority {
-                    2 => Some("capacity".to_string()),
-                    1 => Some("plan".to_string()),
-                    _ => None,
-                },
+                curtailment_source: (acc.curtailment_priority > 0)
+                    .then_some(f64::from(acc.curtailment_priority)),
                 plugged: (acc.plugged_n > 0).then(|| acc.plugged_sum / acc.plugged_n as f64),
             })
             .collect();
@@ -557,7 +554,7 @@ mod tests {
         );
         let (ticks, _) = sampler.flush().unwrap();
         assert!((ticks[0].generation_limit_kw.unwrap() - (-2.0)).abs() < 1e-9);
-        assert_eq!(ticks[0].curtailment_source.as_deref(), Some("plan"));
+        assert_eq!(ticks[0].curtailment_source, Some(1.0), "plan");
     }
 
     #[test]
@@ -589,8 +586,8 @@ mod tests {
         );
         let (ticks, _) = sampler.flush().unwrap();
         assert_eq!(
-            ticks[0].curtailment_source.as_deref(),
-            Some("capacity"),
+            ticks[0].curtailment_source,
+            Some(2.0),
             "a brief capacity-sourced event must win over a plan-sourced majority"
         );
         assert!(
@@ -654,5 +651,25 @@ mod tests {
             ticks[0].plugged, None,
             "no `plugged` value reported: nothing to record, never a 0 that reads as away"
         );
+    }
+
+    // R-101: the stored source is `PvCurtailmentSource::as_f64()`, the code the live
+    // timeline carries — so arbiter, manual and comms-loss limits keep their source
+    // instead of being stored with a limit and no source at all.
+    #[test]
+    fn flush_stores_every_source_as_its_live_code() {
+        for code in [3.0, 4.0, 5.0] {
+            let mut sampler = HistorySampler::new();
+            sampler.record(
+                ts(0),
+                &pv_snap(ts(0), -2.0, Some((-2.0, code))),
+                &[],
+                &[],
+                None,
+            );
+            let (ticks, _) = sampler.flush().unwrap();
+            assert_eq!(ticks[0].curtailment_source, Some(code));
+            assert!(ticks[0].generation_limit_kw.is_some());
+        }
     }
 }

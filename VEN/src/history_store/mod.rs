@@ -1355,7 +1355,7 @@ mod tests {
     }
 
     #[test]
-    fn migrate_v11_to_v12_keeps_tick_rows_and_reads_plugged_as_null() {
+    fn migrate_v11_to_v12_keeps_tick_rows_and_converts_the_curtailment_source() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(schema::SCHEMA_V1).unwrap();
         conn.execute_batch(schema::SCHEMA_V2).unwrap();
@@ -1374,15 +1374,30 @@ mod tests {
             params![100_i64],
         )
         .unwrap();
+        // R-101: v11 stored the source as a name; v12 stores the live code.
+        conn.execute(
+            "INSERT INTO tick_samples (ts, asset_id, power_kw, generation_limit_kw, curtailment_source)
+             VALUES (?1, 'pv', -2.0, -2.0, 'capacity'), (?2, 'pv', -2.0, -2.0, 'plan')",
+            params![110_i64, 120_i64],
+        )
+        .unwrap();
 
         let store = SqliteHistoryStore::from_connection(conn).expect("v11→v12 migration");
         let rows = store
-            .query_ticks(from_unix(0).unwrap(), from_unix(200).unwrap(), None)
+            .query_ticks(from_unix(0).unwrap(), from_unix(200).unwrap(), Some("ev"))
             .unwrap();
         assert_eq!(rows.len(), 1, "existing row survives the column addition");
         assert_eq!(
             rows[0].plugged, None,
             "pre-migration row reads back NULL, not a 0 that would read as away"
+        );
+        let pv = store
+            .query_ticks(from_unix(0).unwrap(), from_unix(200).unwrap(), Some("pv"))
+            .unwrap();
+        assert_eq!(
+            pv.iter().map(|r| r.curtailment_source).collect::<Vec<_>>(),
+            vec![Some(2.0), Some(1.0)],
+            "stored names become the live codes"
         );
     }
 }

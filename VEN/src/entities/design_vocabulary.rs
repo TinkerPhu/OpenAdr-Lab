@@ -42,6 +42,14 @@ impl UserRequestMode {
     pub fn states_a_firm_deadline(&self) -> bool {
         matches!(self, Self::ByDeadline | Self::Asap)
     }
+
+    /// Whether this mode's deadline ends its charging window. The deadline modes
+    /// charge *for* a departure, so nothing is charged after it. The others charge
+    /// whenever their own condition holds (free energy, a budget) and carry a
+    /// deadline only because the request shape has one.
+    pub fn charges_until_departure(&self) -> bool {
+        matches!(self, Self::ByDeadline | Self::Asap | Self::ByDeadlineFree)
+    }
 }
 
 /// BY_DEADLINE is the pre-mode implicit behaviour: cost-aware completion by a

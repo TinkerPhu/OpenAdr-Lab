@@ -15,7 +15,7 @@ pub(super) type TickSampleRow = (
     Option<f64>,
     Option<f64>,
     Option<f64>,
-    Option<String>,
+    Option<f64>,
     Option<f64>,
 );
 

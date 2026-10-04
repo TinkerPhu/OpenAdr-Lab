@@ -14490,5 +14490,24 @@ The review of this proposal correctly found that `a_ev` was not presence. Four d
 work later the opposite was true. Re-reading the code the design names, before the first
 edit, is what caught it; the task list alone would have built the wrong thing well.
 
-**Filed:** R-101 (History cannot show PV curtailment; string vs numeric `curtailment_source`),
-R-102 (non-deadline sessions stay chargeable past a stated departure).
+**Issues found and fixed on the branch** (filed as R-101/R-102, then fixed under the
+"solve issues when they pop up" rule):
+
+- *R-101 — the History page could not show PV curtailment.* The store wrote the source as
+  the names `"plan"`/`"capacity"` while the live timeline carries the numeric
+  `PvCurtailmentSource::as_f64()` code, and the sampler mapped only codes 1 and 2, so an
+  arbiter-, manual- or comms-loss-sourced limit was stored with a value and no source. Now
+  the code is the one vocabulary: `TickSample.curtailment_source` is that number, schema v12
+  converts existing rows (rename, add a REAL column, convert, drop — a TEXT column would
+  have stored the code as text), and the History page passes the PV fields to the same
+  declared shading the Control page uses. The classifier also treated comms-loss (5) as
+  "planned"; every source but the plan is now "unplanned". `/history/ticks` changes its
+  `curtailment_source` from string to number; nothing consumed the string.
+- *R-102 — opportunistic, free and budget sessions stayed chargeable through a stated
+  trip.* Their `from_state` arms set `a_ev` all-true while the trip's SoC drop was still
+  booked at the return. Every arm now takes the one mask from `ev_trip_series::plan_inputs`.
+  For those modes a bare `departure_time` is stated as "no departure" (the horizon end, as
+  the usage forecast states a car that stays home), because their deadline does not end
+  charging; a departure with a stated return is a real absence in every mode.
+  `UserRequestMode::charges_until_departure` is the one place that says which modes' deadline
+  closes the window. `test_mode_opportunistic_has_no_deadline_constraint` passes unchanged.

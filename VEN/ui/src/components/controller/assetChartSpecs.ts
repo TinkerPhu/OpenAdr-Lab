@@ -25,10 +25,12 @@ type CurtailmentKind = "hardware" | "planned" | "unplanned";
 /** Classify one point's curtailment state from its `values` map. `null` = no shading.
  *
  * Past points carry `generation_limit_kw` (the commanded limit, present only when a limit was
- * active), `curtailment_source` (0=none, 1=plan, 2=capacity, 3=arbiter, 4=manual — only
- * meaningful alongside generation_limit_kw), and `inverter_max_kw` (the static hardware
- * ceiling). Capacity, arbiter, and manual sources are all externally-imposed/reactive, not the
- * plan's own forecasted choice, so all three classify as "unplanned". Future (plan) points
+ * active), `curtailment_source` (`PvCurtailmentSource::as_f64()`: 1 plan, 2 capacity,
+ * 3 arbiter, 4 manual, 5 comms-loss — only meaningful alongside generation_limit_kw; the
+ * live timeline and the History rows carry the same code), and `inverter_max_kw` (the
+ * static hardware ceiling, live points only). Every source but the plan is
+ * externally-imposed or reactive, not the plan's own forecasted choice, so all of them
+ * classify as "unplanned". Future (plan) points
  * instead carry `pv_forecast_kw` next to `power_kw` — the plan's forecast is already clamped
  * to `inverter_max_kw` at solve time, so any gap there is always a planned choice, never a
  * hardware ceiling to distinguish separately.
@@ -52,7 +54,7 @@ function classifyPvPoint(values: TimestampedRow["values"]): CurtailmentKind | nu
     (inverterMaxKw == null || Math.abs(generationLimitKw) < inverterMaxKw - CURTAILMENT_EPS_KW)
   ) {
     const source = values?.["curtailment_source"];
-    return source === 2 || source === 3 || source === 4 ? "unplanned" : "planned";
+    return source != null && source >= 2 ? "unplanned" : "planned";
   }
   if (inverterMaxKw != null && Math.abs(-powerKw - inverterMaxKw) < CURTAILMENT_EPS_KW) {
     return "hardware";

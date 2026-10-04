@@ -27,15 +27,26 @@ const BUDGET_CHARGE_REWARD_EUR_KWH: f64 = 5.0;
 /// only when the user stated BOTH a distance and a return time — the pair is what
 /// makes a drop placeable, and the route boundary refuses a half-stated one, so
 /// reaching here with one of the two is already impossible.
+///
+/// `horizon_end` is what "no departure known" is stated as, the same way the usage
+/// forecast states a vehicle that stays home: a mode with no deadline charges whenever it
+/// can, so its `departure_time` is not a time the car leaves. It becomes one only when the
+/// user also stated the trip — then the car really is away from the departure to the
+/// return, in every mode, and the series says so.
 fn uses_from_sessions(
     sessions: &[EvSession],
     cfg: &EvCharger,
+    horizon_end: DateTime<Utc>,
 ) -> Vec<ev_trip_series::ExpectedVehicleUse> {
     sessions
         .iter()
         .map(|s| ev_trip_series::ExpectedVehicleUse {
             window_start: s.window_start,
-            departure_at: s.departure_time,
+            departure_at: if s.mode.charges_until_departure() || s.expected_return_time.is_some() {
+                s.departure_time
+            } else {
+                horizon_end
+            },
             target_soc: s.target_soc,
             // A soft deadline is a preference priced by the curve, and the
             // free/opportunistic modes are gated by surplus rather than a deadline:
@@ -164,10 +175,13 @@ impl EvMilpContext {
         // also closes the gaps when the car is away, without a second rule saying so.
         // The stated series, through the one derivation that serves both producers.
         // Availability, consumption and obligations all come from the same walk, so a
-        // session cannot be chargeable by one rule and obliged by another.
-        let uses = uses_from_sessions(ev_sessions, cfg);
+        // session cannot be chargeable by one rule and obliged by another — in any
+        // mode: every arm below takes this mask, none builds its own.
+        let horizon_end =
+            now + chrono::Duration::seconds(cum_s.get(n).or(cum_s.last()).copied().unwrap_or(0));
+        let uses = uses_from_sessions(ev_sessions, cfg, horizon_end);
         let derived = ev_trip_series::plan_inputs(&uses, n, cum_s, now);
-        let deadline_mask = derived.available_per_slot;
+        let available_per_slot = derived.available_per_slot;
         let obligations = derived.obligations;
         let stated_drops = derived
             .drop_frac_per_slot
@@ -191,7 +205,7 @@ impl EvMilpContext {
             // toward earlier slots.
             UserRequestMode::Opportunistic | UserRequestMode::AsapFree => Self {
                 mode: EvMilpMode::MustRun, // core = 0 -> only the gated extra term acts
-                a_ev: vec![true; n],
+                a_ev: available_per_slot,
                 soc_drops: None,
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
@@ -208,7 +222,7 @@ impl EvMilpContext {
             // warning, never an infeasible solve.
             UserRequestMode::MaxCost => Self {
                 mode: EvMilpMode::MustRun,
-                a_ev: vec![true; n],
+                a_ev: available_per_slot,
                 soc_drops: None,
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: BUDGET_CHARGE_REWARD_EUR_KWH,
@@ -216,12 +230,12 @@ impl EvMilpContext {
                 budget_eur: session.budget_eur,
                 ..base
             },
-            // WP4.1-c BY_DEADLINE_FREE: the deadline mask stays, but there is
+            // WP4.1-c BY_DEADLINE_FREE: the window closes at the deadline, but there is
             // no core obligation (free energy may simply not exist) - free-
             // gated per-kWh reward inside the window instead.
             UserRequestMode::ByDeadlineFree => Self {
                 mode: EvMilpMode::MustRun,
-                a_ev: deadline_mask,
+                a_ev: available_per_slot,
                 soc_drops: None,
                 e_extra_max_kwh: core_kwh,
                 v_extra_eur_kwh: v_ev_free_charge_eur_kwh,
@@ -260,7 +274,7 @@ impl EvMilpContext {
                     } else {
                         EvMilpMode::MustRun
                     },
-                    a_ev: deadline_mask,
+                    a_ev: available_per_slot,
                     soc_drops: None,
                     segments,
                     // Inert here: this arm prices per band, so nothing may also
@@ -337,7 +351,11 @@ mod tests {
         // Created 25 minutes into slot 0, as a user request mid-slot is.
         let s = sess(now + Duration::minutes(25), now + Duration::hours(3));
 
-        let uses = uses_from_sessions(std::slice::from_ref(&s), &ev_cfg());
+        let uses = uses_from_sessions(
+            std::slice::from_ref(&s),
+            &ev_cfg(),
+            now + Duration::hours(n as i64),
+        );
         let mask = ev_trip_series::plan_inputs(&uses, n, &cum_s, now).available_per_slot;
 
         assert!(
@@ -355,7 +373,11 @@ mod tests {
         // Away until 17:00, back for 17:00-19:00 only.
         let s = sess(now + Duration::hours(2), now + Duration::hours(4));
 
-        let uses = uses_from_sessions(std::slice::from_ref(&s), &ev_cfg());
+        let uses = uses_from_sessions(
+            std::slice::from_ref(&s),
+            &ev_cfg(),
+            now + Duration::hours(n as i64),
+        );
         let mask = ev_trip_series::plan_inputs(&uses, n, &cum_s, now).available_per_slot;
 
         assert_eq!(
@@ -363,5 +385,89 @@ mod tests {
             vec![false, false, true, true, false, false],
             "chargeable only where the window overlaps"
         );
+    }
+
+    fn plugged_state() -> super::super::AssetState {
+        super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.30,
+            plugged: true,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+            was_away_by_usage_sim: false,
+        })
+    }
+
+    fn a_ev_for(session: &EvSession, n: usize, now: DateTime<Utc>) -> Vec<bool> {
+        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
+        EvMilpContext::from_state(
+            &plugged_state(),
+            &ev_cfg(),
+            n,
+            &cum_s,
+            now,
+            std::slice::from_ref(session),
+            &[],
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+        .a_ev
+    }
+
+    /// A mode with no deadline does not make the vehicle present while it is driving.
+    /// The mask and the trip's charge loss used to come from different rules in these
+    /// modes: the drop was booked at the return, yet every slot of the trip stayed
+    /// chargeable — a plan that charges a car it has just said is away.
+    #[test]
+    fn from_state_a_stated_trip_closes_availability_in_every_mode() {
+        use crate::entities::design_vocabulary::UserRequestMode;
+        let now = Utc.with_ymd_and_hms(2026, 10, 3, 15, 0, 0).unwrap();
+        for mode in [
+            UserRequestMode::Opportunistic,
+            UserRequestMode::AsapFree,
+            UserRequestMode::MaxCost,
+            UserRequestMode::ByDeadline,
+            UserRequestMode::ByDeadlineFree,
+        ] {
+            // Leaves at 17:00, back at 19:00.
+            let mut s = sess(now, now + Duration::hours(2));
+            s.mode = mode.clone();
+            s.expected_trip_distance_km = Some(40.0);
+            s.expected_return_time = Some(now + Duration::hours(4));
+
+            assert_eq!(
+                a_ev_for(&s, 6, now),
+                vec![true, true, false, false, true, true],
+                "{mode:?}: chargeable before the trip and after the return, not during it"
+            );
+        }
+    }
+
+    /// Without a stated trip, a no-deadline mode's `departure_time` is a deadline it
+    /// does not have, not a statement that the car leaves: the window stays open.
+    #[test]
+    fn from_state_a_bare_departure_closes_availability_only_in_deadline_modes() {
+        use crate::entities::design_vocabulary::UserRequestMode;
+        let now = Utc.with_ymd_and_hms(2026, 10, 3, 15, 0, 0).unwrap();
+        for (mode, closes) in [
+            (UserRequestMode::Opportunistic, false),
+            (UserRequestMode::AsapFree, false),
+            (UserRequestMode::MaxCost, false),
+            (UserRequestMode::ByDeadline, true),
+            (UserRequestMode::Asap, true),
+            (UserRequestMode::ByDeadlineFree, true),
+        ] {
+            let mut s = sess(now, now + Duration::hours(2));
+            s.mode = mode.clone();
+            let expected = if closes {
+                vec![true, true, false, false]
+            } else {
+                vec![true; 4]
+            };
+            assert_eq!(a_ev_for(&s, 4, now), expected, "{mode:?}");
+        }
     }
 }

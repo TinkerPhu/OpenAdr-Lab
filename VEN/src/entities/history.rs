@@ -25,10 +25,11 @@ pub struct TickSample {
     /// plan-sourced or unlimited samples. See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
     #[serde(default)]
     pub generation_limit_kw: Option<f64>,
-    /// Source of `generation_limit_kw`: `"plan"` or `"capacity"`. `None` iff `generation_limit_kw` is
-    /// `None`.
+    /// Source of `generation_limit_kw`, as `PvCurtailmentSource::as_f64()` (1 plan, 2 capacity,
+    /// 3 arbiter, 4 manual, 5 comms-loss) — the same code the live timeline carries under the
+    /// same key, so one classifier reads both. `None` iff `generation_limit_kw` is `None`.
     #[serde(default)]
-    pub curtailment_source: Option<String>,
+    pub curtailment_source: Option<f64>,
     /// Fraction of this window the asset reported itself plugged in (0..1; 1 = the whole
     /// window). `None` for an asset that reports no `plugged` state, and for rows written
     /// before schema v12 — never a 0, which would read as "away".

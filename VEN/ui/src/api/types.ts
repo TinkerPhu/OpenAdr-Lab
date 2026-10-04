@@ -803,6 +803,11 @@ export type HistoryTickSample = {
   /** Fraction of the minute the asset reported itself plugged in (0..1, 1 = plugged).
    * `null` for assets with no plugged state and for rows written before the column existed. */
   plugged: number | null;
+  /** PV generation limit in force during the minute (kW, negative), null when none was. */
+  generation_limit_kw: number | null;
+  /** Source of that limit as the live timeline's code (1 plan, 2 capacity, 3 arbiter,
+   * 4 manual, 5 comms-loss); null iff `generation_limit_kw` is. */
+  curtailment_source: number | null;
 };
 
 export type HistoryGridSample = {

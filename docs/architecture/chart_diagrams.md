@@ -369,9 +369,12 @@ Controller cells (`AssetMidSection`) and the History page both pass the result t
 `AssetTimelineChart`; neither branches on the asset id. Two shadings are declared:
 
 - **PV curtailment** (`overlay`) — classifies each point as hardware-capped (neutral),
-  planned imposed curtailment (amber), or unplanned imposed curtailment (red, past only),
-  from `values.generation_limit_kw`/`curtailment_source`/`inverter_max_kw` (past points)
-  or `values.pv_forecast_kw` (future/plan points).
+  planned imposed curtailment (amber, source 1 = plan), or unplanned imposed curtailment
+  (red, past only, every other source), from `values.generation_limit_kw`/
+  `curtailment_source`/`inverter_max_kw` (past points) or `values.pv_forecast_kw`
+  (future/plan points). `curtailment_source` is `PvCurtailmentSource::as_f64()` on the live
+  timeline and in the History rows alike, so the History page shades planned/unplanned
+  curtailment too (not hardware-capped: `inverter_max_kw` is not persisted).
 - **EV unplugged** (`background`, in the EV's own blue) — the band marks *absence*: no band
   means the EV is there to charge, like every always-present asset. It reads
   `values.plugged` (1 = plugged), the EV's own vocabulary on every surface: measured on

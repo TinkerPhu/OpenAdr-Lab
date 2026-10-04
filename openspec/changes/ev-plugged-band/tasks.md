@@ -7,7 +7,7 @@
 ## 1. Pre-refactor
 
 - [x] 1.1 R-73 (dead `future_state_values*` duplicates) is already resolved on main. Verify grep finds no `future_state_values` method in `VEN/src/assets/`.
-- [ ] 1.2 Add `docs/reference/TECHNICAL_DEBTS.md` entries for the History-vs-timeline `curtailment_source` vocabulary mismatch (string vs numeric code) and for non-deadline sessions keeping the EV chargeable past their stated departure. Verify both entries are present.
+- [x] 1.2 Add `docs/reference/TECHNICAL_DEBTS.md` entries for the History-vs-timeline `curtailment_source` vocabulary mismatch (string vs numeric code) and for non-deadline sessions keeping the EV chargeable past their stated departure. Verify both entries are present.
 
 ## 2. Predicted presence (backend)
 
@@ -24,10 +24,10 @@
 
 ## 4. UI: generic state shading and per-asset declarations
 
-- [ ] 4.1 Test first, a unit test for the pure run builder in `ui-charts` (plain numbers, no rendering, like `dayNightBands`): runs split on kind or weight change and on a data gap, alpha scales with weight, no run for a `null` classification, the final run extends one step. Implement `ui-charts/src/StateShading.tsx` with `fillOpacity={1}` on its areas. Verify with `npm test`.
-- [ ] 4.2 Give `AssetTimelineChart` the `shadings` prop (background specs to `backgroundAreas`, overlay specs to `extraReferenceAreas`). Move `classifyPvPoint`/`CURTAILMENT_COLORS` into a PV declaration and delete `buildCurtailmentZones` and the `pvCurtailment` prop. Update the existing "PV curtailment shading" tests in `AssetTimelineChart.test.tsx` only in how they pass the declaration; their expected areas and colours stay unchanged. Verify with `npm test`.
-- [ ] 4.3 Add a per-asset chart declaration table (`stateKey`, `shadings`) in `components/controller/types.ts` with the EV declaration (kinds `unplugged` / `predicted_away`, weight `1 − plugged`, EV blue, predicted with lower alpha and dashed outline). Make `AssetMidSection.tsx` and `History.tsx` look it up instead of branching on `assetId` or inferring from data. Add tests: unplugged past and predicted-away future give two differently styled background areas; `plugged` 1 and a missing key give none; `plugged` 0.5 gives half the alpha. Verify with `npm test`.
-- [ ] 4.4 Add `plugged: number | null` to `HistoryTickSample` in `api/types.ts`, and pass it through in `ticksByAsset` (`History.tsx`). Add a test that an EV history row with `plugged` 0 produces a band and a `null` row produces none. Verify with `npm test` and zero eslint errors.
+- [x] 4.1 Test first, a unit test for the pure run builder in `ui-charts` (plain numbers, no rendering, like `dayNightBands`): runs split on kind or weight change and on a data gap, alpha scales with weight, no run for a `null` classification, the final run extends one step. Implement `ui-charts/src/StateShading.tsx` with `fillOpacity={1}` on its areas. Verify with `npm test`.
+- [x] 4.2 Give `AssetTimelineChart` the `shadings` prop (background specs to `backgroundAreas`, overlay specs to `extraReferenceAreas`). Move `classifyPvPoint`/`CURTAILMENT_COLORS` into a PV declaration and delete `buildCurtailmentZones` and the `pvCurtailment` prop. Update the existing "PV curtailment shading" tests in `AssetTimelineChart.test.tsx` only in how they pass the declaration; their expected areas and colours stay unchanged. Verify with `npm test`.
+- [x] 4.3 Add a per-asset chart declaration table (`stateKey`, `shadings`) in `components/controller/types.ts` with the EV declaration (kinds `unplugged` / `predicted_away`, weight `1 − plugged`, EV blue, predicted with lower alpha and dashed outline). Make `AssetMidSection.tsx` and `History.tsx` look it up instead of branching on `assetId` or inferring from data. Add tests: unplugged past and predicted-away future give two differently styled background areas; `plugged` 1 and a missing key give none; `plugged` 0.5 gives half the alpha. Verify with `npm test`.
+- [x] 4.4 Add `plugged: number | null` to `HistoryTickSample` in `api/types.ts`, and pass it through in `ticksByAsset` (`History.tsx`). Add a test that an EV history row with `plugged` 0 produces a band and a `null` row produces none. Verify with `npm test` and zero eslint errors.
 - [ ] 4.5 Visual check on a running VEN UI (Control and History, EV cell): the band is readable behind the EV's blue lines and distinct from the plan-zone shading on the future side. Switch to navy if it isn't. Verify with a screenshot of both pages.
 
 ## 5. Use case, BDD, docs
