@@ -30,16 +30,29 @@ use crate::entities::asset::ComfortRate;
 ///
 /// CO2 bids are monetized here (`g/kWh ÷ 1000 × w_ghg_eur_kg`) and added to the
 /// price bid, so the objective has no unit conversion left to do.
+/// The state-of-charge range a set of priced bands covers.
+///
+/// Three numbers that are easy to confuse, and were: `target` is what was asked for,
+/// `max` is what the vehicle will actually accept, and the bands run `init..max` with
+/// `target` as a price breakpoint inside that range. Grouping them is what stops a
+/// caller passing the goal where the limit belongs — which is precisely the bug this
+/// came out of, where the limit was not passed at all and the range ran to a full pack.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EvBandRange {
+    pub init: f64,
+    pub target: f64,
+    pub max: f64,
+}
+
 pub(super) fn ev_energy_segments(
     rates: &[ComfortRate],
-    soc_init: f64,
-    soc_target: f64,
-    soc_max: f64,
+    range: EvBandRange,
     battery_kwh: f64,
     v_ev_core_eur_kwh: f64,
     v_ev_extra_eur_kwh: f64,
     w_ghg_eur_kg: f64,
 ) -> Vec<EvEnergySegment> {
+    let (soc_init, soc_target, soc_max) = (range.init, range.target, range.max);
     let start = soc_init.clamp(0.0, 1.0);
     // The vehicle's charge limit, not a full pack, is where the bands stop.
     // `EvCharger::capability_inner` reports zero import capability at or above it, so
