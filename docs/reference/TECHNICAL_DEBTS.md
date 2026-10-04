@@ -47,19 +47,15 @@ its detail. Re-rate in the item, then here.
 
 | Severity | ID | Goal it blocks | One line |
 |---|---|---|---|
-| 🔴 High | GB-41 | reliable system | **Re-scoped 2026-09-27**: mechanism reproduced offline (comfort-rate core reward below tariff + 0.22 import malus, plus `MayRun`'s all-or-nothing core). Symptom is bypassed on the fleet by `usage_forecast`'s `MustRun`, not fixed — any user soft-deadline request still takes the old path. Remaining: confirm the campaign's `comfort_rates` and decide the product fix. |
-| 🔴 High | GB-50 | VTN stimulus | No quantity/unit contract on the wire: W vs kW contradictions, `USAGE` treated as power where the spec says energy, no `payloadDescriptors`, and a `* duration` fudge in `kpi.py` compensating. Every VTN-facing number and every KPI rests on this. |
+| 🟠 Med-High | GB-50 | VTN stimulus | **Inbound half only** (outbound closed 2026-09-20, see `docs/reference/WIRE_PROFILE.md`): the VEN reads incoming payloads by type name and assumes the unit; declared `payloadDescriptors` are parsed and ignored. In progress: `openspec/changes/gb-50-inbound-payload-descriptors`. |
 | 🟠 Med-High | R-97 | reliable system | Solves of 20.8 s and 63.6 s against a 60 s per-phase timeout — the mechanism behind GB-38 is one busy host away from recurring. |
-| 🟠 Med-High | GB-42 | VTN stimulus | The **default** stale-rate policy is a stub behaving as `LastKnown`: on a 48 h horizon with ~24 h of rates, half the plan is priced at one repeated number. |
 | 🟡 Medium | R-86 | VTN stimulus | `randomizeStart` parsed but ignored — the whole fleet responds on the same instant, which is what the field exists to prevent. |
 | 🟡 Medium | R-21 | reliable system | `cargo test` heap corruption around the HiGHS tests: undermines the instrument every other conclusion rests on. |
-| 🟡 Medium | R-96 | reliable system | The capacity-limit E2E step waits for a freshly *adopted* plan; cost two 65-minute runs on 2026-09-27 with failures that looked like product defects. |
 | 🟡 Medium | R-87 | VTN stimulus | Stricter than the 3.1 schema on `intervalPeriod.start` — the one failure a conformance lab must not have. |
 | 🟡 Medium | R-100 | VTN stimulus | A VTN SoC command was modelled as the user's own charging intent; disabled 2026-10-03 pending a decision on what it should be. |
 | 🟡 Medium | R-98 | reliable system | The EV variable set is declared twice — the real solve and phase-2's dual extraction — and R-93 widened what the second must mirror. |
 | 🟡 Medium | R-99 | reliable system | **Test half resolved 2026-10-03**; what is left is a product question. The Fleet page opens on a 24 h / 900 s window and shows "No telemetry stored for the last 1440 minutes" on a freshly started VTN — which is false, there is just less than one bucket of it. It cannot tell "the store is still filling" from "nothing is reporting". |
 | 🟡 Medium | R-94 | transparent UI | The MILP does not model the heater deadband, so the asset can refuse planned dispatch with nothing on screen saying why. |
-| 🟡 Medium | R-85 | VTN stimulus | Two measurement-report builders with diverging behaviour; resolution already decided, not yet done. |
 | 🟡 Medium | GB-46 | VTN stimulus | Missing VEN-side instrumentation (tariff source event id, effective-limit column), so compliance cannot be proven from the data without harness reconstruction. |
 | 🟡 Medium | GB-52 | reliable system | The E2E broker runs anonymous while production requires credentials — the test bed does not exercise the auth path. |
 | 🔵 Low | R-74 | transparent UI | The Dashboard Simulation card hardcodes ev/heater/pv; battery, base load and shiftable loads are invisible there. Small, and the generic pattern already exists in `Controller.tsx`. |
@@ -81,7 +77,6 @@ additive, so it is the natural filler task between larger pieces.
 | R-89 | **A BDD step asserts a sign that the payload does not guarantee.** `ven_reporting_out.feature:32` requires the `BASELINE` payload to be non-negative, but `report_intervals.rs::build_baseline_report_intervals` sums `AssetHeuristics::sample_kw` across every asset -- PV included -- so a site whose learned generation exceeds its learned load produces a negative baseline, exactly as `USAGE` legitimately does. The same assertion on `USAGE` did fail this way (2026-09-23, -6.8e-06 kWh) and was corrected to a sign-agnostic one; `BASELINE` has not fired yet only because the heuristics in the test profile have not learned enough PV to cross zero. `IMPORT_RESERVATION_CAPACITY` on line 15 is fine -- a capacity really is non-negative. Not changed on speculation: a passing test should be corrected with evidence, not a hypothesis. | `tests/features/ven_reporting_out.feature:32`, `VEN/src/controller/report_intervals.rs` | Trivial | Low (one scenario, and only when PV heuristics dominate) | 🟢 | Low -- a flake that would look like a reporting bug, which is the expensive part |
 | R-87 | **This stack is stricter than the 3.1 schema about `intervalPeriod.start`.** The schema gives `intervalPeriod` no `required:` list at all (`1_OpenADR_3.1.0_20250801.yaml`, ~line 2154), so a conformant peer may omit `start`; `openleadr-wire` makes it a non-`Option` `DateTime<Utc>` and carries its own `// FIXME field not required, though, it's unclear how to interpret it if it's missing` (`interval.rs:43`). Since 3.1b the VEN parses events with those types, so it refuses such an event -- which `wire-contracts` explicitly forbids ("never reject a peer for omitting what the spec lets it omit"). Not newly introduced by the VEN: our **VTN** already parses incoming events with the same types, so it rejects them at the API boundary first, and no such event can reach a VEN in this lab. Fixing it properly means making the field `Option` upstream (their FIXME) and teaching `EventRequest::ends_at()` -- our own P-1 patch -- to cope with an unanchored period; that is an upstream PR, not a local workaround. Until then the deviation is on the VTN's side of the wire and is documented rather than hidden. | `openleadr-rs/openleadr-wire/src/interval.rs`, `lab-core/src/event_timing.rs` | Medium | Low (no peer in this lab omits it; shadow parse clean across 20 VENs) | 🟡 | Medium — conformance-lab credibility: being stricter than the spec is the one failure a conformance lab must not have |
 | R-86 | `intervalPeriod.randomizeStart` is parsed and carried (branch 045, 2026-09-20) but not honoured: a VTN asking a fleet to stagger its response still gets every VEN starting on the same instant, which is the one outcome that field exists to prevent. Honouring it means offsetting the VEN's own action within the declared window from a per-VEN deterministic seed (the `determinism` rule forbids an un-injectable clock or RNG here), and deciding whether the offset applies to dispatch only or to reporting too. Found during the 3.1 DTO gap audit; carried rather than half-built (`no-half-built-features`). | `VEN/src/controller/vtn_port.rs` (`OadrIntervalPeriod`), `lab-core/src/event_timing.rs`, `VEN/src/controller/dispatcher.rs` | Medium | Medium (changes when a VEN acts, fleet-visible) | 🟡 | Medium — the spec's own mechanism for avoiding a synchronised fleet response |
-| R-85 | Two measurement-report builders with diverging behaviour: the timer path (`reporter.rs::build_measurement_report`, driven by `tasks/sim_tick/publish.rs` from `grid.net_power_w`) and the obligation path (`build_measurement_report_for_obligation`, from `report_intervals.rs::build_net_site_power_ts`). The timer path omits `intervalPeriod`, sends `STORAGE_CHARGE_LEVEL` as a string and `SIMPLE` as a constant 1.0. Resolution decided (fleet-monitor phase 0 D-5): the timer path is deleted once the standing monitoring event exists, leaving the obligation path as the only builder. | `VEN/src/controller/reporter.rs`, `VEN/src/controller/report_intervals.rs`, `VEN/src/tasks/sim_tick/publish.rs` | Medium | Low | 🟡 | Medium — one net-power derivation for reports and fleet telemetry |
 | ~~R-76~~ | **Resolved 2026-10-04.** Confirmed, then fixed. Three defects, not the one the entry suspected. (a) **The directions were crossed** — the `IMPORT_` payload read `up_kw` (the *Export*-commitment power) and the `EXPORT_` payload read `down_kw`. Reproduced first, by `reporter::tests::import_reservation_capacity_reads_the_import_direction`, which failed with 8 kW where 3 kW was due. (b) **The quantity was wrong**, as this entry suspected: the spec defines these as capacity *requested* beyond what the VEN is contracted for (Table 2, with a companion `*_RESERVATION_FEE` for what the VEN will pay), not live headroom. (c) **`.abs()` masked a legitimate sign flip** — `up_kw` goes positive when a site is net-importing even under a sustained Export commitment, and its magnitude was then reported as export capacity. The fix puts the quantity in `entities::reservation_request::ReservationRequest::from_headroom` (max-effort capability per direction, less the contracted allowance, floored at zero) and leaves `reporter.rs` a mapper reading one named field per payload type. The inbound half already existed — `IMPORT_CAPACITY_RESERVATION`/`*_SUBSCRIPTION` events bind the planner's slot caps (WP3.3 §8.10) — so the loop now closes, and the allowance rule itself moved onto `OadrCapacityState` rather than being copied (it was a closure inside `build_milp_inputs`). Normal value in this lab is **0**, honestly: no program here issues subscription or reservation events, so nothing binds and there is nothing to ask for. Surfaced on the grid-signal strip (`ui-transparency`) and pinned by `tests/features/ven_reporting_out.feature`'s `@r-76` scenario, which grants a 2 kW allowance to make the request non-zero. **Deliberate non-goal:** "what the site wants" in the strict sense needs a counterfactual solve with the allowance lifted; capability-less-allowance is an upper bound that never understates the binding constraint. | `VEN/src/entities/reservation_request.rs`, `VEN/src/controller/reporter.rs`, `VEN/src/entities/capacity.rs` | Small | — | ✅ | Protocol correctness: a live VTN report carried a crossed, wrong-quantity value for ~4 weeks with no test able to see it |
 | R-77 | Project-wide "envelope" naming audit, deferred from the 2026-09-07 site-headroom fix (`naming-envelope-vs-headroom` in `.claude/CLAUDE.md`): a grep found ~48 `VEN/src` files referencing "envelope"/"Envelope". This session renamed only the two files it was already touching (`envelope.rs`→`site_headroom.rs`, `capacity_envelope.rs`→`capacity_headroom.rs`). Remaining candidates needing individual triage (not a blanket rename): `entities::plan::FlexibilityEnvelope` (per-device-session envelope, built by `milp_planner/envelopes.rs::build_plan_envelopes`) and `SiteFlexibilityEnvelope`/`SiteFlexibilitySample` (this fix's own structs, kept as-is since renaming a `Serialize`d struct mirrored by a TypeScript type in `VEN/ui/src/api/types.ts` is a larger, separately-reviewable change) are likely internal-HEMS concepts that should rename to "headroom"; `entities/capacity.rs`'s "Dynamic Operating Envelope" is a genuine OpenADR-boundary use that should keep "envelope" (`reporter.rs`'s reservation-capacity handling was listed here too; R-76 removed it — those arms no longer read an envelope at all, they read `entities::reservation_request`); `milp_planner/envelopes.rs`'s own mathematical scheduling-constraint sense of "envelope" is ambiguous and needs its own judgment call. | `VEN/src` (~48 files, see grep for `envelope\|Envelope`) | Medium (many small renames, no logic changes) | Low (naming-only, mechanical once triaged) | 🟡 | Low-Medium — code-comprehension/consistency gain, not a correctness fix |
 | R-21 | `cargo test` intermittently crashes with heap corruption (SIGABRT, varying malloc messages) around the two heaviest HiGHS tests (`run_planner_n48_full_horizon`, `solve_ven3_heater_three_tier_zones_feasible`). Same tests pass clean in isolation every time; also crashes with `--test-threads=1`, so it is allocator/heap-state-dependent in the native HiGHS library, not a plain data race. Test-infra only — no production path. Workaround: run the affected module in isolation when the full suite crashes. | `VEN/src/controller/milp_planner/` (HiGHS FFI via `good_lp`), test harness only | Medium | Low (flake) | 🟡 | Medium — CI/test-suite trust, no production impact |
@@ -269,62 +264,6 @@ which is also the shape the fix above should aim for.
 horizon (`plan_zones`-derived when set, else `plan_horizon_h`) and have both
 `tasks/planning/cycle.rs` and `usage_sim_plan_ahead.rs` call it, instead of the cycle task
 reading `plan_zones` and plan-ahead reading `plan_horizon_h` as if they always agreed.
-
-## R-39, R-47, R-73 — RESOLVED 2026-10-03 (`refactor/state-grouping-and-dead-asset-methods`)
-
-Cleared together because 051 is about to edit `state/mod.rs` and `assets/ev.rs` again, and the
-Small/Trivial rule wanted them gone before new behaviour landed, not after.
-
-**R-39** asked for a decision and got one. `EvSettings` is a domain value — two booleans whose
-meaning is the same whether they arrive from a route, a tick, or a restored snapshot — so it moved
-to `entities/ev_settings.rs`, re-exported from `state` for the callers that already look there.
-`HemsState` stayed in `state/`, by the same test applied the other way: its field list is defined
-by what must survive a restart, which is a persistence concern, and moving it would make
-`entities/` the owner of the storage schema.
-
-**R-47**'s remaining half is done: the four flat diagnostic fields (`vtn_connection`,
-`wire_rejections`, `storage_ok`, `task_status`) are now `state::diagnostics::DiagnosticsState`, so
-the next observability feed is a field in that struct rather than a fifth `Arc<RwLock<..>>` on the
-application root. Deliberately four independent locks inside one struct, not one lock over all
-four: they are written by four unrelated tasks and a shared lock would couple them into each
-other's contention for nothing. Every caller already went through an accessor
-(`vtn_connection_status()`, `storage_ok()`, `wire_rejections()`, `task_statuses()`), so no call
-site outside `state/` changed — which is also why this stayed Small.
-
-**R-73** is fully closed. The three dead `future_state_values*` methods on `Battery`, `EvCharger`
-and `Heater` are gone. The duplication existed because `controller/milp_planner` may never import
-`crate::assets::` (`ven-architecture`), so `asset_port.rs` had to carry its own copy — the register's
-suggested alternative, "make callers use the trait methods directly", was structurally impossible.
-The durable fix was the one the heater already demonstrated: the conversion lives in
-`entities::asset_params` (`battery_soc_from_energy`, `ev_soc_clamped`, beside the existing
-`heater_temp_c_from_energy`), which both rings may import, and `asset_port.rs` delegates to it. The
-deleted methods' tests moved onto those shared functions, and `asset_port`'s three — the ones
-`planned_state.rs` actually calls, which had no tests at all — gained coverage for the map key each
-is read by.
-
-## R-92, R-93 — RESOLVED 2026-10-02 (`ev-soc-state-variables`)
-
-Both are fixed, together, as their entries predicted ("Pairs naturally with R-92 — both are
-the same 'generalize the EV model' work").
-
-The EV MILP now carries `soc_ev[t]` over `0..=n` with a per-slot balance equality
-(`VEN/src/assets/ev_milp.rs::constraints`) that folds in charging power and
-`ev-usage-forecast`'s exogenous trip drops, built on the same shape `battery_milp.rs` already
-used for `e_bat`. A charging obligation is a bound on `soc_ev` at its own deadline, and
-`EvMilpContext`/`MilpInputs`/`EvScalars` carry a list of them (`EvObligation`) instead of one
-scalar `(deadline, required energy)` pair — so several departures in one horizon each bind
-their own target, and a recharge after a predicted return is plannable.
-
-The scalar pair turned out to live in **three** places, not the two these entries recorded:
-`EvMilpContext`, `MilpInputs` *and* `EvScalars`. All three now share the one `EvObligation`.
-
-Also discharged here: `reachable_energy_kwh` and the pre-solve `min(required, reachable)` floor
-cap are gone, replaced by a penalised per-obligation shortfall slack, so the gap is the model's
-own answer and `ev_diagnostics::firm_shortfall` reports it per obligation, naming the session.
-`asset_port::ev_soc_trajectory` is deleted — the plan's SoC curve is read off the solved
-variables, so no integrator exists to drift from it, which closes the remaining EV half of R-73.
-
-Pinned by `VEN/src/controller/milp_planner/tests/soc_balance.rs`.
 
 ## R-100 — a VTN SoC command is modelled as if it were the user's own intent
 
@@ -561,29 +500,6 @@ history since the anchor, so a real −11 kW EV-departure cliff smeared into a s
 sampled the average only at the instantaneous curve's sparse breakpoints, which `stepAfter`
 then held flat, overstating capability by 11 kW for two hours. Any such series must be densely
 sampled and drawn as an interpolated line, not a step.
-
-## R-96 — the capacity-limit E2E step requires a freshly *adopted* plan
-
-**Severity: 🟡 Medium** · Effort Small · Risk Low · Gain Medium — costs whole 65-minute runs
-and produces failures that look like product defects.
-
-**Where:** `tests/features/steps/uc_steps.py:14`
-(`I wait for the VEN /plan to have slots with import_cap_kw at most {cap}`), used by UC-10b
-(`ven_uc_edge_cases.feature:59`) and UC-12b (`ven_uc_stress.feature:44`).
-
-The step polls for a plan that both satisfies the cap **and** was created after the limit was
-sent. Plan adoption is deliberately sticky (adoption threshold, decay, switch penalty) and the
-solve itself can take 20-60 s, so a plan that already satisfies the cap — because a previous
-scenario set the same or a tighter one, or because the new plan was not better enough to adopt
-— can leave the poll waiting 300 s for a plan that has no reason to be recomputed. Observed
-twice on 2026-09-27, each run failing a *different* one of the two scenarios, both times with
-the final plan carrying the correct `import_cap_kw` in every slot; a third run passed both.
-
-**To resolve:** make the scenario force a replan (a trigger the VEN cannot ignore) rather than
-waiting for one, or have the step accept a plan that satisfies the cap when the cap was already
-in effect before the scenario started. Changing the assertion to drop the freshness requirement
-outright would weaken a real guarantee — that the limit reached the planner — so pick one of the
-two above instead.
 
 ## R-97 — MILP solve time sits close to its own timeout
 

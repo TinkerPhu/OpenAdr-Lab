@@ -133,5 +133,22 @@ class Classification(unittest.TestCase):
         self.assertEqual(order, ["R-4", "R-2", "R-3", "R-1", "R-89"])
 
 
+class StaleRows(unittest.TestCase):
+    def test_row_that_announces_its_own_resolution(self):
+        text = "| GB-41 | **Resolved 2026-09-29 by removal** of x | High |\n| R-5 | Closed 2026-09-20. rest | S |\n"
+        self.assertEqual(gate.find_resolved_ids(text), ["GB-41", "R-5"])
+
+    def test_section_heading_marked_resolved(self):
+        self.assertEqual(gate.find_resolved_ids("## R-92, R-93 — RESOLVED 2026-10-02 (x)\n"), ["R-92", "R-93"])
+
+    def test_cross_register_row_is_found_by_its_id_cell(self):
+        text = "| High | GB-41 | reliable | **Resolved 2026-09-29**: x |\n"
+        self.assertEqual(gate.find_resolved_ids(text), ["GB-41"])
+
+    def test_open_rows_that_merely_mention_resolution_are_not_flagged(self):
+        text = "| R-97 | Solve time. The GB-38 half was resolved 2026-08-26 by x. | S |\n"
+        self.assertEqual(gate.find_resolved_ids(text), [])
+
+
 if __name__ == "__main__":
     unittest.main()
