@@ -27,3 +27,11 @@ Feature: EV usage forecast fed to the planner (ev-usage-forecast)
   # than a 204 (ev-session-queue).
   Scenario: No charge session is invented to carry the predicted deadline
     Then the EV session queue stays empty for 10 seconds
+
+  # The regression ven-12 showed on the live fleet: two predicted trips in one
+  # horizon, charging before the first only, then a flat coast through the second
+  # (0.800 -> 0.698 -> 0.570). Every departure now binds its own target, so the gap
+  # between two trips is a recharge window rather than dead time.
+  Scenario: Charging is planned before every predicted departure, not just the next
+    When I wait for the VEN /plan to have an EV allocation in slots
+    Then the plan charges before every predicted departure in the horizon
