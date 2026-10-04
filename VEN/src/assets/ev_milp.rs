@@ -878,7 +878,7 @@ mod milp_context_trait_tests {
         // actually required is that the deadline is the slot the departure falls in:
         // its window must bracket the departure, so being ready by it means being ready
         // before the car leaves.
-        let trip = super::ev_schedule::next_trip_after(
+        let trip = crate::assets::ev_schedule::next_trip_after(
             cfg.usage_sim.as_ref().unwrap(),
             cfg.usage_sim_seed_tag,
             now,
