@@ -17,8 +17,10 @@ since this is a load-bearing operational question.
 
 ## Schema and time format
 
-`VEN/src/history_store/schema.rs` is now at schema v8 (`PRAGMA user_version`, applied
-stepwise via `SCHEMA_V1`..`SCHEMA_V8`). The original v1 tables were `tick_samples`,
+`VEN/src/history_store/schema.rs` was at schema v8 when this page was last fully verified
+(`PRAGMA user_version`, applied stepwise via `SCHEMA_V1`..`SCHEMA_Vn`; it is at v12 as of
+2026-10-04 — v12 adds `tick_samples.plugged` and converts `curtailment_source` from names to the
+live numeric code, see [[history-store]]). The original v1 tables were `tick_samples`,
 `grid_samples`, `plan_snapshots`, `events_received`, `reports_sent`, `ledger_periods`; v2
 added `notifications`, v3 `user_settings`, v5/v6 extended `tick_samples` with PV curtailment
 columns. **v7 drops `plan_snapshots`** (R-63: its only writer was never called from any
