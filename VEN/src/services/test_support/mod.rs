@@ -1,5 +1,6 @@
 pub mod asset_snapshots;
 pub mod milp_mocks;
+pub mod milp_pool;
 pub mod mock_history_port;
 pub mod mock_simulator_port;
 pub mod mock_solver_port;

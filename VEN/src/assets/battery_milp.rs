@@ -7,7 +7,7 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 
 use super::Battery;
 use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, BatteryMilpVars, BatterySolOutput,
+    pinned_binary, BatteryMilpContext, BatteryMilpVars, BatterySolOutput, ModeDecisions,
 };
 
 impl BatteryMilpContext {
@@ -20,13 +20,39 @@ impl BatteryMilpContext {
         c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
     ) -> BatteryMilpVars {
+        self.declare_vars_with(n, c_startup_eur, c_ramp_eur_kw, vars, ModeDecisions::Free)
+    }
+
+    /// The one battery variable declaration (R-98): the plan and the marginal-cost pass
+    /// differ only in how `u_bat` is declared. A pinned pass prices fixed decisions, so it
+    /// carries no startup/ramp auxiliaries.
+    pub fn declare_vars_with(
+        &self,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+        modes: ModeDecisions,
+    ) -> BatteryMilpVars {
+        let (c_startup_eur, c_ramp_eur_kw) = match modes {
+            ModeDecisions::Free => (c_startup_eur, c_ramp_eur_kw),
+            ModeDecisions::Pinned(_) => (0.0, 0.0),
+        };
         let p_ch = (0..n)
             .map(|_| vars.add(variable().min(0.0).max(self.p_ch_max_kw)))
             .collect();
         let p_dis = (0..n)
             .map(|_| vars.add(variable().min(0.0).max(self.p_dis_max_kw)))
             .collect();
-        let u_bat = (0..n).map(|_| vars.add(variable().binary())).collect();
+        let u_bat = (0..n)
+            .map(|t| match modes {
+                ModeDecisions::Free => vars.add(variable().binary()),
+                ModeDecisions::Pinned(w) => {
+                    let v = pinned_binary(w.u_bat.get(t).copied());
+                    vars.add(variable().min(v).max(v))
+                }
+            })
+            .collect();
         let e_bat = (0..=n)
             .map(|i| {
                 if i == 0 {
@@ -186,6 +212,16 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         pool.bat = Some(self.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.bat = Some(self.declare_vars_with(n, 0.0, 0.0, vars, ModeDecisions::Pinned(winning)));
+    }
+
     fn constraints(
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
@@ -242,9 +278,9 @@ impl Battery {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
     use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
-    use good_lp::{variable, variables};
+    use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+    use good_lp::variables;
 
     fn make_ctx() -> BatteryMilpContext {
         BatteryMilpContext {
@@ -257,24 +293,6 @@ mod milp_context_trait_tests {
             eff_ch: 0.9746794_f64.sqrt(),
             eff_dis: 0.9746794_f64.sqrt(),
             c_terminal_eur_kwh: 0.0,
-        }
-    }
-
-    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
-        let grid = GridMilpVars {
-            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
-            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        };
-        MilpVarPool {
-            grid,
-            bat: None,
-            ev: None,
-            heater: None,
-            shiftable: vec![],
         }
     }
 
@@ -337,5 +355,43 @@ mod milp_context_trait_tests {
             n * 3 + 1,
             cs.len()
         );
+    }
+
+    /// R-98: the marginal-cost pass declares the battery through the plan's own
+    /// declaration — same variables, with `u_bat` fixed to the winning value.
+    #[test]
+    fn declare_pinned_vars_is_the_free_declaration_with_u_bat_fixed() {
+        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
+        let ctx = make_ctx();
+        let n = 4;
+        let winning = WinningModeDecisions {
+            u_bat: vec![1.0, 0.0, 0.9, 0.2],
+            ..Default::default()
+        };
+        let shape = |pinned: bool| {
+            let mut vars = variables!();
+            let mut pool = empty_pool(&mut vars, n);
+            if pinned {
+                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
+            } else {
+                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+            }
+            let v = pool.bat.expect("battery declared");
+            (
+                v.p_ch.len(),
+                v.p_dis.len(),
+                v.u_bat.len(),
+                v.e_bat.len(),
+                v.z_active.len(),
+            )
+        };
+        assert_eq!(shape(true), shape(false));
+
+        let range = bound_range(|vars| {
+            let mut pool = empty_pool(vars, n);
+            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
+            pool.bat.expect("battery declared").u_bat
+        });
+        assert_eq!(range, vec![(1.0, 1.0), (0.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
     }
 }

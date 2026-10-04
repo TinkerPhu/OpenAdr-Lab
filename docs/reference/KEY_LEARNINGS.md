@@ -3054,3 +3054,15 @@ Rules:
   By apply time 049/051 had made it exactly a presence forecast. The planned second mask
   would have been a duplicate that contradicted the plan's own SoC curve. A reviewed design
   is a statement about the code on the day of the review.
+
+## Shared constraints over separately declared variables are still a duplicate (R-98)
+
+- A model is its constraints *and* its variables with their bounds. The marginal-cost pass
+  shared every `constraints()`/`objective()` with the plan yet declared the variables itself,
+  and the copies drifted until the LP was infeasible on every VEN. When two solves must see
+  the same model, the declaration is the thing to share — vary only what differs (here, how
+  the mode decisions are declared) as a parameter of the one function.
+- A silent fallback hides a broken path: the pass fell back to the tariff with a `warn!`, so the
+  output stayed plausible and the failure ran unnoticed. A fallback should be rare enough that
+  its log line is news; if it fires every cycle, treat it as a defect.
+

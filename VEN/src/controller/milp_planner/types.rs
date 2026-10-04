@@ -390,6 +390,9 @@ pub(crate) struct SolveOutput {
     pub(crate) e_heat_tank_kwh: Vec<f64>,
     /// Per-shiftable-load power schedule [kW]; outer len = num loads, inner len = n
     pub(crate) p_shiftable_kw: Vec<Vec<f64>>,
+    /// The mode decisions as solved, for the marginal-cost pass to pin (R-98): read off
+    /// the solution, never re-derived from the power they produced.
+    pub(crate) mode_decisions: super::asset_port::WinningModeDecisions,
     /// WP6.3 (BL-09) — per-rule, per-window peak-demand penalty slack [kW].
     /// Outer len = `inputs.penalty_rules.len()` (same order), inner len = that
     /// rule's window count. `> 0.0` means that window's peak still exceeded

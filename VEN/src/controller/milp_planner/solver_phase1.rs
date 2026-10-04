@@ -323,6 +323,25 @@ pub(crate) fn read_solve_output<S: Solution>(
         }
     }
 
+    let mode_decisions = super::asset_port::WinningModeDecisions {
+        u_bat: pool
+            .bat
+            .as_ref()
+            .map(|v| v.u_bat.iter().map(|&u| solution.value(u)).collect())
+            .unwrap_or_default(),
+        z_ev_on: z_ev_on_out.clone(),
+        y_heat: y_heat_out.clone(),
+        z_heat_ready: z_heat_ready_out,
+        y_shift: pool
+            .shiftable
+            .iter()
+            .map(|sv| {
+                let row = sv.y_shift.iter().map(|&y| solution.value(y)).collect();
+                (sv.asset_id.clone(), row)
+            })
+            .collect(),
+    };
+
     SolveOutput {
         status: solution.status(),
         objective_eur: solution.eval(objective),
@@ -344,6 +363,7 @@ pub(crate) fn read_solve_output<S: Solution>(
         z_heat_ready: z_heat_ready_out,
         e_heat_tank_kwh: e_heat_tank_out,
         p_shiftable_kw,
+        mode_decisions,
         s_penalty_kw: penalty::read_penalty_solution(solution, penalty_vars),
     }
 }

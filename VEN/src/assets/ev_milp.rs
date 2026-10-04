@@ -12,7 +12,7 @@ use {
 };
 
 use crate::controller::milp_planner::asset_port::{
-    EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
+    pinned_binary, EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput, ModeDecisions,
 };
 
 /// Penalty for letting the floor absorb part of a predicted trip's SoC drop
@@ -37,6 +37,24 @@ impl EvMilpContext {
         c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
     ) -> EvMilpVars {
+        self.declare_vars_with(n, c_startup_eur, c_ramp_eur_kw, vars, ModeDecisions::Free)
+    }
+
+    /// The one EV variable declaration (R-98): the plan and the marginal-cost pass differ
+    /// only in how `z_ev_on` is declared, so the SoC ceiling, the guarantee band and the
+    /// `MustNotRun` shape exist once. A pinned pass carries no startup/ramp auxiliaries.
+    pub fn declare_vars_with(
+        &self,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+        modes: ModeDecisions,
+    ) -> EvMilpVars {
+        let (c_startup_eur, c_ramp_eur_kw) = match modes {
+            ModeDecisions::Free => (c_startup_eur, c_ramp_eur_kw),
+            ModeDecisions::Pinned(_) => (0.0, 0.0),
+        };
         let p_ev = (0..n)
             .map(|_| {
                 if self.mode == EvMilpMode::MustNotRun {
@@ -77,10 +95,17 @@ impl EvMilpContext {
         let z_ev_on = (0..n)
             .map(|t| {
                 if self.mode == EvMilpMode::MustNotRun {
-                    vars.add(variable().min(0.0).max(0.0))
-                } else {
-                    let ub = if self.a_ev[t] { 1.0 } else { 0.0 };
-                    vars.add(variable().max(ub).binary())
+                    return vars.add(variable().min(0.0).max(0.0));
+                }
+                match modes {
+                    ModeDecisions::Free => {
+                        let ub = if self.a_ev[t] { 1.0 } else { 0.0 };
+                        vars.add(variable().max(ub).binary())
+                    }
+                    ModeDecisions::Pinned(w) => {
+                        let v = pinned_binary(w.z_ev_on.get(t).copied());
+                        vars.add(variable().min(v).max(v))
+                    }
                 }
             })
             .collect();
@@ -385,6 +410,16 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         pool.ev = Some(self.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
+    fn declare_pinned_vars_into_pool(
+        &self,
+        n: usize,
+        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.ev = Some(self.declare_vars_with(n, 0.0, 0.0, vars, ModeDecisions::Pinned(winning)));
+    }
+
     fn constraints(
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
@@ -454,29 +489,11 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
     use crate::controller::milp_planner::{
         AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
     };
-    use good_lp::{variable, variables};
-
-    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
-        let grid = GridMilpVars {
-            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
-            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        };
-        MilpVarPool {
-            grid,
-            bat: None,
-            ev: None,
-            heater: None,
-            shiftable: vec![],
-        }
-    }
+    use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+    use good_lp::variables;
 
     // ── ev-usage-forecast: apply_usage_forecast ──────────────────────
 
@@ -1481,5 +1498,44 @@ mod milp_context_trait_tests {
         assert_eq!(v.p_ev.len(), n);
         assert_eq!(v.z_ev_on.len(), n);
         assert!(v.delta_ev.is_empty()); // no startup vars when c_startup=0
+    }
+
+    /// R-98: the marginal-cost pass declares the EV through the plan's own declaration —
+    /// the guarantee band and the SoC ceiling included — with `z_ev_on` fixed.
+    #[test]
+    fn declare_pinned_vars_is_the_free_declaration_with_z_ev_on_fixed() {
+        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
+        let n = 4;
+        let ctx = make_must_run(n);
+        let winning = WinningModeDecisions {
+            z_ev_on: vec![0.0, 1.0, 0.8, 0.1],
+            ..Default::default()
+        };
+        let shape = |pinned: bool| {
+            let mut vars = variables!();
+            let mut pool = empty_pool(&mut vars, n);
+            if pinned {
+                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
+            } else {
+                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+            }
+            let v = pool.ev.expect("EV declared");
+            (
+                v.p_ev.len(),
+                v.soc_ev.len(),
+                v.drop_unmet.len(),
+                v.shortfall_soc.len(),
+                v.z_ev_on.len(),
+                v.e_seg.len(),
+            )
+        };
+        assert_eq!(shape(true), shape(false));
+
+        let range = bound_range(|vars| {
+            let mut pool = empty_pool(vars, n);
+            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
+            pool.ev.expect("EV declared").z_ev_on
+        });
+        assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (1.0, 1.0), (0.0, 0.0)]);
     }
 }

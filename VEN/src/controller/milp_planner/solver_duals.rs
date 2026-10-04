@@ -12,216 +12,31 @@
 //! stays free within its normal bounds, so the remaining LP still has real degrees of freedom for
 //! HiGHS to price.
 //!
-//! This intentionally does not go through `AssetMilpContext::declare_vars_into_pool` (which always
-//! declares mode variables as binary): each asset's continuous variables are re-declared here
-//! directly from `MilpInputs`' own scalar fields — the same source `build_milp_inputs` used to
-//! build the asset contexts in the first place — then the *same* `constraints()`/`objective()`
-//! trait methods are called against this locally-built pool. `good_lp::Variable` is just an opaque
-//! id, so those methods don't care whether the variable behind it was declared integer or
-//! continuous; only whether it's present at the right pool slot with the right cached scalars.
+//! Every asset declares its own variables through
+//! `AssetMilpContext::declare_pinned_vars_into_pool` — the same declaration the plan used, with
+//! its mode decisions pinned to `SolveOutput::mode_decisions` (R-98). A second, hand-written
+//! declaration here used to drift from the real one until the LP was infeasible on every VEN.
+//! The *same* `constraints()`/`objective()` trait methods are then called against this pool.
+//! `good_lp::Variable` is just an opaque id, so those methods don't care whether the variable
+//! behind it was declared integer or continuous.
 //!
 //! Read-only diagnostic: this never feeds back into `p_imp`/`p_exp`/allocations — see
 //! `solve_marginal_costs`'s caller (`solve_milp_two_phase`).
 
 use good_lp::solvers::highs::highs;
 use good_lp::solvers::{DualValues, SolutionWithDual};
-use good_lp::{
-    variable, variables, Expression, ProblemVariables, SolverModel, Variable, WithMipGap,
-    WithTimeLimit,
-};
+use good_lp::{variable, variables, Expression, SolverModel, Variable, WithMipGap, WithTimeLimit};
 
 use crate::controller::milp_interactions::{
     build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
-    GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+    GridMilpVars, MilpVarPool,
 };
-use crate::controller::milp_planner::asset_port::{
-    BatteryMilpVars, EvMilpVars, HeaterMilpVars, MilpLoadMode,
-};
+use crate::controller::milp_planner::asset_port::pinned_binary;
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
 use super::penalty;
 use super::solver_phase1::add_model_constraints;
 use super::types::*;
-
-fn round_bin(v: f64) -> f64 {
-    if v > 0.5 {
-        1.0
-    } else {
-        0.0
-    }
-}
-
-/// Battery vars with the mode binary (`u_bat`) fixed continuous; power/SoC stay free.
-fn declare_fixed_battery_vars(
-    inputs: &MilpInputs,
-    winning: &SolveOutput,
-    n: usize,
-    vars: &mut ProblemVariables,
-) -> BatteryMilpVars {
-    let ch_max = inputs.p_bat_ch_max_kw.unwrap_or(0.0);
-    let dis_max = inputs.p_bat_dis_max_kw.unwrap_or(0.0);
-    let e_min = inputs.e_bat_min_kwh.unwrap_or(0.0);
-    let e_max = inputs.e_bat_max_kwh.unwrap_or(0.0);
-    let e_init = inputs.e_bat_init_kwh.unwrap_or(0.0);
-
-    let p_ch = (0..n)
-        .map(|_| vars.add(variable().min(0.0).max(ch_max)))
-        .collect();
-    let p_dis = (0..n)
-        .map(|_| vars.add(variable().min(0.0).max(dis_max)))
-        .collect();
-    let u_bat = (0..n)
-        .map(|t| {
-            let v = round_bin(if winning.p_bat_ch_kw[t] > 1e-6 {
-                1.0
-            } else {
-                0.0
-            });
-            vars.add(variable().min(v).max(v))
-        })
-        .collect();
-    let e_bat = (0..=n)
-        .map(|i| {
-            if i == 0 {
-                vars.add(variable().min(e_init).max(e_init))
-            } else {
-                vars.add(variable().min(e_min).max(e_max))
-            }
-        })
-        .collect();
-    BatteryMilpVars {
-        p_ch,
-        p_dis,
-        u_bat,
-        e_bat,
-        z_active: vec![],
-        delta_active: vec![],
-        delta_ramp: vec![],
-        dis_max_kw: dis_max,
-    }
-}
-
-/// EV vars with `z_ev_on` fixed continuous; power and segment energy stay free.
-fn declare_fixed_ev_vars(
-    inputs: &MilpInputs,
-    winning: &SolveOutput,
-    n: usize,
-    vars: &mut ProblemVariables,
-) -> EvMilpVars {
-    let must_not = inputs.ev_mode == MilpLoadMode::MustNotRun;
-    let p_max = if must_not { 0.0 } else { inputs.p_ev_max_kw };
-    let e_extra_max = if must_not {
-        0.0
-    } else {
-        inputs.e_ev_extra_max_kwh
-    };
-
-    let p_ev = (0..n)
-        .map(|_| vars.add(variable().min(0.0).max(p_max)))
-        .collect();
-    let z_ev_on = (0..n)
-        .map(|t| {
-            let v = round_bin(winning.z_ev_on[t]);
-            vars.add(variable().min(v).max(v))
-        })
-        .collect();
-    let e_ev_extra = vars.add(variable().min(0.0).max(e_extra_max));
-    // `ev-comfort-piecewise-core`: the bands are continuous, so unlike the
-    // binary they replaced there is nothing to round or pin here — they are
-    // re-declared with their own bounds and left free.
-    let e_seg = inputs
-        .ev_segments
-        .iter()
-        .map(|seg| vars.add(variable().min(0.0).max(seg.kwh)))
-        .collect();
-    // R-93: the SoC state and its two slacks are re-declared with the same bounds
-    // `EvMilpContext::declare_vars` gives them, because `constraints()` rebuilds
-    // the balance equality and the per-obligation bounds against them here too.
-    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
-    let floor_frac = inputs
-        .ev_soc_drops
-        .as_ref()
-        .map_or(0.0, |d| d.floor_frac)
-        .min(soc_init)
-        .max(0.0);
-    let soc_ev = (0..=n)
-        .map(|i| {
-            if i == 0 {
-                vars.add(variable().min(soc_init).max(soc_init))
-            } else {
-                vars.add(variable().min(floor_frac).max(1.0))
-            }
-        })
-        .collect();
-    let drop_unmet = (0..n)
-        .map(|t| {
-            let drop = inputs
-                .ev_soc_drops
-                .as_ref()
-                .and_then(|d| d.drop_frac_per_slot.get(t).copied())
-                .unwrap_or(0.0)
-                .max(0.0);
-            vars.add(variable().min(0.0).max(drop))
-        })
-        .collect();
-    let shortfall_soc = inputs
-        .ev_obligations
-        .iter()
-        .map(|o| vars.add(variable().min(0.0).max(o.target_soc.max(0.0))))
-        .collect();
-    EvMilpVars {
-        p_ev,
-        soc_ev,
-        drop_unmet,
-        shortfall_soc,
-        z_ev_on,
-        e_seg,
-        e_ev_extra,
-        delta_ev: vec![],
-        delta_ev_ramp: vec![],
-        p_min_kw: inputs.p_ev_min_kw,
-        battery_kwh: inputs.ev_battery_kwh,
-    }
-}
-
-/// Heater vars with the stage index (`y_heat`) and `z_heat_ready` fixed
-/// continuous; tank energy/switching stay free.
-fn declare_fixed_heater_vars(
-    inputs: &MilpInputs,
-    winning: &SolveOutput,
-    n: usize,
-    vars: &mut ProblemVariables,
-) -> HeaterMilpVars {
-    let n_stages = inputs.heat_n_stages as f64;
-    let y_heat = (0..n)
-        .map(|t| {
-            // Round to the nearest reachable stage rather than to 0/1 — y is a
-            // general integer now, so `round_bin` would collapse stage 2 to 1.
-            let v = winning.y_heat[t].round().clamp(0.0, n_stages);
-            vars.add(variable().min(v).max(v))
-        })
-        .collect();
-    let z_heat_ready = {
-        let v = round_bin(winning.z_heat_ready);
-        vars.add(variable().min(v).max(v))
-    };
-    let e_lo = -inputs.e_heat_max_kwh.max(1.0);
-    let e_hi = inputs.e_heat_max_kwh.max(1.0);
-    let e_tank = (0..n)
-        .map(|_| vars.add(variable().min(e_lo).max(e_hi)))
-        .collect();
-    let s_low = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let sw = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    HeaterMilpVars {
-        y_heat,
-        z_heat_ready,
-        e_tank,
-        s_low,
-        sw,
-        p_step_kw: inputs.p_heat_step_kw,
-        n_stages: inputs.heat_n_stages,
-    }
-}
 
 /// Fix every binary decision in a freshly-declared (all-continuous) pool to `winning`'s rounded
 /// value, then read the power-balance dual for each slot. Returns one value per slot — both the
@@ -261,7 +76,7 @@ pub(crate) fn solve_marginal_costs(
     // `.binary()`, for the same reason (see module doc).
     let u_grid: Vec<Variable> = (0..n)
         .map(|t| {
-            let v = round_bin(if winning.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 });
+            let v = pinned_binary(Some(if winning.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 }));
             vars.add(variable().min(v).max(v))
         })
         .collect();
@@ -277,39 +92,12 @@ pub(crate) fn solve_marginal_costs(
         p_pv_used: p_pv_used.clone(),
     };
 
-    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
-        .shiftable_loads
-        .iter()
-        .enumerate()
-        .map(|(s, sl)| {
-            let y_shift = sl
-                .valid_start_slots
-                .iter()
-                .map(|&j| {
-                    let active = round_bin(if winning.p_shiftable_kw[s][j] > 0.01 {
-                        1.0
-                    } else {
-                        0.0
-                    });
-                    vars.add(variable().min(active).max(active))
-                })
-                .collect();
-            ShiftableLoadMilpVars {
-                asset_id: sl.asset_id.clone(),
-                power_kw: sl.power_kw,
-                duration_slots: sl.duration_slots,
-                valid_start_slots: sl.valid_start_slots.clone(),
-                y_shift,
-            }
-        })
-        .collect();
-
     let mut pool = MilpVarPool {
         grid: grid_vars,
         bat: None,
         ev: None,
         heater: None,
-        shiftable: shift_vars,
+        shiftable: Vec::new(),
     };
 
     // WP6.3 (BL-09): declared fresh (not fixed to `winning`, like s_imp_viol above) —
@@ -317,22 +105,10 @@ pub(crate) fn solve_marginal_costs(
     let penalty_vars =
         penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
 
+    // R-98: every asset declares its own variables, through the same function the plan
+    // used, with the winning mode decisions pinned — so the priced model is the planned one.
     for ctx in asset_contexts {
-        match ctx.asset_kind() {
-            AssetKind::Battery => {
-                pool.bat = Some(declare_fixed_battery_vars(inputs, winning, n, &mut vars));
-            }
-            AssetKind::Ev => {
-                pool.ev = Some(declare_fixed_ev_vars(inputs, winning, n, &mut vars));
-            }
-            AssetKind::Heater => {
-                pool.heater = Some(declare_fixed_heater_vars(inputs, winning, n, &mut vars));
-            }
-            // No-op: shiftable loads' fixed-value vars are declared unconditionally
-            // above (from `inputs.shiftable_loads`), not gated by this match —
-            // see that block's own comment.
-            AssetKind::ShiftableLoad => {}
-        }
+        ctx.declare_pinned_vars_into_pool(n, &winning.mode_decisions, &mut vars, &mut pool);
     }
 
     let interactions =

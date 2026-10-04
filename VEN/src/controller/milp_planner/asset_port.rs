@@ -297,8 +297,8 @@ pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
 // reach into this infra module for their own port type). Re-exported here so every
 // existing `asset_port::`/`milp_planner::` import path keeps working unchanged.
 pub use crate::controller::asset_milp_port::{
-    AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
-    MilpLoadMode, ShiftableLoadScalars,
+    pinned_binary, AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars,
+    HeaterScalars, MilpLoadMode, ModeDecisions, ShiftableLoadScalars, WinningModeDecisions,
 };
 
 // ── Plan-result helper free functions ─────────────────────────────────────────

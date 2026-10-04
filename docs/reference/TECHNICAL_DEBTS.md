@@ -43,7 +43,6 @@
 | R-88 | S3 | bug | Small | needs-decision: which release semantics the arbiter has: a bound, a maximum engagement, or decay of its own correction | `VEN/src/controller/arbiter.rs::reconcile`, `tests/features/isolated/reactive_correction_notifications.feature` | The deviation arbiter's release edge is unbounded by its cause: removing the disturbance does not end the correction. |
 | R-94 | S3 | bug | Medium | too-big: first step: a latched-minimum stored-energy constraint in heater_milp.rs derived from thermostat_delta_c | `VEN/src/assets/heater_milp.rs`, `VEN/src/assets/heater_thermostat.rs`, `thermostat_delta_c` | The MILP does not model the heater's thermostat deadband, so the asset can refuse planned dispatch. |
 | R-99 | S3 | bug | Small | needs-decision: the Fleet page cannot tell a filling store from nothing reporting; decide what it should say | `tests/features/fleet_telemetry.feature:48`, `VTN/ui/src/components/FleetPowerChart.tsx`, `VTN/ui/src/pages/Fleet.tsx` | The fleet-chart UI scenario depends on elapsed time by an unknown rule; the Fleet page cannot tell a filling store from an empty one. |
-| R-98 | S2 | duplication | Small | FIX | `VEN/src/assets/ev_milp.rs::EvMilpContext::declare_vars`, `VEN/src/controller/milp_planner/solver_duals.rs::declare_fixed_ev_vars`, `z_ev_on` | The EV variable set is declared in two places (the real solve and phase-2 dual extraction). |
 | R-32 | S3 | duplication | Medium | too-big: first step: a shared OAuth client crate | `VTN/bff/src/vtn_client.rs`, `VEN/src/vtn.rs` | `VTN/bff/src/vtn_client.rs` duplicates `VEN/src/vtn.rs`'s OAuth token + 401-retry + get/put-JSON plumbing (~300 lines each). Separate crates — extraction needs a shared workspace crate; record only, don't force. |
 | R-100 | S3 | architecture | Medium | needs-decision: what a VTN SoC command is: a planner constraint, not a session | `VEN/src/tasks/poll_signals.rs::apply_vtn_charge_state_session`, `VEN/src/entities/device_session.rs::EvSessionOrigin::Vtn`, `VEN/src/controller/openadr_interface.rs::parse_charge_state_setpoint` | A VTN SoC command is modelled as if it were the user's own intent (path disabled). |
 | R-90 | S4 | duplication | Small | needs-decision: serve elevation and site location from the BFF and delete the TS port, or accept the copy | `ui-charts/src/solarPosition.ts`, `VEN/src/entities/solar.rs`, `VTN/ui/src/utils/labLocation.ts`, `VEN/profiles/*.yaml` | **Solar position is implemented twice, in two languages, and the lab's coordinates live in two places.** `ui-charts/src/solarPosition.ts` is a faithful port of the elevation path of `VEN/src/entities/solar.rs`, added so the VTN Fleet charts can shade day and night with the real sun rather than a fixed clock curve (at 47.45°N sunset swings from ~16:40 in December to ~21:30 in June, so a clock curve is hours wrong for half the year). The Rust `SolarPosition` is not serialized and no endpoint exposes elevation, so there is no channel that could carry the answer to a browser. The same reasoning forced `VTN/ui/src/utils/labLocation.ts`, a second copy of `weather_pv.latitude_deg`/`.longitude_deg` from the 14 VEN profiles. The two solar implementations can drift; the TS tests pin it to closed-form geometry (solstice elevation = 90 − lat ± 23.44°) rather than to the Rust, so a drift in *either* is caught. Resolution if precision ever matters: serve elevation and the site location from the BFF and delete the port — not make the port smarter. |
@@ -189,38 +188,6 @@ directly rather than through `apply_signal_changes`.
 session competing with them — an obligation the MILP receives without an `EvSession`, much as
 `ev-usage-forecast` already hands the planner a predicted departure without writing one. Until
 then it stays off; do not re-wire it as a session.
-
-## R-98 — the EV variable set is declared in two places
-
-**Where:** `VEN/src/assets/ev_milp.rs::EvMilpContext::declare_vars` (the real one) and
-`VEN/src/controller/milp_planner/solver_duals.rs::declare_fixed_ev_vars` (phase-2 dual
-extraction, which re-declares the same variables with `z_ev_on` pinned).
-
-`declare_fixed_ev_vars` has always re-declared `p_ev`, `z_ev_on`, `e_seg` and `e_ev_extra` by
-hand, because the dual pass needs different bounds on `z_ev_on`. R-93 widened the set it has to
-mirror: `soc_ev`, `drop_unmet`, `shortfall_soc` and `battery_kwh` were added to `EvMilpVars`,
-and `constraints()` — shared by both paths — now references them, so the dual path had to grow
-the same four. Their bounds (the SoC floor capped at the live reading, each slot's drop cap,
-each obligation's shortfall cap) are now written out twice.
-
-**Why a second thing waits on this (added 2026-10-04, R-76 follow-up).** `solver_duals` reads a
-shadow price off each slot's *power-balance* row only (`power_balance_refs`). Pricing an
-`IMPORT_RESERVATION_FEE` — the spec's companion to the `IMPORT_RESERVATION_CAPACITY` report R-76
-fixed, "amount per unit of import capacity that the VEN is willing to pay" — wants the dual on the
-*import-capacity* row instead, which nothing extracts today. That is the economically correct
-number (marginal willingness to pay for one more kW of allowance) and it would come from the same
-solve as the request, so one concept with one source. It is deliberately not attempted before
-this entry is settled: adding a second dual to a declaration that is already written out twice
-would widen exactly the divergence R-98 is about. Until then the VEN reports what capacity it
-wants and not what it is worth, which `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`'s
-UC-07 states plainly rather than leaving implied.
-
-**Why it is debt rather than a bug:** the two copies agree today, and the full suite passes. But
-the only thing keeping them in step is that someone remembers to edit both — exactly the shape
-`one-concept-one-function` exists to prevent, and the bounds involved are no longer trivial.
-
-**To resolve:** give `EvMilpContext` one `declare_vars_with(z_on: ZOnPolicy)` (free binary vs.
-pinned continuous) and have both callers use it, so the variable set and its bounds exist once.
 
 ## R-99 — the fleet-chart UI scenario depends on elapsed time, by an unknown rule
 
