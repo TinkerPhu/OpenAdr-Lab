@@ -71,6 +71,18 @@ producer had ever been wired. `GET /history/plans`/`append_plan_snapshot` were r
 route, the `HistoryPort` methods, and the entity were deleted together rather than kept as an
 unused surface.
 
+## EV plugged fraction and numeric curtailment source (schema v12)
+
+Added by 052-ev-plugged-band (2026-10-04). `tick_samples.plugged` is the mean of an asset's
+`plugged` state value over the 1-minute window — for the EV the fraction of the minute it was
+plugged in, `NULL` for assets that report no such state and for every older row (deliberately
+never 0, which would read as "away"). The same migration turns `curtailment_source` from the
+names `'plan'`/`'capacity'` into the live `PvCurtailmentSource::as_f64()` code (1 plan …
+5 comms-loss), the vocabulary the live timeline already used: a TEXT column would store a code
+as text, so v12 renames the old column, adds a REAL one, converts and drops. The sampler now
+keeps arbiter/manual/comms-loss sources instead of storing their limit with no source. The
+History page draws both from `GET /history/ticks` (see [[ven-ui]]).
+
 ## Forecast accuracy tracking (schema v8)
 
 `forecast_accuracy_samples` persists how well the planner's own forecast held up against what

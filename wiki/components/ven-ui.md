@@ -130,6 +130,19 @@ manual-override, and unplanned regions distinctly, reflecting `PvState.curtailme
 [[asset-layer]]'s PV curtailment model (renamed `generation_limit_kw`, fourth `manual` source
 added alongside the pre-existing `none`/`plan`/`capacity`).
 
+**Per-asset chart declarations and state shading** (052-ev-plugged-band, 2026-10-04): what an
+asset's `AssetTimelineChart` draws beyond its power line — its state line (SoC or tank
+temperature) and its time-range shadings — is declared once per asset in
+`components/controller/assetChartSpecs.ts` and looked up by both the Controller cells and the
+History page; neither branches on the asset id any more. Shading is one shared primitive,
+`ui-charts/src/StateShading.tsx` (classify each point, shade every contiguous run, weight
+folded into the fill alpha), with two declarations: PV curtailment (overlay; every source but
+the plan is "unplanned", comms-loss included) and **EV unplugged** (background, EV blue). The
+EV band marks *absence*: no band means plugged in, like every always-present asset. It reads
+the EV's own `plugged` value (1 = plugged) — measured on past points and the now-point, the
+plan's predicted presence (the availability mask the solve ran under) on future points, drawn
+lighter with a dashed outline as "Predicted away". Details: `docs/architecture/chart_diagrams.md`.
+
 **Nullable slider convention** (`components/controller/DynamicControl.tsx`): a plain slider
 falling back to its `min` whenever no override is active made "no override" visually
 indistinguishable from "curtailed to the minimum" — for `pv_generation_limit_kw` specifically,
@@ -184,3 +197,7 @@ overlays near-lead (fine dotted) and far-lead (coarse dashed) forecast lines fro
 "Forecast accuracy tracking" section for the backend mechanism and
 `docs/architecture/chart_diagrams.md`'s "Forecast-accuracy overlay" note for how the overlay
 folds into the same cursor-correctness-safe merged data array as every other series.
+Since schema v12 the persisted rows also carry the EV's `plugged` fraction and the PV
+`curtailment_source` as the live timeline's numeric code, so History draws the same EV
+"Unplugged" band and the planned/unplanned PV curtailment shading the Controller does (not
+hardware-capped: `inverter_max_kw` is not persisted). Rows from before v12 show neither.
