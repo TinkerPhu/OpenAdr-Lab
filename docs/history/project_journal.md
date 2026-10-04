@@ -14418,7 +14418,7 @@ fix makes a live report go from a crossed, wrong-quantity number to `0.0`. That 
 regression in information and is the opposite: the old number was telling a VTN something untrue
 about a mechanism this VEN was not participating in. A payload whose value is structurally always
 zero is also a payload whose tests can pass forever without touching the interesting path — which
-is why the `@r-76` BDD scenario grants a 0.5 kW allowance to force a non-zero request rather than
+is why the `@r-76` BDD scenario grants a 2 kW allowance to force a non-zero request rather than
 asserting the comfortable zero the existing scenario already covers.
 
 **Issue — `main` was red on arrival, twice, from the 051 EV work.** `cargo test -p ven-app --bins`
