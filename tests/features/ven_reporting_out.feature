@@ -1,18 +1,33 @@
 Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
-  The VEN reports its flexibility envelope (IMPORT/EXPORT_RESERVATION_CAPACITY)
-  and its planned consumption (USAGE_FORECAST) when an event's reportDescriptor
-  requests those payload types — descriptor-driven through the same obligation
-  machinery as measurement reports.
+  The VEN reports the additional grid capacity it is requesting
+  (IMPORT/EXPORT_RESERVATION_CAPACITY) and its planned consumption
+  (USAGE_FORECAST) when an event's reportDescriptor requests those payload
+  types — descriptor-driven through the same obligation machinery as
+  measurement reports.
+
+  R-76: a reservation-capacity report is NOT live site headroom. The spec
+  defines these payloads as capacity *requested* beyond what the VEN is
+  contracted for, so the value is zero until a subscription or reservation
+  event actually binds — which is what the two scenarios below assert from
+  both sides.
 
   Background:
     Given I have a VTN token as "bl-client"
 
-  Scenario: IMPORT_RESERVATION_CAPACITY descriptor yields an envelope-valued report
+  Scenario: With no allowance declared, the VEN requests no additional capacity
     Given I create a program named "envelope-report-test" and save its ID
     And I create an event for the saved program with a reportDescriptor of type "IMPORT_RESERVATION_CAPACITY" reporting every 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to submit an obligation-driven report for the event
     Then the latest VEN-1 report for the event has a "IMPORT_RESERVATION_CAPACITY" payload with a non-negative number value
+
+  @r-76
+  Scenario: A binding import allowance makes the VEN ask for more capacity
+    Given I create a program named "reservation-request-test" and save its ID
+    And I create an event for the saved program granting 0.5 kW import capacity with a reportDescriptor of type "IMPORT_RESERVATION_CAPACITY" reporting every 5 seconds
+    When I wait for VEN-1 to have at least 1 event
+    And I wait for VEN-1 to submit an obligation-driven report for the event
+    Then the latest VEN-1 report for the event has a "IMPORT_RESERVATION_CAPACITY" payload with a value above 0
 
   Scenario: USAGE_FORECAST descriptor yields a plan-slot forecast report
     Given I create a program named "usage-forecast-test" and save its ID

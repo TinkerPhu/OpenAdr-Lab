@@ -17,7 +17,8 @@ use crate::controller::vtn_port::{
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::Plan;
+use crate::entities::reservation_request::ReservationRequest;
 use lab_core::time_series::Aggregation;
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,30 @@ fn operating_state(
 // Obligation-driven measurement report (multi-interval, RF-05e)
 // ---------------------------------------------------------------------------
 
+/// The single interval a `*_RESERVATION_CAPACITY` obligation reports.
+///
+/// One function for both directions, since the two differ only in which named
+/// field of `ReservationRequest` they read — the shape that let the directions
+/// stay crossed through two previous passes over this code (R-76).
+///
+/// `None` (no headroom computed yet, before the first dispatcher tick) reports
+/// 0.0 rather than nothing: a request for no additional capacity is the
+/// truthful statement at that moment, and the obligation is answered on time.
+fn reservation_interval(
+    payload_type: &str,
+    requested_kw: Option<f64>,
+    op_state: &str,
+) -> Vec<OadrReportInterval> {
+    vec![OadrReportInterval {
+        id: 0,
+        intervalPeriod: None,
+        payloads: vec![
+            OadrReportPayload::power_kw(payload_type, requested_kw.unwrap_or(0.0)),
+            OadrReportPayload::state("OPERATING_STATE", op_state),
+        ],
+    }]
+}
+
 /// Build a multi-interval measurement report for a single report obligation.
 ///
 /// Resamples asset history onto obligation-interval boundaries using
@@ -90,6 +115,11 @@ fn operating_state(
 ///     interval per curve step — deliberately NOT routed through the generic
 ///     `!obligation.historical => build_forecast_intervals(active_plan,
 ///     ..)` fallback below, since that reads plan slots, not this closed-form curve.
+///   - IMPORT_RESERVATION_CAPACITY / EXPORT_RESERVATION_CAPACITY → the
+///     additional capacity the VEN is requesting in that direction
+///     (`entities::reservation_request`, R-76). Not live site headroom: the
+///     spec defines these as capacity *requested* beyond what the VEN is
+///     contracted for, which is a different quantity.
 ///
 /// Returns None if the obligation has no event_id or program_id.
 #[allow(clippy::too_many_arguments)]
@@ -97,7 +127,7 @@ pub fn build_measurement_report_for_obligation(
     obligation: &OadrReportObligation,
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     ven_name: &str,
-    site_envelope: Option<&SiteFlexibilityEnvelope>,
+    reservation: Option<&ReservationRequest>,
     active_plan: Option<&Plan>,
     heuristics: &std::collections::HashMap<String, AssetHeuristics>,
     capacity_curves: Option<&(CapacityCurve, CapacityCurve)>,
@@ -134,36 +164,21 @@ pub fn build_measurement_report_for_obligation(
         // "requested" on a report). `openadr_interface.rs::parse_capacity_state`
         // correctly keeps the other string for that reason — verified during
         // GB-21 implementation, not conflated here.
-        "IMPORT_RESERVATION_CAPACITY" => {
-            // up_kw is signed now (site-capacity-seam-unification) -- convert
-            // to magnitude at this OpenADR reporting boundary, mirroring
-            // report_intervals.rs::build_capacity_forecast_intervals's own
-            // signed->magnitude conversion for CapacityCurve. (R-76: whether
-            // this arm reads the right field for this payload type at all is
-            // a separate, still-open question -- only the sign bug is fixed
-            // here.)
-            let up_kw = site_envelope.map(|e| e.up_kw.abs()).unwrap_or(0.0);
-            vec![OadrReportInterval {
-                id: 0,
-                intervalPeriod: None,
-                payloads: vec![
-                    OadrReportPayload::power_kw("IMPORT_RESERVATION_CAPACITY", up_kw),
-                    OadrReportPayload::state("OPERATING_STATE", op_state),
-                ],
-            }]
-        }
-        "EXPORT_RESERVATION_CAPACITY" => {
-            // down_kw is signed now too -- same magnitude conversion as above.
-            let down_kw = site_envelope.map(|e| e.down_kw.abs()).unwrap_or(0.0);
-            vec![OadrReportInterval {
-                id: 0,
-                intervalPeriod: None,
-                payloads: vec![
-                    OadrReportPayload::power_kw("EXPORT_RESERVATION_CAPACITY", down_kw),
-                    OadrReportPayload::state("OPERATING_STATE", op_state),
-                ],
-            }]
-        }
+        // R-76: both arms are a straight read of one named, already-correct
+        // field. The direction crossing, the absolute-vs-additional error and
+        // the sign-masking `.abs()` all lived in arithmetic that used to sit
+        // here; it now lives in `entities::reservation_request`, which has the
+        // spec quotation and the tests. A report mapper should map.
+        "IMPORT_RESERVATION_CAPACITY" => reservation_interval(
+            "IMPORT_RESERVATION_CAPACITY",
+            reservation.map(|r| r.import_kw),
+            op_state,
+        ),
+        "EXPORT_RESERVATION_CAPACITY" => reservation_interval(
+            "EXPORT_RESERVATION_CAPACITY",
+            reservation.map(|r| r.export_kw),
+            op_state,
+        ),
         // WP5.4: event-blind heuristic counterfactual, submitted alongside USAGE
         // during/after an event so `kpi.py` can quantify the event's impact.
         "BASELINE" => build_baseline_report_intervals(
@@ -731,64 +746,55 @@ mod tests {
 
     // ── IMPORT/EXPORT_RESERVATION_CAPACITY ────────────────────────
 
-    #[test]
-    fn test_reporter_import_capacity_reservation_from_envelope() {
+    /// R-76: each payload type must carry its own direction's request.
+    /// Distinct magnitudes, so a swap cannot pass by coincidence — which is
+    /// what the pair of tests this replaced allowed for two passes over this
+    /// code. How the two numbers are *derived* is tested where that lives,
+    /// in `entities::reservation_request`.
+    fn reservation_payload(payload_type: &str) -> (String, f64) {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let env = crate::entities::plan::SiteFlexibilityEnvelope {
-            ts: Utc::now(),
-            up_kw: 5.0,
-            down_kw: 3.0,
-            up_duration_s: None,
-            down_duration_s: None,
+        let req = ReservationRequest {
+            import_kw: 4.0,
+            export_kw: 6.0,
         };
-        let ob = make_obligation("e1", "p1", "IMPORT_RESERVATION_CAPACITY", 900);
+        let ob = make_obligation("e1", "p1", payload_type, 900);
         let report = build_measurement_report_for_obligation(
             &ob,
             &empty,
             "ven-test",
-            Some(&env),
+            Some(&req),
             None,
             &std::collections::HashMap::new(),
             None,
             Utc::now(),
         )
         .expect("should return Some");
-        let iv = &report.resources[0].intervals[0];
-        let val = iv.payloads[0].values[0].as_f64().unwrap();
-        assert!((val - 5.0).abs() < 1e-6, "expected 5 kW, got {val}");
-        assert_eq!(iv.payloads[0].r#type, "IMPORT_RESERVATION_CAPACITY");
+        let payload = &report.resources[0].intervals[0].payloads[0];
+        (payload.r#type.clone(), payload.values[0].as_f64().unwrap())
     }
 
     #[test]
-    fn test_reporter_export_capacity_reservation_from_envelope() {
-        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        let env = crate::entities::plan::SiteFlexibilityEnvelope {
-            ts: Utc::now(),
-            up_kw: 5.0,
-            down_kw: 3.0,
-            up_duration_s: None,
-            down_duration_s: None,
-        };
-        let ob = make_obligation("e1", "p1", "EXPORT_RESERVATION_CAPACITY", 900);
-        let report = build_measurement_report_for_obligation(
-            &ob,
-            &empty,
-            "ven-test",
-            Some(&env),
-            None,
-            &std::collections::HashMap::new(),
-            None,
-            Utc::now(),
-        )
-        .expect("should return Some");
-        let iv = &report.resources[0].intervals[0];
-        let val = iv.payloads[0].values[0].as_f64().unwrap();
-        assert!((val - 3.0).abs() < 1e-6, "expected 3 kW, got {val}");
-        assert_eq!(iv.payloads[0].r#type, "EXPORT_RESERVATION_CAPACITY");
+    fn import_reservation_capacity_reports_the_import_request() {
+        let (payload_type, val) = reservation_payload("IMPORT_RESERVATION_CAPACITY");
+        assert_eq!(payload_type, "IMPORT_RESERVATION_CAPACITY");
+        assert!(
+            (val - 4.0).abs() < 1e-6,
+            "expected the import request of 4 kW, got {val}"
+        );
     }
 
     #[test]
-    fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
+    fn export_reservation_capacity_reports_the_export_request() {
+        let (payload_type, val) = reservation_payload("EXPORT_RESERVATION_CAPACITY");
+        assert_eq!(payload_type, "EXPORT_RESERVATION_CAPACITY");
+        assert!(
+            (val - 6.0).abs() < 1e-6,
+            "expected the export request of 6 kW, got {val}"
+        );
+    }
+
+    #[test]
+    fn test_reporter_capacity_reservation_no_headroom_yet_returns_zero() {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let ob = make_obligation("e1", "p1", "IMPORT_RESERVATION_CAPACITY", 900);
         let report = build_measurement_report_for_obligation(
@@ -801,7 +807,7 @@ mod tests {
             None,
             Utc::now(),
         )
-        .expect("should return Some even with no envelope");
+        .expect("should return Some even before any headroom is computed");
         let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
             .unwrap();

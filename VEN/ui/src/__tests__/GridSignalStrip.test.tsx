@@ -18,6 +18,7 @@ const mockSignals = vi.fn((): SignalsState => ({
     export_limit_event_id: null,
     last_updated: null,
   },
+  reservation_request: null,
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -42,6 +43,7 @@ describe("GridSignalStrip", () => {
         export_limit_event_id: null,
         last_updated: null,
       },
+      reservation_request: null,
     });
   });
 
@@ -83,6 +85,33 @@ describe("GridSignalStrip", () => {
     expect(screen.getByTestId("signal-chip-simple")).toHaveTextContent("SIMPLE L2");
     expect(screen.getByTestId("signal-chip-dispatch")).toHaveTextContent("2 kW");
     expect(screen.getByTestId("signal-chip-capacity")).toHaveTextContent("limit 5");
+  });
+
+  // R-76: the request this VEN sends out as *_RESERVATION_CAPACITY has to be
+  // readable in the UI too, next to the allowance it is measured against.
+  it("shows the capacity this VEN is requesting beyond its allowance", () => {
+    const base = mockSignals();
+    mockSignals.mockReturnValue({
+      ...base,
+      capacity: { ...base.capacity, import_subscription_kw: 7.0 },
+      reservation_request: { import_kw: 4.0, export_kw: 0.0 },
+    });
+    render(<GridSignalStrip />);
+    const chip = screen.getByTestId("signal-chip-capacity");
+    expect(chip).toHaveTextContent("subscription 7 kW");
+    expect(chip).toHaveTextContent("requesting +4 kW import");
+    expect(chip).not.toHaveTextContent("export");
+  });
+
+  it("stays quiet when there is no additional capacity to request", () => {
+    const base = mockSignals();
+    mockSignals.mockReturnValue({
+      ...base,
+      capacity: { ...base.capacity, import_subscription_kw: 7.0 },
+      reservation_request: { import_kw: 0.0, export_kw: 0.0 },
+    });
+    render(<GridSignalStrip />);
+    expect(screen.getByTestId("signal-chip-capacity")).not.toHaveTextContent("requesting");
   });
 
   it("labels an upcoming window 'from' instead of 'until'", () => {

@@ -38,7 +38,17 @@ impl ObligationService {
     ) -> Result<()> {
         let due = state.due_obligations(now).await;
         for ob in due {
-            let env = state.site_envelope().await;
+            // R-76: `*_RESERVATION_CAPACITY` obligations report the additional
+            // capacity the VEN is asking for — its own max-effort capability
+            // in each direction, less what the VTN has already contracted.
+            // Both halves are read here because the request is the pair; the
+            // reporter is handed the answer, not the inputs.
+            let capacity = state.capacity_state().await;
+            let reservation = state.site_envelope().await.map(|env| {
+                crate::entities::reservation_request::ReservationRequest::from_headroom(
+                    &env, &capacity,
+                )
+            });
             // WP3.6: USAGE_FORECAST obligations report from the adopted plan.
             let plan = state.active_plan().await;
             // WP5.4: BASELINE obligations report the event-blind heuristic forecast.
@@ -51,7 +61,7 @@ impl ObligationService {
                 &ob,
                 &asset_samples,
                 ven_name,
-                env.as_ref(),
+                reservation.as_ref(),
                 plan.as_ref(),
                 &heuristics,
                 curves.as_ref(),

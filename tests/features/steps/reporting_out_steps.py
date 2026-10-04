@@ -6,8 +6,7 @@ from features.helpers.api_client import vtn_post, ven_get, VEN_BASE_URL, HTTP_TI
 from features.helpers.wait import poll_until
 
 
-@given('I create an event for the saved program with a reportDescriptor of type "{ptype}" reporting every {secs:d} seconds')
-def step_create_event_with_typed_descriptor(context, ptype, secs):
+def _create_event_with_descriptor(context, ptype, secs, extra_payloads=()):
     """Ask for a report every `secs` seconds, the way 3.1 expresses it.
 
     Three things have to line up, and getting any one wrong makes the report
@@ -44,7 +43,10 @@ def step_create_event_with_typed_descriptor(context, ptype, secs):
                 {
                     "id": 0,
                     "intervalPeriod": {"start": start, "duration": f"PT{secs}S"},
-                    "payloads": [{"type": "PRICE", "values": [0.25]}],
+                    "payloads": [
+                        {"type": "PRICE", "values": [0.25]},
+                        *extra_payloads,
+                    ],
                 },
             ],
             "reportDescriptors": [
@@ -59,6 +61,31 @@ def step_create_event_with_typed_descriptor(context, ptype, secs):
     )
     r.raise_for_status()
     context.saved_event_id = r.json()["id"]
+
+
+@given('I create an event for the saved program with a reportDescriptor of type "{ptype}" reporting every {secs:d} seconds')
+def step_create_event_with_typed_descriptor(context, ptype, secs):
+    _create_event_with_descriptor(context, ptype, secs)
+
+
+@given('I create an event for the saved program granting {kw:g} kW import capacity with a reportDescriptor of type "{ptype}" reporting every {secs:d} seconds')
+def step_create_capacity_granting_event_with_descriptor(context, kw, ptype, secs):
+    """One event that both caps the VEN and asks it what more it wants (R-76).
+
+    `IMPORT_CAPACITY_SUBSCRIPTION` is the inbound half of the reservation
+    mechanism -- the contracted allowance the VEN plans against
+    (`controller::openadr_interface::parse_capacity_state`, WP3.3 Section 8.10).
+    Granting one far below the profile's physical rating is what makes the
+    outbound `IMPORT_RESERVATION_CAPACITY` report non-zero: with no allowance
+    declared at all nothing binds, so the honest request is 0 and the scenario
+    would assert nothing.
+    """
+    _create_event_with_descriptor(
+        context,
+        ptype,
+        secs,
+        extra_payloads=[{"type": "IMPORT_CAPACITY_SUBSCRIPTION", "values": [kw]}],
+    )
 
 
 def _latest_report_intervals(context):
@@ -81,6 +108,17 @@ def step_report_payload_non_negative(context, ptype):
         value = p["values"][0]
         assert isinstance(value, (int, float)), f"'{ptype}' value not numeric: {value!r}"
         assert value >= 0, f"'{ptype}' value negative: {value}"
+
+
+@then('the latest VEN-1 report for the event has a "{ptype}" payload with a value above {floor:g}')
+def step_report_payload_above(context, ptype, floor):
+    intervals = _latest_report_intervals(context)
+    payloads = [p for iv in intervals for p in iv.get("payloads", []) if p.get("type") == ptype]
+    assert payloads, f"No '{ptype}' payload in report intervals: {intervals}"
+    for p in payloads:
+        value = p["values"][0]
+        assert isinstance(value, (int, float)), f"'{ptype}' value not numeric: {value!r}"
+        assert value > floor, f"'{ptype}' value {value} is not above {floor}"
 
 
 @then('every interval of the latest report has a "{ptype}" payload with a number value')
