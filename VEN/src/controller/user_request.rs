@@ -85,7 +85,9 @@ pub enum RequestError {
     /// name the plan back to the user ("your plan for Tue 06:00"), and looking the
     /// ids up separately would make that prompt a second, independently derived
     /// account of the very thing it is explaining - free to disagree with it.
-    EvSessionsConflict { conflicts: Vec<ClashingSession> },
+    EvSessionsConflict {
+        conflicts: Vec<ClashingSession>,
+    },
     /// A replace instruction was stated but does not match the queue. Carries the
     /// queue's own rejection so the caller can re-prompt with current truth.
     EvReplaceRejected {

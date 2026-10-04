@@ -19,6 +19,27 @@ bash run_all_tests.sh --local --e2e  # combine flags
 bash run_all_tests.sh --coverage     # VEN cargo-tarpaulin coverage report (opt-in, see below)
 ```
 
+### Running the VEN Rust gate without local WSL
+
+`--rust` is **openleadr-rs only**. The VEN's own ~1560 tests run in section 3 of
+`run_all_tests.sh`, which is local-only: it shells out to WSL and is *skipped* on a host
+without it. On a machine too short of memory for a `cargo` run (WSL's `vmmem` needs well over
+a gigabyte on top of whatever else is resident), use the docker harness on a build host
+instead — its image already carries `rustfmt` and `clippy`, so overriding the command gives
+the whole Rust gate remotely:
+
+```bash
+# on the docker host, in /srv/docker/openadr_lab
+C=tests/docker-compose.ven-unit-test.yml
+docker compose -f $C run --build --rm ven-unit-test                                      # cargo test
+docker compose -f $C run --rm ven-unit-test cargo fmt --check
+docker compose -f $C run --rm ven-unit-test cargo clippy --all-targets --all-features -- -D warnings
+```
+
+The named cache volumes make everything after the first run incremental. Remember the host
+lock (`LOCK_HOST=Node2 bash scripts/docker_host_lock.sh acquire -m "..."`) — this is a build
+on a shared host like any other.
+
 ### Coverage (opt-in)
 
 `--coverage` runs the VEN Rust test pyramid under `cargo-tarpaulin` instrumentation and

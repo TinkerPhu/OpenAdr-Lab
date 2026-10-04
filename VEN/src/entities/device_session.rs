@@ -148,7 +148,10 @@ pub enum EvSessionReplaceRejection {
     /// does not actually clash with. Both are refusals - a partial instruction
     /// would leave an overlap, and an over-broad one would delete a plan the user
     /// never needed to lose.
-    NotTheConflictSet { missing: Vec<Uuid>, extra: Vec<Uuid> },
+    NotTheConflictSet {
+        missing: Vec<Uuid>,
+        extra: Vec<Uuid>,
+    },
     /// The candidate still clashed once the named sessions were removed. Removing
     /// every overlapping session cannot leave an overlap, so this is unreachable
     /// today; it exists so the checked `insert` stays the only authority on the
@@ -288,7 +291,10 @@ impl EvSessionQueue {
             return Err(EvSessionReplaceRejection::NotTheConflictSet { missing, extra });
         }
 
-        let removed: Vec<EvSession> = replace_ids.iter().filter_map(|id| self.remove(*id)).collect();
+        let removed: Vec<EvSession> = replace_ids
+            .iter()
+            .filter_map(|id| self.remove(*id))
+            .collect();
         match self.insert(session) {
             Ok(()) => Ok(removed),
             Err(conflict) => {
@@ -684,7 +690,10 @@ mod tests {
             .replace(&[standing_id], spontaneous)
             .expect("naming exactly the conflict set is accepted");
 
-        assert_eq!(removed.iter().map(|s| s.id).collect::<Vec<_>>(), vec![standing_id]);
+        assert_eq!(
+            removed.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![standing_id]
+        );
         let ids: Vec<_> = q.iter().map(|s| s.id).collect();
         assert!(ids.contains(&spontaneous_id), "the candidate is queued");
         assert!(!ids.contains(&standing_id), "the named session is gone");
@@ -767,7 +776,10 @@ mod tests {
         let spanning_id = spanning.id;
         let removed = q.replace(&[a_id, b_id], spanning).expect("both named");
         assert_eq!(removed.len(), 2);
-        assert_eq!(q.iter().map(|s| s.id).collect::<Vec<_>>(), vec![spanning_id]);
+        assert_eq!(
+            q.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![spanning_id]
+        );
     }
 
     #[test]

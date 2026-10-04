@@ -95,12 +95,12 @@ pub(crate) async fn apply_vtn_charge_state_session(
                         // is not dropped silently: it is reported, and the next
                         // poll retries once that session has passed.
                         tracing::warn!(
-                            // Ids, not whole sessions: the clash carries the sessions so a prompt can
-                    // describe them, but a log line wants the identity, not the payload.
-                    conflicts = ?conflict.conflicts.iter().map(|s| s.id).collect::<Vec<_>>(),
-                            %window_end,
-                            "VTN charge-state signal overlaps an existing EV session; not queued"
-                        );
+                                // Ids, not whole sessions: the clash carries the sessions so a prompt can
+                        // describe them, but a log line wants the identity, not the payload.
+                        conflicts = ?conflict.conflicts.iter().map(|s| s.id).collect::<Vec<_>>(),
+                                %window_end,
+                                "VTN charge-state signal overlaps an existing EV session; not queued"
+                            );
                     }
                 }
             }
