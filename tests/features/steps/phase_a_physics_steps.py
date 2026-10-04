@@ -231,7 +231,7 @@ def step_remember_export_baseline(context):
     )
 
 
-@then("the capability max_export_kw magnitude is at most {pct:f} percent of the baseline")
+@then("the capability max_export_kw magnitude is at most {pct:g} percent of the baseline")
 def step_capability_max_export_is_fraction_of_baseline(context, pct):
     """Scale-free, because the quantity being bounded is not scale-free.
 
