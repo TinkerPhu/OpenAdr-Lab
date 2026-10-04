@@ -329,3 +329,57 @@ def step_ev_power_in_home_window(context):
         f"the plan schedules no EV charging {where} — engage_charge_planning should "
         "have placed the charge in the home window"
     )
+
+
+@then("the plan charges before every predicted departure in the horizon")
+def step_charges_before_every_departure(context):
+    """The defect 051 fixes, asserted end to end.
+
+    A horizon holding more than one predicted trip used to produce charging only
+    before the first: later trips got a truthful availability mask and a projected
+    SoC drop, but no obligation, so nothing asked the plan to recharge. The vehicle
+    coasted down across every trip but one.
+
+    Derived from the plan itself rather than from the schedule generator: away
+    windows are the runs of slots the plan allocates no EV power to *and* projects a
+    SoC drop at the end of, which is what the planner was actually told. Asserting
+    against a recomputed schedule here would be a second copy of the prediction, the
+    thing this change removed six of.
+    """
+    slots = context.ven_plan.get("slots", [])
+    assert slots, "no plan slots to inspect"
+
+    # Per slot: EV power, and the EV's planned state of charge.
+    series = []
+    for slot in slots:
+        ev_kw = sum(
+            a.get("power_kw", 0.0)
+            for a in slot.get("allocations", [])
+            if a.get("asset_id") == "ev"
+        )
+        soc = (slot.get("planned_state_by_asset", {}).get("ev") or {}).get("soc")
+        series.append((slot.get("slot_index"), ev_kw, soc))
+
+    # A departure shows up as a fall in planned SoC that charging cannot explain.
+    drops = []
+    for i in range(1, len(series)):
+        prev_soc, soc = series[i - 1][2], series[i][2]
+        if prev_soc is None or soc is None:
+            continue
+        if soc < prev_soc - 0.02 and series[i][1] <= 1e-6:
+            drops.append(i)
+    assert len(drops) >= 2, (
+        "this scenario needs a horizon with at least two predicted trips to be "
+        f"meaningful; the plan shows {len(drops)} SoC drop(s). Check the profile's "
+        "leave_probability and the horizon length."
+    )
+
+    # Every drop after the first must have charging somewhere between the previous
+    # drop and itself — that gap is the car being home between two trips.
+    for a, b in zip(drops, drops[1:]):
+        charged = [(idx, kw) for idx, kw, _ in series[a:b] if kw > 1e-6]
+        assert charged, (
+            f"the plan allocates no EV charging between the trips ending at slot {a} "
+            f"and slot {b}. Before 051 only the first departure bound an obligation, "
+            "so the gap between trips was never used — this is that regression."
+        )

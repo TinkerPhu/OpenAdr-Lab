@@ -367,3 +367,101 @@ def step_response_json_field_is_true(context, field_path):
         assert isinstance(val, dict), f"Expected dict at '{p}', got {type(val)}: {val}"
         val = val.get(p)
     assert val is True, f"Field '{field_path}' is not true: {val!r}"
+
+
+# ---------------------------------------------------------------------------
+# 051: the user's trip estimate is optional, and complete or absent
+# ---------------------------------------------------------------------------
+
+def _post_ev_with_estimate(context, from_h, to_h, km=None, back_h=None):
+    """An EV request with an optional trip estimate attached.
+
+    `km` and `back_h` are the pair. Sending one without the other is what the
+    boundary refuses, so the step allows it deliberately in order to assert that.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "asset_id": "ev",
+        "target_soc": 0.8,
+        "earliest_start": (now + timedelta(hours=from_h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "deadlines": [
+            {
+                "latest_end": (now + timedelta(hours=to_h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "min_completion": 0.8,
+            }
+        ],
+        "completion_policy": "STOP",
+    }
+    if km is not None:
+        payload["expected_trip_distance_km"] = km
+    if back_h is not None:
+        payload["expected_return_time"] = (
+            now + timedelta(hours=back_h)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    context.last_ev_payload = payload
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+    except Exception:
+        context.last_response_json = None
+
+
+@when(
+    'I POST an EV user request available in {from_h:d} hours, departing in {to_h:d} hours, '
+    'driving {km:d} km and back in {back_h:d} hours'
+)
+def step_post_ev_with_full_estimate(context, from_h, to_h, km, back_h):
+    _post_ev_with_estimate(context, from_h, to_h, km=km, back_h=back_h)
+
+
+@when(
+    'I POST an EV user request available in {from_h:d} hours, departing in {to_h:d} hours, '
+    'driving {km:d} km with no return time'
+)
+def step_post_ev_with_distance_only(context, from_h, to_h, km):
+    _post_ev_with_estimate(context, from_h, to_h, km=km)
+
+
+@when(
+    'I POST an EV user request available in {from_h:d} hours, departing in {to_h:d} hours, '
+    'back in {back_h:d} hours with no distance'
+)
+def step_post_ev_with_return_only(context, from_h, to_h, back_h):
+    _post_ev_with_estimate(context, from_h, to_h, back_h=back_h)
+
+
+@then('the refusal says the trip estimate is incomplete')
+def step_refusal_incomplete_estimate(context):
+    body = context.last_response_json or {}
+    msg = str(body.get("error", ""))
+    assert "trip estimate" in msg, f"expected an incomplete-estimate refusal, got {body}"
+    assert "missing" in msg, f"the refusal must name the missing part, got {msg!r}"
+
+
+@then('the queued EV session states a trip of {km:d} km')
+def step_session_states_estimate(context, km):
+    r = ven_get("/ev-session")
+    assert r.status_code == 200, f"GET /ev-session returned {r.status_code}"
+    sessions = r.json()
+    assert sessions, "no queued session to inspect"
+    stated = [s for s in sessions if s.get("expected_trip_distance_km") == km]
+    assert stated, f"no queued session states {km} km: {sessions}"
+    for s in stated:
+        assert s.get("expected_return_time"), (
+            "a stated distance must arrive with its return time — the pair is what "
+            f"makes the drop placeable: {s}"
+        )
+
+
+@then('the queued EV session states no trip')
+def step_session_states_no_estimate(context):
+    r = ven_get("/ev-session")
+    assert r.status_code == 200, f"GET /ev-session returned {r.status_code}"
+    sessions = r.json()
+    assert sessions, "no queued session to inspect"
+    for s in sessions:
+        assert s.get("expected_trip_distance_km") is None, (
+            f"nothing was stated, so nothing may be assumed: {s}"
+        )
+        assert s.get("expected_return_time") is None, f"likewise the return time: {s}"

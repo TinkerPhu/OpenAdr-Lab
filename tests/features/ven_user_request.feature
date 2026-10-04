@@ -107,6 +107,33 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 201
     And the EV session queue holds 2 sessions
 
+  # A trip estimate is optional, and it is a pair. Nothing is invented for a user who
+  # says nothing: the plan holds the charge flat until the real return is measured.
+  Scenario: A session with no trip estimate is accepted and assumes nothing
+    When I POST an EV user request available in 1 hours, departing in 8 hours
+    Then the response status is 201
+    And the queued EV session states no trip
+
+  Scenario: A complete trip estimate is carried on the session
+    When I POST an EV user request available in 1 hours, departing in 8 hours, driving 120 km and back in 14 hours
+    Then the response status is 201
+    And the queued EV session states a trip of 120 km
+
+  # Half an estimate cannot be planned for: a distance with no return time is energy
+  # with no instant to apply it to. Completing it by guessing is what this change
+  # removed, so it is refused and says which part is missing.
+  Scenario: A distance with no return time is refused
+    When I POST an EV user request available in 1 hours, departing in 8 hours, driving 120 km with no return time
+    Then the response status is 422
+    And the refusal says the trip estimate is incomplete
+    And the EV session queue holds 0 sessions
+
+  Scenario: A return time with no distance is refused
+    When I POST an EV user request available in 1 hours, departing in 8 hours, back in 14 hours with no distance
+    Then the response status is 422
+    And the refusal says the trip estimate is incomplete
+    And the EV session queue holds 0 sessions
+
   # --- Non-storage asset rejection ---
 
   Scenario: Request for a non-storage asset is rejected
