@@ -14551,3 +14551,13 @@ the same constraint if it ranges over the same variables with the same bounds, a
 in two places. A fallback that turns a solver error into a plausible default (the tariff) hid
 the failure for weeks; a warning nobody alerts on is not a signal.
 
+**E2E, and what it did not settle.** Merged with one scenario red, by decision: the isolated
+`reactive_correction_notifications.feature` ("A sustained deviation ... produces a start and a
+clear notification") failed in two full runs — one on main without R-98 and one on the branch —
+and passed 4/4 when run alone from a fresh VEN, on main and branch alike. That is R-88 (the
+arbiter's release is unbounded by its cause), not R-98. Two other failures in those runs were
+fixed on the branch: the PV-silence scenario read its baseline off the real sky and failed after
+sunset, and the Planner Diagnostics step waited 10 s where its siblings wait 45 s. The second fix
+was not exercised by an E2E run before the merge. The runs also showed that `run_all_tests.sh`
+tests the host's checked-out branch, not the caller's — corrected in `.claude/CLAUDE.md`.
+
