@@ -3078,6 +3078,11 @@ Rules:
   next-tick projection, which includes a charger's response lag: an EV commanded back to plan
   still draws for seconds, so the release was refused forever. `power_when_command_lands_kw`
   is the asset's own answer for "once the command has landed".
+- Find every channel a correction is held through before writing its release. Battery and EV
+  carry the arbiter's command in a setpoint; PV curtailment carries it in the inverter's
+  generation limit, which the next tick's PV preview already includes. A release check that
+  missed it released whenever its own curtailment hid the deviation, then re-engaged a second
+  later — found only by logging "deviation if released" every 2 s during a full E2E run.
 - Summing per-tick kW deltas into a field named `_kwh` made the replan backstop deaf to exactly
   the case it exists for: a correction that is held, not moving, adds zero. A backstop has to
   measure the state it guards (displacement × time), not its rate of change.

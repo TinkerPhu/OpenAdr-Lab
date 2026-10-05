@@ -23,6 +23,7 @@ fn tick<'a>(
         plan_has_ev_allocation: false,
         overlay_enabled: true,
         live_pv_kw: None,
+        live_pv_released_kw: None,
         live_base_load_kw: Some(live_base_load_kw),
         alert_active,
         limit_target_kw,

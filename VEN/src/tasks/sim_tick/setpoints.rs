@@ -28,6 +28,7 @@ use super::dispatch_override::{
 /// dispatch setpoint above a hard import limit while staying inside the
 /// comms-loss bounds.
 ///
+/// `live_pv_released_kw`: the PV preview without the arbiter's own curtailment (R-88).
 /// `live_pv_kw`/`live_base_load_kw`: this tick's previewed output for the two
 /// physics-driven inputs (`SimState::peek_pv_kw`/`peek_base_load_kw`),
 /// computed *before* physics runs — so no pass reads a one-tick-stale value.
@@ -36,7 +37,7 @@ pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
     thermostat_setpoints_kw: &HashMap<String, f64>,
     now: DateTime<Utc>,
-    (live_pv_kw, live_base_load_kw): (Option<f64>, Option<f64>),
+    (live_pv_kw, live_pv_released_kw, live_base_load_kw): (Option<f64>, Option<f64>, Option<f64>),
 ) -> controller::arbiter::ArbiterOutcome {
     use crate::entities::planner_params::PlannerObjective;
     use controller::arbiter::limit;
@@ -67,6 +68,7 @@ pub(crate) fn build_tick_setpoints(
             .is_some_and(|p| controller::dispatcher::plan_has_ev_allocation(p, now)),
         overlay_enabled: ctx.overlay_enabled,
         live_pv_kw,
+        live_pv_released_kw,
         live_base_load_kw,
         alert_active,
         limit_target_kw: limit::limit_target_kw(

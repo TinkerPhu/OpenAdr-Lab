@@ -25,8 +25,19 @@ impl PvInverter {
     /// clipping entirely, overstating export by (rated_kw − inverter_max_kw)
     /// whenever DC potential exceeded the inverter's AC ceiling.
     pub fn resolve_power_kw(&self, inputs: &PvPowerInputs) -> f64 {
+        self.power_under_limit_kw(inputs, self.generation_limit_kw)
+    }
+
+    /// The output for `inputs` under `generation_limit_kw` (≤ 0, `None` = no limit) instead of
+    /// the limit currently in force — so a caller can ask what PV would do under a different
+    /// limit (the arbiter's release check: the limit without its own tightening, R-88).
+    pub fn power_under_limit_kw(
+        &self,
+        inputs: &PvPowerInputs,
+        generation_limit_kw: Option<f64>,
+    ) -> f64 {
         let raw_kw = self.uncurtailed_power_kw(inputs);
-        self.generation_limit_kw
+        generation_limit_kw
             .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
             .unwrap_or(raw_kw)
     }

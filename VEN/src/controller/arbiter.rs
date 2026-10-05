@@ -112,6 +112,12 @@ pub struct ArbiterTick<'a> {
     pub plan_has_ev_allocation: bool,
     pub overlay_enabled: bool,
     pub live_pv_kw: Option<f64>,
+    /// This tick's PV preview under the generation limit that would apply **without** the
+    /// arbiter's own tightening — the PV a released correction would face. `live_pv_kw`
+    /// already includes last tick's arbiter curtailment (it clamps by the inverter's current
+    /// limit), so judging "is the cause gone" on it would release whenever the arbiter's own
+    /// curtailment happened to hide the deviation (R-88). `None`: fall back to `live_pv_kw`.
+    pub live_pv_released_kw: Option<f64>,
     pub live_base_load_kw: Option<f64>,
     /// An alert window is active — the only case that may curtail the heater's
     /// thermostat-forced emergency heat.
