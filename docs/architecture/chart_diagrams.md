@@ -152,8 +152,7 @@ paints fixed plan zones, `DayNightShading` is a function of time alone, `StateSh
 each row what state it is in and shades every contiguous run of the same state.
 
 A chart declares a `StateShadingSpec`: `classify(values, isFuture)` returning
-`{kind, weight}` or `null`, a `styles` entry per kind (`rgb`, `alpha`, optional
-`dashedOutline` for a predicted state), and a `layer` (`"background"` or `"overlay"`).
+`{kind, weight}` or `null`, a `styles` entry per kind (`rgb`, `alpha`), and a `layer` (`"background"` or `"overlay"`).
 `stateShadingRuns()` is the whole calculation without React, which is what the tests read
 (`VEN/ui/src/__tests__/stateShading.test.ts`): a run starts at its first row and ends at the
 first row in a different state, splits when kind or weight changes, extends one step at the

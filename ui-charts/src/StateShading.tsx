@@ -24,8 +24,6 @@ export interface StateShadingStyle {
   rgb: string;
   /** Opacity of a full-weight run (0..1). A run's own weight scales it down. */
   alpha: number;
-  /** Draw a dashed outline — for a state that is predicted rather than measured. */
-  dashedOutline?: boolean;
 }
 
 /** What one row says about itself: which state, and how much of it (0..1). */
@@ -131,9 +129,6 @@ export function renderStateShading<K extends string>(
         // Explicit: recharts defaults ReferenceArea's fillOpacity to 0.5, which
         // would silently halve every alpha computed above.
         fillOpacity={1}
-        {...(style.dashedOutline
-          ? { stroke: `rgb(${style.rgb})`, strokeOpacity: 0.6, strokeDasharray: "4 3" }
-          : {})}
         ifOverflow="hidden"
       />
     );
