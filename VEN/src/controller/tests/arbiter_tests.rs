@@ -958,6 +958,42 @@ fn reconcile_releases_battery_and_ev_together() {
 }
 
 #[test]
+fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
+    // The battery has been discharging 2 kW to hold a correction and has now reached its
+    // minimum SoC, so it cannot take the next 1 kW of disturbance: that 1 kW is unresolved.
+    // The correction is still held — the battery is still 2 kW off-plan — so this is not
+    // a "cleared".
+    let sim = make_sim(vec![
+        ("battery", battery_snap(-2.0, 0.1)),
+        ("base_load", base_snap(PLAN_NET_KW)),
+    ]);
+    let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
+    base_setpoints.insert("battery".to_string(), 0.0);
+    let slot = test_slot(0.20, 0.20, PLAN_NET_KW, 0.0, 0.0, 0.08);
+    let outcome = reconcile(
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: None,
+            live_base_load_kw: Some(PLAN_NET_KW + 3.0),
+            alert_active: false,
+            limit_target_kw: None,
+        },
+        &base_setpoints,
+        Some("battery"),
+    );
+    assert!(
+        outcome.unresolved_kw > 0.9,
+        "the extra 1 kW has no lever: {}",
+        outcome.unresolved_kw
+    );
+    assert_eq!(outcome.active_lever, Some("battery"));
+}
+
+#[test]
 fn reconcile_reports_the_deviation_without_its_correction() {
     // What decides the release is visible: with the battery at plan the step would show.
     let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));

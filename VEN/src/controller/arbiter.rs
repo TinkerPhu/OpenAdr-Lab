@@ -321,8 +321,12 @@ pub fn reconcile(
         setpoints,
         heater_emergency_mode: applied.heater_emergency_mode,
         pv_generation_limit_tighten_kw: applied.pv_generation_limit_tighten_kw,
+        // A lever that acted leads; otherwise a carried lever still off-plan holds the
+        // correction (it may have no capacity left this tick) — still active, not cleared.
+        active_lever: applied
+            .active_lever
+            .or_else(|| release::holding_lever(&displaced_kw_by_asset)),
         displaced_kw_by_asset,
-        active_lever: applied.active_lever,
         net_kw: Some(net_kw),
         dev_kw: Some(dev_kw),
         unresolved_kw: applied.unresolved_kw,

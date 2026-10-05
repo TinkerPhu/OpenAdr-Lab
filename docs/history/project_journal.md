@@ -14561,3 +14561,33 @@ sunset, and the Planner Diagnostics step waited 10 s where its siblings wait 45 
 was not exercised by an E2E run before the merge. The runs also showed that `run_all_tests.sh`
 tests the host's checked-out branch, not the caller's — corrected in `.claude/CLAUDE.md`.
 
+
+### R-88 — the deviation arbiter releases a correction when its cause is gone (2026-10-05)
+
+**Problem.** The deviation pass carries battery/EV's last applied command forward so a quiet tick
+does not undo a correction. That makes a correction held state, and it had no end. Removing the
+disturbance made the battery deviate the other way and the arbiter corrected its own correction;
+any other plan-vs-reality gap kept it engaged; and "Reactive correction cleared" fired on any tick
+where nothing moved, even while the correction was still held. The isolated BDD scenario failed in
+both night-time full runs on 2026-10-04, on main and on a branch alike, and passed alone.
+
+**Decision (user, 2026-10-05).** Release when the cause is gone — a counterfactual — plus a
+planner backstop for a correction something else keeps holding. Rejected: a maximum engagement
+time (a tuning constant and a step change at expiry) and decay of the correction (a sawtooth
+against a dead-beat corrector).
+
+**What was built.** `controller/arbiter/release.rs`: each tick the arbiter also computes the
+deviation with battery/EV back at plan. Inside the dead band, the whole correction returns to
+plan in one tick, the only "cleared". Settled but still needed, it is held and reported as active.
+The planner backstop already existed (`PlanTrigger::ResidualThreshold`) but was deaf: the
+deviation pass fed it per-tick kW deltas under a `_kwh` name, about zero once a correction
+settles. It now feeds kW held × tick, by the same shift rule the limit pass uses. The VEN UI shows
+"Deviation if released" on the Devices arbiter card.
+
+**Issues found on the way.** A first counterfactual used the next-tick projection, which includes
+a charger's response lag: the EV commanded back to plan still drew 1.4 kW for a few seconds, so the
+release would never have been granted (caught by `reconcile_releases_battery_and_ev_together`). It
+now uses `power_when_command_lands_kw`. The day-time evidence run showed the old scenario's pass was
+partly luck: "cleared" came from an empty lever set with 1.85 kW still unresolved. The scenario now
+starts from a precondition that nothing else would hold the correction, and bounds "cleared" at
+60 s; alone it passes in 7 s, against up to 300 s before.
