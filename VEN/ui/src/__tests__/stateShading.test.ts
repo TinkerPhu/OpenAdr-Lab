@@ -29,7 +29,7 @@ const spec: StateShadingSpec<"on" | "later"> = {
   classify,
   styles: {
     on: { rgb: "1,2,3", alpha: 0.4 },
-    later: { rgb: "1,2,3", alpha: 0.2, dashedOutline: true },
+    later: { rgb: "1,2,3", alpha: 0.2 },
   },
 };
 
@@ -108,11 +108,11 @@ describe("renderStateShading", () => {
     expect(half.fillOpacity).toBe(1);
   });
 
-  it("names each area by spec key and kind, and outlines only the kinds that ask for it", () => {
+  it("names each area by spec key and kind, and draws no outline", () => {
     const [past, future] = props([row(0, { w: 1 }), row(2, { w: 1 }), row(3, {})], 1 * minute);
     expect(past.className).toBe("state-shading-demo-on");
     expect(past.strokeDasharray).toBeUndefined();
     expect(future.className).toBe("state-shading-demo-later");
-    expect(future.strokeDasharray).toBeDefined();
+    expect(future.strokeDasharray).toBeUndefined();
   });
 });

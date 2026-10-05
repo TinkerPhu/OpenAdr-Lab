@@ -108,7 +108,7 @@ const EV_UNPLUGGED_SHADING: StateShadingSpec<UnpluggedKind> = {
   },
   styles: {
     unplugged: { rgb: hexToRgb(ASSET_COLORS.ev), alpha: 0.28 },
-    predicted_away: { rgb: hexToRgb(ASSET_COLORS.ev), alpha: 0.14, dashedOutline: true },
+    predicted_away: { rgb: hexToRgb(ASSET_COLORS.ev), alpha: 0.14 },
   },
 };
 

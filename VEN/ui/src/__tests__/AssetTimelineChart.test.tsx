@@ -244,7 +244,7 @@ describe("AssetTimelineChart — EV unplugged shading", () => {
     expect(predicted.x1).toBe(now + 1 * minute);
     expect(predicted.fill).not.toBe(measured.fill);
     expect(measured.strokeDasharray).toBeUndefined();
-    expect(predicted.strokeDasharray).toBeDefined();
+    expect(predicted.strokeDasharray).toBeUndefined();
   });
 
   it("shades a half-plugged bucket at half the opacity of a fully unplugged one", () => {
