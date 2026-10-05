@@ -14605,3 +14605,16 @@ Two unrelated flaky scenarios surfaced in the same runs and were fixed: comms-lo
 on for 20 s instead of polled, and "PV forecast override does not trigger a replan" asserted "no
 plan at all" instead of "no plan with the inject's trigger".
 
+
+**Getting the scenario to test what it claims.** With the release logic right, the reactive-
+correction scenario's new precondition ("nothing else would hold a correction") kept refusing to
+start after the main pass, each time naming a real standing gap that was test pollution, not
+arbiter behaviour: a plan still built under an earlier scenario's `pv_plan_kw` = 0 (overrides are
+reset, but nothing replans until the periodic cycle), and after sunset a decaying irradiance offset
+from the main pass's injects keeping the sim's PV at ~4 kW the plan rightly did not expect. The
+scenario now flushes the PV offset and forces a fresh plan (`/plan/trigger`) before its
+precondition, and passed in the full run after sunset. The logs also showed the arbiter hunting
+between EV and battery while the site itself was steady — a projection mismatch with the charger's
+response lag, filed as R-104. Three flaky scenarios surfaced on the way and were fixed (comms-loss
+onset polled not slept on; "no replan" asserted on the trigger; the EV request step now reports the
+409 body, and the cleanup hook reports leftover EV sessions).

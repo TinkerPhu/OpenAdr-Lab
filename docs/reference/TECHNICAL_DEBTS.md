@@ -1,7 +1,7 @@
 # Technical Debts Register
 
-> **Next ID: R-104.** Use this number for the next new item filed, then increment this
-> line to R-105. (R-101 and R-102 were issued and fixed on `052-ev-plugged-band`; R-103 was
+> **Next ID: R-105.** Use this number for the next new item filed, then increment this
+> line to R-106. (R-104 was filed on `fix/r88-arbiter-release`.) (R-101 and R-102 were issued and fixed on `052-ev-plugged-band`; R-103 was
 > split from R-36 there.) (R-98 came from `048-ev-soc-state-variables` and R-99 from
 > `fix/fleet-chart-precondition`, both merged; R-100 is issued on this branch for the
 > disabled VTN session path. The line counts every ID ever issued, so on a merge keep
@@ -40,6 +40,7 @@
 
 | ID | Sev | Kind | Cost | Why open | Affected files | Description |
 |----|-----|------|------|----------|----------------|-------------|
+| R-104 | S3 | bug | Medium | needs-evidence: reproduce in a multi-tick test that steps the real EV asset's response lag | `VEN/src/controller/arbiter.rs`, `VEN/src/controller/arbiter/arbiter_levers.rs`, `VEN/src/assets/ev.rs` | **The deviation arbiter hunts between the EV and the battery while the site itself is steady.** Logged every 2 s during a full E2E run (2026-10-05, test VEN-1 after the main pass, a standing 2.9 kW plan gap for the arbiter to fill): measured net stayed at 5.15 kW — exactly the plan target — for over a minute, while the arbiter's *projected* net alternated 6.68 / 3.63 kW, deviation ±1.53 kW, the EV's command toggling 1.5 kW / off about every 20 s and the battery swinging 1.0 / 2.5 kW against it. The ±1.53 is the EV's power: the projection (`power_drawn_for_setpoint_kw`, which includes the charger's 10 s response lag) disagrees with what the EV is drawing, so the arbiter corrects a phantom and the EV's zero-cost lever is clawed back and re-engaged in turn. Harmless to the grid in that run (reality stayed on target), but it churns the EV relay and keeps a correction 'active' with nothing to correct; the arbiter is off by default. First step: a `reconcile` loop test that advances the real `EvCharger` state between ticks (`arbiter_tests.rs` fixtures set actual = commanded, so no lag ever shows) and asserts the EV command settles. |
 | R-94 | S3 | bug | Medium | too-big: first step: a latched-minimum stored-energy constraint in heater_milp.rs derived from thermostat_delta_c | `VEN/src/assets/heater_milp.rs`, `VEN/src/assets/heater_thermostat.rs`, `thermostat_delta_c` | The MILP does not model the heater's thermostat deadband, so the asset can refuse planned dispatch. |
 | R-99 | S3 | bug | Small | needs-decision: the Fleet page cannot tell a filling store from nothing reporting; decide what it should say | `tests/features/fleet_telemetry.feature:48`, `VTN/ui/src/components/FleetPowerChart.tsx`, `VTN/ui/src/pages/Fleet.tsx` | The fleet-chart UI scenario depends on elapsed time by an unknown rule; the Fleet page cannot tell a filling store from an empty one. |
 | R-32 | S3 | duplication | Medium | too-big: first step: a shared OAuth client crate | `VTN/bff/src/vtn_client.rs`, `VEN/src/vtn.rs` | `VTN/bff/src/vtn_client.rs` duplicates `VEN/src/vtn.rs`'s OAuth token + 401-retry + get/put-JSON plumbing (~300 lines each). Separate crates — extraction needs a shared workspace crate; record only, don't force. |
