@@ -223,6 +223,24 @@ All planner configuration lives in `VEN/src/profile.rs → PlannerConfig`. Key p
 | `c_ctrl_imp_malus_eur_kwh` | 0.22 | Malus added to import price to discourage unnecessary import |
 | `solver_timeout_s` | 60 | HiGHS wall-time limit per phase |
 
+**What the import malus prices.** `CtrlImportMalusInteraction` (`controller/milp_interactions.rs`)
+charges `c_ctrl_imp_malus_eur_kwh` on controllable power (heater + EV + shiftable loads + battery
+charge − battery discharge) beyond the slot's PV surplus. Battery discharge counts as negative, so
+PV stored in the battery and later fed into the EV or heater is self-consumption and pays no malus.
+That routing is intended: on ven-1's plan of 2026-10-05 it holds grid import at 9 kWh over 48 h,
+where an unmalused plan imports 23 kWh and is 2.6 EUR cheaper. That's the trade the malus buys.
+
+**Equal-cost EV slots are decided earliest-first.** Battery-to-EV charging costs the same in every
+night slot, so *which* slots get it is a tie, and HiGHS breaks ties arbitrarily. Phase 1 then
+scattered it into single slots at the EV's minimum power, and phase 2 could not merge them within its
+15 s budget (ven-1, 2026-10-05: 13 runs, 14 of them single slots, a matching battery blip under each).
+Every EV plan therefore pays the ASAP lateness term at a tie-breaking weight
+(`TIE_BREAK_LATENESS_EUR_KWH_H`, 1e-4 EUR/kWh per hour, in `assets/ev_milp.rs`; ASAP sessions keep
+their own, larger weight). Earliest first is contiguous, so phase 1 already delivers runs. Pinned
+by `controller/milp_planner/tests/phase2_spikes.rs::ven1_live_instance_charges_the_ev_in_runs_not_single_slots`
+(the live instance, captured in `ven1_ev_frag_data.rs`); `bench_ven1_ev_fragmentation` measures
+every planner knob on the same instance.
+
 ## 7. Terminal Energy Reward (c_terminal)
 
 Without a terminal value, the optimizer treats energy stored at the horizon end as

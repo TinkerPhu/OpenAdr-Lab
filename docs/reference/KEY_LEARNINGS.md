@@ -3087,3 +3087,18 @@ Rules:
   the case it exists for: a correction that is held, not moving, adds zero. A backstop has to
   measure the state it guards (displacement × time), not its rate of change.
 
+## Fragmentation from a MILP can be a tie, not a cost signal (ven-1 EV, 2026-10-06)
+
+- When a plan looks erratic, check first whether the scattered decision is *priced* at all. ven-1's
+  EV ran in single slots because battery-to-EV charging cost exactly the same in every night slot;
+  HiGHS breaks ties arbitrarily, and a smoothing pass with a wall-clock budget cannot be relied on
+  to undo it. A tie-breaker that's tiny against every real price difference (here the existing
+  lateness term at 1e-4 EUR/kWh/h) decides it in phase 1.
+- Measure on the real instance before judging a penalty. Capturing the live plan as a bench
+  (forecast, tariffs, SoCs, real profile) reproduced it exactly, and adding grid import/export to
+  the report turned "the malus wastes money" into "the malus buys self-consumption, as designed".
+  A cost-only comparison would have shipped a fix that removed the policy instead of the bug.
+- A fleet result that changes by the same amount for a 10x smaller perturbation is solver
+  tolerance, not the perturbation. Size the gap in EUR: an objective dominated by a penalty term
+  makes a small relative gap a large absolute one.
+
