@@ -14618,3 +14618,38 @@ between EV and battery while the site itself was steady — a projection mismatc
 response lag, filed as R-104. Three flaky scenarios surfaced on the way and were fixed (comms-loss
 onset polled not slept on; "no replan" asserted on the trigger; the EV request step now reports the
 409 body, and the cleanup hook reports leftover EV sessions).
+
+## 2026-10-06 — Scattered EV charging on ven-1: an equal-cost tie, not the malus (fix/ev-battery-malus-shuffle)
+
+**What was seen.** ven-1's plan of 2026-10-05 21:40 local charged the EV in 13 runs, 14 of them
+single 5-minute slots at the 1.4 kW minimum, each with a matching −1.4 kW battery blip; phase 2 hit
+its 15 s limit every cycle since 2026-10-04 ~10:20 local, friction ~0.1 → ~2 EUR.
+
+**How it was isolated.** The live plan was captured as a bench instance (`ven1_ev_frag_data.rs`:
+per-slot PV/base forecast and tariffs, the plan's SoCs, the real ven-1 profile). The replay
+reproduced the live plan exactly (same plugged mask in all 288 slots, friction 1.606 vs 1.609
+live), so every variant could be measured on the real case. Variants ran through temporary env-var
+seams, never committed: phase-2 budget 15/30/45/60/180 s, startup penalty 0.01–0.30, battery–EV
+coexistence penalty in all slots, only the next trip binding, and three import-malus forms
+(today's; without the battery-discharge credit; a surcharge on all site import). A 20-profile
+fleet sweep checked each candidate for side effects.
+
+**What it was.** The import malus credits battery discharge against controllable load, so PV
+stored in the battery and fed into the EV is malus-free self-consumption. That's intended: today's
+plan imports 9 kWh over 48 h where an unmalused plan imports 23 kWh (and is 2.6 EUR cheaper). The
+first hypothesis, that the shuffle was the bug, was wrong; dropping the credit ("no-dis") fixed the
+fragmentation by abandoning the self-consumption, and also cost a heater + battery site
+(ven-14) 0.26 EUR per 48 h. The bug was only *when*: battery-to-EV charging costs the same in every
+night slot, HiGHS breaks the tie arbitrarily, and phase 2 at 15 s returned phase 1's scatter
+unchanged at every startup penalty. 051's second trip in the horizon added EV energy to place,
+which is why it appeared on 2026-10-04.
+
+**The fix.** Every EV plan pays the existing ASAP lateness term at a tie-breaking weight
+(`TIE_BREAK_LATENESS_EUR_KWH_H` = 1e-4 EUR/kWh/h, `assets/ev_milp.rs`). Ties resolve earliest
+first, which is contiguous: phase 1 gives 4 runs and no single slots, money, import and export
+unchanged, phase-2 friction 1.61 → 0.49. 1e-5 left the ties unbroken. Fleet sweep: import and export
+unchanged on all 20 profiles, ven-5 5 → 1 EV runs; ven-18's money moved by 0.38 EUR, but by the
+same amount at 1e-5, and its objective carries a ~7,770 EUR penalty term that makes a 0.2 % gap
+≈ 15 EUR of tolerance, so that's solver noise, not the tie-breaker. Regression test:
+`phase2_spikes.rs::ven1_live_instance_charges_the_ev_in_runs_not_single_slots`.
+

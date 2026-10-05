@@ -28,6 +28,17 @@ const DROP_UNMET_PENALTY_EUR: f64 = 1.0e5;
 /// reported gap instead of an infeasible site solve.
 const SHORTFALL_PENALTY_EUR: f64 = 1.0e4;
 
+/// Lateness cost every EV plan pays, ASAP or not [EUR per kWh per hour of delay].
+/// When several slots cost the same, which one the EV charges in is a tie, and HiGHS
+/// breaks ties arbitrarily: ven-1 (2026-10-05) got its battery-fed night charging in
+/// 13 runs, 14 of them single 1.4 kW slots, which phase 2 had no time to merge. This
+/// weight makes the tie "earliest first", and earliest first is contiguous. It is a
+/// tie-breaker, not a preference: at most 0.005 EUR/kWh over a 48 h horizon, below
+/// every tariff step. Measured with `bench_ven1_ev_fragmentation` and a fleet sweep:
+/// 1e-5 leaves the ties unbroken, 1e-4 gives 4 runs and changes no site's import or
+/// export.
+const TIE_BREAK_LATENESS_EUR_KWH_H: f64 = 1.0e-4;
+
 impl EvMilpContext {
     /// Declare all LP variables for this EV charger. Context-side canonical implementation.
     pub fn declare_vars(
@@ -317,11 +328,17 @@ impl EvMilpContext {
         }
         // WP4.1 (BL-28) ASAP: every kWh pays €/kWh per hour of delay from now,
         // so the solver front-loads at maximum feasible rate, tariff-blind.
-        if self.asap_lateness_eur_kwh_h > 0.0 && self.mode != EvMilpMode::MustNotRun {
+        // Outside ASAP the same term at `TIE_BREAK_LATENESS_EUR_KWH_H` decides
+        // equal-cost slots: earliest first, which is one run instead of scattered
+        // single slots.
+        let lateness_eur_kwh_h = self
+            .asap_lateness_eur_kwh_h
+            .max(TIE_BREAK_LATENESS_EUR_KWH_H);
+        if self.mode != EvMilpMode::MustNotRun {
             let mut elapsed_h = 0.0;
             for (t, &dt) in dt_h.iter().enumerate().take(n) {
                 let mid_h = elapsed_h + dt / 2.0;
-                obj += (self.asap_lateness_eur_kwh_h * mid_h * dt) * v.p_ev[t];
+                obj += (lateness_eur_kwh_h * mid_h * dt) * v.p_ev[t];
                 elapsed_h += dt;
             }
         }

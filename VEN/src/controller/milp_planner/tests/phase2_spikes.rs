@@ -14,7 +14,14 @@ use std::time::Instant;
 mod data {
     include!("ven1_spikes_data.rs");
 }
+#[allow(clippy::approx_constant)] // captured PV forecast: 3.1416 kW is data, not pi
+mod frag {
+    include!("ven1_ev_frag_data.rs");
+}
 use data::SLOTS;
+
+/// One captured slot: (pv_kw, base_kw, import_eur_kwh, export_eur_kwh, co2_g_kwh).
+type Slot = (f64, f64, f64, f64, f64);
 
 fn ven1_now() -> DateTime<Utc> {
     use chrono::TimeZone;
@@ -112,15 +119,20 @@ fn ven1_profile() -> Profile {
 
 /// ven-1's live tariffs of 2026-10-03T10:40Z, one snapshot per plan slot.
 fn ven1_tariffs(profile: &Profile) -> TariffTimeSeries {
+    tariffs_from(profile, ven1_now(), &SLOTS)
+}
+
+/// A captured plan's tariffs, one snapshot per plan slot.
+fn tariffs_from(profile: &Profile, now: DateTime<Utc>, slots: &[Slot]) -> TariffTimeSeries {
     let steps: Vec<i64> = profile
         .planner
         .plan_zones
         .iter()
         .flat_map(|z| std::iter::repeat_n(z.step_s as i64, z.slots))
         .collect();
-    let mut start = ven1_now();
+    let mut start = now;
     let mut snaps = Vec::new();
-    for (i, &(_, _, imp, exp, co2)) in SLOTS.iter().enumerate() {
+    for (i, &(_, _, imp, exp, co2)) in slots.iter().enumerate() {
         let end = start + chrono::Duration::seconds(steps[i]);
         snaps.push(TariffSnapshot {
             interval_start: start,
@@ -141,15 +153,19 @@ struct Instance {
 }
 
 fn ven1_instance() -> Instance {
-    let now = ven1_now();
-    let profile = ven1_profile();
+    instance_from(ven1_profile(), ven1_now(), &SLOTS)
+}
+
+/// A captured plan replayed: the profile's assets and SoCs, the plan's own PV and
+/// base-load forecast and tariffs.
+fn instance_from(profile: Profile, now: DateTime<Utc>, slots: &[Slot]) -> Instance {
     let sim = make_snap_from_profile(&profile);
-    let tariffs = ven1_tariffs(&profile);
+    let tariffs = tariffs_from(&profile, now, slots);
     let cap = no_capacity();
     let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
     let mut inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
     assert_eq!(inputs.n, 288);
-    for (i, &(pv, base, _, _, _)) in SLOTS.iter().enumerate() {
+    for (i, &(pv, base, _, _, _)) in slots.iter().enumerate() {
         inputs.p_pv_kw[i] = pv;
         inputs.p_base_kw[i] = base;
     }
@@ -413,5 +429,245 @@ fn bench_fleet_startup_penalty() {
             "@@RESULT {{\"bench\":\"bench_fleet_startup_penalty\",\"params\":{{\"ven\":\"{name}\",\"assets\":\"{kinds}\",\"mip_gap\":{gap},\"epsilon\":{eps},\"phase2_budget_s\":15}},\"results\":{{\"p1_s\":{p1_s:.2},{}}}}}",
             rec.join(",")
         );
+    }
+}
+
+/// ven-1's plan of 2026-10-05T19:40Z: EV charging scattered into one-slot 1.4 kW runs,
+/// the battery discharging straight into them at night, phase 2 at its 15 s limit
+/// every cycle since 051 (multi-trip usage forecast) went live. The real profile,
+/// with the plan's SoCs.
+fn ven1_frag_instance() -> Instance {
+    use chrono::TimeZone;
+    let mut profile = fleet_profile("ven-1");
+    for asset in profile.assets.iter_mut() {
+        match asset {
+            AssetProfile::Battery(b) => b.initial_soc = 0.8776,
+            AssetProfile::Ev(e) => e.initial_soc = 0.5788,
+            _ => {}
+        }
+    }
+    let now = Utc.with_ymd_and_hms(2026, 10, 5, 19, 40, 0).unwrap();
+    instance_from(profile, now, &frag::SLOTS)
+}
+
+/// EV runs over the whole horizon (the live plan's fragmentation spans all of it).
+fn ev_runs(s: &SolveOutput, n: usize) -> Flips {
+    flips(&|t| s.p_ev_kw.get(t).copied().unwrap_or(0.0) > 0.05, n)
+}
+
+/// Each EV run as `start-slot+len@kW(bat kW)`, so a blip can be located and its
+/// battery partner seen.
+fn ev_run_list(s: &SolveOutput, n: usize) -> String {
+    let on = |t: usize| s.p_ev_kw.get(t).copied().unwrap_or(0.0) > 0.05;
+    let mut out = Vec::new();
+    let mut t = 0;
+    while t < n {
+        if on(t) {
+            let start = t;
+            while t < n && on(t) {
+                t += 1;
+            }
+            let bat = s.p_bat_ch_kw[start] - s.p_bat_dis_kw[start];
+            out.push(format!(
+                "{start}+{}@{:.1}({bat:.1})",
+                t - start,
+                s.p_ev_kw[start]
+            ));
+        } else {
+            t += 1;
+        }
+    }
+    out.join(" ")
+}
+
+/// One planner setting to measure on a captured instance.
+struct Variant {
+    name: &'static str,
+    malus_eur_kwh: Option<f64>,
+    startup_eur: Option<f64>,
+    budget_s: f64,
+}
+
+/// What a plan costs in money over the horizon, ignoring every modelling term:
+/// grid import minus export at the tariffs.
+fn grid_eur(inputs: &MilpInputs, s: &SolveOutput) -> f64 {
+    (0..inputs.n)
+        .map(|t| {
+            (s.p_imp_kw[t] * inputs.c_imp_eur_kwh[t] - s.p_exp_kw[t] * inputs.c_exp_eur_kwh[t])
+                * inputs.dt_h[t]
+        })
+        .sum()
+}
+
+fn variant_row(inputs: &MilpInputs, s: &SolveOutput) -> String {
+    let n = inputs.n;
+    let ev = ev_runs(s, n);
+    let bat = flips(&|t| s.p_bat_ch_kw[t] + s.p_bat_dis_kw[t] > 0.05, n);
+    let kwh = |v: &Vec<f64>| -> f64 { (0..n).map(|t| v[t] * inputs.dt_h[t]).sum() };
+    format!(
+        "ev {:>2}/{:<2} bat {:>2}/{:<2} | grid {:>7.3} EUR imp {:>5.1} exp {:>5.1} kWh  ev {:>5.1} kWh  bat end {:>4.1} kWh",
+        ev.starts,
+        ev.isolated,
+        bat.starts,
+        bat.isolated,
+        grid_eur(inputs, s),
+        kwh(&s.p_imp_kw),
+        kwh(&s.p_exp_kw),
+        kwh(&s.p_ev_kw),
+        s.e_bat_kwh.last().copied().unwrap_or(0.0),
+    )
+}
+
+/// The live regression: on ven-1's plan of 2026-10-05T19:40Z the battery fed the EV
+/// at its 1.4 kW minimum in 13 scattered runs, 14 of them single slots. Routing PV
+/// through the battery into the EV is what the import malus asks for; *when* it
+/// happens was a cost tie HiGHS broke arbitrarily, and phase 2 had no time to merge
+/// it. Phase 1 must already deliver runs, not single slots — whatever phase 2 manages.
+#[test]
+fn ven1_live_instance_charges_the_ev_in_runs_not_single_slots() {
+    let Instance {
+        inputs,
+        ctxs,
+        profile,
+    } = ven1_frag_instance();
+    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+    let runs = ev_runs(&p1, inputs.n);
+    assert_eq!(
+        runs.isolated,
+        0,
+        "single-slot EV charging in phase 1: {}",
+        ev_run_list(&p1, inputs.n)
+    );
+    assert!(
+        runs.starts <= 5,
+        "EV charging split into {} runs: {}",
+        runs.starts,
+        ev_run_list(&p1, inputs.n)
+    );
+}
+
+/// What each planner knob does on ven-1's live instance of 2026-10-05T19:40Z: runs,
+/// money, and the import the malus exists to reduce. `BENCH_ONLY=a,b` restricts.
+#[test]
+#[ignore = "ven-1 EV fragmentation matrix: 7 variants, ~4 min"]
+fn bench_ven1_ev_fragmentation() {
+    let variants = [
+        Variant {
+            name: "prod",
+            malus_eur_kwh: None,
+            startup_eur: None,
+            budget_s: 15.0,
+        },
+        Variant {
+            name: "prod 45s",
+            malus_eur_kwh: None,
+            startup_eur: None,
+            budget_s: 45.0,
+        },
+        Variant {
+            name: "prod 60s",
+            malus_eur_kwh: None,
+            startup_eur: None,
+            budget_s: 60.0,
+        },
+        Variant {
+            name: "startup .01",
+            malus_eur_kwh: None,
+            startup_eur: Some(0.01),
+            budget_s: 15.0,
+        },
+        Variant {
+            name: "startup .30",
+            malus_eur_kwh: None,
+            startup_eur: Some(0.30),
+            budget_s: 15.0,
+        },
+        Variant {
+            name: "malus 0.10",
+            malus_eur_kwh: Some(0.10),
+            startup_eur: None,
+            budget_s: 15.0,
+        },
+        Variant {
+            name: "malus off",
+            malus_eur_kwh: Some(0.0),
+            startup_eur: None,
+            budget_s: 15.0,
+        },
+    ];
+    let only = std::env::var("BENCH_ONLY").ok();
+    let Instance {
+        inputs,
+        ctxs,
+        profile,
+    } = ven1_frag_instance();
+    let mismatched = (0..inputs.n)
+        .filter(|&t| inputs.a_ev[t] != frag::PLUGGED[t])
+        .count();
+    println!(
+        "
+-- ven-1 2026-10-05T19:40Z | obligations {} | plugged mask differs from live in {mismatched} slots",
+        inputs.ev_obligations.len()
+    );
+    println!(
+        "   runs/one-slot blips over 48 h; grid = import - export at the tariffs
+"
+    );
+    for v in &variants {
+        if let Some(o) = &only {
+            if !o.split(',').any(|x| x.trim() == v.name) {
+                continue;
+            }
+        }
+        let mut prof = profile.clone();
+        if let Some(m) = v.malus_eur_kwh {
+            prof.planner.c_ctrl_imp_malus_eur_kwh = m;
+        }
+        if let Some(c) = v.startup_eur {
+            prof.planner.c_bat_startup_eur = c;
+            prof.planner.c_ev_startup_eur = c;
+        }
+        let p1w = build_phase1_weights(&prof, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inputs, &prof.planner);
+        let t = Instant::now();
+        let p1 = match solve_phase1(&inputs, &p1w, &ctxs, 60.0) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("  {:<14} phase 1 ERR {e}", v.name);
+                continue;
+            }
+        };
+        println!(
+            "  {:<14} p1 {:>5.1}s {:<10} {}",
+            v.name,
+            t.elapsed().as_secs_f64(),
+            format!("{:?}", p1.status),
+            variant_row(&inputs, &p1)
+        );
+        let t = Instant::now();
+        let eps = prof.planner.phase2_epsilon_eur;
+        match solve_phase2(
+            &inputs,
+            &p1w,
+            &p2w,
+            p1.objective_eur,
+            eps,
+            &p1,
+            &ctxs,
+            v.budget_s,
+        ) {
+            Ok((s, fr)) => {
+                println!(
+                    "  {:<14} p2 {:>5.1}s {:<10} {}  friction {fr:.3}",
+                    "",
+                    t.elapsed().as_secs_f64(),
+                    format!("{:?}", s.status),
+                    variant_row(&inputs, &s)
+                );
+                println!("  {:<14}    runs {}", "", ev_run_list(&s, inputs.n));
+            }
+            Err(e) => println!("  {:<14} p2 ERR {e}", ""),
+        }
     }
 }

@@ -943,6 +943,13 @@ A `SIMULATED_USAGE`-origin EV session — that is the `usage_sim` class's mechan
 Charging during any away window, including while the car is out *right now*: a replan that lands
 mid-trip still knows the vehicle is gone and still subtracts what that trip costs.
 
+EV charging scattered into single 5-minute slots at the charger's minimum power, each with a
+matching battery discharge blip. Feeding stored PV from the battery into the EV is intended (the
+import malus treats it as self-consumption), but slots that cost the same are filled earliest
+first, so it shows as runs. A single slot is fine when the price or the remaining energy calls for
+one; a row of them across one cheap night is the regression
+`phase2_spikes.rs::ven1_live_instance_charges_the_ev_in_runs_not_single_slots` guards.
+
 A real user request, if you create one, outranks the prediction for the *goal*. It does not
 outrank it for availability or for what a trip costs: the car's absence is fact, so those slots
 stay at zero either way.
