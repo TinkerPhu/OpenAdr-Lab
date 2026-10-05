@@ -29,7 +29,9 @@ def step_given_post_ev_session(context, soc, hours):
         "target_soc": soc,
         "deadlines": [{"latest_end": departure}],
     })
-    r.raise_for_status()
+    # The body names what refused it (a 409 lists the clashing sessions); raise_for_status
+    # alone dropped that, leaving "409 Conflict" with nothing to go on.
+    assert r.ok, f"POST /user-requests (EV) refused: {r.status_code} {r.text}"
     context.last_response = r
     context.last_response_json = r.json()
 

@@ -16,6 +16,9 @@ Feature: Reactive correction notifications (BL-37)
   Background:
     Given the VEN is running with profile "test"
     And the VEN-1 sim overrides are reset
+    # The main pass's irradiance injects leave an offset that blends back over ~47 min;
+    # after sunset the sim keeps producing that PV while the plan correctly expects none.
+    And the VEN-1 pv irradiance offset is flushed to zero
 
   @isolated
   Scenario: A sustained deviation while the arbiter is enabled produces a start and a clear notification

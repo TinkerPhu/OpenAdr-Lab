@@ -341,6 +341,11 @@ def _reset_device_sessions():
         if r.ok:
             for req in (r.json() or []):
                 ven_delete(f"/user-requests/{req['id']}")
+        # An EV session that outlives every request blocks the next overlapping EV request
+        # with a 409; say so where it happens, not three scenarios later.
+        r = ven_get("/ev-session")
+        if r.ok and r.json():
+            print(f"[cleanup] EV sessions left after deleting all user requests: {r.json()}")
     except Exception:
         pass
 
