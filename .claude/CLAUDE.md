@@ -56,11 +56,17 @@ submodule initialized, so all four suites (`--rust`, `--e2e`, `--resilience`, an
 full run_all_tests.sh) run there too, not just `--rust`.
 
 one-checkout-per-host: each docker host has a SINGLE working tree at
-/srv/docker/openadr_lab, and `run_all_tests.sh` resets it to the branch of whoever
-invoked it. So two sessions cannot run a suite on the same host at once even when the
-lock works: the second `git reset --hard` pulls the tree out from under the first one's
-build, and both E2E runs would also collide on the shared compose project name
-(`openadr-test`) and its container names. The lock is what makes this safe - hold it for
+/srv/docker/openadr_lab, and `run_all_tests.sh` does NOT switch it to your branch: it
+only `git pull`s whatever branch the host already has checked out, then builds and tests
+that. So before any remote suite, under the host lock, put the host on your branch yourself
+and verify it:
+  ssh <host> "cd /srv/docker/openadr_lab && git fetch -q origin && git checkout <branch> && git reset --hard origin/<branch> && git log --oneline -1"
+Observed 2026-10-04: a run meant to test a fix branch tested main, and a "main control run"
+tested the fix branch, because the host was still on the previous run's branch; an A/B is
+only an A/B once both sides are verified on the host. Two sessions cannot run a suite on
+the same host at once even when the lock works: the second checkout pulls the tree out
+from under the first one's build, and both E2E runs would also collide on the shared
+compose project name (`openadr-test`) and its container names. The lock is what makes this safe - hold it for
 the whole run, and read `status` before assuming a host is free. Two sessions CAN work
 in parallel by taking different hosts (one on Node1, one on Node2); they cannot share
 one. Observed 2026-10-04: two sessions both believed they held Node2, one testing main
