@@ -14591,3 +14591,17 @@ now uses `power_when_command_lands_kw`. The day-time evidence run showed the old
 partly luck: "cleared" came from an empty lever set with 1.85 kW still unresolved. The scenario now
 starts from a precondition that nothing else would hold the correction, and bounds "cleared" at
 60 s; alone it passes in 7 s, against up to 300 s before.
+
+**Follow-up the same day: PV curtailment is held state too.** The full E2E run still failed the
+scenario intermittently. A 2 s watcher on `/arbiter-diagnostics` during a run showed "deviation if
+released" swinging between −1.17 kW and 0 with base load and natural PV constant — and 1.17 kW was
+exactly the arbiter's PV curtailment. `PvInverter::resolve_power_kw` clamps the PV preview by the
+inverter's current generation limit, which carries last tick's arbiter tightening, so the release
+check saw the over-export hidden by the arbiter's own curtailment, released, and re-engaged a tick
+later. The tick now previews PV a second time under the limit resolved without the arbiter's
+tightening (`SimState::peek_pv` returns one `PvPreview` readable under any limit; the asset's own
+`power_under_limit_kw`, which `resolve_power_kw` now calls too), and the release check uses that.
+Two unrelated flaky scenarios surfaced in the same runs and were fixed: comms-loss onset was slept
+on for 20 s instead of polled, and "PV forecast override does not trigger a replan" asserted "no
+plan at all" instead of "no plan with the inject's trigger".
+

@@ -231,6 +231,7 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: Some(-6.0),
+            live_pv_released_kw: None,
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
@@ -264,6 +265,7 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: Some(-6.0),
+            live_pv_released_kw: None,
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
@@ -301,6 +303,7 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: Some(0.0),
+            live_pv_released_kw: None,
             live_base_load_kw: Some(2.5),
             alert_active: false,
             limit_target_kw: None,
@@ -397,6 +400,7 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: Some(-6.0),
+            live_pv_released_kw: None,
             live_base_load_kw: None,
             alert_active: false,
             limit_target_kw: None,
@@ -687,6 +691,7 @@ fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: None,
+            live_pv_released_kw: None,
             live_base_load_kw: Some(-8.67),
             alert_active: false,
             limit_target_kw: None,
@@ -803,6 +808,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
                 plan_has_ev_allocation: false,
                 overlay_enabled: true,
                 live_pv_kw: None,
+                live_pv_released_kw: None,
                 live_base_load_kw: Some(2.0 + STATIONARY_DEVIATION_KW),
                 alert_active: false,
                 limit_target_kw: None,
@@ -896,6 +902,7 @@ fn release_tick(
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: None,
+            live_pv_released_kw: None,
             live_base_load_kw: Some(live_base_load_kw),
             alert_active: false,
             limit_target_kw: None,
@@ -978,6 +985,7 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
             plan_has_ev_allocation: false,
             overlay_enabled: true,
             live_pv_kw: None,
+            live_pv_released_kw: None,
             live_base_load_kw: Some(PLAN_NET_KW + 3.0),
             alert_active: false,
             limit_target_kw: None,
@@ -991,6 +999,48 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
         outcome.unresolved_kw
     );
     assert_eq!(outcome.active_lever, Some("battery"));
+}
+
+#[test]
+fn deviation_if_released_judges_pv_without_the_arbiters_own_curtailment() {
+    // The site exports 1.17 kW more than planned (live PV 4.03 kW against a plan built on
+    // 2.86 kW), and the arbiter answered last tick by curtailing PV: the inverter now holds
+    // PV at the planned 2.86 kW, so `live_pv_kw` shows no deviation at all. Released, that
+    // curtailment ends and the over-export is back — so the cause is NOT gone. Judged on the
+    // curtailed PV, the correction would be released, re-engaged a tick later, released
+    // again: the cycle that made "cleared" a coin toss in the E2E run of 2026-10-05.
+    let sim = make_sim(vec![
+        ("battery", battery_snap(0.0, 0.5)),
+        ("base_load", base_snap(0.5)),
+        ("pv", base_snap(-2.86)),
+    ]);
+    let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
+    base_setpoints.insert("battery".to_string(), 0.0);
+    let plan_net_kw = 0.5 - 2.86;
+    let slot = test_slot(0.20, 0.20, 0.0, -plan_net_kw, 2.86, 0.08);
+    let outcome = reconcile(
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(-2.86),
+            live_pv_released_kw: Some(-4.03),
+            live_base_load_kw: Some(0.5),
+            alert_active: false,
+            limit_target_kw: None,
+        },
+        &base_setpoints,
+        Some("pv_curtail"),
+    );
+    let without = outcome
+        .dev_without_correction_kw
+        .expect("plan slot present");
+    assert!(
+        (without - -1.17).abs() < 1e-6,
+        "released, the 1.17 kW over-export returns; got {without}"
+    );
 }
 
 #[test]

@@ -246,7 +246,10 @@ refusal. Because battery and EV carry their own last command forward, a correcti
 arbiter holds, and it ends by one rule (`controller/arbiter/release.rs`, R-88): each tick it also
 computes the **deviation if released** — battery and EV back at their plan values, counted at what
 those values draw once the command has landed (a charger's response lag would otherwise refuse the
-release forever). Inside the dead band → the cause is gone and the whole correction returns to plan
+release forever), and PV under the generation limit that applies without the arbiter's own
+tightening (`ArbiterTick::live_pv_released_kw`, from `SimState::peek_pv(..).under_limit_kw`): PV
+curtailment is the arbiter's third held correction, carried through the inverter's limit rather
+than a setpoint, and judged on the curtailed preview it released and re-engaged every few seconds. Inside the dead band → the cause is gone and the whole correction returns to plan
 in one tick; that is the only "Reactive correction cleared". Settled but still needed → the
 correction is *held*: nothing moves, the lever stays reported as active. Otherwise the levers act as
 before, and a shrinking disturbance is tracked down from the carried value. A correction that holds

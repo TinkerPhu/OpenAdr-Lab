@@ -77,14 +77,8 @@ pub(crate) async fn tick_once(
         super::usage_sim_plan_ahead::sync_plan_ahead_session(&state, &sim_guard, now).await;
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
-        let live_pv_kw = sim_guard.peek_pv_kw(
-            now,
-            dt_s,
-            ctx.inject.pv_irradiance,
-            ctx.inject.pv_tau_s,
-            ctx.weather_pv_kw_now,
-            ctx.pv_measured_kw_now,
-        );
+        let (live_pv_kw, live_pv_released_kw) =
+            super::feeds::live_pv_previews(&sim_guard, &ctx, &pre_snap, now, dt_s);
         let live_base_load_kw = sim_guard.peek_base_load_kw(
             now,
             dt_s,
@@ -101,7 +95,7 @@ pub(crate) async fn tick_once(
             &pre_snap,
             &thermostat_setpoints_kw,
             now,
-            (live_pv_kw, live_base_load_kw),
+            (live_pv_kw, live_pv_released_kw, live_base_load_kw),
         );
 
         let resolved_pv_generation_limit = crate::controller::comms_loss::pv_generation_limit(

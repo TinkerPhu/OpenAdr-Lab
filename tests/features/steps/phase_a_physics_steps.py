@@ -149,14 +149,13 @@ def step_wait_sim_tick(context, seconds):
 
 @then("no plan cycle is triggered within {sec:d} seconds")
 def step_no_plan_cycle(context, sec):
-    """Assert the MILP planner does not start a new solve for `sec` seconds.
+    """Assert the inject does not trigger a solve: for `sec` seconds, no newly adopted plan
+    carries the `ASSET_STATE_CHANGE` trigger an inject would send.
 
-    Polls GET /plan every 500 ms for `sec` seconds.  If the plan's created_at
-    advances beyond the value captured in context.idle_plan_ts (set by 'Given
-    the system is idle'), a new solve fired and the assertion fails.
-
-    Uses 500 ms poll interval so a spurious solve firing within the window is
-    reliably detected even on Node1 ARM64.
+    Polls GET /plan every 500 ms. A new plan for any *other* reason (the periodic grid, a
+    previous scenario's request still being planned) is not this scenario's business and
+    does not fail it: asserting "no plan at all" failed on 2026-10-05 when an unrelated plan
+    landed 4 s after the idle baseline. The trigger is the claim the scenario makes.
     """
     baseline_ts = getattr(context, "idle_plan_ts", None)
     assert baseline_ts is not None, (
@@ -167,12 +166,12 @@ def step_no_plan_cycle(context, sec):
     while time.time() < deadline:
         resp = ven_get("/plan")
         if resp.ok:
-            body = resp.json()
-            current_ts = body.get("created_at") if body else None
-            if current_ts and current_ts != baseline_ts:
+            body = resp.json() or {}
+            current_ts = body.get("created_at")
+            if current_ts and current_ts != baseline_ts and body.get("trigger") == "ASSET_STATE_CHANGE":
                 raise AssertionError(
-                    f"Unexpected plan cycle fired within {sec}s of pv_plan_kw inject. "
-                    f"Baseline created_at={baseline_ts!r}, new created_at={current_ts!r}"
+                    f"A plan triggered by ASSET_STATE_CHANGE was adopted within {sec}s of the "
+                    f"pv_plan_kw inject (baseline {baseline_ts!r}, new {current_ts!r})"
                 )
         time.sleep(0.5)
 

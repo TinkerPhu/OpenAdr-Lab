@@ -31,7 +31,8 @@ pub(super) fn at_plan(
 }
 
 /// The deviation that would remain once the correction is released: every carried lever at
-/// its plan value, counted at what that value draws **once the command has landed**. "Is the
+/// its plan value, counted at what that value draws **once the command has landed**, and PV
+/// under the generation limit that applies without the arbiter's own tightening. "Is the
 /// cause gone" is a steady-state question — the next-tick projection includes a charger's
 /// response lag, under which an EV commanded back to plan still draws for a few seconds and
 /// the release would never be granted.
@@ -41,7 +42,10 @@ pub(super) fn deviation_without_correction_kw(
     setpoints: &HashMap<String, f64>,
     plan_setpoints: &HashMap<String, f64>,
 ) -> f64 {
-    let (sim, live_pv_kw, live_base_kw) = (tick.sim, tick.live_pv_kw, tick.live_base_load_kw);
+    // PV as it would be without the arbiter's own curtailment — the third correction the
+    // arbiter holds, carried through the inverter's generation limit instead of a setpoint.
+    let live_pv_kw = tick.live_pv_released_kw.or(tick.live_pv_kw);
+    let (sim, live_base_kw) = (tick.sim, tick.live_base_load_kw);
     let others_kw =
         projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_kw, &CARRIED_LEVERS);
     let released = at_plan(setpoints, plan_setpoints);

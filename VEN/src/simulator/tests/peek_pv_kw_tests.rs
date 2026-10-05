@@ -339,3 +339,25 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
         "with no active limit, PV must be unclamped (~-10.0 kW at noon), got {pv_power}"
     );
 }
+
+/// R-88: the preview can be read under a limit other than the one in force — the arbiter's
+/// release check asks for the limit without its own tightening. A given limit clamps exactly
+/// like the in-force one does; no limit gives the uncurtailed output.
+#[test]
+fn peek_pv_under_a_given_limit_clamps_like_the_limit_in_force() {
+    let sim = pv_state(5.0);
+    let preview = sim
+        .peek_pv(noon(), 30.0, Some(1.0), 2847.37, None, None)
+        .expect("PV configured");
+    let unlimited = preview.under_limit_kw(None);
+    assert!(
+        unlimited < -1.0,
+        "full irradiance at noon exports well over 1 kW: {unlimited}"
+    );
+    assert_eq!(
+        preview.in_force_kw(),
+        unlimited,
+        "no limit is in force on a fresh state, so both read the same"
+    );
+    assert_eq!(preview.under_limit_kw(Some(-1.0)), -1.0);
+}

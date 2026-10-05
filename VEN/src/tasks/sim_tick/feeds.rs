@@ -80,3 +80,39 @@ pub(crate) async fn resolve_measurements_now(
     let base_load = resolve_measured_kw_now(base_load_port, base_load_enabled, now).await;
     (pv, base_load)
 }
+
+/// This tick's PV preview twice: under the generation limit in force (what the tick will
+/// produce) and under the limit without the arbiter's own tightening (what a released
+/// correction would face — `ArbiterTick::live_pv_released_kw`, R-88). One preview, so the
+/// two can only differ in the limit.
+pub(crate) fn live_pv_previews(
+    sim: &crate::simulator::SimState,
+    ctx: &super::context::TickContext,
+    pre_snap: &crate::controller::SimSnapshot,
+    now: DateTime<Utc>,
+    dt_s: f64,
+) -> (Option<f64>, Option<f64>) {
+    let Some(preview) = sim.peek_pv(
+        now,
+        dt_s,
+        ctx.inject.pv_irradiance,
+        ctx.inject.pv_tau_s,
+        ctx.weather_pv_kw_now,
+        ctx.pv_measured_kw_now,
+    ) else {
+        return (None, None);
+    };
+    let released_limit = crate::controller::comms_loss::pv_generation_limit(
+        pre_snap,
+        ctx.plan_snap.as_ref(),
+        &ctx.capacity_snap,
+        &ctx.inject,
+        now,
+        None,
+        ctx.comms_loss,
+    );
+    (
+        Some(preview.in_force_kw()),
+        Some(preview.under_limit_kw(released_limit.limit_kw)),
+    )
+}

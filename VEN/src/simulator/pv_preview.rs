@@ -7,6 +7,27 @@ use crate::assets::{PvInverter, PvPowerInputs};
 
 use super::SimState;
 
+/// This tick's PV inputs, resolved once, readable under any generation limit: the limit in
+/// force (what the tick will produce) or a limit the caller resolved — e.g. the limit without
+/// the arbiter's own tightening, for its release check (R-88).
+pub struct PvPreview<'a> {
+    pv: &'a PvInverter,
+    inputs: PvPowerInputs,
+}
+
+impl PvPreview<'_> {
+    /// Under the generation limit the inverter holds now.
+    pub fn in_force_kw(&self) -> f64 {
+        self.pv.resolve_power_kw(&self.inputs)
+    }
+
+    /// Under `generation_limit_kw` (≤ 0; `None` = unlimited) instead.
+    pub fn under_limit_kw(&self, generation_limit_kw: Option<f64>) -> f64 {
+        self.pv
+            .power_under_limit_kw(&self.inputs, generation_limit_kw)
+    }
+}
+
 impl SimState {
     /// Preview this tick's PV output *before* `tick()` mutates state
     /// (read-only). `None` if no PV asset is configured.
@@ -21,7 +42,7 @@ impl SimState {
     /// `PvInverter::resolve_power_kw` (the same function `step_inner` calls).
     /// `peek_pv_kw_matches_tick_output_for_same_now` in
     /// `simulator/tests/peek_pv_kw_tests.rs` guards against re-drift.
-    pub fn peek_pv_kw(
+    pub fn peek_pv(
         &self,
         now: DateTime<Utc>,
         dt_s: f64,
@@ -29,7 +50,7 @@ impl SimState {
         pv_tau_s: f64,
         weather_pv_kw: Option<f64>,
         pv_measured_kw: Option<f64>,
-    ) -> Option<f64> {
+    ) -> Option<PvPreview<'_>> {
         let pv_cfg = self
             .asset_configs
             .iter()
@@ -44,12 +65,35 @@ impl SimState {
             dt_s,
             pv_tau_s,
         );
-        Some(pv_cfg.resolve_power_kw(&PvPowerInputs {
+        let inputs = PvPowerInputs {
             measured_power_kw: pv_measured_kw,
             weather_power_kw: weather_pv_kw,
             irradiance: (natural_irradiance + offset).clamp(0.0, 1.0),
             irradiance_offset: offset,
             irradiance_forced: pv_irradiance_override.is_some(),
-        }))
+        };
+        Some(PvPreview { pv: pv_cfg, inputs })
+    }
+
+    /// This tick's PV output under the generation limit in force — `peek_pv(..)` read as
+    /// the tick will actually produce it.
+    pub fn peek_pv_kw(
+        &self,
+        now: DateTime<Utc>,
+        dt_s: f64,
+        pv_irradiance_override: Option<f64>,
+        pv_tau_s: f64,
+        weather_pv_kw: Option<f64>,
+        pv_measured_kw: Option<f64>,
+    ) -> Option<f64> {
+        self.peek_pv(
+            now,
+            dt_s,
+            pv_irradiance_override,
+            pv_tau_s,
+            weather_pv_kw,
+            pv_measured_kw,
+        )
+        .map(|preview| preview.in_force_kw())
     }
 }
