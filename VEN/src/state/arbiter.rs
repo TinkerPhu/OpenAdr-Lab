@@ -18,6 +18,10 @@ use super::AppState;
 pub struct ArbiterDiagnostics {
     pub net_kw: Option<f64>,
     pub dev_kw: Option<f64>,
+    /// The deviation with battery/EV back at plan — a held correction is released once this
+    /// falls inside the dead band (R-88).
+    #[serde(default)]
+    pub dev_without_correction_kw: Option<f64>,
     pub active_lever: Option<String>,
     /// Deviation no lever could take (kW).
     #[serde(default)]

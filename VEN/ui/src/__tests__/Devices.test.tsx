@@ -147,6 +147,7 @@ const mockPutArbiterSettings = vi.fn();
 const emptyArbiterDiagnostics: ArbiterDiagnostics = {
   net_kw: null,
   dev_kw: null,
+  dev_without_correction_kw: null,
   active_lever: null,
   unresolved_kw: 0,
   measured_net_kw: null,
@@ -641,6 +642,7 @@ describe("DevicesPage", () => {
     mockArbiterDiagnosticsData.mockReturnValue({
       net_kw: null,
       dev_kw: null,
+      dev_without_correction_kw: null,
       active_lever: null,
       unresolved_kw: 0,
       measured_net_kw: 0.95,
@@ -659,6 +661,25 @@ describe("DevicesPage", () => {
     expect(readout.textContent).toMatch(/0\.90 kW/);
     expect(readout.textContent).toMatch(/battery/);
     expect(readout.textContent).toMatch(/0\.30 kW/);
+  });
+
+  // 16g. Why a correction is still held (R-88) is visible: the deviation it would leave
+  it("shows the deviation the held correction would leave if released", () => {
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: true,
+      limit_enforcement_enabled: true,
+    });
+    mockArbiterDiagnosticsData.mockReturnValue({
+      ...emptyArbiterDiagnostics,
+      net_kw: 2.0,
+      dev_kw: 0.0,
+      dev_without_correction_kw: 2.0,
+      active_lever: "battery",
+      updated_at: "2026-10-05T08:00:00Z",
+    });
+    renderPage();
+    const readout = screen.getByTestId("arbiter-diagnostics");
+    expect(readout.textContent).toMatch(/Deviation if released: 2\.00 kW/);
   });
 
   // 17. All Requests accordion expands

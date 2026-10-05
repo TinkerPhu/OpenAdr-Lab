@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 pub(crate) mod arbiter_levers;
 pub mod limit;
+mod release;
 
 use crate::controller::SimSnapshot;
 use crate::entities::plan::PlanTimeSlot;
@@ -60,10 +61,10 @@ pub struct ArbiterOutcome {
     /// arbiter wants folded into `resolve_pv_generation_limit_kw`'s tighter-wins
     /// comparison.
     pub pv_generation_limit_tighten_kw: Option<f64>,
-    /// kWh absorbed this tick, keyed by asset id — feeds the residual
-    /// accumulator (§5.5). Only battery/EV are ever populated (the
-    /// SoC-coupled resources the accumulator protects).
-    pub absorbed_kwh_by_asset: HashMap<String, f64>,
+    /// How far the deviation pass holds battery/EV off their plan values this tick (kW,
+    /// signed) — the correction's displacement, which `residual_kwh_by_asset` turns into
+    /// energy for the replan backstop. Empty when nothing is held.
+    pub displaced_kw_by_asset: HashMap<String, f64>,
     /// The cheapest lever actually used this tick, if any — fed back in as
     /// `incumbent_lever` next tick for the preemption-margin hysteresis.
     pub active_lever: Option<&'static str>,
@@ -73,6 +74,9 @@ pub struct ArbiterOutcome {
     /// exists to compute a deviation against.
     pub net_kw: Option<f64>,
     pub dev_kw: Option<f64>,
+    /// The deviation there would be with battery and EV back at their plan values — what
+    /// decides whether a held correction is released (R-88). `None` without a plan slot.
+    pub dev_without_correction_kw: Option<f64>,
     /// Part of `dev_kw` no lever could take (kW).
     pub unresolved_kw: f64,
     /// The limit-enforcement pass's result (`None` while it is switched off).
@@ -81,15 +85,15 @@ pub struct ArbiterOutcome {
 
 impl ArbiterOutcome {
     /// What this tick adds to the residual accumulator (§5.5), per SoC-coupled
-    /// asset: the deviation pass's absorbed amounts, plus the limit pass's
-    /// battery/EV adjustments as energy over `dt_h`. The limit pass is
-    /// memoryless — it re-applies its whole adjustment every tick — so only
-    /// energy, not a per-tick kW delta, may accumulate. Heater pauses never
-    /// feed it (no SoC to protect).
+    /// asset: what both passes hold battery/EV away from their input, as energy over
+    /// `dt_h` — the deviation pass's displacement from plan and the limit pass's
+    /// adjustment. Energy, not a per-tick kW delta: a correction that is held, not
+    /// moving, must keep counting, or the backstop never hears it (R-88). Heater pauses
+    /// never feed it (no SoC to protect).
     pub fn residual_kwh_by_asset(&self, dt_h: f64) -> HashMap<String, f64> {
-        let mut residual_kwh = self.absorbed_kwh_by_asset.clone();
+        let mut residual_kwh: HashMap<String, f64> = HashMap::new();
         let limit_adjustments = self.limit.iter().flat_map(|l| &l.adjusted_kw_by_asset);
-        for (asset_id, adjusted_kw) in limit_adjustments {
+        for (asset_id, adjusted_kw) in self.displaced_kw_by_asset.iter().chain(limit_adjustments) {
             if asset_id == crate::ids::ASSET_BATTERY || asset_id == crate::ids::ASSET_EV {
                 *residual_kwh.entry(asset_id.clone()).or_insert(0.0) += adjusted_kw.abs() * dt_h;
             }
@@ -277,13 +281,31 @@ pub fn reconcile(
 
     let net_kw = projected_net_kw(sim, &setpoints, live_pv_kw, live_base_load_kw);
     let dev_kw = deviation_kw(slot, net_kw, tick.limit_target_kw);
+    let without_kw =
+        release::deviation_without_correction_kw(tick, slot, &setpoints, base_setpoints);
+    let quiet = ArbiterOutcome {
+        net_kw: Some(net_kw),
+        dev_kw: Some(dev_kw),
+        dev_without_correction_kw: Some(without_kw),
+        ..Default::default()
+    };
 
+    // R-88: the cause is gone — release the whole correction to plan in one tick, the
+    // one true "cleared", instead of undoing it step by step.
+    if without_kw.abs() < DEAD_BAND_KW {
+        let setpoints = release::at_plan(&setpoints, base_setpoints);
+        return ArbiterOutcome { setpoints, ..quiet };
+    }
+    // Settled but still held: nothing to move this tick, yet the levers are off-plan, so the
+    // correction is active (no false "cleared") and keeps counting toward the backstop.
     if dev_kw.abs() < DEAD_BAND_KW {
+        let displaced_kw_by_asset = release::displaced_from_plan_kw(&setpoints, base_setpoints);
+        let active_lever = release::holding_lever(&displaced_kw_by_asset);
         return ArbiterOutcome {
             setpoints,
-            net_kw: Some(net_kw),
-            dev_kw: Some(dev_kw),
-            ..Default::default()
+            displaced_kw_by_asset,
+            active_lever,
+            ..quiet
         };
     }
 
@@ -293,16 +315,18 @@ pub fn reconcile(
         bounds_kw: &SetpointBoundsKw::new(),
     };
     let applied = apply_ranked_levers(&mut setpoints, &DEVIATION_POLICY, &inputs, dev_kw);
+    let displaced_kw_by_asset = release::displaced_from_plan_kw(&setpoints, base_setpoints);
 
     ArbiterOutcome {
         setpoints,
         heater_emergency_mode: applied.heater_emergency_mode,
         pv_generation_limit_tighten_kw: applied.pv_generation_limit_tighten_kw,
-        absorbed_kwh_by_asset: applied.absorbed_kwh_by_asset,
+        displaced_kw_by_asset,
         active_lever: applied.active_lever,
         net_kw: Some(net_kw),
         dev_kw: Some(dev_kw),
         unresolved_kw: applied.unresolved_kw,
+        dev_without_correction_kw: Some(without_kw),
         limit: None,
     }
 }
@@ -372,7 +396,6 @@ pub(crate) struct LeverInputs<'a> {
 pub(crate) struct AppliedLevers {
     pub(crate) heater_emergency_mode: Option<(bool, bool)>,
     pub(crate) pv_generation_limit_tighten_kw: Option<f64>,
-    pub(crate) absorbed_kwh_by_asset: HashMap<String, f64>,
     pub(crate) active_lever: Option<&'static str>,
     /// Part of `|deviation_kw|` no lever could take (kW).
     pub(crate) unresolved_kw: f64,
@@ -444,30 +467,14 @@ pub(crate) fn apply_ranked_levers(
             -assigned_kw
         };
         let achieved_kw = match lever.id {
-            "battery" => {
-                let delta = apply_battery_lever(
-                    setpoints,
-                    sim,
-                    signed_assigned_kw,
-                    battery_objective,
-                    battery_bounds_kw,
-                );
-                if delta > 0.0 {
-                    *applied
-                        .absorbed_kwh_by_asset
-                        .entry(crate::ids::ASSET_BATTERY.to_string())
-                        .or_insert(0.0) += delta;
-                }
-                delta
-            }
-            "ev" => {
-                let delta = apply_ev_lever(setpoints, sim, signed_assigned_kw);
-                *applied
-                    .absorbed_kwh_by_asset
-                    .entry(crate::ids::ASSET_EV.to_string())
-                    .or_insert(0.0) += delta;
-                delta
-            }
+            "battery" => apply_battery_lever(
+                setpoints,
+                sim,
+                signed_assigned_kw,
+                battery_objective,
+                battery_bounds_kw,
+            ),
+            "ev" => apply_ev_lever(setpoints, sim, signed_assigned_kw),
             "heater_pause" => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
             "heater_emergency" => {
                 applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {

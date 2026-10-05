@@ -116,11 +116,10 @@ pub fn enforce_import_limit(
     outcome.unresolved_kw = applied.unresolved_kw;
     outcome.active_lever = applied.active_lever;
     outcome.heater_emergency_mode = applied.heater_emergency_mode;
-    outcome.adjusted_kw_by_asset = setpoints
-        .iter()
-        .map(|(id, &after_kw)| (id, after_kw - current_setpoint_kw(&before, tick.sim, id)))
-        .filter(|(_, adjusted_kw)| adjusted_kw.abs() > 1e-9)
-        .map(|(id, adjusted_kw)| (id.clone(), adjusted_kw))
-        .collect();
+    let moved_ids: Vec<String> = setpoints.keys().cloned().collect();
+    outcome.adjusted_kw_by_asset =
+        super::release::setpoint_shift_kw(setpoints, moved_ids.iter().map(String::as_str), |id| {
+            current_setpoint_kw(&before, tick.sim, id)
+        });
     Some(outcome)
 }

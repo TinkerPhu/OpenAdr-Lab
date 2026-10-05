@@ -44,6 +44,17 @@ def step_pin_pv_forecast_zero(context):
 
 @when('I wait for a user notification containing "{text}"')
 def step_wait_for_notification(context, text):
+    """Waits up to 300 s — see `wait_for_new_notification` for why that much."""
+    wait_for_new_notification(context, text, timeout_s=300)
+
+
+@when('I wait at most {seconds:d} seconds for a user notification containing "{text}"')
+def step_wait_at_most_for_notification(context, seconds, text):
+    """For an edge whose latency the design bounds, so a slow one is a failure, not a wait."""
+    wait_for_new_notification(context, text, timeout_s=seconds)
+
+
+def wait_for_new_notification(context, text, timeout_s):
     # Only a notification raised from here on counts. The ring is cumulative and
     # survives between scenarios, so matching against all of it lets a re-run
     # "pass" in 0.1s on the previous run's notifications -- observed
@@ -60,16 +71,10 @@ def step_wait_for_notification(context, text):
         return (note.get("id"), note.get("count"), note.get("last_seen_at"))
 
     # The baseline is the ring as it stood at the *scenario's* first wait, not
-    # at this step's. Waiting per-step assumes each edge is caused by the step
-    # immediately before it, and the arbiter does not work that way: it carries
-    # its own last-applied setpoint forward as the baseline
-    # (`controller::arbiter::reconcile`), so removing a disturbance leaves the
-    # correction itself deviating from plan and the lever engages and releases
-    # on its own schedule. Observed 2026-09-22: active at :41, cleared at :43
-    # -- before the inject was cleared -- then active again at :54 and held for
-    # the full 300 s. Per-scenario scoping still cannot pass on an earlier
-    # scenario's notifications, which is the property that matters; it just
-    # stops asserting a causality the design never promised.
+    # at this step's: an edge raised between two waits (e.g. while a later step
+    # is still being sent) must still count for the wait that asks for it.
+    # Per-scenario scoping still cannot pass on an earlier scenario's
+    # notifications, which is the property that matters.
     if not hasattr(context, "notification_baseline"):
         r = ven_get("/notifications")
         context.notification_baseline = {fingerprint(n) for n in r.json()} if r.ok else set()
@@ -86,16 +91,12 @@ def step_wait_for_notification(context, text):
             text in n.get("message", "") and fingerprint(n) not in before for n in notes
         )
 
-    # 300s, not 180s. Measured on a quiet Node1 (host load ~4, the settle gate
-    # satisfied): the "Reactive correction cleared" edge landed 181.0s after
-    # "active" -- one second past a 180s wait, so the scenario lost a race it was
-    # always going to lose, on any host. The assertion is unchanged; only the
-    # allowance is, and it is now well clear of the observed latency rather than
-    # sitting exactly on it.
+    # The 300 s default is for notifications raised by a plan cycle (budget, shortfall),
+    # which can take a replan or two to appear.
     context.notifications = poll_until(
         fetch,
         has_text,
-        timeout=300,
+        timeout=timeout_s,
         interval=5,
         description=f"notification feed contains '{text}'",
     )
