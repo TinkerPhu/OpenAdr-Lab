@@ -72,11 +72,13 @@ Feature: Failure Recovery
   # R-59: VEN-1's test profile (VEN/profiles/test.yaml) opts into comms_loss
   # curtailment with a short 10s debounce_s specifically so this scenario's
   # outage window clears it well within a normal outage-detection wait.
+  #
+  # Detection is polled, not slept on: the VEN only notices the outage on its next VTN poll,
+  # which may still be in a backoff delay from the scenario before, and then debounces 10 s.
+  # A fixed 20 s wait lost that race on 2026-10-05 (health still "ok" at 20 s).
   Scenario: VEN curtails power once VTN comms-loss is confirmed
     When the "test-vtn" service is stopped
-    And I wait 20 seconds
-    And I GET the VEN "/health" endpoint
-    Then the VEN health response field "comms_loss_active" is "true"
+    Then the VEN health response field "comms_loss_active" becomes "true" within 90 seconds
     When the "test-vtn" service is restarted
     And I wait for the "test-vtn" service to be healthy
     # A wide poll window, not a same-instant GET: the poll loop may still be
