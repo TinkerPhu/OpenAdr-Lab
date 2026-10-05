@@ -654,6 +654,9 @@ export type LimitPassOutcome = {
 export type ArbiterDiagnostics = {
   net_kw: number | null;
   dev_kw: number | null;
+  /** The deviation with battery/EV back at plan: a held correction is released once this is
+   * inside the 0.1 kW dead band (R-88). */
+  dev_without_correction_kw: number | null;
   active_lever: string | null;
   unresolved_kw: number;
   measured_net_kw: number | null;

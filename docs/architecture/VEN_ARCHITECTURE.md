@@ -242,15 +242,28 @@ spare; the battery, which adjusts continuously, holds import right at the target
 battery/EV from the setpoint map seeded with their last applied command, see
 `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section) with the target and corrects the
 difference; it never touches the plan's own EV allocation and keeps `MaxRevenue`'s discharge
-refusal. Absorbed amounts feed the per-asset residual accumulator (`PlanTrigger::ResidualThreshold`
-past a capacity fraction and cooldown — never a per-tick trigger).
+refusal. Because battery and EV carry their own last command forward, a correction is state the
+arbiter holds, and it ends by one rule (`controller/arbiter/release.rs`, R-88): each tick it also
+computes the **deviation if released** — battery and EV back at their plan values, counted at what
+those values draw once the command has landed (a charger's response lag would otherwise refuse the
+release forever). Inside the dead band → the cause is gone and the whole correction returns to plan
+in one tick; that is the only "Reactive correction cleared". Settled but still needed → the
+correction is *held*: nothing moves, the lever stays reported as active. Otherwise the levers act as
+before, and a shrinking disturbance is tracked down from the carried value. A correction that holds
+because something else in the site keeps differing from plan never releases on its own; that is the
+**planner backstop**'s case: the held displacement from plan (kW × tick) feeds the per-asset
+residual accumulator, which raises `PlanTrigger::ResidualThreshold` past a capacity fraction and
+cooldown — never a per-tick trigger. The VEN UI shows "Deviation if released" next to the deviation
+(Devices → arbiter settings). Pinned by `controller/tests/arbiter_tests.rs` (`reconcile_releases_*`,
+`reconcile_keeps_*`, `a_held_correction_feeds_the_replan_backstop_as_energy`).
 
 **Limit enforcement** (`limit_enforcement_enabled`, default on; off only to measure the planner
 alone): memoryless — recomputed each tick from this tick's setpoint map — and it may reduce a
 planned EV allocation and discharge the battery regardless of the objective. It meets a hard limit
 from the next tick while the planner catches up (e.g. a timed-out MILP incumbent that put a heater
 stage inside a cap, or unforecast load). Its battery/EV adjustments feed the residual accumulator
-as energy over the tick, so persistent use leads to a replan. Excess nothing can shed (forced
+as energy over the tick, by the same shift rule the deviation pass uses for its displacement
+(`release::setpoint_shift_kw`), so persistent use leads to a replan. Excess nothing can shed (forced
 power, the heater's comfort floor) is reported as `unresolved_kw`, never hidden.
 
 **Heater.** Levers command only exact stages: one quantization rule

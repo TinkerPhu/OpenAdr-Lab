@@ -6,12 +6,12 @@ Feature: Reactive correction notifications (BL-37)
   end-to-end: enabling the arbiter, forcing a sustained deviation, and
   observing the start and clear notifications land in GET /notifications.
   #
-  # Isolated (GB-35): the clear edge needs the arbiter to see the deviation
-  # fall back under DEAD_BAND_KW (0.1 kW) for a tick, so it is bounded by sim
-  # tick latency rather than by the VEN's own logic. Measured 2026-09-17 on
-  # Node2 under the standing 17-VEN fleet: the scenario passes at 1-min load
-  # 5.6-8.1 and times out at 10.1, on main and on a branch alike. A fresh VEN
-  # state and the isolated pass's load-settle gate remove that coupling.
+  # R-88: a correction is released when its cause is gone — the deviation with
+  # battery/EV back at plan falls inside DEAD_BAND_KW (0.1 kW) — and "cleared"
+  # means exactly that release. So the clear edge follows the inject's removal
+  # within a few ticks, and the scenario bounds it instead of waiting minutes.
+  # The precondition makes sure nothing else in the site would hold the
+  # correction (see `controller/arbiter/release.rs`).
 
   Background:
     Given the VEN is running with profile "test"
@@ -20,8 +20,9 @@ Feature: Reactive correction notifications (BL-37)
   @isolated
   Scenario: A sustained deviation while the arbiter is enabled produces a start and a clear notification
     Given the deviation arbiter is enabled
+    And the arbiter has no deviation it would keep if released
     When I inject base_load_kw 3.0 with alpha 1.0 via sim inject
     And I wait for a user notification containing "Reactive correction active"
     And I clear the base_load_kw inject
-    And I wait for a user notification containing "Reactive correction cleared"
+    And I wait at most 60 seconds for a user notification containing "Reactive correction cleared"
     And the deviation arbiter is disabled

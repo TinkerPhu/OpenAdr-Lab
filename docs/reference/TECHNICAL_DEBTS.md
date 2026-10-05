@@ -40,7 +40,6 @@
 
 | ID | Sev | Kind | Cost | Why open | Affected files | Description |
 |----|-----|------|------|----------|----------------|-------------|
-| R-88 | S3 | bug | Small | needs-decision: which release semantics the arbiter has: a bound, a maximum engagement, or decay of its own correction | `VEN/src/controller/arbiter.rs::reconcile`, `tests/features/isolated/reactive_correction_notifications.feature` | The deviation arbiter's release edge is unbounded by its cause: removing the disturbance does not end the correction. |
 | R-94 | S3 | bug | Medium | too-big: first step: a latched-minimum stored-energy constraint in heater_milp.rs derived from thermostat_delta_c | `VEN/src/assets/heater_milp.rs`, `VEN/src/assets/heater_thermostat.rs`, `thermostat_delta_c` | The MILP does not model the heater's thermostat deadband, so the asset can refuse planned dispatch. |
 | R-99 | S3 | bug | Small | needs-decision: the Fleet page cannot tell a filling store from nothing reporting; decide what it should say | `tests/features/fleet_telemetry.feature:48`, `VTN/ui/src/components/FleetPowerChart.tsx`, `VTN/ui/src/pages/Fleet.tsx` | The fleet-chart UI scenario depends on elapsed time by an unknown rule; the Fleet page cannot tell a filling store from an empty one. |
 | R-32 | S3 | duplication | Medium | too-big: first step: a shared OAuth client crate | `VTN/bff/src/vtn_client.rs`, `VEN/src/vtn.rs` | `VTN/bff/src/vtn_client.rs` duplicates `VEN/src/vtn.rs`'s OAuth token + 401-retry + get/put-JSON plumbing (~300 lines each). Separate crates — extraction needs a shared workspace crate; record only, don't force. |
@@ -127,35 +126,6 @@
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
 - [ ] 1.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
-
-## R-88 — the deviation arbiter's release edge is unbounded by its cause
-
-**Where:** `VEN/src/controller/arbiter.rs::reconcile`, surfaced by
-`tests/features/isolated/reactive_correction_notifications.feature`.
-
-`reconcile` carries the dead-beat correctors' own last-applied setpoint forward as the
-baseline rather than the plan's per-slot allocation — deliberately, and the code says why:
-otherwise a tick where the lever does not fire silently reverts the correction and
-re-creates the deviation it just resolved.
-
-The consequence is not written down anywhere: **removing the disturbance does not end the
-correction.** The still-corrected battery now deviates from plan in the opposite
-direction, so the arbiter keeps correcting its own correction until it converges. Observed
-on 2026-09-22 with a 3 kW base-load inject: `Reactive correction active` at 19:28:41,
-`cleared` at 19:28:43 (before the inject was removed), `active` again at 19:28:54 (after it
-was removed), then held for the full 300 s wait.
-
-**Why it is debt rather than a bug:** the behaviour may well be correct dead-beat control
-converging, and the feature is disabled by default. What is wrong is that nothing states
-the release is unbounded, so a test — and presumably an operator — assumes "cause gone,
-correction gone". That assumption is what made this scenario intermittently red for weeks
-and read as a load problem.
-
-**To resolve:** decide and document the release semantics (a convergence bound, a maximum
-engagement, or an explicit "releases when its own correction has decayed"), then let the
-scenario assert that stated behaviour instead of a presumed one. Until then the scenario
-asserts only what BL-37 was about: that both edges reach `GET /notifications` during the
-scenario.
 
 ## R-100 — a VTN SoC command is modelled as if it were the user's own intent
 

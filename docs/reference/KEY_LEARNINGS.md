@@ -3066,3 +3066,19 @@ Rules:
   output stayed plausible and the failure ran unnoticed. A fallback should be rare enough that
   its log line is news; if it fires every cycle, treat it as a defect.
 
+## A corrector that integrates from its own output needs an explicit release (R-88)
+
+- The deviation arbiter carries its last command forward so a quiet tick does not undo the
+  correction. That turns a correction into held state, and held state needs a stated end. Without
+  one, removing the disturbance made the battery deviate the other way and the arbiter corrected
+  its own correction; any other plan-vs-reality gap kept it engaged indefinitely, and "cleared"
+  fired on any quiet tick, even while still held. The end is a counterfactual: would there be a
+  deviation with the levers back at plan?
+- Ask a steady-state question with a steady-state model. The counterfactual first used the
+  next-tick projection, which includes a charger's response lag: an EV commanded back to plan
+  still draws for seconds, so the release was refused forever. `power_when_command_lands_kw`
+  is the asset's own answer for "once the command has landed".
+- Summing per-tick kW deltas into a field named `_kwh` made the replan backstop deaf to exactly
+  the case it exists for: a correction that is held, not moving, adds zero. A backstop has to
+  measure the state it guards (displacement × time), not its rate of change.
+

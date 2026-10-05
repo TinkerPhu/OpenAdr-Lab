@@ -363,8 +363,11 @@ fn both_passes_together_settle_under_a_persistent_unforecast_load() {
 
 #[test]
 fn residual_kwh_by_asset_counts_limit_adjustments_as_energy() {
+    // Both passes feed the backstop the same way since R-88: what they hold battery/EV off
+    // their input (kW) times the tick. The deviation pass's share was a kWh-labelled per-tick
+    // kW delta before, so its 0.2 now reads as 0.2 kW held, not 0.2 kWh.
     let outcome = ArbiterOutcome {
-        absorbed_kwh_by_asset: StdHashMap::from([("battery".to_string(), 0.2)]),
+        displaced_kw_by_asset: StdHashMap::from([("battery".to_string(), 0.2)]),
         limit: Some(limit::LimitPassOutcome {
             adjusted_kw_by_asset: StdHashMap::from([
                 ("battery".to_string(), -1.8),
@@ -375,7 +378,7 @@ fn residual_kwh_by_asset_counts_limit_adjustments_as_energy() {
         ..Default::default()
     };
     let residual = outcome.residual_kwh_by_asset(1.0 / 3600.0);
-    assert!((residual["battery"] - (0.2 + 1.8 / 3600.0)).abs() < 1e-12);
+    assert!((residual["battery"] - (0.2 + 1.8) / 3600.0).abs() < 1e-12);
     assert!(
         !residual.contains_key("heater"),
         "heater pause feeds no residual"

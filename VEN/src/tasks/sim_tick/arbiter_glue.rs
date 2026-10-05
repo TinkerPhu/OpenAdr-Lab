@@ -18,13 +18,13 @@ pub(crate) async fn apply_residual_escalation(
     trigger_tx: &std::sync::Arc<
         tokio::sync::watch::Sender<crate::entities::asset::PlanTriggerSignal>,
     >,
-    absorbed_kwh_by_asset: &HashMap<String, f64>,
+    residual_kwh_by_asset: &HashMap<String, f64>,
     now: DateTime<Utc>,
 ) {
-    if absorbed_kwh_by_asset.is_empty() {
+    if residual_kwh_by_asset.is_empty() {
         return;
     }
-    for (asset_id, kwh) in absorbed_kwh_by_asset {
+    for (asset_id, kwh) in residual_kwh_by_asset {
         state.accumulate_residual(asset_id, *kwh).await;
     }
     let residuals = state.residual_state().await;
@@ -106,6 +106,7 @@ pub(crate) async fn record_arbiter_outcome(
         .set_arbiter_diagnostics(crate::state::ArbiterDiagnostics {
             net_kw: outcome.net_kw,
             dev_kw: outcome.dev_kw,
+            dev_without_correction_kw: outcome.dev_without_correction_kw,
             active_lever: active_lever.clone(),
             unresolved_kw: outcome.unresolved_kw,
             measured_net_kw,

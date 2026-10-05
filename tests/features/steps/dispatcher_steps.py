@@ -98,3 +98,29 @@ def step_deviation_arbiter_disabled(context):
     r.raise_for_status()
 
 
+@given("the arbiter has no deviation it would keep if released")
+def step_arbiter_has_no_held_deviation(context):
+    """R-88: a correction is released once the deviation with battery/EV back at plan is
+    inside the 0.1 kW dead band. A scenario asserting that release first needs a site where
+    that is true *without* its own disturbance; otherwise the correction it provokes is held
+    by something else and "cleared" can never come. Fails naming that gap rather than
+    letting a later wait time out with nothing to go on.
+    """
+    def fetch():
+        r = ven_get("/arbiter-diagnostics")
+        return r.json() if r.ok else None
+
+    def no_held_gap(diag):
+        kw = (diag or {}).get("dev_without_correction_kw")
+        return kw is not None and abs(kw) < 0.1
+
+    try:
+        poll_until(fetch, no_held_gap, timeout=120, interval=2,
+                   description="no deviation the arbiter would keep if released")
+    except TimeoutError:
+        diag = fetch()
+        raise AssertionError(
+            "the site already differs from plan without any disturbance from this scenario, "
+            f"so a release cannot be observed: {diag}"
+        )
+

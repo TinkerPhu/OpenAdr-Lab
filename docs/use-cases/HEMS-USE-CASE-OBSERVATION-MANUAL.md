@@ -798,13 +798,23 @@ underlying disturbance persists.
 
 **Devices → Arbiter card** (the deviation readout is visible while deviation correction is on):
 - `Projected net site power` and `Deviation from plan` update every ~5s
-- `Active lever` shows `battery` briefly while correcting, then `none` once converged
+- `Deviation from plan` drops to ~0 once the battery has corrected; `Active lever` stays `battery`
+  for as long as the correction is **held** — the battery is still off-plan to cancel the change
+- `Deviation if released` shows what would be left with the battery back at plan: about the size
+  of your irradiance change while you hold it
+- Put **Manual Irradiance** back: `Deviation if released` falls inside 0.1 kW, the battery returns
+  to its plan value in one step and `Active lever` shows `none` — the one moment the notification
+  bell gets **"Reactive correction cleared"**
+- If the correction stays held long after you reverted, something else differs from plan:
+  `Deviation if released` shows how much. After a while the held correction triggers a replan
+  (`ResidualThreshold` in the plan trigger), and the new plan takes the gap into account
 
 **Controller → Battery timeline chart:**
 - A single step to the corrected power level, then a flat line — not a repeating zig-zag
 
 **Raw check:** `GET /arbiter-diagnostics` — `dev_kw` should shrink toward the dead band (0.1 kW)
-and stay there; `active_lever` should go back to `null` once converged, not keep toggling.
+and stay there while `active_lever` stays `"battery"`; after you revert, `dev_without_correction_kw`
+falls inside the dead band and `active_lever` goes back to `null`, not keep toggling.
 
 ### What you should NOT see
 Rapid small-magnitude alternation in the battery's power (e.g. flipping sign every tick/every few

@@ -39,6 +39,10 @@ function DeviationReadout({ diagnostics }: { diagnostics: ArbiterDiagnostics }) 
         Deviation from plan: <strong>{formatKw(diagnostics.dev_kw)}</strong>
       </Typography>
       <Typography variant="body2">
+        {/* A held correction is released once this is inside the dead band (R-88). */}
+        Deviation if released: <strong>{formatKw(diagnostics.dev_without_correction_kw)}</strong>
+      </Typography>
+      <Typography variant="body2">
         Active lever: <strong>{diagnostics.active_lever ?? "none"}</strong>
       </Typography>
     </Stack>

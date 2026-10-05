@@ -862,5 +862,134 @@ fn heater_emergency_absorb_hysteresis_stays_active_within_margin_of_threshold() 
     );
 }
 
+// ── R-88: a correction releases when its cause is gone ──────────────────────
+//
+// The plan wants 2.0 kW net import with the battery idle; base load is 2.0 kW when nothing
+// is disturbed. `release_tick` runs one real `reconcile` with the battery (and optionally
+// the EV) at last tick's applied setpoint, exactly as `build_tick_setpoints` does.
+
+const PLAN_NET_KW: f64 = 2.0;
+
+fn release_tick(
+    battery_sp_kw: f64,
+    ev_sp_kw: Option<f64>,
+    live_base_load_kw: f64,
+    incumbent: Option<&'static str>,
+) -> ArbiterOutcome {
+    let mut pairs = vec![
+        ("battery", battery_snap(battery_sp_kw, 0.5)),
+        ("base_load", base_snap(PLAN_NET_KW)),
+    ];
+    let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
+    base_setpoints.insert("battery".to_string(), 0.0); // the plan's allocation
+    if let Some(ev_kw) = ev_sp_kw {
+        pairs.push(("ev", ev_snap(ev_kw, 0.5, 0.9, true)));
+        base_setpoints.insert("ev".to_string(), 0.0);
+    }
+    let sim = make_sim(pairs);
+    let slot = test_slot(0.20, 0.20, PLAN_NET_KW, 0.0, 0.0, 0.08);
+    reconcile(
+        &ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: None,
+            live_base_load_kw: Some(live_base_load_kw),
+            alert_active: false,
+            limit_target_kw: None,
+        },
+        &base_setpoints,
+        incumbent,
+    )
+}
+
+#[test]
+fn reconcile_releases_the_battery_to_plan_once_the_disturbance_is_gone() {
+    // Tick 0: a +2 kW base-load step. The battery discharges 2 kW to cancel it.
+    let engaged = release_tick(0.0, None, PLAN_NET_KW + 2.0, None);
+    assert!((engaged.setpoints["battery"] - -2.0).abs() < 1e-6);
+    assert_eq!(engaged.active_lever, Some("battery"));
+
+    // Tick 1: the step is gone. With the battery back at plan there would be no deviation,
+    // so the correction is released to plan in one tick instead of being undone stepwise.
+    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery"));
+    assert!(
+        released.setpoints["battery"].abs() < 1e-6,
+        "the battery must return to its plan allocation, got {}",
+        released.setpoints["battery"]
+    );
+    assert_eq!(
+        released.active_lever, None,
+        "release is the one true 'cleared'"
+    );
+}
+
+#[test]
+fn reconcile_keeps_reporting_the_lever_while_its_correction_holds() {
+    // The step persists and the correction has settled: nothing moves this tick, but the
+    // battery is still held off-plan, so the correction is active — not "cleared".
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    assert!((held.setpoints["battery"] - -2.0).abs() < 1e-6);
+    assert_eq!(held.active_lever, Some("battery"));
+}
+
+#[test]
+fn reconcile_keeps_correcting_while_a_deviation_without_its_correction_remains() {
+    // A 3 kW step shrinks to 1 kW: the cause is not gone, so no release — the dead-beat
+    // corrector tracks it down from its carried value instead.
+    let tracked = release_tick(-3.0, None, PLAN_NET_KW + 1.0, Some("battery"));
+    assert!(
+        (tracked.setpoints["battery"] - -1.0).abs() < 1e-6,
+        "expected the correction to shrink to -1 kW, got {}",
+        tracked.setpoints["battery"]
+    );
+    assert_eq!(tracked.active_lever, Some("battery"));
+}
+
+#[test]
+fn reconcile_releases_battery_and_ev_together() {
+    // Both carried levers are off-plan and the disturbance is gone: both return to plan.
+    let released = release_tick(-1.0, Some(1.4), PLAN_NET_KW, Some("battery"));
+    assert!(released.setpoints["battery"].abs() < 1e-6);
+    assert!(released.setpoints["ev"].abs() < 1e-6);
+    assert_eq!(released.active_lever, None);
+}
+
+#[test]
+fn reconcile_reports_the_deviation_without_its_correction() {
+    // What decides the release is visible: with the battery at plan the step would show.
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    let without = held
+        .dev_without_correction_kw
+        .expect("reported whenever there is a plan slot");
+    assert!((without - 2.0).abs() < 1e-6, "got {without}");
+}
+
+#[test]
+fn a_held_correction_feeds_the_replan_backstop_as_energy() {
+    // The backstop must hear a correction that is held, not only one that is moving: a
+    // settled -2 kW battery is 2 kW off-plan for the whole tick.
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    let dt_h = 1.0 / 3600.0;
+    let residual = held.residual_kwh_by_asset(dt_h);
+    let battery_kwh = residual.get("battery").copied().unwrap_or(0.0);
+    assert!(
+        (battery_kwh - 2.0 * dt_h).abs() < 1e-12,
+        "expected 2 kW x 1 s of displaced energy, got {battery_kwh} kWh"
+    );
+}
+
+#[test]
+fn a_released_correction_feeds_the_backstop_nothing() {
+    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery"));
+    let residual = released.residual_kwh_by_asset(1.0 / 3600.0);
+    assert!(
+        residual.values().all(|&kwh| kwh.abs() < 1e-12),
+        "{residual:?}"
+    );
+}
+
 #[path = "arbiter_limit_tests.rs"]
 mod limit_tests;
