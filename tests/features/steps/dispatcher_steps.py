@@ -105,7 +105,38 @@ def step_arbiter_has_no_held_deviation(context):
     that is true *without* its own disturbance; otherwise the correction it provokes is held
     by something else and "cleared" can never come. Fails naming that gap rather than
     letting a later wait time out with nothing to go on.
+
+    A replan is forced first: resetting the sim overrides does not replan, so the plan in
+    force can still be one an earlier scenario's override shaped (on 2026-10-05 a
+    `pv_plan_kw` of 0 from the main pass left a plan expecting no PV, a standing 2.9 kW gap
+    the periodic replan, every 300 s, had not yet corrected). `/plan/trigger` is a replan the
+    VEN cannot ignore, so the check runs against a plan made from the reset state.
     """
+    from datetime import datetime, timezone
+
+    cutoff = datetime.now(timezone.utc)
+    ven_post("/plan/trigger").raise_for_status()
+
+    def created_at(plan):
+        # RFC 3339 with up to nanoseconds; fromisoformat takes at most microseconds.
+        raw = (plan or {}).get("created_at")
+        if not raw:
+            return None
+        head, _, frac = raw.rstrip("Z").partition(".")
+        return datetime.fromisoformat(f"{head}.{(frac + '000000')[:6]}+00:00")
+
+    def fetch_plan():
+        r = ven_get("/plan")
+        return r.json() if r.ok else None
+
+    poll_until(
+        fetch_plan,
+        lambda plan: (created_at(plan) or cutoff) > cutoff,
+        timeout=180,
+        interval=2,
+        description="a plan made after the overrides were reset",
+    )
+
     def fetch():
         r = ven_get("/arbiter-diagnostics")
         return r.json() if r.ok else None
