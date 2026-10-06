@@ -136,8 +136,8 @@ mod tests {
         assert_eq!(
             base_load_features(&sim).await,
             vec![
-                ("avg 14 d".to_string(), "0.30 kW".to_string()),
-                ("max 14 d".to_string(), "0.40 kW".to_string()),
+                ("avg".to_string(), "0.30 kW".to_string()),
+                ("max".to_string(), "0.40 kW".to_string()),
             ]
         );
     }
@@ -152,8 +152,8 @@ mod tests {
         assert_eq!(
             base_load_features(&sim).await,
             vec![
-                ("avg 14 d".to_string(), "-".to_string()),
-                ("max 14 d".to_string(), "-".to_string()),
+                ("avg".to_string(), "-".to_string()),
+                ("max".to_string(), "-".to_string()),
             ]
         );
     }

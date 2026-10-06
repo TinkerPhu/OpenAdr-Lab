@@ -50,7 +50,7 @@ function formatSetpointResponse(cap: AssetCapability): string {
     notes.push(`off below ${cap.snap_to_zero_below_kw} kW`);
   }
   if (cap.power_next_tick_kw !== undefined) {
-    notes.push(`drawing ${cap.power_next_tick_kw} kW until the command lands`);
+    notes.push(`drawing ${cap.power_next_tick_kw.toFixed(1)} kW until the command lands`);
   }
   return notes.join(", ");
 }

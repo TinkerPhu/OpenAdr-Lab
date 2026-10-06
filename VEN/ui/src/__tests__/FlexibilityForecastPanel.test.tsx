@@ -124,6 +124,31 @@ describe("FlexibilityForecastPanel", () => {
     expect(cell).toHaveTextContent("drawing 7.4 kW until the command lands");
   });
 
+  it("rounds the power the asset draws until the command lands to one decimal", () => {
+    mockCapabilities.mockReturnValue([
+      {
+        data: {
+          max_import_kw: 7.4,
+          min_import_kw: 1.4,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+          adjustability: "STEPLESS",
+          power_steps_kw: [],
+          key_features: [],
+          snap_to_zero_below_kw: 1.4,
+          power_next_tick_kw: 4.472824277831694,
+        },
+      },
+    ]);
+    mockForecasts.mockReturnValue([]);
+    renderPanel(["ev"]);
+
+    expect(screen.getByTestId("adjustability-ev")).toHaveTextContent(
+      "off below 1.4 kW, drawing 4.5 kW until the command lands",
+    );
+  });
+
   it("shows the heater's Min import distinct from Max import (tiered asset)", () => {
     mockCapabilities.mockReturnValue([
       {
@@ -220,8 +245,8 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "NONE",
           power_steps_kw: [],
           key_features: [
-            { label: "avg 14 d", value: "-" },
-            { label: "max 14 d", value: "-" },
+            { label: "avg", value: "-" },
+            { label: "max", value: "-" },
           ],
         },
       },
@@ -230,8 +255,8 @@ describe("FlexibilityForecastPanel", () => {
     renderPanel(["pv", "base_load"]);
 
     expect(screen.getByTestId("key-feature-pv-peak power")).toHaveTextContent("peak power: 5.00 kW");
-    expect(screen.getByTestId("key-feature-base_load-avg 14 d")).toHaveTextContent("avg 14 d: -");
-    expect(screen.getByTestId("key-feature-base_load-max 14 d")).toHaveTextContent("max 14 d: -");
+    expect(screen.getByTestId("key-feature-base_load-avg")).toHaveTextContent("avg: -");
+    expect(screen.getByTestId("key-feature-base_load-max")).toHaveTextContent("max: -");
   });
 
   it("renders no key-feature lines for an asset that declares none", () => {
