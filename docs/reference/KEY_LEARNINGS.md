@@ -3113,3 +3113,15 @@ Rules:
   that finds them steps the real asset between ticks and feeds every piece of state back the way
   production does.
 
+## A failed result must not be comparable on the success metric (2026-10-06)
+
+- A failed MILP solve reported objective 0 EUR, and the adoption gate compared plans on cost only,
+  so the failure looked like the cheapest plan: it replaced a working plan and blocked every later
+  one. Wherever outcomes are ranked, a failure has to be excluded by its status first, not by
+  hoping its numbers happen to lose.
+- A stability preference (the heater anchor) pinned as a hard constraint will eventually contradict
+  the physics: anchored off drained the tank below its floor, anchored on overflowed its ceiling.
+  Pin a preference only as far as the model can still hold it, and release it beyond.
+- Daytime and night-time E2E runs exercise different states (a predicted trip in progress, PV
+  surplus). A suite that passes at night has not passed by day.
+

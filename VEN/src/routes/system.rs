@@ -130,7 +130,7 @@ fn build_health_response(
 /// A missing plan (VEN just started, nothing adopted yet) is not degraded — only
 /// an actually-infeasible adopted plan is.
 fn plan_is_ok(solve_status: Option<SolveStatus>) -> bool {
-    solve_status != Some(SolveStatus::Infeasible)
+    solve_status.is_none_or(SolveStatus::solved)
 }
 
 /// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): componentised health, replacing the

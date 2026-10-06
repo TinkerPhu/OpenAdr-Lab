@@ -11,6 +11,33 @@ use crate::controller::milp_planner::asset_port::{
     ModeDecisions,
 };
 
+/// The anchor (the plan in force's heater block) up to the last slot the tank can hold:
+/// replayed from a tank that gained heat since, a block that filled it exactly overflows,
+/// and a pinned stage under a hard ceiling fails the whole site's solve at presolve. The
+/// anchor is a stability preference, never physics. `(floor_kwh, ceiling_kwh)`: tank bounds.
+fn anchor_the_tank_can_hold(
+    mut anchored_kw: Vec<Option<f64>>,
+    e_init_kwh: f64,
+    (floor_kwh, ceiling_kwh): (f64, f64),
+    q_dem_kw: f64,
+    cum_s: &[i64],
+) -> Vec<Option<f64>> {
+    let mut e_kwh = e_init_kwh;
+    for t in 0..anchored_kw.len() {
+        let Some(kw) = anchored_kw[t] else { break };
+        let dt_h = match (cum_s.get(t), cum_s.get(t + 1)) {
+            (Some(&start_s), Some(&end_s)) => (end_s - start_s) as f64 / 3600.0,
+            _ => 0.0,
+        };
+        e_kwh += (kw - q_dem_kw) * dt_h;
+        if e_kwh > ceiling_kwh + 1e-9 || e_kwh < floor_kwh - 1e-9 {
+            anchored_kw[t..].iter_mut().for_each(|a| *a = None);
+            break;
+        }
+    }
+    anchored_kw
+}
+
 /// Map a planned heater power [kW] to a stage index.
 /// Returns `Some(k)` when `kw` is within 0.1 kW of `k × p_step_kw` for some
 /// reachable stage, or `None` when it matches no stage (anchor left free).
@@ -27,6 +54,14 @@ fn kw_to_stage(kw: f64, p_step_kw: f64, n_stages: f64) -> Option<f64> {
 }
 
 impl HeaterMilpContext {
+    /// What the plan may fill the tank to [kWh above T_min]: its maximum, or where it
+    /// already is when that is higher (Absorb heats to the safety maximum, the thermostat
+    /// cuts off a tick late). The ceiling bounds what the plan adds, never the state it
+    /// starts from — that would contradict the pinned start and fail the whole site solve.
+    fn ceiling_kwh(&self) -> f64 {
+        self.e_max_kwh.max(self.e_init_kwh)
+    }
+
     /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
         self.declare_vars_with(n, vars, ModeDecisions::Free)
@@ -98,9 +133,9 @@ impl HeaterMilpContext {
             vars.add(variable().min(0.0).max(0.0))
         };
 
-        // e_tank[t]: continuous tank energy above T_min [kWh], domain [−e_max, e_max].
-        let e_lo = -self.e_max_kwh.max(1.0); // allow negative (below T_min)
-        let e_hi = self.e_max_kwh.max(1.0);
+        // e_tank[t]: continuous tank energy above T_min [kWh], domain [−e_max, ceiling].
+        let e_lo = (-self.e_max_kwh.max(1.0)).min(self.e_init_kwh); // allow below T_min
+        let e_hi = self.ceiling_kwh().max(1.0);
         let e_tank = (0..n)
             .map(|_| vars.add(variable().min(e_lo).max(e_hi)))
             .collect();
@@ -156,8 +191,9 @@ impl HeaterMilpContext {
         }
 
         // C3: upper bound — no overheating.
+        let ceiling_kwh = self.ceiling_kwh();
         for t in 0..n {
-            cs.push(constraint!(v.e_tank[t] <= self.e_max_kwh));
+            cs.push(constraint!(v.e_tank[t] <= ceiling_kwh));
         }
 
         // C4: soft lower bound — penalise going below T_min.
@@ -287,6 +323,13 @@ impl HeaterMilpContext {
         )
         .max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
+        let anchored_kw = anchor_the_tank_can_hold(
+            anchored_kw,
+            e_init,
+            (-e_max.max(1.0), e_max.max(e_init)),
+            q_dem,
+            cum_s,
+        );
         // Initial mode detection from last observed hardware tier.
         let actual_kw = if let super::AssetState::Heater(s) = state {
             s.actual_power_kw
@@ -1286,6 +1329,71 @@ mod milp_context_trait_tests {
             cfg.thermal_mass_kwh_per_c,
         );
         assert!((future["temp_c"] - 20.5).abs() < 1e-9);
+    }
+
+    /// The anchor (the plan in force's heater block, pinned for stability) is kept only
+    /// while the tank can hold it. The plan in force often fills the tank to exactly its
+    /// maximum; replayed a cycle later from a tank that gained heat meanwhile, the same
+    /// stages overflow it, and a pinned stage plus a hard ceiling is a contradiction the
+    /// MILP rejects at presolve — E2E 2026-10-06, the usage-forecast VEN, one-hour slots.
+    #[test]
+    fn from_state_keeps_the_anchor_only_while_the_tank_can_hold_it() {
+        let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        });
+        let cum_s: Vec<i64> = (0..=4).map(|i| i * 3600).collect();
+        let anchor = vec![Some(3.0), Some(3.0), Some(3.0), None];
+        let ctx_at = |temperature_c: f64| {
+            let state = super::super::AssetState::Heater(super::super::HeaterState {
+                temperature_c,
+                actual_power_kw: 3.0,
+                emergency_latched: false,
+                ceiling_latched: false,
+            });
+            HeaterMilpContext::from_state(
+                &state,
+                &cfg,
+                4,
+                &cum_s,
+                chrono::Utc::now(),
+                None,
+                0.0,
+                0.0,
+                anchor.clone(),
+                0.5,
+            )
+        };
+        // Within the tank's room: 19 °C is 2 kWh of 10, three full-power hours fit.
+        assert_eq!(
+            ctx_at(19.0).anchored_kw,
+            anchor,
+            "an anchor that fits is kept whole"
+        );
+        // 22.5 °C is 9 kWh of 10: the first anchored hour already overflows.
+        let ctx = ctx_at(22.5);
+        let mut e_kwh = ctx.e_init_kwh;
+        for (t, kw) in ctx.anchored_kw.iter().enumerate() {
+            let Some(kw) = kw else { break };
+            let dt_h = (cum_s[t + 1] - cum_s[t]) as f64 / 3600.0;
+            e_kwh += (kw - ctx.q_dem_kw) * dt_h;
+            assert!(
+                e_kwh <= ctx.e_max_kwh + 1e-9,
+                "anchored slot {t} takes the tank to {e_kwh:.2} kWh, above its {:.2} kWh",
+                ctx.e_max_kwh
+            );
+        }
     }
 
     /// R-98: the marginal-cost pass declares the heater through the plan's own

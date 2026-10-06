@@ -424,6 +424,19 @@ pub fn evaluate_acceptance_gate(
     heater_p_step_kw: f64,
     now: DateTime<Utc>,
 ) -> bool {
+    // A failed solve has nothing to dispatch and reports objective 0: whatever the trigger,
+    // it never displaces a plan that solved, and a failed plan in force yields to the
+    // first that did. Compared on cost, "0 EUR" won both ways (E2E 2026-10-06).
+    if let Some(current) = current {
+        match (
+            current.solve_status.solved(),
+            new_plan.solve_status.solved(),
+        ) {
+            (true, false) => return false,
+            (false, true) => return true,
+            _ => {}
+        }
+    }
     let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
 
     if is_hard_trigger || (threshold_eur == 0.0 && gate_switch_penalty_eur == 0.0) {
@@ -665,6 +678,56 @@ mod tests {
             "friction_eur": 0.0
         }))
         .expect("test Plan with expired slot must deserialize")
+    }
+
+    /// A failed solve has no plan to dispatch: objective 0, no slots.
+    fn make_failed_plan() -> Plan {
+        let mut plan = make_plan(0.0, 0.0);
+        plan.solve_status = crate::entities::plan::SolveStatus::Infeasible;
+        plan
+    }
+
+    #[test]
+    fn test_gate_never_lets_a_failed_solve_displace_a_plan_that_solved() {
+        // E2E 2026-10-06: one infeasible cycle on the usage-forecast VEN read as "0 EUR,
+        // cheaper than 5 EUR" and was adopted, leaving the VEN without a plan.
+        let current = make_plan(5.0, 0.2);
+        for trigger in [PlanTrigger::Periodic, PlanTrigger::RateChange] {
+            let adopt = evaluate_acceptance_gate(
+                Some(&current),
+                &make_failed_plan(),
+                &trigger,
+                0.2,
+                1500.0,
+                0.0,
+                2.0,
+                Utc::now(),
+            );
+            assert!(
+                !adopt,
+                "{trigger:?}: a failed solve replaced a working plan"
+            );
+        }
+    }
+
+    #[test]
+    fn test_gate_replaces_a_failed_plan_with_the_next_one_that_solved() {
+        // The same incident's second half: every later plan cost more than the failed
+        // one's "0 EUR", so none was adopted until the 25-minute decay.
+        let adopt = evaluate_acceptance_gate(
+            Some(&make_failed_plan()),
+            &make_plan(5.0, 0.2),
+            &PlanTrigger::Periodic,
+            0.2,
+            1500.0,
+            0.0,
+            2.0,
+            Utc::now(),
+        );
+        assert!(
+            adopt,
+            "a plan that solved must replace a failed plan in force"
+        );
     }
 
     #[test]

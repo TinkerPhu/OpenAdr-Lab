@@ -873,6 +873,46 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
 }
 
 #[test]
+fn heater_already_above_its_ceiling_still_solves() {
+    // A tank can sit above `temp_max_c` — Absorb may heat to the safety maximum, and
+    // the thermostat cuts off a tick late. Its energy then starts above the planner's
+    // hard ceiling, and "start here" plus "never above that" cannot both hold: the whole
+    // site solve failed at presolve. The ceiling binds what the plan adds, not the
+    // state it starts from.
+    use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
+    use crate::services::test_support::milp_mocks::MockHeaterCtx;
+
+    let n = 4;
+    let inputs = make_solver_inputs(n, 0.5);
+    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> =
+        vec![Box::new(MockHeaterCtx {
+            ctx: HeaterMilpContext {
+                mode: HeaterMilpMode::MayRun,
+                t_dead_step: None,
+                p_step_kw: 1.5,
+                n_stages: 2,
+                e_init_kwh: 10.2,
+                e_max_kwh: 10.0,
+                q_dem_kw: 0.1,
+                e_target_kwh: 10.0,
+                lambda_sw_eur: 0.0,
+                initial_y: 0.0,
+                c_terminal_eur_kwh: 0.0,
+                anchored_kw: vec![],
+                comfort_full_reward_eur_kwh: 0.0,
+                comfort_full_co2_reward_eur_kwh: 0.0,
+            },
+        })];
+    let out = solve_phase1(&inputs, &make_phase1_weights(), &ctxs, 60.0)
+        .expect("a tank above its ceiling must not make the site infeasible");
+    assert!(
+        out.y_heat.iter().all(|&y| y < 0.5),
+        "nothing may be added to a tank above its ceiling: {:?}",
+        out.y_heat
+    );
+}
+
+#[test]
 fn heater_terminal_reward_raises_end_state() {
     // Flat tariff 0.25 EUR/kWh. Heater in MayRun with empty tank (e_init=0).
     // Without c_terminal: no incentive to heat → tank stays empty.
