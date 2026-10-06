@@ -25,10 +25,13 @@ pub struct SensorSnapshot {
 }
 
 impl SensorSnapshot {
-    pub fn empty_now() -> Self {
+    /// A sensor snapshot nobody has written yet. Stamped at the epoch rather
+    /// than "now": the value has no reading time, and a fresh-looking `ts`
+    /// would be a made-up one (and a hidden wall-clock read).
+    pub fn never_sampled() -> Self {
         Self {
             id: Uuid::new_v4(),
-            ts: Utc::now(),
+            ts: DateTime::<Utc>::UNIX_EPOCH,
             temperature_c: None,
             power_w: None,
             voltage_v: None,
@@ -139,8 +142,7 @@ impl SimState {
     /// Build a domain-only `TimelineSnapshot`. All infra→domain conversions happen here
     /// before the sim lock is released; no `AssetHistoryBuffer`/`AssetConfig`/`AssetState`
     /// escapes to the domain layer.
-    pub fn to_timeline_snapshot(&self) -> TimelineSnapshot {
-        let now = Utc::now();
+    pub fn to_timeline_snapshot(&self, now: DateTime<Utc>) -> TimelineSnapshot {
         let w = chrono::Duration::seconds(3600);
         let assets = self
             .iter_assets()

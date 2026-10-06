@@ -14711,3 +14711,17 @@ current energy, so a tank Absorb heated past its maximum can't contradict its ow
 incident's exact anchor couldn't be recovered (plan history keeps no slots); the mechanisms are
 pinned by `from_state_keeps_the_anchor_only_while_the_tank_can_hold_it` and
 `heater_already_above_its_ceiling_still_solves`, and the E2E rerun is the end-to-end check.
+
+## Wall-clock reads below the adapters (refactor/utc-now-edges)
+
+Why: a function that calls `Utc::now()` hides a time dependency from its signature, can't be tested
+without the real clock, and lets two reads inside one request disagree. An audit sweep found 50
+production wall-clock reads; 46 were legitimate (adapters reading the clock at the edge, or
+`Instant::now()` duration timers) and 3 were leaks into inner rings: `SensorSnapshot::empty_now`,
+`SimState::to_timeline_snapshot` and `AppState::complete_shiftable`. What: they now take `now`
+from their callers, and the empty sensor snapshot is `never_sampled()` (epoch timestamp — it has
+no reading time, so it no longer invents one). `scripts/audit_ven_architecture.py` gained rule 7,
+which fails on `Utc::now()` in entities/, controller/, services/, assets/, simulator/ and state/.
+Learning: the first draft of the rule's regex carried a literal backspace (`\b` in a non-raw
+Python string) and passed vacuously — an audit rule is only trusted once it has been seen to fail
+on a known violation, so write it, watch it go red, then fix the code.
