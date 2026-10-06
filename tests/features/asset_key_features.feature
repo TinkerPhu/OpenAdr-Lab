@@ -27,5 +27,5 @@ Feature: Asset key features on the Controller's Flexibility & Forecast panel
   Scenario: Base load summarises its recorded history over the last two weeks
     When I GET /capability/base_load from the VEN
     Then the response status is 200
-    And the capability key feature "avg 14 d" is "-" or a kW value
-    And the capability key feature "max 14 d" is "-" or a kW value
+    And the capability key feature "avg" is "-" or a kW value
+    And the capability key feature "max" is "-" or a kW value

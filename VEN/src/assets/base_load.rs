@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use super::own_state::{own, own_mut};
 use super::{
-    load_window::LOAD_WINDOW_DAYS, Asset, AssetCapability, AssetFlexibilityFloor, AssetState,
-    ControlDescriptor, ControlKind, KeyFeature, LoadWindowStats, TickOverridable, TickOverrides,
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+    KeyFeature, LoadWindowStats, TickOverridable, TickOverrides,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
@@ -291,12 +291,9 @@ impl BaseLoad {
 
 impl Asset for BaseLoad {
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
-        let feature = |what: &str, kw: Option<f64>| {
-            let label = format!("{what} {LOAD_WINDOW_DAYS} d");
-            match kw {
-                Some(kw) => KeyFeature::power_kw(&label, kw),
-                None => KeyFeature::new(&label, "-"),
-            }
+        let feature = |label: &str, kw: Option<f64>| match kw {
+            Some(kw) => KeyFeature::power_kw(label, kw),
+            None => KeyFeature::new(label, "-"),
         };
         vec![
             feature("avg", self.observed_window.map(|w| w.avg_kw)),
@@ -454,10 +451,7 @@ mod tests {
         let bl = base_load_with_spikes(vec![]);
         assert_eq!(
             Asset::key_features(&bl, &base_load_state()),
-            vec![
-                KeyFeature::new("avg 14 d", "-"),
-                KeyFeature::new("max 14 d", "-")
-            ]
+            vec![KeyFeature::new("avg", "-"), KeyFeature::new("max", "-")]
         );
     }
 
@@ -468,8 +462,8 @@ mod tests {
         assert_eq!(
             Asset::key_features(&bl, &base_load_state()),
             vec![
-                KeyFeature::new("avg 14 d", "0.80 kW"),
-                KeyFeature::new("max 14 d", "1.80 kW")
+                KeyFeature::new("avg", "0.80 kW"),
+                KeyFeature::new("max", "1.80 kW")
             ]
         );
     }
