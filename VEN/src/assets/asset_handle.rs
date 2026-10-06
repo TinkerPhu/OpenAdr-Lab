@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState, HistoryPoint,
-    Trajectory,
+    KeyFeature, Trajectory,
 };
 
 // ─── AssetHandle ──────────────────────────────────────────────────────────────
@@ -53,6 +53,10 @@ impl<'a> Asset for AssetHandle<'a> {
 
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
         self.config.flexibility_floor(state)
+    }
+
+    fn key_features(&self, state: &AssetState) -> Vec<KeyFeature> {
+        self.config.key_features(state)
     }
 
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {

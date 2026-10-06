@@ -12,7 +12,7 @@ This manual shows how to observe all 14 HEMS controller use cases using the live
 | Page | What it shows |
 |---|---|
 | **Dashboard** | Latest sensor snapshot + three traffic-light status rows (VTN connection, background tasks, plan health) |
-| **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar |
+| **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar, and the Flexibility & Forecast panel: per asset its feasible import/export band and, in small writing under the asset name, its key features (PV peak power; battery and EV capacity; base load average and maximum over the last 14 days, `-` until history exists) |
 | **Requests** | User requests table with status chips; form to create new requests; inline cancel |
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |

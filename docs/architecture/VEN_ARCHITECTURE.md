@@ -1297,7 +1297,9 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/timeline/:asset_id` | Merged past+future timeline for one asset |
 | GET | `/forecast/:asset_id` | Physics-projected future power for one asset |
 | GET | `/history/:asset_id` | Raw per-asset history slice |
-| GET | `/capability/:asset_id` | Point-in-time feasible power range (`AssetCapability`) |
+| GET | `/capability/:asset_id` | Point-in-time feasible power range (`AssetCapability`) plus `key_features`: the asset's own `[{label, value}]` display facts (see below) |
+
+**Asset key features.** `Asset::key_features(&self, state) -> Vec<KeyFeature>` (`assets/mod.rs`) is the one place an asset states what is worth showing about it, label and value with the unit already in it (`-` when there is nothing yet). PV declares `peak power` (`rated_kw`), Battery and EV declare `capacity` (`capacity_kwh`, `battery_kwh`), all straight from the profile. Base load declares `avg 14 d` / `max 14 d` from `BaseLoad.observed_window` (`assets/load_window.rs`): the `tasks/base_load_window.rs` job reads the last 14 days of 1-minute `TickSample` rows through `HistoryPort` at boot and then hourly (every minute while the history is still empty) and injects the result; the asset owns what it means, so a restart reproduces the same numbers from the same history and a fresh install shows `-` until the first record. Assets with nothing to declare return an empty list. The route serialises the list as is, and the VEN UI's Flexibility & Forecast panel prints it under the asset name with no per-kind branch. Test: `assets/*::key_features_*`, `tasks/base_load_window.rs`, `FlexibilityForecastPanel.test.tsx`, `tests/features/asset_key_features.feature`.
 
 ### 4.7 HEMS Controller
 

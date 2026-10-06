@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use super::own_state::{own, own_mut};
 use super::{
-    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
-    RequestResolvable,
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature,
+    MilpParticipant, RequestResolvable,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::BatteryParams;
@@ -214,6 +214,10 @@ impl Battery {
 }
 
 impl Asset for Battery {
+    fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
+        vec![KeyFeature::energy_kwh("capacity", self.capacity_kwh)]
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &BatteryState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
@@ -379,6 +383,13 @@ impl RequestResolvable for Battery {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn key_features_declare_capacity_from_the_profile() {
+        let (bat, state) = make_battery_cfg(0.5);
+        let features = Asset::key_features(&bat, &AssetState::Battery(state));
+        assert_eq!(features, vec![KeyFeature::new("capacity", "10.0 kWh")]);
+    }
 
     fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {
         let cfg = BatteryParams {

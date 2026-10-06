@@ -1,4 +1,5 @@
 mod backoff;
+mod base_load_window;
 mod daily_gate;
 pub mod fleet_trace;
 pub mod heuristics_job;
@@ -15,6 +16,7 @@ pub mod sim_tick;
 pub mod state_persist;
 pub(crate) mod vtn_charge_state_session;
 
+pub(crate) use base_load_window::spawn_base_load_window;
 pub(crate) use heuristics_job::spawn_heuristics_job;
 pub(crate) use history_sampler::spawn_history_sampler;
 pub(crate) use obligation::spawn_obligation_check;
