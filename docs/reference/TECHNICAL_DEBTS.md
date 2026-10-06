@@ -316,6 +316,17 @@ sampled and drawn as an interpolated line, not a step.
 
 ## R-97 — MILP solve time sits close to its own timeout
 
+**Live evidence, 2026-10-06: heater + battery sites pulse, and phase 2 cannot merge it cheaply.**
+ven-5 and ven-17 run the heater in single 5-minute slots through the PV hours, and the battery
+mirrors each pulse (it charges from the surplus except under the pulse). `bench_ven5_heater_fragmentation`
+replays ven-5's plan of 07:25Z exactly (`ven5_heater_frag_data.rs`). Unlike ven-1's EV, which was an
+equal-cost tie fixed by a tie-breaker (b632c6dc), this one isn't a tie: a heater tie-breaker of
+1e-4 or 1e-3, and a phase-1 gap of 0.02 instead of 0.30, left it at about 30 heater runs, 26 of them
+single slots. Phase 2 returns the same plan at 15 s and 60 s for cost allowances of 0.02 to 0.5 EUR.
+Only 2 EUR with 60 s halves it (13 runs), at +0.7 EUR of grid cost over 48 h. So the remaining
+question is a policy one (what a heater switch is worth in EUR) plus phase 2's search, not a
+missing tie-break.
+
 **A claimed regression from `ev-comfort-piecewise-core`, retracted the same day (2026-09-29).**
 Kept because the method is the lesson, not the conclusion.
 
