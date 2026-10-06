@@ -13,7 +13,7 @@ import {
   useObligations,
 } from "../api/hooks";
 import { useVenContext } from "../api/venContext";
-import { JsonDialog } from "../components/JsonDialog";
+import { JsonDialog } from "@lab/charts/JsonDialog";
 
 /** WP-T5 (G-5): newest submission matching a report, by reportName AND
  * eventID when both are known (reportName alone is free-text and not

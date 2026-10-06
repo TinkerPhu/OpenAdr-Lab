@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -328,8 +328,10 @@ describe("DevicesPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(screen.getByTestId("ev-plan-btn"));
-    await user.type(screen.getByTestId("ev-trip-distance-input"), "150");
-    await user.type(screen.getByTestId("ev-trip-return-input"), "2026-10-06T18:00");
+    // Set, not typed: sixteen keystrokes into a datetime field are what pushed this past the
+    // 5 s default once the whole suite ran in parallel, and the keystrokes prove nothing here.
+    fireEvent.change(screen.getByTestId("ev-trip-distance-input"), { target: { value: "150" } });
+    fireEvent.change(screen.getByTestId("ev-trip-return-input"), { target: { value: "2026-10-06T18:00" } });
     await user.click(screen.getByTestId("ev-dialog-confirm"));
 
     expect(mockPostRequest).toHaveBeenCalledWith(

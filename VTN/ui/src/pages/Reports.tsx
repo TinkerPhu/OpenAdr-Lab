@@ -6,7 +6,7 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { Report } from "../api/types";
 import { useReports, useDeleteReport } from "../api/hooks";
-import { JsonDialog } from "../components/JsonDialog";
+import { JsonDialog } from "@lab/charts/JsonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 export function ReportsPage() {
