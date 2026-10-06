@@ -139,7 +139,7 @@ pub async fn get_timeline(
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
-    let snap = ctx.sim.lock().await.to_timeline_snapshot();
+    let snap = ctx.sim.lock().await.to_timeline_snapshot(now);
     let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     match build_grid_aligned_array(
@@ -258,7 +258,7 @@ pub async fn get_timeline_all(
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
-    let snap = ctx.sim.lock().await.to_timeline_snapshot();
+    let snap = ctx.sim.lock().await.to_timeline_snapshot(now);
     let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     let mut timelines: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();

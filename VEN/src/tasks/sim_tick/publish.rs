@@ -48,7 +48,7 @@ pub(crate) async fn publish_sim_tick_result(
         for load in &loads {
             if !sim_snap.assets.contains_key(load.asset_id.as_str()) {
                 info!(asset_id = %load.asset_id, "shiftable load completed");
-                state.complete_shiftable(load.id).await;
+                state.complete_shiftable(load.id, now).await;
                 let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
             }
         }

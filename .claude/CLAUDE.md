@@ -382,13 +382,15 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
   and justify it in docs/plans/refactoring_backlog.md at the same time.
 
   Verifiable invariants — run `python scripts/audit_ven_architecture.py` before any
-  VEN PR. It applies these five rules to production code only (comments and
+  VEN PR. It applies these rules to production code only (comments and
   #[cfg(test)] stripped), which the raw greps below cannot do:
     no `use crate::profile` in entities/, controller/, routes/
     no `use crate::assets::` in controller/milp_planner/
     no `use crate::assets::` in entities/
     no `serde_json::Value` on vtn.rs's pub surface
     no `crate::assets` or `crate::simulator` anywhere in controller/
+    no `Utc::now()` in entities/, controller/, services/, assets/, simulator/, state/ (the
+    adapters — routes/, tasks/, boot/ — read the clock once and pass `now` down)
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md

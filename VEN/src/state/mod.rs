@@ -73,7 +73,7 @@ pub struct ControllerSimState {
 impl Default for ControllerSimState {
     fn default() -> Self {
         Self {
-            sensor: SensorSnapshot::empty_now(),
+            sensor: SensorSnapshot::never_sampled(),
             sim: None,
             inject_state: SimInjectState::default(),
             controller_trace: ControllerTrace::new(),
@@ -480,7 +480,7 @@ impl AppState {
     /// (detected by `tasks::sim_tick::publish` as its asset_id disappearing
     /// from the live `SimSnapshot` — see `SimState::tick()`'s `is_removable`
     /// pass, design.md D3a of `shiftable-load-as-asset`).
-    pub async fn complete_shiftable(&self, load_id: uuid::Uuid) {
+    pub async fn complete_shiftable(&self, load_id: uuid::Uuid, now: DateTime<Utc>) {
         let mut w = self.hems.write().await;
         w.shiftable_loads.retain(|l| l.id != load_id);
         // Also mark linked UserRequest as Completed.
@@ -490,7 +490,7 @@ impl AppState {
             .find(|r| r.session_id == Some(load_id) && r.status == UserRequestStatus::Active)
         {
             req.status = UserRequestStatus::Completed;
-            req.updated_at = Utc::now();
+            req.updated_at = now;
         }
     }
 
@@ -558,14 +558,14 @@ mod tests {
         let req_id = req.id;
         state.upsert_request(req).await;
 
-        state.complete_shiftable(load_id).await;
+        let now = "2026-10-06T12:00:00Z".parse().unwrap();
+        state.complete_shiftable(load_id, now).await;
 
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
         let requests = state.active_requests().await;
-        assert_eq!(
-            requests.iter().find(|r| r.id == req_id).unwrap().status,
-            UserRequestStatus::Completed
-        );
+        let done = requests.iter().find(|r| r.id == req_id).unwrap();
+        assert_eq!(done.status, UserRequestStatus::Completed);
+        assert_eq!(done.updated_at, now, "stamped with the caller's clock");
     }
 
     #[tokio::test]

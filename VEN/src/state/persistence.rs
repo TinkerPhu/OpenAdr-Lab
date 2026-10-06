@@ -65,7 +65,7 @@ impl AppState {
         }
         {
             let mut cs = self.ctrl_sim.write().await;
-            cs.sensor = section(&root, "sensor", SensorSnapshot::empty_now);
+            cs.sensor = section(&root, "sensor", SensorSnapshot::never_sampled);
         }
         Ok(())
     }

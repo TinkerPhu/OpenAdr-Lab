@@ -31,6 +31,14 @@ The rules, and why each exists:
      `simulator/`. This rule covers the whole ring and both infra modules, so
      the next one is caught the day it lands rather than at the next audit.
 
+  7. No wall-clock read (`Utc::now()`) in the rings below the adapters --
+     entities/, controller/, services/, assets/, simulator/, state/. A function
+     that reads the clock itself hides a time dependency from its signature,
+     cannot be tested without sleeping, and lets two calls inside one request
+     disagree about "now". Adapters (routes/, tasks/, boot/) read it once at
+     the edge and pass `now` down. `Instant::now()` is a monotonic duration
+     timer, not date logic, and is not covered.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -70,7 +78,8 @@ def rust_files(base: Path, skip_tests: bool = True) -> "list[Path]":
     files = []
     for p in base.rglob("*.rs"):
         rel = str(p.relative_to(REPO_ROOT))
-        if skip_tests and is_test_only_path(rel):
+        if skip_tests and (is_test_only_path(rel) or p.name == "tests.rs"
+                           or "test_support" in p.parts):
             continue
         files.append(p)
     return sorted(files)
@@ -161,6 +170,10 @@ CHECKS = [
      lambda: forbid("infra", [VEN_SRC / "controller"],
                     r"crate::(assets|simulator)\b")),
     ("new concrete SimState in the application ring", simstate_in_services),
+    ("wall-clock read below the adapters",
+     lambda: forbid("clock", [VEN_SRC / d for d in (
+         "entities", "controller", "services", "assets", "simulator", "state")],
+         r"(Utc|chrono::Utc)::now\(\)")),
 ]
 
 
