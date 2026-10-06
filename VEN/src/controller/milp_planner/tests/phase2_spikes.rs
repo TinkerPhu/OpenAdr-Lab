@@ -18,6 +18,10 @@ mod data {
 mod frag {
     include!("ven1_ev_frag_data.rs");
 }
+#[allow(clippy::approx_constant)] // captured PV forecast, not pi
+mod frag5 {
+    include!("ven5_heater_frag_data.rs");
+}
 use data::SLOTS;
 
 /// One captured slot: (pv_kw, base_kw, import_eur_kwh, export_eur_kwh, co2_g_kwh).
@@ -438,16 +442,66 @@ fn bench_fleet_startup_penalty() {
 /// with the plan's SoCs.
 fn ven1_frag_instance() -> Instance {
     use chrono::TimeZone;
-    let mut profile = fleet_profile("ven-1");
+    let now = Utc.with_ymd_and_hms(2026, 10, 5, 19, 40, 0).unwrap();
+    captured_instance(
+        "ven-1",
+        now,
+        &LiveState {
+            battery_soc: 0.8776,
+            ev_soc: 0.5788,
+            heater_temp_c: None,
+        },
+        &frag::SLOTS,
+    )
+}
+
+/// ven-5's plan of 2026-10-06T07:25Z: heater + battery + EV (away) + PV, phase-1 gap
+/// 0.30. The heater ran single 5-minute slots through the PV hours and the battery
+/// mirrored each one; phase 2 at its 15 s limit, friction 4.74 EUR.
+fn ven5_frag_instance() -> Instance {
+    use chrono::TimeZone;
+    let now = Utc.with_ymd_and_hms(2026, 10, 6, 7, 25, 0).unwrap();
+    captured_instance(
+        "ven-5",
+        now,
+        &LiveState {
+            battery_soc: 0.1343,
+            ev_soc: 0.7859,
+            heater_temp_c: Some(47.76),
+        },
+        &frag5::SLOTS,
+    )
+}
+
+/// The state a captured plan started from.
+struct LiveState {
+    battery_soc: f64,
+    ev_soc: f64,
+    heater_temp_c: Option<f64>,
+}
+
+/// A live plan replayed: the real profile, the plan's starting state, its own PV and
+/// base-load forecast and tariffs.
+fn captured_instance(
+    name: &str,
+    now: DateTime<Utc>,
+    state: &LiveState,
+    slots: &[Slot],
+) -> Instance {
+    let mut profile = fleet_profile(name);
     for asset in profile.assets.iter_mut() {
         match asset {
-            AssetProfile::Battery(b) => b.initial_soc = 0.8776,
-            AssetProfile::Ev(e) => e.initial_soc = 0.5788,
+            AssetProfile::Battery(b) => b.initial_soc = state.battery_soc,
+            AssetProfile::Ev(e) => e.initial_soc = state.ev_soc,
+            AssetProfile::Heater(h) => {
+                if let Some(t) = state.heater_temp_c {
+                    h.temp_initial_c = t;
+                }
+            }
             _ => {}
         }
     }
-    let now = Utc.with_ymd_and_hms(2026, 10, 5, 19, 40, 0).unwrap();
-    instance_from(profile, now, &frag::SLOTS)
+    instance_from(profile, now, slots)
 }
 
 /// EV runs over the whole horizon (the live plan's fragmentation spans all of it).
@@ -488,6 +542,77 @@ struct Variant {
     budget_s: f64,
 }
 
+/// ven-5's heater + battery fragmentation (R-97): the heater pulses single slots
+/// through the PV hours and the battery mirrors each pulse. Unlike ven-1's EV this is
+/// not a cost tie: a heater tie-breaker (1e-4, 1e-3) and a tight phase-1 gap left it at
+/// ~30 runs; phase 2 halves it only with a 2 EUR cost allowance and 60 s, at +0.7 EUR.
+/// Knobs: phase-1 gap, phase-2 budget, `BENCH_EPS` for the cost allowance.
+/// `BENCH_ONLY=a,b` restricts.
+#[test]
+#[ignore = "ven-5 heater fragmentation matrix, ~3 min"]
+fn bench_ven5_heater_fragmentation() {
+    let variants: [(&str, Option<f64>, f64); 3] = [
+        ("prod", None, 15.0),
+        ("prod 60s", None, 60.0),
+        ("gap .02", Some(0.02), 15.0),
+    ];
+    let only = std::env::var("BENCH_ONLY").ok();
+    let Instance {
+        inputs,
+        ctxs,
+        profile,
+    } = ven5_frag_instance();
+    let mismatched = (0..inputs.n)
+        .filter(|&t| inputs.a_ev[t] != frag5::PLUGGED[t])
+        .count();
+    println!(
+        "
+-- ven-5 2026-10-06T07:25Z | plugged mask differs from live in {mismatched} slots"
+    );
+    for (name, gap, budget) in variants {
+        if let Some(o) = &only {
+            if !o.split(',').any(|x| x.trim() == name) {
+                continue;
+            }
+        }
+        let mut inp = inputs.clone();
+        if let Some(g) = gap {
+            inp.mip_gap_target = g;
+        }
+        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let p2w = build_phase2_weights(&inp, &profile.planner);
+        let t = Instant::now();
+        let p1 = match solve_phase1(&inp, &p1w, &ctxs, 60.0) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("  {name:<22} phase 1 ERR {e}");
+                continue;
+            }
+        };
+        println!(
+            "  {name:<22} p1 {:>5.1}s {:<10} {}",
+            t.elapsed().as_secs_f64(),
+            format!("{:?}", p1.status),
+            variant_row(&inp, &p1)
+        );
+        let t = Instant::now();
+        let eps = std::env::var("BENCH_EPS")
+            .ok()
+            .and_then(|e| e.parse().ok())
+            .unwrap_or(profile.planner.phase2_epsilon_eur);
+        match solve_phase2(&inp, &p1w, &p2w, p1.objective_eur, eps, &p1, &ctxs, budget) {
+            Ok((s, fr)) => println!(
+                "  {:<22} p2 eps {eps} {:>5.1}s {:<10} {}  friction {fr:.3}",
+                "",
+                t.elapsed().as_secs_f64(),
+                format!("{:?}", s.status),
+                variant_row(&inp, &s)
+            ),
+            Err(e) => println!("  {:<22} p2 ERR {e}", ""),
+        }
+    }
+}
+
 /// What a plan costs in money over the horizon, ignoring every modelling term:
 /// grid import minus export at the tariffs.
 fn grid_eur(inputs: &MilpInputs, s: &SolveOutput) -> f64 {
@@ -503,13 +628,16 @@ fn variant_row(inputs: &MilpInputs, s: &SolveOutput) -> String {
     let n = inputs.n;
     let ev = ev_runs(s, n);
     let bat = flips(&|t| s.p_bat_ch_kw[t] + s.p_bat_dis_kw[t] > 0.05, n);
+    let htr = flips(&|t| s.y_heat.get(t).copied().unwrap_or(0.0) > 0.5, n);
     let kwh = |v: &Vec<f64>| -> f64 { (0..n).map(|t| v[t] * inputs.dt_h[t]).sum() };
     format!(
-        "ev {:>2}/{:<2} bat {:>2}/{:<2} | grid {:>7.3} EUR imp {:>5.1} exp {:>5.1} kWh  ev {:>5.1} kWh  bat end {:>4.1} kWh",
+        "ev {:>2}/{:<2} bat {:>2}/{:<2} htr {:>2}/{:<2} | grid {:>7.3} EUR imp {:>5.1} exp {:>5.1} kWh  ev {:>5.1} kWh  bat end {:>4.1} kWh",
         ev.starts,
         ev.isolated,
         bat.starts,
         bat.isolated,
+        htr.starts,
+        htr.isolated,
         grid_eur(inputs, s),
         kwh(&s.p_imp_kw),
         kwh(&s.p_exp_kw),
