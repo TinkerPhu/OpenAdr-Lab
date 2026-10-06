@@ -193,8 +193,8 @@ fn spawn_state_persist(w: &World) {
     );
 }
 
-/// The history sampler and the daily heuristics learner — both no-ops without
-/// a history store, so both are gated on the one `Option`.
+/// The history sampler, the base-load window refresher and the daily heuristics
+/// learner — all no-ops without a history store, so all are gated on the one `Option`.
 fn spawn_history_jobs(w: &World) {
     let Some(history) = w.ports.history.clone() else {
         return;
@@ -220,6 +220,14 @@ fn spawn_history_jobs(w: &World) {
                 n.clone(),
             )
         },
+    );
+
+    let (sim, h) = (w.sim.clone(), history.clone());
+    tasks::supervised_spawn(
+        "base_load_window",
+        TASK_COOLDOWN_S,
+        w.state.clone(),
+        move || tasks::spawn_base_load_window(h.clone(), sim.clone()),
     );
 
     let (s, cfg) = (w.state.clone(), w.heuristics_config);

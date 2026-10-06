@@ -6,7 +6,7 @@ use super::ev_schedule::usage_sim_seed_tag;
 use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
+    KeyFeature, MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{EvParams, EvUsageSimParams};
@@ -262,6 +262,10 @@ impl EvCharger {
 }
 
 impl Asset for EvCharger {
+    fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
+        vec![KeyFeature::energy_kwh("capacity", self.battery_kwh)]
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &EvState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
@@ -504,6 +508,13 @@ impl RequestResolvable for EvCharger {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn key_features_declare_capacity_from_the_profile() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        let features = Asset::key_features(&ev, &AssetState::Ev(state));
+        assert_eq!(features, vec![KeyFeature::new("capacity", "40.0 kWh")]);
+    }
 
     fn make_ev(plugged: bool, soc: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
         let cfg = EvCharger {

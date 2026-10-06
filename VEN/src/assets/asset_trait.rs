@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor};
+use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
 use crate::assets::HistoryPoint;
 use crate::entities::asset::{AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::PvCurtailmentSource;
@@ -57,6 +57,14 @@ pub trait Asset: Send + Sync {
     /// `AssetFlexibilityFloor`'s doc comment. No default: every asset type must
     /// state its own answer explicitly rather than silently inherit a wrong one.
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
+
+    /// The asset's own short list of key features for display (installed peak power,
+    /// battery capacity, typical load, ...). Labels and values are the asset's to declare:
+    /// no caller branches on the asset kind to build them. Default empty: an asset with
+    /// nothing worth stating shows nothing.
+    fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
+        Vec::new()
+    }
 
     /// Whether this asset instance is done and should be dropped from
     /// `SimState`'s dynamic roster (`shiftable-load-as-asset` design.md D3a).

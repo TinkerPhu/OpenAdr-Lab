@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    TickOverridable, TickOverrides, Trajectory,
+    KeyFeature, TickOverridable, TickOverrides, Trajectory,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
@@ -264,6 +264,10 @@ impl PvInverter {
 }
 
 impl Asset for PvInverter {
+    fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
+        vec![KeyFeature::power_kw("peak power", self.rated_kw)]
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &PvState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
@@ -497,6 +501,13 @@ impl TickOverridable for PvInverter {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn key_features_declare_peak_power_from_the_profile() {
+        let (pv, state) = make_pv(5.0);
+        let features = Asset::key_features(&pv, &AssetState::Pv(state));
+        assert_eq!(features, vec![KeyFeature::new("peak power", "5.00 kW")]);
+    }
 
     fn make_pv(rated_kw: f64) -> (PvInverter, PvState) {
         (

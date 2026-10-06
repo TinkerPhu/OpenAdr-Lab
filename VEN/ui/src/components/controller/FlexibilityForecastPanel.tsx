@@ -87,7 +87,21 @@ export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
             const forecast = forecastByAsset.get(assetId);
             return (
               <TableRow key={assetId} data-testid={`flexibility-row-${assetId}`}>
-                <TableCell>{ASSET_LABELS[assetId] ?? assetId}</TableCell>
+                <TableCell>
+                  {ASSET_LABELS[assetId] ?? assetId}
+                  {/* The asset declares these (label + value, unit included): no per-kind branch here. */}
+                  {cap?.key_features.map((f) => (
+                    <Typography
+                      key={f.label}
+                      variant="caption"
+                      display="block"
+                      color="text.secondary"
+                      data-testid={`key-feature-${assetId}-${f.label}`}
+                    >
+                      {f.label}: {f.value}
+                    </Typography>
+                  ))}
+                </TableCell>
                 <TableCell data-testid={`adjustability-${assetId}`}>
                   {cap ? (
                     <>

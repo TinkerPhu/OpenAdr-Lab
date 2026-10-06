@@ -14653,3 +14653,12 @@ same amount at 1e-5, and its objective carries a ~7,770 EUR penalty term that ma
 ≈ 15 EUR of tolerance, so that's solver noise, not the tie-breaker. Regression test:
 `phase2_spikes.rs::ven1_live_instance_charges_the_ev_in_runs_not_single_slots`.
 
+## Asset key features on the Controller (2026-10-06)
+
+**What.** The Controller's "Flexibility & Forecast" panel prints, in small writing under each asset name, the asset's key features: PV `peak power`, battery and EV `capacity`, base load `avg 14 d` / `max 14 d` (`-` until a record exists).
+
+**How.** One seam, owned by the asset: `Asset::key_features(&self, state) -> Vec<KeyFeature>` (default empty). Each asset kind returns its own labels and values with the unit already in the value, so neither the route nor the UI knows an asset kind: `GET /capability/:asset_id` serialises the list as `key_features`, and `FlexibilityForecastPanel` maps over it. PV, battery and EV values come straight from the profile-derived fields (`rated_kw`, `capacity_kwh`, `battery_kwh`). Base load keeps `observed_window` (`assets/load_window.rs`), injected by the new `tasks/base_load_window.rs` job: it reads the last 14 days of 1-minute `TickSample` rows through `HistoryPort` at boot and then hourly. Reading the whole window each time is the seeding (a restart reproduces the numbers) and the moving window in one code path; with less than 14 days it averages what exists, with none it stays `-` and retries every minute so the first record does not wait an hour.
+
+**Decisions.** (1) The heuristics learner (`services::heuristics`) was not reused: it returns `None` on a cold start and weights by recency, while the display wants the plain mean and max of whatever exists. (2) The window is days (`14 d`), not weeks: `2 w` next to a kW value reads as watts. (3) Injection goes through `as_any_mut().downcast_mut::<BaseLoad>()` inside the one job, the documented narrow use of that seam; a trait method for an hourly summary of one asset kind would be a second per-kind hook. (4) The 1-minute rows are already means, so the max is a max of minute means, which is fine for a label.
+
+**Tests.** `assets/*::key_features_*`, `assets/load_window.rs`, `tasks/base_load_window.rs` (refresh with injected clock: window edge excluded, empty history shows `-`), `FlexibilityForecastPanel.test.tsx`, and `tests/features/asset_key_features.feature` for the use case. Docs: `VEN_ARCHITECTURE.md` (route table, "Asset key features"), `HEMS-USE-CASE-OBSERVATION-MANUAL.md` (Controller row).

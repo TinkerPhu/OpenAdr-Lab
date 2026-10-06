@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use super::own_state::{own, own_mut};
 use super::{
-    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
-    TickOverridable, TickOverrides,
+    load_window::LOAD_WINDOW_DAYS, Asset, AssetCapability, AssetFlexibilityFloor, AssetState,
+    ControlDescriptor, ControlKind, KeyFeature, LoadWindowStats, TickOverridable, TickOverrides,
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
@@ -102,6 +102,12 @@ pub struct BaseLoad {
     /// every tick from the live heuristics store regardless.
     #[serde(skip)]
     pub heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+    /// Mean and peak of the recorded load over the trailing `LOAD_WINDOW_DAYS`, for the
+    /// key-features display. Injected by the hourly `tasks::base_load_window` job (the
+    /// history store is acquisition; reading it as "what this load typically draws" is
+    /// this asset's). `None` until a record exists. NOT from YAML, not persisted.
+    #[serde(skip)]
+    observed_window: Option<LoadWindowStats>,
 }
 
 /// BaseLoad mutable state.
@@ -124,7 +130,13 @@ impl BaseLoad {
                 .collect(),
             measured_load_kw: None,
             heuristic: None,
+            observed_window: None,
         }
+    }
+
+    /// Replace the trailing-window summary (`None` while the history holds no record).
+    pub fn set_observed_window(&mut self, window: Option<LoadWindowStats>) {
+        self.observed_window = window;
     }
 
     /// Deterministic simulated appliance noise \[kW\] for `now`: additive
@@ -278,6 +290,20 @@ impl BaseLoad {
 }
 
 impl Asset for BaseLoad {
+    fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
+        let feature = |what: &str, kw: Option<f64>| {
+            let label = format!("{what} {LOAD_WINDOW_DAYS} d");
+            match kw {
+                Some(kw) => KeyFeature::power_kw(&label, kw),
+                None => KeyFeature::new(&label, "-"),
+            }
+        };
+        vec![
+            feature("avg", self.observed_window.map(|w| w.avg_kw)),
+            feature("max", self.observed_window.map(|w| w.max_kw)),
+        ]
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &BaseLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
@@ -418,6 +444,35 @@ impl TickOverridable for BaseLoad {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    fn base_load_state() -> AssetState {
+        AssetState::BaseLoad(BaseLoad::initial_state(&BaseLoadParams::default()))
+    }
+
+    #[test]
+    fn key_features_show_dashes_until_a_window_is_observed() {
+        let bl = base_load_with_spikes(vec![]);
+        assert_eq!(
+            Asset::key_features(&bl, &base_load_state()),
+            vec![
+                KeyFeature::new("avg 14 d", "-"),
+                KeyFeature::new("max 14 d", "-")
+            ]
+        );
+    }
+
+    #[test]
+    fn key_features_show_the_observed_window_average_and_max() {
+        let mut bl = base_load_with_spikes(vec![]);
+        bl.set_observed_window(LoadWindowStats::from_power_kw([0.2, 0.4, 1.8]));
+        assert_eq!(
+            Asset::key_features(&bl, &base_load_state()),
+            vec![
+                KeyFeature::new("avg 14 d", "0.80 kW"),
+                KeyFeature::new("max 14 d", "1.80 kW")
+            ]
+        );
+    }
 
     // jitter_h is kept well under duration_h/2 - ramp_h (0.095) so that tests
     // sampling at the exact center_hour instant reliably land in the plateau
