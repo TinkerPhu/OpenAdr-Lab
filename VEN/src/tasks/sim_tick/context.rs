@@ -58,6 +58,8 @@ pub(crate) struct TickContext {
     pub overlay_enabled: bool,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
+    /// Last tick's battery bridge (R-104), so the carried battery command drops it.
+    pub battery_bridge_kw: f64,
     /// GB-47 limit-enforcement gate and that pass's own last-tick lever.
     pub limit_enforcement_enabled: bool,
     pub limit_incumbent_lever: Option<String>,
@@ -139,6 +141,7 @@ pub(crate) async fn resolve_tick_context(
         overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state, now).await,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
+        battery_bridge_kw: state.arbiter_battery_bridge_kw().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
         // The session governing this tick: the one whose window is open now.

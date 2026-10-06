@@ -31,6 +31,10 @@ pub struct ArbiterDiagnostics {
     pub measured_net_kw: Option<f64>,
     /// `None` while limit enforcement is off or no hard import limit is in force.
     pub limit: Option<crate::controller::arbiter::limit::LimitPassOutcome>,
+    /// The battery's share of its last command that only bridged a lagging command
+    /// (kW, both passes) — removed from the carried battery command next tick (R-104).
+    #[serde(default)]
+    pub battery_bridge_kw: f64,
     pub updated_at: Option<DateTime<Utc>>,
 }
 
@@ -110,6 +114,11 @@ impl AppState {
 
     pub async fn set_arbiter_active_lever(&self, lever: Option<String>) {
         self.hems.write().await.arbiter_active_lever = lever;
+    }
+
+    /// Last tick's battery bridge — next tick's `ArbiterTick::prev_battery_bridge_kw`.
+    pub async fn arbiter_battery_bridge_kw(&self) -> f64 {
+        self.hems.read().await.arbiter_diagnostics.battery_bridge_kw
     }
 
     pub async fn arbiter_diagnostics(&self) -> ArbiterDiagnostics {

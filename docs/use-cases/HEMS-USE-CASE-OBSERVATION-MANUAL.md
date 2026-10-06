@@ -808,6 +808,11 @@ underlying disturbance persists.
 - If the correction stays held long after you reverted, something else differs from plan:
   `Deviation if released` shows how much. After a while the held correction triggers a replan
   (`ResidualThreshold` in the plan trigger), and the new plan takes the gap into account
+- With the EV plugged in and charging headroom left, the EV (zero cost) takes the correction. The
+  charger applies a new command a tick late, so for that one tick the battery covers it:
+  `Battery bridging the charger lag` shows the amount, and is back to 0 kW the next tick. What
+  you should **not** see is `Active lever` and the EV's power flipping every few seconds while
+  `Measured net site power` stays put — that was the hunt this bridge used to cause (R-104)
 
 **Controller → Battery timeline chart:**
 - A single step to the corrected power level, then a flat line — not a repeating zig-zag

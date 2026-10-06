@@ -1042,7 +1042,16 @@ asset's own `step_inner`, so the declaration cannot drift from the physics, and
 branching at all. Before this (R-81/R-82) the arbiter applied the heater's rounding rule by
 asset id — wrong for any other stepped asset — and believed a shed EV setpoint took effect
 immediately, leaving a one-tick excess under a hard import limit. The limit pass now sees that
-lag and covers it with another lever for the tick the charger needs.
+lag and covers it with another lever for the tick the charger needs. That cover is a *bridge*,
+not a correction (`controller/arbiter/lag_bridge.rs`, R-104): each pass reports the battery's
+bridging share (`battery_bridge_kw`), the tick stores the total in the arbiter diagnostics, and
+the next tick's `reconcile` takes it out of the battery's carried command before projecting.
+Carried, it read as a deviation of its own once the charger's command had landed, and the arbiter
+cut the zero-cost EV to remove it: the EV and the battery alternated every tick while the site
+sat on plan. The VEN UI shows it as "Battery bridging the charger lag" (Devices → arbiter
+settings). Pinned by `arbiter_tests.rs::reconcile_settles_on_the_ev_under_the_real_charger_lag`
+and `both_passes_settle_under_a_hard_limit_with_the_real_charger_lag`, which step the real
+`EvCharger` between ticks.
 
 ### 3.1 Generic Asset Model
 

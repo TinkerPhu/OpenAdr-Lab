@@ -235,6 +235,7 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         None,
@@ -269,6 +270,7 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         outcome.active_lever,
@@ -307,6 +309,7 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
             live_base_load_kw: Some(2.5),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         None,
@@ -404,6 +407,7 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
             live_base_load_kw: None,
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         None,
@@ -695,6 +699,7 @@ fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
             live_base_load_kw: Some(-8.67),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         None,
@@ -812,6 +817,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
                 live_base_load_kw: Some(2.0 + STATIONARY_DEVIATION_KW),
                 alert_active: false,
                 limit_target_kw: None,
+                prev_battery_bridge_kw: 0.0,
             },
             &base_setpoints,
             // live base load: 2.0 planned + 2.0 kW step
@@ -906,6 +912,7 @@ fn release_tick(
             live_base_load_kw: Some(live_base_load_kw),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         incumbent,
@@ -989,6 +996,7 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
             live_base_load_kw: Some(PLAN_NET_KW + 3.0),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         Some("battery"),
@@ -1030,6 +1038,7 @@ fn deviation_if_released_judges_pv_without_the_arbiters_own_curtailment() {
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
+            prev_battery_bridge_kw: 0.0,
         },
         &base_setpoints,
         Some("pv_curtail"),
@@ -1079,3 +1088,195 @@ fn a_released_correction_feeds_the_backstop_nothing() {
 
 #[path = "arbiter_limit_tests.rs"]
 mod limit_tests;
+
+// ── R-104: the real charger's response lag, ticked ───────────────────────────
+
+/// A site the R-104 tests tick: the real `EvCharger` stepped between ticks so its
+/// one-tick command lag is physics, not a fixture assumption; the battery follows
+/// its command at once; both arbiter passes run as `build_tick_setpoints` runs them,
+/// and each tick's battery bridge is fed back as the next tick's.
+struct LaggedSite {
+    ev: crate::assets::ev::EvCharger,
+    ev_state: crate::assets::ev::EvState,
+    ev_cmd_kw: f64,
+    battery_kw: f64,
+    incumbent: Option<&'static str>,
+    limit_incumbent: Option<&'static str>,
+    /// Last tick's battery bridge of both passes, fed back as production's tick does.
+    bridge_kw: f64,
+    pv_kw: f64,
+    base_kw: f64,
+    /// Planned site net (kW, + = import).
+    plan_net_kw: f64,
+    hard_limit_kw: Option<f64>,
+}
+
+impl LaggedSite {
+    fn new(
+        pv_kw: f64,
+        base_kw: f64,
+        plan_net_kw: f64,
+        ev_kw: f64,
+        hard_limit_kw: Option<f64>,
+    ) -> Self {
+        use crate::assets::ev::{EvCharger, EvState};
+        Self {
+            ev: EvCharger {
+                max_charge_kw: 7.0,
+                max_discharge_kw: 0.0,
+                v2g_capable: false,
+                battery_kwh: 60.0,
+                consumption_kwh_per_km: 0.18,
+                soc_target: 0.8,
+                soc_target_profile: 0.8,
+                default_charge_kw: 0.0,
+                min_soc: 0.0,
+                min_charge_kw: 1.4,
+                response_delay_s: 10.0,
+                departure_time: None,
+                usage_sim: None,
+                usage_sim_seed_tag: 0,
+            },
+            ev_state: EvState {
+                soc: 0.4,
+                plugged: true,
+                actual_power_kw: ev_kw,
+                pending_command_kw: ev_kw,
+                was_away_by_usage_sim: false,
+            },
+            ev_cmd_kw: ev_kw,
+            battery_kw: 0.0,
+            incumbent: None,
+            limit_incumbent: None,
+            bridge_kw: 0.0,
+            pv_kw,
+            base_kw,
+            plan_net_kw,
+            hard_limit_kw,
+        }
+    }
+
+    /// Both passes, then the physics. Returns (EV command, measured site net kW).
+    fn tick(&mut self) -> (f64, f64) {
+        use crate::controller::arbiter::limit;
+        let ev_snapshot = crate::services::test_support::asset_snapshots::snapshot_from_asset(
+            &self.ev,
+            crate::assets::AssetState::Ev(self.ev_state.clone()),
+            "ev",
+            self.ev_state.actual_power_kw,
+            self.ev_cmd_kw,
+        );
+        let sim = make_sim(vec![
+            ("battery", battery_snap(self.battery_kw, 0.5)),
+            ("ev", ev_snapshot),
+            ("base_load", base_snap(self.base_kw)),
+            ("pv", base_snap(self.pv_kw)),
+        ]);
+        let (import_kw, export_kw) = (self.plan_net_kw.max(0.0), (-self.plan_net_kw).max(0.0));
+        let slot = test_slot(0.25, 0.06, import_kw, export_kw, -self.pv_kw, 0.08);
+        let tick = ArbiterTick {
+            sim: &sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            plan_has_ev_allocation: false,
+            overlay_enabled: true,
+            live_pv_kw: Some(self.pv_kw),
+            live_pv_released_kw: None,
+            live_base_load_kw: Some(self.base_kw),
+            alert_active: false,
+            limit_target_kw: limit::limit_target_kw(self.hard_limit_kw, self.limit_incumbent),
+            prev_battery_bridge_kw: self.bridge_kw,
+        };
+        let mut outcome = reconcile(&tick, &StdHashMap::new(), self.incumbent);
+        let limit_pass = limit::enforce_import_limit(
+            &tick,
+            &mut outcome.setpoints,
+            self.limit_incumbent,
+            &limit::SetpointBoundsKw::new(),
+        );
+        self.incumbent = outcome.active_lever;
+        self.limit_incumbent = limit_pass.as_ref().and_then(|l| l.active_lever);
+        self.bridge_kw =
+            outcome.battery_bridge_kw + limit_pass.as_ref().map_or(0.0, |l| l.battery_bridge_kw);
+        if let Some(&kw) = outcome.setpoints.get("ev") {
+            self.ev_cmd_kw = kw;
+        }
+        if let Some(&kw) = outcome.setpoints.get("battery") {
+            self.battery_kw = kw;
+        }
+        let (state, ev_kw) =
+            self.ev
+                .step_inner(&self.ev_state, self.ev_cmd_kw, chrono::Duration::seconds(1));
+        self.ev_state = state;
+        (
+            self.ev_cmd_kw,
+            self.base_kw + self.pv_kw + ev_kw + self.battery_kw,
+        )
+    }
+}
+
+/// Changes of the EV command over `ticks` (a settled lever has none).
+fn ev_command_changes(ticks: &[(f64, f64)]) -> usize {
+    ticks
+        .windows(2)
+        .filter(|w| (w[0].0 - w[1].0).abs() > 1e-6)
+        .count()
+}
+
+#[test]
+fn reconcile_settles_on_the_ev_under_the_real_charger_lag() {
+    // R-104: logged in a full E2E run, the arbiter toggled the EV between 1.5 kW and
+    // off every ~20 s and swung the battery against it, while the site itself sat on
+    // plan. The battery's one-tick bridge for the charger's lag was carried forward as
+    // a correction; once the EV had landed, the carried bridge read as a deviation and
+    // the arbiter cut the zero-cost EV to remove it. The fixtures above set the
+    // charger's actual power to its command, so the lag never showed; here the real
+    // charger is stepped. Scenario A's geometry: a steady 2.2 kW PV surplus over plan.
+    let mut site = LaggedSite::new(-6.0, 0.5, -3.3, 0.0, None);
+    let ticks: Vec<(f64, f64)> = (0..60).map(|_| site.tick()).collect();
+    let settled = &ticks[5..];
+    assert_eq!(
+        ev_command_changes(settled),
+        0,
+        "the EV command must settle, not hunt: {:?}",
+        settled.iter().map(|t| t.0).collect::<Vec<_>>()
+    );
+    for (i, &(_, net_kw)) in ticks.iter().enumerate() {
+        assert!(
+            (net_kw - -3.3).abs() < 0.1,
+            "tick {i}: the site should sit on plan, net {net_kw:.2} kW"
+        );
+    }
+    assert!(
+        site.battery_kw.abs() < 0.1,
+        "the zero-cost EV holds the surplus; the battery only bridged the lag, got {:.2} kW",
+        site.battery_kw
+    );
+}
+
+#[test]
+fn both_passes_settle_under_a_hard_limit_with_the_real_charger_lag() {
+    // R-82's case, ticked: the EV charging 7 kW under a 3 kW import limit. The limit
+    // pass cuts the charger and the battery bridges the tick until the cut lands, so
+    // import never crosses the limit; once it has landed, the bridge must not be
+    // carried into a correction, or the passes hunt the EV against the battery (R-104).
+    let mut site = LaggedSite::new(0.0, 0.5, 7.5, 7.0, Some(3.0));
+    let ticks: Vec<(f64, f64)> = (0..60).map(|_| site.tick()).collect();
+    for (i, &(_, net_kw)) in ticks.iter().enumerate() {
+        assert!(
+            net_kw <= 3.0 + 1e-6,
+            "tick {i}: import {net_kw:.2} kW above the 3 kW limit"
+        );
+    }
+    assert_eq!(
+        ev_command_changes(&ticks[5..]),
+        0,
+        "the EV command must settle under the limit: {:?}",
+        ticks.iter().map(|t| t.0).collect::<Vec<_>>()
+    );
+    assert!(
+        site.battery_kw.abs() < 0.1,
+        "the charger holds the cut; the battery only bridged its lag, got {:.2} kW",
+        site.battery_kw
+    );
+}

@@ -111,6 +111,8 @@ pub(crate) async fn record_arbiter_outcome(
             unresolved_kw: outcome.unresolved_kw,
             measured_net_kw,
             limit: outcome.limit.clone(),
+            battery_bridge_kw: outcome.battery_bridge_kw
+                + limit.map_or(0.0, |l| l.battery_bridge_kw),
             updated_at: Some(now),
         })
         .await;

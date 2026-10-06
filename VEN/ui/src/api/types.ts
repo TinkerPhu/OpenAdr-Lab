@@ -644,6 +644,8 @@ export type LimitPassOutcome = {
   active_lever: string | null;
   heater_emergency_mode: [boolean, boolean] | null;
   adjusted_kw_by_asset: Record<string, number>;
+  /** The battery's share that only bridges a lagging command (kW, R-104). */
+  battery_bridge_kw: number;
 };
 
 /** Last tick's arbiter reasoning (GET /arbiter-diagnostics) — null fields
@@ -661,6 +663,10 @@ export type ArbiterDiagnostics = {
   unresolved_kw: number;
   measured_net_kw: number | null;
   limit: LimitPassOutcome | null;
+  /** The battery's share of its last command that only bridged a lagging command, e.g. the
+   * EV charger applying a cut a tick late (kW, both passes) — never carried as a correction
+   * into the next tick (R-104). */
+  battery_bridge_kw: number;
   updated_at: string | null;
 };
 

@@ -168,18 +168,27 @@ pub(super) fn ev_lever(
     })
 }
 
-/// Returns the change achieved **this tick** (kW, magnitude) — which is zero
-/// while the charger is still applying the command it accepted last tick
-/// (BL-12's `response_delay_s`, R-82): the reduction is commanded all the same
-/// and lands next tick, and the greedy loop meanwhile passes the excess to the
-/// next lever instead of believing an actuator that has not moved yet.
+/// What a lever's command changes this tick and once it has landed (kW, magnitudes).
+/// They differ only for an asset with a response lag: the charger applies a command a
+/// tick late (BL-12's `response_delay_s`, R-82).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct LeverEffect {
+    pub now_kw: f64,
+    pub landed_kw: f64,
+}
+
+/// The change achieved **this tick** is zero while the charger is still applying the
+/// command it accepted last tick: the change is commanded all the same and lands next
+/// tick, and the greedy loop meanwhile passes the excess to the next lever instead of
+/// believing an actuator that has not moved yet. `landed_kw` is what the command will
+/// have changed then, so the loop knows how much of that pass-on is a one-tick bridge.
 pub(super) fn apply_ev_lever(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     assigned_kw: f64,
-) -> f64 {
+) -> LeverEffect {
     let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) else {
-        return 0.0;
+        return LeverEffect::default();
     };
     let current_sp = current_setpoint_kw(setpoints, sim, crate::ids::ASSET_EV).max(0.0);
     // The charger's own answer for what the reduced command will draw — it
@@ -188,7 +197,12 @@ pub(super) fn apply_ev_lever(
     // physically while corrupting the arbiter's next-tick accounting).
     let new_sp = snap.power_when_command_lands_kw((current_sp - assigned_kw).max(0.0));
     setpoints.insert(crate::ids::ASSET_EV.to_string(), new_sp);
-    (snap.power_drawn_for_setpoint_kw(current_sp) - snap.power_drawn_for_setpoint_kw(new_sp)).abs()
+    LeverEffect {
+        now_kw: (snap.power_drawn_for_setpoint_kw(current_sp)
+            - snap.power_drawn_for_setpoint_kw(new_sp))
+        .abs(),
+        landed_kw: (snap.power_when_command_lands_kw(current_sp) - new_sp).abs(),
+    }
 }
 
 /// Heater pause-within-comfort-band lever: flat zero cost, available

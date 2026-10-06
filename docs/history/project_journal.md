@@ -14662,3 +14662,34 @@ same amount at 1e-5, and its objective carries a ~7,770 EUR penalty term that ma
 **Decisions.** (1) The heuristics learner (`services::heuristics`) was not reused: it returns `None` on a cold start and weights by recency, while the display wants the plain mean and max of whatever exists. (2) The window is days (`14 d`), not weeks: `2 w` next to a kW value reads as watts. (3) Injection goes through `as_any_mut().downcast_mut::<BaseLoad>()` inside the one job, the documented narrow use of that seam; a trait method for an hourly summary of one asset kind would be a second per-kind hook. (4) The 1-minute rows are already means, so the max is a max of minute means, which is fine for a label.
 
 **Tests.** `assets/*::key_features_*`, `assets/load_window.rs`, `tasks/base_load_window.rs` (refresh with injected clock: window edge excluded, empty history shows `-`), `FlexibilityForecastPanel.test.tsx`, and `tests/features/asset_key_features.feature` for the use case. Docs: `VEN_ARCHITECTURE.md` (route table, "Asset key features"), `HEMS-USE-CASE-OBSERVATION-MANUAL.md` (Controller row).
+
+## 2026-10-06 — The battery's lag bridge is not a correction (R-104, fix/r104-arbiter-bridge)
+
+**What was seen.** In a full E2E run the deviation arbiter toggled the EV between 1.5 kW and off
+and swung the battery against it, while measured site power sat on plan and the projection
+alternated by exactly the EV's power.
+
+**Why.** The EV charger applies a command one tick late (R-82). The lever loop therefore counts an
+EV change as zero for the current tick and hands the excess to the battery for that tick: the
+bridge that keeps import under a hard limit while the cut lands. But the battery carries its own
+last command forward as its baseline (the dead-beat corrector), so next tick the bridge looked
+like a lasting correction. With the EV landed, the carried bridge read as a deviation, and the
+cheapest lever to remove it was the zero-cost EV — whose change again landed a tick late. Period
+two ticks, forever. The existing scenario-A test missed it because its second tick built the
+battery at 0, assuming the release instead of letting the arbiter carry it.
+
+**How it was isolated.** The register's own first step: a test site that steps the real `EvCharger`
+between ticks instead of setting its actual power to its command. It reproduced the hunt exactly
+(EV 2.2 / 0 every tick for 40 ticks) and, with the limit pass added, the same hunt under a hard
+import limit (7.0 / 2.4 kW).
+
+**The fix.** The bridge is made explicit (`controller/arbiter/lag_bridge.rs`): the shared lever
+loop records what a lagging lever left undelivered and the battery's share that covered it; both
+passes report it (`battery_bridge_kw`), the tick stores the total in `ArbiterDiagnostics`, and
+`reconcile` takes it out of the carried battery command before projecting. The bridge still
+covers the lag tick, so R-82's limit guarantee holds; it is just never carried. Rejected: no
+bridging in the deviation pass (the limit pass's carried bridge would feed the hunt again, and
+scenario A's tested expectation would change), and inferring the bridge from the charger's
+snapshot (wrong whenever the battery did not actually take it). Shown in the VEN UI as "Battery
+bridging the charger lag". `decision_event` moved to `arbiter/decision.rs` to keep `arbiter.rs`
+under its size cap.
