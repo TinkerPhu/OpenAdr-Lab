@@ -100,6 +100,10 @@ function DiagnosticsReadout(props: {
     <Stack spacing={1.5}>
       {deviationEnabled && <DeviationReadout diagnostics={diagnostics} />}
       {limitEnabled && <LimitReadout limit={diagnostics.limit} />}
+      <Typography variant="body2" data-testid="arbiter-battery-bridge">
+        {/* Covers a command that lands a tick late; dropped, not carried, next tick (R-104). */}
+        Battery bridging the charger lag: <strong>{formatKw(diagnostics.battery_bridge_kw)}</strong>
+      </Typography>
       <Typography variant="body2">
         Measured net site power: <strong>{formatKw(diagnostics.measured_net_kw)}</strong>
       </Typography>

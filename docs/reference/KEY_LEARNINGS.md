@@ -3102,3 +3102,14 @@ Rules:
   tolerance, not the perturbation. Size the gap in EUR: an objective dominated by a penalty term
   makes a small relative gap a large absolute one.
 
+## A carried command must say which part of it is transient (R-104)
+
+- A fast lever bridging a slow one's lag, plus a controller that carries each lever's last
+  command forward as its baseline, oscillates with period two: the bridge is carried as if it were
+  a correction, and once the slow lever lands, the carried bridge reads as a deviation the
+  controller removes by moving the slow lever again. Keep the transient part explicit and take it
+  out of the carried state; a carry-forward cannot tell the two apart on its own.
+- A fixture that sets an actuator's actual power to its command cannot show lag dynamics. The test
+  that finds them steps the real asset between ticks and feeds every piece of state back the way
+  production does.
+

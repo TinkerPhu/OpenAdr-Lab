@@ -75,6 +75,7 @@ pub(crate) fn build_tick_setpoints(
             hard_limit_kw,
             ctx.limit_incumbent_lever.as_deref(),
         ),
+        prev_battery_bridge_kw: ctx.battery_bridge_kw,
     };
 
     let mut outcome = if ctx.deviation_arbiter_enabled {

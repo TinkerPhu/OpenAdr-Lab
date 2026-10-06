@@ -18,8 +18,12 @@
 use std::collections::HashMap;
 
 pub(crate) mod arbiter_levers;
+mod decision;
+mod lag_bridge;
 pub mod limit;
 mod release;
+
+pub use decision::decision_event;
 
 use crate::controller::SimSnapshot;
 use crate::entities::plan::PlanTimeSlot;
@@ -81,6 +85,9 @@ pub struct ArbiterOutcome {
     pub unresolved_kw: f64,
     /// The limit-enforcement pass's result (`None` while it is switched off).
     pub limit: Option<limit::LimitPassOutcome>,
+    /// The battery's share of this tick's setpoint that only bridges a lagging command
+    /// (kW) — next tick's `ArbiterTick::prev_battery_bridge_kw`, with the limit pass's.
+    pub battery_bridge_kw: f64,
 }
 
 impl ArbiterOutcome {
@@ -125,6 +132,12 @@ pub struct ArbiterTick<'a> {
     /// The import ceiling both passes steer to (`limit::limit_target_kw`);
     /// `None` = no hard import limit in force.
     pub limit_target_kw: Option<f64>,
+    /// The part of the battery's last command that only bridged a lagging lever's
+    /// command (kW, battery setpoint sign; `battery_bridge_kw` of both passes last
+    /// tick). That command has landed since, so the bridge is no correction to carry:
+    /// carried, it read as a deviation of its own, and the arbiter undid the EV's
+    /// now-landed change to remove it — the EV/battery hunt of R-104.
+    pub prev_battery_bridge_kw: f64,
 }
 
 /// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
@@ -266,6 +279,7 @@ pub fn reconcile(
             setpoints.insert(id.to_string(), snap.setpoint_kw);
         }
     }
+    lag_bridge::drop_last_bridge(&mut setpoints, tick.prev_battery_bridge_kw);
 
     let Some(slot) = tick.plan_slot else {
         // No active plan yet (startup window): same fallback as the
@@ -338,34 +352,8 @@ pub fn reconcile(
         unresolved_kw: applied.unresolved_kw,
         dev_without_correction_kw: Some(without_kw),
         limit: None,
+        battery_bridge_kw: applied.battery_bridge_kw,
     }
-}
-
-/// The `ControllerEvent::ArbiterDecision` for `pass` when its decision changed
-/// since last tick — a different leading lever, or an unresolved excess
-/// appearing or clearing (above `DEAD_BAND_KW`). `prev`/`now` are
-/// `(active_lever, unresolved_kw)`; `None` when nothing changed, so the event
-/// log records decisions, not ticks.
-pub fn decision_event(
-    pass: &str,
-    prev: (Option<&str>, f64),
-    now: (Option<&str>, f64),
-    target_kw: Option<f64>,
-    excess_kw: Option<f64>,
-    ts: chrono::DateTime<chrono::Utc>,
-) -> Option<crate::controller::trace::ControllerEvent> {
-    let unresolved = |unresolved_kw: f64| unresolved_kw > DEAD_BAND_KW;
-    let changed = prev.0 != now.0 || unresolved(prev.1) != unresolved(now.1);
-    changed.then(
-        || crate::controller::trace::ControllerEvent::ArbiterDecision {
-            ts,
-            pass: pass.to_string(),
-            active_lever: now.0.map(str::to_string),
-            target_kw,
-            excess_kw,
-            unresolved_kw: now.1,
-        },
-    )
 }
 
 /// How a pass may use the levers — the only thing that differs between the
@@ -409,6 +397,9 @@ pub(crate) struct AppliedLevers {
     pub(crate) active_lever: Option<&'static str>,
     /// Part of `|deviation_kw|` no lever could take (kW).
     pub(crate) unresolved_kw: f64,
+    /// The battery's share of this tick's setpoint that only bridges a lagging command
+    /// (kW, battery setpoint sign) — see `ArbiterTick::prev_battery_bridge_kw`.
+    pub(crate) battery_bridge_kw: f64,
 }
 
 /// Candidate → `rank_levers` → greedy apply, shared by every arbiter pass.
@@ -460,6 +451,7 @@ pub(crate) fn apply_ranked_levers(
 
     let mut applied = AppliedLevers::default();
     let mut remaining_kw = deviation_kw.abs();
+    let mut bridge = lag_bridge::LagBridge::default();
     for lever in rank_levers(candidates, inputs.incumbent_lever) {
         if remaining_kw < DEAD_BAND_KW {
             break;
@@ -477,14 +469,17 @@ pub(crate) fn apply_ranked_levers(
             -assigned_kw
         };
         let achieved_kw = match lever.id {
-            "battery" => apply_battery_lever(
-                setpoints,
-                sim,
-                signed_assigned_kw,
-                battery_objective,
-                battery_bounds_kw,
+            "battery" => bridge.battery_moved(
+                apply_battery_lever(
+                    setpoints,
+                    sim,
+                    signed_assigned_kw,
+                    battery_objective,
+                    battery_bounds_kw,
+                ),
+                deviation_kw,
             ),
-            "ev" => apply_ev_lever(setpoints, sim, signed_assigned_kw),
+            "ev" => bridge.ev_moved(apply_ev_lever(setpoints, sim, signed_assigned_kw)),
             "heater_pause" => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
             "heater_emergency" => {
                 applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
@@ -508,6 +503,7 @@ pub(crate) fn apply_ranked_levers(
         }
     }
     applied.unresolved_kw = remaining_kw.max(0.0);
+    applied.battery_bridge_kw = bridge.battery_bridge_kw();
     applied
 }
 

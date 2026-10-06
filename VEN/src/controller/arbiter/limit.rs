@@ -82,6 +82,9 @@ pub struct LimitPassOutcome {
     pub heater_emergency_mode: Option<(bool, bool)>,
     /// Setpoint change per asset, after − before (kW).
     pub adjusted_kw_by_asset: HashMap<String, f64>,
+    /// The battery's share that only bridges a lagging command (kW) — see
+    /// `ArbiterTick::prev_battery_bridge_kw`.
+    pub battery_bridge_kw: f64,
 }
 
 /// Runs the limit pass on `setpoints` (the tick's final map, after deviation
@@ -116,6 +119,7 @@ pub fn enforce_import_limit(
     outcome.unresolved_kw = applied.unresolved_kw;
     outcome.active_lever = applied.active_lever;
     outcome.heater_emergency_mode = applied.heater_emergency_mode;
+    outcome.battery_bridge_kw = applied.battery_bridge_kw;
     let moved_ids: Vec<String> = setpoints.keys().cloned().collect();
     outcome.adjusted_kw_by_asset =
         super::release::setpoint_shift_kw(setpoints, moved_ids.iter().map(String::as_str), |id| {

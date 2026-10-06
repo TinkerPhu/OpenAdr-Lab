@@ -27,6 +27,7 @@ fn tick<'a>(
         live_base_load_kw: Some(live_base_load_kw),
         alert_active,
         limit_target_kw,
+        prev_battery_bridge_kw: 0.0,
     }
 }
 

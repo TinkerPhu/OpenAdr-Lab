@@ -152,6 +152,7 @@ const emptyArbiterDiagnostics: ArbiterDiagnostics = {
   unresolved_kw: 0,
   measured_net_kw: null,
   limit: null,
+  battery_bridge_kw: 0,
   updated_at: null,
 };
 const mockArbiterDiagnosticsData = vi.fn((): ArbiterDiagnostics => emptyArbiterDiagnostics);
@@ -653,7 +654,9 @@ describe("DevicesPage", () => {
         active_lever: "battery",
         heater_emergency_mode: null,
         adjusted_kw_by_asset: { battery: -1.1 },
+        battery_bridge_kw: 0,
       },
+      battery_bridge_kw: 0,
       updated_at: "2026-09-15T08:00:00Z",
     });
     renderPage();
@@ -680,6 +683,23 @@ describe("DevicesPage", () => {
     renderPage();
     const readout = screen.getByTestId("arbiter-diagnostics");
     expect(readout.textContent).toMatch(/Deviation if released: 2\.00 kW/);
+  });
+
+  // 16h. The battery's one-tick bridge for a lagging charger is visible (R-104)
+  it("shows how much of the battery command only bridges the charger's lag", () => {
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: true,
+      limit_enforcement_enabled: true,
+    });
+    mockArbiterDiagnosticsData.mockReturnValue({
+      ...emptyArbiterDiagnostics,
+      battery_bridge_kw: 2.2,
+      updated_at: "2026-10-06T08:00:00Z",
+    });
+    renderPage();
+    expect(screen.getByTestId("arbiter-battery-bridge").textContent).toMatch(
+      /Battery bridging the charger lag: 2\.20 kW/,
+    );
   });
 
   // 17. All Requests accordion expands
