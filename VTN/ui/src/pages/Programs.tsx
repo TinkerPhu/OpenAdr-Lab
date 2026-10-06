@@ -8,7 +8,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
 import type { Program, ProgramInput } from "../api/types";
 import { usePrograms, useVens, useCreateProgram, useUpdateProgram, useDeleteProgram } from "../api/hooks";
-import { JsonDialog } from "../components/JsonDialog";
+import { JsonDialog } from "@lab/charts/JsonDialog";
 import { ProgramFormDialog } from "../components/ProgramFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { audienceLabel } from "../api/targets";

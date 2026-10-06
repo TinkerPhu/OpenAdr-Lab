@@ -6,7 +6,7 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { Program, Ven } from "../api/types";
 import { useVens, useDeleteVen, usePrograms } from "../api/hooks";
-import { JsonDialog } from "../components/JsonDialog";
+import { JsonDialog } from "@lab/charts/JsonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { targets } from "../api/targets";
 
