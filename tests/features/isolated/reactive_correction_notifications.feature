@@ -19,6 +19,12 @@ Feature: Reactive correction notifications (BL-37)
     # The main pass's irradiance injects leave an offset that blends back over ~47 min;
     # after sunset the sim keeps producing that PV while the plan correctly expects none.
     And the VEN-1 pv irradiance offset is flushed to zero
+    # PV is noise for this scenario, and a time-of-day dependent one: at dusk live PV
+    # falls faster than the plan's slot forecast follows (a 0.23 kW gap held the
+    # precondition for its full 120 s, 2026-10-06 18:11 local). Pinned to 0 kW, live and
+    # planned, the scenario behaves the same at any hour.
+    And I inject pv irradiance 0.0 via sim inject
+    And the PV plan forecast is pinned to 0 kW
 
   @isolated
   Scenario: A sustained deviation while the arbiter is enabled produces a start and a clear notification
