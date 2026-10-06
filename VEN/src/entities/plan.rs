@@ -443,6 +443,12 @@ impl SolveStatus {
     fn default_optimal() -> Self {
         SolveStatus::Optimal
     }
+
+    /// Whether the solve produced a plan to dispatch. A failed one carries objective 0
+    /// and no slots, which must never read as "cheapest" to anyone comparing plans.
+    pub fn solved(self) -> bool {
+        self != SolveStatus::Infeasible
+    }
 }
 
 impl TimeWindow for PlanTimeSlot {

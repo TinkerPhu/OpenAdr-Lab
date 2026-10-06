@@ -63,7 +63,7 @@ now_aligned = floor(wall_clock_unix_ts / step_A_s) * step_A_s
 
 2. **Warm-start continuity.** The new plan is warm-started from the previous plan's allocation values (see §4). This only works when the grids align: slot `t` of the new plan must correspond to the same physical time window as slot `t` of the previous plan. Alignment guarantees this for all slots except the very first (which may have advanced one step if a zone boundary was crossed).
 
-3. **Block-commitment anchor.** The planner can lock a slot's setpoint for the remainder of its duration (to prevent rapid resetting of heater relays, for example). The anchor is stored as a UTC timestamp. If grids are not aligned, the anchored time falls between two slots in the next replan, breaking the lock. With alignment, the anchor always coincides with a slot boundary.
+3. **Block-commitment anchor.** The planner can lock a slot's setpoint for the remainder of its duration (to prevent rapid resetting of heater relays, for example). The anchor is stored as a UTC timestamp. If grids are not aligned, the anchored time falls between two slots in the next replan, breaking the lock. With alignment, the anchor always coincides with a slot boundary. The anchor is a stability preference, never physics: the heater keeps it only up to the last slot its tank can hold (`assets/heater_milp.rs :: anchor_the_tank_can_hold`). A plan in force often fills the tank to exactly its ceiling, and replayed from a tank that gained heat since, the same stages overflow it. A pinned stage under a hard ceiling made the whole site's solve infeasible at presolve, the mirror image of the anchored-off case `heater_block_end` already refuses. The ceiling itself is the tank's maximum or its current energy, whichever is higher (`ceiling_kwh`), so a tank Absorb heated past its maximum doesn't contradict its own starting state either.
 
 4. **UI readability.** Aligned timestamps display as clean clock times (14:20:00, 14:25:00, 14:30:00) rather than arbitrary seconds.
 
@@ -150,7 +150,15 @@ let idx = cum_s.partition_point(|&s| s <= offset_s).saturating_sub(1).min(n - 1)
 
 The gate (`services/planning.rs :: evaluate_acceptance_gate`) decides whether to replace the active plan with the newly solved plan.
 
-**Hard triggers** (any trigger except `Periodic`) bypass the gate and always adopt.
+**A failed solve never competes on cost.** It has nothing to dispatch and reports objective 0 €, so
+compared on cost it "wins": it replaced a working plan and then blocked every later one until the
+decay ran out (E2E 2026-10-06, the usage-forecast VEN without a plan for 25 minutes). So before
+anything else, whatever the trigger: a failed plan never replaces one that solved, and a failed plan
+in force yields to the first that solves (`SolveStatus::solved`, which the health check reads too).
+Pinned by `test_gate_never_lets_a_failed_solve_displace_a_plan_that_solved` and
+`test_gate_replaces_a_failed_plan_with_the_next_one_that_solved`.
+
+**Hard triggers** (any trigger except `Periodic`) bypass the rest of the gate and always adopt.
 
 **Periodic replans** are adopted only if the improvement exceeds the threshold after accounting for switch costs:
 

@@ -14693,3 +14693,21 @@ scenario A's tested expectation would change), and inferring the bridge from the
 snapshot (wrong whenever the battery did not actually take it). Shown in the VEN UI as "Battery
 bridging the charger lag". `decision_event` moved to `arbiter/decision.rs` to keep `arbiter.rs`
 under its size cap.
+
+**Found on the way: a VEN without a plan for 25 minutes.** The branch's full E2E run (daytime,
+14:00 local) failed two `ev_usage_forecast` scenarios that pass at night: the test VEN's plan
+never got an EV allocation. Rerunning the feature alone on fresh containers reproduced it. The
+plan in force was a failed solve (INFEASIBLE in 44 ms, objective 0 EUR), while every cycle around
+it solved. Two bugs. (1) The adoption gate compared plans on cost only, so the failed plan's
+"0 EUR" beat a working plan and then blocked every later one until the 25-minute decay; now a
+failed solve never displaces a plan that solved, and a failed plan in force yields to the first
+that does (`SolveStatus::solved`, also read by the health check that had its own copy of that
+question). (2) Why one cycle was infeasible: the heater anchor pins the plan in force's heater
+block, that plan had filled the tank to exactly its ceiling, and replayed a few seconds later from
+a tank that had gained heat, the pinned stages overflowed the hard ceiling. That's the mirror image
+of the anchored-off case `heater_block_end` had already been fixed for (R-36/T019). The heater now
+keeps its anchor only up to the last slot its tank can hold, and its ceiling is never below its
+current energy, so a tank Absorb heated past its maximum can't contradict its own start either. The
+incident's exact anchor couldn't be recovered (plan history keeps no slots); the mechanisms are
+pinned by `from_state_keeps_the_anchor_only_while_the_tank_can_hold_it` and
+`heater_already_above_its_ceiling_still_solves`, and the E2E rerun is the end-to-end check.
