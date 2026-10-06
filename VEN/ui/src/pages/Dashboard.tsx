@@ -5,6 +5,7 @@ import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, use
 import type { OadrCapacityState, AssetLedger, PlannerObjective } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
+import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
 
 const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
   min_cost: "Cost",
@@ -321,35 +322,7 @@ export function DashboardPage() {
                   </Typography>
                 </Stack>
               </Grid>
-              {"ev" in sim.data.assets && (
-                <Grid item xs={4}>
-                  <Stack spacing={0.5}>
-                    <Typography variant="subtitle2">EV Charger</Typography>
-                    <Typography>SOC: {((sim.data.assets["ev"].soc ?? 0) * 100).toFixed(1)}%</Typography>
-                    <Typography>Power: {fmtNum(sim.data.assets["ev"].power_kw)} kW</Typography>
-                    <Typography>Plugged: {(sim.data.assets["ev"].plugged ?? 0) !== 0 ? "Yes" : "No"}</Typography>
-                  </Stack>
-                </Grid>
-              )}
-              {"heater" in sim.data.assets && (
-                <Grid item xs={4}>
-                  <Stack spacing={0.5}>
-                    <Typography variant="subtitle2">Heater</Typography>
-                    <Typography>Temp: {fmtNum(sim.data.assets["heater"].temp_c)}°C</Typography>
-                    <Typography>Power: {fmtNum(sim.data.assets["heater"].power_kw)} kW</Typography>
-                  </Stack>
-                </Grid>
-              )}
-              {"pv" in sim.data.assets && (
-                <Grid item xs={4}>
-                  <Stack spacing={0.5}>
-                    <Typography variant="subtitle2">PV Inverter</Typography>
-                    <Typography>Output: {fmtNum(sim.data.assets["pv"].power_kw)} kW</Typography>
-                    <Typography>Irradiance: {((sim.data.assets["pv"].irradiance ?? 0) * 100).toFixed(0)}%</Typography>
-                    <Typography>Generation limit: {"generation_limit_kw" in sim.data.assets["pv"] ? `${(sim.data.assets["pv"].generation_limit_kw ?? 0).toFixed(1)} kW` : "none"}</Typography>
-                  </Stack>
-                </Grid>
-              )}
+              <SimAssetTiles assets={sim.data.assets} />
             </Grid>
           ) : (
             <Typography color="text.secondary">Loading...</Typography>
