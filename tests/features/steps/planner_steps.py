@@ -331,23 +331,13 @@ def step_ev_power_in_home_window(context):
     )
 
 
-@then("the plan charges before every predicted departure in the horizon")
-def step_charges_before_every_departure(context):
-    """The defect 051 fixes, asserted end to end.
+def _ev_soc_series_and_drops(plan):
+    """Per-slot (index, EV kW, planned SoC) and the slot indices where a trip's consumption shows.
 
-    A horizon holding more than one predicted trip used to produce charging only
-    before the first: later trips got a truthful availability mask and a projected
-    SoC drop, but no obligation, so nothing asked the plan to recharge. The vehicle
-    coasted down across every trip but one.
-
-    Derived from the plan itself rather than from the schedule generator: away
-    windows are the runs of slots the plan allocates no EV power to *and* projects a
-    SoC drop at the end of, which is what the planner was actually told. Asserting
-    against a recomputed schedule here would be a second copy of the prediction, the
-    thing this change removed six of.
+    One definition of "a predicted departure, as the plan sees it", shared by the poll that waits
+    for it and the assertion that judges it.
     """
-    slots = context.ven_plan.get("slots", [])
-    assert slots, "no plan slots to inspect"
+    slots = plan.get("slots", [])
 
     # Per slot: EV power, and the EV's planned state of charge.
     series = []
@@ -373,6 +363,47 @@ def step_charges_before_every_departure(context):
         # discharge could also lower it; this profile's EV has none.)
         if soc < prev_soc - 0.02:
             drops.append(i)
+    return series, drops
+
+
+@then("the plan charges before every predicted departure in the horizon")
+def step_charges_before_every_departure(context):
+    """The defect 051 fixes, asserted end to end.
+
+    A horizon holding more than one predicted trip used to produce charging only
+    before the first: later trips got a truthful availability mask and a projected
+    SoC drop, but no obligation, so nothing asked the plan to recharge. The vehicle
+    coasted down across every trip but one.
+
+    Derived from the plan itself rather than from the schedule generator: away
+    windows are the runs of slots the plan allocates no EV power to *and* projects a
+    SoC drop at the end of, which is what the planner was actually told. Asserting
+    against a recomputed schedule here would be a second copy of the prediction, the
+    thing this change removed six of.
+    """
+    # The plan is replaced every few seconds while the usage forecast and the EV's state settle,
+    # so the first plan that merely has EV power in it may not yet show both trips. Wait for the
+    # precondition the assertion below names, then judge that plan - not whichever snapshot
+    # the previous step happened to capture.
+    def fetch():
+        resp = ven_get("/plan")
+        body = resp.json() if resp.ok else None
+        return body if isinstance(body, dict) and body.get("slots") else None
+
+    last = {}
+
+    def shows_two_trips(plan):
+        last["plan"] = plan
+        return len(_ev_soc_series_and_drops(plan)[1]) >= 2
+
+    try:
+        context.ven_plan = poll_until(
+            fetch, shows_two_trips, timeout=120, interval=5,
+            description="VEN /plan showing at least two predicted EV trips",
+        )
+    except TimeoutError:
+        context.ven_plan = last.get("plan") or context.ven_plan
+    series, drops = _ev_soc_series_and_drops(context.ven_plan)
     assert len(drops) >= 2, (
         "this scenario needs a horizon with at least two predicted trips to be "
         f"meaningful; the plan shows {len(drops)} SoC drop(s). Check the profile's "
