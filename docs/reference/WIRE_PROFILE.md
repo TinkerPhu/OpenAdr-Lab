@@ -94,6 +94,17 @@ numbers: reports emitted watts, capacity limits were read as kilowatts, a fixtur
 for `USAGE` (which the spec defines as energy), and an analysis script carried a `× duration`
 compensation for the mismatch.
 
+### State-of-charge setpoints are received, not applied
+
+`CHARGE_STATE_SETPOINT` is "the state of charge of an energy storage resource", which fits a
+grid-scale or aggregator-controlled battery. This VEN decides when and how much a household EV
+charges, so a grid operator's command about it is neither the driver's plan (it must not become an
+`EvSession` competing for the driver's calendar) nor a planner input. It is **received and not
+applied**, and is not silent: each event carrying it produces one Info notification naming the
+event and the reason. It is deliberately not a wire rejection, because the VTN sent nothing
+malformed and `/health` must not read as degraded for a stated policy. The lab still *emits* the
+payload in seeded events (above) so a VEN's refusal can be observed.
+
 ### Sign convention
 
 Import is positive, export is positive in its own payload type. There is no signed quantity that

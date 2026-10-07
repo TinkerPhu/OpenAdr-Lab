@@ -8,8 +8,7 @@ through the unified POST /user-requests (Stage 5) flow instead, which constructs
 underlying EvSession/HeaterTarget/ShiftableLoad domain objects — same Gherkin step
 phrasing, so none of the ~10 other feature files that use these steps as setup needed to
 change. GET /ev-session (read-only) was kept — see routes/hems/ev.rs — since a
-VTN-triggered CHARGE_STATE_SETPOINT session has no linked UserRequest and is otherwise
-unobservable.
+simulated-usage session has no linked UserRequest and is otherwise unobservable.
 """
 
 from datetime import datetime, timedelta, timezone

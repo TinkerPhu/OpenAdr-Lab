@@ -6,6 +6,9 @@ ven_health_steps.py; only the history-specific assertions live here.
 
 from behave import then
 
+from features.helpers.api_client import ven_get
+from features.helpers.wait import poll_until
+
 
 @then("the VEN notification history response is a list of dedup-aware rows")
 def step_history_is_dedup_aware_list(context):
@@ -37,3 +40,28 @@ def step_history_bad_request(context, text):
     assert resp.status_code == 400, f"expected 400, got {resp.status_code}: {resp.text}"
     body = resp.json()
     assert text in body.get("error", ""), f"error body missing '{text}': {body}"
+
+
+@then('the VEN announces that "{payload_type}" in the saved capacity event is not applied')
+def step_ven_announces_unapplied_payload(context, payload_type):
+    """R-100: a payload this profile does not apply is stated, not dropped.
+
+    Matched on the event id the scenario created, so a notification from an earlier scenario
+    cannot satisfy it.
+    """
+    event_id = context.capacity_event_id
+
+    def fetch():
+        r = ven_get("/notifications")
+        return r.json() if r.ok else None
+
+    def announced(notes):
+        return notes is not None and any(
+            n.get("event_id") == event_id
+            and payload_type in n.get("message", "")
+            and "not applied" in n.get("message", "")
+            for n in notes
+        )
+
+    poll_until(fetch, announced, timeout=60, interval=2,
+               description=f"a notification that {payload_type} in event {event_id} is not applied")

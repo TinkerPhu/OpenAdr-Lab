@@ -42,7 +42,6 @@
 |----|-----|------|------|----------|----------------|-------------|
 | R-94 | S3 | bug | Medium | too-big: first step: a latched-minimum stored-energy constraint in heater_milp.rs derived from thermostat_delta_c | `VEN/src/assets/heater_milp.rs`, `VEN/src/assets/heater_thermostat.rs`, `thermostat_delta_c` | The MILP does not model the heater's thermostat deadband, so the asset can refuse planned dispatch. |
 | R-32 | S3 | duplication | Medium | too-big: first step: a shared OAuth client crate | `VTN/bff/src/vtn_client.rs`, `VEN/src/vtn.rs` | `VTN/bff/src/vtn_client.rs` duplicates `VEN/src/vtn.rs`'s OAuth token + 401-retry + get/put-JSON plumbing (~300 lines each). Separate crates — extraction needs a shared workspace crate; record only, don't force. |
-| R-100 | S3 | architecture | Medium | needs-decision: what a VTN SoC command is: a planner constraint, not a session | `VEN/src/tasks/poll_signals.rs::apply_vtn_charge_state_session`, `VEN/src/entities/device_session.rs::EvSessionOrigin::Vtn`, `VEN/src/controller/openadr_interface.rs::parse_charge_state_setpoint` | A VTN SoC command is modelled as if it were the user's own intent (path disabled). |
 | R-86 | S3 | wire-contract | Medium | needs-decision: does the randomizeStart offset apply to dispatch only or to reporting too | `VEN/src/controller/vtn_port.rs` (`OadrIntervalPeriod`), `lab-core/src/event_timing.rs`, `VEN/src/controller/dispatcher.rs` | `intervalPeriod.randomizeStart` is parsed and carried (branch 045, 2026-09-20) but not honoured: a VTN asking a fleet to stagger its response still gets every VEN starting on the same instant, which is the one outcome that field exists to prevent. Honouring it means offsetting the VEN's own action within the declared window from a per-VEN deterministic seed (the `determinism` rule forbids an un-injectable clock or RNG here), and deciding whether the offset applies to dispatch only or to reporting too. Found during the 3.1 DTO gap audit; carried rather than half-built (`no-half-built-features`). |
 | R-87 | S3 | wire-contract | Medium | too-big: first step: make intervalPeriod.start Option upstream | `openleadr-rs/openleadr-wire/src/interval.rs`, `lab-core/src/event_timing.rs` | **This stack is stricter than the 3.1 schema about `intervalPeriod.start`.** The schema gives `intervalPeriod` no `required:` list at all (`1_OpenADR_3.1.0_20250801.yaml`, ~line 2154), so a conformant peer may omit `start`; `openleadr-wire` makes it a non-`Option` `DateTime<Utc>` and carries its own `// FIXME field not required, though, it's unclear how to interpret it if it's missing` (`interval.rs:43`). Since 3.1b the VEN parses events with those types, so it refuses such an event -- which `wire-contracts` explicitly forbids ("never reject a peer for omitting what the spec lets it omit"). Not newly introduced by the VEN: our **VTN** already parses incoming events with the same types, so it rejects them at the API boundary first, and no such event can reach a VEN in this lab. Fixing it properly means making the field `Option` upstream (their FIXME) and teaching `EventRequest::ends_at()` -- our own P-1 patch -- to cope with an unanchored period; that is an upstream PR, not a local workaround. Until then the deviation is on the VTN's side of the wire and is documented rather than hidden. |
 | R-65 | S4 | ui-transparency | Medium | too-big: first step: read the achieved gap past good_lp's solve path | `VEN/src/controller/milp_planner/types.rs`, `VEN/src/controller/milp_planner/solver_phase1.rs` | Narrowed by GB-31 (2026-08-19): `Plan.solve_status` now reads `good_lp`'s real `Solution::status()` (`Optimal`/`TimeLimit`/`GapLimit`, new `SolveStatus` variants) instead of being hardcoded, so an operator can at least see when a plan wasn't certified optimal. What's still missing: the achieved gap as a *number* — `good_lp`'s public `Solution` trait exposes only that coarse status, not the underlying `highs::SolvedModel::mip_gap()` float; reaching it means bypassing `good_lp`'s solve path (which drops the `SolvedModel` after extracting the solution) and reimplementing its private `Variable`→column-index mapping by hand — confirmed by reading `good_lp` 1.15.2's and `highs` 2.4.0's source, not assumed. `Plan.mip_gap_target` therefore still persists only the *configured* tolerance, not the achieved value — and since GB-40 made that tolerance a per-profile setting (`planner.mip_gap_target`, default `0.02`) rather than a const, the missing achieved-gap number is now the *only* way to tell what a given gap setting actually bought, which has to be measured offline instead (`milp_planner/tests/solve_cost.rs::bench_mip_gap_sweep`). |
@@ -123,38 +122,6 @@
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
 - [ ] 1.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
-
-## R-100 — a VTN SoC command is modelled as if it were the user's own intent
-
-**Where:** `VEN/src/tasks/poll_signals.rs::apply_vtn_charge_state_session` (preserved but **not
-called** as of 2026-10-03), `VEN/src/entities/device_session.rs::EvSessionOrigin::Vtn`,
-`VEN/src/controller/openadr_interface.rs::parse_charge_state_setpoint`.
-
-A VTN `CHARGE_STATE_SETPOINT` used to create an `EvSession` — the same object a user's own
-charging request creates, distinguished only by `origin`. Those are different things: one is an
-external constraint from the grid, the other is intent about the user's own car and their own
-travel. Modelling them identically says a grid preference *is* the driver's plan.
-
-The spec's own wording supports the doubt: `CHARGE_STATE_SETPOINT` is "the state of charge of an
-energy storage resource", which fits a grid-scale or aggregator-controlled battery far better than
-a household EV whose schedule follows its driver.
-
-**Why it stopped being theoretical.** The EV session queue forbids overlapping sessions, so a VTN
-session and a user session compete for one calendar: a grid signal can be refused because the user
-has booked their car, and a VTN session can block the user from booking it at all. The old single
-slot hid this — the last writer simply won, which is also how a VTN signal could silently overwrite
-a user's session whose target merely differed.
-
-**Current state:** disabled on the user's instruction (2026-10-03), code preserved verbatim with
-its ownership-by-id bookkeeping and withdrawal semantics intact, and pinned shut by
-`a_charge_state_signal_creates_no_ev_session`. The two tests covering the preserved path drive it
-directly rather than through `apply_signal_changes`.
-
-**To resolve:** decide what a VTN SoC command *is* here. The likely answer is a planner
-**constraint** weighed against the user's sessions (alongside capacity limits and prices), not a
-session competing with them — an obligation the MILP receives without an `EvSession`, much as
-`ev-usage-forecast` already hands the planner a predicted departure without writing one. Until
-then it stays off; do not re-wire it as a session.
 
 ## R-94 — the MILP does not model the heater's thermostat deadband
 

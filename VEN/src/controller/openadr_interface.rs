@@ -32,8 +32,7 @@ pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCap
     let strictest = |payload_type: &str| {
         events
             .iter()
-            .flat_map(|e| e.content.intervals.iter().flatten())
-            .flat_map(|i| &i.payloads)
+            .flat_map(event_payloads)
             .filter(|p| p.value_type.wire_name() == payload_type)
             .filter_map(|p| p.numeric())
             .reduce(f64::min)
@@ -93,6 +92,17 @@ fn timed_payloads<'a>(
     })
 }
 
+/// Every payload of every interval of `event`, whatever its timing: the one way to ask "what does
+/// this event carry", for readers that care about the payload and not about when it applies.
+fn event_payloads(event: &OadrEvent) -> impl Iterator<Item = &OadrPayload> {
+    event
+        .content
+        .intervals
+        .iter()
+        .flatten()
+        .flat_map(|i| i.payloads.iter())
+}
+
 /// Grid-alert windows (ALERT_GRID_EMERGENCY / ALERT_BLACK_START, WP3.1/BL-04).
 /// The payload value is the spec's human-readable message.
 pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
@@ -146,17 +156,45 @@ pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
         .collect()
 }
 
-/// The first CHARGE_STATE_SETPOINT (WP3.4): `(target_soc 0.0–1.0, window_end,
-/// event_id)`. Values > 1 are read as percent (80 → 0.8); out-of-range
-/// results are dropped.
-pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTime<Utc>, String)> {
-    timed_payloads(events, &["CHARGE_STATE_SETPOINT"]).find_map(|(event, timed, payload)| {
-        let raw = payload.numeric()?;
-        let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
-        (0.0..=1.0)
-            .contains(&target_soc)
-            .then(|| (target_soc, timed.end, event.id.to_string()))
-    })
+/// Payload types this VEN receives and deliberately does not act on, with the reason. Data, not
+/// a branch: a type joins by being listed here, and the poll announces it from this one table.
+///
+/// `CHARGE_STATE_SETPOINT` (R-100): the spec words it as "the state of charge of an energy
+/// storage resource", which fits a grid-scale or aggregator-controlled battery. This VEN decides
+/// when and how much a household EV charges; a grid command about it is neither the driver's plan
+/// nor a planner input. Declared in `docs/reference/WIRE_PROFILE.md`.
+const NOT_APPLIED_PAYLOADS: &[(&str, &str)] = &[(
+    "CHARGE_STATE_SETPOINT",
+    "the driver decides when and how much a household EV charges (WIRE_PROFILE.md)",
+)];
+
+/// An event carrying a payload type this profile does not apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnappliedPayload {
+    pub payload_type: String,
+    pub event_id: String,
+    pub reason: String,
+}
+
+/// Every event carrying a payload listed in [`NOT_APPLIED_PAYLOADS`], once per event and type.
+/// Parsed so the refusal can be stated (`wire-contracts`: a peer is told what we assumed or
+/// declined), never silently dropped.
+pub fn parse_unapplied_payloads(events: &[OadrEvent]) -> Vec<UnappliedPayload> {
+    events
+        .iter()
+        .flat_map(|event| {
+            NOT_APPLIED_PAYLOADS
+                .iter()
+                .filter(move |(payload_type, _)| {
+                    event_payloads(event).any(|p| p.value_type.wire_name() == *payload_type)
+                })
+                .map(move |(payload_type, reason)| UnappliedPayload {
+                    payload_type: (*payload_type).to_string(),
+                    event_id: event.id.to_string(),
+                    reason: (*reason).to_string(),
+                })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +399,7 @@ mod tests {
         assert!(alerts.is_empty());
     }
 
-    // ── parse_dispatch_windows / parse_charge_state_setpoint (WP3.4) ───────
+    // ── parse_dispatch_windows (WP3.4) ─────────────────────────────────────
 
     #[test]
     fn test_parse_dispatch_windows_extracts_setpoint_and_window() {
@@ -378,30 +416,65 @@ mod tests {
         assert_eq!(w[0].event_id, "disp-1");
     }
 
+    // ── parse_unapplied_payloads (R-100) ───────────────────────────────────
+
     #[test]
-    fn test_parse_charge_state_setpoint_fraction_and_percent() {
-        let make = |val: serde_json::Value| {
-            json!([{
+    fn parse_unapplied_payloads_names_each_event_carrying_one() {
+        let events = json!([
+            {
                 "id": "cs-1",
                 "programID": "prog-1",
                 "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT2H" },
-                "intervals": [{ "id": 0, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [val] }] }]
-            }])
-        };
-        let parse =
-            |v| parse_charge_state_setpoint(&lab_core::test_fixtures::events_from_json(make(v)));
-        let (soc, end, eid) = parse(json!(0.9)).expect("fraction accepted");
-        assert!((soc - 0.9).abs() < 1e-9);
-        assert_eq!(eid, "cs-1");
-        assert_eq!(end.to_rfc3339(), "2026-03-14T02:00:00+00:00");
-
-        let (soc, _, _) = parse(json!(85)).expect("percent accepted");
-        assert!((soc - 0.85).abs() < 1e-9);
-
-        assert!(parse(json!("full")).is_none(), "non-numeric dropped");
+                "intervals": [
+                    { "id": 0, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [0.9] }] },
+                    { "id": 1, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [0.8] }] }
+                ]
+            },
+            {
+                "id": "simple-1",
+                "programID": "prog-1",
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+                "intervals": [{ "id": 0, "payloads": [{ "type": "SIMPLE", "values": [1] }] }]
+            },
+            {
+                "id": "cs-2",
+                "programID": "prog-1",
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+                "intervals": [{ "id": 0, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [50] }] }]
+            }
+        ]);
+        let found = parse_unapplied_payloads(&lab_core::test_fixtures::events_from_json(events));
+        let named: Vec<(&str, &str)> = found
+            .iter()
+            .map(|u| (u.payload_type.as_str(), u.event_id.as_str()))
+            .collect();
+        // One entry per event, not per interval, and never for a type we do apply.
+        assert_eq!(
+            named,
+            vec![
+                ("CHARGE_STATE_SETPOINT", "cs-1"),
+                ("CHARGE_STATE_SETPOINT", "cs-2")
+            ]
+        );
+        assert!(
+            found[0].reason.contains("driver"),
+            "the reason is stated: {}",
+            found[0].reason
+        );
     }
 
-    // ── parse_capacity_state export subscription/reservation (WP3.3) ───────
+    #[test]
+    fn parse_unapplied_payloads_ignores_payloads_we_apply() {
+        let events = json!([{
+            "id": "disp-1",
+            "programID": "prog-1",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT15M" },
+            "intervals": [{ "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [1.5] }] }]
+        }]);
+        assert!(
+            parse_unapplied_payloads(&lab_core::test_fixtures::events_from_json(events)).is_empty()
+        );
+    }
 
     #[test]
     fn test_parse_capacity_state_export_subscription_and_reservation() {
@@ -527,11 +600,6 @@ mod tests {
 
         let dispatch = parse_dispatch_windows(&events("DISPATCH_SETPOINT", json!(1.0), json!(2.0)));
         assert_eq!((dispatch[1].setpoint_kw, dispatch[1].start), (2.0, t30));
-
-        let (_, end, _) =
-            parse_charge_state_setpoint(&events("CHARGE_STATE_SETPOINT", json!(0.8), json!(0.9)))
-                .unwrap();
-        assert_eq!(end, t30, "the first interval's own end, not the event's");
     }
 
     #[test]

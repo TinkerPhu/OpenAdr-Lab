@@ -1,6 +1,7 @@
 //! Application of parsed grid-signal changes from one event poll (split out
 //! of `poll_events.rs` for the tasks/ file-size cap): alert windows (WP3.1),
-//! SIMPLE levels (WP3.2), and direct setpoints (WP3.4). Pure change-vs-prev
+//! SIMPLE levels (WP3.2), direct setpoints (WP3.4), and the announcement of payloads this
+//! profile does not apply (R-100). Pure change-vs-prev
 //! bookkeeping plus state writes and plan triggers — no parsing here.
 
 use chrono::{DateTime, Utc};
@@ -10,16 +11,14 @@ use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::capacity::{AlertWindow, DispatchWindow, SimpleWindow};
 use crate::state::AppState;
 
-#[cfg(test)]
-use super::vtn_charge_state_session::apply_vtn_charge_state_session;
-
 /// The signal payloads parsed from one poll's event list.
 #[derive(Default)]
 pub(crate) struct ParsedSignals {
     pub alerts: Vec<AlertWindow>,
     pub simple: Vec<SimpleWindow>,
     pub dispatch: Vec<DispatchWindow>,
-    pub charge_state: Option<(f64, DateTime<Utc>, String)>,
+    /// Events carrying a payload this profile does not apply (R-100).
+    pub unapplied: Vec<controller::openadr_interface::UnappliedPayload>,
 }
 
 /// Previous-poll signal state, owned by the poll loop across iterations.
@@ -28,10 +27,8 @@ pub(crate) struct SignalPrevs {
     pub alerts: Vec<AlertWindow>,
     pub simple: Vec<SimpleWindow>,
     pub dispatch: Vec<DispatchWindow>,
-    /// The EvSession id created by a CHARGE_STATE_SETPOINT event, so its
-    /// disappearance (event deleted == cancelled) can clear that session —
-    /// and only that one, never a user-created session.
-    pub charge_state_session: Option<uuid::Uuid>,
+    /// What was already announced as not applied, so a standing event is said once.
+    pub unapplied: Vec<controller::openadr_interface::UnappliedPayload>,
 }
 
 /// Apply this poll's parsed signals. Returns `true` when a plan trigger was
@@ -50,8 +47,7 @@ pub(crate) async fn apply_signal_changes(
         alerts,
         simple,
         dispatch,
-        // Parsed but ignored while the VTN session path is disabled (below).
-        charge_state: _charge_state,
+        unapplied,
     } = signals;
     // WP3.1 (BL-04): alert changes replan with the Alert trigger.
     let alerts_changed = alerts != prevs.alerts;
@@ -111,11 +107,29 @@ pub(crate) async fn apply_signal_changes(
             .await;
     }
 
-    // WP3.4 DISABLED (2026-10-03): a VTN CHARGE_STATE_SETPOINT no longer creates
-    // an EvSession. The code that did is preserved verbatim in
-    // `apply_vtn_charge_state_session` below and is deliberately not called - see
-    // that function's doc comment for why. `charge_state` is therefore parsed and
-    // ignored, which is why it is bound with a leading underscore above.
+    // R-100: a payload this profile does not apply is said so, once per event, rather than
+    // dropped in silence. Info, not a wire rejection: the VTN did nothing wrong and `/health`
+    // must not read as degraded because of a stated policy.
+    for u in unapplied.iter().filter(|u| !prevs.unapplied.contains(u)) {
+        notifier
+            .notify(
+                state,
+                now,
+                crate::entities::design_vocabulary::UserNotificationSeverity::Info,
+                format!(
+                    "{} in this event is not applied: {}",
+                    u.payload_type, u.reason
+                ),
+                None,
+                Some(u.event_id.clone()),
+                Some(format!(
+                    "payload-not-applied-{}-{}",
+                    u.payload_type, u.event_id
+                )),
+            )
+            .await;
+    }
+    prevs.unapplied = unapplied;
 
     alerts_changed || simple_changed
 }
@@ -129,107 +143,74 @@ mod tests {
         Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
     }
 
-    /// The disabling itself, pinned: a charge-state signal reaching the live path
-    /// must leave the session queue empty. Without this, re-wiring the VTN session
-    /// path would be a silent change that every other test still passed.
+    fn unapplied(event_id: &str) -> controller::openadr_interface::UnappliedPayload {
+        controller::openadr_interface::UnappliedPayload {
+            payload_type: "CHARGE_STATE_SETPOINT".to_string(),
+            event_id: event_id.to_string(),
+            reason: "the driver decides how a household EV charges".to_string(),
+        }
+    }
+
+    /// R-100: a payload this profile does not apply is announced - once per event - and never
+    /// becomes an EV session. The announcement is what makes "not applied" a stated policy
+    /// rather than a silent drop (`wire-contracts`).
     #[tokio::test]
-    async fn a_charge_state_signal_creates_no_ev_session() {
+    async fn an_unapplied_payload_is_announced_once_and_creates_no_ev_session() {
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
         let state = AppState::new();
         let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let mut prevs = SignalPrevs::default();
         let notifier = crate::services::notify::Notifier::new(None);
-        let signals = ParsedSignals {
-            charge_state: Some((0.9, ts(7200), "evt-cs".to_string())),
-            ..Default::default()
-        };
 
-        apply_signal_changes(&state, &tx, &notifier, signals, ts(0), &mut prevs).await;
+        for secs in [0, 30] {
+            let signals = ParsedSignals {
+                unapplied: vec![unapplied("evt-cs")],
+                ..Default::default()
+            };
+            apply_signal_changes(&state, &tx, &notifier, signals, ts(secs), &mut prevs).await;
+        }
 
         assert!(
             state.ev_sessions().await.is_empty(),
-            "a VTN charge-state signal must not create an EV session"
+            "a VTN state-of-charge command must not create an EV session"
         );
+        let notes = state.notifications_since(None).await;
+        assert_eq!(notes.len(), 1, "announced once, not once per poll");
+        assert_eq!(notes[0].severity, UserNotificationSeverity::Info);
+        assert_eq!(notes[0].event_id.as_deref(), Some("evt-cs"));
+        assert!(notes[0].message.contains("CHARGE_STATE_SETPOINT"));
+        assert!(notes[0].message.contains("not applied"));
         assert!(
-            prevs.charge_state_session.is_none(),
-            "and must record no session of its own"
+            notes[0].message.contains("driver"),
+            "the reason travels with it"
         );
     }
 
-    /// Drives `apply_vtn_charge_state_session` directly, because
-    /// `apply_signal_changes` no longer calls it (see its doc comment). The test is
-    /// kept pointed at the preserved function rather than deleted: it is what
-    /// proves that code still works if a future change decides to use it.
     #[tokio::test]
-    async fn vtn_charge_state_path_creates_then_withdraws_its_own_session() {
+    async fn a_second_event_with_an_unapplied_payload_is_announced_too() {
         let state = AppState::new();
         let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let mut prevs = SignalPrevs::default();
+        let notifier = crate::services::notify::Notifier::new(None);
 
-        // Signal present -> session created.
-        let signals = ParsedSignals {
-            charge_state: Some((0.9, ts(7200), "evt-cs".to_string())),
+        let first = ParsedSignals {
+            unapplied: vec![unapplied("evt-1")],
             ..Default::default()
         };
-        let sent =
-            apply_vtn_charge_state_session(&state, &tx, signals.charge_state, ts(0), &mut prevs)
-                .await;
-        assert!(sent);
-        let sessions = state.ev_sessions().await;
-        assert_eq!(sessions.len(), 1, "exactly one session queued");
-        let session = sessions.iter().next().unwrap();
-        assert!((session.target_soc - 0.9).abs() < 1e-9);
-
-        // Signal gone (event deleted == cancelled) -> that session cleared.
-        let sent = apply_vtn_charge_state_session(&state, &tx, None, ts(10), &mut prevs).await;
-        assert!(sent);
-        assert!(
-            state.ev_sessions().await.is_empty(),
-            "event-created session cleared on event deletion"
-        );
-    }
-
-    /// Same reason as above: aimed at the preserved function.
-    #[tokio::test]
-    async fn vtn_charge_state_withdrawal_leaves_a_user_session_alone() {
-        let state = AppState::new();
-        let (tx, _rx) = tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
-        let mut prevs = SignalPrevs::default();
-
-        // Event-created session, then a USER replaces it with their own.
-        let signals = ParsedSignals {
-            charge_state: Some((0.9, ts(7200), "evt-cs".to_string())),
+        apply_signal_changes(&state, &tx, &notifier, first, ts(0), &mut prevs).await;
+        let both = ParsedSignals {
+            unapplied: vec![unapplied("evt-1"), unapplied("evt-2")],
             ..Default::default()
         };
-        apply_vtn_charge_state_session(&state, &tx, signals.charge_state, ts(0), &mut prevs).await;
-        // The VTN's own session covers [ts(0), ts(7200)); the user's sits after it,
-        // so both are queued at once. Under the single slot this test had to
-        // *overwrite* the VTN session to express "a user session exists", which
-        // could not distinguish "left alone" from "never looked at".
-        let user_session = crate::entities::device_session::EvSession {
-            id: uuid::Uuid::new_v4(),
-            target_soc: 0.7,
-            window_start: ts(7200),
-            expected_trip_distance_km: None,
-            expected_return_time: None,
-            departure_time: ts(10800),
-            soft_deadline: false,
-            origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-            budget_eur: None,
-            comfort_rates: vec![],
-            mode: Default::default(),
-            created_at: ts(5),
-            updated_at: ts(5),
-        };
-        state
-            .insert_ev_session(user_session.clone())
+        apply_signal_changes(&state, &tx, &notifier, both, ts(30), &mut prevs).await;
+
+        let ids: Vec<_> = state
+            .notifications_since(None)
             .await
-            .expect("a window after the VTN's must queue alongside it");
-
-        apply_vtn_charge_state_session(&state, &tx, None, ts(10), &mut prevs).await;
-        // The VTN removed only what it created, by id: the user's session remains
-        // and is now the only one queued.
-        let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
-        assert_eq!(left, vec![user_session.id], "user session untouched");
+            .iter()
+            .filter_map(|n| n.event_id.clone())
+            .collect();
+        assert_eq!(ids, vec!["evt-1", "evt-2"]);
     }
 
     #[tokio::test]

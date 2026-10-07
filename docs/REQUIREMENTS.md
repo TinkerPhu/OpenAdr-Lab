@@ -158,7 +158,7 @@ as-is. See `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` for a
 | `EXPORT_CAPACITY_SUBSCRIPTION` / `_RESERVATION` | Subscribed/reserved capacity (kW) |
 | `SIMPLE` | Curtailment level 0–3 (see note on profiles below) |
 | `DISPATCH_SETPOINT` | Absolute power setpoint (kW) |
-| `CHARGE_STATE_SETPOINT` | Battery/EV target SOC (%) |
+| `CHARGE_STATE_SETPOINT` | Target SOC (%). Received, not applied by this VEN (R-100, `WIRE_PROFILE.md`) |
 | `ALERT_GRID_EMERGENCY` / `ALERT_FLEX_ALERT` / etc. | Grid alerts |
 
 **OpenADR report payload types used in this lab** (full list in spec §5.4.2):
