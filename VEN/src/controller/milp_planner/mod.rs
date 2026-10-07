@@ -49,6 +49,9 @@ pub mod asset_port;
 mod envelopes;
 mod ev_diagnostics;
 mod inputs;
+// Defines `probe!`; must precede the solver modules that use it.
+#[macro_use]
+mod model_probe;
 pub(crate) mod penalty;
 mod planned_state;
 mod results;

@@ -50,6 +50,7 @@ pub(crate) fn solve_marginal_costs(
     winning: &SolveOutput,
     timeout_s: f64,
 ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+    probe!(begin, "solve_marginal_costs");
     let n = inputs.n;
 
     let global = GlobalMilpInputs {
@@ -164,6 +165,8 @@ pub(crate) fn solve_marginal_costs(
     objective += shiftable_tiebreak_expr(&pool.shiftable);
     objective += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
+    probe!(vars, &vars);
+    probe!(expr, "objective", &objective);
     let model = vars.minimise(&objective).using(highs);
 
     let (model, power_balance_refs) = add_model_constraints(

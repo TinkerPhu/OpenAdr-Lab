@@ -1,7 +1,7 @@
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
-    WithTimeLimit,
+    constraint, variable, variables, Constraint, Expression, Solution, SolverModel, Variable,
+    WithMipGap, WithTimeLimit,
 };
 
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
@@ -22,6 +22,7 @@ pub(crate) fn solve_phase1(
     asset_contexts: &[Box<dyn AssetMilpContext>],
     timeout_s: f64,
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
+    probe!(begin, "solve_phase1");
     let n = inputs.n;
 
     let global = GlobalMilpInputs {
@@ -135,6 +136,8 @@ pub(crate) fn solve_phase1(
     // Full-PV-utilization tie-break (see PV_USE_TIEBREAK_EUR_PER_KWH for the rationale).
     objective += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
+    probe!(vars, &vars);
+    probe!(expr, "objective", &objective);
     let mut model = vars.minimise(&objective).using(highs);
     (model, _) = add_model_constraints(
         model,
@@ -220,43 +223,58 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             .map(|v| v.p_step_kw * v.y_heat[t])
             .unwrap_or_else(|| Expression::from(0.0));
 
-        let power_balance_ref = model.add_constraint(constraint!(
+        let power_balance = constraint!(
             p_imp[t] + pool.grid.p_pv_used[t] + bat_dis
                 == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + p_exp[t]
-        ));
+        );
+        probe!(constraint, &power_balance);
+        let power_balance_ref = model.add_constraint(power_balance);
         power_balance_refs.push(power_balance_ref);
-        model = model.with(constraint!(pool.grid.p_pv_used[t] <= inputs.p_pv_kw[t]));
-        model = model.with(constraint!(
-            p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]
-        ));
-        model = model.with(constraint!(
-            p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])
-        ));
-        model = model.with(constraint!(
-            p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]
-        ));
-        model = model.with(constraint!(
-            p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]
-        ));
+        model = with_constraint(
+            model,
+            constraint!(pool.grid.p_pv_used[t] <= inputs.p_pv_kw[t]),
+        );
+        model = with_constraint(
+            model,
+            constraint!(p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]),
+        );
+        model = with_constraint(
+            model,
+            constraint!(p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])),
+        );
+        model = with_constraint(
+            model,
+            constraint!(p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]),
+        );
+        model = with_constraint(
+            model,
+            constraint!(p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]),
+        );
     }
 
     for ctx in asset_contexts {
         for c in ctx.constraints(pool, n, &global.dt_h) {
-            model = model.with(c);
+            model = with_constraint(model, c);
         }
     }
 
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
         for c in interaction.constraints(pool, iv, global) {
-            model = model.with(c);
+            model = with_constraint(model, c);
         }
     }
 
     // WP6.3 (BL-09): p_imp[t] <= threshold_kw + s_penalty[window_of(t)] for each active rule.
     for c in penalty::penalty_constraints(p_imp, &inputs.cum_s, penalty_vars) {
-        model = model.with(c);
+        model = with_constraint(model, c);
     }
     (model, power_balance_refs)
+}
+
+/// `model.with(c)`, recording `c` first when a test is capturing the model (`probe!`).
+pub(super) fn with_constraint<S: SolverModel>(model: S, c: Constraint) -> S {
+    probe!(constraint, &c);
+    model.with(c)
 }
 
 /// Extract a `SolveOutput` from a solved `good_lp::Solution`.

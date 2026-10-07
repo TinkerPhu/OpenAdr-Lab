@@ -11,7 +11,9 @@ use crate::controller::milp_interactions::{
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
 use super::penalty;
-use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1};
+use super::solver_phase1::{
+    add_model_constraints, read_solve_output, solve_phase1, with_constraint,
+};
 use super::types::*;
 
 /// Phase 2: minimise operational friction subject to phase1_cost(p2_vars) ≤ c_star + epsilon.
@@ -139,6 +141,7 @@ pub(crate) fn solve_phase2(
     asset_contexts: &[Box<dyn AssetMilpContext>],
     timeout_s: f64,
 ) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
+    probe!(begin, "solve_phase2");
     let n = inputs.n;
 
     let global = GlobalMilpInputs {
@@ -341,9 +344,13 @@ pub(crate) fn solve_phase2(
         n,
     );
 
+    probe!(vars, &vars);
+    probe!(expr, "friction", &friction_obj);
+    probe!(expr, "phase1_cap", &phase1_cap_expr);
+    probe!(warm_start, &warm_start);
     let mut model = vars.minimise(&friction_obj).using(highs);
     model = model.with_initial_solution(warm_start);
-    model = model.with(constraint!(phase1_cap_expr <= c_star + epsilon));
+    model = with_constraint(model, constraint!(phase1_cap_expr <= c_star + epsilon));
     (model, _) = add_model_constraints(
         model,
         inputs,
