@@ -14747,3 +14747,25 @@ declared defaults. The `POST /debug/heuristics/preload` route had no caller anyw
 and is deleted; the synthetic-backfill helpers it used remain as `#[cfg(test)]` fixtures of
 `services/heuristics.rs`. Learning: a sweep's "N copies" count must be verified against test
 blocks before it is believed; and the remaining findings (R-106..R-115) are filed, not fixed.
+
+## The solver's three solves share one model skeleton (refactor/solver-model-skeleton)
+
+Why: the 2026-10-07 architecture audit found `solve_phase1`, `solve_phase2` and
+`solve_marginal_costs` each rebuilding the same model by hand (about 120 of phase 1's 259
+significant lines reappeared in the dual pass, about 85 in phase 2), with comments promising to
+"mirror phase 1 exactly". R-98 had already shown what that produces: a dual pass that drifted from
+the plan until its LP was infeasible on every VEN. The constraint was that this is the heart of the
+VEN and must stay functionally identical.
+What: a guard first, then the change. `probe!` (a macro that expands to nothing outside tests) records
+every variable definition, objective, warm start and constraint each solve builds, in order, sorted
+and as-sent; `tests/model_fingerprint.rs` compares nine scenarios (each asset alone and together,
+both interactions, shiftable loads, a penalty rule, import/export slack, phase 2 skipped) with a
+golden captured from the unmodified logic. Then `model_skeleton.rs` (`ModelSkeleton`, `Declaration`)
+took over the dual pass, phase 1, phase 2 and the warm-start test seam, one commit each, the golden
+unchanged at every step. The three solver files went from about 840 to 480 lines.
+Issues: (1) the guard is only trusted once seen to fail: swapping two variable declarations and
+dropping a tie-break both failed it at the objective record, while swapping the order of two terms on
+*different* variables did not, correctly, since HiGHS receives the same model. (2) A skeleton with
+no caller would fail clippy's dead-code check, so each commit added only the `Declaration` variant
+its consumer needed. (3) Reverting a mutation with `git checkout -- <file>` also discarded wanted,
+uncommitted edits in that file; commit before mutating.

@@ -56,7 +56,7 @@
               C_ACCUM["report_accumulator.rs\nappend + bounded trim"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
               C_TIMELINE["timeline.rs\nbuild_asset_timeline()"]
-              C_MILP["milp_planner/\nrun_planner()\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
+              C_MILP["milp_planner/\nrun_planner()\nmodel_skeleton\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
           end
           RPTWIN["state/report_windows.rs\nper-(event,payload) interval windows"]
           BLOG["state/bounded_log.rs\nBoundedLog&lt;T&gt; — notifications,\nevent log, report submissions,\nflexibility history"]

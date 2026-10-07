@@ -20,10 +20,27 @@ Key source files:
 | Input tensors | `VEN/src/controller/milp_planner/inputs.rs` |
 | Phase 1 solver | `VEN/src/controller/milp_planner/solver_phase1.rs` |
 | Phase 2 solver | `VEN/src/controller/milp_planner/solver_phase2.rs` |
+| Shared model skeleton | `VEN/src/controller/milp_planner/model_skeleton.rs` |
 | Plan translation | `VEN/src/controller/milp_planner/results.rs` |
 | Planning loop | `VEN/src/tasks/planning.rs` |
 | Acceptance gate | `VEN/src/services/planning.rs` |
 | Config | `VEN/src/profile.rs` → `PlannerConfig` |
+
+**One skeleton, three solves.** Phase 1, phase 2 and the marginal-cost pass (§9) solve the same
+economic model. `ModelSkeleton::declare` builds it once — grid variables, penalty slacks, each
+asset's variables, the cross-asset interactions that apply — `cost_expr` is the one economic cost,
+and `add_constraints` the one set of constraints; `Declaration::{Phase1, Phase2, Pinned}` is the
+only statement of how the solves differ (assets declared with or without startup/ramp costs, mode
+decisions free or pinned). `cost_expr` is phase 1's objective, phase 2's cost cap and the dual
+pass's objective, so the cap equals `c_star` term for term by construction. A new grid variable
+or objective term is added in `model_skeleton.rs`, once.
+
+The order in which variables, expressions and constraints are created is part of the contract:
+`good_lp` keeps coefficients in an `FnvHashMap`, so what HiGHS receives is a function of that order.
+`tests/model_fingerprint.rs` records the model each solve sends (through `probe!`, a macro that is
+a no-op outside tests) for nine scenarios and compares it with `tests/golden/model_fingerprints.txt`.
+It fails with the scenario and record number of the first difference; regenerate the golden only
+for an intended model change (`UPDATE_MODEL_GOLDEN=1`).
 
 ---
 
@@ -306,7 +323,9 @@ fixed to the winning solution's values, and the constraint's dual value is read 
   the plan used with `ModeDecisions::Pinned` — the mode decisions (battery `u_bat`, EV
   `z_ev_on`, heater stage and ready flag, each shiftable load's start) become continuous
   variables fixed to `SolveOutput::mode_decisions`, read off the winning solution. Every other
-  variable and bound is the plan's own, so the priced model cannot drift from the planned one.
+  variable and bound is the plan's own, and the grid variables, objective and constraints come from
+  the same `ModelSkeleton` the plan was built on (`Declaration::Pinned`), so the priced model cannot
+  drift from the planned one.
   (Before R-98 the pass hand-declared its own copies; they drifted until the LP was infeasible
   on every VEN and the marginal cost was always the fallback tariff.) Pinned by each asset's
   `declare_pinned_vars_is_the_free_declaration_*` test and by

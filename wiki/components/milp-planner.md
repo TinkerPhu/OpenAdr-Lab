@@ -163,7 +163,7 @@ see [[milp-over-greedy]].
   shared slack per rule per window bounds every slot's import in that window
   (`p_imp[t] <= threshold_kw + s_penalty[window]`), penalized once per window (not
   per slot — a demand-charge-style peak cost, not an energy cost). Threaded through
-  both solver phases and the marginal-cost dual solve via `add_model_constraints`'s
+  both solver phases and the marginal-cost dual solve via `ModelSkeleton::add_constraints`'s
   existing shared constraint function. Deliberately **not** the stateful, persisted
   billing-period tracker sketched in `entities::design_vocabulary::PenaltyRule`
   (rolling averages, `breached_this_period` surviving restarts) — each solve
@@ -186,6 +186,7 @@ see [[milp-over-greedy]].
 | Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
 | Asset port (trait + var/context structs) | `asset_port.rs` |
 | Phase 1 / Phase 2 | `solver_phase1.rs` / `solver_phase2.rs` |
+| Shared model skeleton (variables, cost, constraints) | `model_skeleton.rs` |
 | Stale-rate policy dispatch (WP4.4) | `stale_rates.rs` |
 | Request-mode EV semantics (WP4.1) | `VEN/src/assets/ev_milp.rs` (via `AssetMilpContext`) |
 | Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |

@@ -1487,7 +1487,7 @@ debt in `docs/reference/TECHNICAL_DEBTS.md`).
 
 **`Plan.solve_status`** (GB-31) — reads the solver's real termination reason instead of always
 reporting `Optimal`. `SolveOutput` (`controller::milp_planner::types`) carries the winning solve's
-`good_lp::solvers::SolutionStatus`, captured in `read_solve_output` and mapped via
+`good_lp::solvers::SolutionStatus`, captured in `ModelSkeleton::read_output` and mapped via
 `types::map_solve_status` onto `SolveStatus::{Optimal, TimeLimit, GapLimit}` at `Plan`
 construction; `Infeasible` is still set directly by `fallback_plan`, since a solve that returns
 `Err` (genuinely infeasible, unbounded, or any other solver failure) never produces a
