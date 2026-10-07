@@ -477,29 +477,29 @@ mod tests {
 
     /// A shiftable-load request as `create_shiftable` builds it, for the asset `asset_id`.
     fn shiftable_request(asset_id: &str) -> UserRequest {
-    UserRequest {
-        mode: Default::default(),
-        id: Uuid::new_v4(),
-        asset_id: asset_id.to_string(),
-        status: UserRequestStatus::Active,
-        target_soc: None,
-        target_energy_kwh: 2.0,
-        desired_power_kw: 2.0,
-        deadlines: vec![],
-        completion_policy: "STOP".to_string(),
-        max_total_cost_eur: None,
-        tier_count: 0,
-        session_id: Some(Uuid::new_v4()),
-        session_type: Some(SessionType::ShiftableLoad),
-        comfort_rates: vec![],
-        estimated_cost_eur: 0.0,
-        estimated_co2_g: 0.0,
-        accumulated_cost_eur: 0.0,
-        interruptible: false,
-        tolerance_min: None,
-        budget_eur: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        UserRequest {
+            mode: Default::default(),
+            id: Uuid::new_v4(),
+            asset_id: asset_id.to_string(),
+            status: UserRequestStatus::Active,
+            target_soc: None,
+            target_energy_kwh: 2.0,
+            desired_power_kw: 2.0,
+            deadlines: vec![],
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: Some(Uuid::new_v4()),
+            session_type: Some(SessionType::ShiftableLoad),
+            comfort_rates: vec![],
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -564,7 +564,10 @@ mod tests {
             Utc::now(),
             std::collections::HashMap::from([("wm".to_string(), 2.0)]),
         ));
-        assert!(sim.asset("wm").unwrap().last_power_kw > 0.0, "the load is drawing power");
+        assert!(
+            sim.asset("wm").unwrap().last_power_kw > 0.0,
+            "the load is drawing power"
+        );
 
         let req = shiftable_request("wm");
         let id = req.id;
