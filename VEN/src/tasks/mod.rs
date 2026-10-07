@@ -14,7 +14,6 @@ pub(crate) mod poll_signals;
 mod progress_ticker;
 pub mod sim_tick;
 pub mod state_persist;
-pub(crate) mod vtn_charge_state_session;
 
 pub(crate) use base_load_window::spawn_base_load_window;
 pub(crate) use heuristics_job::spawn_heuristics_job;

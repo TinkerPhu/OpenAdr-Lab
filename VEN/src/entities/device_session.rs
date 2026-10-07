@@ -16,6 +16,8 @@ use crate::entities::design_vocabulary::UserRequestMode;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvSessionOrigin {
     UserRequest,
+    /// Historical: no producer creates it any more (R-100, a VTN SoC command is not applied).
+    /// Kept so a session persisted under it still loads after an upgrade.
     Vtn,
     SimulatedUsage,
 }

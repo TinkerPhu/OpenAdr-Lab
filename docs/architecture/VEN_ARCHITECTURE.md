@@ -151,7 +151,7 @@ Two consequences worth knowing when reading this code:
 | `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `AlertWindow` (window per the shared interval timing below); `PlanTrigger::Alert` fires on change; both types clamp planned import to 0 over the window (soft constraint — never infeasible) | ✅ implemented |
 | `SIMPLE` (levels 0–3) | `SimpleWindow` — L1 caps import at a configurable % of contract, L2 at baseline, L3 at 0; highest level wins, alerts override | ✅ implemented |
 | `DISPATCH_SETPOINT` | `DispatchWindow` — dispatcher steers the battery to the commanded net site power during the window, plan running underneath; alert wins precedence | ✅ implemented |
-| `CHARGE_STATE_SETPOINT` | `EvSession` create/modify targeting the given SoC (fraction or percent); event deletion cancels the event-created session | ✅ implemented |
+| `CHARGE_STATE_SETPOINT` | **Received, not applied** (R-100): announced once per event as an Info notification naming the reason (`controller::openadr_interface::NOT_APPLIED_PAYLOADS`, the one table); never an `EvSession`, never a planner input — see `docs/reference/WIRE_PROFILE.md` | ✅ by design |
 
 **Internal → VTN report generation** (`controller/reporter.rs`):
 

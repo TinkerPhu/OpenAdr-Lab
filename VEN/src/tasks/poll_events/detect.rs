@@ -51,7 +51,7 @@ pub(crate) fn detect_event_changes(
         alerts: controller::openadr_interface::parse_alert_windows(events),
         simple: controller::openadr_interface::parse_simple_windows(events),
         dispatch: controller::openadr_interface::parse_dispatch_windows(events),
-        charge_state: controller::openadr_interface::parse_charge_state_setpoint(events),
+        unapplied: controller::openadr_interface::parse_unapplied_payloads(events),
     };
 
     let current_ids: std::collections::HashSet<String> =
