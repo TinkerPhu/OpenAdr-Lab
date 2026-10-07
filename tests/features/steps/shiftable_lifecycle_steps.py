@@ -107,9 +107,8 @@ def step_poll_sim_until_asset_appears(context, asset_id):
 def step_poll_sim_until_asset_started(context, asset_id):
     """The load is running: the planner chose a slot and the dispatcher commanded it.
 
-    Not `power_kw > 0`: for a shiftable load `/sim`'s `power_kw` is its rated power from the
-    first moment it exists, so it says nothing about whether it runs. `started` is the asset's
-    own latch (R-116).
+    `started` is the asset's own latch; `power_kw > 0` follows from it (`/sim`'s `power_kw` is
+    the actual power; the rating is `rated_power_kw`).
     """
 
     def fetch():

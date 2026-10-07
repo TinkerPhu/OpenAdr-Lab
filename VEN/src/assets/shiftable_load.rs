@@ -136,7 +136,9 @@ impl ShiftableLoadAsset {
 
     pub fn state_values(&self, state: &ShiftableLoadState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("power_kw".into(), self.power_kw);
+        // `rated_power_kw`, not `power_kw`: this map is flattened into the `/sim` JSON next to the
+        // typed `power_kw` (actual power), and a same-named key would overwrite it (R-116).
+        m.insert("rated_power_kw".into(), self.power_kw);
         m.insert("duration_min".into(), self.duration_min as f64);
         m.insert("elapsed_min".into(), state.elapsed_min);
         m.insert("started".into(), if state.started { 1.0 } else { 0.0 });

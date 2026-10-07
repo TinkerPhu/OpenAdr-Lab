@@ -14793,3 +14793,14 @@ not by seeing the build pass: `eslint --print-config` is byte-identical before a
 `tsc --showConfig` differs only in `baseUrl`/`paths`, which resolve to the same directory.
 Learning: measure before claiming duplication, and scope a consolidation to what is the same concept,
 not to what looks alike.
+
+## R-116: /sim reported a shiftable load's rating as its power
+
+`GET /sim` flattens each asset's `state_values()` into the same JSON object as the typed
+`AssetSnapshot` fields. `ShiftableLoadAsset::state_values` inserted its configured `power_kw`, which
+overwrote the typed `power_kw` (actual power): a pending load with `started: 0.0` showed
+`power_kw: 2.0`. Found because the cancel-refused scenario's first draft waited on `power_kw > 0` and
+got a load that had not started. The key is now `rated_power_kw`; the BDD steps that asserted
+`power_kw > 0` for a shiftable load (previously vacuous) now wait for `started` first, so they check
+real power. The structural guard is `simulator/tests.rs` `no_asset_kind_reports_a_state_value_named_like_a_typed_snapshot_field`:
+no asset kind may report a `state_values` key that equals a typed snapshot field.
