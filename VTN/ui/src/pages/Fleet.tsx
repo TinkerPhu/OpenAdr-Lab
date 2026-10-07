@@ -107,6 +107,7 @@ export function FleetPage() {
             windowMinutes={chosen.minutes}
             tickMinutes={chosen.tickMinutes}
             nowMs={now.getTime()}
+            reportingVens={live.data?.fleet.contributingVens ?? 0}
           />
         )}
       </Paper>

@@ -57,15 +57,25 @@ Feature: Fleet telemetry (fleet-monitor phase 0)
     #     waiting on the 10 min / 5 s probe alone was never sufficient: it is a
     #     different question from the one the chart asks.
     # Narrowing the window removes the dependency on elapsed time instead of
-    # waiting it out. The default-window view is a separate concern - see R-99
-    # on whether "No telemetry stored for the last 1440 minutes" is the right
-    # thing to show an operator on a freshly started VTN.
+    # waiting it out. The default-window view is the next scenario.
     Given I open the VTN UI
     When I wait for the fleet history of the last 10 minutes to have samples
     And I navigate to the Fleet page
     And I select the fleet "15 min" window
     Then the fleet chart has a line for every reporting VEN
     And hiding a VEN in the legend removes its line
+
+  # R-99. The page opens on 24 h at 900 s steps, so a freshly started store has
+  # no complete bucket and the chart used to say "No telemetry stored for the
+  # last 1440 minutes" while VENs were reporting. It now draws, or says it is
+  # still collecting; which of the two depends on the store's age, so the
+  # scenario asserts only that the false claim is gone.
+  @ui
+  Scenario: The fleet page does not deny telemetry while VENs are reporting
+    Given I open the VTN UI
+    When I wait for the fleet history of the last 10 minutes to have samples
+    And I navigate to the Fleet page
+    Then the fleet page does not say there is no telemetry while VENs are reporting
 
   # §1: the power curves say what a site did; this says what it was told. A dip
   # at 09:15 means something different depending on whether a limit was in

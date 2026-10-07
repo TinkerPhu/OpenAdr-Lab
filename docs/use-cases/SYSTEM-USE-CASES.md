@@ -249,6 +249,12 @@ The curves come from the **live telemetry** the BFF stored — lossy by design,
 5 s resolution — not from the VTN's reports. The chart says which resolution
 it drew (raw samples, or 1-minute means once the raw rows have aged out).
 
+The page opens on 24 h, so on a freshly started VTN the store holds less than one
+bucket of it. The chart then says **"N VENs are reporting, but the store is still
+collecting"** rather than claiming there is no telemetry; "No telemetry stored"
+means no VEN is reporting at all. Pinned by the scenario "The fleet page does not
+deny telemetry while VENs are reporting" in `tests/features/fleet_telemetry.feature`.
+
 **Asking what the fleet did about one event:**
 `GET /api/fleet/reactions?eventID=…` lists every VEN that said it saw that
 event, when it saw it, when it next replanned, and its mean site power over

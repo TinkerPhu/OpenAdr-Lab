@@ -57,9 +57,13 @@ export function FleetPowerChart({
   windowMinutes,
   tickMinutes,
   nowMs,
+  reportingVens,
 }: {
   history: FleetHistory;
   windowMinutes: number;
+  /** VENs reporting right now (the live feed's `contributingVens`). It is what separates a store
+   * that is still filling from one nothing is writing to: both resample to zero rows. */
+  reportingVens: number;
   /** Tick spacing, chosen per window by the page so both charts agree. */
   tickMinutes: number;
   nowMs: number;
@@ -128,6 +132,16 @@ export function FleetPowerChart({
   }, [history]);
 
   if (rows.length === 0) {
+    // Two different causes of the same empty array, and only the second is "no telemetry": the
+    // page opens on 24 h at 900 s steps, so a freshly started store holds less than one bucket.
+    if (reportingVens > 0) {
+      return (
+        <EmptyState
+          message={`${reportingVens} ${reportingVens === 1 ? "VEN is" : "VENs are"} reporting, but the store is still collecting - this window has no complete bucket yet.`}
+          testId="fleet-chart-collecting"
+        />
+      );
+    }
     return (
       <EmptyState
         message={`No telemetry stored for the last ${windowMinutes} minutes.`}
