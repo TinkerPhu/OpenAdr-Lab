@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
 use crate::assets::HistoryPoint;
-use crate::entities::asset::{AssetType, ComfortRate, CompletionPolicy};
+use crate::entities::asset::{AssetHistoryView, AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
@@ -208,6 +208,13 @@ pub trait Asset: Send + Sync {
     /// diagnostics UI (e.g. `{"soc": 0.6, "capacity_kwh": 10.0}`).
     fn state_values(&self, _state: &AssetState) -> HashMap<String, f64> {
         unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// What this asset tells the history recorder about itself at this state, typed — the
+    /// recorder must not read `state_values()` keys or decode them. Default: nothing to
+    /// report (base load, grid, shiftable load).
+    fn history_view(&self, _state: &AssetState) -> AssetHistoryView {
+        AssetHistoryView::default()
     }
 
     /// Overwrite mutable state fields from user-supplied key/value pairs (the

@@ -129,6 +129,7 @@ mod dispatch_override_tests {
             default_setpoint_kw: power_kw,
             setpoint_kw: power_kw,
             values: std::collections::HashMap::new(),
+            history: Default::default(),
         }
     }
 

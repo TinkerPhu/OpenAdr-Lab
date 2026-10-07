@@ -32,5 +32,6 @@ pub fn snapshot_from_asset(
         default_setpoint_kw: 0.0,
         setpoint_kw,
         values: asset.state_values(&state).into_iter().collect(),
+        history: asset.history_view(&state),
     }
 }

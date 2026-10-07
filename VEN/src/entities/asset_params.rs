@@ -294,6 +294,15 @@ pub enum PvCurtailmentSource {
 }
 
 impl PvCurtailmentSource {
+    /// Whether `self` is the more authoritative source of the two when a recorder must
+    /// name ONE source for a window of samples. Declaration order is the rank
+    /// (`CommsLoss` highest, `None` lowest) — the same order the type documents for exact
+    /// ties. This answers "which source to report", not "which limit applies"; the tightest
+    /// limit still decides the latter (`controller::dispatcher::resolve_pv_generation_limit_kw`).
+    pub fn outranks(self, other: Self) -> bool {
+        self.as_f64() > other.as_f64()
+    }
+
     /// Numeric encoding for the flattened `state_values()` map (which is `HashMap<String, f64>`):
     /// `0.0` = none, `1.0` = plan, `2.0` = capacity, `3.0` = arbiter, `4.0` = manual, `5.0` = comms-loss.
     pub fn as_f64(self) -> f64 {
@@ -537,5 +546,21 @@ mod tests {
     fn ev_soc_clamped_clamps_both_ends() {
         assert_eq!(ev_soc_clamped(-0.1), 0.0);
         assert_eq!(ev_soc_clamped(1.5), 1.0);
+    }
+
+    #[test]
+    fn curtailment_sources_rank_in_declaration_order() {
+        use PvCurtailmentSource::*;
+        let ranked = [None, Plan, Capacity, Arbiter, Manual, CommsLoss];
+        for (i, lower) in ranked.iter().enumerate() {
+            for higher in &ranked[i + 1..] {
+                assert!(higher.outranks(*lower), "{higher:?} outranks {lower:?}");
+                assert!(
+                    !lower.outranks(*higher),
+                    "{lower:?} does not outrank {higher:?}"
+                );
+            }
+            assert!(!lower.outranks(*lower), "a source does not outrank itself");
+        }
     }
 }

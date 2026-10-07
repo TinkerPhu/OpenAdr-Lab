@@ -7,7 +7,9 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     KeyFeature, TickOverridable, TickOverrides, Trajectory,
 };
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
+use crate::entities::asset::{
+    AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
+};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use lab_core::time_series::TimeSeries;
@@ -364,6 +366,15 @@ impl Asset for PvInverter {
         Self::state_values(self, s)
     }
 
+    fn history_view(&self, state: &AssetState) -> AssetHistoryView {
+        let s: &PvState = own(state);
+        AssetHistoryView {
+            generation_limit_kw: s.generation_limit_kw,
+            curtailment_source: Some(s.curtailment_source),
+            ..Default::default()
+        }
+    }
+
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut PvState = own_mut(state);
         Self::reset(self, s, values)
@@ -507,6 +518,32 @@ mod tests {
         let (pv, state) = make_pv(5.0);
         let features = Asset::key_features(&pv, &AssetState::Pv(state));
         assert_eq!(features, vec![KeyFeature::new("peak power", "5.00 kW")]);
+    }
+
+    #[test]
+    fn history_view_agrees_with_state_values() {
+        let (pv, mut state) = make_pv(5.0);
+        state.generation_limit_kw = Some(-2.5);
+        state.curtailment_source = PvCurtailmentSource::Manual;
+        let state = AssetState::Pv(state);
+        let view = Asset::history_view(&pv, &state);
+        let values = Asset::state_values(&pv, &state);
+        assert_eq!(
+            view.generation_limit_kw,
+            values.get("generation_limit_kw").copied()
+        );
+        assert_eq!(
+            view.curtailment_source.map(PvCurtailmentSource::as_f64),
+            values.get("curtailment_source").copied()
+        );
+    }
+
+    #[test]
+    fn history_view_reports_no_limit_when_unlimited() {
+        let (pv, state) = make_pv(5.0);
+        let view = Asset::history_view(&pv, &AssetState::Pv(state));
+        assert_eq!(view.generation_limit_kw, None);
+        assert_eq!(view.curtailment_source, Some(PvCurtailmentSource::None));
     }
 
     fn make_pv(rated_kw: f64) -> (PvInverter, PvState) {

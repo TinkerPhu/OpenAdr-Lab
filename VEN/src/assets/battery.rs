@@ -7,7 +7,9 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature,
     MilpParticipant, RequestResolvable,
 };
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
+use crate::entities::asset::{
+    AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
+};
 use crate::entities::asset_params::BatteryParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use lab_core::time_series::{Interpolation, TimeSeries};
@@ -279,6 +281,14 @@ impl Asset for Battery {
         Self::state_values(self, s)
     }
 
+    fn history_view(&self, state: &AssetState) -> AssetHistoryView {
+        let s: &BatteryState = own(state);
+        AssetHistoryView {
+            soc_frac: Some(s.soc),
+            ..Default::default()
+        }
+    }
+
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut BatteryState = own_mut(state);
         Self::reset(self, s, values)
@@ -389,6 +399,19 @@ mod tests {
         let (bat, state) = make_battery_cfg(0.5);
         let features = Asset::key_features(&bat, &AssetState::Battery(state));
         assert_eq!(features, vec![KeyFeature::new("capacity", "10.0 kWh")]);
+    }
+
+    #[test]
+    fn history_view_agrees_with_state_values() {
+        let (bat, state) = make_battery_cfg(0.37);
+        let state = AssetState::Battery(state);
+        let view = Asset::history_view(&bat, &state);
+        assert_eq!(
+            view.soc_frac,
+            Asset::state_values(&bat, &state).get("soc").copied()
+        );
+        assert_eq!(view.plugged, None);
+        assert_eq!(view.temperature_c, None);
     }
 
     fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {

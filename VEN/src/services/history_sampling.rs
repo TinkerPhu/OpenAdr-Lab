@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 use crate::controller::simulator_port::SimSnapshot;
+use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity::{tightest_capacity_limit, CapacitySnapshot};
 use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
 use crate::entities::history::{GridSample, TickSample};
@@ -31,12 +32,12 @@ struct AssetAcc {
     plugged_sum: f64,
     plugged_n: u32,
     n: u32,
-    /// PV curtailment: not a mean (categorical + intermittent). Tracks the highest-priority
-    /// source seen this window (`PvCurtailmentSource::as_f64()`: 0 none, 1 plan, 2 capacity,
-    /// 3 arbiter, 4 manual, 5 comms-loss — persisted as that same code) and the tightest limit value observed for that priority,
+    /// PV curtailment: not a mean (categorical + intermittent). Tracks the highest-ranked
+    /// source seen this window (`PvCurtailmentSource::outranks`; persisted as
+    /// `PvCurtailmentSource::as_f64()`) and the tightest limit value observed for that source,
     /// so a brief capacity-sourced event is never masked by a plan-sourced or unlimited
     /// majority within the same window. See `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History).
-    curtailment_priority: u8,
+    curtailment_source: PvCurtailmentSource,
     curtailment_limit_kw: Option<f64>,
 }
 
@@ -109,30 +110,27 @@ impl HistorySampler {
             let acc = self.assets.entry(asset_id.clone()).or_default();
             acc.power_kw_sum += snap.power_kw;
             acc.n += 1;
-            if let Some(soc) = snap.val("soc") {
-                acc.soc_pct_sum += soc * 100.0;
+            let view = &snap.history;
+            if let Some(soc_frac) = view.soc_frac {
+                acc.soc_pct_sum += soc_frac * 100.0;
                 acc.soc_pct_n += 1;
             }
-            if let Some(temp) = snap.val("temp_c") {
-                acc.temperature_c_sum += temp;
+            if let Some(temperature_c) = view.temperature_c {
+                acc.temperature_c_sum += temperature_c;
                 acc.temperature_c_n += 1;
             }
-            if let Some(plugged) = snap.val("plugged") {
-                acc.plugged_sum += plugged;
+            if let Some(plugged) = view.plugged {
+                acc.plugged_sum += if plugged { 1.0 } else { 0.0 };
                 acc.plugged_n += 1;
             }
-            if let Some(limit_kw) = snap.val("generation_limit_kw") {
-                let priority = snap.val("curtailment_source").unwrap_or(0.0) as u8;
-                match priority.cmp(&acc.curtailment_priority) {
-                    std::cmp::Ordering::Greater => {
-                        acc.curtailment_priority = priority;
-                        acc.curtailment_limit_kw = Some(limit_kw);
-                    }
-                    std::cmp::Ordering::Equal => {
-                        acc.curtailment_limit_kw =
-                            Some(acc.curtailment_limit_kw.unwrap_or(limit_kw).max(limit_kw));
-                    }
-                    std::cmp::Ordering::Less => {}
+            if let Some(limit_kw) = view.generation_limit_kw {
+                let source = view.curtailment_source.unwrap_or_default();
+                if source.outranks(acc.curtailment_source) {
+                    acc.curtailment_source = source;
+                    acc.curtailment_limit_kw = Some(limit_kw);
+                } else if source == acc.curtailment_source {
+                    acc.curtailment_limit_kw =
+                        Some(acc.curtailment_limit_kw.unwrap_or(limit_kw).max(limit_kw));
                 }
             }
         }
@@ -192,8 +190,8 @@ impl HistorySampler {
                 temperature_c: (acc.temperature_c_n > 0)
                     .then(|| acc.temperature_c_sum / acc.temperature_c_n as f64),
                 generation_limit_kw: acc.curtailment_limit_kw,
-                curtailment_source: (acc.curtailment_priority > 0)
-                    .then_some(f64::from(acc.curtailment_priority)),
+                curtailment_source: (acc.curtailment_source != PvCurtailmentSource::None)
+                    .then(|| acc.curtailment_source.as_f64()),
                 plugged: (acc.plugged_n > 0).then(|| acc.plugged_sum / acc.plugged_n as f64),
             })
             .collect();
@@ -228,7 +226,7 @@ impl HistorySampler {
 mod tests {
     use super::*;
     use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
-    use crate::entities::asset::SetpointResponse;
+    use crate::entities::asset::{AssetHistoryView, SetpointResponse};
     use chrono::TimeZone;
 
     fn ts(secs: i64) -> DateTime<Utc> {
@@ -236,10 +234,10 @@ mod tests {
     }
 
     fn snap(now: DateTime<Utc>, power_kw: f64, soc: Option<f64>) -> SimSnapshot {
-        let mut values = HashMap::new();
-        if let Some(s) = soc {
-            values.insert("soc".to_string(), s);
-        }
+        let history = AssetHistoryView {
+            soc_frac: soc,
+            ..Default::default()
+        };
         let mut assets = HashMap::new();
         assets.insert(
             "ev".to_string(),
@@ -254,7 +252,8 @@ mod tests {
                 response: SetpointResponse::continuous(),
                 default_setpoint_kw: power_kw,
                 setpoint_kw: power_kw,
-                values,
+                values: HashMap::new(),
+                history,
             },
         );
         SimSnapshot {
@@ -495,13 +494,20 @@ mod tests {
         power_kw: f64,
         limit_and_source: Option<(f64, f64)>,
     ) -> SimSnapshot {
-        let mut values = HashMap::new();
-        if let Some((limit_kw, source)) = limit_and_source {
-            values.insert("generation_limit_kw".to_string(), limit_kw);
-            values.insert("curtailment_source".to_string(), source);
-        } else {
-            values.insert("curtailment_source".to_string(), 0.0);
-        }
+        let source_of = |code: f64| {
+            use PvCurtailmentSource::*;
+            [None, Plan, Capacity, Arbiter, Manual, CommsLoss]
+                .into_iter()
+                .find(|s| s.as_f64() == code)
+                .expect("a PvCurtailmentSource code")
+        };
+        let history = AssetHistoryView {
+            generation_limit_kw: limit_and_source.map(|(limit_kw, _)| limit_kw),
+            curtailment_source: Some(
+                limit_and_source.map_or(PvCurtailmentSource::None, |(_, c)| source_of(c)),
+            ),
+            ..Default::default()
+        };
         let mut assets = HashMap::new();
         assets.insert(
             "pv".to_string(),
@@ -516,7 +522,8 @@ mod tests {
                 response: SetpointResponse::continuous(),
                 default_setpoint_kw: power_kw,
                 setpoint_kw: power_kw,
-                values,
+                values: HashMap::new(),
+                history,
             },
         );
         SimSnapshot {
@@ -627,11 +634,7 @@ mod tests {
         for (i, plugged) in [1.0, 1.0, 0.0, 0.0].into_iter().enumerate() {
             let now = ts(i as i64 * 10);
             let mut sim = snap(now, 1.0, Some(0.5));
-            sim.assets
-                .get_mut("ev")
-                .unwrap()
-                .values
-                .insert("plugged".to_string(), plugged);
+            sim.assets.get_mut("ev").unwrap().history.plugged = Some(plugged > 0.5);
             sampler.record(now, &sim, &[], &[], None);
         }
         let (ticks, _) = sampler.flush().expect("a partial window still flushes");
@@ -640,6 +643,43 @@ mod tests {
             Some(0.5),
             "plugged for half the window's samples"
         );
+    }
+
+    #[test]
+    fn flush_temperature_is_the_window_mean() {
+        let mut sampler = HistorySampler::new();
+        for (i, temperature_c) in [20.0, 22.0].into_iter().enumerate() {
+            let now = ts(i as i64 * 10);
+            let mut sim = snap(now, 1.0, None);
+            sim.assets.get_mut("ev").unwrap().history.temperature_c = Some(temperature_c);
+            sampler.record(now, &sim, &[], &[], None);
+        }
+        let (ticks, _) = sampler.flush().unwrap();
+        assert_eq!(ticks[0].temperature_c, Some(21.0));
+    }
+
+    #[test]
+    fn flush_keeps_the_higher_ranked_source_when_a_lower_one_arrives_later() {
+        let mut sampler = HistorySampler::new();
+        // CommsLoss (5.0) first, then Plan (1.0) with a tighter limit: the source stays
+        // CommsLoss and the lower-ranked sample's limit is ignored entirely.
+        sampler.record(
+            ts(0),
+            &pv_snap(ts(0), -1.0, Some((-1.0, 5.0))),
+            &[],
+            &[],
+            None,
+        );
+        sampler.record(
+            ts(10),
+            &pv_snap(ts(10), -1.0, Some((-9.0, 1.0))),
+            &[],
+            &[],
+            None,
+        );
+        let (ticks, _) = sampler.flush().unwrap();
+        assert_eq!(ticks[0].curtailment_source, Some(5.0));
+        assert_eq!(ticks[0].generation_limit_kw, Some(-1.0));
     }
 
     #[test]
