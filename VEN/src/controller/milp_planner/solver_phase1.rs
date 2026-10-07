@@ -1,7 +1,7 @@
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Constraint, Expression, Solution, SolverModel, Variable,
-    WithMipGap, WithTimeLimit,
+    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
+    WithTimeLimit,
 };
 
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
@@ -11,6 +11,7 @@ use crate::controller::milp_interactions::{
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
+use super::model_skeleton::with_constraint;
 use super::penalty::{self, PenaltyRuleVars};
 use super::types::*;
 
@@ -269,12 +270,6 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
         model = with_constraint(model, c);
     }
     (model, power_balance_refs)
-}
-
-/// `model.with(c)`, recording `c` first when a test is capturing the model (`probe!`).
-pub(super) fn with_constraint<S: SolverModel>(model: S, c: Constraint) -> S {
-    probe!(constraint, &c);
-    model.with(c)
 }
 
 /// Extract a `SolveOutput` from a solved `good_lp::Solution`.

@@ -52,6 +52,7 @@ mod inputs;
 // Defines `probe!`; must precede the solver modules that use it.
 #[macro_use]
 mod model_probe;
+mod model_skeleton;
 pub(crate) mod penalty;
 mod planned_state;
 mod results;
