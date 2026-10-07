@@ -90,6 +90,11 @@ pub struct AssetSnapshot {
     /// Flattened into the top-level JSON object for backward-compatibility.
     #[serde(flatten)]
     pub values: HashMap<String, f64>,
+    /// What the asset itself reports to the history recorder (`Asset::history_view`) —
+    /// typed, so the recorder never reads `values` keys. Not serialized: `values` carries
+    /// the same facts for the `/sim` API.
+    #[serde(skip)]
+    pub history: crate::entities::asset::AssetHistoryView,
 }
 
 impl AssetSnapshot {
@@ -188,6 +193,7 @@ mod tests {
             default_setpoint_kw: 0.0,
             setpoint_kw: 0.0,
             values,
+            history: Default::default(),
         };
         assert_eq!(snap.val("soc"), Some(0.5));
         assert_eq!(snap.val("nonexistent"), None);

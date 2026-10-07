@@ -102,6 +102,7 @@ impl SimState {
                     default_setpoint_kw: cfg.default_setpoint(),
                     setpoint_kw: entry.setpoint_kw,
                     values,
+                    history: cfg.history_view(&entry.state),
                 },
             );
         }

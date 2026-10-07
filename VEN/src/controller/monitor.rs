@@ -112,6 +112,7 @@ mod tests {
                     default_setpoint_kw: power_kw,
                     setpoint_kw: power_kw,
                     values: HashMap::new(),
+                    history: Default::default(),
                 },
             )]),
         }

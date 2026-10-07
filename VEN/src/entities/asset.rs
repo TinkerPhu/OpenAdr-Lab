@@ -235,6 +235,23 @@ fn highest_power_step_at_or_below_kw(power_steps_kw: &[f64], kw: f64) -> f64 {
         .unwrap_or(lowest_kw)
 }
 
+/// What an asset reports to the history recorder about itself at one tick — the asset's
+/// own answer, typed, so the recorder never reads `state_values()` keys or decodes
+/// numeric codes. `None` = this asset has no such quantity. Units are in the names.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AssetHistoryView {
+    /// State of charge as a fraction 0..1 (battery, EV).
+    pub soc_frac: Option<f64>,
+    /// Temperature in °C (heater).
+    pub temperature_c: Option<f64>,
+    /// Whether the vehicle is plugged in (EV).
+    pub plugged: Option<bool>,
+    /// Active generation limit in kW (PV), negative = export magnitude; `None` = unlimited.
+    pub generation_limit_kw: Option<f64>,
+    /// Which source produced `generation_limit_kw` (PV).
+    pub curtailment_source: Option<crate::entities::asset_params::PvCurtailmentSource>,
+}
+
 /// How to handle completion when the last DeadlineTier expires (§1.10).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

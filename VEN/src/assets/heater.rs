@@ -7,7 +7,9 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
     Thermostat, TickOverridable,
 };
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
+use crate::entities::asset::{
+    AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
+};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 use lab_core::time_series::{Interpolation, TimeSeries};
@@ -417,6 +419,14 @@ impl Asset for Heater {
         Self::state_values(self, s)
     }
 
+    fn history_view(&self, state: &AssetState) -> AssetHistoryView {
+        let s: &HeaterState = own(state);
+        AssetHistoryView {
+            temperature_c: Some(s.temperature_c),
+            ..Default::default()
+        }
+    }
+
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut HeaterState = own_mut(state);
         Self::reset(self, s, values)
@@ -513,6 +523,18 @@ mod tests {
             draw_kw: 0.5,
             ambient_temp_c: 20.0,
         }
+    }
+
+    #[test]
+    fn history_view_agrees_with_state_values() {
+        let heater = default_heater();
+        let state = AssetState::Heater(state_at(21.5, 0.0));
+        let view = Asset::history_view(&heater, &state);
+        assert_eq!(
+            view.temperature_c,
+            Asset::state_values(&heater, &state).get("temp_c").copied()
+        );
+        assert_eq!(view.soc_frac, None);
     }
 
     fn state_at(temperature_c: f64, actual_power_kw: f64) -> HeaterState {

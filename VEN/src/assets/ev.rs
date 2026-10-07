@@ -8,7 +8,9 @@ use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
     KeyFeature, MilpParticipant, RequestResolvable, TickOverridable, TickOverrides, Trajectory,
 };
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
+use crate::entities::asset::{
+    AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
+};
 use crate::entities::asset_params::{EvParams, EvUsageSimParams};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use lab_core::time_series::{Interpolation, TimeSeries};
@@ -362,6 +364,15 @@ impl Asset for EvCharger {
         Self::state_values(self, s)
     }
 
+    fn history_view(&self, state: &AssetState) -> AssetHistoryView {
+        let s: &EvState = own(state);
+        AssetHistoryView {
+            soc_frac: Some(s.soc),
+            plugged: Some(s.plugged),
+            ..Default::default()
+        }
+    }
+
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut EvState = own_mut(state);
         Self::reset(self, s, values)
@@ -514,6 +525,22 @@ mod tests {
         let (ev, state) = make_ev(true, 0.5, 0.0);
         let features = Asset::key_features(&ev, &AssetState::Ev(state));
         assert_eq!(features, vec![KeyFeature::new("capacity", "40.0 kWh")]);
+    }
+
+    #[test]
+    fn history_view_agrees_with_state_values() {
+        for plugged in [true, false] {
+            let (ev, state) = make_ev(plugged, 0.42, 0.0);
+            let state = AssetState::Ev(state);
+            let view = Asset::history_view(&ev, &state);
+            let values = Asset::state_values(&ev, &state);
+            assert_eq!(view.soc_frac, values.get("soc").copied());
+            assert_eq!(view.plugged, Some(plugged));
+            assert_eq!(
+                values.get("plugged").copied(),
+                Some(if plugged { 1.0 } else { 0.0 })
+            );
+        }
     }
 
     fn make_ev(plugged: bool, soc: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
