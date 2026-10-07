@@ -337,49 +337,28 @@ pub(crate) fn solve_milp_two_phase(
 }
 
 /// R-97 test seam: build phase 2's variable pool and warm start exactly as
-/// `solve_phase2` does, and hand back the battery's `u_bat` handles so a test can
-/// check what value the warm start assigns them. Exists because an infeasible warm
-/// start is invisible from the outside — it shows up only as `NoSolutionFound` on
+/// `solve_phase2` does (through the same `ModelSkeleton::declare`), and hand back the battery's
+/// `u_bat` handles so a test can check what value the warm start assigns them. Exists because an
+/// infeasible warm start is invisible from the outside — it shows up only as `NoSolutionFound` on
 /// instances hard enough that phase 2 cannot recover by solving from scratch.
 #[cfg(test)]
 pub(crate) fn warm_start_for_test(
     inputs: &MilpInputs,
+    p1w: &Phase1Weights,
+    p2w: &Phase2Weights,
     p1: &SolveOutput,
     asset_contexts: &[Box<dyn AssetMilpContext>],
 ) -> (Vec<(Variable, f64)>, Vec<Variable>) {
-    use crate::controller::milp_interactions::GridMilpVars;
-    use good_lp::{variable, variables};
-    let n = inputs.n;
-    let mut vars = variables!();
-    let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
-    let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let mut pool = MilpVarPool {
-        grid: GridMilpVars {
-            p_imp: p_imp.clone(),
-            p_exp: p_exp.clone(),
-            u_grid: u_grid.clone(),
-            s_imp_viol: s_imp_viol.clone(),
-            s_exp_viol: s_exp_viol.clone(),
-            p_pv_used,
-        },
-        bat: None,
-        ev: None,
-        heater: None,
-        shiftable: Vec::new(),
-    };
-    // Same non-zero startup/ramp costs phase 2 uses, so the same aux vars exist.
-    for ctx in asset_contexts {
-        ctx.declare_vars_into_pool(n, 0.01, 0.005, &mut vars, &mut pool);
-    }
-    let u_bat = pool
+    let (_vars, skeleton) =
+        ModelSkeleton::declare(inputs, p1w, asset_contexts, Declaration::Phase2(p2w));
+    let u_bat = skeleton
+        .pool
         .bat
         .as_ref()
         .map(|b| b.u_bat.clone())
         .unwrap_or_default();
-    let iv = build_phase2_warm_start(inputs, p1, &pool, n);
-    (iv, u_bat)
+    (
+        build_phase2_warm_start(inputs, p1, &skeleton.pool, inputs.n),
+        u_bat,
+    )
 }

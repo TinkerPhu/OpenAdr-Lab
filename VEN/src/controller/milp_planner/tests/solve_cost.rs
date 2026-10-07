@@ -2389,8 +2389,10 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
 
     // Rebuild phase 2's variable pool exactly as solve_phase2 does, then inspect the
     // warm start it would be given.
-    let (iv, u_bat) =
-        crate::controller::milp_planner::solver_phase2::warm_start_for_test(&inputs, &p1, &ctxs);
+    let p2w = build_phase2_weights(&inputs, &profile.planner);
+    let (iv, u_bat) = crate::controller::milp_planner::solver_phase2::warm_start_for_test(
+        &inputs, &p1w, &p2w, &p1, &ctxs,
+    );
     let lookup: std::collections::HashMap<_, _> = iv.into_iter().collect();
     for t in discharging {
         let v = lookup
