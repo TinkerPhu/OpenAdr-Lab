@@ -27,6 +27,9 @@ use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
 /// How a solve declares its decisions. The one place the three solves differ in what they build.
 pub(super) enum Declaration<'a> {
+    /// Phase 1: every decision is free (the grid direction a binary) and each asset is declared
+    /// without startup/ramp auxiliaries, i.e. with both costs `0.0`.
+    Phase1,
     /// The marginal-cost pass: every mode decision (grid direction, battery direction, EV on/off,
     /// heater stage, shiftable start) is fixed to the winning solution's value as a *continuous*
     /// variable, because HiGHS returns no duals for a model with any integer column.
@@ -37,6 +40,7 @@ impl Declaration<'_> {
     /// One slot's grid import/export exclusion variable.
     fn declare_u_grid(&self, t: usize, vars: &mut ProblemVariables) -> Variable {
         match self {
+            Declaration::Phase1 => vars.add(variable().binary()),
             Declaration::Pinned(winning) => {
                 // u_grid is a mode decision like the asset binaries: fixed continuous, not
                 // `.binary()`, for the reason given on `Declaration::Pinned`.
@@ -54,6 +58,7 @@ impl Declaration<'_> {
         pool: &mut MilpVarPool,
     ) {
         match self {
+            Declaration::Phase1 => ctx.declare_vars_into_pool(n, 0.0, 0.0, vars, pool),
             // R-98: through the same function the plan used, with the winning mode decisions
             // pinned, so the priced model is the planned one.
             Declaration::Pinned(winning) => {

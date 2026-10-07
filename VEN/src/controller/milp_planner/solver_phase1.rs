@@ -1,17 +1,11 @@
 use good_lp::solvers::highs::highs;
-use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
-    WithTimeLimit,
-};
+use good_lp::{constraint, Expression, Solution, SolverModel, Variable, WithMipGap, WithTimeLimit};
 
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
-use crate::controller::milp_interactions::{
-    build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
-    GridMilpVars, MilpVarPool,
-};
-use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
+use crate::controller::milp_interactions::{GlobalMilpInputs, MilpVarPool};
+use crate::controller::milp_planner::AssetMilpContext;
 
-use super::model_skeleton::with_constraint;
+use super::model_skeleton::{with_constraint, Declaration, ModelSkeleton};
 use super::penalty::{self, PenaltyRuleVars};
 use super::types::*;
 
@@ -24,138 +18,13 @@ pub(crate) fn solve_phase1(
     timeout_s: f64,
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
     probe!(begin, "solve_phase1");
-    let n = inputs.n;
-
-    let global = GlobalMilpInputs {
-        n,
-        dt_h: inputs.dt_h.clone(),
-        c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
-        c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
-        g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
-        p_pv_kw: inputs.p_pv_kw.clone(),
-        p_base_kw: inputs.p_base_kw.clone(),
-        p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
-        p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
-        p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
-        p_exp_max_cont_kw: inputs.p_exp_max_cont_kw.clone(),
-        pen_imp_eur_kwh: inputs.pen_imp_eur_kwh,
-        pen_exp_eur_kwh: inputs.pen_exp_eur_kwh,
-    };
-
-    let mut vars = variables!();
-
-    let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
-    let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let grid_vars = GridMilpVars {
-        p_imp: p_imp.clone(),
-        p_exp: p_exp.clone(),
-        u_grid: u_grid.clone(),
-        s_imp_viol: s_imp_viol.clone(),
-        s_exp_viol: s_exp_viol.clone(),
-        p_pv_used: p_pv_used.clone(),
-    };
-
-    let mut pool = MilpVarPool {
-        grid: grid_vars,
-        bat: None,
-        ev: None,
-        heater: None,
-        // Populated generically below by each ShiftableLoadMilpContext's own
-        // `declare_vars_into_pool` (shiftable-load-as-asset), same loop that
-        // already declares Battery/EV/Heater's vars.
-        shiftable: Vec::new(),
-    };
-
-    // WP6.3 (BL-09): one slack per window per active penalty rule. Empty
-    // `inputs.penalty_rules` (the default) declares nothing — no-op.
-    let penalty_vars =
-        penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
-
-    // Phase 1: startup/ramp = 0.0 for all assets.
-    for ctx in asset_contexts {
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-    }
-
-    let interactions =
-        build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
-    let mut active_interactions: Vec<&dyn crate::controller::milp_interactions::AssetInteraction> =
-        Vec::new();
-    let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
-    for interaction in &interactions {
-        if interaction.applicable(&pool) {
-            let iv = interaction.declare_vars(&pool, &global, &mut vars);
-            active_interactions.push(interaction.as_ref());
-            iv_list.push(iv);
-        }
-    }
-
-    // Phase 1 objective: economic + m_low; no startup/ramp/switching/tier friction.
-    let mut objective = Expression::from(0.0);
-    for t in 0..n {
-        objective += (p1w.w_energy * inputs.dt_h[t] * inputs.c_imp_eur_kwh[t]) * p_imp[t];
-        objective += -(p1w.w_energy * inputs.dt_h[t] * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        objective += (p1w.w_ghg * inputs.dt_h[t] * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        objective += (p1w.w_grid * inputs.dt_h[t]) * p_imp[t];
-        objective += (p1w.w_grid * inputs.dt_h[t]) * p_exp[t];
-        objective += (p1w.w_import * inputs.dt_h[t]) * p_imp[t];
-        objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
-        objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
-    }
-    // WP6.3 (BL-09): peak-demand penalty slack cost, once per window (not per slot).
-    objective += penalty::penalty_objective(&penalty_vars);
-    // Asset objective contributions — Phase 1: c_startup=0.0, c_ramp=0.0.
-    // Battery: wear only. EV: service reward only. Heater: m_low penalty only.
-    for ctx in asset_contexts {
-        match ctx.asset_kind() {
-            AssetKind::Battery => {
-                objective +=
-                    ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
-            }
-            AssetKind::Ev => {
-                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-            AssetKind::Heater => {
-                // c_startup=0.0 signals Phase 1 → m_low penalty, no tier/switching.
-                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-            AssetKind::ShiftableLoad => {
-                // No economic term of its own — see ShiftableLoadMilpContext::objective's doc comment.
-                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-        }
-    }
-    for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        objective += interaction.objective(iv, &inputs.dt_h);
-    }
-    // Deterministic earliest-start tie-break for shiftable loads (see
-    // SHIFT_TIEBREAK_EUR_PER_SLOT for the rationale).
-    objective += shiftable_tiebreak_expr(&pool.shiftable);
-    // Full-PV-utilization tie-break (see PV_USE_TIEBREAK_EUR_PER_KWH for the rationale).
-    objective += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
+    let (vars, skeleton) = ModelSkeleton::declare(inputs, p1w, asset_contexts, Declaration::Phase1);
+    let objective = skeleton.cost_expr(inputs, p1w, asset_contexts);
 
     probe!(vars, &vars);
     probe!(expr, "objective", &objective);
-    let mut model = vars.minimise(&objective).using(highs);
-    (model, _) = add_model_constraints(
-        model,
-        inputs,
-        &pool,
-        &p_imp,
-        &p_exp,
-        &u_grid,
-        &s_imp_viol,
-        &s_exp_viol,
-        &active_interactions,
-        &iv_list,
-        &global,
-        asset_contexts,
-        n,
-        &penalty_vars,
-    );
+    let model = vars.minimise(&objective).using(highs);
+    let (mut model, _) = skeleton.add_constraints(model, inputs, asset_contexts);
     model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(inputs.mip_gap_target as f32)?;
     let solution = model.solve()?;
@@ -163,10 +32,10 @@ pub(crate) fn solve_phase1(
     Ok(read_solve_output(
         &solution,
         &objective,
-        &pool,
+        &skeleton.pool,
         inputs,
-        n,
-        &penalty_vars,
+        inputs.n,
+        &skeleton.penalty_vars,
     ))
 }
 
