@@ -41,22 +41,26 @@ fn spawn_vtn_polls(w: &World) {
         tasks::spawn_program_poll(s.clone(), v.clone(), secs, jitter_s, n.clone())
     });
 
-    let (s, v, n, secs, tx, h) = (
+    let (s, v, n, secs, tx, h, seed) = (
         state.clone(),
         vtn.clone(),
         notifier.clone(),
         w.poll.events_secs,
         w.trigger_tx.clone(),
         w.ports.history.clone(),
+        w.ven_name.clone(),
     );
     tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, state.clone(), move || {
         tasks::spawn_event_poll(
             s.clone(),
             v.clone(),
-            secs,
+            tasks::EventPollTiming {
+                secs,
+                startup_delay_s: jitter_s,
+                ven_seed: seed.clone(),
+            },
             tx.clone(),
             n.clone(),
-            jitter_s,
             h.clone(),
         )
     });

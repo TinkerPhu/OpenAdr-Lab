@@ -105,6 +105,25 @@ event and the reason. It is deliberately not a wire rejection, because the VTN s
 malformed and `/health` must not read as degraded for a stated policy. The lab still *emits* the
 payload in seeded events (above) so a VEN's refusal can be observed.
 
+### `randomizeStart` is honoured, per VEN
+
+`intervalPeriod.randomizeStart` is "the absolute range of client applied offset to start": a VTN
+that wants a fleet not to respond on one instant sets it. Each VEN delays every period that
+declares it by its own offset within that window.
+
+- **Stable and reproducible, not random.** The offset is a pure function of the VEN's name and
+  the event id (`lab_core::event_timing::randomized_start_offset`), so every VEN differs, one VEN
+  keeps the same offset across polls and restarts, and tests need no clock or generator.
+- **The window moves as a whole.** Start and end shift together, so the response also *ends*
+  staggered. All periods of one event take the same offset, which keeps a sequence contiguous.
+- **Applies to what the VEN acts on:** alert, SIMPLE and dispatch windows, rates and capacity
+  limits are parsed from the shifted copy (`events_this_ven_acts_on`).
+- **Does not apply to reporting.** Obligations are read from the declared events, so reports keep
+  the cadence the VTN asked for (a request is a guarantee). The declared event, as stored and
+  shown by the UI and the BFF, is never changed.
+- **Announced.** One Info notification per event states the delay, so a window that opens after
+  the VTN's start does not read as a fault.
+
 ### Sign convention
 
 Import is positive, export is positive in its own payload type. There is no signed quantity that

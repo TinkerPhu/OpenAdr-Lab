@@ -291,6 +291,25 @@ the VTN sent must not look like a quiet grid.
 
 ---
 
+## 12. Staggering a Fleet's Response
+**Description:**
+A VTN asks many VENs to respond to one event but does not want them all to act on the same instant, because a synchronised step is itself a grid disturbance.
+
+**Characteristics:**
+- One event, many VENs
+- `intervalPeriod.randomizeStart` gives the window within which each VEN may delay its start
+
+**Typical Signals:**
+- Any event with a window: SIMPLE, capacity limit, dispatch, price
+
+**What to test:**
+- Two VENs given the same event begin at different times, each inside the declared window
+- A VEN keeps its offset across polls, and says how long it delays (an Info notification)
+- Reports keep their requested cadence and are not delayed
+- `tests/features/ven_simple_levels.feature` — "Two VENs begin a randomized event at their own offsets"
+
+---
+
 ## Notes
 If the system can reliably handle all use cases above, it already matches the majority of real-world OpenADR deployments. More complex scenarios (stacked markets, transactive energy, multi-program arbitration) typically build on these fundamentals.
 

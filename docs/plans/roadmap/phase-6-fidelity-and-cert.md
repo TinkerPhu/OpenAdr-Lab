@@ -6,7 +6,7 @@
 > packages** — they can be interleaved into earlier phases whenever priorities shift
 > or a WP elsewhere touches the same files.
 > **Items:** BL-11, BL-13, BL-27, BL-18, Cluster H (TLS, webhooks, MQTT,
-> `/auth/server`, gzip, `randomizeStart`, "now" sentinel, runtime reconfig, mDNS),
+> `/auth/server`, gzip, "now" sentinel, runtime reconfig, mDNS),
 > dependency-vulnerability batch, Cluster I hygiene (BL-22/23/29,
 > GB-01/04/05/08).
 > **Prerequisites:** none hard; WP6.3 benefits from Phase 3's constraint work.
@@ -69,7 +69,7 @@ both touch the reqwest stack.
 3. `/auth/server` token-endpoint discovery with `/auth/token` fallback + caching
    (cert §3).
 4. Small cert line items alongside: gzip `Accept-Encoding` (reqwest feature flag),
-   `randomizeStart` support, "0001-01-01 = now" start-time sentinel (each S, each
+   "0001-01-01 = now" start-time sentinel (each S, each
    with one unit test; they share `openadr_interface`/`vtn.rs` files with this WP).
 
 ### WP6.6 — Webhooks: subscriptions + receiver (L–XL)

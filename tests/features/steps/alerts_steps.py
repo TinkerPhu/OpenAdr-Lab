@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from behave import given, then, when
-from features.helpers.api_client import ven_get, vtn_post, vtn_delete
+from features.helpers.api_client import ven_get, ven2_get, vtn_post, vtn_delete
 from features.helpers.wait import poll_until
 
 
@@ -222,3 +222,61 @@ def step_assert_window_slots_capped(context, minutes, cap):
         )
         checked += 1
     assert checked > 0, "no plan slots overlapped the alert window at all"
+
+
+@given("I create a SIMPLE event of level {level:d} for the saved program lasting {minutes:d} minutes with a randomizeStart of {window:d} minutes")
+def step_create_randomized_simple_event(context, level, minutes, window):
+    """R-86: the declared start is now; each VEN may begin up to `window` minutes later."""
+    context.randomized_declared_start = datetime.now(timezone.utc).replace(microsecond=0)
+    context.randomize_window_s = window * 60
+    r = vtn_post(
+        "/events",
+        context.vtn_token,
+        json={
+            "programID": context.saved_program_id,
+            "eventName": f"simple-randomized-{level}",
+            "intervalPeriod": {
+                "start": context.randomized_declared_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": f"PT{minutes}M",
+                "randomizeStart": f"PT{window}M",
+            },
+            "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [level]}]}],
+        },
+    )
+    r.raise_for_status()
+    context.simple_event_id = r.json().get("id")
+
+
+def _simple_window_start(get, event_id):
+    r = get("/signals")
+    if not r.ok:
+        return None
+    for w in r.json().get("simple", []):
+        if w.get("event_id") == event_id:
+            return datetime.fromisoformat(w["start"].replace("Z", "+00:00"))
+    return None
+
+
+@when("both VENs report a SIMPLE window for the saved event")
+def step_both_vens_report_simple_window(context):
+    def fetch():
+        return (_simple_window_start(ven_get, context.simple_event_id),
+                _simple_window_start(ven2_get, context.simple_event_id))
+
+    context.ven_starts = poll_until(
+        fetch, lambda pair: pair[0] is not None and pair[1] is not None,
+        timeout=90, interval=3, description="both VENs to report the SIMPLE window",
+    )
+
+
+@then("the two VENs begin the saved event at different times within the randomizeStart window")
+def step_vens_begin_at_different_times(context):
+    declared = context.randomized_declared_start
+    window_s = context.randomize_window_s
+    first, second = context.ven_starts
+    assert first != second, f"both VENs begin at {first}: nothing was staggered"
+    for name, start in (("ven-1", first), ("ven-2", second)):
+        delay_s = (start - declared).total_seconds()
+        assert 0 <= delay_s < window_s, (
+            f"{name} begins {delay_s:.0f} s after the declared start, outside [0, {window_s}) s"
+        )

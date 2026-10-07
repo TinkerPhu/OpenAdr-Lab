@@ -19,6 +19,7 @@ use chrono::{DateTime, Utc};
 // one rather than a local re-description of one.
 use crate::time_window::TimeWindow;
 pub use openleadr_wire::event::{Event as OadrEvent, EventInterval as OadrInterval};
+use openleadr_wire::interval::IntervalPeriod;
 
 /// The start of an interval no start could be derived for.
 pub const OPEN_START: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
@@ -167,6 +168,69 @@ fn event_window_end(event: &OadrEvent, base: &[TimedInterval<'_>]) -> Option<Dat
         .checked_add_signed(duration.to_chrono_at_datetime(first.start))
 }
 
+/// How far this VEN delays an event's declared start, out of the `window` the VTN allowed
+/// (`intervalPeriod.randomizeStart`, "the absolute range of client applied offset to start").
+///
+/// The spec's purpose is a fleet that does not respond on one instant, so the offset must differ
+/// between VENs; it must also be *stable* for one VEN and event, or a re-poll would move an event
+/// that is already in force, and reproducible for the `determinism` rule, so it is a pure function
+/// of `(seed, event_id)` rather than a draw from a generator. The seed is the VEN's own name.
+///
+/// FNV-1a rather than `std`'s `DefaultHasher`, which is not stable across Rust releases: a VEN
+/// upgraded mid-event must not change its mind about when it acts.
+pub fn randomized_start_offset(
+    seed: &str,
+    event_id: &str,
+    window: chrono::Duration,
+) -> chrono::Duration {
+    let window_ms = window.num_milliseconds();
+    if window_ms <= 0 {
+        return chrono::Duration::zero();
+    }
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in seed.bytes().chain(std::iter::once(0)).chain(event_id.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    // FNV's last multiply leaves the high bits well mixed but the low ones weak, and names that
+    // differ in one character ("ven-1", "ven-2") are exactly the case that matters: finalise.
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    let fraction = (h >> 11) as f64 / (1u64 << 53) as f64; // [0, 1)
+    chrono::Duration::milliseconds((window_ms as f64 * fraction) as i64)
+}
+
+/// `event` as this VEN should act on it: every `intervalPeriod` that declares a `randomizeStart`
+/// starts later by this VEN's own [`randomized_start_offset`].
+///
+/// Only the start moves, but each interval's end is `start + duration`, so the whole window moves
+/// and the response unwinds staggered as well as begins staggered. The same offset applies to every
+/// period of one event, which keeps a sequence of intervals contiguous.
+///
+/// The declared event is left alone. It is what the VTN said, and what the UI and the BFF show;
+/// only the copy a VEN *parses to decide when to act* is shifted. Reports are not parsed from it:
+/// they keep the cadence the VTN asked for (a request is a guarantee).
+pub fn with_randomized_start(event: &OadrEvent, seed: &str) -> OadrEvent {
+    let mut out = event.clone();
+    let id = event.id.to_string();
+    let shift = |period: &mut IntervalPeriod| {
+        if let Some(window) = period.randomize_start.as_ref() {
+            let window = window.to_chrono_at_datetime(period.start);
+            period.start += randomized_start_offset(seed, &id, window);
+        }
+    };
+    if let Some(period) = out.content.interval_period.as_mut() {
+        shift(period);
+    }
+    for interval in out.content.intervals.iter_mut().flatten() {
+        if let Some(period) = interval.interval_period.as_mut() {
+            shift(period);
+        }
+    }
+    out
+}
+
 /// The interval list exactly as the event declares it, before any looping.
 fn base_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
     let event_period = event.content.interval_period.as_ref();
@@ -232,6 +296,99 @@ mod tests {
 
     fn limit_interval(id: i64, kw: f64) -> serde_json::Value {
         json!({"id": id, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [kw]}]})
+    }
+
+    // ── randomizeStart (R-86) ──────────────────────────────────────────────
+
+    fn randomized(id: &str, window: &str) -> OadrEvent {
+        event(json!({
+            "id": id, "programID": "p",
+            "intervalPeriod": {
+                "start": "2023-02-10T10:00:00Z", "duration": "PT1H", "randomizeStart": window
+            },
+            "intervals": [limit_interval(0, 4.0)]
+        }))
+    }
+
+    #[test]
+    fn randomized_start_offset_is_inside_the_window_and_stable() {
+        let window = chrono::Duration::minutes(10);
+        let first = randomized_start_offset("ven-1", "evt-a", window);
+        assert!(first >= chrono::Duration::zero() && first < window, "{first}");
+        assert_eq!(first, randomized_start_offset("ven-1", "evt-a", window));
+    }
+
+    /// The whole point of the field: a fleet told to stagger must not all act at once.
+    #[test]
+    fn randomized_start_offsets_differ_between_vens() {
+        let window = chrono::Duration::minutes(10);
+        let distinct: std::collections::HashSet<_> = (1..=20)
+            .map(|n| randomized_start_offset(&format!("ven-{n}"), "evt-a", window))
+            .collect();
+        assert!(distinct.len() >= 18, "20 VENs gave only {} offsets", distinct.len());
+    }
+
+    #[test]
+    fn randomized_start_offset_differs_between_events_for_one_ven() {
+        let window = chrono::Duration::minutes(10);
+        assert_ne!(
+            randomized_start_offset("ven-1", "evt-a", window),
+            randomized_start_offset("ven-1", "evt-b", window)
+        );
+    }
+
+    #[test]
+    fn no_window_means_no_offset() {
+        assert_eq!(
+            randomized_start_offset("ven-1", "evt-a", chrono::Duration::zero()),
+            chrono::Duration::zero()
+        );
+        assert_eq!(
+            randomized_start_offset("ven-1", "evt-a", chrono::Duration::minutes(-5)),
+            chrono::Duration::zero()
+        );
+    }
+
+    #[test]
+    fn with_randomized_start_moves_the_whole_window_and_keeps_its_width() {
+        let e = randomized("evt-a", "PT10M");
+        let moved = with_randomized_start(&e, "ven-1");
+        let offset = randomized_start_offset("ven-1", "evt-a", chrono::Duration::minutes(10));
+        assert_eq!(
+            spans(&moved),
+            vec![(at(10, 0) + offset, at(11, 0) + offset)],
+            "start and end move together: the response unwinds staggered too"
+        );
+        // The declared event is untouched: it is what the VTN said, and what the UI shows.
+        assert_eq!(spans(&e), vec![(at(10, 0), at(11, 0))]);
+    }
+
+    #[test]
+    fn an_event_without_randomize_start_is_returned_unchanged() {
+        let e = event(json!({
+            "id": "evt-plain", "programID": "p",
+            "intervalPeriod": {"start": "2023-02-10T10:00:00Z", "duration": "PT1H"},
+            "intervals": [limit_interval(0, 4.0)]
+        }));
+        assert_eq!(with_randomized_start(&e, "ven-1"), e);
+    }
+
+    #[test]
+    fn an_interval_with_its_own_randomized_period_shifts_by_the_same_offset() {
+        let e = event(json!({
+            "id": "evt-own", "programID": "p",
+            "intervalPeriod": {"start": "2023-02-10T10:00:00Z", "duration": "PT30M", "randomizeStart": "PT10M"},
+            "intervals": [
+                limit_interval(0, 4.0),
+                {"id": 1,
+                 "intervalPeriod": {"start": "2023-02-10T12:00:00Z", "duration": "PT30M", "randomizeStart": "PT10M"},
+                 "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [2.0]}]}
+            ]
+        }));
+        let offset = randomized_start_offset("ven-3", "evt-own", chrono::Duration::minutes(10));
+        let s = spans(&with_randomized_start(&e, "ven-3"));
+        assert_eq!(s[0].0, at(10, 0) + offset);
+        assert_eq!(s[1].0, at(12, 0) + offset);
     }
 
     #[test]

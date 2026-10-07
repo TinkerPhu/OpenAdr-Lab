@@ -14,19 +14,32 @@ use crate::controller::VtnPort;
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::state::AppState;
 use crate::tasks::backoff::Backoff;
-use detect::detect_event_changes;
+use detect::{detect_event_changes, events_this_ven_acts_on};
 
-/// `startup_delay_s` (GB-09, WP2.5): see `spawn_program_poll`.
+/// When the event poll runs, and who it runs as.
+pub(crate) struct EventPollTiming {
+    /// Poll interval.
+    pub secs: u64,
+    /// GB-09, WP2.5: see `spawn_program_poll`.
+    pub startup_delay_s: u64,
+    /// This VEN's own name: the seed of its `randomizeStart` offset (R-86).
+    pub ven_seed: String,
+}
+
 pub(crate) fn spawn_event_poll(
     state: AppState,
     vtn: Arc<dyn VtnPort>,
-    secs: u64,
+    timing: EventPollTiming,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>,
     notifier: crate::services::notify::Notifier,
-    startup_delay_s: u64,
     history: Option<Arc<dyn crate::controller::HistoryPort>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let EventPollTiming {
+            secs,
+            startup_delay_s,
+            ven_seed,
+        } = timing;
         if startup_delay_s > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(startup_delay_s)).await;
         }
@@ -37,6 +50,8 @@ pub(crate) fn spawn_event_poll(
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
         let mut signal_prevs = super::poll_signals::SignalPrevs::default();
+        let mut announced_staggered: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut vtn_ok = true; // WP4.3: notify only on reachable⇄unreachable edges
         loop {
             use crate::services::notify::notify_outage_edge as outage_edge;
@@ -56,8 +71,20 @@ pub(crate) fn spawn_event_poll(
                     let events = outcome.items;
                     info!(resource = "events", count = events.len(), "poll success");
 
-                    let changes = detect_event_changes(
+                    // R-86: windows, rates and limits are parsed from the copy whose starts
+                    // carry this VEN's randomizeStart offset; `events` stays as declared.
+                    let acted_on = events_this_ven_acts_on(&events, &ven_seed);
+                    super::poll_signals::announce_staggered_starts(
+                        &state,
+                        &notifier,
                         &events,
+                        &acted_on,
+                        now,
+                        &mut announced_staggered,
+                    )
+                    .await;
+                    let changes = detect_event_changes(
+                        &acted_on,
                         &prev_event_ids,
                         prev_tariff_count,
                         prev_import_limit,
