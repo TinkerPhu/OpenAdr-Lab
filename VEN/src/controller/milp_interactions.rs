@@ -23,7 +23,7 @@ use crate::controller::milp_planner::asset_port::{BatteryMilpVars, EvMilpVars, H
 
 /// Grid-level (non-asset) MILP parameters for one planning cycle.
 /// Per-step `Vec<f64>` fields have `len == n`.
-/// Built by `build_global_inputs()` in `milp_planner.rs` (Step 6 refactor).
+/// Built by `ModelSkeleton::declare` (`milp_planner/model_skeleton.rs`).
 #[derive(Debug, Clone)]
 pub struct GlobalMilpInputs {
     pub n: usize,
@@ -193,7 +193,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
         global: &GlobalMilpInputs,
         vars: &mut ProblemVariables,
     ) -> InteractionVars {
-        // SAFETY: every caller (solver_phase1/2, solver_duals) checks `applicable()`
+        // SAFETY: its one caller, `ModelSkeleton::declare`, checks `applicable()`
         // — which requires both `Some` — before invoking `declare_vars`.
         let bat = pool.bat.as_ref().unwrap();
         let ev = pool.ev.as_ref().unwrap();
