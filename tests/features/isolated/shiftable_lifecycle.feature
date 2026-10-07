@@ -47,3 +47,16 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
     When I DELETE shiftable load with saved id
     And I poll the VEN /sim until asset "wm-4" disappears
     Then the polled sim does not have asset "wm-4"
+
+  # ── A started load is non-interruptible: cancelling it is refused ──────────
+  # Once running, the load draws its fixed power until its duration elapses; removing the
+  # asset would desync the request record from the power still being drawn. The asset itself
+  # answers "cancellable" (`Asset::is_cancellable`); the route reports 409.
+
+  @isolated
+  Scenario: Cancelling a shiftable load that is already running is refused
+    Given I POST a shiftable load for asset "wm-5" at 2.0 kW for 60 minutes within 80 minutes
+    And I poll the VEN /sim until asset "wm-5" is drawing power
+    When I DELETE shiftable load with saved id
+    Then the response status is 409
+    And the polled sim has asset "wm-5" with power_kw > 0

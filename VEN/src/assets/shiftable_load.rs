@@ -272,6 +272,11 @@ impl Asset for ShiftableLoadAsset {
         self.is_finished(s)
     }
 
+    fn is_cancellable(&self, state: &AssetState) -> bool {
+        let s: &ShiftableLoadState = own(state);
+        !s.started
+    }
+
     fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
         Some(self)
     }
@@ -531,6 +536,19 @@ impl ShiftableLoadMilpContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_cancellable_only_until_it_has_started() {
+        let load = load(2.0, 60);
+        let pending = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        assert!(Asset::is_cancellable(&load, &pending));
+        let running = AssetState::ShiftableLoad(ShiftableLoadState {
+            started: true,
+            elapsed_min: 5.0,
+            actual_power_kw: 2.0,
+        });
+        assert!(!Asset::is_cancellable(&load, &running));
+    }
 
     fn load(power_kw: f64, duration_min: u32) -> ShiftableLoadAsset {
         let now = Utc::now();

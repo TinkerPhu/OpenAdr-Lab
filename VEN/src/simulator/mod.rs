@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use crate::assets::{
     Asset, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater, PvInverter,
-    TickOverrides,
+    ShiftableLoadAsset, TickOverrides,
 };
 use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
@@ -88,6 +88,21 @@ impl BaseLoadSmoothingState {
             0.0
         } else {
             decayed
+        }
+    }
+}
+
+impl AssetEntry {
+    /// A roster entry as it is when first added: nothing drawn yet, an empty energy counter
+    /// and an empty history buffer. The one place an entry is assembled.
+    pub fn new(id: String, state: AssetState, setpoint_kw: f64) -> Self {
+        Self {
+            id,
+            state,
+            setpoint_kw,
+            last_power_kw: 0.0,
+            energy: EnergyCounter::new(),
+            history: default_history_buffer(),
         }
     }
 }
@@ -211,6 +226,14 @@ impl SimState {
         Ok(())
     }
 
+    /// Add a shiftable load at acceptance time (`shiftable-load-as-asset` design.md D1): it
+    /// enters the roster not-yet-started, visible to forecasting and the MILP for its whole
+    /// life. The one place a shiftable load becomes a roster entry.
+    pub fn add_shiftable(&mut self, id: &str, load: ShiftableLoadAsset) -> Result<(), String> {
+        let state = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        self.add_asset(AssetEntry::new(id.to_string(), state, 0.0), Box::new(load))
+    }
+
     /// Remove an asset by id. No-op (returns `false`) if not present.
     pub fn remove_asset(&mut self, id: &str) -> bool {
         let Some(idx) = self.assets.iter().position(|a| a.id == id) else {
@@ -233,14 +256,7 @@ impl SimState {
         for ap in params {
             let (id, cfg, state) = asset_config_and_state_from_params(ap);
             let setpoint_kw = cfg.default_setpoint();
-            entries.push(AssetEntry {
-                id,
-                state,
-                setpoint_kw,
-                last_power_kw: 0.0,
-                energy: EnergyCounter::new(),
-                history: AssetHistoryBuffer::new(3600),
-            });
+            entries.push(AssetEntry::new(id, state, setpoint_kw));
             configs.push(cfg);
         }
 

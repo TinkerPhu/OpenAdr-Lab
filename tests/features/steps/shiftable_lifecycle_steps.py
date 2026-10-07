@@ -101,6 +101,29 @@ def step_poll_sim_until_asset_appears(context, asset_id):
         raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
 
 
+@when('I poll the VEN /sim until asset "{asset_id}" is drawing power')
+@given('I poll the VEN /sim until asset "{asset_id}" is drawing power')
+def step_poll_sim_until_asset_drawing(context, asset_id):
+    """The load has started: the planner chose a slot and the dispatcher commanded it."""
+
+    def fetch():
+        resp = ven_get("/sim")
+        return resp.json() if resp.ok else None
+
+    def drawing(sim):
+        asset = (sim or {}).get("assets", {}).get(asset_id)
+        return asset is not None and asset.get("power_kw", 0) > 0
+
+    try:
+        context.polled_sim = poll_until(
+            fetch, drawing,
+            timeout=240, interval=3,
+            description=f"/sim asset '{asset_id}' is drawing power",
+        )
+    except TimeoutError as e:
+        raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
+
+
 @then('the polled sim has asset "{asset_id}" with power_kw > 0')
 @given('the polled sim has asset "{asset_id}" with power_kw > 0')
 def step_assert_sim_asset_power(context, asset_id):

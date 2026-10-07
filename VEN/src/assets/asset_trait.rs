@@ -66,6 +66,12 @@ pub trait Asset: Send + Sync {
         Vec::new()
     }
 
+    /// Whether a user may still cancel what this asset is doing. Default yes; a shiftable
+    /// load that has started is physically non-interruptible, so it says no.
+    fn is_cancellable(&self, _state: &AssetState) -> bool {
+        true
+    }
+
     /// Whether this asset instance is done and should be dropped from
     /// `SimState`'s dynamic roster (`shiftable-load-as-asset` design.md D3a).
     /// Default `false`: every boot-fixed asset kind (Battery/EvCharger/

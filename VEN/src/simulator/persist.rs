@@ -334,29 +334,24 @@ mod tests {
         // whose request no longer exists after the restart (HemsState isn't
         // persisted -- D4).
         saved
-            .add_asset(
-                crate::simulator::AssetEntry {
-                    id: "wm".to_string(),
-                    state: crate::assets::AssetState::ShiftableLoad(
-                        crate::assets::ShiftableLoadState {
-                            started: true,
-                            elapsed_min: 5.0,
-                            actual_power_kw: 2.0,
-                        },
-                    ),
-                    setpoint_kw: 2.0,
-                    last_power_kw: 2.0,
-                    energy: crate::simulator::energy::EnergyCounter::new(),
-                    history: crate::assets::AssetHistoryBuffer::new(3600),
-                },
-                Box::new(crate::assets::ShiftableLoadAsset {
+            .add_shiftable(
+                "wm",
+                crate::assets::ShiftableLoadAsset {
                     power_kw: 2.0,
                     duration_min: 60,
                     earliest_start: now(),
                     latest_end: now() + chrono::Duration::hours(4),
-                }),
+                },
             )
             .unwrap();
+        let wm = saved.asset_mut("wm").unwrap();
+        wm.state = crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
+            started: true,
+            elapsed_min: 5.0,
+            actual_power_kw: 2.0,
+        });
+        wm.setpoint_kw = 2.0;
+        wm.last_power_kw = 2.0;
         save(&saved, data_dir).await.unwrap();
 
         // Restart with only the fixed-roster battery in `asset_params` --

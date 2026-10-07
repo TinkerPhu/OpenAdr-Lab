@@ -221,11 +221,10 @@ impl UserRequestService {
         }
 
         if req.session_type == Some(SessionType::ShiftableLoad) {
-            let started = matches!(
-                sim.asset(&req.asset_id).map(|e| &e.state),
-                Some(crate::assets::AssetState::ShiftableLoad(s)) if s.started
-            );
-            if started {
+            let cancellable = sim
+                .find_asset(&req.asset_id)
+                .is_none_or(|(entry, cfg)| cfg.is_cancellable(&entry.state));
+            if !cancellable {
                 return Err(DomainError::SessionConflict(format!(
                     "shiftable load '{}' has already started and cannot be cancelled",
                     req.asset_id
@@ -484,29 +483,22 @@ mod tests {
     async fn test_cancel_rejects_a_started_shiftable_load() {
         let state = AppState::new();
         let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_asset(
-            crate::simulator::AssetEntry {
-                id: "wm".to_string(),
-                state: crate::assets::AssetState::ShiftableLoad(
-                    crate::assets::ShiftableLoadState {
-                        started: true,
-                        elapsed_min: 5.0,
-                        actual_power_kw: 2.0,
-                    },
-                ),
-                setpoint_kw: 2.0,
-                last_power_kw: 2.0,
-                energy: crate::simulator::energy::EnergyCounter::new(),
-                history: crate::assets::AssetHistoryBuffer::new(3600),
-            },
-            Box::new(crate::assets::ShiftableLoadAsset {
+        sim.add_shiftable(
+            "wm",
+            crate::assets::ShiftableLoadAsset {
                 power_kw: 2.0,
                 duration_min: 60,
                 earliest_start: Utc::now(),
                 latest_end: Utc::now() + chrono::Duration::hours(4),
-            }),
+            },
         )
         .unwrap();
+        sim.asset_mut("wm").unwrap().state =
+            crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
+                started: true,
+                elapsed_min: 5.0,
+                actual_power_kw: 2.0,
+            });
 
         let req = UserRequest {
             mode: Default::default(),
@@ -552,27 +544,14 @@ mod tests {
     async fn test_cancel_removes_a_pending_shiftable_loads_asset() {
         let state = AppState::new();
         let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_asset(
-            crate::simulator::AssetEntry {
-                id: "wm".to_string(),
-                state: crate::assets::AssetState::ShiftableLoad(
-                    crate::assets::ShiftableLoadState {
-                        started: false,
-                        elapsed_min: 0.0,
-                        actual_power_kw: 0.0,
-                    },
-                ),
-                setpoint_kw: 0.0,
-                last_power_kw: 0.0,
-                energy: crate::simulator::energy::EnergyCounter::new(),
-                history: crate::assets::AssetHistoryBuffer::new(3600),
-            },
-            Box::new(crate::assets::ShiftableLoadAsset {
+        sim.add_shiftable(
+            "wm",
+            crate::assets::ShiftableLoadAsset {
                 power_kw: 2.0,
                 duration_min: 60,
                 earliest_start: Utc::now(),
                 latest_end: Utc::now() + chrono::Duration::hours(4),
-            }),
+            },
         )
         .unwrap();
 
