@@ -43,8 +43,10 @@ const mockHistory = {
 
 // The chart has its own test file; here it only has to not be recharts.
 vi.mock("../components/FleetPowerChart", () => ({
-  FleetPowerChart: ({ windowMinutes }: { windowMinutes: number }) => (
-    <div data-testid="fleet-chart-stub">{windowMinutes}</div>
+  FleetPowerChart: ({ windowMinutes, reportingVens }: { windowMinutes: number; reportingVens: number }) => (
+    <div data-testid="fleet-chart-stub" data-reporting={reportingVens}>
+      {windowMinutes}
+    </div>
   ),
 }));
 
@@ -121,6 +123,13 @@ describe("FleetPage", () => {
     const power = screen.getByTestId("fleet-chart-stub");
     // Reading order is the point: the tariff is context for the curves below.
     expect(tariff.compareDocumentPosition(power)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  // The chart cannot tell an empty store from a filling one without knowing whether anything is
+  // reporting now, and the page already holds that number (R-99).
+  it("tells the chart how many VENs are reporting now", () => {
+    renderFleet();
+    expect(screen.getByTestId("fleet-chart-stub")).toHaveAttribute("data-reporting", "2");
   });
 
   it("moves both charts with one window selector", () => {

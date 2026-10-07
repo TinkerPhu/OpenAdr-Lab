@@ -185,9 +185,11 @@ def _fleet_chart_diagnosis(page, minutes=1440, step_seconds=900):
     that separate every candidate explanation are both cheap to get, and
     neither was being collected:
 
-    - whether `fleet-chart-empty` is rendered. `FleetPowerChart` renders it
-      *instead of* the chart while `rows.length === 0`, so its presence means
-      "no data" and its absence means the component never rendered at all.
+    - whether `fleet-chart-empty` or `fleet-chart-collecting` is rendered.
+      `FleetPowerChart` renders one of them *instead of* the chart while
+      `rows.length === 0`: `-empty` means nothing is reporting, `-collecting`
+      means VENs are reporting but the store has no complete bucket yet. Both
+      absent means the component never rendered at all.
     - what the page's own `/api/fleet/power` fetch returns, asked with the
       page's own parameters. `Fleet.tsx` opens on `WINDOWS[3]`
       (`useState(3)`) = **24 h at 900 s steps** -- not the 15 min at 5 s that
@@ -198,6 +200,7 @@ def _fleet_chart_diagnosis(page, minutes=1440, step_seconds=900):
       running the fetch *in the page* settles both differences at once.
     """
     empty = page.locator('[data-testid="fleet-chart-empty"]').count() > 0
+    collecting = page.locator('[data-testid="fleet-chart-collecting"]').count() > 0
     card = page.locator('[data-testid="fleet-total-card"]').count() > 0
     try:
         seen = page.evaluate(
@@ -221,7 +224,8 @@ def _fleet_chart_diagnosis(page, minutes=1440, step_seconds=900):
     except Exception as e:  # the page itself may be broken; say so rather than mask it
         seen = {"evaluate_failed": str(e)[:200]}
     return (
-        f"fleet-chart-empty rendered: {empty}; fleet-total-card present: {card}; "
+        f"fleet-chart-empty rendered: {empty}; fleet-chart-collecting rendered: {collecting}; "
+        f"fleet-total-card present: {card}; "
         f"the page's own /api/fleet/power ({minutes} min, step {step_seconds}s) "
         f"returned: {seen}"
     )
@@ -253,6 +257,38 @@ def step_fleet_chart_has_a_line_per_ven(context):
     missing = [name for name in reporting if name not in labels]
     assert not missing, f"reporting VENs missing from the chart legend: {missing} (legend: {labels})"
     assert "fleet total" in labels, f"the fleet total is not drawn: {labels}"
+
+
+@then("the fleet page does not say there is no telemetry while VENs are reporting")
+def step_fleet_page_does_not_deny_reporting_vens(context):
+    """R-99: on the default 24 h window a young store has no complete bucket, and the chart used to
+    answer "No telemetry stored" with VENs reporting. It must now draw, or say it is collecting.
+
+    Whichever of those two the store's age produces is not the point, so the step accepts both and
+    cannot depend on elapsed time; it fails only on the false claim.
+    """
+    page = context.ui.page
+    page.wait_for_function(
+        """() => {
+            const t = document.querySelector('[data-testid="fleet-contributors"]');
+            return t && /^[1-9]/.test(t.textContent.trim());
+        }""",
+        timeout=60000,
+    )
+    try:
+        page.wait_for_selector(
+            '[data-testid="fleet-power-chart"], [data-testid="fleet-chart-collecting"]',
+            timeout=60000,
+        )
+    except Exception as e:
+        raise AssertionError(
+            "VENs are reporting, yet the page neither drew the chart nor said it is collecting. "
+            f"{_fleet_chart_diagnosis(page)}"
+        ) from e
+    assert page.locator('[data-testid="fleet-chart-empty"]').count() == 0, (
+        "the page says no telemetry is stored while VENs are reporting. "
+        f"{_fleet_chart_diagnosis(page)}"
+    )
 
 
 @then("hiding a VEN in the legend removes its line")

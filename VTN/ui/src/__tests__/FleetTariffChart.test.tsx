@@ -147,7 +147,7 @@ describe("the two Fleet charts line up", () => {
   it("share tMin, tMax and the y-axis width", () => {
     chartProps.length = 0;
     render(<FleetTariffChart signals={fleet(20)} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
-    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
+    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} reportingVens={0} />);
 
     const [tariff, power] = chartProps;
     const expected = fleetChartWindow(NOW, 120);
@@ -170,7 +170,7 @@ describe("the two Fleet charts line up", () => {
   it("both wash the plot with the same day/night background", () => {
     chartProps.length = 0;
     render(<FleetTariffChart signals={fleet(20)} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
-    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} />);
+    render(<FleetPowerChart history={history} windowMinutes={120} tickMinutes={10} nowMs={NOW} reportingVens={0} />);
     const [tariff, power] = chartProps;
     const bands = (p: Record<string, unknown>) => (p.backgroundAreas as unknown[]).length;
     expect(bands(tariff)).toBeGreaterThan(0);
