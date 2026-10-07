@@ -32,6 +32,18 @@ pub(crate) struct EventChanges {
     pub event_records: Vec<entities::history::EventReceived>,
 }
 
+/// `events` as this VEN acts on them: each declared start moved by the VEN's own
+/// `randomizeStart` offset (R-86, `lab_core::event_timing::with_randomized_start`). What the
+/// poll parses into windows, rates and limits comes from this; the declared events, the report
+/// obligations and the trace do not, because they say what the VTN asked, not when this VEN
+/// begins to respond. One call site, so "which events are staggered" cannot differ per parser.
+pub(crate) fn events_this_ven_acts_on(events: &[OadrEvent], ven_seed: &str) -> Vec<OadrEvent> {
+    events
+        .iter()
+        .map(|e| lab_core::event_timing::with_randomized_start(e, ven_seed))
+        .collect()
+}
+
 /// Pure change-detection pass over a freshly fetched event list.
 ///
 /// Compares against previous poll state and returns all trace events that
@@ -439,6 +451,75 @@ mod event_poll_tests {
         assert!(
             state.report_obligations().await.is_empty(),
             "obligation retired once its event expired"
+        );
+    }
+
+    // ── randomizeStart (R-86) ──────────────────────────────────────────────
+
+    fn simple_event_with_window(window: Option<&str>) -> Vec<OadrEvent> {
+        let mut period = serde_json::json!({"start": "2026-03-21T11:00:00Z", "duration": "PT1H"});
+        if let Some(w) = window {
+            period["randomizeStart"] = serde_json::json!(w);
+        }
+        lab_core::test_fixtures::events_from_json(serde_json::json!([{
+            "id": "stagger-1", "programID": "p", "intervalPeriod": period,
+            "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [2]}]}]
+        }]))
+    }
+
+    fn simple_start(events: &[OadrEvent], seed: &str) -> DateTime<Utc> {
+        let acted_on = events_this_ven_acts_on(events, seed);
+        detect_event_changes(&acted_on, &empty_ids(), 0, None, ts())
+            .signals
+            .simple[0]
+            .start
+    }
+
+    /// The field's purpose: two VENs given one event do not begin on one instant.
+    #[test]
+    fn two_vens_begin_a_randomized_event_at_their_own_offsets() {
+        let events = simple_event_with_window(Some("PT10M"));
+        let nominal = Utc.with_ymd_and_hms(2026, 3, 21, 11, 0, 0).unwrap();
+        let (a, b) = (
+            simple_start(&events, "ven-1"),
+            simple_start(&events, "ven-2"),
+        );
+        assert_ne!(a, b);
+        for start in [a, b] {
+            assert!(
+                start >= nominal && start < nominal + chrono::Duration::minutes(10),
+                "{start}"
+            );
+        }
+        let offset = lab_core::event_timing::randomized_start_offset(
+            "ven-1",
+            "stagger-1",
+            chrono::Duration::minutes(10),
+        );
+        assert_eq!(
+            a,
+            nominal + offset,
+            "the window starts exactly at this VEN's offset"
+        );
+    }
+
+    #[test]
+    fn an_event_without_randomize_start_begins_on_its_declared_start() {
+        let events = simple_event_with_window(None);
+        let nominal = Utc.with_ymd_and_hms(2026, 3, 21, 11, 0, 0).unwrap();
+        assert_eq!(simple_start(&events, "ven-1"), nominal);
+        assert_eq!(simple_start(&events, "ven-2"), nominal);
+    }
+
+    /// Reporting is not staggered: obligations are read from the declared events.
+    #[test]
+    fn the_declared_event_is_not_changed_by_staggering() {
+        let events = simple_event_with_window(Some("PT10M"));
+        let _ = events_this_ven_acts_on(&events, "ven-1");
+        let declared = events[0].content.interval_period.as_ref().unwrap();
+        assert_eq!(
+            declared.start,
+            Utc.with_ymd_and_hms(2026, 3, 21, 11, 0, 0).unwrap()
         );
     }
 }

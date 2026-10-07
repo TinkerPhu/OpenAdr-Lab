@@ -79,7 +79,7 @@ was fixed 2026-08-11. Two lower-priority, unblocked-independent items remain:
 |------|---------|
 | BL-11 | Time-weighted tariff averaging per slot (slot straddling a tariff boundary) |
 | BL-13 | Early firm-up heuristic under flat rates |
-| Cluster H | Transport modernisation: TLS 1.2+ (cert MUST), webhooks/subscriptions, optional MQTT, `/auth/server` discovery, mDNS, randomizeStart, gzip — tracked in `docs/BACKLOG_OpenADR_Cert.md` |
+| Cluster H | Transport modernisation: TLS 1.2+ (cert MUST), webhooks/subscriptions, optional MQTT, `/auth/server` discovery, mDNS, gzip — tracked in `docs/BACKLOG_OpenADR_Cert.md` |
 
 The standing decision holds: **lab-learning first** — transport work doesn't change
 fleet dynamics at 30 s poll resolution; revisit when latency experiments or

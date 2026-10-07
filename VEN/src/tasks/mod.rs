@@ -20,7 +20,7 @@ pub(crate) use heuristics_job::spawn_heuristics_job;
 pub(crate) use history_sampler::spawn_history_sampler;
 pub(crate) use obligation::spawn_obligation_check;
 pub(crate) use planning::spawn_planning;
-pub(crate) use poll_events::spawn_event_poll;
+pub(crate) use poll_events::{spawn_event_poll, EventPollTiming};
 pub(crate) use poll_programs::spawn_program_poll;
 pub(crate) use poll_reports::spawn_report_poll;
 pub(crate) use sim_tick::spawn_sim_tick;

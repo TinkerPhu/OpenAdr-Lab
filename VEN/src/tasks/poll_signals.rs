@@ -31,6 +31,54 @@ pub(crate) struct SignalPrevs {
     pub unapplied: Vec<controller::openadr_interface::UnappliedPayload>,
 }
 
+/// The events this VEN starts later than declared (R-86), with the delay. `acted_on` is
+/// `events_this_ven_acts_on(declared, ..)`, so the two lists line up one to one.
+pub(crate) fn staggered_starts(
+    declared: &[crate::controller::vtn_port::OadrEvent],
+    acted_on: &[crate::controller::vtn_port::OadrEvent],
+) -> Vec<(String, chrono::Duration)> {
+    declared
+        .iter()
+        .zip(acted_on)
+        .filter_map(|(d, a)| {
+            let shift = a.content.interval_period.as_ref()?.start
+                - d.content.interval_period.as_ref()?.start;
+            (shift > chrono::Duration::zero()).then(|| (d.id.to_string(), shift))
+        })
+        .collect()
+}
+
+/// Say, once per event, that this VEN starts it later than declared: a window that opens
+/// minutes after the VTN's start would otherwise look like a bug (`ui-transparency`).
+pub(crate) async fn announce_staggered_starts(
+    state: &AppState,
+    notifier: &crate::services::notify::Notifier,
+    declared: &[crate::controller::vtn_port::OadrEvent],
+    acted_on: &[crate::controller::vtn_port::OadrEvent],
+    now: DateTime<Utc>,
+    announced: &mut std::collections::HashSet<String>,
+) {
+    for (event_id, shift) in staggered_starts(declared, acted_on) {
+        if !announced.insert(event_id.clone()) {
+            continue;
+        }
+        notifier
+            .notify(
+                state,
+                now,
+                crate::entities::design_vocabulary::UserNotificationSeverity::Info,
+                format!(
+                    "randomizeStart: this VEN begins the event {} s after its declared start",
+                    shift.num_seconds()
+                ),
+                None,
+                Some(event_id.clone()),
+                Some(format!("randomize-start-{event_id}")),
+            )
+            .await;
+    }
+}
+
 /// Apply this poll's parsed signals. Returns `true` when a plan trigger was
 /// already sent (Alert / CapacityChange / UserRequest) — the caller must then
 /// not overwrite it with RateChange, since `trigger_tx` is a watch channel
@@ -247,5 +295,64 @@ mod tests {
         assert_eq!(notes[0].severity, UserNotificationSeverity::Alert);
         assert_eq!(notes[0].event_id.as_deref(), Some("evt-a"));
         assert!(notes[0].message.contains("shed all load"));
+    }
+
+    fn randomized_event(id: &str, window: Option<&str>) -> crate::controller::vtn_port::OadrEvent {
+        let mut period = serde_json::json!({"start": "2026-03-21T11:00:00Z", "duration": "PT1H"});
+        if let Some(w) = window {
+            period["randomizeStart"] = serde_json::json!(w);
+        }
+        lab_core::test_fixtures::events_from_json(serde_json::json!([{
+            "id": id, "programID": "p", "intervalPeriod": period,
+            "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [1]}]}]
+        }]))
+        .remove(0)
+    }
+
+    #[test]
+    fn staggered_starts_names_only_the_events_that_move() {
+        let declared = vec![
+            randomized_event("moves", Some("PT10M")),
+            randomized_event("plain", None),
+        ];
+        let acted_on = declared
+            .iter()
+            .map(|e| lab_core::event_timing::with_randomized_start(e, "ven-1"))
+            .collect::<Vec<_>>();
+        let moved = staggered_starts(&declared, &acted_on);
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].0, "moves");
+        assert!(
+            moved[0].1 > chrono::Duration::zero() && moved[0].1 < chrono::Duration::minutes(10)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_staggered_start_is_announced_once_per_event() {
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+        let declared = vec![randomized_event("moves", Some("PT10M"))];
+        let acted_on = declared
+            .iter()
+            .map(|e| lab_core::event_timing::with_randomized_start(e, "ven-1"))
+            .collect::<Vec<_>>();
+        let mut announced = std::collections::HashSet::new();
+
+        for secs in [0, 30] {
+            announce_staggered_starts(
+                &state,
+                &notifier,
+                &declared,
+                &acted_on,
+                ts(secs),
+                &mut announced,
+            )
+            .await;
+        }
+
+        let notes = state.notifications_since(None).await;
+        assert_eq!(notes.len(), 1, "once, not once per poll");
+        assert_eq!(notes[0].event_id.as_deref(), Some("moves"));
+        assert!(notes[0].message.contains("randomizeStart"));
     }
 }

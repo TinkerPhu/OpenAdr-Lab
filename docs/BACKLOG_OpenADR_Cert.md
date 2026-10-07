@@ -171,7 +171,7 @@ The VEN never self-registers or manages its own VEN/resource objects on the VTN.
 | Event payload descriptors | — | Full | Parsed for PRICE/EXPORT_PRICE/GHG + report obligations |
 | Report payload descriptors | — | Full | payloadType, readingType, units included in reports |
 | Interval management (id, period, duration) | — | Full | Full ISO 8601 duration parsing, interval IDs |
-| `randomizeStart` support | — | Missing | Not implemented |
+| `randomizeStart` support | — | Full | Per-VEN stable offset within the declared window (`lab_core::event_timing`); see `docs/reference/WIRE_PROFILE.md` |
 | Start time sentinel "0001-01-01" (meaning "now") | — | Missing | No special sentinel handling |
 
 **Fulfilment: ~75%**
@@ -239,7 +239,7 @@ Remaining gap: HTTP status handling itself is still only "Partial" — no dedica
 | 7 | Subscriptions & Notifications | **0%** | Entirely missing — pure polling model |
 | 8 | VEN & Resource Management | **0%** | No self-registration, no resource CRUD |
 | 9 | Targeting & Enrollment | **~50%** | Server-side only; VEN is passive |
-| 10 | Data Model & Payload | **~75%** | No `randomizeStart`, no "now" sentinel |
+| 10 | Data Model & Payload | **~75%** | No "now" sentinel |
 | 11 | Error Handling | **~75%** | Problem parsing + pagination done (Phase 2); no per-status-code handling beyond 401/403/409 |
 | 12 | Compression | **0%** | Not implemented (optional) |
 | 13 | Security & Privacy | **~40%** | No TLS; scope enforcement delegated to VTN |

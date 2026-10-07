@@ -14,3 +14,14 @@ Feature: SIMPLE load-shed levels (WP3.2)
     When I wait for the VEN /plan to have at least one slot with import_cap_kw at most 0.6
     When I delete the saved SIMPLE event
     And I wait for the VEN /plan to have no slot with import_cap_kw below 1.0
+
+  # R-86. A VTN that wants a fleet not to respond on one instant sets randomizeStart on the
+  # event's period. Each VEN delays the declared start by its own stable offset within that
+  # window (a hash of its name and the event id, so it is reproducible, not a dice roll); the
+  # offset is announced to the operator. Reports keep their cadence and are not staggered.
+  Scenario: Two VENs begin a randomized event at their own offsets
+    Given I create an open program "simple-randomize-test" and save its ID
+    And I create a SIMPLE event of level 1 for the saved program lasting 120 minutes with a randomizeStart of 60 minutes
+    When both VENs report a SIMPLE window for the saved event
+    Then the two VENs begin the saved event at different times within the randomizeStart window
+    When I delete the saved SIMPLE event
