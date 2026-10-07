@@ -1024,6 +1024,18 @@ under Normal / Absorb). The MILP planner no longer takes a `SimSnapshot` at all
 own `AssetMilpContext` (e.g. the EV's `soc_init`). Test snapshots are built from real assets via
 `services/test_support/asset_snapshots.rs`.
 
+Four more questions are answered the same way, each by one asset method that its callers use
+instead of reading config, state keys or concrete types themselves (`refactor/asset-interpretation`):
+`Asset::history_view` (typed soc/temperature/plugged/curtailment, carried on `AssetSnapshot.history`,
+so the history sampler never reads `state_values()` keys; `PvCurtailmentSource::outranks` is the one
+rule for which source names a window), `RequestResolvable::request_defaults` (current SoC, default
+target, capacity and charge rate a user request resolves against; `AssetRequestSlice` does the
+arithmetic once), `Asset::is_cancellable` (a started shiftable load is non-interruptible) and
+`Asset::usage_schedule_view` (the EV's configured trip schedule for `GET /ev-usage-sim`). A shiftable
+load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
+assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`
+`add_shiftable_*`, `assets/ev_schedule.rs` `usage_view_*`.
+
 **"What will you draw next tick if I command X?"** is such a question, and the asset answers it
 with `entities::asset::SetpointResponse`, carried on its `AssetCapability` (and from there into
 `AssetSnapshot`, flattened, so `power_steps_kw` keeps its place in the `/assets` and `/sim`

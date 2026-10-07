@@ -14725,3 +14725,25 @@ which fails on `Utc::now()` in entities/, controller/, services/, assets/, simul
 Learning: the first draft of the rule's regex carried a literal backspace (`\b` in a non-raw
 Python string) and passed vacuously — an audit rule is only trusted once it has been seen to fail
 on a known violation, so write it, watch it go red, then fix the code.
+
+## Asset interpretation stays inside the asset (refactor/asset-interpretation)
+
+Why: an architecture sweep (2026-10-07) found places outside `assets/` that read raw asset values
+by string key or downcast to concrete asset types and decided for themselves what the asset can do
+(`asset-competence-assurance`). Three were fixed together, three commits. (1) The history sampler
+read `soc`/`temp_c`/`plugged`/`generation_limit_kw`/`curtailment_source` out of `state_values()`
+and ranked curtailment sources by their numeric code; assets now report an `AssetHistoryView`
+(`Asset::history_view`, carried on `AssetSnapshot`), and `PvCurtailmentSource::outranks` is the one
+window-priority rule. (2) The sweep claimed three hand-built shiftable-load entries in production;
+only one was (the others were in tests), but nine more fixtures built the same literal. All now go
+through `SimState::add_shiftable` / `AssetEntry::new`, and `Asset::is_cancellable` replaces the
+service matching `ShiftableLoadState.started`. (3) `POST /user-requests` downcast to `EvCharger`/
+`Battery` to pick defaults and `GET /ev-usage-sim` downcast to `EvCharger`; they now call
+`RequestResolvable::request_defaults` and `Asset::usage_schedule_view`.
+Issues: `RequestResolvable::resolve_request_target` (and the two inherent copies) was a second
+implementation of the request arithmetic `AssetRequestSlice::resolve_request_target` already does,
+used only by tests; it is replaced by `request_defaults`, and its two tests now assert the
+declared defaults. The `POST /debug/heuristics/preload` route had no caller anywhere (UI, BDD, scripts)
+and is deleted; the synthetic-backfill helpers it used remain as `#[cfg(test)]` fixtures of
+`services/heuristics.rs`. Learning: a sweep's "N copies" count must be verified against test
+blocks before it is believed; and the remaining findings (R-106..R-115) are filed, not fixed.

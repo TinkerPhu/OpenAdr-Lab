@@ -206,6 +206,8 @@ Replace `TODAY_14:00:00+01:00` with today's 14:00 in ISO 8601 (e.g. `2026-03-12T
 
 **Conceptual gap:** Without a real washing machine in the simulator, you won't see a 2 kW fixed ON/OFF asset — only the planning deferral logic, which is identical.
 
+**Cancelling:** a load that has not started yet can be cancelled (`DELETE /user-requests/{id}`): its asset leaves `/sim` and the request is `Cancelled`. Once it is drawing power it cannot — the run is non-interruptible, so the request returns `409` and the asset keeps running to its end. The shiftable load itself answers this (`Asset::is_cancellable`); scenario "Cancelling a shiftable load that is already running is refused" in `tests/features/isolated/shiftable_lifecycle.feature`.
+
 ---
 
 ## UC-03: PV Surplus Cascade
