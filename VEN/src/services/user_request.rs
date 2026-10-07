@@ -475,6 +475,34 @@ mod tests {
         assert!(state.ev_sessions().await.is_empty());
     }
 
+    /// A shiftable-load request as `create_shiftable` builds it, for the asset `asset_id`.
+    fn shiftable_request(asset_id: &str) -> UserRequest {
+    UserRequest {
+        mode: Default::default(),
+        id: Uuid::new_v4(),
+        asset_id: asset_id.to_string(),
+        status: UserRequestStatus::Active,
+        target_soc: None,
+        target_energy_kwh: 2.0,
+        desired_power_kw: 2.0,
+        deadlines: vec![],
+        completion_policy: "STOP".to_string(),
+        max_total_cost_eur: None,
+        tier_count: 0,
+        session_id: Some(Uuid::new_v4()),
+        session_type: Some(SessionType::ShiftableLoad),
+        comfort_rates: vec![],
+        estimated_cost_eur: 0.0,
+        estimated_co2_g: 0.0,
+        accumulated_cost_eur: 0.0,
+        interruptible: false,
+        tolerance_min: None,
+        budget_eur: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        }
+    }
+
     /// shiftable-load-as-asset design.md D6: a shiftable load that has
     /// already started cannot be cancelled — the physics is non-interruptible,
     /// so silently removing the asset would desync accounting from the power
@@ -500,30 +528,7 @@ mod tests {
                 actual_power_kw: 2.0,
             });
 
-        let req = UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: "wm".to_string(),
-            status: UserRequestStatus::Active,
-            target_soc: None,
-            target_energy_kwh: 2.0,
-            desired_power_kw: 2.0,
-            deadlines: vec![],
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
-            session_id: Some(Uuid::new_v4()),
-            session_type: Some(SessionType::ShiftableLoad),
-            comfort_rates: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let req = shiftable_request("wm");
         let id = req.id;
         state.upsert_request(req).await;
 
@@ -535,6 +540,40 @@ mod tests {
         assert!(
             sim.find_asset("wm").is_some(),
             "the running asset must not be removed"
+        );
+    }
+
+    /// What the sim actually does: a load commanded on is drawing power and has started, so
+    /// cancelling it is refused (the E2E scenario hit a 204 here).
+    #[tokio::test]
+    async fn cancel_rejects_a_shiftable_load_the_sim_has_started_running() {
+        let state = AppState::new();
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_shiftable(
+            "wm",
+            crate::assets::ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 60,
+                earliest_start: Utc::now(),
+                latest_end: Utc::now() + chrono::Duration::hours(4),
+            },
+        )
+        .unwrap();
+        sim.tick(crate::simulator::TickInputs::new(
+            1.0,
+            Utc::now(),
+            std::collections::HashMap::from([("wm".to_string(), 2.0)]),
+        ));
+        assert!(sim.asset("wm").unwrap().last_power_kw > 0.0, "the load is drawing power");
+
+        let req = shiftable_request("wm");
+        let id = req.id;
+        state.upsert_request(req).await;
+
+        let result = UserRequestService::cancel(id, &state, &mut sim).await;
+        assert!(
+            matches!(result, Err(DomainError::SessionConflict(_))),
+            "a running load cannot be cancelled, got {result:?}"
         );
     }
 
@@ -555,30 +594,7 @@ mod tests {
         )
         .unwrap();
 
-        let req = UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: "wm".to_string(),
-            status: UserRequestStatus::Active,
-            target_soc: None,
-            target_energy_kwh: 2.0,
-            desired_power_kw: 2.0,
-            deadlines: vec![],
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
-            session_id: Some(Uuid::new_v4()),
-            session_type: Some(SessionType::ShiftableLoad),
-            comfort_rates: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let req = shiftable_request("wm");
         let id = req.id;
         state.upsert_request(req).await;
 
