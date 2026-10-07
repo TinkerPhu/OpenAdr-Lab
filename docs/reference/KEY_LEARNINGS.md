@@ -3125,3 +3125,17 @@ Rules:
 - Daytime and night-time E2E runs exercise different states (a predicted trip in progress, PV
   surplus). A suite that passes at night has not passed by day.
 
+## Restructuring the solver: pin the model, not just the answer (2026-10-07)
+
+- `good_lp` keeps coefficients in an `FnvHashMap` (a deterministic hasher), so the model HiGHS
+  receives is a pure function of the order operations were applied in. A refactor of model-building
+  code can therefore be proven model-identical by recording variable definitions, the objective, the
+  warm start and each constraint, both sorted (what it means) and in iteration order (what is sent).
+  A solution-level check alone is weaker: it can pass on a scenario that happens not to exercise the
+  difference.
+- Capture the golden from the unmodified code before touching it, show it reproduces across thread
+  counts, and show it fails on a deliberate change before relying on it. Changing which variable
+  sits at which index or dropping a term is a change the solver can see; reordering terms on
+  different variables is not.
+- An expression that must equal another (phase 1's cost, phase 2's cost cap, the dual pass's
+  objective) belongs in one function. "Mirror it exactly" in a comment is the copy that drifts.
