@@ -2,29 +2,44 @@
 /// the only dynamic (not boot-fixed) mutation of the asset roster.
 mod add_remove_asset_tests {
     use super::super::*;
-    use crate::assets::{ShiftableLoadAsset, ShiftableLoadState};
-    use crate::simulator::energy::EnergyCounter;
+    use crate::assets::ShiftableLoadAsset;
 
-    fn shiftable_entry(id: &str) -> (AssetEntry, Box<dyn Asset>) {
-        let entry = AssetEntry {
-            id: id.to_string(),
-            state: AssetState::ShiftableLoad(ShiftableLoadState {
-                started: false,
-                elapsed_min: 0.0,
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        };
-        let config: Box<dyn Asset> = Box::new(ShiftableLoadAsset {
-            power_kw: 2.0,
-            duration_min: 60,
+    fn shiftable_load(power_kw: f64, duration_min: u32) -> ShiftableLoadAsset {
+        ShiftableLoadAsset {
+            power_kw,
+            duration_min,
             earliest_start: Utc::now(),
             latest_end: Utc::now() + chrono::Duration::hours(4),
-        });
-        (entry, config)
+        }
+    }
+
+    fn shiftable_entry(id: &str) -> (AssetEntry, Box<dyn Asset>) {
+        let state = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        (
+            AssetEntry::new(id.to_string(), state, 0.0),
+            Box::new(shiftable_load(2.0, 60)),
+        )
+    }
+
+    #[test]
+    fn add_shiftable_enters_the_roster_not_yet_started() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_shiftable("wm", shiftable_load(2.0, 60)).unwrap();
+        let (entry, cfg) = sim.find_asset("wm").expect("added to the roster");
+        let AssetState::ShiftableLoad(state) = &entry.state else {
+            panic!("a shiftable load holds shiftable-load state");
+        };
+        assert!(!state.started);
+        assert_eq!((entry.setpoint_kw, entry.last_power_kw), (0.0, 0.0));
+        assert!(cfg.is_cancellable(&entry.state));
+    }
+
+    #[test]
+    fn add_shiftable_rejects_a_duplicate_id() {
+        let mut sim = SimState::from_params(&[], Utc::now());
+        sim.add_shiftable("wm", shiftable_load(2.0, 60)).unwrap();
+        assert!(sim.add_shiftable("wm", shiftable_load(1.0, 30)).is_err());
+        assert_eq!(sim.assets.len(), 1, "the duplicate must not be appended");
     }
 
     #[test]
@@ -85,33 +100,17 @@ mod add_remove_asset_tests {
 /// with no per-kind branching in the removal pass itself.
 mod shiftable_load_removal_tests {
     use super::super::*;
-    use crate::assets::{ShiftableLoadAsset, ShiftableLoadState};
-
-    use crate::simulator::energy::EnergyCounter;
+    use crate::assets::ShiftableLoadAsset;
 
     fn shiftable_only(power_kw: f64, duration_min: u32) -> SimState {
         let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_asset(
-            AssetEntry {
-                id: "wm".to_string(),
-                state: AssetState::ShiftableLoad(ShiftableLoadState {
-                    started: false,
-                    elapsed_min: 0.0,
-                    actual_power_kw: 0.0,
-                }),
-                setpoint_kw: 0.0,
-                last_power_kw: 0.0,
-                energy: EnergyCounter::new(),
-                history: AssetHistoryBuffer::new(3600),
-            },
-            Box::new(ShiftableLoadAsset {
-                power_kw,
-                duration_min,
-                earliest_start: Utc::now(),
-                latest_end: Utc::now() + chrono::Duration::hours(4),
-            }),
-        )
-        .unwrap();
+        let load = ShiftableLoadAsset {
+            power_kw,
+            duration_min,
+            earliest_start: Utc::now(),
+            latest_end: Utc::now() + chrono::Duration::hours(4),
+        };
+        sim.add_shiftable("wm", load).unwrap();
         sim
     }
 

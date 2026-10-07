@@ -866,28 +866,20 @@ mod tests {
     #[test]
     fn shiftable_load_contributes_via_the_same_primitive_as_other_assets() {
         use crate::assets::shiftable_load::ShiftableLoadAsset;
-        use crate::assets::AssetHistoryBuffer;
-        use crate::simulator::energy::EnergyCounter;
-        use crate::simulator::AssetEntry;
 
         let now = t0();
         let plan = make_plan(900, 2, now); // 2 x 15-min slots
         let mut sim = SimState::from_params(&[], now);
-        let entry = AssetEntry {
-            id: "wm-1".to_string(),
-            state: AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        };
-        let config: Box<dyn crate::assets::Asset> = Box::new(ShiftableLoadAsset {
-            power_kw: 2.0,
-            duration_min: 10,
-            earliest_start: now,
-            latest_end: now + Duration::minutes(30),
-        });
-        sim.add_asset(entry, config).unwrap();
+        sim.add_shiftable(
+            "wm-1",
+            ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 10,
+                earliest_start: now,
+                latest_end: now + Duration::minutes(30),
+            },
+        )
+        .unwrap();
 
         let forecast = compute_site_headroom_forecast(&sim, &plan, now, 1_000.0, 1_000.0);
         assert!(
@@ -993,27 +985,19 @@ mod tests {
         // generic asset_max_power_series path, not just merge_events' own
         // unit tests, closing the untested combination the review flagged.
         use crate::assets::shiftable_load::ShiftableLoadAsset;
-        use crate::assets::AssetHistoryBuffer;
-        use crate::simulator::energy::EnergyCounter;
-        use crate::simulator::AssetEntry;
 
         let now = t0();
         let mut sim = SimState::from_params(&[], now);
-        let entry = AssetEntry {
-            id: "wm-1".to_string(),
-            state: AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        };
-        let config: Box<dyn crate::assets::Asset> = Box::new(ShiftableLoadAsset {
-            power_kw: 2.0,
-            duration_min: 10,
-            earliest_start: now,
-            latest_end: now + Duration::minutes(30),
-        });
-        sim.add_asset(entry, config).unwrap();
+        sim.add_shiftable(
+            "wm-1",
+            ShiftableLoadAsset {
+                power_kw: 2.0,
+                duration_min: 10,
+                earliest_start: now,
+                latest_end: now + Duration::minutes(30),
+            },
+        )
+        .unwrap();
 
         // Export placement: start as late as possible = latest_end - duration
         // = now+20min, running through now+30min.
@@ -1266,11 +1250,8 @@ mod tests {
     /// with a live measurement, a weather forecast, and a plan that curtails it.
     fn mixed_fleet(now: DateTime<Utc>) -> (SimState, Plan) {
         use crate::assets::shiftable_load::ShiftableLoadAsset;
-        use crate::assets::AssetHistoryBuffer;
         use crate::entities::asset_params::EvParams;
         use crate::ids::ASSET_EV;
-        use crate::simulator::energy::EnergyCounter;
-        use crate::simulator::AssetEntry;
 
         let mut sim = SimState::from_params(
             &[
@@ -1307,21 +1288,14 @@ mod tests {
             ],
             now,
         );
-        sim.add_asset(
-            AssetEntry {
-                id: "wm-1".to_string(),
-                state: AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state()),
-                setpoint_kw: 0.0,
-                last_power_kw: 0.0,
-                energy: EnergyCounter::new(),
-                history: AssetHistoryBuffer::new(3600),
-            },
-            Box::new(ShiftableLoadAsset {
+        sim.add_shiftable(
+            "wm-1",
+            ShiftableLoadAsset {
                 power_kw: 2.0,
                 duration_min: 30,
                 earliest_start: now + Duration::minutes(30),
                 latest_end: now + Duration::hours(3),
-            }),
+            },
         )
         .unwrap();
         {

@@ -228,23 +228,14 @@ pub async fn post_requests(
         // shiftable-load-as-asset design.md D1: the asset enters SimState at
         // acceptance time (started = false), not deferred until the MILP
         // picks a start slot — visible to forecasting/MILP for its whole life.
-        if let Err(msg) = ctx.sim.lock().await.add_asset(
-            crate::simulator::AssetEntry {
-                id: load.asset_id.clone(),
-                state: crate::assets::AssetState::ShiftableLoad(
-                    crate::assets::ShiftableLoadAsset::initial_state(),
-                ),
-                setpoint_kw: 0.0,
-                last_power_kw: 0.0,
-                energy: crate::simulator::energy::EnergyCounter::new(),
-                history: crate::assets::AssetHistoryBuffer::new(3600),
-            },
-            Box::new(crate::assets::ShiftableLoadAsset {
+        if let Err(msg) = ctx.sim.lock().await.add_shiftable(
+            &load.asset_id,
+            crate::assets::ShiftableLoadAsset {
                 power_kw: load.power_kw,
                 duration_min: load.duration_min,
                 earliest_start: load.earliest_start,
                 latest_end: load.latest_end,
-            }),
+            },
         ) {
             // Should be unreachable: add_shiftable_load's own duplicate
             // check above already rejects a reused asset_id.
