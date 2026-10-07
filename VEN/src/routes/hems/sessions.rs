@@ -275,40 +275,22 @@ pub async fn post_requests(
     // WP4.2 (BL-19): user comfort-curve overrides beat the built-in defaults.
     let comfort_overrides = ctx.state.comfort_overrides_map().await;
     let asset_data: Vec<AssetRequestSlice> = {
-        use crate::assets::{AssetState as AS, Battery, EvCharger};
         let sim = ctx.sim.lock().await;
         sim.assets
             .iter()
             .zip(sim.asset_configs.iter())
             .map(|(entry, cfg)| {
-                let (current_soc, default_soc_target, capacity_kwh, max_charge_kw) =
-                    if let (AS::Ev(s), Some(c)) =
-                        (&entry.state, cfg.as_any().downcast_ref::<EvCharger>())
-                    {
-                        (
-                            Some(s.soc),
-                            Some(c.soc_target),
-                            Some(c.battery_kwh),
-                            Some(c.max_charge_kw),
-                        )
-                    } else if let (AS::Battery(s), Some(c)) =
-                        (&entry.state, cfg.as_any().downcast_ref::<Battery>())
-                    {
-                        (
-                            Some(s.soc),
-                            Some(1.0),
-                            Some(c.capacity_kwh),
-                            Some(c.max_charge_kw),
-                        )
-                    } else {
-                        (None, None, None, None)
-                    };
+                // Storage-shaped assets declare their own request defaults; the rest
+                // (heater, PV, base load) have none.
+                let defaults = cfg
+                    .as_request_resolvable()
+                    .map(|r| r.request_defaults(&entry.state));
                 AssetRequestSlice {
                     id: entry.id.clone(),
-                    current_soc,
-                    default_soc_target,
-                    capacity_kwh,
-                    max_charge_kw,
+                    current_soc: defaults.map(|d| d.current_soc),
+                    default_soc_target: defaults.map(|d| d.default_soc_target),
+                    capacity_kwh: defaults.map(|d| d.capacity_kwh),
+                    max_charge_kw: defaults.map(|d| d.max_charge_kw),
                     completion_policy: cfg.default_completion_policy(),
                     comfort_rates: crate::services::comfort::effective_comfort_rates(
                         &comfort_overrides,

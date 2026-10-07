@@ -293,13 +293,21 @@ mod phase2a_battery_tests {
     }
 
     #[test]
-    fn resolve_request_target_toward_higher_soc_returns_energy_and_power() {
+    fn request_defaults_declare_a_full_charge_target_and_the_batterys_own_limits() {
         let (boxed, state) = boxed_and_state(0.5);
-        let result = boxed
+        let defaults = boxed
             .as_request_resolvable()
             .expect("Battery must implement RequestResolvable")
-            .resolve_request_target(&state, Some(0.9), None);
-        assert!(result.is_some(), "request toward a higher SoC must resolve");
+            .request_defaults(&state);
+        assert_eq!(
+            defaults,
+            crate::entities::asset_params::RequestDefaults {
+                current_soc: 0.5,
+                default_soc_target: 1.0,
+                capacity_kwh: 10.0,
+                max_charge_kw: 5.0,
+            }
+        );
     }
 
     #[test]
@@ -440,13 +448,17 @@ mod phase2a_ev_tests {
     }
 
     #[test]
-    fn resolve_request_target_toward_higher_soc_returns_energy_and_power() {
+    fn request_defaults_declare_the_evs_own_target_and_limits() {
         let (boxed, state) = boxed_and_state();
-        let result = boxed
+        let params = ev_params();
+        let defaults = boxed
             .as_request_resolvable()
             .expect("EvCharger must implement RequestResolvable")
-            .resolve_request_target(&state, Some(0.9), None);
-        assert!(result.is_some());
+            .request_defaults(&state);
+        assert_eq!(defaults.current_soc, 0.4);
+        assert_eq!(defaults.default_soc_target, params.soc_target);
+        assert_eq!(defaults.capacity_kwh, params.battery_kwh);
+        assert_eq!(defaults.max_charge_kw, params.max_charge_kw);
     }
 
     #[test]

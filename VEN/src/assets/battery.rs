@@ -10,7 +10,7 @@ use super::{
 use crate::entities::asset::{
     AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
 };
-use crate::entities::asset_params::BatteryParams;
+use crate::entities::asset_params::{BatteryParams, RequestDefaults};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use lab_core::time_series::{Interpolation, TimeSeries};
 
@@ -198,21 +198,6 @@ impl Battery {
             interpolation: Interpolation::Linear,
         }
     }
-
-    pub fn resolve_request_target(
-        &self,
-        state: &BatteryState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
-        let target = target_soc.unwrap_or(1.0);
-        let delta = (target - state.soc).max(0.0);
-        let kwh = delta * self.capacity_kwh;
-        if kwh < 1e-6 {
-            return None;
-        }
-        Some((kwh, desired_power_kw.unwrap_or(self.max_charge_kw)))
-    }
 }
 
 impl Asset for Battery {
@@ -361,14 +346,15 @@ impl MilpParticipant for Battery {
 }
 
 impl RequestResolvable for Battery {
-    fn resolve_request_target(
-        &self,
-        state: &AssetState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
+    /// A battery with no stated target fills to full.
+    fn request_defaults(&self, state: &AssetState) -> RequestDefaults {
         let s: &BatteryState = own(state);
-        Self::resolve_request_target(self, s, target_soc, desired_power_kw)
+        RequestDefaults {
+            current_soc: s.soc,
+            default_soc_target: 1.0,
+            capacity_kwh: self.capacity_kwh,
+            max_charge_kw: self.max_charge_kw,
+        }
     }
 
     /// Moved here verbatim from `AssetConfig::available_storage_kwh`'s Battery

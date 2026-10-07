@@ -5,9 +5,10 @@ use chrono::{DateTime, Duration, Utc};
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
 use crate::assets::HistoryPoint;
 use crate::entities::asset::{AssetHistoryView, AssetType, ComfortRate, CompletionPolicy};
-use crate::entities::asset_params::PvCurtailmentSource;
+use crate::entities::asset_params::{PvCurtailmentSource, RequestDefaults};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::timeline::HeaterPlanTrajectory;
 use lab_core::time_series::TimeSeries;
 
@@ -214,6 +215,12 @@ pub trait Asset: Send + Sync {
     /// diagnostics UI (e.g. `{"soc": 0.6, "capacity_kwh": 10.0}`).
     fn state_values(&self, _state: &AssetState) -> HashMap<String, f64> {
         unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
+    }
+
+    /// This asset's configured usage schedule as the diagnostics surface shows it
+    /// (`GET /ev-usage-sim`), or `None` if it has none. Only the EV has one.
+    fn usage_schedule_view(&self, _now: DateTime<Utc>) -> Option<EvUsageSimState> {
+        None
     }
 
     /// What this asset tells the history recorder about itself at this state, typed — the
@@ -433,14 +440,10 @@ pub trait MilpParticipant {
 /// storage-shaped assets, Battery and EV.
 #[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
 pub trait RequestResolvable {
-    /// Resolve a user request into `(energy_kwh, power_kw)`, or `None` if the
-    /// request implies no meaningful action (e.g. already at/above target).
-    fn resolve_request_target(
-        &self,
-        state: &AssetState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)>;
+    /// The asset's own answer to "what would a user request resolve against": its current
+    /// SoC, default target, capacity and charge rate. `AssetRequestSlice::resolve_request_target`
+    /// is the one place the request arithmetic happens.
+    fn request_defaults(&self, state: &AssetState) -> RequestDefaults;
 
     /// `(discharge_kwh, charge_kwh)` currently available, or `None` if the
     /// asset can't participate right now (e.g. an unplugged EV).

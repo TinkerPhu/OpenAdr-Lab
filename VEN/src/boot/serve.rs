@@ -46,7 +46,6 @@ fn app_ctx(w: World) -> AppCtx {
         base_load_measurement: w.ports.base_load_measurement,
         base_load_measurement_enabled: w.base_load_measurement_enabled,
         comms_loss_debounce_s: w.comms_loss.map(|c| c.debounce_s),
-        heuristics_config: w.heuristics_config,
         grid_max_import_kw: w.grid_max_import_kw,
         grid_max_export_kw: w.grid_max_export_kw,
     }

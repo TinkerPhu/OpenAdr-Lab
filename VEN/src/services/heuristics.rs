@@ -5,17 +5,16 @@
 //! passes, one per day of the week (`chrono::Weekday::num_days_from_monday()`),
 //! each shrunk toward the flat overall mean in proportion to how much data
 //! that bucket/hour cell actually has, plus a rolling-30-day seasonal factor.
-//! `generate_synthetic_backfill` is
-//! the counterpart used both by the on-demand preload route
-//! (`routes/debug.rs`) and this module's own tests, so the "looks like 4
-//! weeks of real history" demonstration and the test assertions can never
-//! silently diverge into two different algorithms.
+//! `generate_synthetic_backfill` is the test-only counterpart that feeds this module's
+//! tests a "looks like 4 weeks of real history" series.
 
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 
+#[cfg(test)]
 use crate::assets::base_load::BaseLoad;
 use crate::controller::HistoryPort;
 use crate::entities::design_vocabulary::AssetHeuristics;
+#[cfg(test)]
 use crate::entities::history::TickSample;
 use crate::entities::DomainError;
 
@@ -24,10 +23,7 @@ use crate::entities::DomainError;
 /// `docs/architecture/forecasting_model.md`); PV forecasting is WP5.3's job,
 /// not this pipeline's.
 ///
-/// One list, not one per caller: the daily learner job
-/// (`tasks::heuristics_job`) and the on-demand preload route
-/// (`routes::debug`) each used to declare their own, and a third caller would
-/// have declared a third.
+/// One list, not one per caller: a second caller would otherwise declare a second.
 pub const HEURISTIC_ASSET_IDS: [&str; 1] = [crate::ids::ASSET_BASE_LOAD];
 
 #[derive(Clone, Copy)]
@@ -201,11 +197,12 @@ pub fn learn_asset_heuristics(
 
 /// Generate synthetic backdated `TickSample`s for `asset_id`, at 1-minute
 /// resolution (matching `history_sampler`'s production downsample grain),
-/// sampling `power_kw_at` at each timestamp. Shared by the
-/// `/debug/heuristics/preload` route and this module's own tests. Generic
+/// sampling `power_kw_at` at each timestamp. Test-only fixture for this module's own tests
+/// (the `/debug/heuristics/preload` route that also used it is gone). Generic
 /// over the power function rather than hardcoding `BaseLoad`'s formula so
 /// callers can seed any asset with its own model instead of silently
 /// reusing base_load's.
+#[cfg(test)]
 pub fn generate_synthetic_backfill(
     asset_id: &str,
     from: DateTime<Utc>,
@@ -232,6 +229,7 @@ pub fn generate_synthetic_backfill(
 
 /// `generate_synthetic_backfill`'s `power_kw_at` for `base_load` itself:
 /// static baseline plus the configured appliance-noise model.
+#[cfg(test)]
 pub fn base_load_power_kw_at(base_load: &BaseLoad) -> impl Fn(DateTime<Utc>) -> f64 + '_ {
     move |ts| base_load.baseline_kw_profile + base_load.appliance_noise_kw(ts)
 }

@@ -463,6 +463,19 @@ impl AssetParams {
     }
 }
 
+/// What a storage-shaped asset (battery, EV) declares about itself when a user request is
+/// resolved against it — the asset's own answer, so no route or service reads its config to
+/// decide. SoC is a fraction 0..1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RequestDefaults {
+    pub current_soc: f64,
+    /// Target applied when the request names none.
+    pub default_soc_target: f64,
+    pub capacity_kwh: f64,
+    /// Default desired power when the request names none.
+    pub max_charge_kw: f64,
+}
+
 /// Minimal asset snapshot for user-request creation.
 /// Built by the adapter layer (routes/hems.rs) from a locked SimState.
 /// Pure domain type — no assets/ or simulator/ imports.
