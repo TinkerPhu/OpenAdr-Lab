@@ -1,18 +1,16 @@
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable,
-    WithInitialSolution, WithMipGap, WithTimeLimit,
+    constraint, Expression, Solution, SolverModel, Variable, WithInitialSolution, WithMipGap,
+    WithTimeLimit,
 };
 
 use crate::controller::milp_interactions::{
-    build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
-    GridMilpVars, MilpVarPool,
+    pv_use_tiebreak_expr, shiftable_tiebreak_expr, MilpVarPool,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
-use super::model_skeleton::with_constraint;
-use super::penalty;
-use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1};
+use super::model_skeleton::{with_constraint, Declaration, ModelSkeleton};
+use super::solver_phase1::solve_phase1;
 use super::types::*;
 
 /// Phase 2: minimise operational friction subject to phase1_cost(p2_vars) ≤ c_star + epsilon.
@@ -20,26 +18,24 @@ use super::types::*;
 /// Warm-start vector: Phase 1 solution values provided as initial MIP incumbent for Phase 2.
 /// This ensures HiGHS immediately has a feasible integer point (the Phase 1 solution satisfies
 /// all Phase 2 constraints), avoiding the NoSolutionFound timeout on Node1 ARM.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_phase2_warm_start(
     inputs: &MilpInputs,
     p1: &SolveOutput,
-    p_imp: &[Variable],
-    p_exp: &[Variable],
-    u_grid: &[Variable],
-    s_imp_viol: &[Variable],
-    s_exp_viol: &[Variable],
     pool: &MilpVarPool,
     n: usize,
 ) -> Vec<(Variable, f64)> {
+    let grid = &pool.grid;
     let mut iv: Vec<(Variable, f64)> = Vec::with_capacity(n * 12);
     for t in 0..n {
-        iv.push((p_imp[t], p1.p_imp_kw[t].max(0.0)));
-        iv.push((p_exp[t], p1.p_exp_kw[t].max(0.0)));
-        iv.push((u_grid[t], if p1.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 }));
-        iv.push((s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
-        iv.push((s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
-        iv.push((pool.grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
+        iv.push((grid.p_imp[t], p1.p_imp_kw[t].max(0.0)));
+        iv.push((grid.p_exp[t], p1.p_exp_kw[t].max(0.0)));
+        iv.push((
+            grid.u_grid[t],
+            if p1.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 },
+        ));
+        iv.push((grid.s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
+        iv.push((grid.s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
+        iv.push((grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
     }
     if let Some(v) = &pool.heater {
         let iy = inputs.heat_initial_y;
@@ -142,146 +138,14 @@ pub(crate) fn solve_phase2(
 ) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
     probe!(begin, "solve_phase2");
     let n = inputs.n;
+    let (vars, skeleton) =
+        ModelSkeleton::declare(inputs, p1w, asset_contexts, Declaration::Phase2(p2w));
 
-    let global = GlobalMilpInputs {
-        n,
-        dt_h: inputs.dt_h.clone(),
-        c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
-        c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
-        g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
-        p_pv_kw: inputs.p_pv_kw.clone(),
-        p_base_kw: inputs.p_base_kw.clone(),
-        p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
-        p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
-        p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
-        p_exp_max_cont_kw: inputs.p_exp_max_cont_kw.clone(),
-        pen_imp_eur_kwh: inputs.pen_imp_eur_kwh,
-        pen_exp_eur_kwh: inputs.pen_exp_eur_kwh,
-    };
-
-    let mut vars = variables!();
-
-    let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
-    let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-    let grid_vars = GridMilpVars {
-        p_imp: p_imp.clone(),
-        p_exp: p_exp.clone(),
-        u_grid: u_grid.clone(),
-        s_imp_viol: s_imp_viol.clone(),
-        s_exp_viol: s_exp_viol.clone(),
-        p_pv_used: p_pv_used.clone(),
-    };
-
-    let mut pool = MilpVarPool {
-        grid: grid_vars,
-        bat: None,
-        ev: None,
-        heater: None,
-        // Populated generically below by each ShiftableLoadMilpContext's own
-        // `declare_vars_into_pool` (shiftable-load-as-asset).
-        shiftable: Vec::new(),
-    };
-
-    // WP6.3 (BL-09): declared fresh here too — Phase 2 re-declares all variables,
-    // same as s_imp_viol/s_exp_viol above.
-    let penalty_vars =
-        penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
-
-    // Phase 2: per-asset startup/ramp aux vars declared with real cost values.
-    for ctx in asset_contexts {
-        match ctx.asset_kind() {
-            AssetKind::Battery => {
-                ctx.declare_vars_into_pool(
-                    n,
-                    p2w.c_bat_startup_eur,
-                    p2w.c_bat_ramp_eur_kw,
-                    &mut vars,
-                    &mut pool,
-                );
-            }
-            AssetKind::Ev => {
-                ctx.declare_vars_into_pool(
-                    n,
-                    p2w.c_ev_startup_eur,
-                    p2w.c_ev_ramp_eur_kw,
-                    &mut vars,
-                    &mut pool,
-                );
-            }
-            AssetKind::Heater => {
-                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-            }
-            AssetKind::ShiftableLoad => {
-                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-            }
-        }
-    }
-
-    let interactions =
-        build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
-    let mut active_interactions: Vec<&dyn crate::controller::milp_interactions::AssetInteraction> =
-        Vec::new();
-    let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
-    for interaction in &interactions {
-        if interaction.applicable(&pool) {
-            let iv = interaction.declare_vars(&pool, &global, &mut vars);
-            active_interactions.push(interaction.as_ref());
-            iv_list.push(iv);
-        }
-    }
-
-    // Phase 1 cost cap expression, rebuilt using Phase 2 variables.
-    let mut phase1_cap_expr = Expression::from(0.0);
-    for t in 0..n {
-        phase1_cap_expr += (p1w.w_energy * inputs.dt_h[t] * inputs.c_imp_eur_kwh[t]) * p_imp[t];
-        phase1_cap_expr += -(p1w.w_energy * inputs.dt_h[t] * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        phase1_cap_expr += (p1w.w_ghg * inputs.dt_h[t] * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        phase1_cap_expr += (p1w.w_grid * inputs.dt_h[t]) * p_imp[t];
-        phase1_cap_expr += (p1w.w_grid * inputs.dt_h[t]) * p_exp[t];
-        phase1_cap_expr += (p1w.w_import * inputs.dt_h[t]) * p_imp[t];
-        phase1_cap_expr += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
-        phase1_cap_expr += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
-    }
-    // WP6.3 (BL-09): must mirror Phase 1's objective exactly, same rationale as
-    // every other term here — this is an economic cost, not friction, so it
-    // belongs in the cap expression, not in `friction_obj` below.
-    phase1_cap_expr += penalty::penalty_objective(&penalty_vars);
-    // Phase 1 cost cap contributions: battery wear + EV service reward + heater m_low.
-    // Matches Phase 1 objective exactly so the cap is meaningful.
-    for ctx in asset_contexts {
-        match ctx.asset_kind() {
-            AssetKind::Battery => {
-                // Battery wear only (c_startup=0, c_ramp=0 in cost cap).
-                phase1_cap_expr +=
-                    ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
-            }
-            AssetKind::Ev => {
-                // EV service reward only (c_startup=0 → Phase 1 mode in EV impl).
-                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-            AssetKind::Heater => {
-                // m_low term: use Phase 1 convention (c_startup=0 → m_low in heater impl).
-                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-            AssetKind::ShiftableLoad => {
-                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
-            }
-        }
-    }
-    for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        phase1_cap_expr += interaction.objective(iv, &inputs.dt_h);
-    }
-    // Mirror the Phase 1 objective exactly: earliest-start and PV-use tie-breaks
-    // included. Omitting either lets c_star (Phase 1's true optimum, which
-    // includes both) diverge from this cap by the missing term's magnitude —
-    // for PV-use, up to PV_USE_TIEBREAK_EUR_PER_KWH * total_pv_used_kwh, which
-    // easily dwarfs the epsilon budget and makes Phase 2 infeasible outright.
-    phase1_cap_expr += shiftable_tiebreak_expr(&pool.shiftable);
-    phase1_cap_expr += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
+    // Phase 1 cost cap, over this solve's own variables: the very expression phase 1 minimised.
+    // Built once, in the skeleton, so `c_star` and the cap cannot disagree by a term (which would
+    // make phase 2 infeasible outright). It is an economic cost, not friction, so it belongs in the
+    // cap and not in `friction_obj` below.
+    let phase1_cap_expr = skeleton.cost_expr(inputs, p1w, asset_contexts);
 
     // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
     // c_startup_eur > 0.0 signals Phase 2 mode to asset objective impls.
@@ -291,7 +155,7 @@ pub(crate) fn solve_phase2(
             AssetKind::Battery => {
                 // wear=0, startup=bat_startup, ramp=bat_ramp.
                 friction_obj += ctx.objective(
-                    &pool,
+                    &skeleton.pool,
                     n,
                     &inputs.dt_h,
                     0.0,
@@ -302,7 +166,7 @@ pub(crate) fn solve_phase2(
             AssetKind::Ev => {
                 // c_startup>0 → Phase 2: startup+ramp active, service reward off.
                 friction_obj += ctx.objective(
-                    &pool,
+                    &skeleton.pool,
                     n,
                     &inputs.dt_h,
                     0.0,
@@ -313,35 +177,31 @@ pub(crate) fn solve_phase2(
             AssetKind::Heater => {
                 // c_startup=1.0 signals Phase 2; c_ramp carries w_tier_penalty_eur.
                 // self.lambda_sw_eur applied internally by HeaterMilpContext::objective.
-                friction_obj +=
-                    ctx.objective(&pool, n, &inputs.dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
+                friction_obj += ctx.objective(
+                    &skeleton.pool,
+                    n,
+                    &inputs.dt_h,
+                    0.0,
+                    1.0,
+                    p2w.w_tier_penalty_eur,
+                );
             }
             AssetKind::ShiftableLoad => {
-                friction_obj += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
+                friction_obj += ctx.objective(&skeleton.pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }
     }
     // Earliest-start tie-break must also bias Phase 2: the epsilon cost budget
     // would otherwise let friction smoothing move a shiftable start to a later
     // cost-equal slot, undoing the Phase 1 choice (same lesson as ASAP_FREE).
-    friction_obj += shiftable_tiebreak_expr(&pool.shiftable);
+    friction_obj += shiftable_tiebreak_expr(&skeleton.pool.shiftable);
     // Phase 2's objective is friction-only and otherwise has no opinion on
     // p_pv_used at all — without this, the epsilon cost budget could let
     // friction smoothing curtail PV arbitrarily. Same rationale as the
     // shiftable-load tie-break above.
-    friction_obj += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
+    friction_obj += pv_use_tiebreak_expr(&skeleton.pool.grid, &inputs.dt_h);
 
-    let warm_start = build_phase2_warm_start(
-        inputs,
-        phase1_sol,
-        &p_imp,
-        &p_exp,
-        &u_grid,
-        &s_imp_viol,
-        &s_exp_viol,
-        &pool,
-        n,
-    );
+    let warm_start = build_phase2_warm_start(inputs, phase1_sol, &skeleton.pool, n);
 
     probe!(vars, &vars);
     probe!(expr, "friction", &friction_obj);
@@ -350,28 +210,13 @@ pub(crate) fn solve_phase2(
     let mut model = vars.minimise(&friction_obj).using(highs);
     model = model.with_initial_solution(warm_start);
     model = with_constraint(model, constraint!(phase1_cap_expr <= c_star + epsilon));
-    (model, _) = add_model_constraints(
-        model,
-        inputs,
-        &pool,
-        &p_imp,
-        &p_exp,
-        &u_grid,
-        &s_imp_viol,
-        &s_exp_viol,
-        &active_interactions,
-        &iv_list,
-        &global,
-        asset_contexts,
-        n,
-        &penalty_vars,
-    );
+    (model, _) = skeleton.add_constraints(model, inputs, asset_contexts);
     model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(inputs.mip_gap_target as f32)?;
     let solution = model.solve()?;
 
     let friction_value = solution.eval(&friction_obj);
-    let out = read_solve_output(&solution, &friction_obj, &pool, inputs, n, &penalty_vars);
+    let out = skeleton.read_output(&solution, &friction_obj, inputs);
     Ok((out, friction_value))
 }
 
@@ -502,6 +347,8 @@ pub(crate) fn warm_start_for_test(
     p1: &SolveOutput,
     asset_contexts: &[Box<dyn AssetMilpContext>],
 ) -> (Vec<(Variable, f64)>, Vec<Variable>) {
+    use crate::controller::milp_interactions::GridMilpVars;
+    use good_lp::{variable, variables};
     let n = inputs.n;
     let mut vars = variables!();
     let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
@@ -533,16 +380,6 @@ pub(crate) fn warm_start_for_test(
         .as_ref()
         .map(|b| b.u_bat.clone())
         .unwrap_or_default();
-    let iv = build_phase2_warm_start(
-        inputs,
-        p1,
-        &p_imp,
-        &p_exp,
-        &u_grid,
-        &s_imp_viol,
-        &s_exp_viol,
-        &pool,
-        n,
-    );
+    let iv = build_phase2_warm_start(inputs, p1, &pool, n);
     (iv, u_bat)
 }
