@@ -56,7 +56,7 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
   @isolated
   Scenario: Cancelling a shiftable load that is already running is refused
     Given I POST a shiftable load for asset "wm-5" at 2.0 kW for 60 minutes within 80 minutes
-    And I poll the VEN /sim until asset "wm-5" is drawing power
+    And I poll the VEN /sim until asset "wm-5" has started
     When I DELETE shiftable load with saved id
     Then the response status is 409
-    And the polled sim has asset "wm-5" with power_kw > 0
+    And I poll the VEN /sim until asset "wm-5" appears

@@ -75,6 +75,7 @@ def _plan_diagnostic():
 
 @when('I poll the VEN /sim until asset "{asset_id}" appears')
 @given('I poll the VEN /sim until asset "{asset_id}" appears')
+@then('I poll the VEN /sim until asset "{asset_id}" appears')
 def step_poll_sim_until_asset_appears(context, asset_id):
     def fetch():
         resp = ven_get("/sim")
@@ -101,27 +102,32 @@ def step_poll_sim_until_asset_appears(context, asset_id):
         raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
 
 
-@when('I poll the VEN /sim until asset "{asset_id}" is drawing power')
-@given('I poll the VEN /sim until asset "{asset_id}" is drawing power')
-def step_poll_sim_until_asset_drawing(context, asset_id):
-    """The load has started: the planner chose a slot and the dispatcher commanded it."""
+@when('I poll the VEN /sim until asset "{asset_id}" has started')
+@given('I poll the VEN /sim until asset "{asset_id}" has started')
+def step_poll_sim_until_asset_started(context, asset_id):
+    """The load is running: the planner chose a slot and the dispatcher commanded it.
+
+    Not `power_kw > 0`: for a shiftable load `/sim`'s `power_kw` is its rated power from the
+    first moment it exists, so it says nothing about whether it runs. `started` is the asset's
+    own latch (R-116).
+    """
 
     def fetch():
         resp = ven_get("/sim")
         return resp.json() if resp.ok else None
 
-    def drawing(sim):
+    def started(sim):
         asset = (sim or {}).get("assets", {}).get(asset_id)
-        return asset is not None and asset.get("power_kw", 0) > 0
+        return asset is not None and asset.get("started", 0) > 0.5
 
     try:
         context.polled_sim = poll_until(
-            fetch, drawing,
+            fetch, started,
             timeout=240, interval=3,
-            description=f"/sim asset '{asset_id}' is drawing power",
+            description=f"/sim asset '{asset_id}' has started",
         )
     except TimeoutError as e:
-        raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
+        raise TimeoutError(f"{e}"+chr(92)+f"nDIAGNOSTIC {_plan_diagnostic()}") from None
 
 
 @then('the polled sim has asset "{asset_id}" with power_kw > 0')
