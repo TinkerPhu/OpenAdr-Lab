@@ -11,8 +11,9 @@ use super::{
 use crate::entities::asset::{
     AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
 };
-use crate::entities::asset_params::{EvParams, EvUsageSimParams};
+use crate::entities::asset_params::{EvParams, EvUsageSimParams, RequestDefaults};
 use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::ev_usage::EvUsageSimState;
 use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
@@ -246,21 +247,6 @@ impl EvCharger {
             interpolation: Interpolation::Step,
         }
     }
-
-    pub fn resolve_request_target(
-        &self,
-        state: &EvState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
-        let target = target_soc.unwrap_or(self.soc_target);
-        let delta = (target - state.soc).max(0.0);
-        let kwh = delta * self.battery_kwh;
-        if kwh < 1e-6 {
-            return None;
-        }
-        Some((kwh, desired_power_kw.unwrap_or(self.max_charge_kw)))
-    }
 }
 
 impl Asset for EvCharger {
@@ -362,6 +348,10 @@ impl Asset for EvCharger {
     fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
         let s: &EvState = own(state);
         Self::state_values(self, s)
+    }
+
+    fn usage_schedule_view(&self, now: DateTime<Utc>) -> Option<EvUsageSimState> {
+        self.usage_view(now)
     }
 
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
@@ -479,14 +469,14 @@ impl MilpParticipant for EvCharger {
 }
 
 impl RequestResolvable for EvCharger {
-    fn resolve_request_target(
-        &self,
-        state: &AssetState,
-        target_soc: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
+    fn request_defaults(&self, state: &AssetState) -> RequestDefaults {
         let s: &EvState = own(state);
-        Self::resolve_request_target(self, s, target_soc, desired_power_kw)
+        RequestDefaults {
+            current_soc: s.soc,
+            default_soc_target: self.soc_target,
+            capacity_kwh: self.battery_kwh,
+            max_charge_kw: self.max_charge_kw,
+        }
     }
 
     /// Moved here verbatim from `AssetConfig::available_storage_kwh`'s EV arm

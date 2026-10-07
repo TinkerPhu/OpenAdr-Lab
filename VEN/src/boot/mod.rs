@@ -60,8 +60,7 @@ pub struct World {
     pub base_load_measurement_enabled: bool,
     pub comms_loss: Option<CommsLossConfig>,
     pub history_retention_days: u32,
-    /// Resolved once and shared by the daily learner job and the
-    /// `/debug/heuristics/preload` route, instead of each defaulting on its own.
+    /// Resolved once from the profile for the daily learner job.
     pub heuristics_config: HeuristicsConfig,
 
     pub poll: tasks::poll_config::ResolvedPollConfig,

@@ -61,13 +61,6 @@ pub struct AppCtx {
     /// carried (not the full `CommsLossConfig`) because `routes/` may not
     /// import `crate::profile` types (AB-06, `tests/architecture.rs`).
     pub comms_loss_debounce_s: Option<u64>,
-    /// Base-load heuristics learner config, resolved once from the profile
-    /// at startup (`services::heuristics::HeuristicsConfig` — all-`Copy`
-    /// primitives, safe to clone into `AppCtx`). Threading a single shared
-    /// value into both `tasks::heuristics_job` and
-    /// `routes::debug::preload_heuristics` closes a latent drift risk where
-    /// each independently called `HeuristicsConfig::default()`.
-    pub heuristics_config: services::heuristics::HeuristicsConfig,
     /// The site's physical grid import/export rating (`profile.grid`), the
     /// same clamp the tick applies to its capacity curves — carried as
     /// primitives so `GET /flexibility/capacity?start=` clamps identically

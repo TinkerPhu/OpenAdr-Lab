@@ -19,6 +19,7 @@ use super::ev::{EvCharger, EvState};
 use super::own_state::own;
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
 use crate::entities::asset_params::EvUsageSimParams;
+use crate::entities::ev_usage::{EvUsageSimState, NextTrip};
 
 /// One simulated day's leave/return trip, per `ev-usage-simulation`.
 #[derive(Debug, Clone, PartialEq)]
@@ -174,7 +175,35 @@ pub fn most_recently_ended_trip(
         .max_by_key(|trip| trip.return_at)
 }
 
+/// How far ahead the diagnostics view looks for the next trip. For display only,
+/// independent of the planner's own (shorter) horizon.
+const USAGE_VIEW_LOOKAHEAD_DAYS: i64 = 7;
+
 impl EvCharger {
+    /// The configured usage schedule as `GET /ev-usage-sim` shows it: the usage class,
+    /// whether charge planning is engaged, and the trip in progress or, failing that,
+    /// the next one. `None` when no schedule is configured.
+    pub(super) fn usage_view(&self, now: DateTime<Utc>) -> Option<EvUsageSimState> {
+        let cfg = self.usage_sim.as_ref()?;
+        let trip = active_trip_at(cfg, self.usage_sim_seed_tag, now).or_else(|| {
+            next_trip_after(
+                cfg,
+                self.usage_sim_seed_tag,
+                now,
+                now + Duration::days(USAGE_VIEW_LOOKAHEAD_DAYS),
+            )
+        });
+        Some(EvUsageSimState {
+            mode: cfg.mode,
+            engage_charge_planning: cfg.engage_charge_planning,
+            next_trip: trip.map(|t| NextTrip {
+                leave_at: t.leave_at,
+                return_at: t.return_at,
+                expected_soc_drop_pct: t.soc_drop_pct,
+            }),
+        })
+    }
+
     /// True if this EV is unavailable (away) at `ts`, from either of the two
     /// independent sources: a live `EvSession` deadline (existing
     /// `ev-departure-consolidation` behavior, unbounded from `departure_time`
@@ -326,6 +355,54 @@ mod usage_sim_tests {
             weekend,
             min_soc_after_drop_pct: 5.0,
         }
+    }
+
+    fn ev_with_schedule(usage_sim: Option<EvUsageSimParams>) -> EvCharger {
+        EvCharger::from_params(&crate::entities::asset_params::EvParams {
+            usage_sim,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn usage_view_is_none_without_a_configured_schedule() {
+        assert_eq!(ev_with_schedule(None).usage_view(Utc::now()), None);
+    }
+
+    #[test]
+    fn usage_view_reports_the_trip_in_progress() {
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let ev = ev_with_schedule(Some(cfg.clone()));
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let view = ev.usage_view(noon).expect("a schedule is configured");
+        assert_eq!(view.mode, cfg.mode);
+        assert_eq!(view.engage_charge_planning, cfg.engage_charge_planning);
+        let trip = view
+            .next_trip
+            .expect("the day's trip is in progress at noon");
+        assert!(trip.leave_at <= noon && noon < trip.return_at);
+    }
+
+    #[test]
+    fn usage_view_looks_ahead_to_the_next_trip_when_home() {
+        let cfg = usage_cfg(day_cfg(8, 17, 1.0), day_cfg(8, 17, 1.0));
+        let ev = ev_with_schedule(Some(cfg));
+        let evening = Utc.with_ymd_and_hms(2026, 7, 20, 22, 0, 0).unwrap();
+        let trip = ev
+            .usage_view(evening)
+            .and_then(|v| v.next_trip)
+            .expect("tomorrow's trip is inside the look-ahead");
+        assert!(trip.leave_at > evening);
+    }
+
+    #[test]
+    fn usage_view_has_no_next_trip_when_none_is_ever_scheduled() {
+        let cfg = usage_cfg(day_cfg(8, 17, 0.0), day_cfg(8, 17, 0.0));
+        let ev = ev_with_schedule(Some(cfg));
+        let view = ev
+            .usage_view(Utc::now())
+            .expect("the schedule is configured");
+        assert_eq!(view.next_trip, None);
     }
 
     // 2026-07-20 is a Monday.
