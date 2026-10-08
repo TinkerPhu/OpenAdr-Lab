@@ -21,7 +21,22 @@ pub struct SensorSnapshot {
     pub temperature_c: Option<f64>,
     pub power_w: Option<f64>,
     pub voltage_v: Option<f64>,
-    pub raw: serde_json::Value,
+    pub raw: SensorRaw,
+}
+
+/// What a sensor reading carries beyond its typed values: where it came from and, from the
+/// simulator, the meter's import and export. Any other key a `POST /sensors` client sends is kept
+/// as it came (`extra`) and echoed back; the VEN never reads it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SensorRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_w: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_w: Option<f64>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl SensorSnapshot {
@@ -35,7 +50,7 @@ impl SensorSnapshot {
             temperature_c: None,
             power_w: None,
             voltage_v: None,
-            raw: serde_json::json!({}),
+            raw: SensorRaw::default(),
         }
     }
 }
@@ -45,7 +60,7 @@ pub struct SensorInput {
     pub temperature_c: Option<f64>,
     pub power_w: Option<f64>,
     pub voltage_v: Option<f64>,
-    pub raw: Option<serde_json::Value>,
+    pub raw: Option<SensorRaw>,
 }
 
 impl SimState {
@@ -64,11 +79,12 @@ impl SimState {
             temperature_c: temp_c,
             power_w: Some(self.grid.net_power_w),
             voltage_v: Some(self.grid.voltage_v),
-            raw: serde_json::json!({
-                "source": "simulator",
-                "import_w": self.grid.import_w,
-                "export_w": self.grid.export_w,
-            }),
+            raw: SensorRaw {
+                source: Some("simulator".into()),
+                import_w: Some(self.grid.import_w),
+                export_w: Some(self.grid.export_w),
+                extra: Default::default(),
+            },
         }
     }
 
@@ -213,8 +229,30 @@ impl SimState {
 
 #[cfg(test)]
 mod tests {
+    use super::SensorRaw;
     use crate::entities::asset_params::{AssetParams, HeaterParams};
     use crate::simulator::SimState;
+
+    /// R-114: the typed `raw` keeps the JSON it replaced - the simulator's three keys, a
+    /// client's own keys as they came, and `{}` for nothing.
+    #[test]
+    fn sensor_raw_round_trips_the_json_it_replaced() {
+        let client = serde_json::json!({"source": "test", "probe": {"id": 7}, "rssi": -61});
+        let raw: SensorRaw = serde_json::from_value(client.clone()).unwrap();
+        assert_eq!(raw.source.as_deref(), Some("test"));
+        assert_eq!(serde_json::to_value(&raw).unwrap(), client);
+
+        let sim = SimState::from_params(&[], chrono::Utc::now()).to_sensor_snapshot();
+        let wire = serde_json::to_value(&sim.raw).unwrap();
+        assert_eq!(wire["source"], "simulator");
+        assert!(wire["import_w"].is_number() && wire["export_w"].is_number());
+        assert_eq!(wire.as_object().unwrap().len(), 3);
+
+        assert_eq!(
+            serde_json::to_value(SensorRaw::default()).unwrap(),
+            serde_json::json!({})
+        );
+    }
 
     #[test]
     fn thermostat_setpoints_come_from_each_thermostat_asset() {

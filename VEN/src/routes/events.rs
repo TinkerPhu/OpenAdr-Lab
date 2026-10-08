@@ -45,7 +45,7 @@ pub async fn post_sensors(
         temperature_c: input.temperature_c,
         power_w: input.power_w,
         voltage_v: input.voltage_v,
-        raw: input.raw.unwrap_or(serde_json::json!({})),
+        raw: input.raw.unwrap_or_default(),
     };
     ctx.state.update_sensor(snap.clone()).await;
     Json(snap)

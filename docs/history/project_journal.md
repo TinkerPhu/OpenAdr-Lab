@@ -14944,3 +14944,15 @@ moved into `services/request_submission.rs`; the "controller event + replan trig
 three times, and `delete_request` once more, is now `announce_request_transition`. The capability
 traits left `asset_trait.rs` for `capability_traits.rs` to keep it under the 500-line cap. BDD covers
 heater requests for the first time (stated target, declared default) and the two refused `/sim` values.
+
+## R-114: typed bodies instead of `serde_json::Value` on the telemetry port (refactor/r114-typed-telemetry)
+
+The domain `TelemetryPort` took `serde_json::Value`, built by serialising a snapshot and inserting
+`venName` by hand, with a serialisation failure turned into `{}`. It now takes `TelemetryBody` and
+`TraceBody` (the snapshot or the `ControllerEvent` flattened, plus `venName`); the MQTT adapter
+serialises them and logs and drops a body that will not serialise. A test pins that the wire JSON is
+exactly the old one. `SensorSnapshot.raw` became `SensorRaw`: the three keys the simulator writes are
+typed, and anything else a `POST /sensors` client sends is kept in a flattened `extra` map and echoed
+back, so the endpoint stays a passthrough. Only a non-object `raw` (accepted before) is now refused.
+The `to_value(..).unwrap_or_default()` in `GET /plan`, `/ledger` and `/sim` went the way of the one in
+`POST /user-requests` (R-113): `Json(x)` serialises directly.

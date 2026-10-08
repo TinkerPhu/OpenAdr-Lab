@@ -1055,7 +1055,10 @@ one `RequestTransition` event and one replan trigger through `announce_request_t
 `services::request_submission::{submit, cancel_and_announce}`, and a value set through `/sim/reset` or
 `/sim/config/battery` is checked by the asset itself (`Asset::validate_values`, called by `SimHandle`;
 `DomainError::InvalidValue` -> 400, `AssetNotFound` -> 404). Tests: `services/request_submission.rs`,
-`simulator/handle.rs` `the_battery_refuses_*`. Lever ids are the named
+`simulator/handle.rs` `the_battery_refuses_*`. No `serde_json::Value` crosses a domain port: the
+`TelemetryPort` takes `TelemetryBody`/`TraceBody` (the snapshot or the event, flattened, plus `venName`)
+and the MQTT adapter serialises them (`telemetry_port::to_wire`); `SensorSnapshot.raw` is a typed
+`SensorRaw` whose unknown client keys ride in `extra`. Lever ids are the named
 `LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`

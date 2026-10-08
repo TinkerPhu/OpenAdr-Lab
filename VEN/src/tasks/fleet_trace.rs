@@ -46,6 +46,7 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::telemetry_port::{to_wire, TelemetryBody, TraceBody};
     use crate::state::AppState;
     use async_trait::async_trait;
     use std::sync::Mutex;
@@ -58,9 +59,10 @@ mod tests {
 
     #[async_trait]
     impl TelemetryPort for Recorder {
-        async fn publish_telemetry(&self, _body: serde_json::Value) {}
-        async fn publish_trace(&self, body: serde_json::Value) {
-            self.published.lock().unwrap().push(body);
+        async fn publish_telemetry(&self, _body: TelemetryBody<'_>) {}
+        async fn publish_trace(&self, body: TraceBody<'_>) {
+            let wire = serde_json::from_str(&to_wire(&body).unwrap()).unwrap();
+            self.published.lock().unwrap().push(wire);
         }
         fn is_connected(&self) -> bool {
             true

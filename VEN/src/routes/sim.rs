@@ -173,7 +173,7 @@ fn no_content_or_error(
 
 pub async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.sim().await {
-        Some(sim) => Json(serde_json::to_value(sim).unwrap_or_default()).into_response(),
+        Some(sim) => Json(sim).into_response(),
         None => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({"error": "simulator not yet initialized"})),
