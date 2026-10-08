@@ -75,7 +75,7 @@
   "VEN/src/tasks/planning/mod.rs::spawn_planning": 110,
   "VEN/src/tasks/poll_events/detect.rs::detect_event_changes": 110,
   "VEN/src/tasks/poll_events/mod.rs::spawn_event_poll": 163,
-  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 183,
+  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 182,
   "VEN/src/vtn_reports.rs::upsert_report": 102,
   "VTN/bff/src/main.rs::main": 134
  }
