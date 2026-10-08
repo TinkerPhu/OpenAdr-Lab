@@ -501,6 +501,14 @@ pub struct AssetRequestSlice {
 }
 
 impl AssetRequestSlice {
+    /// The state-of-charge target a request aims for: the one it states, else the asset's own
+    /// declared default (`RequestDefaults::default_soc_target`); `None` for an asset with no SoC.
+    /// The one place this is decided, so the energy to charge and the session it creates can never
+    /// aim at two different targets (R-112).
+    pub fn target_soc(&self, requested: Option<f64>) -> Option<f64> {
+        requested.or(self.default_soc_target)
+    }
+
     pub fn resolve_request_target(
         &self,
         target_soc: Option<f64>,
@@ -508,7 +516,7 @@ impl AssetRequestSlice {
     ) -> Option<(f64, f64)> {
         let current_soc = self.current_soc?;
         let capacity_kwh = self.capacity_kwh?;
-        let target = target_soc.or(self.default_soc_target).unwrap_or(1.0);
+        let target = self.target_soc(target_soc).unwrap_or(1.0);
         let kwh = (target - current_soc).max(0.0) * capacity_kwh;
         if kwh < 1e-6 {
             return None;

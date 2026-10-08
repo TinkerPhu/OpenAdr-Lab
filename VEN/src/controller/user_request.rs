@@ -250,7 +250,7 @@ pub fn create_from_body(
     let user_request = UserRequest {
         id: Uuid::new_v4(),
         asset_id: body.asset_id,
-        target_soc: body.target_soc,
+        target_soc: slice.target_soc(body.target_soc),
         target_energy_kwh,
         desired_power_kw,
         deadlines: request_deadlines,
