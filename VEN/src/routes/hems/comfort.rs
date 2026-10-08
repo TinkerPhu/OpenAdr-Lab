@@ -36,12 +36,8 @@ pub async fn get_comfort_curve(
             .into_response();
     };
     let overrides = ctx.state.comfort_overrides_map().await;
-    let source = if overrides.contains_key(&asset_id) {
-        "override"
-    } else {
-        "default"
-    };
-    let rates = crate::services::comfort::effective_comfort_rates(&overrides, &asset_id, default);
+    let source = crate::entities::comfort::comfort_curve_source(&overrides, &asset_id);
+    let rates = crate::entities::comfort::effective_comfort_rates(&overrides, &asset_id, default);
     Json(serde_json::json!({ "source": source, "rates": rates })).into_response()
 }
 

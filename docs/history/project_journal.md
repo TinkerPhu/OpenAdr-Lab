@@ -14865,3 +14865,15 @@ recorded the lower baseline. The row was closed by guarding the duplication, not
 purpose: a single declaration needs `serde(flatten)` and touches ~170 reads.
 Learning: where two types must exist, make drift a compile error with an exhaustive pattern and pin
 their defaults with a parity test, rather than relying on whoever adds a field to remember the other.
+
+## R-108: comfort curves are domain logic (refactor/r108-comfort-in-entities)
+
+`simulator/plan_context.rs` (infrastructure) called `services::comfort::effective_comfort_rates`
+(application): the dependency ran the wrong way. The function is one line of pure logic, and its
+neighbour `validate_curve` is pure too, so both moved to `entities/comfort.rs`; `services/comfort.rs`
+keeps only what touches `AppState` and `SettingsPort`. The `GET .../comfort_curve` route had its own
+copy of the override-versus-default question (`overrides.contains_key`); it now asks
+`comfort_curve_source`. Rule 9 of `audit_ven_architecture.py` (no `crate::services` in assets/ or
+simulator/) was added first and seen failing on exactly the one import. The move could have silently
+broken the planner's pricing, which nothing tested end to end at that seam, so a `plan_context` test now
+pins that a user's curve reaches the EV's priced bands (and that the default does not).

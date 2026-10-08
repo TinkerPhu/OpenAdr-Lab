@@ -4,6 +4,7 @@ pub mod asset_ledger;
 pub mod asset_params;
 pub mod capacity;
 pub mod capacity_curve;
+pub mod comfort;
 pub mod design_vocabulary;
 pub mod device_session;
 pub mod error;

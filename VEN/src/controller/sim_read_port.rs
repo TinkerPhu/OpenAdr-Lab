@@ -56,6 +56,6 @@ pub trait SimReadPort: Send + Sync {
 
     /// One slice per asset for resolving a user request, each with the asset's own request
     /// defaults and its BUILT-IN comfort curve; a user's override is applied by the caller
-    /// (`services::comfort::effective_comfort_rates`).
+    /// (`entities::comfort::effective_comfort_rates`).
     async fn request_slices(&self) -> Vec<AssetRequestSlice>;
 }

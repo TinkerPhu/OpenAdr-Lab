@@ -55,6 +55,12 @@ The rules, and why each exists:
      `Asset` method carried on `AssetSnapshot` (`history`, `emergency_what_ifs`, `ac_ceiling_kw`,
      ...).
 
+  9. No `crate::services` in assets/ or simulator/. Infrastructure implements what the domain
+     defines; calling up into the application ring runs the dependency the wrong way (R-108:
+     `simulator/plan_context.rs` called `services::comfort::effective_comfort_rates`, a pure
+     function that belongs to `entities/comfort.rs`). Test-only uses of `services::test_support`
+     are in test blocks and are not flagged.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -186,6 +192,9 @@ CHECKS = [
      lambda: forbid("infra", [VEN_SRC / "controller"],
                     r"crate::(assets|simulator)\b")),
     ("new concrete SimState in the application ring", simstate_in_services),
+    ("application ring reached from infra",
+     lambda: forbid("services", [VEN_SRC / "assets", VEN_SRC / "simulator"],
+                    r"crate::services\b")),
     ("string-key asset value read outside assets/",
      lambda: forbid("val", [VEN_SRC / d for d in (
          "controller", "services", "routes", "tasks", "entities", "simulator", "state",

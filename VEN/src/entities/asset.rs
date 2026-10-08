@@ -460,7 +460,7 @@ pub struct ComfortRate {
 impl ComfortRate {
     /// Interpolate an arbitrary `ComfortRate` field (selected by `extract`) at a fill level.
     /// `rates` must be sorted non-decreasing by `fill` (guaranteed by
-    /// `services/comfort.rs::validate_curve` for any persisted curve) and non-empty. Exact
+    /// `entities/comfort.rs::validate_curve` for any persisted curve) and non-empty. Exact
     /// breakpoint queries return the stored value; mid-curve queries interpolate linearly
     /// between the two bracketing points; queries outside the stored range clamp to the
     /// nearest boundary breakpoint.

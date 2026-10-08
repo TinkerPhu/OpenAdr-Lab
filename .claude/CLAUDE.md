@@ -397,6 +397,7 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     adapters — routes/, tasks/, boot/ — read the clock once and pass `now` down)
     no `.val("...")` string-key read of an asset's `state_values()` outside assets/ (declare a
     typed `Asset` method, carried on `AssetSnapshot`)
+    no `crate::services` in assets/ or simulator/ (infra implements what the domain defines)
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md
