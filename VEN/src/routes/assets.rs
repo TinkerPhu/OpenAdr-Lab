@@ -7,6 +7,30 @@ use serde::Deserialize;
 
 use crate::AppCtx;
 
+/// The 404 every per-asset route answers for an id the roster does not hold.
+fn unknown_asset(asset_id: &str) -> axum::response::Response {
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
+    )
+        .into_response()
+}
+
+/// A time series as `{"samples": [{"ts": ..., "value": ...}], "interpolation": ...}` - the one
+/// wire shape of the forecast and history routes.
+fn series_json(series: &lab_core::time_series::TimeSeries) -> axum::response::Response {
+    let samples: Vec<serde_json::Value> = series
+        .samples
+        .iter()
+        .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
+        .collect();
+    Json(serde_json::json!({
+        "samples": samples,
+        "interpolation": series.interpolation,
+    }))
+    .into_response()
+}
+
 /// Query parameters for GET /forecast/:asset_id.
 #[derive(Deserialize)]
 pub struct ForecastParams {
@@ -26,7 +50,6 @@ pub async fn get_asset_forecast(
     Path(asset_id): Path<String>,
     Query(params): Query<ForecastParams>,
 ) -> impl IntoResponse {
-    use axum::http::StatusCode;
     use chrono::Duration;
 
     let timespan_s = params.timespan_s.unwrap_or(0.0);
@@ -34,23 +57,8 @@ pub async fn get_asset_forecast(
     let now = chrono::Utc::now();
 
     match ctx.sim_read.asset_forecast(&asset_id, timespan, now).await {
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
-        )
-            .into_response(),
-        Some(series) => {
-            let samples: Vec<serde_json::Value> = series
-                .samples
-                .iter()
-                .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
-                .collect();
-            Json(serde_json::json!({
-                "samples": samples,
-                "interpolation": series.interpolation,
-            }))
-            .into_response()
-        }
+        None => unknown_asset(&asset_id),
+        Some(series) => series_json(&series),
     }
 }
 
@@ -65,14 +73,8 @@ pub async fn get_asset_capability(
     State(ctx): State<AppCtx>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
-    use axum::http::StatusCode;
-
     match ctx.sim_read.asset_capability(&asset_id).await {
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
-        )
-            .into_response(),
+        None => unknown_asset(&asset_id),
         Some(view) => {
             let (cap, floor) = (view.capability, view.floor);
             // Serialized from the capability itself, so every field the asset
@@ -107,7 +109,6 @@ pub async fn get_asset_history(
     Path(asset_id): Path<String>,
     Query(params): Query<HistoryParams>,
 ) -> impl IntoResponse {
-    use axum::http::StatusCode;
     use chrono::Duration;
 
     let timespan_s = params.timespan_s.unwrap_or(0.0);
@@ -115,22 +116,7 @@ pub async fn get_asset_history(
     let now = chrono::Utc::now();
 
     match ctx.sim_read.asset_history(&asset_id, timespan, now).await {
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
-        )
-            .into_response(),
-        Some(series) => {
-            let samples: Vec<serde_json::Value> = series
-                .samples
-                .iter()
-                .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
-                .collect();
-            Json(serde_json::json!({
-                "samples": samples,
-                "interpolation": series.interpolation,
-            }))
-            .into_response()
-        }
+        None => unknown_asset(&asset_id),
+        Some(series) => series_json(&series),
     }
 }
