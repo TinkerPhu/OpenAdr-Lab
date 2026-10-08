@@ -31,7 +31,7 @@ use crate::entities::planner_params::PlannerObjective;
 use arbiter_levers::{
     apply_battery_lever, apply_ev_lever, apply_ev_lever_opportunistic, apply_heater_pause_lever,
     battery_lever, ev_lever, heater_emergency_lever, heater_pause_lever, pv_curtailment_lever,
-    Lever,
+    Lever, LEVER_BATTERY, LEVER_EV, LEVER_HEATER_EMERGENCY, LEVER_HEATER_PAUSE, LEVER_PV_CURTAIL,
 };
 
 /// Illustrative defaults — the design doc's own open-question list notes none
@@ -444,7 +444,7 @@ pub(crate) fn apply_ranked_levers(
         sim,
         tick.plan_slot,
         deviation_kw,
-        inputs.incumbent_lever == Some("heater_emergency"),
+        inputs.incumbent_lever == Some(LEVER_HEATER_EMERGENCY),
         tick.alert_active,
     ));
     candidates.extend(pv_curtailment_lever(tick.plan_slot, deviation_kw));
@@ -469,7 +469,7 @@ pub(crate) fn apply_ranked_levers(
             -assigned_kw
         };
         let achieved_kw = match lever.id {
-            "battery" => bridge.battery_moved(
+            LEVER_BATTERY => bridge.battery_moved(
                 apply_battery_lever(
                     setpoints,
                     sim,
@@ -479,9 +479,9 @@ pub(crate) fn apply_ranked_levers(
                 ),
                 deviation_kw,
             ),
-            "ev" => bridge.ev_moved(apply_ev_lever(setpoints, sim, signed_assigned_kw)),
-            "heater_pause" => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
-            "heater_emergency" => {
+            LEVER_EV => bridge.ev_moved(apply_ev_lever(setpoints, sim, signed_assigned_kw)),
+            LEVER_HEATER_PAUSE => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
+            LEVER_HEATER_EMERGENCY => {
                 applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
                     // Curtail (alerts only): no planned stage either.
                     setpoints.insert(crate::ids::ASSET_HEATER.to_string(), 0.0);
@@ -491,7 +491,7 @@ pub(crate) fn apply_ranked_levers(
                 });
                 assigned_kw
             }
-            "pv_curtail" => {
+            LEVER_PV_CURTAIL => {
                 applied.pv_generation_limit_tighten_kw = Some(assigned_kw);
                 assigned_kw
             }

@@ -14816,3 +14816,16 @@ points and converted watts by hand. Now: `Asset::planned_usage_sessions` (EV) + 
 `ev_usage_forecast::predicted_uses`; both now call `ev_schedule::trip_windows`, so "when is the car
 home between two trips" has one answer. The plan-ahead task tests moved to where the behaviour now
 lives (`ev_schedule`, `services::ev_usage_plan`); the task keeps a wiring test.
+
+## R-107: the controller reads typed asset answers (refactor/r107-typed-controller-reads)
+
+The arbiter and comms-loss read three asset answers out of the `state_values()` string map
+(`emergency_heat_kw`, `absorb_headroom_kw`, `inverter_max_kw`): a renamed key would have silently
+yielded `None`. They are now `Asset::emergency_what_ifs` (heater) and `Asset::ac_ceiling_kw` (PV),
+carried typed on `AssetSnapshot`; `state_values()` builds its keys from the same method, so the map and
+the typed field cannot drift (parity tests per asset). `audit_ven_architecture.py` rule 8 forbids any
+`.val("...")` outside assets/, and was seen failing on exactly these three reads first. The debt row
+also said lever dispatch compared literal asset ids; exploration showed they are *lever* ids, a
+separate namespace that merely shares spellings with `ids::ASSET_*`, so the fix is named `LEVER_*`
+constants, not asset-id constants. `simulator/tests.rs` hit the file-size cap with the added tests;
+two of its modules moved into `simulator/tests/` like the existing `peek_*` tests.

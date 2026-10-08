@@ -393,6 +393,8 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     no `crate::assets` or `crate::simulator` anywhere in controller/
     no `Utc::now()` in entities/, controller/, services/, assets/, simulator/, state/ (the
     adapters — routes/, tasks/, boot/ — read the clock once and pass `now` down)
+    no `.val("...")` string-key read of an asset's `state_values()` outside assets/ (declare a
+    typed `Asset` method, carried on `AssetSnapshot`)
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md
