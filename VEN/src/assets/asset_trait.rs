@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
 
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
-use crate::assets::HistoryPoint;
+use crate::assets::{HistoryPoint, LoadWindowStats};
 use crate::entities::asset::{AssetHistoryView, AssetType, ComfortRate, CompletionPolicy};
 use crate::entities::asset_params::{PvCurtailmentSource, RequestDefaults};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
@@ -216,6 +216,10 @@ pub trait Asset: Send + Sync {
     fn state_values(&self, _state: &AssetState) -> HashMap<String, f64> {
         unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
     }
+
+    /// Receive the summary of this asset's trailing window of recorded power (`None` while the
+    /// history holds no record). Default: ignore it. Only the base load keeps one, to show.
+    fn set_observed_window(&mut self, _window: Option<LoadWindowStats>) {}
 
     /// The simulated-origin charge sessions this asset's configured usage schedule predicts in
     /// `[now, now + window]` (one per trip), for the session queue. Empty for every asset

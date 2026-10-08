@@ -290,6 +290,10 @@ impl BaseLoad {
 }
 
 impl Asset for BaseLoad {
+    fn set_observed_window(&mut self, window: Option<LoadWindowStats>) {
+        BaseLoad::set_observed_window(self, window);
+    }
+
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
         let feature = |label: &str, kw: Option<f64>| match kw {
             Some(kw) => KeyFeature::power_kw(label, kw),

@@ -12,7 +12,6 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::assets::load_window::{LoadWindowStats, LOAD_WINDOW_DAYS};
-use crate::assets::BaseLoad;
 use crate::controller::HistoryPort;
 use crate::ids::ASSET_BASE_LOAD;
 use crate::simulator::SimState;
@@ -47,12 +46,7 @@ pub(crate) async fn refresh_base_load_window(
         }
     };
     let stats = LoadWindowStats::from_power_kw(rows.iter().map(|r| r.power_kw));
-    let mut sim = sim.lock().await;
-    if let Some((_, asset)) = sim.find_asset_mut(ASSET_BASE_LOAD) {
-        if let Some(base_load) = asset.as_any_mut().downcast_mut::<BaseLoad>() {
-            base_load.set_observed_window(stats);
-        }
-    }
+    sim.lock().await.set_base_load_observed_window(stats);
     stats
 }
 
