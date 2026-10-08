@@ -5,6 +5,7 @@ pub mod test_support;
 pub mod planning;
 pub use planning::PlanningService;
 
+pub mod request_submission;
 pub mod user_request;
 
 pub mod ev_usage_plan;

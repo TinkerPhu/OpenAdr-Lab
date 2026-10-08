@@ -280,7 +280,7 @@ impl UserRequestService {
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::entities::user_request::UserRequestStatus;
     use crate::entities::DomainError;
@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(load.duration_min, 60);
     }
 
-    fn shiftable_body(duration_min: u32, window_h: i64) -> CreateUserRequestParams {
+    pub(crate) fn shiftable_body(duration_min: u32, window_h: i64) -> CreateUserRequestParams {
         CreateUserRequestParams {
             mode: Default::default(),
             asset_id: "washing_machine".to_string(),
@@ -710,7 +710,7 @@ mod tests {
     }
 
     /// An EV request due in 6 h, stating `target_soc` or not.
-    fn ev_body(now: DateTime<Utc>, target_soc: Option<f64>) -> CreateUserRequestParams {
+    pub(crate) fn ev_body(now: DateTime<Utc>, target_soc: Option<f64>) -> CreateUserRequestParams {
         CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_EV.to_string(),
@@ -867,7 +867,10 @@ mod tests {
     }
 
     /// A heater request due in 4 h for 5 kWh at 2 kW, stating `target_temp_c` or not.
-    fn heater_body(now: DateTime<Utc>, target_temp_c: Option<f64>) -> CreateUserRequestParams {
+    pub(crate) fn heater_body(
+        now: DateTime<Utc>,
+        target_temp_c: Option<f64>,
+    ) -> CreateUserRequestParams {
         CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_HEATER.to_string(),
