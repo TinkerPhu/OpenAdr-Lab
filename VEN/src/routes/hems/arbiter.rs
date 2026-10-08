@@ -7,7 +7,7 @@
 use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
-use crate::AppCtx;
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArbiterSettings {
@@ -15,16 +15,16 @@ pub struct ArbiterSettings {
     pub limit_enforcement_enabled: bool,
 }
 
-async fn arbiter_settings(ctx: &AppCtx) -> ArbiterSettings {
+async fn arbiter_settings(state: &crate::state::AppState) -> ArbiterSettings {
     ArbiterSettings {
-        deviation_arbiter_enabled: ctx.state.deviation_arbiter_enabled().await,
-        limit_enforcement_enabled: ctx.state.limit_enforcement_enabled().await,
+        deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
+        limit_enforcement_enabled: state.limit_enforcement_enabled().await,
     }
 }
 
 /// GET /arbiter-settings — both passes' current toggle state.
-pub async fn get_arbiter_settings(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(arbiter_settings(&ctx).await)
+pub async fn get_arbiter_settings(State(state): State<AppState>) -> impl IntoResponse {
+    Json(arbiter_settings(&state).await)
 }
 
 /// PUT /arbiter-settings body — each toggle is optional, so one switch can
@@ -37,16 +37,16 @@ pub struct UpdateArbiterSettingsBody {
 
 /// PUT /arbiter-settings — update either or both toggles; returns the result.
 pub async fn put_arbiter_settings(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Json(body): Json<UpdateArbiterSettingsBody>,
 ) -> impl IntoResponse {
     if let Some(enabled) = body.deviation_arbiter_enabled {
-        ctx.state.set_deviation_arbiter_enabled(enabled).await;
+        state.set_deviation_arbiter_enabled(enabled).await;
     }
     if let Some(enabled) = body.limit_enforcement_enabled {
-        ctx.state.set_limit_enforcement_enabled(enabled).await;
+        state.set_limit_enforcement_enabled(enabled).await;
     }
-    Json(arbiter_settings(&ctx).await)
+    Json(arbiter_settings(&state).await)
 }
 
 /// GET /arbiter-diagnostics — last tick's arbiter reasoning (projected net
@@ -56,6 +56,6 @@ pub async fn put_arbiter_settings(
 /// (ui-transparency — no backend-only decision without an inspectable
 /// surface). `net_kw`/`dev_kw`/`active_lever` are `null` before the arbiter
 /// has run this process, or during the no-plan-yet startup window.
-pub async fn get_arbiter_diagnostics(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.arbiter_diagnostics().await)
+pub async fn get_arbiter_diagnostics(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.arbiter_diagnostics().await)
 }

@@ -1,7 +1,8 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 
-use crate::AppCtx;
+use crate::app_ctx::SimRead;
+use crate::state::AppState;
 
 /// GET /ev-session — every queued EV charging session, in window order, read-only.
 ///
@@ -14,14 +15,14 @@ use crate::AppCtx;
 /// `/user-requests`) because a session need not have a linked `UserRequest`: the
 /// simulated usage schedule creates its own, so they are invisible to
 /// `GET /user-requests`. This is the only observable surface for those.
-pub async fn get_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let sessions: Vec<_> = ctx.state.ev_sessions().await.iter().cloned().collect();
+pub async fn get_ev_session(State(state): State<AppState>) -> impl IntoResponse {
+    let sessions: Vec<_> = state.ev_sessions().await.iter().cloned().collect();
     Json(sessions).into_response()
 }
 
 /// GET /ev-settings — returns the current EV overlay settings.
-pub async fn get_ev_settings(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.ev_settings().await)
+pub async fn get_ev_settings(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.ev_settings().await)
 }
 
 /// PUT /ev-settings body.
@@ -32,15 +33,15 @@ pub struct UpdateEvSettingsBody {
 
 /// PUT /ev-settings — update the user toggle for opportunistic PV charging.
 pub async fn put_ev_settings(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Json(body): Json<UpdateEvSettingsBody>,
 ) -> impl IntoResponse {
-    let current = ctx.state.ev_settings().await;
+    let current = state.ev_settings().await;
     let updated = crate::state::EvSettings {
         opportunistic_charging_enabled: body.opportunistic_charging_enabled,
         paused_by_active_session: current.paused_by_active_session,
     };
-    ctx.state.set_ev_settings(updated.clone()).await;
+    state.set_ev_settings(updated.clone()).await;
     Json(updated)
 }
 
@@ -49,8 +50,8 @@ pub async fn put_ev_settings(
 /// declared, whether charge planning is engaged, and the next scheduled
 /// leave/return, or `204 No Content` when the EV has no usage schedule
 /// configured at all, matching `/ev-session`'s existing convention.
-pub async fn get_ev_usage_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.sim_read.usage_schedule_view(chrono::Utc::now()).await {
+pub async fn get_ev_usage_sim(State(sim_read): State<SimRead>) -> impl IntoResponse {
+    match sim_read.usage_schedule_view(chrono::Utc::now()).await {
         Some(view) => Json(view).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }

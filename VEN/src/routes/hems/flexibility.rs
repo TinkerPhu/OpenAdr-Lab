@@ -11,15 +11,16 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tracing::debug;
 
+use crate::app_ctx::{GridRating, Headroom};
 use crate::entities::capacity_curve::CapacityCurves;
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// GET /flexibility — returns the live site-level flexibility envelope (Phase E).
 ///
 /// Updated every dispatcher tick (~1s) and after every planner cycle.
 /// Returns 204 No Content until the first dispatcher tick completes.
-pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.site_envelope().await {
+pub async fn get_flexibility(State(state): State<AppState>) -> impl IntoResponse {
+    match state.site_envelope().await {
         Some(env) => Json(env).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }
@@ -29,8 +30,8 @@ pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// (`AppState::flexibility_history`), oldest first, for the "Site Headroom"
 /// diagram. Distinct from `GET /flexibility`, which is a single live snapshot.
 /// Always 200 — an empty array before the first dispatcher tick.
-pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.flexibility_history().await)
+pub async fn get_flexibility_history(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.flexibility_history().await)
 }
 
 /// GET /flexibility/forecast — forward-looking per-slot headroom trajectory,
@@ -41,8 +42,8 @@ pub async fn get_flexibility_history(State(ctx): State<AppCtx>) -> impl IntoResp
 /// `unified-capacity-envelope-engine` Spec E) — distinct from both
 /// `GET /flexibility` (instant-only) and `GET /flexibility/history` (the past
 /// ring). Always 200 — an empty array when there's no active plan.
-pub async fn get_flexibility_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.site_headroom_forecast().await)
+pub async fn get_flexibility_forecast(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.site_headroom_forecast().await)
 }
 
 /// Query for `GET /flexibility/capacity`. `start` (RFC 3339) anchors the
@@ -65,10 +66,12 @@ pub struct CapacityCurvesQuery {
 /// per-tick curves. The response's `start` is the instant actually used.
 /// 204 before the first dispatcher tick.
 pub async fn get_capacity_curves(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(headroom): State<Headroom>,
+    State(grid_rating): State<GridRating>,
     Query(query): Query<CapacityCurvesQuery>,
 ) -> impl IntoResponse {
-    let Some((import, export)) = ctx.state.capacity_curves().await else {
+    let Some((import, export)) = state.capacity_curves().await else {
         return StatusCode::NO_CONTENT.into_response();
     };
     let per_tick = CapacityCurves {
@@ -76,17 +79,16 @@ pub async fn get_capacity_curves(
         import,
         export,
     };
-    let at_start = match (query.start, ctx.state.active_plan().await) {
+    let at_start = match (query.start, state.active_plan().await) {
         (Some(start), Some(plan)) => {
             let started = std::time::Instant::now();
-            let curves = ctx
-                .headroom
+            let curves = headroom
                 .capacity_curves_at(
                     &plan,
                     start,
                     Utc::now(),
-                    ctx.grid_max_import_kw,
-                    ctx.grid_max_export_kw,
+                    grid_rating.max_import_kw,
+                    grid_rating.max_export_kw,
                 )
                 .await;
             debug!(

@@ -7,20 +7,22 @@ use chrono::Utc;
 use metrics::counter;
 use tracing::error;
 
+use crate::app_ctx::History;
 use crate::controller::history_port::record_report_sent;
 use crate::controller::vtn_port::OadrReportBody;
 use crate::entities::report_submission::ReportSubmissionRecord;
-use crate::AppCtx;
+use crate::state::AppState;
+use crate::vtn::VtnClient;
 
-pub async fn get_reports(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.reports().await)
+pub async fn get_reports(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.reports().await)
 }
 
 /// GET /reports/submissions — recent VEN-initiated submission outcomes
 /// (WP-T5/G-5), newest first. Independent of `GET /reports`, which stays a
 /// straight VTN-echo pass-through.
-pub async fn get_report_submissions(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.report_submissions().await)
+pub async fn get_report_submissions(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.report_submissions().await)
 }
 
 /// GET /reports/windows — how many intervals each report currently carries
@@ -30,9 +32,8 @@ pub async fn get_report_submissions(State(ctx): State<AppCtx>) -> impl IntoRespo
 /// it is state a reader must be able to see rather than infer from the reports
 /// themselves (`ui-transparency`). A window stuck at one interval means
 /// accumulation is not happening; one pinned at the cap means it is trimming.
-pub async fn get_report_windows(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let mut windows: Vec<_> = ctx
-        .state
+pub async fn get_report_windows(State(state): State<AppState>) -> impl IntoResponse {
+    let mut windows: Vec<_> = state
         .report_window_sizes()
         .await
         .into_iter()
@@ -71,7 +72,9 @@ fn submission_outcome(
 }
 
 pub async fn post_reports(
-    State(ctx): State<AppCtx>,
+    State(vtn): State<VtnClient>,
+    State(state): State<AppState>,
+    State(history): State<History>,
     Json(body): Json<OadrReportBody>,
 ) -> impl IntoResponse {
     let echo = body.clone();
@@ -80,9 +83,9 @@ pub async fn post_reports(
         body.eventID.clone(),
         body.clientName.clone(),
     );
-    let result = ctx.vtn.upsert_report(body).await;
+    let result = vtn.upsert_report(body).await;
     let now = Utc::now();
-    ctx.state
+    state
         .record_report_submission(submission_outcome(
             &result,
             report_name.clone(),
@@ -95,7 +98,7 @@ pub async fn post_reports(
         Ok(()) => {
             counter!("reports_sent_total").increment(1);
             record_report_sent(
-                ctx.history.clone(),
+                history.clone(),
                 report_name.unwrap_or_default(),
                 event_id.unwrap_or_default(),
                 now,
@@ -115,7 +118,9 @@ pub async fn post_reports(
 }
 
 pub async fn put_report(
-    State(ctx): State<AppCtx>,
+    State(vtn): State<VtnClient>,
+    State(state): State<AppState>,
+    State(history): State<History>,
     Path(id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
@@ -132,7 +137,7 @@ pub async fn put_report(
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_default();
-    let result = ctx.vtn.update_report(&id, body).await;
+    let result = vtn.update_report(&id, body).await;
     let now = Utc::now();
     // R-45: route through the same submission_outcome() call-and-record path
     // post_reports uses, rather than re-deriving accepted/rejected inline.
@@ -142,7 +147,7 @@ pub async fn put_report(
         Ok(_) => Ok(()),
         Err(e) => Err(anyhow::anyhow!("{e:#}")),
     };
-    ctx.state
+    state
         .record_report_submission(submission_outcome(
             &outcome_result,
             report_name.clone(),
@@ -155,7 +160,7 @@ pub async fn put_report(
         Ok(result) => {
             counter!("reports_sent_total").increment(1);
             record_report_sent(
-                ctx.history.clone(),
+                history.clone(),
                 report_name.unwrap_or_default(),
                 event_id.unwrap_or_default(),
                 now,

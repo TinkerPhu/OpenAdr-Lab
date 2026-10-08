@@ -21,10 +21,12 @@ use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
+use crate::app_ctx::History;
 use crate::controller::HistoryPort;
 use crate::entities::design_vocabulary::UserNotificationSeverity;
 use crate::entities::notification::UserNotification;
-use crate::AppCtx;
+use crate::services::notify::Notifier;
+use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct NotificationsQuery {
@@ -34,10 +36,10 @@ pub struct NotificationsQuery {
 
 /// GET /notifications — the in-memory notification ring, oldest first.
 pub async fn get_notifications(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Query(q): Query<NotificationsQuery>,
 ) -> Json<Vec<crate::entities::notification::UserNotification>> {
-    Json(ctx.state.notifications_since(q.since).await)
+    Json(state.notifications_since(q.since).await)
 }
 
 /// 030: query parameters for the persisted-history endpoint.
@@ -102,10 +104,10 @@ async fn notifications_history(
 
 /// GET /notifications/history — persisted notification history (030).
 pub async fn get_notifications_history(
-    State(ctx): State<AppCtx>,
+    State(history): State<History>,
     Query(q): Query<NotificationsHistoryQuery>,
 ) -> axum::response::Response {
-    match notifications_history(ctx.history.clone(), q).await {
+    match notifications_history(history.clone(), q).await {
         Ok(rows) => Json(rows).into_response(),
         Err(err) => err.into_response(),
     }
@@ -113,9 +115,9 @@ pub async fn get_notifications_history(
 
 /// GET /notifications/events — Server-Sent Events stream of new notifications.
 pub async fn get_notification_events(
-    State(ctx): State<AppCtx>,
+    State(notifier): State<Notifier>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let mut bcast_rx = ctx.notifier.subscribe();
+    let mut bcast_rx = notifier.subscribe();
     // Bridge broadcast → mpsc so lagged clients don't poison the broadcast sender.
     let (fwd_tx, fwd_rx) = tokio::sync::mpsc::channel::<Event>(32);
     tokio::spawn(async move {

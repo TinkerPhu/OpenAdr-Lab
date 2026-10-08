@@ -1300,8 +1300,11 @@ request transitions. `GET /trace/history` serves per-asset recent history.
 
 ## 4. API Contract
 
-All routes are registered in `VEN/src/routes/mod.rs::build_router`. CORS is open. All
-handlers receive `State(ctx: AppCtx)`.
+All routes are registered in `VEN/src/routes/mod.rs::build_router`. CORS is open. The router
+holds `AppCtx`, but no handler takes the whole of it: each extracts only the parts it uses
+(`State(state): State<AppState>`, `State(roster): State<Roster>`, `State<GridRating>`, ...), every part
+having its own type and `impl FromRef<AppCtx>` in `app_ctx.rs` (R-110), so a signature says what the
+route can reach. `audit_ven_architecture.py` rule 11 refuses `State<AppCtx>` in `routes/`.
 
 ### 4.1 Infrastructure
 

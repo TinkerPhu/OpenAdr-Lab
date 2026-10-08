@@ -8,7 +8,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::simulator::{SensorInput, SensorSnapshot};
-use crate::AppCtx;
+use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -16,10 +16,10 @@ pub struct EventsQuery {
 }
 
 pub async fn get_events(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Query(q): Query<EventsQuery>,
 ) -> impl IntoResponse {
-    let mut events = ctx.state.events().await;
+    let mut events = state.events().await;
     let limit = q.limit.unwrap_or(100);
     if events.len() > limit {
         events.truncate(limit);
@@ -27,16 +27,16 @@ pub async fn get_events(
     Json(events)
 }
 
-pub async fn get_programs(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.programs().await)
+pub async fn get_programs(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.programs().await)
 }
 
-pub async fn get_sensors(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.sensor().await)
+pub async fn get_sensors(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.sensor().await)
 }
 
 pub async fn post_sensors(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Json(input): Json<SensorInput>,
 ) -> impl IntoResponse {
     let snap = SensorSnapshot {
@@ -47,6 +47,6 @@ pub async fn post_sensors(
         voltage_v: input.voltage_v,
         raw: input.raw.unwrap_or_default(),
     };
-    ctx.state.update_sensor(snap.clone()).await;
+    state.update_sensor(snap.clone()).await;
     Json(snap)
 }

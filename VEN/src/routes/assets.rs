@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::AppCtx;
+use crate::app_ctx::SimRead;
 
 /// The 404 every per-asset route answers for an id the roster does not hold.
 fn unknown_asset(asset_id: &str) -> axum::response::Response {
@@ -46,7 +46,7 @@ pub struct HistoryParams {
 /// GET /forecast/:asset_id — forward-looking TimeSeries for one asset (speckit 007).
 /// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
 pub async fn get_asset_forecast(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
     Path(asset_id): Path<String>,
     Query(params): Query<ForecastParams>,
 ) -> impl IntoResponse {
@@ -56,7 +56,7 @@ pub async fn get_asset_forecast(
     let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
     let now = chrono::Utc::now();
 
-    match ctx.sim_read.asset_forecast(&asset_id, timespan, now).await {
+    match sim_read.asset_forecast(&asset_id, timespan, now).await {
         None => unknown_asset(&asset_id),
         Some(series) => series_json(&series),
     }
@@ -70,10 +70,10 @@ pub async fn get_asset_forecast(
 /// `snap_to_zero_below_kw`, `power_next_tick_kw` — R-81). BL-27: `adjustability`
 /// is a static control-mode classification, not part of the live feasible range.
 pub async fn get_asset_capability(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
-    match ctx.sim_read.asset_capability(&asset_id).await {
+    match sim_read.asset_capability(&asset_id).await {
         None => unknown_asset(&asset_id),
         Some(view) => {
             let (cap, floor) = (view.capability, view.floor);
@@ -105,7 +105,7 @@ pub async fn get_asset_capability(
 /// GET /history/:asset_id — historical TimeSeries for one asset (speckit 007).
 /// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
 pub async fn get_asset_history(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
     Path(asset_id): Path<String>,
     Query(params): Query<HistoryParams>,
 ) -> impl IntoResponse {
@@ -115,7 +115,7 @@ pub async fn get_asset_history(
     let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
     let now = chrono::Utc::now();
 
-    match ctx.sim_read.asset_history(&asset_id, timespan, now).await {
+    match sim_read.asset_history(&asset_id, timespan, now).await {
         None => unknown_asset(&asset_id),
         Some(series) => series_json(&series),
     }

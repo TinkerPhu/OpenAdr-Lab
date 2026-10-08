@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::str::FromStr;
 
+use crate::app_ctx::History;
 use crate::entities::history::ForecastLeadKind;
-use crate::AppCtx;
 
 /// Requests spanning more than this many days are rejected — bounds response size.
 const MAX_RANGE_DAYS: i64 = 7;
@@ -67,10 +67,10 @@ fn resolve_range(
 macro_rules! history_range_route {
     ($fn_name:ident, $query:ident) => {
         pub async fn $fn_name(
-            State(ctx): State<AppCtx>,
+            State(history): State<History>,
             Query(params): Query<HistoryRangeParams>,
         ) -> impl IntoResponse {
-            let Some(history) = ctx.history.clone() else {
+            let Some(history) = history else {
                 return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
             };
             let (from, to) = match resolve_range(&params) {
@@ -118,10 +118,10 @@ fn resolve_page(params: &HistoryPageParams) -> (u32, u32) {
 macro_rules! history_page_route {
     ($fn_name:ident, $query:ident) => {
         pub async fn $fn_name(
-            State(ctx): State<AppCtx>,
+            State(history): State<History>,
             Query(params): Query<HistoryPageParams>,
         ) -> impl IntoResponse {
-            let Some(history) = ctx.history.clone() else {
+            let Some(history) = history else {
                 return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
             };
             let range_params = HistoryRangeParams {
@@ -157,10 +157,10 @@ history_page_route!(get_history_reports, query_reports);
 /// GET /history/ticks?from=&to=&asset_id= — 1-minute per-asset samples in
 /// `[from, to)`, optionally filtered to one asset.
 pub async fn get_history_ticks(
-    State(ctx): State<AppCtx>,
+    State(history): State<History>,
     Query(params): Query<HistoryRangeParams>,
 ) -> impl IntoResponse {
-    let Some(history) = ctx.history.clone() else {
+    let Some(history) = history else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
     };
     let (from, to) = match resolve_range(&params) {
@@ -193,10 +193,10 @@ pub struct ForecastAccuracyParams {
 /// (predicted, and actual once reconciled) in `[from, to)`, optionally filtered to one asset
 /// and/or lead kind. See `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
 pub async fn get_history_forecast_accuracy(
-    State(ctx): State<AppCtx>,
+    State(history): State<History>,
     Query(params): Query<ForecastAccuracyParams>,
 ) -> impl IntoResponse {
-    let Some(history) = ctx.history.clone() else {
+    let Some(history) = history else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
     };
     let range_params = HistoryRangeParams {
@@ -232,10 +232,10 @@ pub async fn get_history_forecast_accuracy(
 /// proxy, cost/warning summary) in `[from, to)`. See `docs/architecture/VEN_ARCHITECTURE.md`
 /// §4.9a and `entities::history::PlanHistorySample` (GB-25).
 pub async fn get_history_plans(
-    State(ctx): State<AppCtx>,
+    State(history): State<History>,
     Query(params): Query<HistoryRangeParams>,
 ) -> impl IntoResponse {
-    let Some(history) = ctx.history.clone() else {
+    let Some(history) = history else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
     };
     let (from, to) = match resolve_range(&params) {

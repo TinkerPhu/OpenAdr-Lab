@@ -10,13 +10,14 @@ use tracing::warn;
 use uuid::Uuid;
 
 use super::{SessionDetail, UserRequestWithSession};
+use crate::app_ctx::{PlanTriggerTx, Roster, SimRead};
 use crate::controller::user_request::{
     ComfortRateParams, CreateUserRequestParams, RequestDeadlineParams,
 };
 use crate::entities::design_vocabulary::UserRequestMode;
 use crate::entities::user_request::SessionType;
 use crate::services::request_submission::{self, SubmitError};
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// R-25: HTTP DTO for POST /user-requests — owned by the routes layer.
 /// Converts into the domain-owned `CreateUserRequestParams` before crossing
@@ -131,14 +132,14 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
 }
 
 /// GET /user-requests — list all user requests with embedded session details.
-pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let requests = ctx.state.active_requests().await;
+pub async fn get_requests(State(state): State<AppState>) -> impl IntoResponse {
+    let requests = state.active_requests().await;
     // The whole queue: each request resolves to the session it owns, by id. Matching
     // against one global session meant that with several queued, only whichever
     // happened to be stored could ever be shown - the rest reported no session at all.
-    let ev = ctx.state.ev_sessions().await;
-    let heater = ctx.state.heater_target().await;
-    let loads = ctx.state.shiftable_loads().await;
+    let ev = state.ev_sessions().await;
+    let heater = state.heater_target().await;
+    let loads = state.shiftable_loads().await;
 
     let enriched: Vec<UserRequestWithSession> = requests
         .into_iter()
@@ -189,16 +190,19 @@ pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// POST /user-requests — create a user energy task request (shiftable load, EV or heater;
 /// `services::request_submission::submit` decides which).
 pub async fn post_requests(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(roster): State<Roster>,
+    State(sim_read): State<SimRead>,
+    State(trigger_tx): State<PlanTriggerTx>,
     Json(body): Json<CreateUserRequestBody>,
 ) -> impl IntoResponse {
     let submitted = request_submission::submit(
         body.into(),
         Utc::now(),
-        &ctx.state,
-        ctx.roster.as_ref(),
-        ctx.sim_read.as_ref(),
-        &ctx.trigger_tx,
+        &state,
+        roster.as_ref(),
+        sim_read.as_ref(),
+        &trigger_tx,
     )
     .await;
     match submitted {
@@ -227,13 +231,18 @@ fn submit_error_response(e: SubmitError) -> axum::response::Response {
 }
 
 /// DELETE /user-requests/:id — cancel a user request and clear any linked device session.
-pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> impl IntoResponse {
+pub async fn delete_request(
+    State(state): State<AppState>,
+    State(roster): State<Roster>,
+    State(trigger_tx): State<PlanTriggerTx>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
     let cancelled = request_submission::cancel_and_announce(
         id,
         Utc::now(),
-        &ctx.state,
-        ctx.roster.as_ref(),
-        &ctx.trigger_tx,
+        &state,
+        roster.as_ref(),
+        &trigger_tx,
     )
     .await;
     match cancelled {
