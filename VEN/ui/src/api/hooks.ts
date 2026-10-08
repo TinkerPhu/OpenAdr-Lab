@@ -8,7 +8,7 @@ import type {
   PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
   EventLogEntry,
 } from "./types";
-import { debugLog } from "../utils/debugLog";
+import { debugLog } from "@lab/charts/debugLog";
 
 // Mirrors the backend's own EVENT_LOG_RING_CAP (VEN/src/state/event_log.rs) —
 // keeps the client-side list from growing unbounded over a long-lived SSE
