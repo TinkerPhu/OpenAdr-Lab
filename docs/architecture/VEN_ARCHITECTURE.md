@@ -1045,7 +1045,11 @@ comms-loss curtailment); `audit_ven_architecture.py` rule 8 enforces it. The com
 so `simulator::plan_context` resolves a user override without importing `services` (rule 9).
 Unit arithmetic is written once in `entities/units.rs` (`kw_from_w`, `w_from_kw`, `dt_h_from_s`,
 `dt_h_from_duration`, `energy_kwh`, `energy_kwh_from_min`); `GridSnapshot::net_power_kw` and
-`GridMeter::net_power_kw` are the two meter views over it (rule 10 keeps the inline spellings out). Lever ids are the named
+`GridMeter::net_power_kw` are the two meter views over it (rule 10 keeps the inline spellings out).
+A request that states no target is answered by the asset, not by a literal in `services/`: the EV's
+`default_soc_target` and the heater's `default_target_temp_c` (through `Thermostat::default_request_target_c`)
+ride on `AssetRequestSlice`, and `AssetRequestSlice::target_soc` is the one resolution the energy and the
+session both use. A heater that declares no default gets `RequestError::MissingTarget`. Lever ids are the named
 `LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`
