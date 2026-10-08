@@ -616,6 +616,7 @@ fn make_profile_n48() -> Profile {
                 usage_sim: None,
             }),
             AssetProfile::Heater(HeaterConfig {
+                default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 2.0,
                 temp_initial_c: 20.0,

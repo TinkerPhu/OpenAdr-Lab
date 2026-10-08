@@ -11,6 +11,7 @@ assets:
     temp_initial_c: 20.0
     temp_min_c: 18.0
     temp_max_c: 23.0
+    default_target_temp_c: 21.0   # room target a request aims for when it states none
     thermostat_delta_c: 3.0   # deadband at BOTH ends: off at max until max-3, emergency at min until min+3
   - type: pv
     id: pv

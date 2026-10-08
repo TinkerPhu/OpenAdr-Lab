@@ -1,4 +1,4 @@
-use super::schema::{AssetProfile, Profile};
+use super::schema::{AssetProfile, HeaterConfig, Profile};
 use std::path::Path;
 
 impl Profile {
@@ -34,23 +34,7 @@ impl Profile {
         // declare a mid level that was not half of max.
         for a in &self.assets {
             if let AssetProfile::Heater(h) = a {
-                if !(1..=2).contains(&h.power_stages) {
-                    errors.push(format!(
-                        "heater '{}': power_stages must be 1 or 2, got {}",
-                        h.id, h.power_stages
-                    ));
-                }
-                // The deadband is applied at both ends of the band, so a delta
-                // at or beyond the band's own width leaves no room to regulate
-                // in: the ceiling's release point would sit at or below the
-                // floor, where the emergency takes over.
-                let band_c = h.temp_max_c - h.temp_min_c;
-                if h.thermostat_delta_c <= 0.0 || h.thermostat_delta_c >= band_c {
-                    errors.push(format!(
-                        "heater '{}': thermostat_delta_c must be > 0 and < the                          temp_min_c..temp_max_c band ({band_c} °C), got {}",
-                        h.id, h.thermostat_delta_c
-                    ));
-                }
+                validate_heater(h, &mut errors);
             }
         }
         // A zero budget would leave phase 2 no time to even read its warm start,
@@ -391,6 +375,37 @@ impl Profile {
     }
 }
 
+/// The checks one heater block must pass: its power stages, its thermostat deadband and its
+/// declared request default (R-112).
+fn validate_heater(h: &HeaterConfig, errors: &mut Vec<String>) {
+    if !(1..=2).contains(&h.power_stages) {
+        errors.push(format!(
+            "heater '{}': power_stages must be 1 or 2, got {}",
+            h.id, h.power_stages
+        ));
+    }
+    // The deadband is applied at both ends of the band, so a delta
+    // at or beyond the band's own width leaves no room to regulate
+    // in: the ceiling's release point would sit at or below the
+    // floor, where the emergency takes over.
+    let band_c = h.temp_max_c - h.temp_min_c;
+    if h.thermostat_delta_c <= 0.0 || h.thermostat_delta_c >= band_c {
+        errors.push(format!(
+            "heater '{}': thermostat_delta_c must be > 0 and < the temp_min_c..temp_max_c band ({band_c} °C), got {}",
+            h.id, h.thermostat_delta_c
+        ));
+    }
+    // The declared request default must be a temperature the heater can hold.
+    if let Some(t) = h.default_target_temp_c {
+        if !(h.temp_min_c..=h.temp_max_c).contains(&t) {
+            errors.push(format!(
+                "heater '{}': default_target_temp_c must lie within temp_min_c..temp_max_c ({}..{} °C), got {t}",
+                h.id, h.temp_min_c, h.temp_max_c
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +415,7 @@ mod tests {
     #[test]
     fn heater_config_switching_penalty_default() {
         let cfg = HeaterConfig {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -421,6 +437,7 @@ mod tests {
     #[test]
     fn heater_config_switching_penalty_explicit() {
         let cfg = HeaterConfig {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -680,6 +697,45 @@ assets:
         );
     }
 
+    /// R-112: the declared request default must be a temperature the heater can hold.
+    #[test]
+    fn validate_rejects_a_default_target_outside_the_heaters_band() {
+        let yaml = r#"
+assets:
+  - type: heater
+    id: heater
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+    thermostat_delta_c: 3.0
+    default_target_temp_c: 55.0
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("must parse");
+        let msg = format!("{:?}", profile.validate());
+        assert!(
+            msg.contains("default_target_temp_c"),
+            "55 degC on an 18..23 degC heater must be flagged: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_a_default_target_inside_the_band_or_none() {
+        for line in ["    default_target_temp_c: 21.0", ""] {
+            let yaml = format!(
+                "assets:
+  - type: heater
+    id: heater
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+    thermostat_delta_c: 3.0
+{line}
+"
+            );
+            let profile: Profile = serde_yaml::from_str(&yaml).expect("must parse");
+            let msg = format!("{:?}", profile.validate());
+            assert!(!msg.contains("default_target_temp_c"), "{line:?}: {msg}");
+        }
+    }
+
     #[tokio::test]
     async fn every_heater_profile_declares_a_thermostat_delta_inside_its_band() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
@@ -699,6 +755,12 @@ assets:
             assert!(
                 contents.contains("thermostat_delta_c:"),
                 "{name}: every heater profile must declare thermostat_delta_c explicitly"
+            );
+            // R-112: a shipped heater must never meet the "no target, no declared default"
+            // refusal, so each declares the target a request without one aims for.
+            assert!(
+                contents.contains("default_target_temp_c:"),
+                "{name}: every heater profile must declare default_target_temp_c"
             );
             let profile = Profile::try_load(path.to_str().unwrap())
                 .await

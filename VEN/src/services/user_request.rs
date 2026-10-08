@@ -90,15 +90,27 @@ impl UserRequestService {
         asset_data: &[AssetRequestSlice],
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, HeaterTarget), RequestError> {
-        let target_temp_c = body.target_temp_c;
+        let stated_target_temp_c = body.target_temp_c;
         let mut req = create_from_body(body, asset_data, now)?;
 
+        // The heater answers what a request without a target aims for (its profile's
+        // `default_target_temp_c`); a heater that declares none gets a refusal, not a guess.
+        let target_temp_c = stated_target_temp_c
+            .or_else(|| {
+                asset_data
+                    .iter()
+                    .find(|s| s.id == req.asset_id)
+                    .and_then(|s| s.default_target_temp_c)
+            })
+            .ok_or_else(|| RequestError::MissingTarget {
+                asset_id: req.asset_id.clone(),
+            })?;
+        // `create_from_body` refuses a request without deadlines, so the first one exists.
         let ready_by = req
             .deadlines
             .first()
             .map(|d| d.latest_end)
-            .unwrap_or_else(|| now + chrono::Duration::hours(4));
-        let target_temp_c = target_temp_c.unwrap_or(55.0);
+            .ok_or(RequestError::NoDeadlines)?;
         let target = HeaterTarget {
             id: Uuid::new_v4(),
             target_temp_c,
@@ -626,6 +638,7 @@ mod tests {
     fn ev_slice(soc: f64) -> AssetRequestSlice {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
+            default_target_temp_c: None,
             id: ids::ASSET_EV.to_string(),
             current_soc: Some(soc),
             default_soc_target: Some(0.8),
@@ -643,6 +656,7 @@ mod tests {
     fn heater_slice() -> AssetRequestSlice {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
+            default_target_temp_c: None,
             id: ids::ASSET_HEATER.to_string(),
             current_soc: None,
             default_soc_target: None,
@@ -809,10 +823,9 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_create_heater_builds_target() {
-        let now = Utc::now();
-        let body = CreateUserRequestParams {
+    /// A heater request due in 4 h for 5 kWh at 2 kW, stating `target_temp_c` or not.
+    fn heater_body(now: DateTime<Utc>, target_temp_c: Option<f64>) -> CreateUserRequestParams {
+        CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_HEATER.to_string(),
             target_soc: None,
@@ -835,16 +848,59 @@ mod tests {
             expected_trip_distance_km: None,
             latest_end: None,
             soft_deadline: None,
-            target_temp_c: Some(55.0),
+            target_temp_c,
             expected_return_time: None,
             replace_session_ids: None,
-        };
+        }
+    }
+
+    #[test]
+    fn test_create_heater_builds_target() {
+        let now = Utc::now();
         let (req, target) =
-            UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
+            UserRequestService::create_heater(heater_body(now, Some(55.0)), &[heater_slice()], now)
+                .unwrap();
         assert_eq!(req.asset_id, ids::ASSET_HEATER);
         assert!((req.target_energy_kwh - 5.0).abs() < 0.01);
         assert_eq!(req.session_id, Some(target.id));
         assert!((target.target_temp_c - 55.0).abs() < 0.01);
+    }
+
+    /// R-112: a request that states no target aims for the heater's own declared default.
+    #[test]
+    fn create_heater_uses_the_declared_default_when_no_target_is_stated() {
+        let now = Utc::now();
+        let slice = AssetRequestSlice {
+            default_target_temp_c: Some(21.0),
+            ..heater_slice()
+        };
+        let (_req, target) =
+            UserRequestService::create_heater(heater_body(now, None), &[slice], now).unwrap();
+        assert_eq!(target.target_temp_c, 21.0);
+    }
+
+    /// R-112: no stated target and no declared default is refused - never a guessed 55 °C.
+    #[test]
+    fn create_heater_refuses_when_no_target_is_stated_and_none_is_declared() {
+        let now = Utc::now();
+        let err = UserRequestService::create_heater(heater_body(now, None), &[heater_slice()], now)
+            .unwrap_err();
+        assert!(
+            matches!(&err, RequestError::MissingTarget { asset_id } if asset_id == ids::ASSET_HEATER),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn create_heater_keeps_a_stated_target_over_the_declared_default() {
+        let now = Utc::now();
+        let slice = AssetRequestSlice {
+            default_target_temp_c: Some(21.0),
+            ..heater_slice()
+        };
+        let (_req, target) =
+            UserRequestService::create_heater(heater_body(now, Some(23.0)), &[slice], now).unwrap();
+        assert_eq!(target.target_temp_c, 23.0);
     }
 
     /// Discriminator helpers correctly categorise request bodies.

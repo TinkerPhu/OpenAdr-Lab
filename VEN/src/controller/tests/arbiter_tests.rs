@@ -90,6 +90,7 @@ fn heater_snap_in(
     use crate::assets::heater::{Heater, HeaterState};
     let (temp_min_c, temp_max_c, temp_safety_max_c) = band;
     let heater = Heater {
+        default_target_temp_c: None,
         max_kw: 3.0,
         power_stages: 2,
         temp_min_c,

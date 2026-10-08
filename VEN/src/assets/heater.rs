@@ -42,6 +42,10 @@ pub struct Heater {
     /// today's (no extra headroom), so existing profiles are unaffected.
     #[serde(default)]
     pub temp_safety_max_c: f64,
+    /// The target (°C) a user request aims for when it states none (profile
+    /// `default_target_temp_c`); `None` = this heater declares none.
+    #[serde(default)]
+    pub default_target_temp_c: Option<f64>,
     /// Thermostat deadband (°C) at BOTH ends of the band: the emergency at
     /// `temp_min_c` runs until `temp_min_c + delta`, the forced-off ceiling at
     /// `temp_max_c` stays off until `temp_max_c - delta`. Default 3.0 — what the
@@ -120,6 +124,7 @@ impl Heater {
             temp_min_c_profile: cfg.temp_min_c,
             temp_max_c_profile: cfg.temp_max_c,
             temp_safety_max_c: cfg.temp_safety_max_c,
+            default_target_temp_c: cfg.default_target_temp_c,
             emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
             k_loss_kw_per_c: cfg.k_loss_kw_per_c,
@@ -499,6 +504,7 @@ mod tests {
 
     fn default_heater() -> Heater {
         Heater {
+            default_target_temp_c: None,
             max_kw: 2.5,
             power_stages: 2,
             temp_min_c: 20.0,
@@ -522,6 +528,7 @@ mod tests {
     /// (see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section).
     fn hot_water_heater() -> Heater {
         Heater {
+            default_target_temp_c: None,
             max_kw: 6.0,
             power_stages: 2,
             temp_min_c: 40.0,
@@ -554,6 +561,23 @@ mod tests {
                 values.get("absorb_headroom_kw")
             );
         }
+    }
+
+    #[test]
+    fn heater_declares_its_default_target_through_the_thermostat_capability() {
+        let heater = Heater::from_params(&HeaterParams {
+            default_target_temp_c: Some(55.0),
+            ..HeaterParams::default()
+        });
+        let thermostat = Asset::as_thermostat(&heater).expect("a heater is a thermostat");
+        assert_eq!(thermostat.default_request_target_c(), Some(55.0));
+        let undeclared = Heater::from_params(&HeaterParams::default());
+        assert_eq!(
+            Asset::as_thermostat(&undeclared)
+                .unwrap()
+                .default_request_target_c(),
+            None
+        );
     }
 
     #[test]

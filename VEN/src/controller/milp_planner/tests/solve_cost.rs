@@ -31,6 +31,7 @@ fn bench_profile(with_heater: bool) -> Profile {
     let mut assets: Vec<AssetProfile> = Vec::new();
     if with_heater {
         assets.push(AssetProfile::Heater(HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 6.0,
             power_stages: 2,

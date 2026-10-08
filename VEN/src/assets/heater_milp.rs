@@ -1098,6 +1098,7 @@ mod milp_context_trait_tests {
         use chrono::Utc;
 
         let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -1170,6 +1171,7 @@ mod milp_context_trait_tests {
         use chrono::Utc;
 
         let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -1237,6 +1239,7 @@ mod milp_context_trait_tests {
     #[test]
     fn from_state_no_target_comfort_full_reward_is_zero() {
         let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -1284,6 +1287,7 @@ mod milp_context_trait_tests {
     #[test]
     fn from_state_e_init_and_e_max_agree_with_plan_trajectory_and_heater_future_state() {
         let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -1340,6 +1344,7 @@ mod milp_context_trait_tests {
     #[test]
     fn from_state_keeps_the_anchor_only_while_the_tank_can_hold_it() {
         let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c: 20.0,

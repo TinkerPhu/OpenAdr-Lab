@@ -203,6 +203,9 @@ impl SimReadPort for SimHandle {
                     max_charge_kw: defaults.map(|d| d.max_charge_kw),
                     completion_policy: cfg.default_completion_policy(),
                     comfort_rates: cfg.default_comfort_rates(),
+                    default_target_temp_c: cfg
+                        .as_thermostat()
+                        .and_then(|t| t.default_request_target_c()),
                 }
             })
             .collect()
@@ -395,6 +398,20 @@ mod tests {
             handle.usage_schedule_view(Utc::now()).await.is_none(),
             "no EV at all"
         );
+    }
+
+    #[tokio::test]
+    async fn request_slices_carry_the_heaters_declared_target_and_none_for_other_assets() {
+        use crate::entities::asset_params::HeaterParams;
+        let heater = AssetParams::Heater(HeaterParams {
+            default_target_temp_c: Some(21.0),
+            ..HeaterParams::default()
+        });
+        let (handle, _sim) = handle_with(&[heater, AssetParams::Battery(BatteryParams::default())]);
+        for slice in handle.request_slices().await {
+            let expected = (slice.id == crate::ids::ASSET_HEATER).then_some(21.0);
+            assert_eq!(slice.default_target_temp_c, expected, "on '{}'", slice.id);
+        }
     }
 
     #[tokio::test]

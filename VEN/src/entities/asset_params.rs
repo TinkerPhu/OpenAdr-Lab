@@ -140,6 +140,8 @@ pub struct HeaterParams {
     pub temp_max_c: f64,
     /// True hard safety ceiling, above `temp_max_c`. Only reachable in `Absorb` mode.
     pub temp_safety_max_c: f64,
+    /// The target (°C) a request aims for when it states none; `None` = the heater declares none.
+    pub default_target_temp_c: Option<f64>,
     /// Thermostat deadband (°C) applied at both ends of the band — see
     /// `assets::heater::Heater::thermostat_delta_c`.
     pub thermostat_delta_c: f64,
@@ -168,6 +170,7 @@ impl Default for HeaterParams {
             temp_min_c: 18.0,
             temp_max_c: 23.0,
             temp_safety_max_c: 23.0,
+            default_target_temp_c: None,
             thermostat_delta_c: 3.0,
             power_stages: 2,
             thermal_mass_kwh_per_c: 2.0,
@@ -492,6 +495,9 @@ pub struct AssetRequestSlice {
     pub max_charge_kw: Option<f64>,
     pub completion_policy: CompletionPolicy,
     pub comfort_rates: Vec<ComfortRate>,
+    /// A thermostat asset's declared default target (°C) for a request that states none
+    /// (`Thermostat::default_request_target_c`); `None` for every other asset.
+    pub default_target_temp_c: Option<f64>,
 }
 
 impl AssetRequestSlice {

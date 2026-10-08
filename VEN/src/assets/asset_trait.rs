@@ -483,7 +483,6 @@ pub trait RequestResolvable {
 /// Capability: this asset has thermostat-shaped behavior (a target
 /// temperature driving an on/off or discrete-stage setpoint). Implemented by
 /// Heater only, today.
-#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
 pub trait Thermostat {
     /// A stateful trajectory computer seeded from the live state, for
     /// recomputing the plan's own thermal trajectory — `None` if the current
@@ -493,6 +492,10 @@ pub trait Thermostat {
     /// The on/off (or discrete-stage) setpoint \[kW\] that drives temperature
     /// toward `target_c` from the current state.
     fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64;
+
+    /// The target (°C) a user request aims for when it states none, or `None` when this
+    /// thermostat declares no default (then such a request is refused, not guessed).
+    fn default_request_target_c(&self) -> Option<f64>;
 }
 
 /// Capability: this asset accepts tick-time environment/Behaviour-C overrides
