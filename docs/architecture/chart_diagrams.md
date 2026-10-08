@@ -25,6 +25,14 @@ ui-charts/src/                 shared by both UIs (imported as @lab/charts/*)
   testUtils/
     assertTooltipMatchesData.ts  regression helper for the cursor-correctness invariant
 
+  (not charts, but the same "one implementation for both UIs" rule: see the section below)
+  JsonDialog.tsx             the raw-JSON viewer both UIs open from a table row
+  prometheus.ts              parse Prometheus text into rows (both Metrics pages)
+  RefreshControls.tsx        the toolbar's Auto toggle and Refresh button
+  debugLog.ts                dev-only console logging, a no-op in production builds
+  tsconfig.base.json         the compiler options both UIs extend
+  eslint.base.mjs            the flat ESLint config both UIs re-export
+
 VEN/ui/src/components/charts/   VEN-specific compositions
   StackedTimeSeriesChart.tsx composition 2: stacked areas + net-value tooltip (asset colours)
   CurveChart.tsx             composition 3: non-temporal X-axis (comfort rates)
@@ -32,6 +40,21 @@ VEN/ui/src/components/charts/   VEN-specific compositions
 VTN/ui/src/components/
   FleetPowerChart.tsx        one line per VEN plus the fleet total, on TimeSeriesChart
 ```
+
+### What else lives here, and what deliberately does not
+
+`ui-charts/` is the one place for source both UIs need, so it also holds the pieces above that
+are not charts, and `unitFormat.ts` is the canonical home of every "value or dash" formatter
+(`formatFixedOrDash`, `formatKwOrDash`): a missing value or NaN is a dash, and the caller states
+the decimals. Tests for this shared source run in the VEN workspace
+(`VEN/ui/src/__tests__/{prometheus,unitFormat,RefreshControls,TimeSeriesChart}.test.tsx`).
+
+The two UIs are otherwise different applications. Their pages overlap by 20-40 % at most (the
+VTN's Events, Programs and Reports create, edit and delete against the BFF; the VEN's are
+read-only views of one VEN), their API clients and types by under 10 %, and their `vite.config.ts`
+differ in port, root and test setup, so none of those are shared. The directory keeps its
+original name although it now holds more than charts; renaming it is filed in
+`docs/reference/TECHNICAL_DEBTS.md`.
 
 ### Why a shared package, and how it resolves
 

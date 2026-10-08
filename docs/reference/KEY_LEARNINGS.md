@@ -3139,3 +3139,16 @@ Rules:
   different variables is not.
 - An expression that must equal another (phase 1's cost, phase 2's cost cap, the dual pass's
   objective) belongs in one function. "Mirror it exactly" in a comment is the copy that drifts.
+
+## Consolidating shared UI code: measure first, and compare effective configuration (2026-10-08)
+
+- "These two apps duplicate large parts of each other" was a feeling, not a measurement. Counting
+  matching significant lines per same-path file gave about 1,000 lines out of about 16,000, mostly
+  configuration, with pages that look alike but do different jobs. Share the code that is the same
+  *concept* (a parser, a formatter, a control) and leave alike-looking pages alone.
+- Search for a concept by every spelling it has: the same "value or dash" formatter was `fmt`,
+  `fmtNum`, `fmtKw` and `formatKw`, in nine places, three more than a first look found.
+- A shared `tsconfig` or ESLint base is verified by diffing what the tools *resolve*
+  (`eslint --print-config <file>`, `tsc --showConfig`) before and after, not by watching the build
+  stay green: a green build cannot tell "the same settings" from "settings that happen to pass".
+  `include` in a `tsconfig` is resolved relative to the file that declares it, so it stays per app.
