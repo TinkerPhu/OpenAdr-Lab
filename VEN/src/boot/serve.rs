@@ -46,13 +46,19 @@ fn app_ctx(w: World) -> AppCtx {
         settings: w.ports.settings,
         weather: w.ports.weather,
         weather_pv_params: w.weather_pv_params,
-        pv_measurement: w.ports.pv_measurement,
-        pv_measurement_enabled: w.pv_measurement_enabled,
-        base_load_measurement: w.ports.base_load_measurement,
-        base_load_measurement_enabled: w.base_load_measurement_enabled,
-        comms_loss_debounce_s: w.comms_loss.map(|c| c.debounce_s),
-        grid_max_import_kw: w.grid_max_import_kw,
-        grid_max_export_kw: w.grid_max_export_kw,
+        measurements: crate::app_ctx::MeasurementFeeds {
+            pv: w.ports.pv_measurement,
+            pv_enabled: w.pv_measurement_enabled,
+            base_load: w.ports.base_load_measurement,
+            base_load_enabled: w.base_load_measurement_enabled,
+        },
+        comms_loss: crate::app_ctx::CommsLoss {
+            debounce_s: w.comms_loss.map(|c| c.debounce_s),
+        },
+        grid_rating: crate::app_ctx::GridRating {
+            max_import_kw: w.grid_max_import_kw,
+            max_export_kw: w.grid_max_export_kw,
+        },
     }
 }
 

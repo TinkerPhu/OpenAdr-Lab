@@ -7,9 +7,10 @@ use serde::{Deserialize, Deserializer};
 use std::net::SocketAddr;
 use tracing::{debug, warn};
 
+use crate::app_ctx::{PlanTriggerTx, Roster, SimSchema};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::sim_inject::SimInjectState;
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// Deserializes a field as `Option<Option<T>>` ("double option") so a
 /// tri-state PATCH body can distinguish all three JSON shapes. Serde's
@@ -127,25 +128,25 @@ pub struct BatteryConfigBody {
 /// Reads the pre-computed schema from `AppCtx.sim_schema`. Does NOT acquire
 /// the sim mutex, so it remains responsive even while the MILP planner is
 /// running (10-24s on Node1).
-pub async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
+pub async fn get_sim_schema(State(sim_schema): State<SimSchema>) -> impl IntoResponse {
     debug!("GET /sim/schema: returning pre-computed schema");
-    let schema = (*ctx.sim_schema).clone();
+    let schema = (*sim_schema).clone();
     Json(schema)
 }
 
 /// POST /sim/reset/:asset_id — jump an asset's SoC to the given value.
 pub async fn post_sim_reset(
-    State(ctx): State<AppCtx>,
+    State(roster): State<Roster>,
     Path(asset_id): Path<String>,
     Json(body): Json<SocBody>,
 ) -> impl IntoResponse {
     let values = std::collections::HashMap::from([("soc".to_string(), body.soc_frac)]);
-    no_content_or_error(ctx.roster.reset_asset(&asset_id, values).await)
+    no_content_or_error(roster.reset_asset(&asset_id, values).await)
 }
 
 /// PUT /sim/config/battery — update battery capacity_kwh and/or min_soc.
 pub async fn put_sim_config_battery(
-    State(ctx): State<AppCtx>,
+    State(roster): State<Roster>,
     Json(body): Json<BatteryConfigBody>,
 ) -> impl IntoResponse {
     let mut values = std::collections::HashMap::new();
@@ -154,7 +155,7 @@ pub async fn put_sim_config_battery(
         values.insert("min_soc".to_string(), min_soc_frac);
     }
     no_content_or_error(
-        ctx.roster
+        roster
             .update_asset_config(crate::ids::ASSET_BATTERY, values)
             .await,
     )
@@ -173,8 +174,8 @@ fn no_content_or_error(
     }
 }
 
-pub async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.sim().await {
+pub async fn get_sim(State(state): State<AppState>) -> impl IntoResponse {
+    match state.sim().await {
         Some(sim) => Json(sim).into_response(),
         None => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
@@ -185,8 +186,8 @@ pub async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
 }
 
 /// GET /sim/inject — returns the current inject state.
-pub async fn get_sim_inject(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.inject_state().await)
+pub async fn get_sim_inject(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.inject_state().await)
 }
 
 /// POST /sim/inject — partial-merge inject state.
@@ -199,7 +200,8 @@ pub async fn get_sim_inject(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// behind the `ven-ui` nginx proxy shows up as nginx's address, not the original browser/script
 /// — cross-reference nginx's own access log for that case.
 pub async fn post_sim_inject(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(trigger_tx): State<PlanTriggerTx>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
@@ -222,13 +224,11 @@ pub async fn post_sim_inject(
         || body.grid_import_limit_kw.is_some()
         || body.grid_export_limit_kw.is_some()
         || body.pv_generation_limit_kw.is_some();
-    let mut current = ctx.state.inject_state().await;
+    let mut current = state.inject_state().await;
     merge_inject(&mut current, body);
-    ctx.state.set_inject_state(current).await;
+    state.set_inject_state(current).await;
     if should_replan {
-        let _ = ctx
-            .trigger_tx
-            .send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
+        let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
     }
     axum::http::StatusCode::NO_CONTENT
 }
@@ -238,20 +238,18 @@ pub async fn post_sim_inject(
 /// Sends `PlanTrigger::AssetStateChange` without modifying any sim state.
 /// Useful in tests to request a fresh plan without side-effecting physics
 /// (e.g., after calling `POST /sim/reset` or adjusting an EV session).
-pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let _ = ctx
-        .trigger_tx
-        .send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
+pub async fn post_plan_trigger(State(trigger_tx): State<PlanTriggerTx>) -> impl IntoResponse {
+    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::AssetStateChange));
     axum::http::StatusCode::NO_CONTENT
 }
 
 /// POST /sim/inject/reset — release all active overrides at once.
 pub async fn post_sim_inject_reset(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
     warn!(?peer, "POST /sim/inject/reset");
-    ctx.state.set_inject_state(SimInjectState::default()).await;
+    state.set_inject_state(SimInjectState::default()).await;
     axum::http::StatusCode::NO_CONTENT
 }
 

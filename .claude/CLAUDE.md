@@ -398,8 +398,10 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     no `.val("...")` string-key read of an asset's `state_values()` outside assets/ (declare a
     typed `Asset` method, carried on `AssetSnapshot`)
     no `crate::services` in assets/ or simulator/ (infra implements what the domain defines)
-    no inline unit conversion (W<->kW, seconds/Duration -> hours, kW x step -> kWh) outside
-    `entities/units.rs`
+    no inline unit conversion (W<->kW, seconds/Duration -> hours, kW x step -> kWh, frac -> %)
+    outside `entities/units.rs`
+    no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
+    each has an `impl FromRef<AppCtx>` in `app_ctx.rs`
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md

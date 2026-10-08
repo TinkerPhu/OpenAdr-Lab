@@ -8,8 +8,8 @@ use axum::{extract::State, Json};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::app_ctx::MeasurementFeeds;
 use crate::entities::measurement::{resolve_measured_kw, MEASUREMENT_STALENESS_THRESHOLD};
-use crate::AppCtx;
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -72,20 +72,22 @@ fn build_signal_response(
     }
 }
 
-pub async fn get_measurement(State(ctx): State<AppCtx>) -> Json<MeasurementResponse> {
+pub async fn get_measurement(
+    State(measurements): State<MeasurementFeeds>,
+) -> Json<MeasurementResponse> {
     let now = Utc::now();
-    let pv_latest = ctx.pv_measurement.latest_kw().await;
+    let pv_latest = measurements.pv.latest_kw().await;
     let pv = build_signal_response(
         pv_latest,
-        ctx.pv_measurement_enabled,
-        ctx.pv_measurement.is_alive(),
+        measurements.pv_enabled,
+        measurements.pv.is_alive(),
         now,
     );
-    let base_load_latest = ctx.base_load_measurement.latest_kw().await;
+    let base_load_latest = measurements.base_load.latest_kw().await;
     let base_load = build_signal_response(
         base_load_latest,
-        ctx.base_load_measurement_enabled,
-        ctx.base_load_measurement.is_alive(),
+        measurements.base_load_enabled,
+        measurements.base_load.is_alive(),
         now,
     );
     Json(MeasurementResponse { pv, base_load })

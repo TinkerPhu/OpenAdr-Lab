@@ -9,20 +9,20 @@ use axum::Json;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
+use crate::state::AppState;
 use crate::state::EventLogEntry;
-use crate::AppCtx;
 
 /// GET /events/log — the in-memory event log ring, oldest first.
-pub async fn get_event_log(State(ctx): State<AppCtx>) -> Json<Vec<EventLogEntry>> {
-    Json(ctx.state.event_log_snapshot().await)
+pub async fn get_event_log(State(state): State<AppState>) -> Json<Vec<EventLogEntry>> {
+    Json(state.event_log_snapshot().await)
 }
 
 /// GET /events/log/events — Server-Sent Events stream of new event log entries.
 /// Mirrors `routes/notifications.rs::get_notification_events`'s bridge pattern.
 pub async fn get_event_log_events(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let mut bcast_rx = ctx.state.subscribe_event_log();
+    let mut bcast_rx = state.subscribe_event_log();
     let (fwd_tx, fwd_rx) = tokio::sync::mpsc::channel::<Event>(32);
     tokio::spawn(async move {
         loop {

@@ -4,9 +4,10 @@ use serde::Deserialize;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::app_ctx::PlanTriggerTx;
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::device_session::{BaselineOverride, BaselineSlot};
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// POST /baseline-override body.
 #[derive(Deserialize)]
@@ -21,8 +22,8 @@ pub struct BaselineSlotBody {
 }
 
 /// GET /baseline-override — returns the active baseline override (204 if none).
-pub async fn get_baseline_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.baseline_override().await {
+pub async fn get_baseline_override(State(state): State<AppState>) -> impl IntoResponse {
+    match state.baseline_override().await {
         Some(o) => Json(o).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }
@@ -30,7 +31,8 @@ pub async fn get_baseline_override(State(ctx): State<AppCtx>) -> impl IntoRespon
 
 /// POST /baseline-override — upsert the baseline override, triggering a replan.
 pub async fn post_baseline_override(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(trigger_tx): State<PlanTriggerTx>,
     Json(body): Json<CreateBaselineOverrideBody>,
 ) -> impl IntoResponse {
     let now = Utc::now();
@@ -52,18 +54,17 @@ pub async fn post_baseline_override(
         slot_count = ovr.slots.len(),
         "baseline override set"
     );
-    ctx.state.set_baseline_override(Some(ovr.clone())).await;
-    let _ = ctx
-        .trigger_tx
-        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+    state.set_baseline_override(Some(ovr.clone())).await;
+    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     (StatusCode::CREATED, Json(ovr))
 }
 
 /// DELETE /baseline-override — clear the baseline override.
-pub async fn delete_baseline_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    ctx.state.set_baseline_override(None).await;
-    let _ = ctx
-        .trigger_tx
-        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+pub async fn delete_baseline_override(
+    State(state): State<AppState>,
+    State(trigger_tx): State<PlanTriggerTx>,
+) -> impl IntoResponse {
+    state.set_baseline_override(None).await;
+    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     StatusCode::NO_CONTENT
 }

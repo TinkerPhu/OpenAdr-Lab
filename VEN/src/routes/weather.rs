@@ -12,11 +12,12 @@ use axum::{extract::State, Json};
 use chrono::Duration;
 use serde::Serialize;
 
+use crate::app_ctx::{Weather, WeatherPvParams};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::pv_snow::PvSnowState;
 use crate::entities::solar::{weather_pv_forecast_series, WeatherPvForecastSlot};
 use crate::entities::weather::WeatherForecast;
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// Cached forecasts older than this are still shown (never hidden) but
 /// flagged `status: "stale"` — mirrors `WeatherForecast::is_fresh`'s own
@@ -80,15 +81,19 @@ fn build_weather_response(
     }
 }
 
-pub async fn get_weather(State(ctx): State<AppCtx>) -> Json<WeatherResponse> {
-    let forecast = ctx.weather.latest().await;
-    let source_alive = ctx.weather.is_alive();
+pub async fn get_weather(
+    State(weather): State<Weather>,
+    State(weather_pv_params): State<WeatherPvParams>,
+    State(state): State<AppState>,
+) -> Json<WeatherResponse> {
+    let forecast = weather.latest().await;
+    let source_alive = weather.is_alive();
     Json(build_weather_response(
         forecast,
-        ctx.weather_pv_params.as_ref(),
+        weather_pv_params.as_ref(),
         source_alive,
         chrono::Utc::now(),
-        ctx.state.pv_snow_state().await,
+        state.pv_snow_state().await,
     ))
 }
 

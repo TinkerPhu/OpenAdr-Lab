@@ -6,7 +6,8 @@ use axum::{
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::AppCtx;
+use crate::app_ctx::SimRead;
+use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct TraceQuery {
@@ -21,11 +22,11 @@ pub struct TraceHistoryQuery {
 
 /// GET /trace/events?limit=N — returns recent ControllerEvent log entries (newest first).
 pub async fn get_trace_events(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
     Query(q): Query<TraceQuery>,
 ) -> impl IntoResponse {
     let limit = q.limit.unwrap_or(50);
-    let ct = ctx.state.controller_trace().await;
+    let ct = state.controller_trace().await;
     let mut events = ct.events();
     let total = events.len();
     events.reverse();
@@ -50,7 +51,7 @@ pub async fn get_trace_events(
 
 /// GET /trace/history?asset=<id>&limit=N — returns timeline rows for an asset.
 pub async fn get_trace_history(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
     Query(q): Query<TraceHistoryQuery>,
 ) -> impl IntoResponse {
     use chrono::{Duration, Utc};
@@ -59,8 +60,7 @@ pub async fn get_trace_history(
     // Slice up to 24 h of history (buffer holds ~1 h at 1 s tick; 24 h is a safe ceiling).
     let window = Duration::hours(24);
 
-    let mut json: Vec<serde_json::Value> = ctx
-        .sim_read
+    let mut json: Vec<serde_json::Value> = sim_read
         .asset_trace(&q.asset, window, now)
         .await
         .into_iter()

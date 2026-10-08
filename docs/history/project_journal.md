@@ -14971,3 +14971,15 @@ have. Renaming made the fraction-to-percent conversion readable in two places, s
 `units::pct_from_frac` and audit rule 10 now refuses `_frac * 100.0`. Filed: the SoC-shaped names
 outside the list (`soc_ev`, `battery_soc`, `current_soc`, ...), which need their units checked one by
 one: the MILP's `soc_ev` may be kWh (R-125).
+
+## R-110 (first step): every route extracts only what it uses (refactor/r110-fromref-substates)
+
+All 70 handlers took `State(ctx): State<AppCtx>`, so every route could reach all 23 parts of the
+context. Decided with the user: axum `FromRef` sub-states. Each part of `AppCtx` now has a type of its
+own (aliases such as `Roster`, `SimRead`, `History` for the ports; the primitives that would collide by
+type grouped into `MeasurementFeeds`, `GridRating`, `CommsLoss`) and an `impl FromRef<AppCtx>`, written
+by a small `macro_rules!` rather than axum's `macros` feature, so no crate was added. A script rewrote
+each handler from its `ctx.<field>` uses; it flagged locals that shadow an extractor, and one was a real
+bug in waiting: `vtn_status` bound the connection status to `vtn`, hiding the `VtnClient` it then called.
+Two helpers that took `&AppCtx` now take the part they read. Audit rule 11 refuses `State<AppCtx>` in
+`routes/`. The row stays open, narrowed to `state/mod.rs`, `simulator/mod.rs` and `capacity_headroom.rs`.

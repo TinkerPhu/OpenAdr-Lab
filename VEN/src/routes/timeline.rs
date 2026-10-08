@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use crate::entities::timeline::TimelineSnapshot;
 
-use crate::AppCtx;
+use crate::app_ctx::SimRead;
+use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct TimelineParams {
@@ -119,7 +120,8 @@ pub fn serialize_future_points(
 
 /// GET /timeline/:asset_id — grid-aligned past+future timeline for one asset.
 pub async fn get_timeline(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(sim_read): State<SimRead>,
     Path(asset_id): Path<String>,
     Query(params): Query<TimelineParams>,
 ) -> impl IntoResponse {
@@ -138,8 +140,8 @@ pub async fn get_timeline(
     let (history_grid, _future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
-    let plan = ctx.state.active_plan().await;
-    let snap = ctx.sim_read.timeline_snapshot(now).await;
+    let plan = state.active_plan().await;
+    let snap = sim_read.timeline_snapshot(now).await;
     let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     match build_grid_aligned_array(
@@ -240,7 +242,8 @@ fn zones_from_plan(
 
 /// GET /timeline/all — merged timelines for all configured assets + "grid".
 pub async fn get_timeline_all(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(sim_read): State<SimRead>,
     Query(params): Query<TimelineParams>,
 ) -> impl IntoResponse {
     use crate::controller::timeline::compute_uniform_grid;
@@ -257,8 +260,8 @@ pub async fn get_timeline_all(
     let (history_grid, _future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
-    let plan = ctx.state.active_plan().await;
-    let snap = ctx.sim_read.timeline_snapshot(now).await;
+    let plan = state.active_plan().await;
+    let snap = sim_read.timeline_snapshot(now).await;
     let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     let mut timelines: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();

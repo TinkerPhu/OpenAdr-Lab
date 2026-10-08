@@ -15,27 +15,32 @@ use axum::{
 use chrono::Utc;
 use tracing::info;
 
+use crate::app_ctx::{Settings, SimRead};
 use crate::entities::asset::ComfortRate;
-use crate::AppCtx;
+use crate::state::AppState;
 
 /// Default curve for an asset, `None` when the asset id is unknown.
-async fn default_rates(ctx: &AppCtx, asset_id: &str) -> Option<Vec<ComfortRate>> {
-    ctx.sim_read.default_comfort_rates(asset_id).await
+async fn default_rates(
+    sim_read: &dyn crate::controller::SimReadPort,
+    asset_id: &str,
+) -> Option<Vec<ComfortRate>> {
+    sim_read.default_comfort_rates(asset_id).await
 }
 
 /// GET /assets/:id/comfort_curve
 pub async fn get_comfort_curve(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
+    State(state): State<AppState>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
-    let Some(default) = default_rates(&ctx, &asset_id).await else {
+    let Some(default) = default_rates(sim_read.as_ref(), &asset_id).await else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("unknown asset: {asset_id}") })),
         )
             .into_response();
     };
-    let overrides = ctx.state.comfort_overrides_map().await;
+    let overrides = state.comfort_overrides_map().await;
     let source = crate::entities::comfort::comfort_curve_source(&overrides, &asset_id);
     let rates = crate::entities::comfort::effective_comfort_rates(&overrides, &asset_id, default);
     Json(serde_json::json!({ "source": source, "rates": rates })).into_response()
@@ -43,11 +48,13 @@ pub async fn get_comfort_curve(
 
 /// POST /assets/:id/comfort_curve
 pub async fn post_comfort_curve(
-    State(ctx): State<AppCtx>,
+    State(sim_read): State<SimRead>,
+    State(state): State<AppState>,
+    State(settings): State<Settings>,
     Path(asset_id): Path<String>,
     Json(rates): Json<Vec<ComfortRate>>,
 ) -> impl IntoResponse {
-    if default_rates(&ctx, &asset_id).await.is_none() {
+    if default_rates(sim_read.as_ref(), &asset_id).await.is_none() {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("unknown asset: {asset_id}") })),
@@ -55,8 +62,8 @@ pub async fn post_comfort_curve(
             .into_response();
     }
     match crate::services::comfort::set_override(
-        &ctx.state,
-        ctx.settings.clone(),
+        &state,
+        settings.clone(),
         Utc::now(),
         &asset_id,
         rates.clone(),
@@ -81,11 +88,12 @@ pub async fn post_comfort_curve(
 
 /// DELETE /assets/:id/comfort_curve
 pub async fn delete_comfort_curve(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(settings): State<Settings>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
     let existed =
-        crate::services::comfort::clear_override(&ctx.state, ctx.settings.clone(), &asset_id).await;
+        crate::services::comfort::clear_override(&state, settings.clone(), &asset_id).await;
     info!(asset_id, existed, "comfort curve override cleared");
     if existed {
         StatusCode::NO_CONTENT.into_response()

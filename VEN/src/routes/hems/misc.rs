@@ -11,16 +11,18 @@ use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
+use crate::app_ctx::{ActiveObjective, History, PlanTriggerTx};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::history::LedgerPeriod;
 use crate::entities::reservation_request::ReservationRequest;
 use crate::entities::PlannerObjective;
-use crate::AppCtx;
+use crate::planner_events::PlannerEventTx;
+use crate::state::AppState;
 use lab_core::time_window::TimeWindow;
 
 /// GET /plan — returns the active Plan (null until Stage 3).
-pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.active_plan().await {
+pub async fn get_plan(State(state): State<AppState>) -> impl IntoResponse {
+    match state.active_plan().await {
         Some(plan) => Json(plan).into_response(),
         None => Json(serde_json::Value::Null).into_response(),
     }
@@ -28,8 +30,8 @@ pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 /// GET /forecast — per-asset forecasts from the latest plan cycle
 /// (WP3.6, BL-15). Empty array until the first plan has been adopted.
-pub async fn get_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.asset_forecasts().await)
+pub async fn get_forecast(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.asset_forecasts().await)
 }
 
 /// PUT /plan/objective — change the active optimization objective and trigger an immediate replan.
@@ -39,59 +41,55 @@ pub struct SetObjectiveBody {
 }
 
 pub async fn put_plan_objective(
-    State(ctx): State<AppCtx>,
+    State(active_objective): State<ActiveObjective>,
+    State(trigger_tx): State<PlanTriggerTx>,
     Json(body): Json<SetObjectiveBody>,
 ) -> impl IntoResponse {
-    *ctx.active_objective.write().await = body.objective;
-    let _ = ctx
-        .trigger_tx
-        .send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+    *active_objective.write().await = body.objective;
+    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
     StatusCode::NO_CONTENT
 }
 
 /// GET /tariffs — returns planned tariff snapshots parsed from active events.
-pub async fn get_tariffs(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.planned_tariffs().await)
+pub async fn get_tariffs(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.planned_tariffs().await)
 }
 
 /// GET /capacity — returns the current OadrCapacityState (Stage 2).
-pub async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.capacity_state().await)
+pub async fn get_capacity(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.capacity_state().await)
 }
 
 /// GET /capacity/schedule — returns the Dynamic Operating Envelope schedule
 /// (per-interval import/export capacity limits parsed from active events),
 /// the timeline `GET /capacity` collapses into a single current-value scalar.
-pub async fn get_capacity_schedule(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.planned_capacity_limits().await)
+pub async fn get_capacity_schedule(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.planned_capacity_limits().await)
 }
 
 /// GET /signals — WP4.6: one-round-trip aggregate of the active grid signals
 /// (alert / SIMPLE / dispatch windows + capacity state) for the UI status
 /// strip. Read-only view over state the poll loop already maintains.
-pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
+pub async fn get_signals(State(state): State<AppState>) -> impl IntoResponse {
     // Ended windows stay in state while their event exists on the VTN
     // (events are permanent records; operators may end an emergency by
     // adding timing rather than deleting) — drop them here so the strip
     // never shows a stale chip. Upcoming windows are kept (the UI labels
     // them "from HH:MM").
     let now = chrono::Utc::now();
-    let alerts: Vec<_> = ctx
-        .state
+    let alerts: Vec<_> = state
         .alert_windows()
         .await
         .into_iter()
         .filter(|w| !w.is_ended(now))
         .collect();
-    let simple: Vec<_> = ctx
-        .state
+    let simple: Vec<_> = state
         .simple_windows()
         .await
         .into_iter()
         .filter(|w| !w.is_ended(now))
         .collect();
-    let dispatch: Vec<_> = ctx
-        .state
+    let dispatch: Vec<_> = state
         .dispatch_windows()
         .await
         .into_iter()
@@ -101,9 +99,8 @@ pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
     // granted it. `ui-transparency` — this goes out on the wire as
     // `*_RESERVATION_CAPACITY`, so it must be readable here too; the strip
     // shows it next to the subscription and reservation it is measured against.
-    let capacity = ctx.state.capacity_state().await;
-    let reservation_request = ctx
-        .state
+    let capacity = state.capacity_state().await;
+    let reservation_request = state
         .site_envelope()
         .await
         .map(|env| ReservationRequest::from_headroom(&env, &capacity));
@@ -117,8 +114,8 @@ pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
 }
 
 /// GET /obligations — returns pending report obligations (Stage 2).
-pub async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.report_obligations().await)
+pub async fn get_obligations(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.report_obligations().await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,15 +129,16 @@ pub struct LedgerQuery {
 /// `{ current, closed_periods }` for that one asset — `closed_periods` comes
 /// from WP1.6's monthly `AssetLedger` rollover archive.
 pub async fn get_ledger(
-    State(ctx): State<AppCtx>,
+    State(state): State<AppState>,
+    State(history): State<History>,
     Query(params): Query<LedgerQuery>,
 ) -> impl IntoResponse {
-    let current = ctx.state.asset_ledger().await;
+    let current = state.asset_ledger().await;
     let Some(asset_id) = params.asset_id else {
         return Json(current).into_response();
     };
 
-    let closed_periods: Vec<LedgerPeriod> = match ctx.history.clone() {
+    let closed_periods: Vec<LedgerPeriod> = match history {
         Some(history) => {
             let aid = asset_id.clone();
             tokio::task::spawn_blocking(move || history.query_ledger_periods(&aid))
@@ -162,9 +160,9 @@ pub async fn get_ledger(
 /// Pushes `solving_started`, `solving_progress` (1 s ticks), and `plan_ready`
 /// events so the UI can show live solver feedback.
 pub async fn get_plan_events(
-    State(ctx): State<AppCtx>,
+    State(planner_event_tx): State<PlannerEventTx>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let mut bcast_rx = ctx.planner_event_tx.subscribe();
+    let mut bcast_rx = planner_event_tx.subscribe();
     // Bridge broadcast → mpsc so lagged clients don't poison the broadcast sender.
     let (fwd_tx, fwd_rx) = tokio::sync::mpsc::channel::<Event>(32);
     tokio::spawn(async move {

@@ -4,9 +4,11 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::app_ctx::{CommsLoss, MetricsHandle, Telemetry};
 use crate::entities::plan::SolveStatus;
+use crate::state::AppState;
 use crate::state::{TaskStatus, VtnConnectionStatus};
-use crate::AppCtx;
+use crate::vtn::VtnClient;
 
 /// R-59: whether the comms-loss curtailment fail-safe is currently active —
 /// `false` unconditionally when the profile has no `comms_loss:` section.
@@ -139,22 +141,23 @@ fn plan_is_ok(solve_status: Option<SolveStatus>) -> bool {
 /// fix; a VTN outage or infeasible plan is not resolved by restarting the container,
 /// so Docker/`fleet.sh` healthchecks (which check the HTTP status only) must not
 /// treat those as reasons to cycle the VEN.
-pub async fn health(State(ctx): State<AppCtx>) -> Json<HealthResponse> {
-    let vtn = ctx.state.vtn_connection_status().await;
-    let storage_ok = ctx.state.storage_ok().await;
-    let plan_solve_status = ctx.state.active_plan_solve_status().await;
-    let wire_rejections = ctx.state.wire_rejections().await;
+pub async fn health(
+    State(state): State<AppState>,
+    State(telemetry): State<Telemetry>,
+    State(comms_loss): State<CommsLoss>,
+) -> Json<HealthResponse> {
+    let vtn = state.vtn_connection_status().await;
+    let storage_ok = state.storage_ok().await;
+    let plan_solve_status = state.active_plan_solve_status().await;
+    let wire_rejections = state.wire_rejections().await;
     // `None` when this VEN does not publish at all, which must not read as a
     // failure -- see the field's doc comment.
-    let telemetry_connected = ctx
-        .telemetry
-        .publishes()
-        .then(|| ctx.telemetry.is_connected());
+    let telemetry_connected = telemetry.publishes().then(|| telemetry.is_connected());
     Json(build_health_response(
         &vtn,
         storage_ok,
         plan_is_ok(plan_solve_status),
-        ctx.comms_loss_debounce_s,
+        comms_loss.debounce_s,
         &wire_rejections,
         telemetry_connected,
         Utc::now(),
@@ -191,13 +194,17 @@ fn build_vtn_status_response(
 
 /// WP-T1: VTN-connection detail — the terse `/health` shape has no room for
 /// `token_expires_at`; this endpoint answers "what exactly, in detail."
-pub async fn vtn_status(State(ctx): State<AppCtx>) -> Json<VtnStatusResponse> {
-    let vtn = ctx.state.vtn_connection_status().await;
-    let token_expires_at = ctx.vtn.token_expires_at(Utc::now()).await;
+pub async fn vtn_status(
+    State(state): State<AppState>,
+    State(vtn): State<VtnClient>,
+    State(comms_loss): State<CommsLoss>,
+) -> Json<VtnStatusResponse> {
+    let connection = state.vtn_connection_status().await;
+    let token_expires_at = vtn.token_expires_at(Utc::now()).await;
     Json(build_vtn_status_response(
-        vtn,
+        connection,
         token_expires_at,
-        ctx.comms_loss_debounce_s,
+        comms_loss.debounce_s,
         Utc::now(),
     ))
 }
@@ -231,13 +238,13 @@ fn build_tasks_status_response(
 /// WP-T3 (`docs/history/project_journal.md, search "WP-T"`): per-task restart/outcome status
 /// from `tasks::supervised_spawn`. Only reflects tasks actually spawned in this
 /// process — several are conditional on config, so this is not a fixed-length list.
-pub async fn tasks_status(State(ctx): State<AppCtx>) -> Json<Vec<TaskStatusEntry>> {
-    let statuses = ctx.state.task_statuses().await;
+pub async fn tasks_status(State(state): State<AppState>) -> Json<Vec<TaskStatusEntry>> {
+    let statuses = state.task_statuses().await;
     Json(build_tasks_status_response(statuses))
 }
 
-pub async fn get_metrics(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    ctx.metrics_handle.render()
+pub async fn get_metrics(State(metrics_handle): State<MetricsHandle>) -> impl IntoResponse {
+    metrics_handle.render()
 }
 
 #[cfg(test)]

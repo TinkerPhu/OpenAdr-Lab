@@ -69,6 +69,10 @@ The rules, and why each exists:
      specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds), so
      hour-of-day arithmetic and physical constants such as `4.186 / 3600` do not match.
 
+  11. No handler takes the whole `AppCtx` (`State<AppCtx>`) in routes/. Each extracts the parts it
+     uses (`State<AppState>`, `State<Roster>`, ...), each of which has its own
+     `impl FromRef<AppCtx>` in `app_ctx.rs` (R-110), so a signature says what the route can reach.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -225,6 +229,8 @@ CHECKS = [
      lambda: forbid("clock", [VEN_SRC / d for d in (
          "entities", "controller", "services", "assets", "simulator", "state")],
          r"(Utc|chrono::Utc)::now\(\)")),
+    ("a handler taking the whole AppCtx",
+     lambda: forbid("appctx", [VEN_SRC / "routes"], r"State<AppCtx>")),
 ]
 
 
