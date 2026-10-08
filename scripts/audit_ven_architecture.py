@@ -39,6 +39,14 @@ The rules, and why each exists:
      the edge and pass `now` down. `Instant::now()` is a monotonic duration
      timer, not date logic, and is not covered.
 
+  8. No `.val("...")` string-key read of an asset's `state_values()` outside assets/. The map
+     is the asset's diagnostics/JSON surface; a controller, service or route reading a key out
+     of it holds a second copy of a contract the asset can rename without the compiler noticing
+     (R-107: the arbiter and comms-loss read `emergency_heat_kw`, `absorb_headroom_kw` and
+     `inverter_max_kw` this way). What a reader needs is declared by the asset as a typed
+     `Asset` method carried on `AssetSnapshot` (`history`, `emergency_what_ifs`, `ac_ceiling_kw`,
+     ...).
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -170,6 +178,10 @@ CHECKS = [
      lambda: forbid("infra", [VEN_SRC / "controller"],
                     r"crate::(assets|simulator)\b")),
     ("new concrete SimState in the application ring", simstate_in_services),
+    ("string-key asset value read outside assets/",
+     lambda: forbid("val", [VEN_SRC / d for d in (
+         "controller", "services", "routes", "tasks", "entities", "simulator", "state",
+         "boot")], r"\.val\(\"")),
     ("wall-clock read below the adapters",
      lambda: forbid("clock", [VEN_SRC / d for d in (
          "entities", "controller", "services", "assets", "simulator", "state")],

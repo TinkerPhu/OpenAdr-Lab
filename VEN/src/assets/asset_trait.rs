@@ -4,7 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
 use crate::assets::{HistoryPoint, LoadWindowStats};
-use crate::entities::asset::{AssetHistoryView, AssetType, ComfortRate, CompletionPolicy};
+use crate::entities::asset::{
+    AssetHistoryView, AssetType, ComfortRate, CompletionPolicy, EmergencyWhatIfs,
+};
 use crate::entities::asset_params::{PvCurtailmentSource, RequestDefaults};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
@@ -231,6 +233,18 @@ pub trait Asset: Send + Sync {
     /// This asset's configured usage schedule as the diagnostics surface shows it
     /// (`GET /ev-usage-sim`), or `None` if it has none. Only the EV has one.
     fn usage_schedule_view(&self, _now: DateTime<Utc>) -> Option<EvUsageSimState> {
+        None
+    }
+
+    /// The asset's own answers to the arbiter's emergency-mode what-ifs, or `None` if it has none.
+    /// Only the heater does: its thermostat rule under Normal and under Absorb.
+    fn emergency_what_ifs(&self, _state: &AssetState) -> Option<EmergencyWhatIfs> {
+        None
+    }
+
+    /// The asset's AC output ceiling [kW], or `None` if it has none. Only the PV inverter does;
+    /// comms-loss curtailment is a percentage of it.
+    fn ac_ceiling_kw(&self) -> Option<f64> {
         None
     }
 

@@ -254,6 +254,8 @@ mod tests {
                 setpoint_kw: power_kw,
                 values: HashMap::new(),
                 history,
+                emergency_what_ifs: None,
+                ac_ceiling_kw: None,
             },
         );
         SimSnapshot {
@@ -524,6 +526,8 @@ mod tests {
                 setpoint_kw: power_kw,
                 values: HashMap::new(),
                 history,
+                emergency_what_ifs: None,
+                ac_ceiling_kw: None,
             },
         );
         SimSnapshot {

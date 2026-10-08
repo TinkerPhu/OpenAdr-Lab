@@ -366,6 +366,10 @@ impl Asset for PvInverter {
         Self::state_values(self, s)
     }
 
+    fn ac_ceiling_kw(&self) -> Option<f64> {
+        Some(self.inverter_max_kw)
+    }
+
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &PvState = own(state);
         AssetHistoryView {
@@ -518,6 +522,19 @@ mod tests {
         let (pv, state) = make_pv(5.0);
         let features = Asset::key_features(&pv, &AssetState::Pv(state));
         assert_eq!(features, vec![KeyFeature::new("peak power", "5.00 kW")]);
+    }
+
+    #[test]
+    fn ac_ceiling_agrees_with_the_state_values_map() {
+        let (pv, state) = make_pv(5.0);
+        let state = AssetState::Pv(state);
+        assert_eq!(
+            Asset::ac_ceiling_kw(&pv),
+            Asset::state_values(&pv, &state)
+                .get("inverter_max_kw")
+                .copied()
+        );
+        assert_eq!(Asset::ac_ceiling_kw(&pv), Some(5.0));
     }
 
     #[test]

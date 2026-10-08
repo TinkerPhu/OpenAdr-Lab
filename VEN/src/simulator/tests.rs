@@ -437,6 +437,28 @@ mod snapshot_values_tests {
     };
 
     #[test]
+    fn typed_answers_are_carried_only_by_the_assets_that_have_them() {
+        let params = [
+            AssetParams::Battery(BatteryParams::default()),
+            AssetParams::Ev(EvParams::default()),
+            AssetParams::Heater(HeaterParams::default()),
+            AssetParams::Pv(PvParams::default()),
+            AssetParams::BaseLoad(BaseLoadParams::default()),
+        ];
+        let snapshot = SimState::from_params(&params, Utc::now()).to_sim_snapshot();
+        for (id, asset) in &snapshot.assets {
+            let is_heater = id == crate::ids::ASSET_HEATER;
+            let is_pv = id == crate::ids::ASSET_PV;
+            assert_eq!(
+                asset.emergency_what_ifs.is_some(),
+                is_heater,
+                "what-ifs on '{id}'"
+            );
+            assert_eq!(asset.ac_ceiling_kw.is_some(), is_pv, "AC ceiling on '{id}'");
+        }
+    }
+
+    #[test]
     fn no_asset_kind_reports_a_state_value_named_like_a_typed_snapshot_field() {
         let params = [
             AssetParams::Battery(BatteryParams::default()),
