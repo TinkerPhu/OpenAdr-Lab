@@ -3,6 +3,7 @@ mod asset_trait;
 pub mod base_load;
 pub mod battery;
 mod battery_milp;
+mod capability_traits;
 pub mod ev;
 mod ev_comfort;
 mod ev_milp;
@@ -31,12 +32,12 @@ pub mod shiftable_load;
 // bin-crate "pub items have no external consumer" situation AssetHandle was already
 // #[allow(dead_code)]'d for before this file split.
 pub use asset_handle::AssetHandle;
-pub use asset_trait::{
-    Asset, MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
-    Trajectory, TrajectoryPoint,
-};
+pub use asset_trait::{Asset, Trajectory, TrajectoryPoint};
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
+pub use capability_traits::{
+    MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
+};
 pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
 pub use heater::{Heater, HeaterState};

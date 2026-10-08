@@ -137,23 +137,8 @@ pub async fn post_sim_reset(
     Path(asset_id): Path<String>,
     Json(body): Json<SocBody>,
 ) -> impl IntoResponse {
-    if !(0.0..=1.0).contains(&body.soc) {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "soc must be between 0.0 and 1.0"})),
-        )
-            .into_response();
-    }
     let values = std::collections::HashMap::from([("soc".to_string(), body.soc)]);
-    if ctx.roster.reset_asset(&asset_id, values).await {
-        axum::http::StatusCode::NO_CONTENT.into_response()
-    } else {
-        (
-            axum::http::StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": format!("asset '{}' not found", asset_id)})),
-        )
-            .into_response()
-    }
+    no_content_or_error(ctx.roster.reset_asset(&asset_id, values).await)
 }
 
 /// PUT /sim/config/battery — update battery capacity_kwh and/or min_soc.
@@ -161,38 +146,28 @@ pub async fn put_sim_config_battery(
     State(ctx): State<AppCtx>,
     Json(body): Json<BatteryConfigBody>,
 ) -> impl IntoResponse {
-    if body.capacity_kwh <= 0.0 {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "capacity_kwh must be > 0"})),
-        )
-            .into_response();
-    }
-    if let Some(min_soc) = body.min_soc {
-        if !(0.0..=1.0).contains(&min_soc) {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "min_soc must be between 0.0 and 1.0"})),
-            )
-                .into_response();
-        }
-    }
     let mut values = std::collections::HashMap::new();
     values.insert("capacity_kwh".to_string(), body.capacity_kwh);
     if let Some(min_soc) = body.min_soc {
         values.insert("min_soc".to_string(), min_soc);
     }
-    match ctx
-        .roster
-        .update_asset_config(crate::ids::ASSET_BATTERY, values)
-        .await
-    {
-        true => axum::http::StatusCode::NO_CONTENT.into_response(),
-        false => (
-            axum::http::StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "battery asset not found"})),
-        )
-            .into_response(),
+    no_content_or_error(
+        ctx.roster
+            .update_asset_config(crate::ids::ASSET_BATTERY, values)
+            .await,
+    )
+}
+
+/// 204 on success; the domain error's own status and message otherwise (`routes/error.rs`).
+fn no_content_or_error(
+    result: Result<(), crate::entities::DomainError>,
+) -> axum::response::Response {
+    match result {
+        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            let (status, body): (axum::http::StatusCode, Json<serde_json::Value>) = e.into();
+            (status, body).into_response()
+        }
     }
 }
 

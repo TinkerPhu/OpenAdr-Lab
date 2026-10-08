@@ -23,6 +23,7 @@ use crate::entities::device_session::ShiftableLoad;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::timeline::TimelineSnapshot;
+use crate::entities::DomainError;
 use chrono::Duration;
 use chrono::{DateTime, Utc};
 use lab_core::time_series::{Interpolation, TimeSeries};
@@ -67,26 +68,36 @@ impl SimRosterPort for SimHandle {
         }
     }
 
-    async fn reset_asset(&self, asset_id: &str, values: HashMap<String, f64>) -> bool {
+    async fn reset_asset(
+        &self,
+        asset_id: &str,
+        values: HashMap<String, f64>,
+    ) -> Result<(), DomainError> {
         let mut sim = self.sim.lock().await;
-        match sim.find_asset_mut(asset_id) {
-            Some((entry, cfg)) => {
-                cfg.reset(&mut entry.state, values);
-                true
-            }
-            None => false,
-        }
+        let (entry, cfg) =
+            sim.find_asset_mut(asset_id)
+                .ok_or_else(|| DomainError::AssetNotFound {
+                    asset_id: asset_id.to_string(),
+                })?;
+        cfg.validate_values(asset_id, &values)?;
+        cfg.reset(&mut entry.state, values);
+        Ok(())
     }
 
-    async fn update_asset_config(&self, asset_id: &str, values: HashMap<String, f64>) -> bool {
+    async fn update_asset_config(
+        &self,
+        asset_id: &str,
+        values: HashMap<String, f64>,
+    ) -> Result<(), DomainError> {
         let mut sim = self.sim.lock().await;
-        match sim.find_asset_mut(asset_id) {
-            Some((_entry, cfg)) => {
-                cfg.update_config(values);
-                true
-            }
-            None => false,
-        }
+        let (_entry, cfg) =
+            sim.find_asset_mut(asset_id)
+                .ok_or_else(|| DomainError::AssetNotFound {
+                    asset_id: asset_id.to_string(),
+                })?;
+        cfg.validate_values(asset_id, &values)?;
+        cfg.update_config(values);
+        Ok(())
     }
 }
 
@@ -525,27 +536,28 @@ mod tests {
     async fn reset_asset_applies_the_values_and_reports_an_unknown_id() {
         let (handle, sim) = handle_with(&[AssetParams::Battery(BatteryParams::default())]);
         let values = HashMap::from([("soc".to_string(), 0.25)]);
-        assert!(
-            handle
-                .reset_asset(crate::ids::ASSET_BATTERY, values.clone())
-                .await
-        );
+        handle
+            .reset_asset(crate::ids::ASSET_BATTERY, values.clone())
+            .await
+            .expect("a valid value is applied");
         let guard = sim.lock().await;
         let (entry, cfg) = guard.find_asset(crate::ids::ASSET_BATTERY).unwrap();
         assert_eq!(cfg.state_values(&entry.state).get("soc"), Some(&0.25));
         drop(guard);
-        assert!(!handle.reset_asset("nope", values).await);
+        assert!(matches!(
+            handle.reset_asset("nope", values).await,
+            Err(DomainError::AssetNotFound { .. })
+        ));
     }
 
     #[tokio::test]
     async fn update_asset_config_applies_the_values_and_reports_an_unknown_id() {
         let (handle, sim) = handle_with(&[AssetParams::Battery(BatteryParams::default())]);
         let values = HashMap::from([("capacity_kwh".to_string(), 42.0)]);
-        assert!(
-            handle
-                .update_asset_config(crate::ids::ASSET_BATTERY, values.clone())
-                .await
-        );
+        handle
+            .update_asset_config(crate::ids::ASSET_BATTERY, values.clone())
+            .await
+            .expect("a valid value is applied");
         let guard = sim.lock().await;
         let (entry, cfg) = guard.find_asset(crate::ids::ASSET_BATTERY).unwrap();
         assert_eq!(
@@ -553,6 +565,49 @@ mod tests {
             Some(&42.0)
         );
         drop(guard);
-        assert!(!handle.update_asset_config("nope", values).await);
+        assert!(matches!(
+            handle.update_asset_config("nope", values).await,
+            Err(DomainError::AssetNotFound { .. })
+        ));
+    }
+
+    /// R-113: the battery refuses a value outside its own limits, and nothing is applied.
+    #[tokio::test]
+    async fn the_battery_refuses_out_of_range_values_and_keeps_its_own() {
+        let (handle, sim) = handle_with(&[AssetParams::Battery(BatteryParams::default())]);
+        let battery = crate::ids::ASSET_BATTERY;
+        let before = {
+            let guard = sim.lock().await;
+            let (entry, cfg) = guard.find_asset(battery).unwrap();
+            cfg.state_values(&entry.state)
+        };
+        for (key, value, port_reset) in [
+            ("soc", 1.5, true),
+            ("min_soc", -0.1, false),
+            ("capacity_kwh", 0.0, false),
+        ] {
+            let values = HashMap::from([(key.to_string(), value)]);
+            let result = if port_reset {
+                handle.reset_asset(battery, values).await
+            } else {
+                handle.update_asset_config(battery, values).await
+            };
+            match result {
+                Err(DomainError::InvalidValue {
+                    key: k, message, ..
+                }) => {
+                    assert_eq!(k, key);
+                    assert!(message.contains(key), "{message}");
+                }
+                other => panic!("{key}={value} must be refused, got {other:?}"),
+            }
+        }
+        let guard = sim.lock().await;
+        let (entry, cfg) = guard.find_asset(battery).unwrap();
+        assert_eq!(
+            cfg.state_values(&entry.state),
+            before,
+            "nothing was applied"
+        );
     }
 }

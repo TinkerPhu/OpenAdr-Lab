@@ -229,6 +229,29 @@ impl Asset for Battery {
         vec![]
     }
 
+    /// A state of charge or a minimum outside 0..=1, or a capacity that is not positive, is
+    /// refused rather than clamped: the caller asked for something this battery cannot be.
+    fn validate_values(
+        &self,
+        asset_id: &str,
+        values: &HashMap<String, f64>,
+    ) -> Result<(), crate::entities::DomainError> {
+        let refuse = |key: &str, message: &str| crate::entities::DomainError::InvalidValue {
+            asset_id: asset_id.to_string(),
+            key: key.to_string(),
+            message: message.to_string(),
+        };
+        for key in ["soc", "min_soc"] {
+            if values.get(key).is_some_and(|v| !(0.0..=1.0).contains(v)) {
+                return Err(refuse(key, &format!("{key} must be between 0.0 and 1.0")));
+            }
+        }
+        if values.get("capacity_kwh").is_some_and(|v| *v <= 0.0) {
+            return Err(refuse("capacity_kwh", "capacity_kwh must be > 0"));
+        }
+        Ok(())
+    }
+
     fn update_config(&mut self, values: HashMap<String, f64>) {
         if let Some(&v) = values.get("capacity_kwh") {
             self.capacity_kwh = v.max(0.1);

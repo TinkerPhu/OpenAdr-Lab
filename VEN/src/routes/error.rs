@@ -16,7 +16,10 @@ use crate::entities::DomainError;
 impl From<DomainError> for (StatusCode, Json<serde_json::Value>) {
     fn from(e: DomainError) -> Self {
         let status = match e {
-            DomainError::NotFound { .. } => StatusCode::NOT_FOUND,
+            DomainError::NotFound { .. } | DomainError::AssetNotFound { .. } => {
+                StatusCode::NOT_FOUND
+            }
+            DomainError::InvalidValue { .. } => StatusCode::BAD_REQUEST,
             DomainError::SessionConflict(_) => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -40,6 +43,24 @@ mod tests {
                 id: uuid::Uuid::new_v4()
             }),
             StatusCode::NOT_FOUND
+        );
+    }
+
+    #[test]
+    fn an_unknown_asset_maps_to_404_and_a_refused_value_to_400() {
+        assert_eq!(
+            status_of(DomainError::AssetNotFound {
+                asset_id: "nope".into()
+            }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status_of(DomainError::InvalidValue {
+                asset_id: "battery".into(),
+                key: "soc".into(),
+                message: "soc must be between 0.0 and 1.0".into(),
+            }),
+            StatusCode::BAD_REQUEST
         );
     }
 
