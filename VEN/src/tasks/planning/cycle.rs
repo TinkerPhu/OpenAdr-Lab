@@ -134,7 +134,7 @@ pub(super) async fn run_plan_cycle(
     let prev = current_plan.as_ref();
     finish_plan_cycle(
         state,
-        sim,
+        &crate::simulator::SimHandle::new(sim.clone()),
         notifier,
         wall_now,
         prev,

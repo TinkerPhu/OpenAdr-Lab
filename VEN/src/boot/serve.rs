@@ -26,6 +26,9 @@ pub async fn serve(w: World) -> anyhow::Result<()> {
 }
 
 fn app_ctx(w: World) -> AppCtx {
+    // One handle on the shared simulator behind every port the routes and services use; the
+    // tick loop and the other tasks keep the concrete `Arc<Mutex<SimState>>` (`w.sim`).
+    let handle = Arc::new(simulator::SimHandle::new(w.sim.clone()));
     AppCtx {
         sim_schema: Arc::new(simulator::schema_from_params(&w.asset_params)),
         telemetry: w.ports.telemetry,
@@ -33,7 +36,8 @@ fn app_ctx(w: World) -> AppCtx {
         vtn: w.ports.vtn,
         metrics_handle: w.metrics_handle,
         trigger_tx: w.trigger_tx,
-        roster: Arc::new(simulator::SimHandle::new(w.sim.clone())),
+        roster: handle.clone(),
+        headroom: handle,
         sim: w.sim,
         active_objective: w.active_objective,
         planner_event_tx: w.planner_event_tx,

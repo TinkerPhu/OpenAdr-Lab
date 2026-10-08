@@ -20,7 +20,7 @@ use crate::state::AppState;
 #[allow(clippy::too_many_arguments)]
 pub async fn finish_plan_cycle(
     state: &AppState,
-    sim: &std::sync::Arc<tokio::sync::Mutex<crate::simulator::SimState>>,
+    headroom: &dyn crate::controller::HeadroomPort,
     notifier: &crate::services::notify::Notifier,
     wall_now: DateTime<Utc>,
     prev_plan: Option<&Plan>,
@@ -42,18 +42,11 @@ pub async fn finish_plan_cycle(
         &cycle.plan,
     )
     .await;
-    // Computed synchronously while the lock is held, then dropped immediately —
-    // never hold a SimState lock across an `.await` (publish_post_cycle_state
-    // below awaits on state/weather).
-    let site_headroom = {
-        let guard = sim.lock().await;
-        crate::simulator::site_headroom::compute_site_headroom(
-            &guard,
-            wall_now,
-            grid_max_import_kw,
-            grid_max_export_kw,
-        )
-    };
+    // The port locks the simulator inside the call and releases it before returning, so the
+    // awaits in `publish_post_cycle_state` below never run with it held.
+    let site_headroom = headroom
+        .site_headroom(wall_now, grid_max_import_kw, grid_max_export_kw)
+        .await;
     // Fetched once and shared: both publish_post_cycle_state and the forecast-accuracy
     // capture below need it, and it's an RwLock read + full HashMap clone.
     let heuristics = state.asset_heuristics().await;

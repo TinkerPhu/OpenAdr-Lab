@@ -12,7 +12,6 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::entities::capacity_curve::CapacityCurves;
-use crate::simulator::capacity_headroom::compute_site_capacity_curves_at;
 use crate::AppCtx;
 
 /// GET /flexibility — returns the live site-level flexibility envelope (Phase E).
@@ -80,19 +79,16 @@ pub async fn get_capacity_curves(
     let at_start = match (query.start, ctx.state.active_plan().await) {
         (Some(start), Some(plan)) => {
             let started = std::time::Instant::now();
-            // Computed synchronously under the lock, dropped before any
-            // `.await` -- same pattern as `services::forecast::finish_plan_cycle`.
-            let curves = {
-                let sim = ctx.sim.lock().await;
-                compute_site_capacity_curves_at(
-                    &sim,
+            let curves = ctx
+                .headroom
+                .capacity_curves_at(
                     &plan,
                     start,
                     Utc::now(),
                     ctx.grid_max_import_kw,
                     ctx.grid_max_export_kw,
                 )
-            };
+                .await;
             debug!(
                 elapsed_us = started.elapsed().as_micros() as u64,
                 "capacity curves at future start"

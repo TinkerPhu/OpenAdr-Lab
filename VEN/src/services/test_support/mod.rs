@@ -6,3 +6,4 @@ pub mod mock_simulator_port;
 pub mod mock_solver_port;
 pub mod mock_vtn;
 pub mod mock_weather_port;
+pub mod plans;

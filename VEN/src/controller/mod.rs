@@ -31,6 +31,8 @@ pub mod history_port;
 pub use history_port::HistoryPort;
 
 // ── SettingsPort trait (WP4.2, BL-19) ─────────────────────────────────────────
+pub mod headroom_port;
+pub use headroom_port::HeadroomPort;
 pub mod settings_port;
 pub mod sim_roster_port;
 pub use settings_port::SettingsPort;
