@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use super::arbiter_levers::current_setpoint_kw;
+use super::arbiter_levers::{current_setpoint_kw, LEVER_EV, LEVER_HEATER_PAUSE};
 pub use super::SetpointBoundsKw;
 use super::{
     apply_ranked_levers, projected_net_kw, ArbiterTick, LeverInputs, LeverPolicy, DEAD_BAND_KW,
@@ -32,7 +32,7 @@ pub const LIMIT_RELEASE_HYSTERESIS_KW: f64 = 0.2;
 /// Levers whose release switches discretely — a heater stage, the EV's
 /// minimum-charge floor. The battery adjusts continuously and gets no
 /// hysteresis, so it can hold import right at the target.
-const SWITCHING_LEVERS: [&str; 2] = ["heater_pause", "ev"];
+const SWITCHING_LEVERS: [&str; 2] = [LEVER_HEATER_PAUSE, LEVER_EV];
 
 /// A hard limit may also cut charging the plan itself scheduled, and battery
 /// discharge ignores `MaxRevenue`'s refusal — the limit outranks the objective.

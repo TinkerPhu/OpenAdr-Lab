@@ -1037,7 +1037,11 @@ loop's tasks do the same: they ask and schedule, they do not decide. `Asset::pla
 is the one trip walk, shared with the `usage_forecast` expected uses), `Asset::set_observed_window`
 (the base load's trailing-window summary, via `SimState::set_base_load_observed_window`) and
 `SimState::record_history` (per-asset history points and the grid asset update; the meter's one
-W-to-kW conversion is `GridMeter::net_power_kw`). A shiftable
+W-to-kW conversion is `GridMeter::net_power_kw`). The controller reads asset answers as typed
+`AssetSnapshot` fields, never `state_values()` keys: `Asset::emergency_what_ifs` (the heater's thermostat
+rule under Normal/Absorb, for the arbiter) and `Asset::ac_ceiling_kw` (the PV inverter's AC ceiling, for
+comms-loss curtailment); `audit_ven_architecture.py` rule 8 enforces it. Lever ids are the named
+`LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`
 `add_shiftable_*`, `assets/ev_schedule.rs` `usage_view_*`.

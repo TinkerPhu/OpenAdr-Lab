@@ -12,6 +12,15 @@ use crate::entities::asset::EmergencyWhatIfs;
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
 
+/// Lever ids: a namespace of their own (an id names a *lever*, not an asset or an asset type -
+/// the battery lever happens to share a spelling with `ids::ASSET_BATTERY`, nothing more). One
+/// spelling each, used by the constructors here and by every place that matches a lever.
+pub(crate) const LEVER_BATTERY: &str = "battery";
+pub(crate) const LEVER_EV: &str = "ev";
+pub(crate) const LEVER_HEATER_PAUSE: &str = "heater_pause";
+pub(crate) const LEVER_HEATER_EMERGENCY: &str = "heater_emergency";
+pub(crate) const LEVER_PV_CURTAIL: &str = "pv_curtail";
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Lever {
     pub(super) id: &'static str,
@@ -88,7 +97,7 @@ pub(super) fn battery_lever(
         return None;
     }
     Some(Lever {
-        id: "battery",
+        id: LEVER_BATTERY,
         available_capacity_kw,
         marginal_cost_eur_per_kwh,
     })
@@ -163,7 +172,7 @@ pub(super) fn ev_lever(
         return None;
     }
     Some(Lever {
-        id: "ev",
+        id: LEVER_EV,
         available_capacity_kw,
         marginal_cost_eur_per_kwh: 0.0,
     })
@@ -228,7 +237,7 @@ pub(super) fn heater_pause_lever(
         return None;
     }
     Some(Lever {
-        id: "heater_pause",
+        id: LEVER_HEATER_PAUSE,
         available_capacity_kw: drawn_kw,
         marginal_cost_eur_per_kwh: 0.0,
     })
@@ -307,7 +316,7 @@ pub(super) fn heater_emergency_lever(
             return None; // thermostat isn't forcing emergency heat
         }
         Some(Lever {
-            id: "heater_emergency",
+            id: LEVER_HEATER_EMERGENCY,
             available_capacity_kw: emergency_heat_kw,
             marginal_cost_eur_per_kwh: HEATER_COMFORT_OVERRIDE_EUR_PER_KWH,
         })
@@ -322,7 +331,7 @@ pub(super) fn heater_emergency_lever(
             return None; // already at the true safety ceiling
         }
         Some(Lever {
-            id: "heater_emergency",
+            id: LEVER_HEATER_EMERGENCY,
             available_capacity_kw: absorb_headroom_kw,
             marginal_cost_eur_per_kwh: slot.marginal_cost_export_eur_per_kwh,
         })
@@ -340,7 +349,7 @@ pub(super) fn pv_curtailment_lever(
         return None;
     }
     Some(Lever {
-        id: "pv_curtail",
+        id: LEVER_PV_CURTAIL,
         available_capacity_kw: slot.pv_used_kw,
         marginal_cost_eur_per_kwh: slot.export_tariff_eur_kwh,
     })
