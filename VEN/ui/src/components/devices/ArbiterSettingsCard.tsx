@@ -15,16 +15,13 @@ import type {
   LimitPassOutcome,
   UpdateArbiterSettingsBody,
 } from "../../api/types";
+import { formatKwOrDash } from "@lab/charts/unitFormat";
 
 export type ArbiterSettingsCardProps = {
   arbiterSettings: ArbiterSettings | undefined;
   putArbiterSettings: (body: UpdateArbiterSettingsBody) => void;
   diagnostics: ArbiterDiagnostics | undefined;
 };
-
-function formatKw(kw: number | null | undefined): string {
-  return kw === null || kw === undefined ? "—" : `${kw.toFixed(2)} kW`;
-}
 
 /** ui-transparency: the deviation pass's last tick — no backend-only decision
  * without an inspectable surface. */
@@ -33,14 +30,14 @@ function DeviationReadout({ diagnostics }: { diagnostics: ArbiterDiagnostics }) 
     <Stack spacing={0.5} data-testid="arbiter-diagnostics">
       <Typography variant="subtitle2">Deviation correction</Typography>
       <Typography variant="body2">
-        Projected net site power: <strong>{formatKw(diagnostics.net_kw)}</strong>
+        Projected net site power: <strong>{formatKwOrDash(diagnostics.net_kw)}</strong>
       </Typography>
       <Typography variant="body2">
-        Deviation from plan: <strong>{formatKw(diagnostics.dev_kw)}</strong>
+        Deviation from plan: <strong>{formatKwOrDash(diagnostics.dev_kw)}</strong>
       </Typography>
       <Typography variant="body2">
         {/* A held correction is released once this is inside the dead band (R-88). */}
-        Deviation if released: <strong>{formatKw(diagnostics.dev_without_correction_kw)}</strong>
+        Deviation if released: <strong>{formatKwOrDash(diagnostics.dev_without_correction_kw)}</strong>
       </Typography>
       <Typography variant="body2">
         Active lever: <strong>{diagnostics.active_lever ?? "none"}</strong>
@@ -63,10 +60,10 @@ function LimitReadout({ limit }: { limit: LimitPassOutcome | null }) {
       ) : (
         <>
           <Typography variant="body2">
-            Import ceiling: <strong>{formatKw(limit.target_kw)}</strong>
+            Import ceiling: <strong>{formatKwOrDash(limit.target_kw)}</strong>
           </Typography>
           <Typography variant="body2">
-            Excess before shedding: <strong>{formatKw(Math.max(limit.excess_kw, 0))}</strong>
+            Excess before shedding: <strong>{formatKwOrDash(Math.max(limit.excess_kw, 0))}</strong>
           </Typography>
           <Typography variant="body2">
             Lever: <strong>{limit.active_lever ?? "none"}</strong>
@@ -75,7 +72,7 @@ function LimitReadout({ limit }: { limit: LimitPassOutcome | null }) {
             variant="body2"
             color={limit.unresolved_kw > 0 ? "error" : undefined}
           >
-            Unresolved: <strong>{formatKw(limit.unresolved_kw)}</strong>
+            Unresolved: <strong>{formatKwOrDash(limit.unresolved_kw)}</strong>
           </Typography>
         </>
       )}
@@ -102,10 +99,10 @@ function DiagnosticsReadout(props: {
       {limitEnabled && <LimitReadout limit={diagnostics.limit} />}
       <Typography variant="body2" data-testid="arbiter-battery-bridge">
         {/* Covers a command that lands a tick late; dropped, not carried, next tick (R-104). */}
-        Battery bridging the charger lag: <strong>{formatKw(diagnostics.battery_bridge_kw)}</strong>
+        Battery bridging the charger lag: <strong>{formatKwOrDash(diagnostics.battery_bridge_kw)}</strong>
       </Typography>
       <Typography variant="body2">
-        Measured net site power: <strong>{formatKw(diagnostics.measured_net_kw)}</strong>
+        Measured net site power: <strong>{formatKwOrDash(diagnostics.measured_net_kw)}</strong>
       </Typography>
       <Typography variant="caption" color="text.secondary">
         Updated {new Date(diagnostics.updated_at).toLocaleTimeString()}

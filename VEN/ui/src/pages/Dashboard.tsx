@@ -6,6 +6,7 @@ import type { OadrCapacityState, AssetLedger, PlannerObjective } from "../api/ty
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
+import { formatFixedOrDash, formatKwOrDash } from "@lab/charts/unitFormat";
 
 const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
   min_cost: "Cost",
@@ -14,11 +15,6 @@ const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
   min_import: "Autarky",
   max_revenue: "Revenue",
 };
-
-function fmtNum(v: number | undefined | null, decimals = 1): string {
-  if (v == null) return "—";
-  return v.toFixed(decimals);
-}
 
 function ModeBadge({ mode }: { mode?: string }) {
   if (!mode || mode === "IDLE") return <Chip label="IDLE" size="small" />;
@@ -51,7 +47,6 @@ function CapacityCard({
   const importKw = netPowerW != null && netPowerW > 0 ? netPowerW / 1000 : 0;
   const exportKw = netPowerW != null && netPowerW < 0 ? -netPowerW / 1000 : 0;
 
-  const fmtKw = (v: number | null | undefined) => (v != null ? `${v.toFixed(1)} kW` : "—");
   const fmtTs = (v: string | null | undefined) => {
     if (!v) return "—";
     return new Date(v).toLocaleTimeString();
@@ -63,10 +58,10 @@ function CapacityCard({
         OpenADR Capacity
       </Typography>
       <Stack spacing={0.5}>
-        <Typography variant="body2">Import limit: {fmtKw(capacity?.import_limit_kw)}</Typography>
-        <Typography variant="body2">Export limit: {fmtKw(capacity?.export_limit_kw)}</Typography>
-        <Typography variant="body2">Subscribed: {fmtKw(capacity?.import_subscription_kw)}</Typography>
-        <Typography variant="body2">Reserved: {fmtKw(capacity?.import_reservation_kw)}</Typography>
+        <Typography variant="body2">Import limit: {formatKwOrDash(capacity?.import_limit_kw, 1)}</Typography>
+        <Typography variant="body2">Export limit: {formatKwOrDash(capacity?.export_limit_kw, 1)}</Typography>
+        <Typography variant="body2">Subscribed: {formatKwOrDash(capacity?.import_subscription_kw, 1)}</Typography>
+        <Typography variant="body2">Reserved: {formatKwOrDash(capacity?.import_reservation_kw, 1)}</Typography>
         <Typography variant="caption" color="text.secondary">
           Updated: {fmtTs(capacity?.last_updated)}
         </Typography>
@@ -301,13 +296,13 @@ export function DashboardPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">Power</Typography>
                   <Typography data-testid="sim-net-power">
-                    Net: {fmtNum(sim.data.grid.net_power_w, 0)} W
+                    Net: {formatFixedOrDash(sim.data.grid.net_power_w, 0)} W
                   </Typography>
                   <Typography data-testid="sim-import">
-                    Import: {fmtNum(sim.data.grid.net_power_w > 0 ? sim.data.grid.net_power_w : 0, 0)} W
+                    Import: {formatFixedOrDash(sim.data.grid.net_power_w > 0 ? sim.data.grid.net_power_w : 0, 0)} W
                   </Typography>
                   <Typography data-testid="sim-export">
-                    Export: {fmtNum(sim.data.grid.net_power_w < 0 ? -sim.data.grid.net_power_w : 0, 0)} W
+                    Export: {formatFixedOrDash(sim.data.grid.net_power_w < 0 ? -sim.data.grid.net_power_w : 0, 0)} W
                   </Typography>
                 </Stack>
               </Grid>
@@ -315,10 +310,10 @@ export function DashboardPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">Energy</Typography>
                   <Typography data-testid="sim-import-kwh">
-                    Import: {fmtNum(sim.data.grid.import_kwh, 3)} kWh
+                    Import: {formatFixedOrDash(sim.data.grid.import_kwh, 3)} kWh
                   </Typography>
                   <Typography data-testid="sim-export-kwh">
-                    Export: {fmtNum(sim.data.grid.export_kwh, 3)} kWh
+                    Export: {formatFixedOrDash(sim.data.grid.export_kwh, 3)} kWh
                   </Typography>
                 </Stack>
               </Grid>
