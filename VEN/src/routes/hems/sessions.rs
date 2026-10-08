@@ -228,15 +228,7 @@ pub async fn post_requests(
         // shiftable-load-as-asset design.md D1: the asset enters SimState at
         // acceptance time (started = false), not deferred until the MILP
         // picks a start slot — visible to forecasting/MILP for its whole life.
-        if let Err(msg) = ctx.sim.lock().await.add_shiftable(
-            &load.asset_id,
-            crate::assets::ShiftableLoadAsset {
-                power_kw: load.power_kw,
-                duration_min: load.duration_min,
-                earliest_start: load.earliest_start,
-                latest_end: load.latest_end,
-            },
-        ) {
+        if let Err(msg) = ctx.roster.add_shiftable(&load).await {
             // Should be unreachable: add_shiftable_load's own duplicate
             // check above already rejects a reused asset_id.
             warn!(asset_id = %load.asset_id, error = %msg, "add_asset failed after add_shiftable_load succeeded");
@@ -418,8 +410,7 @@ pub async fn post_requests(
 
 /// DELETE /user-requests/:id — cancel a user request and clear any linked device session.
 pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    let mut sim = ctx.sim.lock().await;
-    match UserRequestService::cancel(id, &ctx.state, &mut sim).await {
+    match UserRequestService::cancel(id, &ctx.state, ctx.roster.as_ref()).await {
         Ok(req) => {
             ctx.state
                 .push_controller_event(

@@ -2,13 +2,13 @@ use chrono::{DateTime, Utc};
 use tracing::info;
 use uuid::Uuid;
 
+use crate::controller::sim_roster_port::CancelOutcome;
 use crate::controller::user_request::{create_from_body, CreateUserRequestParams, RequestError};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::DomainError;
 use crate::ids;
-use crate::simulator::SimState;
 use crate::state::AppState;
 
 pub struct UserRequestService;
@@ -201,7 +201,7 @@ impl UserRequestService {
     pub async fn cancel(
         id: Uuid,
         state: &AppState,
-        sim: &mut SimState,
+        roster: &dyn crate::controller::SimRosterPort,
     ) -> Result<UserRequest, DomainError> {
         // Check existence and terminal state before calling the state method.
         let requests = state.active_requests().await;
@@ -221,18 +221,15 @@ impl UserRequestService {
         }
 
         if req.session_type == Some(SessionType::ShiftableLoad) {
-            let cancellable = sim
-                .find_asset(&req.asset_id)
-                .is_none_or(|(entry, cfg)| cfg.is_cancellable(&entry.state));
-            if !cancellable {
+            // One atomic call: the asset says whether it can still be cancelled, and is removed
+            // only if so. No asset in the roster (never added, or already gone) is not an
+            // obstacle: the request itself is still cancelled below.
+            if roster.cancel_if_cancellable(&req.asset_id).await == CancelOutcome::NotCancellable {
                 return Err(DomainError::SessionConflict(format!(
                     "shiftable load '{}' has already started and cannot be cancelled",
                     req.asset_id
                 )));
             }
-            // Not yet started: drop the pending asset too, not just the
-            // HEMS-level request record `cancel_request` clears below.
-            sim.remove_asset(&req.asset_id);
         }
 
         // Delegate to AppState which handles session clearing atomically.
@@ -270,6 +267,9 @@ mod tests {
     use super::*;
     use crate::entities::user_request::UserRequestStatus;
     use crate::entities::DomainError;
+    use crate::simulator::{SimHandle, SimState};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     /// Check shiftable request creation from a minimal body.
     #[test]
@@ -375,8 +375,9 @@ mod tests {
     async fn test_cancel_unknown_id_returns_err() {
         let state = AppState::new();
         let unknown = Uuid::new_v4();
-        let mut sim = SimState::from_params(&[], Utc::now());
-        let result = UserRequestService::cancel(unknown, &state, &mut sim).await;
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        let result = UserRequestService::cancel(unknown, &state, &roster).await;
         assert!(matches!(result, Err(DomainError::NotFound { .. })));
     }
 
@@ -412,8 +413,9 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let mut sim = SimState::from_params(&[], Utc::now());
-        let result = UserRequestService::cancel(id, &state, &mut sim).await;
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        let result = UserRequestService::cancel(id, &state, &roster).await;
         assert!(matches!(result, Err(DomainError::SessionConflict(_))));
     }
 
@@ -466,8 +468,9 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let mut sim = SimState::from_params(&[], Utc::now());
-        let cancelled = UserRequestService::cancel(id, &state, &mut sim)
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        let cancelled = UserRequestService::cancel(id, &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
@@ -510,18 +513,21 @@ mod tests {
     #[tokio::test]
     async fn test_cancel_rejects_a_started_shiftable_load() {
         let state = AppState::new();
-        let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_shiftable(
-            "wm",
-            crate::assets::ShiftableLoadAsset {
-                power_kw: 2.0,
-                duration_min: 60,
-                earliest_start: Utc::now(),
-                latest_end: Utc::now() + chrono::Duration::hours(4),
-            },
-        )
-        .unwrap();
-        sim.asset_mut("wm").unwrap().state =
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        sim.lock()
+            .await
+            .add_shiftable(
+                "wm",
+                crate::assets::ShiftableLoadAsset {
+                    power_kw: 2.0,
+                    duration_min: 60,
+                    earliest_start: Utc::now(),
+                    latest_end: Utc::now() + chrono::Duration::hours(4),
+                },
+            )
+            .unwrap();
+        sim.lock().await.asset_mut("wm").unwrap().state =
             crate::assets::AssetState::ShiftableLoad(crate::assets::ShiftableLoadState {
                 started: true,
                 elapsed_min: 5.0,
@@ -532,13 +538,13 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let result = UserRequestService::cancel(id, &state, &mut sim).await;
+        let result = UserRequestService::cancel(id, &state, &roster).await;
         assert!(
             matches!(result, Err(DomainError::SessionConflict(_))),
             "cancelling a started shiftable load must be rejected"
         );
         assert!(
-            sim.find_asset("wm").is_some(),
+            sim.lock().await.find_asset("wm").is_some(),
             "the running asset must not be removed"
         );
     }
@@ -548,24 +554,27 @@ mod tests {
     #[tokio::test]
     async fn cancel_rejects_a_shiftable_load_the_sim_has_started_running() {
         let state = AppState::new();
-        let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_shiftable(
-            "wm",
-            crate::assets::ShiftableLoadAsset {
-                power_kw: 2.0,
-                duration_min: 60,
-                earliest_start: Utc::now(),
-                latest_end: Utc::now() + chrono::Duration::hours(4),
-            },
-        )
-        .unwrap();
-        sim.tick(crate::simulator::TickInputs::new(
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        sim.lock()
+            .await
+            .add_shiftable(
+                "wm",
+                crate::assets::ShiftableLoadAsset {
+                    power_kw: 2.0,
+                    duration_min: 60,
+                    earliest_start: Utc::now(),
+                    latest_end: Utc::now() + chrono::Duration::hours(4),
+                },
+            )
+            .unwrap();
+        sim.lock().await.tick(crate::simulator::TickInputs::new(
             1.0,
             Utc::now(),
             std::collections::HashMap::from([("wm".to_string(), 2.0)]),
         ));
         assert!(
-            sim.asset("wm").unwrap().last_power_kw > 0.0,
+            sim.lock().await.asset("wm").unwrap().last_power_kw > 0.0,
             "the load is drawing power"
         );
 
@@ -573,7 +582,7 @@ mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let result = UserRequestService::cancel(id, &state, &mut sim).await;
+        let result = UserRequestService::cancel(id, &state, &roster).await;
         assert!(
             matches!(result, Err(DomainError::SessionConflict(_))),
             "a running load cannot be cancelled, got {result:?}"
@@ -585,28 +594,31 @@ mod tests {
     #[tokio::test]
     async fn test_cancel_removes_a_pending_shiftable_loads_asset() {
         let state = AppState::new();
-        let mut sim = SimState::from_params(&[], Utc::now());
-        sim.add_shiftable(
-            "wm",
-            crate::assets::ShiftableLoadAsset {
-                power_kw: 2.0,
-                duration_min: 60,
-                earliest_start: Utc::now(),
-                latest_end: Utc::now() + chrono::Duration::hours(4),
-            },
-        )
-        .unwrap();
+        let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
+        let roster = SimHandle::new(sim.clone());
+        sim.lock()
+            .await
+            .add_shiftable(
+                "wm",
+                crate::assets::ShiftableLoadAsset {
+                    power_kw: 2.0,
+                    duration_min: 60,
+                    earliest_start: Utc::now(),
+                    latest_end: Utc::now() + chrono::Duration::hours(4),
+                },
+            )
+            .unwrap();
 
         let req = shiftable_request("wm");
         let id = req.id;
         state.upsert_request(req).await;
 
-        let cancelled = UserRequestService::cancel(id, &state, &mut sim)
+        let cancelled = UserRequestService::cancel(id, &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
         assert!(
-            sim.find_asset("wm").is_none(),
+            sim.lock().await.find_asset("wm").is_none(),
             "the pending asset must be removed"
         );
     }
