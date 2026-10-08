@@ -13,8 +13,12 @@ use tokio::sync::Mutex;
 
 use super::SimState;
 use crate::assets::ShiftableLoadAsset;
+use crate::controller::headroom_port::HeadroomPort;
 use crate::controller::sim_roster_port::{CancelOutcome, SimRosterPort};
+use crate::entities::capacity_curve::CapacityCurves;
 use crate::entities::device_session::ShiftableLoad;
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
 pub struct SimHandle {
@@ -78,6 +82,39 @@ impl SimRosterPort for SimHandle {
     }
 }
 
+#[async_trait]
+impl HeadroomPort for SimHandle {
+    async fn site_headroom(
+        &self,
+        now: DateTime<Utc>,
+        phys_import_kw: f64,
+        phys_export_kw: f64,
+    ) -> SiteFlexibilityEnvelope {
+        // Computed under the lock and returned by value: nothing here awaits while it is held.
+        let sim = self.sim.lock().await;
+        super::site_headroom::compute_site_headroom(&sim, now, phys_import_kw, phys_export_kw)
+    }
+
+    async fn capacity_curves_at(
+        &self,
+        plan: &Plan,
+        start: DateTime<Utc>,
+        now: DateTime<Utc>,
+        phys_import_kw: f64,
+        phys_export_kw: f64,
+    ) -> Option<CapacityCurves> {
+        let sim = self.sim.lock().await;
+        super::capacity_headroom::compute_site_capacity_curves_at(
+            &sim,
+            plan,
+            start,
+            now,
+            phys_import_kw,
+            phys_export_kw,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +141,53 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn all_kinds() -> Vec<AssetParams> {
+        use crate::entities::asset_params::{BaseLoadParams, EvParams, HeaterParams, PvParams};
+        vec![
+            AssetParams::Battery(BatteryParams::default()),
+            AssetParams::Ev(EvParams::default()),
+            AssetParams::Heater(HeaterParams::default()),
+            AssetParams::Pv(PvParams::default()),
+            AssetParams::BaseLoad(BaseLoadParams::default()),
+        ]
+    }
+
+    /// The port answers exactly what the direct computation answers for the same simulator.
+    #[tokio::test]
+    async fn site_headroom_equals_the_direct_computation() {
+        let (handle, sim) = handle_with(&all_kinds());
+        let now = Utc::now();
+        let direct =
+            super::super::site_headroom::compute_site_headroom(&*sim.lock().await, now, 10.0, 8.0);
+        let via_port = handle.site_headroom(now, 10.0, 8.0).await;
+        assert_eq!(
+            serde_json::to_value(via_port).unwrap(),
+            serde_json::to_value(direct).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn capacity_curves_at_equals_the_direct_computation() {
+        use crate::services::test_support::plans::flat_plan;
+        let (handle, sim) = handle_with(&all_kinds());
+        let now = Utc::now();
+        let plan = flat_plan(900, 8, now);
+        let start = now + Duration::minutes(30);
+        let direct = super::super::capacity_headroom::compute_site_capacity_curves_at(
+            &*sim.lock().await,
+            &plan,
+            start,
+            now,
+            10.0,
+            8.0,
+        );
+        let via_port = handle
+            .capacity_curves_at(&plan, start, now, 10.0, 8.0)
+            .await;
+        assert!(via_port.is_some(), "a plan with slots left anchors curves");
+        assert_eq!(via_port, direct);
     }
 
     #[tokio::test]
