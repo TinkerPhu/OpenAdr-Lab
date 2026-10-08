@@ -2,7 +2,7 @@
 
 import time
 from behave import when, then
-from features.helpers.api_client import ven_get, VEN_BASE_URL, HTTP_TIMEOUT
+from features.helpers.api_client import ven_get, ven_post, ven_put, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 import requests
 
@@ -103,3 +103,22 @@ def step_sensor_raw_source(context, source):
     )
 
 
+
+# ---------------------------------------------------------------------------
+# R-113: the asset refuses a value outside its own limits
+# ---------------------------------------------------------------------------
+
+@when("I reset the VEN battery soc to {soc:g}")
+def step_reset_battery_soc(context, soc):
+    context.last_response = ven_post("/sim/reset/battery", json={"soc": soc})
+
+
+@when("I set the VEN battery capacity_kwh to {capacity_kwh:g}")
+def step_set_battery_capacity(context, capacity_kwh):
+    context.last_response = ven_put("/sim/config/battery", json={"capacity_kwh": capacity_kwh})
+
+
+@then('the VEN error names "{key}"')
+def step_error_names(context, key):
+    body = context.last_response.json()
+    assert key in body.get("error", ""), f"expected the error to name {key!r}, got {body}"

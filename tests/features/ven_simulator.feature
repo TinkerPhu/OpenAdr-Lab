@@ -107,3 +107,16 @@ Feature: VEN Simulator
     # reports a negative value, as this scenario did at -6.8e-06 kWh. Asserting
     # a sign here would pin the weather, not the mechanism.
     Then every interval of the latest report has a "USAGE" payload with a number value
+
+
+  # --- The asset refuses a value outside its own limits (R-113) ---
+
+  Scenario: A battery state of charge above 1 is refused, not clamped
+    When I reset the VEN battery soc to 1.5
+    Then the response status is 400
+    And the VEN error names "soc"
+
+  Scenario: A battery capacity of zero is refused
+    When I set the VEN battery capacity_kwh to 0
+    Then the response status is 400
+    And the VEN error names "capacity_kwh"

@@ -465,3 +465,53 @@ def step_session_states_no_estimate(context):
             f"nothing was stated, so nothing may be assumed: {s}"
         )
         assert s.get("expected_return_time") is None, f"likewise the return time: {s}"
+
+
+
+# ---------------------------------------------------------------------------
+# Heater requests (R-112/R-113): a stated target, or the heater's declared default
+# ---------------------------------------------------------------------------
+
+def _post_heater_request(context, energy_kwh, target_temp_c):
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=4)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    payload = {
+        "asset_id": "heater",
+        "target_energy_kwh": energy_kwh,
+        "desired_power_kw": 2.0,
+        "deadlines": [{"latest_end": latest_end}],
+    }
+    if target_temp_c is not None:
+        payload["target_temp_c"] = target_temp_c
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@when("I POST a heater user request for {energy:g} kWh with target_temp_c {temp:g}")
+def step_post_heater_request_with_target(context, energy, temp):
+    _post_heater_request(context, energy, temp)
+
+
+@when("I POST a heater user request for {energy:g} kWh without a target temperature")
+def step_post_heater_request_without_target(context, energy):
+    _post_heater_request(context, energy, None)
+
+
+@then("the heater session of the saved user request aims for {temp:g} °C")
+def step_heater_session_target(context, temp):
+    r = ven_get("/user-requests")
+    assert r.status_code == 200, f"GET /user-requests: {r.status_code} {r.text[:200]}"
+    req = next((q for q in r.json() if q.get("id") == context.saved_request_id), None)
+    assert req is not None, f"request {context.saved_request_id} not in GET /user-requests"
+    session = req.get("session") or {}
+    assert session.get("type") == "heater", f"expected a heater session, got {session}"
+    assert abs(session.get("target_temp_c") - temp) < 1e-9, (
+        f"expected target_temp_c {temp}, got {session.get('target_temp_c')}"
+    )
