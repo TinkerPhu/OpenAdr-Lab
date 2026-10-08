@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import {
   AppBar, Box, Button, Chip, Container, Stack, Toolbar, Typography,
 } from "@mui/material";
-import { useQueryClient } from "@tanstack/react-query";
 import { BffApi } from "./api/client";
 import { useHealth } from "./api/hooks";
 import { DashboardPage } from "./pages/Dashboard";
@@ -16,6 +15,7 @@ import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { debugLog } from "./utils/debugLog";
 import { BffContext } from "./api/bffContext";
+import { RefreshControls } from "@lab/charts/RefreshControls";
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
@@ -40,27 +40,7 @@ debugLog("[VTN-UI] Module loaded at", new Date().toISOString());
 
 export default function App() {
   debugLog("[VTN-UI] App render");
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const api = useMemo(() => { debugLog("[VTN-UI] BffApi created"); return new BffApi(); }, []);
-  const queryClient = useQueryClient();
-
-  function handleRefreshAll() {
-    queryClient.invalidateQueries();
-  }
-
-  function handleToggleAuto() {
-    setAutoRefresh((a) => !a);
-    if (autoRefresh) {
-      queryClient.setDefaultOptions({
-        queries: { refetchInterval: false },
-      });
-    } else {
-      queryClient.setDefaultOptions({
-        queries: { refetchInterval: undefined },
-      });
-    }
-    queryClient.invalidateQueries();
-  }
 
   const ctx = useMemo(() => ({ api }), [api]);
 
@@ -79,23 +59,7 @@ export default function App() {
 
             <Box sx={{ flex: 1 }} />
 
-            <Button
-              color="inherit"
-              onClick={handleToggleAuto}
-              data-testid="auto-refresh-toggle"
-              aria-label={`Auto refresh: ${autoRefresh ? "On" : "Off"}`}
-              aria-pressed={autoRefresh}
-            >
-              Auto: {autoRefresh ? "On" : "Off"}
-            </Button>
-            <Button
-              color="inherit"
-              onClick={handleRefreshAll}
-              data-testid="refresh-all-btn"
-              aria-label="Refresh all data"
-            >
-              Refresh
-            </Button>
+            <RefreshControls />
           </Toolbar>
         </AppBar>
 
