@@ -34,28 +34,12 @@ pub(crate) fn finalize_tick_outputs(
     let tick_sensor = sim.to_sensor_snapshot();
     let tick_sim_snap = sim.to_sim_snapshot();
 
-    // Push HistoryPoint per asset into per-asset ring buffer (CP2).
-    {
-        use crate::assets::HistoryPoint;
-        for entry in &mut sim.assets {
-            entry.history.push(HistoryPoint {
-                ts: now,
-                power_kw: entry.last_power_kw,
-                state: entry.state.clone(),
-            });
-        }
-    }
-
-    // Update Grid virtual asset with net power + VTN capacity limits.
-    // Done here (not inside tick()) so capacity_snap is available.
-    {
-        let net_power_kw = sim.grid.net_power_w / 1000.0;
-        let import_limit_kw = ctx.capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
-        // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
-        let export_limit_kw_signed = -(ctx.capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
-        sim.grid_asset
-            .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
-    }
+    // Record the tick: per-asset history points + the Grid virtual asset's net power and VTN
+    // capacity limits. Here, not inside tick(), so capacity_snap is available.
+    let import_limit_kw = ctx.capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
+    // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
+    let export_limit_kw_signed = -(ctx.capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
+    sim.record_history(now, import_limit_kw, export_limit_kw_signed);
 
     // Compute site headroom (pure math — reads the live SimState directly, not
     // the flattened snapshot: needed to call `Asset::max_effort_setpoint`,

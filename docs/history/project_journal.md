@@ -14804,3 +14804,15 @@ got a load that had not started. The key is now `rated_power_kw`; the BDD steps 
 `power_kw > 0` for a shiftable load (previously vacuous) now wait for `started` first, so they check
 real power. The structural guard is `simulator/tests.rs` `no_asset_kind_reports_a_state_value_named_like_a_typed_snapshot_field`:
 no asset kind may report a `state_values` key that equals a typed snapshot field.
+
+## R-106: tasks ask the asset (refactor/r106-tasks-ask-the-asset)
+
+Three tasks did the domain's work. `usage_sim_plan_ahead` downcast to `EvCharger`, walked the trips
+and built `EvSession`s; `base_load_window` `downcast_mut`ed `BaseLoad`; `finalize` pushed history
+points and converted watts by hand. Now: `Asset::planned_usage_sessions` (EV) + `services::ev_usage_plan`
++ `EvSession::simulated`; `Asset::set_observed_window` via `SimState::set_base_load_observed_window`;
+`SimState::record_history` + `GridMeter::net_power_kw`, in a new `simulator/recording.rs` because
+`simulator/mod.rs` sits at its 500-line cap. A second copy of the trip walk turned up in
+`ev_usage_forecast::predicted_uses`; both now call `ev_schedule::trip_windows`, so "when is the car
+home between two trips" has one answer. The plan-ahead task tests moved to where the behaviour now
+lives (`ev_schedule`, `services::ev_usage_plan`); the task keeps a wiring test.

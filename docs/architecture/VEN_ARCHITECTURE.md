@@ -1031,7 +1031,13 @@ so the history sampler never reads `state_values()` keys; `PvCurtailmentSource::
 rule for which source names a window), `RequestResolvable::request_defaults` (current SoC, default
 target, capacity and charge rate a user request resolves against; `AssetRequestSlice` does the
 arithmetic once), `Asset::is_cancellable` (a started shiftable load is non-interruptible) and
-`Asset::usage_schedule_view` (the EV's configured trip schedule for `GET /ev-usage-sim`). A shiftable
+`Asset::usage_schedule_view` (the EV's configured trip schedule for `GET /ev-usage-sim`). The tick
+loop's tasks do the same: they ask and schedule, they do not decide. `Asset::planned_usage_sessions`
+(the EV's predicted plan-ahead sessions; `services::ev_usage_plan` installs them; `ev_schedule::trip_windows`
+is the one trip walk, shared with the `usage_forecast` expected uses), `Asset::set_observed_window`
+(the base load's trailing-window summary, via `SimState::set_base_load_observed_window`) and
+`SimState::record_history` (per-asset history points and the grid asset update; the meter's one
+W-to-kW conversion is `GridMeter::net_power_kw`). A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`
 `add_shiftable_*`, `assets/ev_schedule.rs` `usage_view_*`.
