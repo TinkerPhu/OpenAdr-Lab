@@ -182,7 +182,9 @@ Fix branches: fix/<slug>. All those branches target main. Never force-push to ma
 Commits are signed off (-s); do not add co-author footers (see rule above).
 Merge only after all of these pass (run manually): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
-lines), and E2E tests green on Node1.
+lines), duplication ratchet (`python scripts/audit_duplication.py` — fails when a branch adds or
+grows a duplicated cluster or a Rust function over 100 lines; `--update` only after reducing debt),
+and E2E tests green on Node1.
 Touched anything under tests/features/? Run `python scripts/audit_step_definitions.py`
 BEFORE queuing a remote suite. `tests/entrypoint.sh` aborts the whole E2E run if any step
 is undefined or ambiguous, so one sentence/pattern mismatch costs the full ~20-minute

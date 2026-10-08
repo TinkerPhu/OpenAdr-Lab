@@ -48,7 +48,8 @@ Feature: Uniform-Grid Timeline API (RF-05c)
   # already covered elsewhere in this file (`hours_forward=25` at line 58)
   # and reliable there.
   Scenario: Each asset array contains a now-point between history and future
-    When I GET /timeline/all?resolution=30&hours_back=1&hours_forward=25 from the VEN
+    When I wait for the VEN /plan endpoint to return a plan
+    And I GET /timeline/all?resolution=30&hours_back=1&hours_forward=25 from the VEN
     Then the response status is 200
     And the response JSON is an object
     And each asset array has a now-point between history and future grid portions
