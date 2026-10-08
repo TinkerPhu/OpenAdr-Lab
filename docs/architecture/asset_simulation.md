@@ -267,6 +267,7 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 | `temp_initial_c` | 20.0 | °C | Starting room temperature |
 | `temp_min_c` | 18.0 | °C | Thermostat lower bound |
 | `temp_max_c` | 23.0 | °C | Thermostat upper bound |
+| `default_target_temp_c` | none | °C | The target a user request aims for when it states none; must lie within `temp_min_c..temp_max_c`. Declared by every shipped heater (55 for the hot-water tanks, 21 for the 18-23 °C heaters). Without it, a heater request with no target is refused (`MissingTarget`), never guessed. |
 
 ### Inject Overrides (`POST /sim/inject`)
 

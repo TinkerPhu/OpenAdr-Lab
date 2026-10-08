@@ -14915,3 +14915,18 @@ inaccuracies the survey caught: the three Zone A `300.0 / 3600.0` sites were all
 added first, specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds) so
 hour-of-day arithmetic and `4.186 / 3600` do not match. `residual_kwh_by_asset` now takes seconds, which
 also kept `tick.rs` at its 200-line cap.
+
+## R-112: the asset declares what a request without a target aims for (refactor/r112-asset-declared-defaults)
+
+A heater request that stated no target got `55.0` from a literal in `services/user_request.rs`: right
+for a hot-water tank, but above the 23 °C ceiling of a room heater. Decided with the user: the heater
+declares it (new optional profile field `default_target_temp_c`, validated within its own band, set on
+every shipped heater: 55 for the tanks, 21 for the 18-23 °C heaters); a heater that declares none refuses
+such a request (`RequestError::MissingTarget`) instead of guessing. It reaches the request code through
+`Thermostat::default_request_target_c` on `AssetRequestSlice`, the same carrier the EV's defaults use.
+The survey also found the EV twin, in its own commit because it changes behaviour: an EV request with no
+target computed its energy for the EV's `soc_target` but created a session aiming at a literal 0.9. Now
+`AssetRequestSlice::target_soc` is the one resolution for both. Two unreachable deadline fallbacks
+(`now + 4h`, `now + 8h`) were deleted. The duplication ratchet flagged `validate()` growing, so the heater
+checks moved into `validate_heater`. Filed: the two `1.0 kW` power fallbacks (R-122), the UI form's own
+`"55"` (R-123) and a probable `ZeroEnergy` for a heater request stating only a temperature (R-124).
