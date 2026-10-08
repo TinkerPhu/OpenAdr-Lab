@@ -122,7 +122,9 @@ def step_poll_sim_until_asset_started(context, asset_id):
     try:
         context.polled_sim = poll_until(
             fetch, started,
-            timeout=240, interval=3,
+            # A start needs a plan cycle (trigger, MILP solve, adopt, dispatch): ~125-150 s on a
+            # busy host, and longer right after another suite pass, so 240 s was marginal here.
+            timeout=420, interval=3,
             description=f"/sim asset '{asset_id}' has started",
         )
     except TimeoutError as e:
