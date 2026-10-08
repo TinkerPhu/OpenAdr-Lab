@@ -29,6 +29,7 @@ import { DevicesPage } from "./pages/Devices";
 import { PlanHistoryPage } from "./pages/PlanHistory";
 import { CapacityForecastPage } from "./pages/CapacityForecast";
 import { debugLog } from "./utils/debugLog";
+import { RefreshControls } from "@lab/charts/RefreshControls";
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
@@ -88,7 +89,6 @@ debugLog("[VEN-UI] Module loaded at", new Date().toISOString());
 export default function App() {
   debugLog("[VEN-UI] App render");
   const [venUrl, setVenUrl] = useState(DEFAULT_VENS[0].url);
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const queryClient = useQueryClient();
 
   // Dynamic dropdown: registered + reachable VENs beyond the default trio
@@ -109,26 +109,6 @@ export default function App() {
 
   function handleVenChange(url: string) {
     setVenUrl(url);
-    queryClient.invalidateQueries();
-  }
-
-  function handleRefreshAll() {
-    queryClient.invalidateQueries();
-  }
-
-  function handleToggleAuto() {
-    setAutoRefresh((a) => !a);
-    if (autoRefresh) {
-      // Turning off — set all refetch intervals to false
-      queryClient.setDefaultOptions({
-        queries: { refetchInterval: false },
-      });
-    } else {
-      // Turning on — clear defaults so per-query intervals resume
-      queryClient.setDefaultOptions({
-        queries: { refetchInterval: undefined },
-      });
-    }
     queryClient.invalidateQueries();
   }
 
@@ -176,23 +156,7 @@ export default function App() {
 
             <Box sx={{ flex: 1 }} />
 
-            <Button
-              color="inherit"
-              onClick={handleToggleAuto}
-              data-testid="auto-refresh-toggle"
-              aria-label={`Auto refresh: ${autoRefresh ? "On" : "Off"}`}
-              aria-pressed={autoRefresh}
-            >
-              Auto: {autoRefresh ? "On" : "Off"}
-            </Button>
-            <Button
-              color="inherit"
-              onClick={handleRefreshAll}
-              data-testid="refresh-all-btn"
-              aria-label="Refresh all data"
-            >
-              Refresh
-            </Button>
+            <RefreshControls />
           </Toolbar>
         </AppBar>
 
