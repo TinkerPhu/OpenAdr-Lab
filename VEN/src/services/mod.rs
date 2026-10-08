@@ -7,6 +7,7 @@ pub use planning::PlanningService;
 
 pub mod user_request;
 
+pub mod ev_usage_plan;
 pub mod forecast;
 pub mod heuristics;
 

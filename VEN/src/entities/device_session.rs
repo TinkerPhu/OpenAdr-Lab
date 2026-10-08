@@ -91,6 +91,37 @@ pub struct EvSession {
     pub updated_at: DateTime<Utc>,
 }
 
+impl EvSession {
+    /// A session the simulated usage schedule queues on the user's behalf: charge to
+    /// `target_soc` between `window_start` and `departure_time`. It states no trip distance
+    /// (the generated trip already carries its own consumption as a SoC percentage, so
+    /// round-tripping it through kilometres would only invite the two to disagree), no
+    /// budget and no comfort curve. It stands in for a user, so the queue refuses it
+    /// wherever a stated session already covers the window.
+    pub fn simulated(
+        target_soc: f64,
+        window_start: DateTime<Utc>,
+        departure_time: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            target_soc,
+            window_start,
+            departure_time,
+            expected_trip_distance_km: None,
+            expected_return_time: None,
+            soft_deadline: false,
+            mode: Default::default(),
+            origin: EvSessionOrigin::SimulatedUsage,
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
 /// Two sessions conflict when their charging windows overlap.
 ///
 /// Carries the ids rather than a message: the follow-up change's UI has to name

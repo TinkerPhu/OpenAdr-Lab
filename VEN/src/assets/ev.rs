@@ -354,6 +354,10 @@ impl Asset for EvCharger {
         self.usage_view(now)
     }
 
+    fn planned_usage_sessions(&self, now: DateTime<Utc>, window: Duration) -> Vec<EvSession> {
+        EvCharger::planned_usage_sessions(self, now, window)
+    }
+
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &EvState = own(state);
         AssetHistoryView {

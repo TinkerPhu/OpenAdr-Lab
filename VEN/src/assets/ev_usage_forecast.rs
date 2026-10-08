@@ -104,7 +104,6 @@ fn predicted_uses(
                 .unwrap_or_else(|| cum_s.last().copied().unwrap_or(0)),
         );
     let mut uses = Vec::new();
-    let mut cursor = now;
     let mut window_open = now;
     // Mid-trip at `now`. `next_trip_after` only yields trips that depart *after* the
     // cursor, so the trip the car is currently on would be skipped entirely: the plan
@@ -130,11 +129,11 @@ fn predicted_uses(
         });
         window_open = active.return_at;
     }
-    while let Some(trip) =
-        ev_schedule::next_trip_after(usage, cfg.usage_sim_seed_tag, cursor, horizon_end)
+    for (opens_at, trip) in
+        ev_schedule::trip_windows(usage, cfg.usage_sim_seed_tag, now, window_open, horizon_end)
     {
         uses.push(ExpectedVehicleUse {
-            window_start: window_open,
+            window_start: opens_at,
             departure_at: trip.leave_at,
             target_soc: cfg.soc_target,
             firm,
@@ -148,7 +147,6 @@ fn predicted_uses(
             session_id: None,
         });
         window_open = trip.return_at;
-        cursor = trip.leave_at;
     }
     // A vehicle with no trip left in the horizon is at home for the rest of it, and
     // that has to be said rather than left implicit: an empty series means "no windows"
