@@ -268,7 +268,7 @@ pub async fn post_requests(
     let comfort_overrides = ctx.state.comfort_overrides_map().await;
     let mut asset_data: Vec<AssetRequestSlice> = ctx.sim_read.request_slices().await;
     for slice in &mut asset_data {
-        slice.comfort_rates = crate::services::comfort::effective_comfort_rates(
+        slice.comfort_rates = crate::entities::comfort::effective_comfort_rates(
             &comfort_overrides,
             &slice.id,
             std::mem::take(&mut slice.comfort_rates),

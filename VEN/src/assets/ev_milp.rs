@@ -122,7 +122,7 @@ impl EvMilpContext {
             .collect();
         // `ev-comfort-piecewise-core`: one continuous variable per priced band.
         // Because the bids are non-increasing (enforced by
-        // `services::comfort::validate_curve`) the solver fills the valuable
+        // `entities::comfort::validate_curve`) the solver fills the valuable
         // bands first on its own — no ordering constraints and no binary.
         let e_seg: Vec<Variable> = if self.mode == EvMilpMode::MustNotRun {
             Vec::new()

@@ -322,7 +322,7 @@ pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f6
 /// instead of being an all-or-nothing block.
 ///
 /// Bids are non-increasing across the bands (enforced at the API boundary by
-/// `services::comfort::validate_curve`), which is what keeps the valuation
+/// `entities::comfort::validate_curve`), which is what keeps the valuation
 /// concave and therefore solvable with continuous variables only — no binary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EvEnergySegment {

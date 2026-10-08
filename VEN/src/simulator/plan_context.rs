@@ -141,7 +141,7 @@ pub fn build_asset_contexts(
                 .get(&entry.id)
                 .copied()
                 .unwrap_or(0.0);
-            let comfort_rates = crate::services::comfort::effective_comfort_rates(
+            let comfort_rates = crate::entities::comfort::effective_comfort_rates(
                 comfort_overrides,
                 &entry.id,
                 cfg.default_comfort_rates(),
@@ -407,6 +407,94 @@ mod tests {
                 ("ev".to_string(), AssetKind::Ev),
                 ("heater".to_string(), AssetKind::Heater),
             ]
+        );
+    }
+
+    /// R-108 moved the override-versus-default rule out of `services`; this pins what the move
+    /// could silently break: a user's comfort curve reaches the planner's EV context, and
+    /// without one the EV's own built-in curve does.
+    #[test]
+    fn build_asset_contexts_prices_the_ev_by_the_users_comfort_override() {
+        use crate::entities::asset::ComfortRate;
+        use crate::entities::asset_params::{
+            AssetParams, EvParams, EvUsageDayParams, EvUsageMode, EvUsageSimParams,
+        };
+
+        // A forecast-driven charge (no session): the path where the curve is consulted.
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
+        let day = EvUsageDayParams {
+            leave_time: chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            leave_jitter_min: 0.0,
+            return_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+            return_jitter_min: 0.0,
+            leave_probability: 1.0,
+            soc_drop_pct_mean: 10.0,
+            soc_drop_pct_stddev: 0.0,
+        };
+        let params = vec![AssetParams::Ev(EvParams {
+            id: "ev".into(),
+            initial_soc: 0.3,
+            usage_sim: Some(EvUsageSimParams {
+                mode: EvUsageMode::Forecast,
+                engage_charge_planning: true,
+                weekday: day.clone(),
+                weekend: day,
+                min_soc_after_drop_pct: 5.0,
+            }),
+            ..Default::default()
+        })];
+        let sim_snap = SimState::from_params(&params, now);
+        let planner = PlannerParams::default();
+        let cum_s = cum_seconds(24, 3600);
+        let segments_with = |overrides: &std::collections::HashMap<String, Vec<ComfortRate>>| {
+            let contexts = build_asset_contexts(
+                &sim_snap,
+                24,
+                &cum_s,
+                now,
+                &[],
+                None,
+                &params,
+                &planner,
+                0.0,
+                &terminal_values(),
+                &[],
+                overrides,
+            );
+            let ev = contexts
+                .iter()
+                .find(|c| c.asset_kind() == AssetKind::Ev)
+                .expect("an EV context");
+            match ev.milp_params(24, now) {
+                AssetMilpParams::Ev(scalars) => scalars
+                    .segments
+                    .iter()
+                    .map(|s| s.eur_per_kwh)
+                    .collect::<Vec<_>>(),
+                other => panic!("expected EV scalars, got {other:?}"),
+            }
+        };
+
+        let by_default = segments_with(&std::collections::HashMap::new());
+        let override_curve = vec![ComfortRate {
+            fill: 1.0,
+            max_marginal_price: 0.77,
+            max_marginal_co2: 0.0,
+        }];
+        let overrides = std::collections::HashMap::from([("ev".to_string(), override_curve)]);
+        let by_override = segments_with(&overrides);
+
+        assert!(
+            !by_override.is_empty(),
+            "the override prices at least one band"
+        );
+        assert_ne!(
+            by_override, by_default,
+            "the override changes what the EV is bid"
+        );
+        assert!(
+            by_override.iter().all(|bid| (bid - 0.77).abs() < 1e-6),
+            "every band is bid at the override's price, got {by_override:?}"
         );
     }
 
