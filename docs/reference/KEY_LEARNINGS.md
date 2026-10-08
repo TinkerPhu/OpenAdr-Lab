@@ -3162,3 +3162,12 @@ Rules:
 - Defaults declared in several places (serde attributes, `Default` impls) are pinned by tests that
   compare them (`PlannerParams::from(&PlannerConfig::default()) == PlannerParams::default()`; an
   empty YAML document equals `Default`), not by comments.
+
+## Make state the asset owns an explicit parameter of the shared function (2026-10-08)
+
+- The forecast function had `PvSnowState::default()` baked in, so four callers shared one silent
+  guess. Making the starting state a required parameter (not an optional one) forced each caller to
+  name where it comes from, and the asset that can actually observe it became the only source.
+- A conclusion drawn from a live signal needs its own decay path: a "covered" state concluded in the
+  cold must melt when the air warms even if the measurement that raised it is gone, or it outlives
+  its evidence.

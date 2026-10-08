@@ -38,7 +38,7 @@ export function WeatherPage() {
           )}
           <WeatherRawPanel forecast={data.raw} />
           {data.derived ? (
-            <WeatherDerivedPanel slots={data.derived} />
+            <WeatherDerivedPanel slots={data.derived} snowCoveredNow={data.pv_snow_covered_now} />
           ) : (
             <Alert severity="info" data-testid="weather-derived-unavailable">
               No PV array configured for this site (<code>weather_pv</code> profile section) —

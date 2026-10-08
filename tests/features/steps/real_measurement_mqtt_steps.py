@@ -45,6 +45,52 @@ def step_publish_pv_measurement(context):
     )
 
 
+@given("a PV measurement of {kw:g} kW is published to the test Mosquitto broker for VEN-1")
+def step_publish_pv_measurement_of(context, kw):
+    _publish_mqtt("openadr-lab/measurement/ven-1/pv", _sample_measurement_message(kw))
+
+
+@given("daylight gives the weather forecast a snow-free PV output of at least {kw:g} kW for VEN-1")
+def step_daylight_snow_free_output(context, kw):
+    """Snow can only be told from darkness when the sun is up: the VEN's own snow-free reference
+    (`snow_free_ac_kw`, what /weather derives for the first hour) says whether it is. Out of
+    daylight the scenario is skipped rather than failed, the way a time-of-day dependency should be."""
+    deadline = time.time() + 20
+    reference_kw = 0.0
+    while time.time() < deadline:
+        resp = ven_get("/weather")
+        derived = resp.json().get("derived") if resp.ok else None
+        if derived and derived[0]["snow_free_ac_kw"] >= kw:
+            return
+        reference_kw = derived[0]["snow_free_ac_kw"] if derived else 0.0
+        time.sleep(1)
+    context.scenario.skip(
+        f"no daylight: the snow-free PV reference is {reference_kw:.2f} kW, below {kw:g} kW"
+    )
+
+
+@then("/weather reports the PV panels as snow-covered")
+def step_weather_reports_snow_covered(context):
+    poll_until(
+        lambda: ven_get("/weather"),
+        lambda resp: resp.ok and resp.json().get("pv_snow_covered_now") is True,
+        timeout=30,
+        interval=1,
+        description="/weather reports pv_snow_covered_now=true once the PV asset sees no output",
+    )
+
+
+@then("every derived PV forecast hour is snow-covered and promises no output")
+def step_derived_hours_covered(context):
+    derived = ven_get("/weather").json()["derived"]
+    assert derived, "no derived PV forecast"
+    for slot in derived:
+        assert slot["snow_covered"], f"hour {slot['valid_at']} is not snow-covered"
+        assert abs(slot["forecast_ac_kw"]) < 1e-9, (
+            f"hour {slot['valid_at']} promises {slot['forecast_ac_kw']} kW from a covered panel"
+        )
+
+
 @given("a baseline-load measurement message is published to the test Mosquitto broker for VEN-1")
 def step_publish_base_load_measurement(context):
     _publish_mqtt(

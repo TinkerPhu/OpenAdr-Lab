@@ -29,7 +29,7 @@ def _publish_mqtt(topic: str, payload: dict) -> None:
     )
 
 
-def _sample_forecast_message(fetched_at: datetime) -> dict:
+def _sample_forecast_message(fetched_at: datetime, temperature_c: float = 20.0) -> dict:
     # 24 hourly samples spanning a full day ahead, not just a single sample
     # 1h out: a single-sample fixture is time-of-day flaky against real solar
     # position (Zunzgen) — whenever the suite happens to run in the evening,
@@ -45,7 +45,7 @@ def _sample_forecast_message(fetched_at: datetime) -> dict:
             {
                 "valid_at": valid_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "age_h": h,
-                "temperature_c": 20.0,
+                "temperature_c": temperature_c,
                 "ghi_w_m2": 600.0,
             }
         )
@@ -56,6 +56,17 @@ def _sample_forecast_message(fetched_at: datetime) -> dict:
         "fetched_at": fetched_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "samples": samples,
     }
+
+
+@given("a sub-zero weather forecast message is published to the test Mosquitto broker for VEN-1")
+def step_publish_sub_zero_forecast(context):
+    """Cold and bright: no snowfall in it, so any snow cover can only come from what the PV asset
+    observes about its own output (R-55), not from the forecast's own snow model."""
+    now = datetime.now(timezone.utc)
+    _publish_mqtt(
+        "openadr-lab/weather/ven-1/forecast",
+        _sample_forecast_message(now, temperature_c=-3.0),
+    )
 
 
 @given("a weather forecast message is published to the test Mosquitto broker for VEN-1")

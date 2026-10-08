@@ -33,6 +33,7 @@ mod heuristics;
 mod obligations;
 mod openadr_objects;
 mod persistence;
+mod pv_snow;
 mod report_submissions;
 mod report_windows;
 mod site_headroom_forecast;
@@ -126,6 +127,9 @@ pub struct HemsState {
     pub last_residual_trigger_at: Option<DateTime<Utc>>,
     /// Previous tick's active lever (§4a.1); last tick's arbiter reasoning.
     pub arbiter_active_lever: Option<String>,
+    /// The PV asset's own snow-cover conclusion, published each tick (R-55): the starting state
+    /// of every weather-sourced PV forecast. See `state/pv_snow.rs`.
+    pub pv_snow_state: crate::entities::pv_snow::PvSnowState,
     pub arbiter_diagnostics: arbiter::ArbiterDiagnostics,
 }
 

@@ -27,6 +27,53 @@ impl PvSnowState {
     }
 }
 
+/// Below this share of the array's rating, the expected (snow-free) output is too small to tell a
+/// covered panel from a dim hour, so a reading says nothing about snow.
+const OBSERVE_MIN_EXPECTED_FRACTION_OF_RATED: f64 = 0.1;
+/// A panel delivering at most this share of what the weather says it could is covered.
+const COVERED_AT_OR_BELOW_RATIO: f64 = 0.15;
+/// A panel delivering at least this share of what the weather says it could is clear. Between the
+/// two ratios nothing is concluded (cloud, partial cover): the state stays as it was.
+const CLEAR_AT_OR_ABOVE_RATIO: f64 = 0.5;
+
+/// What the live inputs say about the panel right now.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnowEvidence {
+    /// Output the weather predicts for this instant with no snow on the panel, after any
+    /// generation limit in force (a curtailed array is not a covered one).
+    pub expected_kw: f64,
+    /// What the array actually delivered, from the real measurement.
+    pub measured_kw: f64,
+    /// Whether the air is cold enough for snow to lie at all (`temperature < clear_threshold_c`).
+    /// A shortfall in warm air is cloud, shading or a fault, not snow.
+    pub snow_possible: bool,
+}
+
+impl PvSnowState {
+    /// The panel's state after looking at what it actually produces, starting from `self`: the
+    /// telemetry cross-check R-55 describes. Replaces the forecast-only guess as the starting
+    /// state of the forecast trajectory, so a panel that is covered *now* is forecast covered
+    /// until the melt condition, however sunny the forecast.
+    pub fn observed(self, evidence: SnowEvidence, rated_kw: f64) -> Self {
+        let SnowEvidence {
+            expected_kw,
+            measured_kw,
+            snow_possible,
+        } = evidence;
+        if rated_kw <= 0.0 || expected_kw < OBSERVE_MIN_EXPECTED_FRACTION_OF_RATED * rated_kw {
+            return self;
+        }
+        let ratio = measured_kw / expected_kw;
+        if ratio <= COVERED_AT_OR_BELOW_RATIO && snow_possible {
+            Self { covered: true }
+        } else if ratio >= CLEAR_AT_OR_ABOVE_RATIO {
+            Self { covered: false }
+        } else {
+            self
+        }
+    }
+}
+
 /// Run the snow-cover state machine forward over a forecast sequence,
 /// starting from a known/assumed `initial` state. Pure fold — the planner
 /// needs the whole horizon's trajectory in one shot, not a live tick-by-tick
@@ -78,6 +125,60 @@ mod tests {
             sky_condition: None,
             irradiance_variability: None,
         }
+    }
+
+    fn evidence(expected_kw: f64, measured_kw: f64, snow_possible: bool) -> SnowEvidence {
+        SnowEvidence {
+            expected_kw,
+            measured_kw,
+            snow_possible,
+        }
+    }
+
+    #[test]
+    fn producing_next_to_nothing_in_bright_cold_conditions_means_covered() {
+        let after = PvSnowState::default().observed(evidence(4.0, 0.1, true), 5.0);
+        assert!(after.covered);
+    }
+
+    #[test]
+    fn producing_next_to_nothing_in_warm_air_is_not_snow() {
+        let after = PvSnowState::default().observed(evidence(4.0, 0.0, false), 5.0);
+        assert!(!after.covered);
+        let still = PvSnowState { covered: true }.observed(evidence(4.0, 0.0, false), 5.0);
+        assert!(
+            still.covered,
+            "no evidence either way: the state stays as it was"
+        );
+    }
+
+    #[test]
+    fn producing_what_the_weather_predicts_clears_a_covered_state() {
+        let after = PvSnowState { covered: true }.observed(evidence(4.0, 3.8, true), 5.0);
+        assert!(!after.covered);
+    }
+
+    #[test]
+    fn a_dim_hour_says_nothing_about_snow() {
+        // expected 0.2 kW on a 5 kW array is below the 10 % floor
+        let after = PvSnowState::default().observed(evidence(0.2, 0.0, true), 5.0);
+        assert!(!after.covered);
+        let covered = PvSnowState { covered: true }.observed(evidence(0.2, 0.2, true), 5.0);
+        assert!(covered.covered);
+    }
+
+    #[test]
+    fn a_partial_shortfall_leaves_the_state_unchanged() {
+        for covered in [false, true] {
+            let before = PvSnowState { covered };
+            assert_eq!(before.observed(evidence(4.0, 1.2, true), 5.0), before); // ratio 0.3
+        }
+    }
+
+    #[test]
+    fn an_array_without_a_rating_cannot_be_observed() {
+        let before = PvSnowState { covered: true };
+        assert_eq!(before.observed(evidence(4.0, 4.0, true), 0.0), before);
     }
 
     #[test]

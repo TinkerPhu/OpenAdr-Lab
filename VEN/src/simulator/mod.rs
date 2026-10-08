@@ -10,6 +10,7 @@ pub mod plan_context;
 pub mod power_model;
 mod pv_preview;
 pub(crate) mod pv_smoothing;
+mod pv_snow;
 mod recording;
 pub mod site_headroom;
 mod snapshot;

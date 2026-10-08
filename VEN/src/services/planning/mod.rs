@@ -62,6 +62,7 @@ pub async fn resolve_weather_pv_kw_for_cycle(
     now: DateTime<Utc>,
     cum_s: &[i64],
     n_slots: usize,
+    initial_snow: crate::entities::pv_snow::PvSnowState,
 ) -> Option<Vec<f64>> {
     let forecast = if weather_pv_params.is_some() {
         weather.latest().await
@@ -78,6 +79,7 @@ pub async fn resolve_weather_pv_kw_for_cycle(
         wall_now,
         WEATHER_STALENESS_THRESHOLD,
         &slot_starts,
+        initial_snow,
     )
 }
 
@@ -162,10 +164,18 @@ pub async fn build_solve_request(
     cum_s: &[i64],
     n_slots: usize,
     history: Option<&Arc<dyn HistoryPort>>,
+    pv_snow: crate::entities::pv_snow::PvSnowState,
 ) -> SolveRequest {
-    let weather_pv_kw =
-        resolve_weather_pv_kw_for_cycle(weather, weather_pv_params, wall_now, now, cum_s, n_slots)
-            .await;
+    let weather_pv_kw = resolve_weather_pv_kw_for_cycle(
+        weather,
+        weather_pv_params,
+        wall_now,
+        now,
+        cum_s,
+        n_slots,
+        pv_snow,
+    )
+    .await;
     let (diurnal_import_eur_kwh, diurnal_co2_g_kwh) =
         resolve_diurnal_reference_for_cycle(history, now).await;
     SolveRequest {

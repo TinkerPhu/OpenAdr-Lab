@@ -8,8 +8,23 @@ use tokio::sync::Mutex;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
+/// PHASE 1 (post-lock): clear this tick's one-shot inject fields, then publish the PV asset's
+/// snow-cover conclusion (R-55) for next tick's weather feed and for the forecast, planning and
+/// `/weather` consumers: one value, owned by the asset.
+pub(crate) async fn after_tick(
+    state: &AppState,
+    sim: &Arc<Mutex<SimState>>,
+    cleared_fields: Vec<&'static str>,
+    pv_clear: bool,
+    base_clear: bool,
+) {
+    clear_inject_fields(state, cleared_fields, pv_clear, base_clear).await;
+    let snow_state = sim.lock().await.pv_snow_state();
+    state.set_pv_snow_state(snow_state).await;
+}
+
 /// PHASE 1 (post-lock): clear every one-shot inject field applied this tick.
-pub(crate) async fn clear_inject_fields(
+async fn clear_inject_fields(
     state: &AppState,
     cleared_fields: Vec<&'static str>,
     pv_clear: bool,

@@ -218,7 +218,7 @@ can silently diverge on what a `WeatherForecast` implies for PV output:
    `simulator/grid_meter.rs` to keep `simulator/mod.rs` under the file-size
    cap after this addition.)
 
-**Known deferred accuracy gaps** (tracked as R-53 in TECHNICAL_DEBTS.md):
+**Deliberately not modelled** (a decision, not debt: R-53 was abandoned):
 horizon/shading obstructions (real rooftops rarely have an unobstructed
 horizon), the Perez/HDKR diffuse-sky model (the current diffuse term is
 isotropic-on-zenith-only, ignoring the panel's own tilt view factor and
@@ -312,13 +312,32 @@ transposition/temperature-derate math: while `covered`, output is forced to
 `× covered_output_fraction` regardless of what the clear-sky/POA calculation
 says.
 
-**Known gap** (R-55): `initial` (is the panel covered *right now*, at the
-start of a forecast trajectory) currently only has the forecast-only
-fallback implemented — running `snow_coverage_trajectory` from the `age_h=0`
-sample forward. The preferred source, a cross-check against live PV
-telemetry deviation (`AssetState.power_deviation_kw`: a large sustained
-negative deviation on an otherwise clear/moderate-GHI day is itself strong
-evidence of snow cover), is not yet wired.
+**Starting state: the PV asset observes it.** `initial` (is the panel covered
+*right now*) is owned by the PV asset, not guessed by the forecast. Each tick
+`PvInverter::observe_snow` compares the live measurement
+(`measured_power_kw`) with the snow-free output the weather predicts for this
+instant (`WeatherPvForecastSlot::snow_free_ac_kw`, after any generation limit,
+so a curtailed array is not read as a covered one), and `PvSnowState::observed`
+decides:
+
+- at most 15 % of the expectation, while the air is below `clear_threshold_c`
+  → covered;
+- at least 50 % → clear;
+- in between, or when the expected output is under 10 % of the array's rating
+  (night, heavy cloud) → no conclusion, the state stays;
+- warm air (`>= clear_threshold_c`) melts a covered state even with no
+  measurement, the same rule as `PvSnowState::step`.
+
+The tick publishes the conclusion (`AppState::pv_snow_state`), and every
+consumer that turns the forecast into a PV forecast passes it as
+`initial_snow` to `weather_pv_forecast_series`: the sim tick's asset input,
+the planner's weather fallback, the `/forecast` entry and `GET /weather`
+(`pv_snow_covered_now`, shown on the VEN UI Weather page). Without a
+measurement feed nothing is observed and the state stays at its default
+(uncovered, the forecast-only fallback). Tests: `entities/pv_snow.rs`,
+`assets/pv.rs` (`observe_snow_*`), `entities/solar.rs`, and the BDD scenario
+"A PV array delivering nothing under a bright, sub-zero forecast is treated as
+snow-covered" in `real_measurement_mqtt.feature` (skipped at night).
 
 ## Wire contract
 

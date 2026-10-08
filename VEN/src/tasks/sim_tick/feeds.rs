@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 pub(crate) async fn resolve_weather_pv_kw_for_tick(
     weather: &dyn crate::controller::WeatherForecastPort,
     weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
+    initial_snow: crate::entities::pv_snow::PvSnowState,
     now: DateTime<Utc>,
 ) -> (
     Option<f64>,
@@ -31,7 +32,8 @@ pub(crate) async fn resolve_weather_pv_kw_for_tick(
     if !forecast.is_fresh(now, crate::services::planning::WEATHER_STALENESS_THRESHOLD) {
         return (None, None);
     }
-    let series = crate::entities::solar::weather_pv_forecast_series(params, &forecast);
+    let series =
+        crate::entities::solar::weather_pv_forecast_series(params, &forecast, initial_snow);
     let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
         .first()
         .copied();
