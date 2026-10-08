@@ -3,6 +3,7 @@ pub mod capacity_headroom;
 pub mod energy;
 pub mod forecast;
 mod grid_meter;
+mod handle;
 pub mod inject;
 pub mod persist;
 pub mod plan_context;
@@ -26,6 +27,7 @@ use crate::assets::{
 use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
 use energy::EnergyCounter;
+pub use handle::SimHandle;
 pub use pv_smoothing::PvSmoothingState;
 pub use snapshot::{SensorInput, SensorSnapshot};
 pub use tick_inputs::TickInputs;

@@ -144,20 +144,15 @@ pub async fn post_sim_reset(
         )
             .into_response();
     }
-    let mut sim = ctx.sim.lock().await;
-    match sim.find_asset_mut(&asset_id) {
-        Some((entry, cfg)) => {
-            let mut values = std::collections::HashMap::new();
-            values.insert("soc".to_string(), body.soc);
-            cfg.reset(&mut entry.state, values);
-            drop(sim);
-            axum::http::StatusCode::NO_CONTENT.into_response()
-        }
-        None => (
+    let values = std::collections::HashMap::from([("soc".to_string(), body.soc)]);
+    if ctx.roster.reset_asset(&asset_id, values).await {
+        axum::http::StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
             axum::http::StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": format!("asset '{}' not found", asset_id)})),
         )
-            .into_response(),
+            .into_response()
     }
 }
 
@@ -182,19 +177,18 @@ pub async fn put_sim_config_battery(
                 .into_response();
         }
     }
-    let mut sim = ctx.sim.lock().await;
-    match sim.find_asset_mut(crate::ids::ASSET_BATTERY) {
-        Some((_entry, cfg)) => {
-            let mut values = std::collections::HashMap::new();
-            values.insert("capacity_kwh".to_string(), body.capacity_kwh);
-            if let Some(min_soc) = body.min_soc {
-                values.insert("min_soc".to_string(), min_soc);
-            }
-            cfg.update_config(values);
-            drop(sim);
-            axum::http::StatusCode::NO_CONTENT.into_response()
-        }
-        None => (
+    let mut values = std::collections::HashMap::new();
+    values.insert("capacity_kwh".to_string(), body.capacity_kwh);
+    if let Some(min_soc) = body.min_soc {
+        values.insert("min_soc".to_string(), min_soc);
+    }
+    match ctx
+        .roster
+        .update_asset_config(crate::ids::ASSET_BATTERY, values)
+        .await
+    {
+        true => axum::http::StatusCode::NO_CONTENT.into_response(),
+        false => (
             axum::http::StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "battery asset not found"})),
         )

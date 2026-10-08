@@ -27,6 +27,9 @@ pub struct AppCtx {
     /// touching the raw `Profile` type or acquiring any lock.
     pub sim_schema: Arc<HashMap<String, Vec<ControlDescriptor>>>,
     pub sim: Arc<Mutex<SimState>>,
+    /// The asset roster through its port (add/cancel a shiftable load, reset/configure an
+    /// asset): the same shared simulator as `sim`, behind a handle that owns the lock.
+    pub roster: Arc<dyn controller::SimRosterPort>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
     pub planner_event_tx: PlannerEventTx,
     /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled`

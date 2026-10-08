@@ -32,7 +32,9 @@ pub use history_port::HistoryPort;
 
 // ── SettingsPort trait (WP4.2, BL-19) ─────────────────────────────────────────
 pub mod settings_port;
+pub mod sim_roster_port;
 pub use settings_port::SettingsPort;
+pub use sim_roster_port::SimRosterPort;
 
 // ── WeatherForecastPort trait ──────────────────────────────────────────────────
 pub mod measurement_port;
