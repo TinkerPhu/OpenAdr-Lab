@@ -21,7 +21,7 @@ use lab_core::time_window::TimeWindow;
 /// GET /plan — returns the active Plan (null until Stage 3).
 pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.active_plan().await {
-        Some(plan) => Json(serde_json::to_value(plan).unwrap_or_default()).into_response(),
+        Some(plan) => Json(plan).into_response(),
         None => Json(serde_json::Value::Null).into_response(),
     }
 }
@@ -137,7 +137,7 @@ pub async fn get_ledger(
 ) -> impl IntoResponse {
     let current = ctx.state.asset_ledger().await;
     let Some(asset_id) = params.asset_id else {
-        return Json(serde_json::to_value(&current).unwrap_or_default()).into_response();
+        return Json(current).into_response();
     };
 
     let closed_periods: Vec<LedgerPeriod> = match ctx.history.clone() {

@@ -18,8 +18,10 @@
 //! also command would be a way around them.
 
 use async_trait::async_trait;
+use serde::Serialize;
 
 use crate::controller::simulator_port::SimSnapshot;
+use crate::controller::trace::ControllerEvent;
 
 /// What a VEN publishes about itself, and where.
 ///
@@ -31,7 +33,7 @@ use crate::controller::simulator_port::SimSnapshot;
 #[async_trait]
 pub trait TelemetryPort: Send + Sync {
     /// The site's current state: a snapshot, published on the tick cadence.
-    async fn publish_telemetry(&self, body: serde_json::Value);
+    async fn publish_telemetry(&self, body: TelemetryBody<'_>);
 
     /// Whether a telemetry sample is due now.
     ///
@@ -54,7 +56,7 @@ pub trait TelemetryPort: Send + Sync {
     /// want different delivery: a snapshot is replaced by the next one seconds
     /// later and may be dropped, a decision happens once and a fleet watching
     /// for "did this VEN see the event" cannot recover a lost one.
-    async fn publish_trace(&self, _body: serde_json::Value) {}
+    async fn publish_trace(&self, _body: TraceBody<'_>) {}
 
     /// Whether this VEN's publisher is connected, for `/health` and the VEN
     /// UI's diagnostics (`ui-transparency`: a feed with no visible surface is
@@ -82,7 +84,7 @@ pub struct NoTelemetry;
 
 #[async_trait]
 impl TelemetryPort for NoTelemetry {
-    async fn publish_telemetry(&self, _body: serde_json::Value) {}
+    async fn publish_telemetry(&self, _body: TelemetryBody<'_>) {}
 
     fn is_connected(&self) -> bool {
         false
@@ -108,17 +110,19 @@ impl TelemetryPort for NoTelemetry {
 /// sums. It is published, not recomputed: the report path derives its own
 /// series from the same snapshot's assets, and a second derivation here is
 /// exactly the divergence F-9 records.
-pub fn telemetry_body(ven_name: &str, snap: &SimSnapshot) -> serde_json::Value {
-    let mut body = serde_json::to_value(snap).unwrap_or_else(|e| {
-        // A snapshot that will not serialise is a bug in its own definition,
-        // not a runtime condition -- say so rather than publish nothing.
-        tracing::error!(error = %e, "sim snapshot is not serialisable");
-        serde_json::json!({})
-    });
-    if let Some(obj) = body.as_object_mut() {
-        obj.insert("venName".into(), serde_json::json!(ven_name));
+#[derive(Debug, Serialize)]
+pub struct TelemetryBody<'a> {
+    #[serde(flatten)]
+    pub snapshot: &'a SimSnapshot,
+    #[serde(rename = "venName")]
+    pub ven_name: &'a str,
+}
+
+pub fn telemetry_body<'a>(ven_name: &'a str, snap: &'a SimSnapshot) -> TelemetryBody<'a> {
+    TelemetryBody {
+        snapshot: snap,
+        ven_name,
     }
-    body
 }
 
 /// What a trace message says.
@@ -126,18 +130,22 @@ pub fn telemetry_body(ven_name: &str, snap: &SimSnapshot) -> serde_json::Value {
 /// The `ControllerEvent` exactly as `/trace/events` serves it, plus the name
 /// of the VEN that decided it — same rule as `telemetry_body`: one vocabulary
 /// across the fleet channel and the VEN's own routes (`dto`).
-pub fn trace_body(
-    ven_name: &str,
-    event: &crate::controller::trace::ControllerEvent,
-) -> serde_json::Value {
-    let mut body = serde_json::to_value(event).unwrap_or_else(|e| {
-        tracing::error!(error = %e, "controller event is not serialisable");
-        serde_json::json!({})
-    });
-    if let Some(obj) = body.as_object_mut() {
-        obj.insert("venName".into(), serde_json::json!(ven_name));
-    }
-    body
+#[derive(Debug, Serialize)]
+pub struct TraceBody<'a> {
+    #[serde(flatten)]
+    pub event: &'a ControllerEvent,
+    #[serde(rename = "venName")]
+    pub ven_name: &'a str,
+}
+
+pub fn trace_body<'a>(ven_name: &'a str, event: &'a ControllerEvent) -> TraceBody<'a> {
+    TraceBody { event, ven_name }
+}
+
+/// The JSON a body goes onto the wire as. A body that will not serialise is a bug in its own
+/// definition, not a runtime condition: the caller logs it and publishes nothing.
+pub fn to_wire<T: Serialize>(body: &T) -> Result<String, serde_json::Error> {
+    serde_json::to_string(body)
 }
 
 #[cfg(test)]
@@ -162,7 +170,7 @@ mod tests {
 
     #[test]
     fn telemetry_body_carries_the_sender_and_the_snapshot() {
-        let body = telemetry_body("ven-7", &snapshot(2500.0));
+        let body = serde_json::to_value(telemetry_body("ven-7", &snapshot(2500.0))).unwrap();
         assert_eq!(body["venName"], "ven-7");
         assert_eq!(body["grid"]["net_power_w"], 2500.0);
     }
@@ -180,11 +188,44 @@ mod tests {
             value: 0.3,
             interval: 4,
         };
-        let body = trace_body("ven-7", &event);
+        let body = serde_json::to_value(trace_body("ven-7", &event)).unwrap();
         assert_eq!(body["type"], "OpenAdrArrived");
         assert_eq!(body["event_id"], "ev-9f3");
         assert_eq!(body["modification_date_time"], "2026-09-22T10:00:00+00:00");
         assert_eq!(body["venName"], "ven-7");
+    }
+
+    /// R-114: the typed bodies go onto the wire exactly as the `serde_json::Value` they replace
+    /// did: the snapshot (or the event, with its `type` tag) plus `venName`.
+    #[test]
+    fn the_typed_bodies_are_the_snapshot_or_event_plus_the_ven_name_on_the_wire() {
+        let with_name = |mut v: serde_json::Value| {
+            v.as_object_mut()
+                .unwrap()
+                .insert("venName".into(), "ven-3".into());
+            v
+        };
+        let wire = |s: String| serde_json::from_str::<serde_json::Value>(&s).unwrap();
+
+        let snap = snapshot(1200.0);
+        let expected = with_name(serde_json::to_value(&snap).unwrap());
+        assert_eq!(
+            wire(to_wire(&telemetry_body("ven-3", &snap)).unwrap()),
+            expected
+        );
+
+        let event = ControllerEvent::RequestTransition {
+            ts: chrono::Utc::now(),
+            request_id: uuid::Uuid::new_v4(),
+            asset_id: "ev".into(),
+            from_status: "None".into(),
+            to_status: "Active".into(),
+        };
+        let expected = with_name(serde_json::to_value(&event).unwrap());
+        assert_eq!(
+            wire(to_wire(&trace_body("ven-3", &event)).unwrap()),
+            expected
+        );
     }
 
     /// Export is negative and must stay negative: a fleet sum built from
@@ -192,7 +233,7 @@ mod tests {
     /// F-3 fixed on the report side.
     #[test]
     fn telemetry_body_keeps_the_sign_of_exported_power() {
-        let body = telemetry_body("ven-1", &snapshot(-3100.0));
+        let body = serde_json::to_value(telemetry_body("ven-1", &snapshot(-3100.0))).unwrap();
         assert_eq!(body["grid"]["net_power_w"], -3100.0);
     }
 }

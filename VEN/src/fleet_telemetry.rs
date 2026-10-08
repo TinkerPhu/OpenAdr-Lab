@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use tracing::{info, warn};
 
-use crate::controller::telemetry_port::TelemetryPort;
+use crate::controller::telemetry_port::{to_wire, TelemetryBody, TelemetryPort, TraceBody};
 
 /// Where this VEN publishes, and as whom.
 #[derive(Clone, Debug)]
@@ -209,15 +209,20 @@ fn announce_online(client: AsyncClient, topic: String) {
 
 #[async_trait]
 impl TelemetryPort for FleetMqttPublisher {
-    async fn publish_telemetry(&self, body: serde_json::Value) {
+    async fn publish_telemetry(&self, body: TelemetryBody<'_>) {
         let topic = format!("{}/telemetry", self.topic_root);
+        let Ok(payload) = to_wire(&body).inspect_err(|e| {
+            tracing::error!(error = %e, "sim snapshot is not serialisable");
+        }) else {
+            return;
+        };
         // QoS 0 and retained: a dropped sample is replaced by the next one a
         // few seconds later, so redelivery would cost more than it is worth --
         // but a subscriber joining mid-stream should not have to wait for the
         // next tick to see anything.
         if let Err(e) = self
             .client
-            .publish(&topic, QoS::AtMostOnce, true, body.to_string())
+            .publish(&topic, QoS::AtMostOnce, true, payload)
             .await
         {
             // Debug, not warn: the publish queue filling while the broker is
@@ -227,8 +232,13 @@ impl TelemetryPort for FleetMqttPublisher {
         }
     }
 
-    async fn publish_trace(&self, body: serde_json::Value) {
+    async fn publish_trace(&self, body: TraceBody<'_>) {
         let topic = format!("{}/trace", self.topic_root);
+        let Ok(payload) = to_wire(&body).inspect_err(|e| {
+            tracing::error!(error = %e, "controller event is not serialisable");
+        }) else {
+            return;
+        };
         // QoS 1 and *not* retained, unlike telemetry: a decision is not a
         // state to catch up on -- a subscriber joining later must not be told
         // about an event arrival from an hour ago as though it just happened --
@@ -236,7 +246,7 @@ impl TelemetryPort for FleetMqttPublisher {
         // silently breaks the reaction chain it belongs to (§6.3).
         if let Err(e) = self
             .client
-            .publish(&topic, QoS::AtLeastOnce, false, body.to_string())
+            .publish(&topic, QoS::AtLeastOnce, false, payload)
             .await
         {
             tracing::debug!(topic, error = %e, "fleet trace publish dropped");
