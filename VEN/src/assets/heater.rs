@@ -408,12 +408,12 @@ impl Asset for Heater {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.30,
+                max_marginal_price_eur_kwh: 0.30,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.10,
+                max_marginal_price_eur_kwh: 0.10,
                 max_marginal_co2: 0.0,
             },
         ]

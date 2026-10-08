@@ -542,10 +542,14 @@ fn ev_planned_state_soc_populated() {
     // Set EV soc to 0.2
     if let Some(ev) = sim.assets.get_mut("ev") {
         let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
         let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
         ev.values.insert("soc".into(), 0.2);
-        ev.cap_max_import_kw = if 0.2_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.cap_max_import_kw = if 0.2_f64 >= soc_target_frac {
+            0.0
+        } else {
+            max_ch
+        };
         ev.available_discharge_kwh = Some(0.2 * bat_kwh);
         ev.available_charge_kwh = Some(0.8 * bat_kwh);
     }
@@ -553,7 +557,7 @@ fn ev_planned_state_soc_populated() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -588,10 +592,10 @@ fn ev_planned_state_soc_populated() {
             state.contains_key("soc"),
             "slot {t}: missing 'soc' key in ev state map"
         );
-        let soc = state["soc"];
+        let soc_frac = state["soc"];
         assert!(
-            (0.0..=1.0).contains(&soc),
-            "slot {t}: soc={soc} out of [0,1]"
+            (0.0..=1.0).contains(&soc_frac),
+            "slot {t}: soc={soc_frac} out of [0,1]"
         );
     }
     // First slot SoC must match the initial SoC (0.2)
@@ -635,10 +639,10 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 id: "ev".into(),
                 max_charge_kw: 11.0,
                 max_discharge_kw: 0.0,
-                initial_soc: 0.30,
+                initial_soc_frac: 0.30,
                 battery_kwh: 75.0,
                 consumption_kwh_per_km: 0.18,
-                soc_target: 0.80,
+                soc_target_frac: 0.80,
                 default_charge_kw: 0.0,
                 min_charge_kw: 0.0,
                 response_delay_s: 10.0,

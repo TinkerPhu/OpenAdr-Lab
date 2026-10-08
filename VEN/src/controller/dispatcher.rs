@@ -197,17 +197,17 @@ mod tests {
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use crate::services::test_support::asset_snapshots::snapshot_from_asset;
 
-    fn battery_entry(soc: f64) -> (String, AssetSnapshot) {
+    fn battery_entry(soc_frac: f64) -> (String, AssetSnapshot) {
         use crate::assets::battery::{Battery, BatteryState};
         let battery = Battery {
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
             round_trip_efficiency: 1.0,
-            min_soc: 0.1,
+            min_soc_frac: 0.1,
         };
         let state = crate::assets::AssetState::Battery(BatteryState {
-            soc,
+            soc_frac,
             actual_power_kw: 0.0,
         });
         (
@@ -216,7 +216,7 @@ mod tests {
         )
     }
 
-    fn ev_entry(soc: f64, plugged: bool, soc_target: f64) -> (String, AssetSnapshot) {
+    fn ev_entry(soc_frac: f64, plugged: bool, soc_target_frac: f64) -> (String, AssetSnapshot) {
         use crate::assets::ev::{EvCharger, EvState};
         let ev = EvCharger {
             max_charge_kw: 7.4,
@@ -224,10 +224,10 @@ mod tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            soc_target,
-            soc_target_profile: soc_target,
+            soc_target_frac,
+            soc_target_profile: soc_target_frac,
             default_charge_kw: 0.0,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
@@ -235,7 +235,7 @@ mod tests {
             usage_sim_seed_tag: 0,
         };
         let state = crate::assets::AssetState::Ev(EvState {
-            soc,
+            soc_frac,
             plugged,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,

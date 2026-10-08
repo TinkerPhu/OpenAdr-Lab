@@ -427,11 +427,11 @@ mod tests {
     fn make_ev_snap(id: &str, rows: &[(i64, f64, f64)]) -> (String, TimelineAssetData) {
         let history: Vec<TimelinePoint> = rows
             .iter()
-            .map(|(offset, power, soc)| TimelinePoint {
+            .map(|(offset, power, soc_frac)| TimelinePoint {
                 ts: ts(*offset),
                 power_kw: *power,
                 state_values: HashMap::from([
-                    ("soc".to_string(), *soc),
+                    ("soc".to_string(), *soc_frac),
                     ("plugged".to_string(), 1.0_f64),
                 ]),
             })
@@ -1277,8 +1277,11 @@ mod tests {
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert!(p.ts > now);
-        let soc = p.values.get("soc").copied().expect("soc key missing");
-        assert!((soc - 0.75).abs() < 1e-9, "expected soc=0.75, got {soc}");
+        let soc_frac = p.values.get("soc").copied().expect("soc key missing");
+        assert!(
+            (soc_frac - 0.75).abs() < 1e-9,
+            "expected soc=0.75, got {soc_frac}"
+        );
         // power_kw must also still be present
         assert!(p.values.contains_key("power_kw"), "power_kw key missing");
     }

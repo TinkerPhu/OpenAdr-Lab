@@ -42,7 +42,8 @@ pub enum SessionType {
 pub struct UserRequest {
     pub id: Uuid,
     pub asset_id: String,
-    pub target_soc: Option<f64>,
+    #[serde(rename = "target_soc")]
+    pub target_soc_frac: Option<f64>,
     pub target_energy_kwh: f64,
     pub desired_power_kw: f64,
     pub deadlines: Vec<RequestDeadline>,

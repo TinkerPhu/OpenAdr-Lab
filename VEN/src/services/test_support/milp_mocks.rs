@@ -126,8 +126,8 @@ impl MockEvCtx {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustNotRun,
-                soc_init: 0.0,
-                soc_max: 1.0,
+                soc_init_frac: 0.0,
+                soc_max_frac: 1.0,
                 a_ev: vec![false; n],
                 soc_drops: None,
                 obligations: vec![],
@@ -154,13 +154,13 @@ impl MockEvCtx {
         Self {
             ctx: EvMilpContext {
                 mode: EvMilpMode::MustRun,
-                soc_init: 0.0,
-                soc_max: 1.0,
+                soc_init_frac: 0.0,
+                soc_max_frac: 1.0,
                 a_ev: vec![true; n],
                 soc_drops: None,
                 obligations: vec![EvObligation {
                     deadline_step: n - 1,
-                    target_soc: required_kwh / MOCK_EV_BATTERY_KWH,
+                    target_soc_frac: required_kwh / MOCK_EV_BATTERY_KWH,
                     session_id: None,
                 }],
                 battery_kwh: MOCK_EV_BATTERY_KWH,
@@ -199,7 +199,7 @@ impl AssetMilpContext for MockEvCtx {
         };
         AssetMilpParams::Ev(EvScalars {
             mode,
-            soc_init: self.ctx.soc_init,
+            soc_init_frac: self.ctx.soc_init_frac,
             a_ev: self.ctx.a_ev.clone(),
             soc_drops: None,
             obligations: self.ctx.obligations.clone(),

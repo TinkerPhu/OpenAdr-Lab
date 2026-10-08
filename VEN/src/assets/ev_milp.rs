@@ -82,7 +82,7 @@ impl EvMilpContext {
         let soc_ev = (0..=n)
             .map(|i| {
                 if i == 0 {
-                    vars.add(variable().min(self.soc_init).max(self.soc_init))
+                    vars.add(variable().min(self.soc_init_frac).max(self.soc_init_frac))
                 } else {
                     // The charge limit is the upper bound, not a full pack: above it
                     // the charger reports no import capability at all, so planning
@@ -101,7 +101,7 @@ impl EvMilpContext {
         let shortfall_soc = self
             .obligations
             .iter()
-            .map(|o| vars.add(variable().min(0.0).max(o.target_soc.max(0.0))))
+            .map(|o| vars.add(variable().min(0.0).max(o.target_soc_frac.max(0.0))))
             .collect();
         let z_ev_on = (0..n)
             .map(|t| {
@@ -238,7 +238,7 @@ impl EvMilpContext {
         // expressed by the model so `ev_diagnostics` can report what was actually
         // missed, and for which session.
         for (k, ob) in self.obligations.iter().enumerate() {
-            if self.mode == EvMilpMode::MustNotRun || ob.target_soc <= 1e-9 {
+            if self.mode == EvMilpMode::MustNotRun || ob.target_soc_frac <= 1e-9 {
                 continue;
             }
             // An obligation whose deadline falls outside this horizon constrains
@@ -253,7 +253,7 @@ impl EvMilpContext {
             // would quietly move every existing deadline one slot earlier.
             let step = ob.deadline_step + 1;
             cs.push(constraint!(
-                v.soc_ev[step] + v.shortfall_soc[k] >= ob.target_soc
+                v.soc_ev[step] + v.shortfall_soc[k] >= ob.target_soc_frac
             ));
         }
         for i in 0..v.delta_ev.len() {
@@ -401,7 +401,7 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         crate::controller::milp_planner::AssetMilpParams::Ev(
             crate::controller::milp_planner::EvScalars {
                 mode,
-                soc_init: self.soc_init,
+                soc_init_frac: self.soc_init_frac,
                 a_ev: self.a_ev.clone(),
                 soc_drops: self.soc_drops.clone(),
                 obligations: self.obligations.clone(),
@@ -534,10 +534,10 @@ mod milp_context_trait_tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
@@ -693,7 +693,7 @@ mod milp_context_trait_tests {
         comfort_rates: &[crate::entities::asset::ComfortRate],
     ) -> EvMilpContext {
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.30,
+            soc_frac: 0.30,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -745,12 +745,12 @@ mod milp_context_trait_tests {
         let curve = vec![
             ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.50,
+                max_marginal_price_eur_kwh: 0.50,
                 max_marginal_co2: 0.0,
             },
             ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.10,
+                max_marginal_price_eur_kwh: 0.10,
                 max_marginal_co2: 0.0,
             },
         ];
@@ -801,7 +801,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
 
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.30,
+            soc_frac: 0.30,
             plugged: false, // out driving
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -859,7 +859,7 @@ mod milp_context_trait_tests {
         let n = 24;
         let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.30,
+            soc_frac: 0.30,
             plugged: false,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -1028,7 +1028,7 @@ mod milp_context_trait_tests {
         // the forecast's (80 % by 08:00).
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
-            target_soc: 0.40,
+            target_soc_frac: 0.40,
             window_start: now,
             expected_trip_distance_km: None,
             expected_return_time: None,
@@ -1042,7 +1042,7 @@ mod milp_context_trait_tests {
             updated_at: now,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.30,
+            soc_frac: 0.30,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -1138,15 +1138,15 @@ mod milp_context_trait_tests {
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
             mode: EvMilpMode::MustRun,
-            soc_init: 0.0,
-            soc_max: 1.0,
+            soc_init_frac: 0.0,
+            soc_max_frac: 1.0,
             a_ev: vec![true; n],
             soc_drops: None,
             obligations: vec![EvObligation {
                 deadline_step: n - 1,
                 // 10 kWh of a 60 kWh pack from empty — what this fixture used to
                 // state as `e_required_kwh: 10.0`.
-                target_soc: 10.0 / 60.0,
+                target_soc_frac: 10.0 / 60.0,
                 session_id: None,
             }],
             battery_kwh: 60.0,
@@ -1183,10 +1183,10 @@ mod milp_context_trait_tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
@@ -1194,7 +1194,7 @@ mod milp_context_trait_tests {
             usage_sim_seed_tag: 0,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.2,
+            soc_frac: 0.2,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -1203,7 +1203,7 @@ mod milp_context_trait_tests {
         let now = Utc::now();
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
-            target_soc: 0.3,
+            target_soc_frac: 0.3,
             window_start: Utc::now(),
             expected_trip_distance_km: None,
             expected_return_time: None,
@@ -1215,12 +1215,12 @@ mod milp_context_trait_tests {
             comfort_rates: vec![
                 ComfortRate {
                     fill: 0.0,
-                    max_marginal_price: 0.05,
+                    max_marginal_price_eur_kwh: 0.05,
                     max_marginal_co2: 0.0,
                 },
                 ComfortRate {
                     fill: 1.0,
-                    max_marginal_price: 0.12,
+                    max_marginal_price_eur_kwh: 0.12,
                     max_marginal_co2: 0.0,
                 },
             ],
@@ -1273,10 +1273,10 @@ mod milp_context_trait_tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
@@ -1286,7 +1286,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..=4).map(|i| i * 300).collect();
         for plugged in [true, false] {
             let state = super::super::AssetState::Ev(super::super::EvState {
-                soc: 0.42,
+                soc_frac: 0.42,
                 plugged,
                 actual_power_kw: 0.0,
                 pending_command_kw: 0.0,
@@ -1308,7 +1308,7 @@ mod milp_context_trait_tests {
                 0.0,
             );
             match ctx.milp_params(4, chrono::Utc::now()) {
-                AssetMilpParams::Ev(e) => assert_eq!(e.soc_init, 0.42, "plugged={plugged}"),
+                AssetMilpParams::Ev(e) => assert_eq!(e.soc_init_frac, 0.42, "plugged={plugged}"),
                 _ => panic!("expected Ev variant"),
             }
         }
@@ -1328,10 +1328,10 @@ mod milp_context_trait_tests {
             v2g_capable: false,
             battery_kwh: 60.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 0.0,
             response_delay_s: 0.0,
             departure_time: None,
@@ -1339,7 +1339,7 @@ mod milp_context_trait_tests {
             usage_sim_seed_tag: 0,
         };
         let state = super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.2,
+            soc_frac: 0.2,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -1348,7 +1348,7 @@ mod milp_context_trait_tests {
         let now = Utc::now();
         let session = EvSession {
             id: uuid::Uuid::new_v4(),
-            target_soc: 0.3,
+            target_soc_frac: 0.3,
             window_start: now,
             expected_trip_distance_km: None,
             expected_return_time: None,
@@ -1413,8 +1413,8 @@ mod milp_context_trait_tests {
     fn milp_params_may_run_mode() {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
-            soc_init: 0.0,
-            soc_max: 1.0,
+            soc_init_frac: 0.0,
+            soc_max_frac: 1.0,
             a_ev: vec![true; 4],
             soc_drops: None,
             obligations: vec![],
@@ -1443,8 +1443,8 @@ mod milp_context_trait_tests {
     fn milp_params_must_not_run_mode() {
         let ctx = EvMilpContext {
             mode: EvMilpMode::MustNotRun,
-            soc_init: 0.0,
-            soc_max: 1.0,
+            soc_init_frac: 0.0,
+            soc_max_frac: 1.0,
             a_ev: vec![false; 4],
             soc_drops: None,
             obligations: vec![],
@@ -1475,8 +1475,8 @@ mod milp_context_trait_tests {
         let a_ev = vec![true, false, true, false];
         let ctx = EvMilpContext {
             mode: EvMilpMode::MayRun,
-            soc_init: 0.0,
-            soc_max: 1.0,
+            soc_init_frac: 0.0,
+            soc_max_frac: 1.0,
             a_ev: a_ev.clone(),
             soc_drops: None,
             obligations: vec![],

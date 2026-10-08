@@ -161,9 +161,11 @@ pub struct FlexibilityEnvelope {
     /// Number of slots in window
     pub slots_available: usize,
     /// Max rate this packet will accept (€/kWh)
-    pub max_acceptable_rate: f64,
+    #[serde(rename = "max_acceptable_rate")]
+    pub max_acceptable_rate_eur_kwh: f64,
     /// Min rate at projected fill (€/kWh)
-    pub min_acceptable_rate: f64,
+    #[serde(rename = "min_acceptable_rate")]
+    pub min_acceptable_rate_eur_kwh: f64,
     /// MaxTotalCost - AccumulatedCost (€)
     pub budget_remaining_eur: f64,
     /// Estimated cost (EnergyNeeded × avg eligible slot GridEffectiveCost) (€)

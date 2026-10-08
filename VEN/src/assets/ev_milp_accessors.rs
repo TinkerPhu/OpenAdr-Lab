@@ -23,7 +23,7 @@ impl EvMilpContext {
         self.soc_drops
             .as_ref()
             .map_or(0.0, |d| d.floor_frac)
-            .min(self.soc_init)
+            .min(self.soc_init_frac)
             .max(0.0)
     }
 
@@ -97,7 +97,7 @@ impl EvMilpContext {
     /// discharge itself to comply. Clamping up keeps that case solvable; the model
     /// simply cannot add to it.
     pub fn soc_ceiling(&self) -> f64 {
-        self.soc_max.clamp(0.0, 1.0).max(self.soc_init)
+        self.soc_max_frac.clamp(0.0, 1.0).max(self.soc_init_frac)
     }
 
     /// Energy a firm obligation needs, measured against what the vehicle can actually
@@ -111,8 +111,8 @@ impl EvMilpContext {
                 let consumed: f64 = (0..o.deadline_step.saturating_add(1))
                     .map(|t| self.drop_frac_at(t))
                     .sum();
-                let reachable = o.target_soc.min(self.soc_ceiling());
-                ((reachable - self.soc_init + consumed) * self.battery_kwh).max(0.0)
+                let reachable = o.target_soc_frac.min(self.soc_ceiling());
+                ((reachable - self.soc_init_frac + consumed) * self.battery_kwh).max(0.0)
             })
             .fold(0.0_f64, f64::max)
     }

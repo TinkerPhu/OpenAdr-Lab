@@ -33,7 +33,8 @@ fn default_ev_session_origin() -> EvSessionOrigin {
 pub struct EvSession {
     pub id: Uuid,
     /// Target SoC (0.0–1.0). E.g. 0.80 = "charge to 80%".
-    pub target_soc: f64,
+    #[serde(rename = "target_soc")]
+    pub target_soc_frac: f64,
     /// When this session's charging window opens — the instant the vehicle
     /// becomes available for it. With `departure_time` it forms the half-open
     /// window `[window_start, departure_time)`.
@@ -99,14 +100,14 @@ impl EvSession {
     /// budget and no comfort curve. It stands in for a user, so the queue refuses it
     /// wherever a stated session already covers the window.
     pub fn simulated(
-        target_soc: f64,
+        target_soc_frac: f64,
         window_start: DateTime<Utc>,
         departure_time: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            target_soc,
+            target_soc_frac,
             window_start,
             departure_time,
             expected_trip_distance_km: None,
@@ -480,7 +481,7 @@ mod tests {
     fn test_ev_session_serde_roundtrip_preserves_mode() {
         let session = EvSession {
             id: Uuid::new_v4(),
-            target_soc: 0.9,
+            target_soc_frac: 0.9,
             window_start: Utc::now(),
             expected_trip_distance_km: None,
             expected_return_time: None,
@@ -539,7 +540,7 @@ mod tests {
     fn sess(from: i64, to: i64) -> EvSession {
         EvSession {
             id: Uuid::new_v4(),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             window_start: ts(from),
             expected_trip_distance_km: None,
             expected_return_time: None,

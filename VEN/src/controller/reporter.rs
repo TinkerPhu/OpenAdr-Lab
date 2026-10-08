@@ -31,7 +31,7 @@ pub struct AssetReportSample {
     pub ts: DateTime<Utc>,
     pub power_kw: f64,
     /// State of charge as fraction 0.0–1.0. None for non-storage assets.
-    pub soc: Option<f64>,
+    pub soc_frac: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +335,7 @@ mod tests {
             .map(|&(offset_s, power_kw)| AssetReportSample {
                 ts: ts(offset_s),
                 power_kw,
-                soc: None,
+                soc_frac: None,
             })
             .collect();
         (id.to_string(), samples)
@@ -345,10 +345,10 @@ mod tests {
     fn make_ev_samples(id: &str, rows: &[(i64, f64, f64)]) -> (String, Vec<AssetReportSample>) {
         let samples = rows
             .iter()
-            .map(|&(offset_s, power_kw, soc)| AssetReportSample {
+            .map(|&(offset_s, power_kw, soc_frac)| AssetReportSample {
                 ts: ts(offset_s),
                 power_kw,
-                soc: Some(soc),
+                soc_frac: Some(soc_frac),
             })
             .collect();
         (id.to_string(), samples)
@@ -1030,7 +1030,7 @@ mod tests {
             vec![AssetReportSample {
                 ts: ts(1750),
                 power_kw: 1.0,
-                soc: None,
+                soc_frac: None,
             }],
         );
         assert_eq!(operating_state(&samples, now), "ACTIVE");
@@ -1045,7 +1045,7 @@ mod tests {
             vec![AssetReportSample {
                 ts: ts(0),
                 power_kw: 1.0,
-                soc: None,
+                soc_frac: None,
             }],
         );
         assert_eq!(operating_state(&samples, now), "UNRESPONSIVE");

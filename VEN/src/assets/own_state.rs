@@ -125,7 +125,7 @@ mod tests {
 
     fn battery_state() -> AssetState {
         AssetState::Battery(BatteryState {
-            soc: 0.42,
+            soc_frac: 0.42,
             actual_power_kw: 1.5,
         })
     }
@@ -134,7 +134,7 @@ mod tests {
     fn own_borrows_the_matching_variant() {
         let state = battery_state();
         let s: &BatteryState = own(&state);
-        assert!((s.soc - 0.42).abs() < 1e-9);
+        assert!((s.soc_frac - 0.42).abs() < 1e-9);
     }
 
     #[test]
@@ -155,8 +155,8 @@ mod tests {
     fn own_mut_borrows_the_matching_variant_mutably() {
         let mut state = battery_state();
         let s: &mut BatteryState = own_mut(&mut state);
-        s.soc = 0.9;
-        assert!(matches!(state, AssetState::Battery(ref b) if (b.soc - 0.9).abs() < 1e-9));
+        s.soc_frac = 0.9;
+        assert!(matches!(state, AssetState::Battery(ref b) if (b.soc_frac - 0.9).abs() < 1e-9));
     }
 
     #[test]

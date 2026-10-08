@@ -6,17 +6,17 @@ use super::*;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
 use std::collections::HashMap as StdHashMap;
 
-fn battery_snap(setpoint_kw: f64, soc: f64) -> AssetSnapshot {
+fn battery_snap(setpoint_kw: f64, soc_frac: f64) -> AssetSnapshot {
     use crate::assets::battery::{Battery, BatteryState};
     let battery = Battery {
         capacity_kwh: 8.0,
         max_charge_kw: 5.0,
         max_discharge_kw: 5.0,
         round_trip_efficiency: 1.0,
-        min_soc: 0.1,
+        min_soc_frac: 0.1,
     };
     let state = crate::assets::AssetState::Battery(BatteryState {
-        soc,
+        soc_frac,
         actual_power_kw: setpoint_kw,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
@@ -28,7 +28,7 @@ fn battery_snap(setpoint_kw: f64, soc: f64) -> AssetSnapshot {
     )
 }
 
-fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetSnapshot {
+fn ev_snap(setpoint_kw: f64, soc_frac: f64, soc_target_frac: f64, plugged: bool) -> AssetSnapshot {
     use crate::assets::ev::{EvCharger, EvState};
     let ev = EvCharger {
         max_charge_kw: 7.0,
@@ -36,10 +36,10 @@ fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetS
         v2g_capable: false,
         battery_kwh: 60.0,
         consumption_kwh_per_km: 0.18,
-        soc_target,
-        soc_target_profile: soc_target,
+        soc_target_frac,
+        soc_target_profile: soc_target_frac,
         default_charge_kw: 0.0,
-        min_soc: 0.0,
+        min_soc_frac: 0.0,
         min_charge_kw: 1.4,
         response_delay_s: 10.0,
         departure_time: None,
@@ -47,7 +47,7 @@ fn ev_snap(setpoint_kw: f64, soc: f64, soc_target: f64, plugged: bool) -> AssetS
         usage_sim_seed_tag: 0,
     };
     let state = crate::assets::AssetState::Ev(EvState {
-        soc,
+        soc_frac,
         plugged,
         actual_power_kw: setpoint_kw.max(0.0),
         pending_command_kw: setpoint_kw.max(0.0),
@@ -725,14 +725,14 @@ fn battery_lever_converges_under_stationary_disturbance_across_multiple_ticks() 
     // (the actually-applied value) as the integrator state, this test proves
     // that alone is sufficient: no external holding state is needed.
     let mut setpoint_kw = 0.0_f64;
-    let mut soc = 0.5_f64;
+    let mut soc_frac = 0.5_f64;
     const STATIONARY_DEVIATION_KW: f64 = 2.0; // constant unplanned import step
     const CAPACITY_KWH: f64 = 10.0;
     const DT_H: f64 = 300.0 / 3600.0;
 
     let mut history = Vec::new();
     for _ in 0..6 {
-        let sim = make_sim(vec![("battery", battery_snap(setpoint_kw, soc))]);
+        let sim = make_sim(vec![("battery", battery_snap(setpoint_kw, soc_frac))]);
         let mut sp: StdHashMap<String, f64> = StdHashMap::new();
         // Fresh per-tick deviation: the stationary external disturbance plus
         // whatever the battery's own last correction is already contributing
@@ -745,7 +745,7 @@ fn battery_lever_converges_under_stationary_disturbance_across_multiple_ticks() 
             apply_battery_lever(&mut sp, &sim, assigned_kw, PlannerObjective::MinCost, None);
         setpoint_kw = sp.get("battery").copied().unwrap_or(setpoint_kw);
         // Physics: setpoint_kw negative = discharge, drains SoC.
-        soc = (soc - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
+        soc_frac = (soc_frac - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
         history.push(setpoint_kw);
     }
 
@@ -786,7 +786,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
     // battery is driven to its physical clamp instead of converging to the
     // exact correction.
     let mut setpoint_kw = 0.0_f64;
-    let mut soc = 0.5_f64;
+    let mut soc_frac = 0.5_f64;
     const STATIONARY_DEVIATION_KW: f64 = 2.0; // constant unplanned base-load step
     const CAPACITY_KWH: f64 = 10.0;
     const DT_H: f64 = 300.0 / 3600.0;
@@ -803,7 +803,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
     let mut incumbent: Option<&'static str> = None;
     for _ in 0..6 {
         let sim = make_sim(vec![
-            ("battery", battery_snap(setpoint_kw, soc)),
+            ("battery", battery_snap(setpoint_kw, soc_frac)),
             ("base_load", base_snap(2.0)),
         ]);
         let outcome = reconcile(
@@ -831,7 +831,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
             .copied()
             .unwrap_or(setpoint_kw);
         // Physics: setpoint_kw negative = discharge, drains SoC.
-        soc = (soc - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
+        soc_frac = (soc_frac - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
         history.push(setpoint_kw);
     }
 
@@ -1128,10 +1128,10 @@ impl LaggedSite {
                 v2g_capable: false,
                 battery_kwh: 60.0,
                 consumption_kwh_per_km: 0.18,
-                soc_target: 0.8,
+                soc_target_frac: 0.8,
                 soc_target_profile: 0.8,
                 default_charge_kw: 0.0,
-                min_soc: 0.0,
+                min_soc_frac: 0.0,
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
                 departure_time: None,
@@ -1139,7 +1139,7 @@ impl LaggedSite {
                 usage_sim_seed_tag: 0,
             },
             ev_state: EvState {
-                soc: 0.4,
+                soc_frac: 0.4,
                 plugged: true,
                 actual_power_kw: ev_kw,
                 pending_command_kw: ev_kw,

@@ -28,7 +28,7 @@ pub struct ExpectedVehicleUse {
     pub window_start: DateTime<Utc>,
     /// The vehicle must hold `target_soc` by here.
     pub departure_at: DateTime<Utc>,
-    pub target_soc: f64,
+    pub target_soc_frac: f64,
     /// A firm departure is a guarantee and binds an obligation. A soft one states a
     /// preference priced per kWh by the comfort curve and binds none
     /// (`ev-comfort-piecewise-core`), but still contributes its window and its
@@ -210,7 +210,7 @@ pub fn plan_inputs(
         .filter(|u| (u.departure_at - now).num_seconds() <= horizon_end_s)
         .map(|u| EvObligation {
             deadline_step: deadline_slot(cum_s, n, (u.departure_at - now).num_seconds()),
-            target_soc: u.target_soc,
+            target_soc_frac: u.target_soc_frac,
             session_id: u.session_id,
         })
         .collect();
@@ -244,7 +244,7 @@ mod tests {
         ExpectedVehicleUse {
             window_start: at(open),
             departure_at: at(depart),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             firm: true,
             consumption: ret.map(|r| ExpectedTripConsumption {
                 return_at: at(r),
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(out.obligations.len(), 2);
         assert_eq!(out.obligations[0].deadline_step, 4);
         assert_eq!(out.obligations[1].deadline_step, 13);
-        assert!(out.obligations.iter().all(|o| o.target_soc == 0.8));
+        assert!(out.obligations.iter().all(|o| o.target_soc_frac == 0.8));
     }
 
     #[test]
@@ -416,7 +416,7 @@ mod tests {
         let depart_then_return = ExpectedVehicleUse {
             window_start: at(0),
             departure_at: at(9),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             firm: true,
             consumption: Some(ExpectedTripConsumption {
                 return_at: at(9),
@@ -452,7 +452,7 @@ mod tests {
         let inside = ExpectedVehicleUse {
             window_start: at(0),
             departure_at: at(2),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             firm: true,
             consumption: Some(ExpectedTripConsumption {
                 return_at: at(6),
@@ -463,7 +463,7 @@ mod tests {
         let beyond = ExpectedVehicleUse {
             window_start: at(6),
             departure_at: at(11),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             firm: true,
             consumption: Some(ExpectedTripConsumption {
                 return_at: at(30), // long after the horizon ends

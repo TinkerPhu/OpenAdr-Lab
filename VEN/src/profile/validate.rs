@@ -136,10 +136,10 @@ impl Profile {
         for asset in &self.assets {
             match asset {
                 AssetProfile::Ev(c) => {
-                    if !(0.0..=1.0).contains(&c.soc_target) {
+                    if !(0.0..=1.0).contains(&c.soc_target_frac) {
                         errors.push(format!(
                             "ev.soc_target must be in [0.0, 1.0], got {}",
-                            c.soc_target
+                            c.soc_target_frac
                         ));
                     }
                     // A negative consumption would turn driving into charging, and a
@@ -204,10 +204,10 @@ impl Profile {
                     }
                 }
                 AssetProfile::Battery(c) => {
-                    if !(0.0..1.0).contains(&c.min_soc) {
+                    if !(0.0..1.0).contains(&c.min_soc_frac) {
                         errors.push(format!(
                             "battery.min_soc must be in [0.0, 1.0), got {}",
-                            c.min_soc
+                            c.min_soc_frac
                         ));
                     }
                     if c.round_trip_efficiency <= 0.0 || c.round_trip_efficiency > 1.0 {

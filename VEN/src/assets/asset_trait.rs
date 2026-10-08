@@ -434,9 +434,9 @@ mod handle_tests {
     use crate::assets::battery::{Battery, BatteryState};
     use crate::assets::{AssetHandle, AssetHistoryBuffer};
 
-    fn make_battery_state(soc: f64, power_kw: f64) -> AssetState {
+    fn make_battery_state(soc_frac: f64, power_kw: f64) -> AssetState {
         AssetState::Battery(BatteryState {
-            soc,
+            soc_frac,
             actual_power_kw: power_kw,
         })
     }
@@ -447,7 +447,7 @@ mod handle_tests {
             max_charge_kw: max_kw,
             max_discharge_kw: max_kw,
             round_trip_efficiency: 1.0,
-            min_soc: 0.1,
+            min_soc_frac: 0.1,
         }
     }
 
@@ -478,7 +478,7 @@ mod handle_tests {
         };
         match handle.current_state() {
             AssetState::Battery(s) => {
-                assert!((s.soc - 0.7).abs() < 1e-9);
+                assert!((s.soc_frac - 0.7).abs() < 1e-9);
                 assert!((s.actual_power_kw - 2.0).abs() < 1e-9);
             }
             _ => panic!("expected Battery state"),
@@ -538,7 +538,7 @@ mod handle_tests {
         let (new_state, actual_kw) = handle.step(&state, 5.0, Duration::seconds(3600));
         // 1 hour at 5 kW on 10 kWh battery → SoC goes from 0.5 to 1.0 (full)
         match new_state {
-            AssetState::Battery(s) => assert!((s.soc - 1.0).abs() < 1e-6),
+            AssetState::Battery(s) => assert!((s.soc_frac - 1.0).abs() < 1e-6),
             _ => panic!("expected Battery state"),
         }
         assert!(actual_kw > 0.0);
@@ -546,7 +546,7 @@ mod handle_tests {
 
     fn soc_of(state: &AssetState) -> f64 {
         match state {
-            AssetState::Battery(s) => s.soc,
+            AssetState::Battery(s) => s.soc_frac,
             other => panic!("expected Battery state, got {other:?}"),
         }
     }

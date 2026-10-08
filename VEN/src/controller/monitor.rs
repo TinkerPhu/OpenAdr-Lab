@@ -196,7 +196,7 @@ mod tests {
         UserRequest {
             id: uuid::Uuid::new_v4(),
             asset_id: asset_id.to_string(),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: 0.0,
             desired_power_kw: 0.0,
             deadlines: vec![],

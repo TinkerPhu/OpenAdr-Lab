@@ -452,9 +452,10 @@ impl PlanTriggerSignal {
 /// MaxMarginalPrice is a priority bid, not the actual price paid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComfortRate {
-    pub fill: f64,               // 0.0..1.0 task completion fraction
-    pub max_marginal_price: f64, // max €/kWh the user bids — determines priority
-    pub max_marginal_co2: f64,   // max gCO2/kWh user accepts at this fill level
+    pub fill: f64, // 0.0..1.0 task completion fraction
+    #[serde(rename = "max_marginal_price")]
+    pub max_marginal_price_eur_kwh: f64, // max €/kWh the user bids — determines priority
+    pub max_marginal_co2: f64, // max gCO2/kWh user accepts at this fill level
 }
 
 impl ComfortRate {
@@ -488,7 +489,7 @@ impl ComfortRate {
 
     /// Interpolate `max_marginal_price` at an arbitrary fill level. See `interpolate_at_fill`.
     pub fn value_at_fill(rates: &[ComfortRate], fill: f64) -> f64 {
-        Self::interpolate_at_fill(rates, fill, |r| r.max_marginal_price)
+        Self::interpolate_at_fill(rates, fill, |r| r.max_marginal_price_eur_kwh)
     }
 
     /// Interpolate `max_marginal_co2` at an arbitrary fill level. See `interpolate_at_fill`.
@@ -656,12 +657,12 @@ mod comfort_rate_tests {
         vec![
             ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.30,
+                max_marginal_price_eur_kwh: 0.30,
                 max_marginal_co2: 300.0,
             },
             ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.10,
+                max_marginal_price_eur_kwh: 0.10,
                 max_marginal_co2: 50.0,
             },
         ]
@@ -693,17 +694,17 @@ mod comfort_rate_tests {
         let rates = vec![
             ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.30,
+                max_marginal_price_eur_kwh: 0.30,
                 max_marginal_co2: 0.0,
             },
             ComfortRate {
                 fill: 0.5,
-                max_marginal_price: 0.20,
+                max_marginal_price_eur_kwh: 0.20,
                 max_marginal_co2: 0.0,
             },
             ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.10,
+                max_marginal_price_eur_kwh: 0.10,
                 max_marginal_co2: 0.0,
             },
         ];
@@ -738,17 +739,17 @@ mod comfort_rate_tests {
         let rates = vec![
             ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.30,
+                max_marginal_price_eur_kwh: 0.30,
                 max_marginal_co2: 300.0,
             },
             ComfortRate {
                 fill: 0.5,
-                max_marginal_price: 0.20,
+                max_marginal_price_eur_kwh: 0.20,
                 max_marginal_co2: 200.0,
             },
             ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.10,
+                max_marginal_price_eur_kwh: 0.10,
                 max_marginal_co2: 50.0,
             },
         ];
@@ -763,12 +764,12 @@ mod comfort_rate_tests {
         let rates = vec![
             ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.10, // price rises with fill...
-                max_marginal_co2: 300.0,  // ...while CO2 bid falls with fill
+                max_marginal_price_eur_kwh: 0.10, // price rises with fill...
+                max_marginal_co2: 300.0,          // ...while CO2 bid falls with fill
             },
             ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.50,
+                max_marginal_price_eur_kwh: 0.50,
                 max_marginal_co2: 20.0,
             },
         ];

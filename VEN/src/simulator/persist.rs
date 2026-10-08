@@ -150,9 +150,9 @@ mod tests {
             capacity_kwh: 10.0,
             max_charge_kw: 3.0,
             max_discharge_kw: 3.0,
-            initial_soc: 0.5,
+            initial_soc_frac: 0.5,
             round_trip_efficiency: 0.95,
-            min_soc: 0.1,
+            min_soc_frac: 0.1,
             c_terminal_eur_kwh: None,
         })
     }
@@ -165,7 +165,7 @@ mod tests {
         let mut state = SimState::from_params(&[battery_params("battery")], now());
         let (entry, _) = state.find_asset_mut("battery").unwrap();
         entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
-            soc: 0.73,
+            soc_frac: 0.73,
             actual_power_kw: 1.5,
         });
 
@@ -183,7 +183,10 @@ mod tests {
             .expect("battery asset entry must exist after a bare load");
         match &loaded_entry.state {
             crate::assets::AssetState::Battery(s) => {
-                assert!((s.soc - 0.73).abs() < 1e-9, "soc must survive round-trip");
+                assert!(
+                    (s.soc_frac - 0.73).abs() < 1e-9,
+                    "soc must survive round-trip"
+                );
                 assert!((s.actual_power_kw - 1.5).abs() < 1e-9);
             }
             other => panic!("expected Battery state, got {other:?}"),
@@ -239,7 +242,7 @@ mod tests {
         let mut saved = SimState::from_params(&[battery_params("battery")], now());
         let (entry, _) = saved.find_asset_mut("battery").unwrap();
         entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
-            soc: 0.42,
+            soc_frac: 0.42,
             actual_power_kw: 0.0,
         });
         save(&saved, data_dir).await.unwrap();
@@ -260,7 +263,7 @@ mod tests {
         match &entry.state {
             crate::assets::AssetState::Battery(s) => {
                 assert!(
-                    (s.soc - 0.42).abs() < 1e-9,
+                    (s.soc_frac - 0.42).abs() < 1e-9,
                     "mutable SoC must be restored from disk"
                 );
             }
@@ -286,7 +289,7 @@ mod tests {
         let mut saved = SimState::from_params(&[battery_params("battery-old")], now());
         let (entry, _) = saved.find_asset_mut("battery-old").unwrap();
         entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
-            soc: 0.99,
+            soc_frac: 0.99,
             actual_power_kw: 0.0,
         });
         save(&saved, data_dir).await.unwrap();
@@ -306,7 +309,7 @@ mod tests {
             .expect("must fall back to a fresh state built from current params");
         match &entry.state {
             crate::assets::AssetState::Battery(s) => assert!(
-                (s.soc - 0.5).abs() < 1e-9,
+                (s.soc_frac - 0.5).abs() < 1e-9,
                 "fresh state must use initial_soc from params, not the stale 0.99 on disk"
             ),
             other => panic!("expected Battery state, got {other:?}"),
@@ -327,7 +330,7 @@ mod tests {
         let mut saved = SimState::from_params(&[battery_params("battery")], now());
         let (entry, _) = saved.find_asset_mut("battery").unwrap();
         entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
-            soc: 0.66,
+            soc_frac: 0.66,
             actual_power_kw: 0.0,
         });
         // Simulate a shiftable load that was mid-run at the last persist but
@@ -364,7 +367,7 @@ mod tests {
             .expect("fixed-roster battery must still be present");
         match &entry.state {
             crate::assets::AssetState::Battery(s) => assert!(
-                (s.soc - 0.66).abs() < 1e-9,
+                (s.soc_frac - 0.66).abs() < 1e-9,
                 "battery's mutable state must survive despite unrelated dynamic-asset churn"
             ),
             other => panic!("expected Battery state, got {other:?}"),
@@ -406,7 +409,7 @@ mod tests {
             .expect("the asset must still exist, built fresh from current params");
         match &entry.state {
             crate::assets::AssetState::Battery(s) => assert!(
-                (s.soc - 0.5).abs() < 1e-9,
+                (s.soc_frac - 0.5).abs() < 1e-9,
                 "mismatched state must be replaced by the fresh params-built one"
             ),
             other => panic!("expected a fresh Battery state, got {other:?}"),

@@ -91,10 +91,14 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     set_ev_plugged(&mut sim, true);
     if let Some(ev) = sim.assets.get_mut("ev") {
         let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
         let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
         ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
+            0.0
+        } else {
+            max_ch
+        };
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
@@ -102,7 +106,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -290,10 +294,14 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
     set_ev_plugged(&mut sim, true);
     if let Some(ev) = sim.assets.get_mut("ev") {
         let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
         let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
         ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
+            0.0
+        } else {
+            max_ch
+        };
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
@@ -301,7 +309,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,

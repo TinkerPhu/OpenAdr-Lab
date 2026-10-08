@@ -24,7 +24,8 @@ use crate::AppCtx;
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequestBody {
     pub asset_id: String,
-    pub target_soc: Option<f64>,
+    #[serde(rename = "target_soc")]
+    pub target_soc_frac: Option<f64>,
     pub target_energy_kwh: Option<f64>,
     pub desired_power_kw: Option<f64>,
     pub deadlines: Vec<RequestDeadlineInput>,
@@ -104,7 +105,7 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
     fn from(b: CreateUserRequestBody) -> Self {
         CreateUserRequestParams {
             asset_id: b.asset_id,
-            target_soc: b.target_soc,
+            target_soc_frac: b.target_soc_frac,
             target_energy_kwh: b.target_energy_kwh,
             desired_power_kw: b.desired_power_kw,
             deadlines: b.deadlines.into_iter().map(Into::into).collect(),

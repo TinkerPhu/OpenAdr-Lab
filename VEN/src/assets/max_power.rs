@@ -103,17 +103,17 @@ mod asset_max_power_tests {
             .unwrap_or((0.0, 0.0))
     }
 
-    fn battery(capacity_kwh: f64, max_kw: f64, soc: f64) -> (Battery, AssetState) {
+    fn battery(capacity_kwh: f64, max_kw: f64, soc_frac: f64) -> (Battery, AssetState) {
         (
             Battery {
                 capacity_kwh,
                 max_charge_kw: max_kw,
                 max_discharge_kw: max_kw,
                 round_trip_efficiency: 1.0,
-                min_soc: 0.1,
+                min_soc_frac: 0.1,
             },
             AssetState::Battery(BatteryState {
-                soc,
+                soc_frac,
                 actual_power_kw: 0.0,
             }),
         )

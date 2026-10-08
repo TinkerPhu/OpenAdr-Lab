@@ -55,10 +55,10 @@ fn ven1_profile() -> Profile {
                 id: "ev".into(),
                 max_charge_kw: 11.0,
                 max_discharge_kw: 0.0,
-                initial_soc: 0.745,
+                initial_soc_frac: 0.745,
                 battery_kwh: 60.0,
                 consumption_kwh_per_km: 0.18,
-                soc_target: 0.80,
+                soc_target_frac: 0.80,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
@@ -82,9 +82,9 @@ fn ven1_profile() -> Profile {
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
                 max_discharge_kw: 5.0,
-                initial_soc: 0.17,
+                initial_soc_frac: 0.17,
                 round_trip_efficiency: 0.92,
-                min_soc: 0.10,
+                min_soc_frac: 0.10,
                 c_terminal_eur_kwh: None,
             }),
             AssetProfile::BaseLoad(BaseLoadParams {
@@ -491,8 +491,8 @@ fn captured_instance(
     let mut profile = fleet_profile(name);
     for asset in profile.assets.iter_mut() {
         match asset {
-            AssetProfile::Battery(b) => b.initial_soc = state.battery_soc,
-            AssetProfile::Ev(e) => e.initial_soc = state.ev_soc,
+            AssetProfile::Battery(b) => b.initial_soc_frac = state.battery_soc,
+            AssetProfile::Ev(e) => e.initial_soc_frac = state.ev_soc,
             AssetProfile::Heater(h) => {
                 if let Some(t) = state.heater_temp_c {
                     h.temp_initial_c = t;

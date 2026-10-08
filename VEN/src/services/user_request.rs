@@ -50,9 +50,11 @@ impl UserRequestService {
             .first()
             .map(|d| d.latest_end)
             .ok_or(RequestError::NoDeadlines)?;
-        let target_soc = req.target_soc.ok_or_else(|| RequestError::MissingTarget {
-            asset_id: req.asset_id.clone(),
-        })?;
+        let target_soc_frac = req
+            .target_soc_frac
+            .ok_or_else(|| RequestError::MissingTarget {
+                asset_id: req.asset_id.clone(),
+            })?;
         let window_start = stated_window_start.unwrap_or(now);
         if window_start >= departure {
             return Err(RequestError::EmptyChargingWindow {
@@ -62,7 +64,7 @@ impl UserRequestService {
         }
         let session = EvSession {
             id: Uuid::new_v4(),
-            target_soc,
+            target_soc_frac,
             window_start,
             expected_trip_distance_km,
             expected_return_time,
@@ -83,7 +85,7 @@ impl UserRequestService {
             request_id = %req.id,
             session_id = %session.id,
             asset_id = %req.asset_id,
-            target_soc,
+            target_soc_frac,
             "user request created (EV session)"
         );
         Ok((req, session))
@@ -181,7 +183,7 @@ impl UserRequestService {
         let user_req = UserRequest {
             id: Uuid::new_v4(),
             asset_id: body.asset_id,
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: crate::entities::units::energy_kwh_from_min(power, duration as f64),
             desired_power_kw: power,
             deadlines: vec![],
@@ -297,7 +299,7 @@ pub(crate) mod tests {
             power_kw: Some(2.0),
             duration_min: Some(60),
             latest_end: Some(Utc::now() + chrono::Duration::hours(4)),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![],
@@ -333,7 +335,7 @@ pub(crate) mod tests {
             earliest_start: Some(Utc::now()),
             expected_trip_distance_km: None,
             latest_end: Some(Utc::now() + chrono::Duration::hours(window_h)),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![],
@@ -408,7 +410,7 @@ pub(crate) mod tests {
             id: Uuid::new_v4(),
             asset_id: "ev".to_string(),
             status: UserRequestStatus::Cancelled,
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: 10.0,
             desired_power_kw: 3.0,
             deadlines: vec![],
@@ -444,7 +446,7 @@ pub(crate) mod tests {
             mode: Default::default(),
             origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             id: Uuid::new_v4(),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             window_start: Utc::now(),
             expected_trip_distance_km: None,
             expected_return_time: None,
@@ -463,7 +465,7 @@ pub(crate) mod tests {
             id: Uuid::new_v4(),
             asset_id: "ev".to_string(),
             status: UserRequestStatus::Active,
-            target_soc: Some(0.8),
+            target_soc_frac: Some(0.8),
             target_energy_kwh: 10.0,
             desired_power_kw: 3.0,
             deadlines: vec![],
@@ -502,7 +504,7 @@ pub(crate) mod tests {
             id: Uuid::new_v4(),
             asset_id: asset_id.to_string(),
             status: UserRequestStatus::Active,
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: 2.0,
             desired_power_kw: 2.0,
             deadlines: vec![],
@@ -640,19 +642,19 @@ pub(crate) mod tests {
         );
     }
 
-    fn ev_slice(soc: f64) -> AssetRequestSlice {
+    fn ev_slice(soc_frac: f64) -> AssetRequestSlice {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
             default_target_temp_c: None,
             id: ids::ASSET_EV.to_string(),
-            current_soc: Some(soc),
+            current_soc: Some(soc_frac),
             default_soc_target: Some(0.8),
             capacity_kwh: Some(60.0),
             max_charge_kw: Some(7.4),
             completion_policy: CompletionPolicy::Stop,
             comfort_rates: vec![ComfortRate {
                 fill: 0.8,
-                max_marginal_price: 0.3,
+                max_marginal_price_eur_kwh: 0.3,
                 max_marginal_co2: 0.0,
             }],
         }
@@ -670,7 +672,7 @@ pub(crate) mod tests {
             completion_policy: CompletionPolicy::Stop,
             comfort_rates: vec![ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.0,
+                max_marginal_price_eur_kwh: 0.0,
                 max_marginal_co2: 0.0,
             }],
         }
@@ -684,11 +686,11 @@ pub(crate) mod tests {
         let (req, session) =
             UserRequestService::create_ev(ev_body(now, None), &[ev_slice(0.5)], now).unwrap();
         assert_eq!(
-            session.target_soc, 0.8,
+            session.target_soc_frac, 0.8,
             "the slice's default_soc_target, not 0.9"
         );
         assert_eq!(
-            req.target_soc,
+            req.target_soc_frac,
             Some(0.8),
             "the request records the target it aimed for"
         );
@@ -705,16 +707,19 @@ pub(crate) mod tests {
         let now = Utc::now();
         let (req, session) =
             UserRequestService::create_ev(ev_body(now, Some(0.95)), &[ev_slice(0.5)], now).unwrap();
-        assert_eq!(session.target_soc, 0.95);
-        assert_eq!(req.target_soc, Some(0.95));
+        assert_eq!(session.target_soc_frac, 0.95);
+        assert_eq!(req.target_soc_frac, Some(0.95));
     }
 
     /// An EV request due in 6 h, stating `target_soc` or not.
-    pub(crate) fn ev_body(now: DateTime<Utc>, target_soc: Option<f64>) -> CreateUserRequestParams {
+    pub(crate) fn ev_body(
+        now: DateTime<Utc>,
+        target_soc_frac: Option<f64>,
+    ) -> CreateUserRequestParams {
         CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_EV.to_string(),
-            target_soc,
+            target_soc_frac,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -749,7 +754,7 @@ pub(crate) mod tests {
         // soc 0.5 → target 0.9: (0.9-0.5)*60 = 24 kWh
         assert!((req.target_energy_kwh - 24.0).abs() < 0.01);
         assert_eq!(req.session_id, Some(session.id));
-        assert!((session.target_soc - 0.9).abs() < 0.01);
+        assert!((session.target_soc_frac - 0.9).abs() < 0.01);
     }
 
     /// A mode given in the body must land on both the UserRequest and the EvSession.
@@ -759,7 +764,7 @@ pub(crate) mod tests {
         let now = Utc::now();
         let body = CreateUserRequestParams {
             asset_id: ids::ASSET_EV.to_string(),
-            target_soc: Some(0.9),
+            target_soc_frac: Some(0.9),
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -796,7 +801,7 @@ pub(crate) mod tests {
         let now = Utc::now();
         let body = CreateUserRequestParams {
             asset_id: ids::ASSET_HEATER.to_string(),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: Some(5.0),
             desired_power_kw: Some(2.0),
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -833,7 +838,7 @@ pub(crate) mod tests {
         let body = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: "nonexistent".to_string(),
-            target_soc: Some(0.9),
+            target_soc_frac: Some(0.9),
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -874,7 +879,7 @@ pub(crate) mod tests {
         CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_HEATER.to_string(),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: Some(5.0),
             desired_power_kw: Some(2.0),
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -955,7 +960,7 @@ pub(crate) mod tests {
         let base = CreateUserRequestParams {
             mode: Default::default(),
             asset_id: String::new(),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![],

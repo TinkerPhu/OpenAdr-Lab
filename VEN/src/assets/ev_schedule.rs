@@ -295,7 +295,7 @@ impl EvCharger {
             .map(|cfg| cfg.min_soc_after_drop_pct)
             .unwrap_or(0.0)
             / 100.0;
-        s.soc = (s.soc - trip.soc_drop_pct / 100.0).max(floor);
+        s.soc_frac = (s.soc_frac - trip.soc_drop_pct / 100.0).max(floor);
     }
 
     /// The live tick's `TickOverridable::apply_tick_overrides` EV handling for

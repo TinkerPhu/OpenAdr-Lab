@@ -81,7 +81,7 @@ pub enum EvMilpMode {
 pub struct EvMilpContext {
     pub mode: EvMilpMode,
     /// Live SoC at plan time, reported by the EV itself (seeds the plan's EV SoC forecast).
-    pub soc_init: f64,
+    pub soc_init_frac: f64,
     /// The highest state of charge this vehicle will accept (0..1) — its configured
     /// charge limit, which `EvCharger::capability_inner` enforces absolutely by
     /// reporting zero import capability at or above it.
@@ -92,7 +92,7 @@ pub struct EvMilpContext {
     /// full pack, so a plan would promise charge the asset then rejected — ven-2 was
     /// planned to 0.998 against a 0.85 limit while a week of measurements never once
     /// exceeded 0.850.
-    pub soc_max: f64,
+    pub soc_max_frac: f64,
     /// Per-step availability mask (false forces p_ev[t] = 0).
     pub a_ev: Vec<bool>,
     /// `ev-usage-forecast`: exogenous SoC changes the plan must project but
@@ -307,8 +307,8 @@ pub use crate::controller::asset_milp_port::{
 
 /// Future state map for battery: `{"soc": e_kwh / capacity_kwh}`.
 pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f64> {
-    let soc = crate::entities::asset_params::battery_soc_from_energy(e_kwh, capacity_kwh);
-    HashMap::from([("soc".into(), soc)])
+    let soc_frac = crate::entities::asset_params::battery_soc_from_energy(e_kwh, capacity_kwh);
+    HashMap::from([("soc".into(), soc_frac)])
 }
 
 /// One band of EV energy priced at a single marginal bid
@@ -347,7 +347,7 @@ pub struct EvObligation {
     /// the user bid — a guarantee, not a reward. An obligation exists only for a
     /// firm target: a soft deadline states no obligation and lets its comfort
     /// bids decide how far to charge.
-    pub target_soc: f64,
+    pub target_soc_frac: f64,
     /// The `EvSession` this obligation came from, when it came from one. `None`
     /// for an obligation the EV's own predicted schedule produced
     /// (`ev-usage-forecast`), which has no session. Carried so a shortfall can
@@ -376,11 +376,11 @@ pub struct ExogenousSocDrops {
 /// from its live plug state, its stated sessions and its usage forecast. Same key and
 /// encoding as the live `EvCharger::state_values`, so a measured point and a planned
 /// one are read by one rule.
-pub fn ev_future_state_at(soc: f64, plugged: bool) -> HashMap<String, f64> {
+pub fn ev_future_state_at(soc_frac: f64, plugged: bool) -> HashMap<String, f64> {
     HashMap::from([
         (
             "soc".into(),
-            crate::entities::asset_params::ev_soc_clamped(soc),
+            crate::entities::asset_params::ev_soc_clamped(soc_frac),
         ),
         ("plugged".into(), if plugged { 1.0 } else { 0.0 }),
     ])

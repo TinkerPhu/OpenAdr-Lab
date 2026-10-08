@@ -253,7 +253,7 @@ pub fn build_weather_pv_forecast(
         source: ForecastSource::WeatherModel,
         confidence,
         power_kw,
-        soc: None,
+        soc_frac: None,
         availability_windows: None,
     }
 }
@@ -288,7 +288,7 @@ pub fn build_heuristic_forecasts(
                 // is where this becomes derived from sample count/variance.
                 confidence: 0.5,
                 power_kw,
-                soc: None,
+                soc_frac: None,
                 availability_windows: None,
             }
         })
@@ -324,7 +324,7 @@ pub fn build_asset_forecasts(plan: &Plan, now: DateTime<Utc>) -> Vec<AssetForeca
                     .get(asset_id)
                     .is_some_and(|m| m.contains_key("soc"))
             });
-            let soc = has_soc.then(|| {
+            let soc_frac = has_soc.then(|| {
                 let mut last = 0.0;
                 plan.slots
                     .iter()
@@ -347,7 +347,7 @@ pub fn build_asset_forecasts(plan: &Plan, now: DateTime<Utc>) -> Vec<AssetForeca
                 source: ForecastSource::Optimization,
                 confidence: 1.0,
                 power_kw,
-                soc,
+                soc_frac,
                 availability_windows: None,
             }
         })
@@ -512,7 +512,7 @@ mod tests {
         assert_eq!(f.asset_id, "battery");
         assert_eq!(f.source, ForecastSource::Optimization);
         assert_eq!(f.power_kw, vec![1.5, -2.0]);
-        assert_eq!(f.soc.as_deref(), Some(&[0.5, 0.6][..]));
+        assert_eq!(f.soc_frac.as_deref(), Some(&[0.5, 0.6][..]));
     }
 
     #[test]
@@ -526,7 +526,7 @@ mod tests {
         let f = &forecasts[0];
         assert_eq!(f.power_kw, vec![7.0, 0.0], "missing power defaults to 0");
         assert_eq!(
-            f.soc.as_deref(),
+            f.soc_frac.as_deref(),
             Some(&[0.4, 0.4][..]),
             "missing soc carries the last known value forward"
         );
@@ -536,7 +536,7 @@ mod tests {
     fn test_build_asset_forecasts_no_soc_for_non_storage() {
         let plan = make_plan_with_slots(vec![slot(0, &[("heater", 3.0)], &[])]);
         let forecasts = build_asset_forecasts(&plan, ts(0));
-        assert_eq!(forecasts[0].soc, None);
+        assert_eq!(forecasts[0].soc_frac, None);
     }
 
     #[test]

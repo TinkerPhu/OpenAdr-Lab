@@ -352,9 +352,9 @@ mod tests {
                 capacity_kwh: 10.0,
                 max_charge_kw: 3.0,
                 max_discharge_kw: 3.0,
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 round_trip_efficiency: 0.95,
-                min_soc: 0.1,
+                min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
             AssetParams::Heater(HeaterParams {
@@ -433,7 +433,7 @@ mod tests {
         };
         let params = vec![AssetParams::Ev(EvParams {
             id: "ev".into(),
-            initial_soc: 0.3,
+            initial_soc_frac: 0.3,
             usage_sim: Some(EvUsageSimParams {
                 mode: EvUsageMode::Forecast,
                 engage_charge_planning: true,
@@ -478,7 +478,7 @@ mod tests {
         let by_default = segments_with(&std::collections::HashMap::new());
         let override_curve = vec![ComfortRate {
             fill: 1.0,
-            max_marginal_price: 0.77,
+            max_marginal_price_eur_kwh: 0.77,
             max_marginal_co2: 0.0,
         }];
         let overrides = std::collections::HashMap::from([("ev".to_string(), override_curve)]);
@@ -509,9 +509,9 @@ mod tests {
                 capacity_kwh: 10.0,
                 max_charge_kw: 3.0,
                 max_discharge_kw: 3.0,
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 round_trip_efficiency: 0.95,
-                min_soc: 0.1,
+                min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
             AssetParams::Heater(HeaterParams {
