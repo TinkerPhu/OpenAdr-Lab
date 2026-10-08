@@ -14845,3 +14845,23 @@ the `ctx.sim` field exposed three methods only that path had kept alive (`AssetH
 `SimState::asset_mut`, `peek_pv_kw`); they are test-only now. `handle.rs` tests compare every port
 answer with the direct computation. Open: the tick task still awaits while holding the lock (R-109
 stage 5).
+
+## R-117: the planner's settings can no longer drift between the YAML shape and the domain shape
+
+Why: `PlannerConfig` (YAML, `profile/`) and `PlannerParams` (domain, `entities/`) declare the same
+~40 settings and a hand-written copy in `build_domain_params` joined them. The `no profile in
+entities/` ring rule requires two types, so one declaration was not reachable; the harm was that a
+setting added to `PlannerConfig` only parsed fine and silently never reached the planner (the reverse
+direction already failed to compile).
+What: `impl From<&PlannerConfig> for PlannerParams` in `profile/planner.rs` is now the one translation.
+It names every `PlannerConfig` field in a `let` pattern with no `..`, and builds `PlannerParams`
+without `..`, so a new setting on either side fails to compile until it is mapped. Three tests pin
+the places defaults live (serde attributes, `PlannerConfig::default`, `PlannerParams::default`)
+to each other, plus the zone fallback. `build_domain_params` shrank by 45 lines.
+Issues: the first draft of the conversion repeated the field names in identical lines and the new
+duplication ratchet (`scripts/audit_duplication.py`) failed it; spelling the pattern as `field: _`
+and the literal as `field: config.field` made the two lists differ and the ratchet pass, and it
+recorded the lower baseline. The row was closed by guarding the duplication, not removing it, on
+purpose: a single declaration needs `serde(flatten)` and touches ~170 reads.
+Learning: where two types must exist, make drift a compile error with an exhaustive pattern and pin
+their defaults with a parity test, rather than relying on whoever adds a field to remember the other.
