@@ -18,6 +18,7 @@ import type {
 import { SiteHeadroomChart } from "./charts/SiteHeadroomChart";
 import { formatTs } from "./charts/tariffChartShared";
 import { useCapacityCurvesAt } from "../../api/hooks";
+import { formatKwOrDash } from "@lab/charts/unitFormat";
 
 interface GridHeadroomCellProps {
   envelope: SiteFlexibilityEnvelope | null | undefined;
@@ -29,10 +30,6 @@ interface GridHeadroomCellProps {
   extended: boolean;
   pinned: boolean;
   onTogglePin: () => void;
-}
-
-function fmtKw(v: number | undefined): string {
-  return v === undefined ? "—" : `${v.toFixed(2)} kW`;
 }
 
 function fmtDuration(s: number | null | undefined): string {
@@ -100,10 +97,10 @@ export function GridHeadroomCell({
           Site Headroom
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="headroom-up-kw">
-          Up: {fmtKw(envelope?.up_kw)} ({fmtDuration(envelope?.up_duration_s)})
+          Up: {formatKwOrDash(envelope?.up_kw)} ({fmtDuration(envelope?.up_duration_s)})
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="headroom-down-kw">
-          Down: {fmtKw(envelope?.down_kw)} ({fmtDuration(envelope?.down_duration_s)})
+          Down: {formatKwOrDash(envelope?.down_kw)} ({fmtDuration(envelope?.down_duration_s)})
         </Typography>
       </Box>
 

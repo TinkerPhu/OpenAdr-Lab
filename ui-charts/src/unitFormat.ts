@@ -59,3 +59,17 @@ export function formatTemperatureC(valueC: number): string {
 export function formatEnergyKwh(valueKwh: number): string {
   return `${valueKwh.toFixed(1)} kWh`;
 }
+
+/** A number that may be missing, to exactly `decimals` places: "—" for null, undefined or NaN.
+ * The one rule behind every "value or dash" cell; the decimals are always the caller's choice
+ * because they differ by quantity (tariffs 4, power 1-2, energy 3). */
+export function formatFixedOrDash(value: number | null | undefined, decimals: number): string {
+  return value == null || Number.isNaN(value) ? "—" : value.toFixed(decimals);
+}
+
+/** Power [kW] that may be missing: "—" (no unit) when it is, else the value with its unit. Fixed
+ * decimals, unlike `formatPowerValue`, for cells that must line up. Two decimals unless a
+ * caller asks for fewer. */
+export function formatKwOrDash(valueKw: number | null | undefined, decimals = 2): string {
+  return valueKw == null || Number.isNaN(valueKw) ? "—" : `${valueKw.toFixed(decimals)} kW`;
+}

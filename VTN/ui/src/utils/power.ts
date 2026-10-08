@@ -1,3 +1,5 @@
+import { formatKwOrDash } from "@lab/charts/unitFormat";
+
 /**
  * Power, in the unit the rest of this lab states it in.
  *
@@ -9,5 +11,5 @@
  * "this VEN is drawing nothing" are different facts.
  */
 export function formatKw(watts: number | null | undefined): string {
-  return watts === null || watts === undefined ? "—" : `${(watts / 1000).toFixed(2)} kW`;
+  return formatKwOrDash(watts == null ? null : watts / 1000);
 }

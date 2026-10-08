@@ -13,6 +13,7 @@ import { GridRatesChart } from "./charts/GridRatesChart";
 import type { ZoneDef } from "../../api/types";
 import { useTariffs } from "../../api/hooks";
 import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
+import { formatFixedOrDash } from "@lab/charts/unitFormat";
 
 interface GridRatesCellProps {
   snapshot: TariffSnapshot;
@@ -51,9 +52,6 @@ export function GridRatesCell({
     return fillCostRateFromTariffs(merged, tariffsData);
   }, [gridTimeline, tariffsData]);
 
-  const fmt = (v: number | null, decimals = 4) =>
-    v === null ? "—" : v.toFixed(decimals);
-
   return (
     <Paper
       variant="outlined"
@@ -66,10 +64,10 @@ export function GridRatesCell({
           Grid Rates
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="rates-total-cost-rate">
-          Cost rate: {fmt(snapshot.totalCostRateEurH, 3)} €/h
+          Cost rate: {formatFixedOrDash(snapshot.totalCostRateEurH, 3)} €/h
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="rates-total-co2-rate">
-          CO₂ rate: {fmt(snapshot.totalCo2RateGH, 1)} g/h
+          CO₂ rate: {formatFixedOrDash(snapshot.totalCo2RateGH, 1)} g/h
         </Typography>
       </Box>
 

@@ -15,6 +15,7 @@ import { useTariffs, useCapacitySchedule } from "../../api/hooks";
 import {
   buildTariffPricePoints, buildCapacityLimitPoints, buildPowerPoints, fillCostRateFromTariffs,
 } from "./tariffBuilders";
+import { formatFixedOrDash } from "@lab/charts/unitFormat";
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
@@ -49,9 +50,6 @@ export function GridTariffCell({
     return fillCostRateFromTariffs(merged, tariffsData);
   }, [gridTimeline, tariffsData, capacityScheduleData]);
 
-  const fmt = (v: number | null, decimals = 4) =>
-    v === null ? "—" : v.toFixed(decimals);
-
   return (
     <Paper
       variant="outlined"
@@ -64,16 +62,16 @@ export function GridTariffCell({
           Tariff &amp; Envelope
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="tariff-import-price">
-          Import: {fmt(snapshot.importPriceEurKwh)} €/kWh
+          Import: {formatFixedOrDash(snapshot.importPriceEurKwh, 4)} €/kWh
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="tariff-export-price">
-          Export: {fmt(snapshot.exportPriceEurKwh)} €/kWh
+          Export: {formatFixedOrDash(snapshot.exportPriceEurKwh, 4)} €/kWh
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="tariff-co2">
-          CO₂eq: {fmt(snapshot.co2GKwh, 1)} g/kWh
+          CO₂eq: {formatFixedOrDash(snapshot.co2GKwh, 1)} g/kWh
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="tariff-total-cost-rate">
-          Cost rate: {fmt(snapshot.totalCostRateEurH, 3)} €/h
+          Cost rate: {formatFixedOrDash(snapshot.totalCostRateEurH, 3)} €/h
         </Typography>
       </Box>
 
