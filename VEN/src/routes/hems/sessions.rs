@@ -266,33 +266,14 @@ pub async fn post_requests(
     // ── EV / heater path — requires sim-asset lookup ────────────────────────
     // WP4.2 (BL-19): user comfort-curve overrides beat the built-in defaults.
     let comfort_overrides = ctx.state.comfort_overrides_map().await;
-    let asset_data: Vec<AssetRequestSlice> = {
-        let sim = ctx.sim.lock().await;
-        sim.assets
-            .iter()
-            .zip(sim.asset_configs.iter())
-            .map(|(entry, cfg)| {
-                // Storage-shaped assets declare their own request defaults; the rest
-                // (heater, PV, base load) have none.
-                let defaults = cfg
-                    .as_request_resolvable()
-                    .map(|r| r.request_defaults(&entry.state));
-                AssetRequestSlice {
-                    id: entry.id.clone(),
-                    current_soc: defaults.map(|d| d.current_soc),
-                    default_soc_target: defaults.map(|d| d.default_soc_target),
-                    capacity_kwh: defaults.map(|d| d.capacity_kwh),
-                    max_charge_kw: defaults.map(|d| d.max_charge_kw),
-                    completion_policy: cfg.default_completion_policy(),
-                    comfort_rates: crate::services::comfort::effective_comfort_rates(
-                        &comfort_overrides,
-                        &entry.id,
-                        cfg.default_comfort_rates(),
-                    ),
-                }
-            })
-            .collect()
-    };
+    let mut asset_data: Vec<AssetRequestSlice> = ctx.sim_read.request_slices().await;
+    for slice in &mut asset_data {
+        slice.comfort_rates = crate::services::comfort::effective_comfort_rates(
+            &comfort_overrides,
+            &slice.id,
+            std::mem::take(&mut slice.comfort_rates),
+        );
+    }
 
     if UserRequestService::is_ev(&body) {
         // Read before `body` is moved: a stated instruction is what separates

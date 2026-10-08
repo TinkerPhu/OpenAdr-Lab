@@ -34,6 +34,8 @@ pub use history_port::HistoryPort;
 pub mod headroom_port;
 pub use headroom_port::HeadroomPort;
 pub mod settings_port;
+pub mod sim_read_port;
+pub use sim_read_port::SimReadPort;
 pub mod sim_roster_port;
 pub use settings_port::SettingsPort;
 pub use sim_roster_port::SimRosterPort;

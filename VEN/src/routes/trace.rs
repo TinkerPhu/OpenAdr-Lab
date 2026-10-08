@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::AppCtx;
 
@@ -59,38 +59,20 @@ pub async fn get_trace_history(
     // Slice up to 24 h of history (buffer holds ~1 h at 1 s tick; 24 h is a safe ceiling).
     let window = Duration::hours(24);
 
-    let lock_start = std::time::Instant::now();
-    let sim = ctx.sim.lock().await;
-    let lock_ms = lock_start.elapsed().as_millis();
-    if lock_ms > 100 {
-        warn!(
-            lock_wait_ms = lock_ms,
-            asset = %q.asset,
-            "GET /trace/history: sim mutex wait was long (planner may be running)"
-        );
-    } else {
-        debug!(lock_wait_ms = lock_ms, asset = %q.asset, "GET /trace/history: sim mutex acquired");
-    }
-
-    let mut json: Vec<serde_json::Value> = match sim.find_asset(&q.asset) {
-        None => vec![],
-        Some((entry, cfg)) => entry
-            .history
-            .slice(window, now)
-            .into_iter()
-            .map(|p| {
-                let mut values = cfg.state_values(&p.state);
-                values.insert("power_kw".into(), p.power_kw);
-                let mut m = serde_json::Map::new();
-                m.insert("ts".to_string(), serde_json::json!(p.ts));
-                for (k, v) in values {
-                    m.insert(k, serde_json::json!(v));
-                }
-                serde_json::Value::Object(m)
-            })
-            .collect(),
-    };
-    drop(sim);
+    let mut json: Vec<serde_json::Value> = ctx
+        .sim_read
+        .asset_trace(&q.asset, window, now)
+        .await
+        .into_iter()
+        .map(|row| {
+            let mut m = serde_json::Map::new();
+            m.insert("ts".to_string(), serde_json::json!(row.ts));
+            for (k, v) in row.values {
+                m.insert(k, serde_json::json!(v));
+            }
+            serde_json::Value::Object(m)
+        })
+        .collect();
 
     json.reverse();
     json.truncate(limit);

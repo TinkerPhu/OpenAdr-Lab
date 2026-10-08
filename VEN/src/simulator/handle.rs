@@ -14,11 +14,19 @@ use tokio::sync::Mutex;
 use super::SimState;
 use crate::assets::ShiftableLoadAsset;
 use crate::controller::headroom_port::HeadroomPort;
+use crate::controller::sim_read_port::SimReadPort;
 use crate::controller::sim_roster_port::{CancelOutcome, SimRosterPort};
+use crate::entities::asset::{AssetCapabilityView, AssetTraceRow, ComfortRate};
+use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::capacity_curve::CapacityCurves;
 use crate::entities::device_session::ShiftableLoad;
+use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::timeline::TimelineSnapshot;
+use chrono::Duration;
 use chrono::{DateTime, Utc};
+use lab_core::time_series::{Interpolation, TimeSeries};
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct SimHandle {
@@ -79,6 +87,125 @@ impl SimRosterPort for SimHandle {
             }
             None => false,
         }
+    }
+}
+
+#[async_trait]
+impl SimReadPort for SimHandle {
+    async fn timeline_snapshot(&self, now: DateTime<Utc>) -> TimelineSnapshot {
+        self.sim.lock().await.to_timeline_snapshot(now)
+    }
+
+    async fn asset_forecast(
+        &self,
+        asset_id: &str,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> Option<TimeSeries> {
+        let sim = self.sim.lock().await;
+        let (entry, cfg) = sim.find_asset(asset_id)?;
+        Some(cfg.forecast(&entry.state, timespan, now))
+    }
+
+    async fn asset_capability(&self, asset_id: &str) -> Option<AssetCapabilityView> {
+        let sim = self.sim.lock().await;
+        let (entry, cfg) = sim.find_asset(asset_id)?;
+        let capability = cfg.capability(&entry.state);
+        let floor = cfg.flexibility_floor(&entry.state);
+        Some(AssetCapabilityView {
+            is_fixed: capability.is_fixed(&floor),
+            key_features: cfg.key_features(&entry.state),
+            capability,
+            floor,
+        })
+    }
+
+    async fn asset_history(
+        &self,
+        asset_id: &str,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> Option<TimeSeries> {
+        let sim = self.sim.lock().await;
+        let entry = sim.asset(asset_id)?;
+        let points = entry.history.slice(timespan, now);
+        // A LOCF boundary point at now-timespan, so consumers always get a sample anchored at
+        // the start of the requested window.
+        let boundary_ts = now - timespan;
+        let boundary_power_kw = entry.history.power_at(boundary_ts).unwrap_or(0.0);
+        let mut samples = vec![(boundary_ts, boundary_power_kw)];
+        samples.extend(points.iter().map(|p| (p.ts, p.power_kw)));
+        Some(TimeSeries {
+            samples,
+            interpolation: Interpolation::Linear,
+        })
+    }
+
+    async fn asset_trace(
+        &self,
+        asset_id: &str,
+        window: Duration,
+        now: DateTime<Utc>,
+    ) -> Vec<AssetTraceRow> {
+        let lock_start = std::time::Instant::now();
+        let sim = self.sim.lock().await;
+        let lock_wait_ms = lock_start.elapsed().as_millis();
+        if lock_wait_ms > 100 {
+            warn!(
+                lock_wait_ms,
+                asset = %asset_id,
+                "asset trace: sim mutex wait was long (planner may be running)"
+            );
+        } else {
+            debug!(lock_wait_ms, asset = %asset_id, "asset trace: sim mutex acquired");
+        }
+        let Some((entry, cfg)) = sim.find_asset(asset_id) else {
+            return Vec::new();
+        };
+        entry
+            .history
+            .slice(window, now)
+            .into_iter()
+            .map(|p| {
+                let mut values = cfg.state_values(&p.state);
+                values.insert("power_kw".into(), p.power_kw);
+                AssetTraceRow { ts: p.ts, values }
+            })
+            .collect()
+    }
+
+    async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>> {
+        let sim = self.sim.lock().await;
+        sim.find_asset(asset_id)
+            .map(|(_, cfg)| cfg.default_comfort_rates())
+    }
+
+    async fn usage_schedule_view(&self, now: DateTime<Utc>) -> Option<EvUsageSimState> {
+        let sim = self.sim.lock().await;
+        sim.find_asset(crate::ids::ASSET_EV)
+            .and_then(|(_, cfg)| cfg.usage_schedule_view(now))
+    }
+
+    async fn request_slices(&self) -> Vec<AssetRequestSlice> {
+        let sim = self.sim.lock().await;
+        sim.iter_assets()
+            .map(|(entry, cfg)| {
+                // Storage-shaped assets declare their own request defaults; the rest
+                // (heater, PV, base load) have none.
+                let defaults = cfg
+                    .as_request_resolvable()
+                    .map(|r| r.request_defaults(&entry.state));
+                AssetRequestSlice {
+                    id: entry.id.clone(),
+                    current_soc: defaults.map(|d| d.current_soc),
+                    default_soc_target: defaults.map(|d| d.default_soc_target),
+                    capacity_kwh: defaults.map(|d| d.capacity_kwh),
+                    max_charge_kw: defaults.map(|d| d.max_charge_kw),
+                    completion_policy: cfg.default_completion_policy(),
+                    comfort_rates: cfg.default_comfort_rates(),
+                }
+            })
+            .collect()
     }
 }
 
@@ -152,6 +279,144 @@ mod tests {
             AssetParams::Pv(PvParams::default()),
             AssetParams::BaseLoad(BaseLoadParams::default()),
         ]
+    }
+
+    #[tokio::test]
+    async fn timeline_snapshot_equals_the_direct_snapshot() {
+        let (handle, sim) = handle_with(&all_kinds());
+        let now = Utc::now();
+        let direct = sim.lock().await.to_timeline_snapshot(now);
+        let via_port = handle.timeline_snapshot(now).await;
+        assert_eq!(via_port.assets.len(), direct.assets.len());
+        assert!(via_port.assets.contains_key(crate::ids::ASSET_BATTERY));
+    }
+
+    #[tokio::test]
+    async fn asset_forecast_is_the_assets_own_series_and_none_for_an_unknown_asset() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        let series = handle
+            .asset_forecast(
+                crate::ids::ASSET_BATTERY,
+                Duration::seconds(300),
+                Utc::now(),
+            )
+            .await
+            .expect("the battery forecasts");
+        assert!(!series.samples.is_empty());
+        assert!(handle
+            .asset_forecast("nope", Duration::seconds(300), Utc::now())
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn asset_capability_carries_the_assets_range_floor_and_key_features() {
+        let (handle, sim) = handle_with(&all_kinds());
+        let view = handle
+            .asset_capability(crate::ids::ASSET_BATTERY)
+            .await
+            .expect("the battery answers");
+        let guard = sim.lock().await;
+        let (entry, cfg) = guard.find_asset(crate::ids::ASSET_BATTERY).unwrap();
+        assert_eq!(
+            view.capability.max_import_kw,
+            cfg.capability(&entry.state).max_import_kw
+        );
+        assert_eq!(view.key_features, cfg.key_features(&entry.state));
+        assert_eq!(view.is_fixed, view.capability.is_fixed(&view.floor));
+        drop(guard);
+        assert!(handle.asset_capability("nope").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn asset_history_is_anchored_at_the_window_start_and_follows_the_records() {
+        let (handle, sim) = handle_with(&all_kinds());
+        let now = Utc::now();
+        sim.lock()
+            .await
+            .record_history(now - Duration::seconds(10), 10.0, -5.0);
+        sim.lock()
+            .await
+            .record_history(now - Duration::seconds(5), 10.0, -5.0);
+        let series = handle
+            .asset_history(crate::ids::ASSET_BATTERY, Duration::seconds(60), now)
+            .await
+            .expect("the battery has a history");
+        assert_eq!(
+            series.samples.len(),
+            3,
+            "boundary point plus the two records"
+        );
+        assert_eq!(series.samples[0].0, now - Duration::seconds(60));
+        assert!(handle
+            .asset_history("nope", Duration::seconds(60), now)
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn asset_trace_rows_are_state_values_plus_power_and_empty_for_an_unknown_asset() {
+        let (handle, sim) = handle_with(&all_kinds());
+        let now = Utc::now();
+        sim.lock()
+            .await
+            .record_history(now - Duration::seconds(5), 10.0, -5.0);
+        let rows = handle
+            .asset_trace(crate::ids::ASSET_BATTERY, Duration::hours(24), now)
+            .await;
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].values.contains_key("power_kw"));
+        assert!(
+            rows[0].values.contains_key("soc"),
+            "the battery's own state values"
+        );
+        assert!(handle
+            .asset_trace("nope", Duration::hours(24), now)
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn default_comfort_rates_are_the_assets_and_none_for_an_unknown_asset() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        assert!(handle
+            .default_comfort_rates(crate::ids::ASSET_EV)
+            .await
+            .is_some());
+        assert!(handle.default_comfort_rates("nope").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn usage_schedule_view_is_none_without_a_configured_schedule() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        assert!(handle.usage_schedule_view(Utc::now()).await.is_none());
+        let (handle, _sim) = handle_with(&[]);
+        assert!(
+            handle.usage_schedule_view(Utc::now()).await.is_none(),
+            "no EV at all"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_slices_give_storage_assets_their_defaults_and_the_rest_none() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        let slices = handle.request_slices().await;
+        assert_eq!(slices.len(), 5);
+        for slice in &slices {
+            let storage = slice.id == crate::ids::ASSET_BATTERY || slice.id == crate::ids::ASSET_EV;
+            assert_eq!(
+                slice.current_soc.is_some(),
+                storage,
+                "defaults on '{}'",
+                slice.id
+            );
+            assert_eq!(
+                slice.capacity_kwh.is_some(),
+                storage,
+                "capacity on '{}'",
+                slice.id
+            );
+        }
     }
 
     /// The port answers exactly what the direct computation answers for the same simulator.

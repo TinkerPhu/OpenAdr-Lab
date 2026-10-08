@@ -64,12 +64,10 @@ impl AssetHistoryBuffer {
             .map(|p| p.power_kw)
     }
 
+    /// Number of recorded points. Test-only: nothing in production needs it.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.points.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.points.is_empty()
     }
 
     /// Time-weighted average of `power_kw` over the last `window` ending at `now`.

@@ -188,7 +188,9 @@ impl SimState {
         self.assets.iter().find(|a| a.id == id)
     }
 
-    /// Look up an asset entry by id (mutable).
+    /// Look up an asset entry by id (mutable). Test-only: production code mutates an asset
+    /// through the `Asset` trait (`find_asset_mut`) or the roster port.
+    #[cfg(test)]
     pub fn asset_mut(&mut self, id: &str) -> Option<&mut AssetEntry> {
         self.assets.iter_mut().find(|a| a.id == id)
     }

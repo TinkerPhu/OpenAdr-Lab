@@ -50,11 +50,7 @@ pub async fn put_ev_settings(
 /// leave/return, or `204 No Content` when the EV has no usage schedule
 /// configured at all, matching `/ev-session`'s existing convention.
 pub async fn get_ev_usage_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let sim = ctx.sim.lock().await;
-    let view = sim
-        .find_asset(crate::ids::ASSET_EV)
-        .and_then(|(_, cfg)| cfg.usage_schedule_view(chrono::Utc::now()));
-    match view {
+    match ctx.sim_read.usage_schedule_view(chrono::Utc::now()).await {
         Some(view) => Json(view).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }

@@ -20,9 +20,7 @@ use crate::AppCtx;
 
 /// Default curve for an asset, `None` when the asset id is unknown.
 async fn default_rates(ctx: &AppCtx, asset_id: &str) -> Option<Vec<ComfortRate>> {
-    let sim = ctx.sim.lock().await;
-    sim.find_asset(asset_id)
-        .map(|(_, cfg)| cfg.default_comfort_rates())
+    ctx.sim_read.default_comfort_rates(asset_id).await
 }
 
 /// GET /assets/:id/comfort_curve

@@ -76,7 +76,9 @@ impl SimState {
     }
 
     /// This tick's PV output under the generation limit in force — `peek_pv(..)` read as
-    /// the tick will actually produce it.
+    /// the tick will actually produce it. Test-only anchor: `peek_pv_kw_matches_tick_output_for_same_now`
+    /// proves `peek_pv` and `tick()` cannot diverge; production reads `peek_pv` directly.
+    #[cfg(test)]
     pub fn peek_pv_kw(
         &self,
         now: DateTime<Utc>,
