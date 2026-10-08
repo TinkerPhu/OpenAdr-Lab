@@ -169,3 +169,22 @@ Feature: VEN User Request Manager — Stage 5
     # below its target.
     Given the VEN has a scheduled interruptible EV session
     Then the live site headroom's import side includes the EV's own live import capability
+
+  # --- Heater requests: the target, stated or the heater's own (R-112, R-113) ---
+
+  Scenario: A heater request aims for the target it states
+    When I POST a heater user request for 3 kWh with target_temp_c 22.5
+    Then the response status is 201
+    When I save the request ID
+    Then the heater session of the saved user request aims for 22.5 °C
+    When I DELETE the saved user request
+    Then the response status is 204
+
+  Scenario: A heater request without a target aims for the heater's declared default
+    # The "test" profile's heater declares default_target_temp_c: 21.0.
+    When I POST a heater user request for 3 kWh without a target temperature
+    Then the response status is 201
+    When I save the request ID
+    Then the heater session of the saved user request aims for 21 °C
+    When I DELETE the saved user request
+    Then the response status is 204

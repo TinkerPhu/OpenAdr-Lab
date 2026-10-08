@@ -1049,7 +1049,13 @@ Unit arithmetic is written once in `entities/units.rs` (`kw_from_w`, `w_from_kw`
 A request that states no target is answered by the asset, not by a literal in `services/`: the EV's
 `default_soc_target` and the heater's `default_target_temp_c` (through `Thermostat::default_request_target_c`)
 ride on `AssetRequestSlice`, and `AssetRequestSlice::target_soc` is the one resolution the energy and the
-session both use. A heater that declares no default gets `RequestError::MissingTarget`. Lever ids are the named
+session both use. A heater that declares no default gets `RequestError::MissingTarget`. Handlers
+only parse and map a status: creating and cancelling a user request (install the session, record it,
+one `RequestTransition` event and one replan trigger through `announce_request_transition`) is
+`services::request_submission::{submit, cancel_and_announce}`, and a value set through `/sim/reset` or
+`/sim/config/battery` is checked by the asset itself (`Asset::validate_values`, called by `SimHandle`;
+`DomainError::InvalidValue` -> 400, `AssetNotFound` -> 404). Tests: `services/request_submission.rs`,
+`simulator/handle.rs` `the_battery_refuses_*`. Lever ids are the named
 `LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`

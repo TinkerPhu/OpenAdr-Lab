@@ -14930,3 +14930,17 @@ target computed its energy for the EV's `soc_target` but created a session aimin
 (`now + 4h`, `now + 8h`) were deleted. The duplication ratchet flagged `validate()` growing, so the heater
 checks moved into `validate_heater`. Filed: the two `1.0 kW` power fallbacks (R-122), the UI form's own
 `"55"` (R-123) and a probable `ZeroEnergy` for a heater request stating only a temperature (R-124).
+
+## R-113: handlers parse and map; the service orchestrates; the asset owns its limits (refactor/r113-thin-handlers)
+
+`routes/sim.rs` checked the battery's ranges (`soc`, `min_soc` in 0..1, `capacity_kwh > 0`) and the
+battery then clamped the same values silently: one rule in two places with two behaviours. Decided with
+the user (services + asset methods): the asset answers. `Asset::validate_values` (default: accept) is
+overridden by the battery and called by `SimHandle` before `reset`/`update_config`; the port returns
+`Result<(), DomainError>` with two new variants, `AssetNotFound` (404) and `InvalidValue` (400, the
+asset's own message). A separate method instead of changing `reset`/`update_config` on all six assets:
+only the battery has limits to state. `post_requests` (193 lines, the largest function in `routes/`)
+moved into `services/request_submission.rs`; the "controller event + replan trigger" block it wrote
+three times, and `delete_request` once more, is now `announce_request_transition`. The capability
+traits left `asset_trait.rs` for `capability_traits.rs` to keep it under the 500-line cap. BDD covers
+heater requests for the first time (stated target, declared default) and the two refused `/sim` values.
