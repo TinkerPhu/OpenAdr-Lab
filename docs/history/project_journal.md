@@ -14769,3 +14769,27 @@ dropping a tie-break both failed it at the objective record, while swapping the 
 no caller would fail clippy's dead-code check, so each commit added only the `Declaration` variant
 its consumer needed. (3) Reverting a mutation with `git checkout -- <file>` also discarded wanted,
 uncommitted edits in that file; commit before mutating.
+
+## One implementation for what the VEN UI and VTN UI really share (refactor/ui-shared-code)
+
+Why: the 2026-10-07 audit flagged the two UIs as duplicating each other. Measured, that was
+overstated: VEN/ui is about 12,900 production lines and VTN/ui about 2,900, only 23 files share a
+path and they match on about 1,000 lines, mostly configuration. The pages differ in substance (the
+VTN's do CRUD against the BFF, the VEN's read one VEN), so merging pages was ruled out and the work
+was scoped to code that is the same *concept*.
+What: five commits, each with tests written first where there was logic. The Prometheus parser
+(byte-identical in both Metrics pages) moved to `ui-charts/src/prometheus.ts`. Nine local
+copies of "a number or a kW value that may be missing" became `formatFixedOrDash` and
+`formatKwOrDash` in `unitFormat.ts`, with the one stated change that NaN is a dash everywhere.
+The auto-refresh toggle and Refresh button (state, handlers and markup, verbatim in both `App.tsx`)
+became `RefreshControls`. `debugLog` moved. The identical `tsconfig.json` and `eslint.config.js`
+became `ui-charts/tsconfig.base.json` and `eslint.base.mjs`, extended and re-exported by each app.
+Issues: (1) the formatter inventory grew while migrating, from the six copies I had counted to nine,
+because the helpers were spelled `fmt`, `fmtNum`, `fmtKw` and `formatKw`; searching for the concept
+and not a name is the rule's own first step. (2) The migration script aborted halfway on an import
+style it did not expect, leaving some files changed; it was rewritten to be re-runnable instead of
+being undone by hand. (3) The config bases were verified by comparing *effective* configuration,
+not by seeing the build pass: `eslint --print-config` is byte-identical before and after and
+`tsc --showConfig` differs only in `baseUrl`/`paths`, which resolve to the same directory.
+Learning: measure before claiming duplication, and scope a consolidation to what is the same concept,
+not to what looks alike.

@@ -67,7 +67,10 @@ Diagnostics — is built from one shared primitive kit plus three named composit
 the older `StackedAreaChart`/`ComfortCurveChart` names and locations are gone, renamed and
 moved here). Full architecture (why one kit, the cursor-correctness invariant that motivated
 it, per-composition behavior): `docs/architecture/chart_diagrams.md`. Two facts worth pulling
-up here rather than just linking:
+up here rather than just linking. (`ui-charts/` also holds the code both UIs share that is not a
+chart: the Prometheus parser, the toolbar's `RefreshControls`, `debugLog`, the `JsonDialog`, the
+"value or dash" formatters in `unitFormat.ts`, and the TypeScript/ESLint base configs each UI
+extends; see the same document.)
 
 - **Data-presence filtering is generic, not per-caller.** `TimeSeriesChart` itself hides any
   series with no non-null value anywhere in its data, for every current and future series a
