@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use crate::entities::device_session::ShiftableLoad;
+use crate::entities::DomainError;
 
 /// What `SimRosterPort::cancel_if_cancellable` did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,9 +33,18 @@ pub trait SimRosterPort: Send + Sync {
     /// "ask, then remove": between two lock acquisitions a load could start.
     async fn cancel_if_cancellable(&self, asset_id: &str) -> CancelOutcome;
 
-    /// Overwrite an asset's mutable state from `values` (the sim-inject UI). `false` = unknown id.
-    async fn reset_asset(&self, asset_id: &str, values: HashMap<String, f64>) -> bool;
+    /// Overwrite an asset's mutable state from `values` (the sim-inject UI), after the asset has
+    /// checked them against its own limits (`Asset::validate_values`).
+    async fn reset_asset(
+        &self,
+        asset_id: &str,
+        values: HashMap<String, f64>,
+    ) -> Result<(), DomainError>;
 
-    /// Change an asset's configuration from `values`. `false` = unknown id.
-    async fn update_asset_config(&self, asset_id: &str, values: HashMap<String, f64>) -> bool;
+    /// Change an asset's configuration from `values`, after the asset has checked them.
+    async fn update_asset_config(
+        &self,
+        asset_id: &str,
+        values: HashMap<String, f64>,
+    ) -> Result<(), DomainError>;
 }

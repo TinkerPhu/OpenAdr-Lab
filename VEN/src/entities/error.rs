@@ -8,6 +8,19 @@ pub enum DomainError {
     #[error("not found: {id}")]
     NotFound { id: Uuid },
 
+    /// The roster holds no asset with this id.
+    #[error("asset '{asset_id}' not found")]
+    AssetNotFound { asset_id: String },
+
+    /// An asset refused a value outside its own limits (`Asset::validate_values`). The
+    /// message is the asset's own, so the reader learns which limit was broken.
+    #[error("{message}")]
+    InvalidValue {
+        asset_id: String,
+        key: String,
+        message: String,
+    },
+
     /// Constructed (WP2.3, BL-25) when `milp_planner::run_planner`'s two-phase
     /// solve fails — logged at that boundary, not propagated as an error:
     /// `SolverPort::solve` stays infallible by design (see solver_port.rs),
@@ -42,6 +55,14 @@ mod tests {
         let cases: &[DomainError] = &[
             DomainError::SessionConflict("already active".into()),
             DomainError::NotFound { id },
+            DomainError::AssetNotFound {
+                asset_id: "battery".into(),
+            },
+            DomainError::InvalidValue {
+                asset_id: "battery".into(),
+                key: "soc".into(),
+                message: "soc must be between 0.0 and 1.0".into(),
+            },
             DomainError::PlanInfeasible("infeasible".into()),
             DomainError::VtnUnreachable("timeout".into()),
             DomainError::ProfileInvalid("bad value".into()),
