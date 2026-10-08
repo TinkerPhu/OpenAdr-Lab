@@ -983,6 +983,10 @@ export type WeatherPvForecastSlot = {
   valid_at: string;
   forecast_ac_kw: number;
   snow_covered: boolean;
+  /** What the weather predicts with no snow on the panel: the reference the real output is compared with. */
+  snow_free_ac_kw: number;
+  /** Whether the air this hour is cold enough for snow to lie. */
+  snow_possible: boolean;
 };
 
 export type WeatherStatus = "ok" | "stale" | "no_forecast";
@@ -994,6 +998,8 @@ export type WeatherResponse = {
   source_alive: boolean;
   raw: WeatherForecast | null;
   derived: WeatherPvForecastSlot[] | null;
+  /** The PV asset concludes its panels are snow-covered right now (from its output vs the weather). */
+  pv_snow_covered_now: boolean;
 };
 
 // ── Real-measurement MQTT feeds (real-measurement-mqtt) ───────────────────────

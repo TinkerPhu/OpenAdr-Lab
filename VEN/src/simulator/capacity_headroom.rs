@@ -752,11 +752,15 @@ mod tests {
                     valid_at: now,
                     forecast_ac_kw: 4.0,
                     snow_covered: false,
+                    snow_free_ac_kw: 4.0,
+                    snow_possible: false,
                 },
                 crate::entities::solar::WeatherPvForecastSlot {
                     valid_at: now + Duration::seconds(3600),
                     forecast_ac_kw: 0.0, // night -- ceiling drops to 0
                     snow_covered: false,
+                    snow_free_ac_kw: 0.0,
+                    snow_possible: false,
                 },
             ]);
         }
@@ -1249,6 +1253,8 @@ mod tests {
                         valid_at: now + Duration::hours(h),
                         forecast_ac_kw: 6.0 - h as f64,
                         snow_covered: false,
+                        snow_free_ac_kw: 6.0 - h as f64,
+                        snow_possible: false,
                     })
                     .collect(),
             );
@@ -1307,6 +1313,8 @@ mod tests {
                 valid_at: now,
                 forecast_ac_kw: 6.0,
                 snow_covered: false,
+                snow_free_ac_kw: 6.0,
+                snow_possible: false,
             }]);
             pv.live_inputs_at = Some(now);
         }

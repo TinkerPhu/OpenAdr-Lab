@@ -209,7 +209,12 @@ pub async fn publish_post_cycle_state(
                     wall_now,
                     crate::services::planning::WEATHER_STALENESS_THRESHOLD,
                 ) {
-                    forecasts.push(build_weather_pv_forecast(&forecast, params, wall_now));
+                    forecasts.push(build_weather_pv_forecast(
+                        &forecast,
+                        params,
+                        state.pv_snow_state().await,
+                        wall_now,
+                    ));
                 }
             }
         }
@@ -230,9 +235,10 @@ pub async fn publish_post_cycle_state(
 pub fn build_weather_pv_forecast(
     forecast: &WeatherForecast,
     params: &PvForecastParams,
+    initial_snow: crate::entities::pv_snow::PvSnowState,
     now: DateTime<Utc>,
 ) -> AssetForecast {
-    let series = crate::entities::solar::weather_pv_forecast_series(params, forecast);
+    let series = crate::entities::solar::weather_pv_forecast_series(params, forecast, initial_snow);
     // Sign convention: AssetForecast.power_kw is positive = import (see
     // entities/design_vocabulary.rs); PV only exports, so negate.
     let power_kw: Vec<f64> = series.iter().map(|s| -s.forecast_ac_kw).collect();
@@ -628,6 +634,7 @@ mod tests {
     // ── build_weather_pv_forecast / slot_confidence (R-50, task 8.4/8.5) ────
 
     use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
+    use crate::entities::pv_snow::PvSnowState;
     use crate::entities::weather::{GeoPosition, SkyCondition, WeatherForecastSample};
 
     fn weather_sample(age_h: u32, irradiance_variability: Option<f64>) -> WeatherForecastSample {
@@ -718,7 +725,7 @@ mod tests {
             valid_at: noon,
             ..weather_sample(1, Some(0.0))
         }]);
-        let af = build_weather_pv_forecast(&forecast, &params, noon);
+        let af = build_weather_pv_forecast(&forecast, &params, PvSnowState::default(), noon);
         assert_eq!(af.asset_id, crate::ids::ASSET_PV);
         assert_eq!(af.source, ForecastSource::WeatherModel);
         assert_eq!(af.power_kw.len(), 1);
@@ -733,7 +740,7 @@ mod tests {
     fn build_weather_pv_forecast_empty_samples_zero_confidence() {
         let params = pv_forecast_params();
         let forecast = weather_forecast(vec![]);
-        let af = build_weather_pv_forecast(&forecast, &params, ts(0));
+        let af = build_weather_pv_forecast(&forecast, &params, PvSnowState::default(), ts(0));
         assert_eq!(af.confidence, 0.0);
         assert!(af.power_kw.is_empty());
     }

@@ -29,7 +29,13 @@ const mockRawForecast = {
 };
 
 const mockDerivedSlots = [
-  { valid_at: "2026-07-19T06:00:00Z", forecast_ac_kw: 0.42, snow_covered: false },
+  {
+    valid_at: "2026-07-19T06:00:00Z",
+    forecast_ac_kw: 0.42,
+    snow_covered: false,
+    snow_free_ac_kw: 0.42,
+    snow_possible: false,
+  },
 ];
 
 function renderWeather() {
@@ -46,7 +52,14 @@ function renderWeather() {
 describe("WeatherPage", () => {
   it("shows a no-forecast empty state when no weather feed is configured", () => {
     vi.mocked(useWeather).mockReturnValue({
-      data: { status: "no_forecast", is_fresh: false, source_alive: false, raw: null, derived: null },
+      data: {
+        status: "no_forecast",
+        is_fresh: false,
+        source_alive: false,
+        raw: null,
+        derived: null,
+        pv_snow_covered_now: false,
+      },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
     renderWeather();
@@ -62,6 +75,7 @@ describe("WeatherPage", () => {
         source_alive: true,
         raw: mockRawForecast,
         derived: mockDerivedSlots,
+        pv_snow_covered_now: false,
       },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
@@ -69,6 +83,23 @@ describe("WeatherPage", () => {
     expect(screen.getByTestId("weather-raw-panel")).toBeVisible();
     expect(screen.getByTestId("weather-derived-panel")).toBeVisible();
     expect(screen.queryByTestId("weather-stale-alert")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("weather-pv-snow-now")).not.toBeInTheDocument();
+  });
+
+  it("says so when the PV asset concludes its panels are covered with snow right now", () => {
+    vi.mocked(useWeather).mockReturnValue({
+      data: {
+        status: "ok",
+        is_fresh: true,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: [{ ...mockDerivedSlots[0], snow_covered: true, forecast_ac_kw: 0 }],
+        pv_snow_covered_now: true,
+      },
+      isLoading: false,
+    } as ReturnType<typeof useWeather>);
+    renderWeather();
+    expect(screen.getByTestId("weather-pv-snow-now")).toHaveTextContent(/snow/i);
   });
 
   it("shows a stale warning without hiding the raw forecast", () => {

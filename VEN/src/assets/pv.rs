@@ -123,6 +123,12 @@ pub struct PvInverter {
     /// PV built directly in a unit test).
     #[serde(skip)]
     pub live_inputs_at: Option<DateTime<Utc>>,
+    /// Whether the panels are covered with snow right now, as this asset concludes from what it
+    /// actually delivers against what the weather says it could (`observe_snow`, R-55). The
+    /// starting state of every weather-sourced PV forecast; nothing else decides it. Not
+    /// persisted: it is re-observed within a tick of a restart, while the measurement is live.
+    #[serde(skip)]
+    pub snow_state: crate::entities::pv_snow::PvSnowState,
 }
 
 /// PV mutable state.
@@ -155,6 +161,7 @@ impl PvInverter {
             irradiance_forced: false,
             measured_power_kw: None,
             live_inputs_at: None,
+            snow_state: crate::entities::pv_snow::PvSnowState::default(),
         }
     }
 
@@ -509,6 +516,7 @@ impl TickOverridable for PvInverter {
         self.measured_power_kw = overrides.pv_measured_power_kw;
         self.irradiance_forced = overrides.pv_irradiance_forced;
         self.live_inputs_at = Some(overrides.now);
+        self.observe_snow();
     }
 }
 
@@ -578,6 +586,7 @@ mod tests {
                 irradiance_forced: false,
                 measured_power_kw: None,
                 live_inputs_at: None,
+                snow_state: crate::entities::pv_snow::PvSnowState::default(),
             },
             PvState {
                 actual_power_kw: 0.0,
@@ -720,6 +729,79 @@ mod tests {
             (power_kw - 0.0).abs() < 1e-9,
             "blended dc_potential must clamp to 0, not go negative/import, got {power_kw}"
         );
+    }
+
+    // ── observe_snow (R-55) ──────────────────────────────────────────────────
+
+    fn observing_pv(snow_free_kw: f64, snow_possible: bool) -> PvInverter {
+        let now = Utc.with_ymd_and_hms(2026, 1, 15, 11, 0, 0).unwrap();
+        let (mut pv, _) = make_pv(5.0);
+        pv.live_inputs_at = Some(now);
+        pv.weather_forecast = Some(vec![crate::entities::solar::WeatherPvForecastSlot {
+            valid_at: now,
+            forecast_ac_kw: snow_free_kw,
+            snow_covered: false,
+            snow_free_ac_kw: snow_free_kw,
+            snow_possible,
+        }]);
+        pv
+    }
+
+    #[test]
+    fn observe_snow_concludes_covered_when_the_measurement_is_far_below_the_snow_free_forecast() {
+        let mut pv = observing_pv(4.0, true);
+        pv.measured_power_kw = Some(0.05);
+        pv.observe_snow();
+        assert!(pv.snow_state.covered);
+    }
+
+    #[test]
+    fn observe_snow_clears_the_state_when_the_array_delivers_what_the_weather_predicts() {
+        let mut pv = observing_pv(4.0, true);
+        pv.snow_state.covered = true;
+        pv.measured_power_kw = Some(3.9);
+        pv.observe_snow();
+        assert!(!pv.snow_state.covered);
+    }
+
+    #[test]
+    fn observe_snow_without_a_measurement_keeps_a_covered_state_while_the_air_stays_cold() {
+        let mut pv = observing_pv(4.0, true);
+        pv.snow_state.covered = true;
+        pv.measured_power_kw = None;
+        pv.observe_snow();
+        assert!(pv.snow_state.covered);
+    }
+
+    #[test]
+    fn observe_snow_lets_warm_air_melt_a_covered_state_even_without_a_measurement() {
+        let mut pv = observing_pv(4.0, false);
+        pv.snow_state.covered = true;
+        pv.measured_power_kw = None;
+        pv.observe_snow();
+        assert!(!pv.snow_state.covered);
+    }
+
+    #[test]
+    fn observe_snow_does_not_mistake_a_curtailed_array_for_a_covered_one() {
+        let mut pv = observing_pv(4.0, true);
+        pv.generation_limit_kw = Some(0.2); // expected output now 0.2 kW: below the 10 % floor
+        pv.measured_power_kw = Some(0.0);
+        pv.observe_snow();
+        assert!(!pv.snow_state.covered);
+        pv.generation_limit_kw = Some(2.0); // delivering the limit is delivering what is expected
+        pv.snow_state.covered = true;
+        pv.measured_power_kw = Some(2.0);
+        pv.observe_snow();
+        assert!(!pv.snow_state.covered);
+    }
+
+    #[test]
+    fn observe_snow_in_warm_air_never_concludes_snow() {
+        let mut pv = observing_pv(4.0, false);
+        pv.measured_power_kw = Some(0.0);
+        pv.observe_snow();
+        assert!(!pv.snow_state.covered);
     }
 
     // ── step_inner: measured_power_kw precedence (measured > weather > sin) ──
@@ -934,6 +1016,8 @@ mod tests {
             valid_at: now,
             forecast_ac_kw: 0.0,
             snow_covered: false,
+            snow_free_ac_kw: 0.0,
+            snow_possible: false,
         }]);
         pv.measured_power_kw = Some(1.9);
         let state = AssetState::Pv(state);
@@ -967,6 +1051,8 @@ mod tests {
             valid_at: now,
             forecast_ac_kw: 4.0,
             snow_covered: false,
+            snow_free_ac_kw: 4.0,
+            snow_possible: false,
         }]);
         pv.measured_power_kw = Some(1.9);
         pv.live_inputs_at = Some(now);

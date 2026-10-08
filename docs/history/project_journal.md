@@ -14877,3 +14877,27 @@ copy of the override-versus-default question (`overrides.contains_key`); it now 
 simulator/) was added first and seen failing on exactly the one import. The move could have silently
 broken the planner's pricing, which nothing tested end to end at that seam, so a `plan_context` test now
 pins that a user's curve reaches the EV's priced bands (and that the default does not).
+
+## The PV asset observes its own snow cover (R-55; R-53 abandoned)
+
+Why: the snow model folded forward from "not covered" at the start of every forecast, so a panel that
+was covered *now* was forecast producing at the next hour whenever no new snow was in the forecast.
+You asked whether that is the asset's business, not the planner's; it is, and it already lives in the
+PV asset's ring (`asset-competence-assurance`): only the asset sees what it delivers.
+What: `PvInverter::observe_snow` compares the live measurement with the snow-free output the weather
+predicts for now (new `snow_free_ac_kw` per forecast slot; a generation limit lowers the expectation
+so a curtailed array is not read as a covered one). `PvSnowState::observed` concludes covered at
+<= 15 % of expected while the air is below the melt threshold, clear at >= 50 %, nothing in between or
+when the expected output is under 10 % of the rating; warm air melts a covered state even with no
+measurement. The tick publishes the conclusion (`AppState::pv_snow_state`) and every consumer of the
+forecast series (tick asset input, planner weather fallback, `/forecast`, `/weather`) passes it as the
+explicit `initial_snow` argument, so none keeps a silent default. `/weather` reports
+`pv_snow_covered_now` and the VEN UI Weather page says so. R-53 (shading, Perez/HDKR, degradation) was
+abandoned as too detailed to matter and its row removed.
+Issues: the lab simulator has no snow of its own, so on the lab the conclusion can only come from the
+real measurement feed; the BDD scenario publishes a bright sub-zero forecast and a 0 kW reading, and
+skips itself at night. A first draft observed only when a measurement existed, which left a state
+concluded in the cold standing after the cold had gone; warm air now melts it.
+Learning: an interface that makes a default impossible to ignore (an explicit `initial_snow`
+parameter on the one forecast function) found all four callers, where a default argument would have
+kept them guessing.

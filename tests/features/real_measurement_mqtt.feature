@@ -34,3 +34,16 @@ Feature: Real Measurement MQTT Feeds — PV and baseline load
   Scenario: A measured baseline-load reading replaces the synthetic profile
     Given a baseline-load measurement message is published to the test Mosquitto broker for VEN-1
     Then /measurement reports the base_load signal as ok with the published reading
+
+  # R-55: the PV asset concludes "my panels are covered" from what it delivers against what the
+  # weather says it could, and every PV forecast starts from that conclusion. The forecast is cold
+  # and bright and contains no snowfall, so only the observation can cover the panels. Skipped at
+  # night: with no sun there is nothing to compare the output with.
+  @real-measurement-mqtt
+  Scenario: A PV array delivering nothing under a bright, sub-zero forecast is treated as snow-covered
+    Given the VEN-1 pv irradiance offset is flushed to zero
+    And a sub-zero weather forecast message is published to the test Mosquitto broker for VEN-1
+    And daylight gives the weather forecast a snow-free PV output of at least 0.5 kW for VEN-1
+    And a PV measurement of 0 kW is published to the test Mosquitto broker for VEN-1
+    Then /weather reports the PV panels as snow-covered
+    And every derived PV forecast hour is snow-covered and promises no output

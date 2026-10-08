@@ -203,14 +203,21 @@ pub struct WeatherPvForecastSlot {
     pub valid_at: DateTime<Utc>,
     pub forecast_ac_kw: f64,
     pub snow_covered: bool,
+    /// What the weather predicts for this hour with no snow on the panel: the reference the
+    /// panel's real output is compared with to see whether it is covered (R-55).
+    pub snow_free_ac_kw: f64,
+    /// Whether the air this hour is cold enough for snow to lie: below `clear_threshold_c`, the exact
+    /// complement of the melt condition in `PvSnowState::step`.
+    pub snow_possible: bool,
 }
 
 /// Compute the full weather-sourced PV forecast series over a
 /// `WeatherForecast`'s own horizon: one `WeatherPvForecastSlot` per sample.
-/// Snow-cover state uses the forecast-only fallback (`PvSnowState::default()`,
-/// folded forward through `forecast.samples` starting at whatever `age_h` the
-/// first sample happens to be — normally `age_h=0`, the "fact" hour) since no
-/// live telemetry cross-check is wired up (R-55).
+/// The snow-cover trajectory folds forward through `forecast.samples` from
+/// `initial_snow`: the PV asset's own observed state (`PvSnowState::observed`,
+/// R-55), or `PvSnowState::default()` when there is no measurement to observe.
+/// The forecast's first sample (normally `age_h=0`, the "fact" hour) can still
+/// start coverage if it snowed within that hour.
 ///
 /// This is the single source of truth for "how a `WeatherForecast` becomes a
 /// PV forecast" — both `GET /weather` (read-only diagnostic) and the
@@ -219,9 +226,9 @@ pub struct WeatherPvForecastSlot {
 pub fn weather_pv_forecast_series(
     params: &PvForecastParams,
     forecast: &WeatherForecast,
+    initial_snow: PvSnowState,
 ) -> Vec<WeatherPvForecastSlot> {
-    let snow_states =
-        snow_coverage_trajectory(PvSnowState::default(), &params.snow, &forecast.samples);
+    let snow_states = snow_coverage_trajectory(initial_snow, &params.snow, &forecast.samples);
     forecast
         .samples
         .iter()
@@ -230,6 +237,13 @@ pub fn weather_pv_forecast_series(
             valid_at: sample.valid_at,
             forecast_ac_kw: forecast_ac_kw(params, sample, sample.valid_at, snow_state),
             snow_covered: snow_state.covered,
+            snow_free_ac_kw: forecast_ac_kw(
+                params,
+                sample,
+                sample.valid_at,
+                PvSnowState::default(),
+            ),
+            snow_possible: sample.temperature_c < params.snow.clear_threshold_c,
         })
         .collect()
 }
@@ -248,13 +262,14 @@ pub fn resolve_weather_pv_kw(
     now: DateTime<Utc>,
     staleness_threshold: chrono::Duration,
     slot_starts: &[DateTime<Utc>],
+    initial_snow: PvSnowState,
 ) -> Option<Vec<f64>> {
     let params = params?;
     let forecast = forecast?;
     if !forecast.is_fresh(now, staleness_threshold) {
         return None;
     }
-    let series = weather_pv_forecast_series(params, forecast);
+    let series = weather_pv_forecast_series(params, forecast, initial_snow);
     Some(weather_pv_kw_for_slots(&series, slot_starts))
 }
 
@@ -278,26 +293,47 @@ pub fn weather_pv_kw_for_slots(
     sorted.sort_by_key(|s| s.valid_at); // defensive — don't assume publisher order
     slot_starts
         .iter()
-        .map(|t| interpolate_ac_kw(&sorted, *t))
+        .map(|t| interpolate_kw(&sorted, *t, |s| s.forecast_ac_kw))
         .collect()
 }
 
-/// Linearly interpolate `forecast_ac_kw` at `t` between the two `sorted`
-/// entries bracketing it. `sorted` must be non-empty and ascending by
-/// `valid_at`. Clamps to the first/last value outside the series' range.
-fn interpolate_ac_kw(sorted: &[&WeatherPvForecastSlot], t: DateTime<Utc>) -> f64 {
+/// What the weather says about the panel at `t`, for `PvSnowState::observed`: the snow-free
+/// output interpolated like the forecast itself, and whether the hour containing `t` is cold
+/// enough for snow. `None` for an empty series.
+pub fn weather_snow_reference_at(
+    series: &[WeatherPvForecastSlot],
+    t: DateTime<Utc>,
+) -> Option<(f64, bool)> {
+    let mut sorted: Vec<&WeatherPvForecastSlot> = series.iter().collect();
+    sorted.sort_by_key(|s| s.valid_at);
+    let first = sorted.first()?;
+    let at = sorted
+        .partition_point(|s| s.valid_at <= t)
+        .saturating_sub(1);
+    let possible = sorted.get(at).unwrap_or(first).snow_possible;
+    Some((interpolate_kw(&sorted, t, |s| s.snow_free_ac_kw), possible))
+}
+
+/// Linearly interpolate the `value` of the two `sorted` entries bracketing `t`. `sorted` must be
+/// non-empty and ascending by `valid_at`. Clamps to the first/last value outside the series'
+/// range. One interpolation for every per-slot quantity (the forecast, its snow-free twin).
+fn interpolate_kw(
+    sorted: &[&WeatherPvForecastSlot],
+    t: DateTime<Utc>,
+    value: impl Fn(&WeatherPvForecastSlot) -> f64,
+) -> f64 {
     if t <= sorted[0].valid_at {
-        return sorted[0].forecast_ac_kw;
+        return value(sorted[0]);
     }
     let last = sorted.len() - 1;
     if t >= sorted[last].valid_at {
-        return sorted[last].forecast_ac_kw;
+        return value(sorted[last]);
     }
     let idx = sorted.partition_point(|s| s.valid_at <= t);
     let (a, b) = (sorted[idx - 1], sorted[idx]);
     let span_s = (b.valid_at - a.valid_at).num_seconds() as f64;
     let frac = (t - a.valid_at).num_seconds() as f64 / span_s;
-    a.forecast_ac_kw + (b.forecast_ac_kw - a.forecast_ac_kw) * frac
+    value(a) + (value(b) - value(a)) * frac
 }
 
 // ── PV generation ceiling: one definition, every consumer ────────────────────
@@ -543,7 +579,7 @@ mod tests {
             sample_at(600.0, 19.0, t0 + chrono::Duration::hours(2)),
         ];
         let forecast = make_forecast(samples.clone());
-        let series = weather_pv_forecast_series(&params, &forecast);
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
         assert_eq!(series.len(), samples.len());
         for (slot, sample) in series.iter().zip(&samples) {
             assert_eq!(slot.valid_at, sample.valid_at);
@@ -560,7 +596,7 @@ mod tests {
         let samples = vec![snowy, cold];
         let forecast = make_forecast(samples.clone());
 
-        let series = weather_pv_forecast_series(&params, &forecast);
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
         let expected_states = crate::entities::pv_snow::snow_coverage_trajectory(
             PvSnowState::default(),
             &params.snow,
@@ -579,9 +615,74 @@ mod tests {
         let samples = vec![sample_at(500.0, 20.0, t0)];
         let forecast = make_forecast(samples.clone());
 
-        let series = weather_pv_forecast_series(&params, &forecast);
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
         let direct = forecast_ac_kw(&params, &samples[0], t0, PvSnowState::default());
         assert!((series[0].forecast_ac_kw - direct).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_panel_observed_covered_stays_covered_through_a_sunny_cold_forecast() {
+        // R-55: no snowfall in the forecast, but the panel is covered NOW (observed), and the air
+        // stays below the melt threshold: the forecast must not promise sun the panel cannot use.
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let samples: Vec<_> = (0..3)
+            .map(|h| sample_at(500.0, -3.0, t0 + chrono::Duration::hours(h)))
+            .collect();
+        let forecast = make_forecast(samples);
+
+        let guessed = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
+        let observed =
+            weather_pv_forecast_series(&params, &forecast, PvSnowState { covered: true });
+        assert!(guessed
+            .iter()
+            .all(|s| !s.snow_covered && s.forecast_ac_kw > 0.0));
+        assert!(observed.iter().all(|s| s.snow_covered));
+        assert!(observed.iter().all(|s| s.forecast_ac_kw < 1e-9));
+        // the snow-free reference is untouched by the snow state
+        for (a, b) in guessed.iter().zip(&observed) {
+            assert!((a.snow_free_ac_kw - b.snow_free_ac_kw).abs() < 1e-12);
+            assert!(a.snow_free_ac_kw > 0.0);
+        }
+    }
+
+    #[test]
+    fn an_observed_covered_panel_still_clears_when_the_forecast_warms_up() {
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let samples = vec![
+            sample_at(500.0, -3.0, t0),
+            sample_at(500.0, 3.0, t0 + chrono::Duration::hours(1)), // above the 1.5 degC melt
+        ];
+        let series = weather_pv_forecast_series(
+            &params,
+            &make_forecast(samples),
+            PvSnowState { covered: true },
+        );
+        assert!(series[0].snow_covered);
+        assert!(!series[1].snow_covered);
+        assert!(series[1].forecast_ac_kw > 0.0);
+    }
+
+    #[test]
+    fn weather_snow_reference_interpolates_snow_free_power_and_reads_the_hours_temperature() {
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let slot = |h: i64, kw: f64, possible: bool| WeatherPvForecastSlot {
+            valid_at: t0 + chrono::Duration::hours(h),
+            forecast_ac_kw: 0.0,
+            snow_covered: true,
+            snow_free_ac_kw: kw,
+            snow_possible: possible,
+        };
+        let series = vec![slot(0, 1.0, true), slot(1, 3.0, false)];
+        let (kw, possible) =
+            weather_snow_reference_at(&series, t0 + chrono::Duration::minutes(30)).unwrap();
+        assert!((kw - 2.0).abs() < 1e-9);
+        assert!(
+            possible,
+            "the hour containing t is the one that started at t0"
+        );
+        assert_eq!(weather_snow_reference_at(&[], t0), None);
     }
 
     // ── weather_pv_kw_for_slots ───────────────────────────────────────────────
@@ -592,11 +693,15 @@ mod tests {
                 valid_at: t0,
                 forecast_ac_kw: 1.0,
                 snow_covered: false,
+                snow_free_ac_kw: 1.0,
+                snow_possible: false,
             },
             WeatherPvForecastSlot {
                 valid_at: t0 + chrono::Duration::hours(1),
                 forecast_ac_kw: 2.0,
                 snow_covered: false,
+                snow_free_ac_kw: 2.0,
+                snow_possible: false,
             },
         ]
     }
@@ -655,6 +760,8 @@ mod tests {
             valid_at: t0,
             forecast_ac_kw: 3.0,
             snow_covered: false,
+            snow_free_ac_kw: 3.0,
+            snow_possible: false,
         }];
         let kw = weather_pv_kw_for_slots(
             &series,
@@ -688,6 +795,7 @@ mod tests {
             now,
             chrono::Duration::hours(2),
             &[t0],
+            PvSnowState::default(),
         );
         assert!(result.is_some(), "fresh forecast + config must be used");
         assert!(result.unwrap()[0] > 0.0);
@@ -705,6 +813,7 @@ mod tests {
             now,
             chrono::Duration::hours(2),
             &[t0],
+            PvSnowState::default(),
         );
         assert!(result.is_none(), "stale forecast must fall back to None");
     }
@@ -713,8 +822,14 @@ mod tests {
     fn resolve_weather_pv_kw_no_config_falls_back() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
-        let result =
-            resolve_weather_pv_kw(None, Some(&forecast), t0, chrono::Duration::hours(2), &[t0]);
+        let result = resolve_weather_pv_kw(
+            None,
+            Some(&forecast),
+            t0,
+            chrono::Duration::hours(2),
+            &[t0],
+            PvSnowState::default(),
+        );
         assert!(
             result.is_none(),
             "no PvForecastParams config must fall back to None"
@@ -725,8 +840,14 @@ mod tests {
     fn resolve_weather_pv_kw_no_forecast_received_falls_back() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let params = default_forecast_params();
-        let result =
-            resolve_weather_pv_kw(Some(&params), None, t0, chrono::Duration::hours(2), &[t0]);
+        let result = resolve_weather_pv_kw(
+            Some(&params),
+            None,
+            t0,
+            chrono::Duration::hours(2),
+            &[t0],
+            PvSnowState::default(),
+        );
         assert!(
             result.is_none(),
             "no forecast ever received must fall back to None"

@@ -151,6 +151,7 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         &cum_s,
         n_slots,
         a.history,
+        a.state.pv_snow_state().await,
     )
     .await
 }

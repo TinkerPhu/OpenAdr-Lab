@@ -24,6 +24,7 @@ mod max_power;
 pub(crate) mod own_state;
 pub mod pv;
 mod pv_schedule;
+mod pv_snow_cover;
 pub mod shiftable_load;
 
 // AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same

@@ -170,8 +170,7 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    super::post_lock::clear_inject_fields(&state, cleared_fields, ctx.pv_clear, ctx.base_clear)
-        .await;
+    super::post_lock::after_tick(&state, &sim, cleared_fields, ctx.pv_clear, ctx.base_clear).await;
 
     // Publish consumes the snapshot and hands it back: one object per tick.
     super::publish::publish_sim_tick_result(

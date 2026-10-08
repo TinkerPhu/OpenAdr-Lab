@@ -13,6 +13,7 @@ use chrono::Duration;
 use serde::Serialize;
 
 use crate::entities::asset_params::PvForecastParams;
+use crate::entities::pv_snow::PvSnowState;
 use crate::entities::solar::{weather_pv_forecast_series, WeatherPvForecastSlot};
 use crate::entities::weather::WeatherForecast;
 use crate::AppCtx;
@@ -43,6 +44,9 @@ pub struct WeatherResponse {
     source_alive: bool,
     raw: Option<WeatherForecast>,
     derived: Option<Vec<WeatherPvForecastSlot>>,
+    /// Whether the PV asset concludes its panels are snow-covered right now (R-55): the state
+    /// `derived` starts from, so a covered panel is shown covered until the melt condition.
+    pv_snow_covered_now: bool,
 }
 
 /// Pure response builder — testable without `AppCtx`, same shape as
@@ -52,6 +56,7 @@ fn build_weather_response(
     pv_params: Option<&PvForecastParams>,
     source_alive: bool,
     now: chrono::DateTime<chrono::Utc>,
+    initial_snow: PvSnowState,
 ) -> WeatherResponse {
     let is_fresh = forecast
         .as_ref()
@@ -62,7 +67,7 @@ fn build_weather_response(
         Some(_) => WeatherStatus::Stale,
     };
     let derived = match (&forecast, pv_params) {
-        (Some(f), Some(params)) => Some(weather_pv_forecast_series(params, f)),
+        (Some(f), Some(params)) => Some(weather_pv_forecast_series(params, f, initial_snow)),
         _ => None,
     };
     WeatherResponse {
@@ -71,6 +76,7 @@ fn build_weather_response(
         source_alive,
         raw: forecast,
         derived,
+        pv_snow_covered_now: initial_snow.covered,
     }
 }
 
@@ -82,6 +88,7 @@ pub async fn get_weather(State(ctx): State<AppCtx>) -> Json<WeatherResponse> {
         ctx.weather_pv_params.as_ref(),
         source_alive,
         chrono::Utc::now(),
+        ctx.state.pv_snow_state().await,
     ))
 }
 
@@ -142,11 +149,29 @@ mod tests {
             Some(&sample_params()),
             true,
             now,
+            PvSnowState::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.is_fresh);
         assert!(resp.raw.is_some());
         assert_eq!(resp.derived.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_observed_covered_panel_starts_the_derived_series_covered() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
+        let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
+        let mut cold = sample_forecast(fetched_at);
+        cold.samples[0].temperature_c = -3.0; // below the melt threshold: a covered panel stays so
+        let resp = build_weather_response(
+            Some(cold),
+            Some(&sample_params()),
+            true,
+            now,
+            PvSnowState { covered: true },
+        );
+        assert!(resp.pv_snow_covered_now);
+        assert!(resp.derived.unwrap()[0].snow_covered);
     }
 
     #[test]
@@ -158,6 +183,7 @@ mod tests {
             Some(&sample_params()),
             true,
             now,
+            PvSnowState::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Stale);
         assert!(!resp.is_fresh);
@@ -170,7 +196,13 @@ mod tests {
     #[test]
     fn no_forecast_returns_null_raw_and_no_forecast_status() {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 0, 0).unwrap();
-        let resp = build_weather_response(None, Some(&sample_params()), false, now);
+        let resp = build_weather_response(
+            None,
+            Some(&sample_params()),
+            false,
+            now,
+            PvSnowState::default(),
+        );
         assert_eq!(resp.status, WeatherStatus::NoForecast);
         assert!(resp.raw.is_none());
         assert!(resp.derived.is_none());
@@ -180,7 +212,13 @@ mod tests {
     fn forecast_present_without_config_returns_null_derived() {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
-        let resp = build_weather_response(Some(sample_forecast(fetched_at)), None, true, now);
+        let resp = build_weather_response(
+            Some(sample_forecast(fetched_at)),
+            None,
+            true,
+            now,
+            PvSnowState::default(),
+        );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.raw.is_some());
         assert!(resp.derived.is_none());
@@ -195,6 +233,7 @@ mod tests {
             Some(&sample_params()),
             false,
             now,
+            PvSnowState::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.is_fresh);

@@ -103,8 +103,13 @@ pub(crate) async fn resolve_tick_context(
     };
 
     let plan_snap = state.active_plan().await;
-    let (weather_pv_kw_now, weather_pv_forecast) =
-        super::feeds::resolve_weather_pv_kw_for_tick(weather, weather_pv_params, now).await;
+    let (weather_pv_kw_now, weather_pv_forecast) = super::feeds::resolve_weather_pv_kw_for_tick(
+        weather,
+        weather_pv_params,
+        state.pv_snow_state().await,
+        now,
+    )
+    .await;
     let (pv_measured_kw_now, base_load_measured_kw_now) = super::feeds::resolve_measurements_now(
         pv_measurement,
         pv_measurement_enabled,

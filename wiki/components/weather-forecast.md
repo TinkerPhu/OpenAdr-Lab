@@ -78,11 +78,12 @@ then reverified green; a pre-existing, unrelated intermittent flake in
 
 ## Known deferred gaps
 
-`docs/reference/TECHNICAL_DEBTS.md` R-53..R-55: horizon/shading obstructions and the Perez/HDKR
-diffuse-sky model are deliberately deferred accuracy improvements over the current
-isotropic-on-zenith transposition; the snow-cover model's initial state has no cross-check
-against live PV telemetry deviation; and the Mosquitto broker accepts anonymous publishes on
-its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider exposure).
+Horizon/shading obstructions and the Perez/HDKR diffuse-sky model are deliberately not modelled
+(the isotropic-on-zenith transposition stays). The snow-cover model's starting state is observed
+by the PV asset from its own output against the weather (R-55, `docs/architecture/weather_forecast.md`
+"Snow cover"). `docs/reference/TECHNICAL_DEBTS.md` R-54: the Mosquitto broker accepts anonymous
+publishes on its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider
+exposure).
 
 ## E2E fixture was time-of-day flaky (found 2026-08-03)
 
