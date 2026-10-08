@@ -62,6 +62,12 @@ pub(crate) async fn tick_once(
         cleared_fields,
         arbiter_outcome,
     ) = {
+        // ev-usage-simulation: offer the EV's next simulated leave instant to
+        // the planner in advance when plan-ahead is enabled — a no-op for
+        // every EV without it configured, and for one with it disabled.
+        // Before the lock below: it awaits on `AppState`, and reads only the EV's schedule.
+        super::usage_sim_plan_ahead::sync_plan_ahead_session(&state, &sim, now).await;
+
         let mut sim_guard = sim.lock().await;
 
         let cleared_fields =
@@ -70,11 +76,6 @@ pub(crate) async fn tick_once(
         let pre_snap = sim_guard
             .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
             .expect("SimState::snapshot is infallible");
-
-        // ev-usage-simulation: offer the EV's next simulated leave instant to
-        // the planner in advance when plan-ahead is enabled — a no-op for
-        // every EV without it configured, and for one with it disabled.
-        super::usage_sim_plan_ahead::sync_plan_ahead_session(&state, &sim_guard, now).await;
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
         let (live_pv_kw, live_pv_released_kw) =

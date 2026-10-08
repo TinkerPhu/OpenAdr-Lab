@@ -1075,6 +1075,31 @@ settings). Pinned by `arbiter_tests.rs::reconcile_settles_on_the_ev_under_the_re
 and `both_passes_settle_under_a_hard_limit_with_the_real_charger_lag`, which step the real
 `EvCharger` between ticks.
 
+### 3.0e The Simulator Behind Ports (R-109)
+
+Services and routes never touch `SimState`. They use three small, domain-typed ports in `controller/`,
+all implemented by `simulator::SimHandle` (`simulator/handle.rs`), one handle on the shared
+`Arc<Mutex<SimState>>` that `boot/serve.rs` builds for `AppCtx`:
+
+- `SimRosterPort` — add a shiftable load, `cancel_if_cancellable` (the asset says whether it can still be
+  cancelled and is removed only if so, in ONE call: two calls would let a load start in between), reset
+  an asset, change an asset's configuration.
+- `SimReadPort` — plain-data reads for the routes: timeline snapshot, an asset's forecast / capability /
+  history / trace, default comfort curve, the EV's usage schedule, the per-asset request slices. Return
+  types are `entities/` types (`KeyFeature`, `AssetCapability` and `AssetFlexibilityFloor` moved there,
+  re-exported from `assets`); never `&dyn Asset`, `HistoryPoint` or an asset's state enum.
+- `HeadroomPort` — `site_headroom` and `capacity_curves_at`. They read the whole live roster (each
+  asset's own maximum-effort answer), which the flattened `SimSnapshot` cannot carry correctly for PV, so
+  they stay on the simulator and are reached through the port.
+
+**Lock discipline:** each handle method takes the simulator lock for the length of that one call and
+releases it before returning; nothing hands out a guard, so no adapter can hold it across an `.await`.
+The tick loop and the other tasks keep the concrete `Arc<Mutex<SimState>>` (they own the simulator);
+the sampler and planner still read it through `SimulatorPort::snapshot`. Tests of the handle build a real
+`SimState` (`simulator/handle.rs`), and each answer is compared with the direct computation.
+`audit_ven_architecture.py` rule 6 forbids `SimState`, `ctx.sim` and the roster-reading computations in
+`services/` and `routes/`, with no exceptions.
+
 ### 3.1 Generic Asset Model
 
 The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.
