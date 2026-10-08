@@ -14829,3 +14829,19 @@ also said lever dispatch compared literal asset ids; exploration showed they are
 separate namespace that merely shares spellings with `ids::ASSET_*`, so the fix is named `LEVER_*`
 constants, not asset-id constants. `simulator/tests.rs` hit the file-size cap with the added tests;
 two of its modules moved into `simulator/tests/` like the existing `peek_*` tests.
+
+## R-109: the simulator behind ports (refactor/r109-sim-ports)
+
+Services and routes reached the concrete `SimState` (and the `compute_*` functions that read its live
+roster); two handlers held its lock across `.await`. Decisions with the user: services AND routes go
+through ports, tasks keep the concrete type (they own the tick loop); a `SimHandle` owns the lock and
+implements the traits; the headroom computations get their own port; tests keep building a real
+`SimState`. Built in stages, each green on its own: `SimRosterPort` (cancel became ONE atomic
+`cancel_if_cancellable`; `delete_request` no longer holds a lock across awaits), `HeadroomPort`,
+`SimReadPort` (eight plain-data reads; `KeyFeature`/`AssetCapability`/`AssetFlexibilityFloor` moved to
+`entities/`), then rule 6 tightened to `services/` + `routes/` with no exceptions (its old
+`SimState`-only pattern would have passed vacuously in routes, which never spell the type). Removing
+the `ctx.sim` field exposed three methods only that path had kept alive (`AssetHistoryBuffer::len`,
+`SimState::asset_mut`, `peek_pv_kw`); they are test-only now. `handle.rs` tests compare every port
+answer with the direct computation. Open: the tick task still awaits while holding the lock (R-109
+stage 5).

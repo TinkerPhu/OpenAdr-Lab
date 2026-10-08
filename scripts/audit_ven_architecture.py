@@ -31,6 +31,14 @@ The rules, and why each exists:
      `simulator/`. This rule covers the whole ring and both infra modules, so
      the next one is caught the day it lands rather than at the next audit.
 
+  6. No concrete simulator in services/ or routes/: no `SimState`, `ctx.sim`, or direct call of
+     the computations that read the live roster (`site_headroom`, `capacity_headroom`,
+     `plan_context`, `persist`). They reach it through `controller::SimRosterPort` (add or
+     cancel a shiftable load, reset or configure an asset), `SimReadPort` (plain-data reads) and
+     `HeadroomPort`, all implemented by `simulator::SimHandle`, which takes the simulator lock
+     inside each call and releases it before returning -- so nothing outside the tick loop can
+     hold it across an `.await`. Routes never spell `SimState` (they locked it through
+     `ctx.sim`), so the type alone would pass vacuously there.
   7. No wall-clock read (`Utc::now()`) in the rings below the adapters --
      entities/, controller/, services/, assets/, simulator/, state/. A function
      that reads the clock itself hides a time dependency from its signature,
@@ -127,18 +135,20 @@ def vtn_value_leaks() -> "list[str]":
 
 
 
-# Services that hold a concrete `SimState` today, against the rule in rule 6.
-# A ratchet, not an amnesty: anything outside this set fails, so the count can
-# only go down. Remove an entry when that service moves behind the port --
-# never add one without deciding rule 6's fate first.
-SIMSTATE_KNOWN = {
-    # Threads the sim into `simulator::site_headroom::compute_site_headroom`,
-    # which needs `&SimState` and `Asset::max_effort_setpoint` directly.
-    "VEN/src/services/forecast.rs",
-    # Mutates the asset roster: a shiftable load becomes a real `SimState`
-    # entry at acceptance and is removed on cancel.
-    "VEN/src/services/user_request.rs",
-}
+# Files in services/ or routes/ allowed to reach the concrete simulator. Empty since R-109: they
+# go through `controller::{SimRosterPort, SimReadPort, HeadroomPort}`, implemented by
+# `simulator::SimHandle`. A ratchet, not an amnesty -- never add an entry without deciding rule
+# 6's fate first. (Tasks keep the concrete `Arc<Mutex<SimState>>`: they own the tick loop.)
+SIMSTATE_KNOWN: "set[str]" = set()
+
+
+# What reaching the concrete simulator looks like in the application and adapter rings: the type
+# itself, the routes' `ctx.sim` lock, and the computations that read the live roster. Routes never
+# spell `SimState` (they take the lock through `ctx.sim` and infer the type), so the type alone
+# would pass vacuously there.
+CONCRETE_SIM = re.compile(
+    r"\bSimState\b|\bctx\.sim\b"
+    r"|crate::simulator::(site_headroom|capacity_headroom|plan_context|persist)\b")
 
 
 def simstate_in_services() -> "list[str]":
@@ -151,16 +161,14 @@ def simstate_in_services() -> "list[str]":
     fails.
     """
     hits = []
-    for f in rust_files(VEN_SRC / "services"):
-        rel = str(f.relative_to(REPO_ROOT)).replace(os.sep, "/")
-        if rel in SIMSTATE_KNOWN:
-            continue
-        for n, line in code_lines(f):
-            if re.search(r"\bSimState\b", line):
-                hits.append(f"  {rel}:{n}: {line.strip()}")
-    if not hits:
-        print("      (known, tracked: " + ", ".join(sorted(
-            r.rsplit("/", 1)[-1] for r in SIMSTATE_KNOWN)) + " -- see rule 6)")
+    for ring in ("services", "routes"):
+        for f in rust_files(VEN_SRC / ring):
+            rel = str(f.relative_to(REPO_ROOT)).replace(os.sep, "/")
+            if rel in SIMSTATE_KNOWN:
+                continue
+            for n, line in code_lines(f):
+                if CONCRETE_SIM.search(line):
+                    hits.append(f"  {rel}:{n}: {line.strip()}")
     return hits
 
 

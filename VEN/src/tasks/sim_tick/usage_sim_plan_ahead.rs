@@ -7,6 +7,7 @@
 //! the answer to the other every tick.
 
 use chrono::{DateTime, Duration, Utc};
+use tokio::sync::Mutex;
 
 use crate::ids::ASSET_EV;
 use crate::services::ev_usage_plan::install_planned_sessions;
@@ -29,11 +30,21 @@ const ROLLING_WINDOW_DAYS: i64 = 7;
 /// simply contribute no obligation this cycle. Taking `plan_horizon_h` here also
 /// made this function disagree with the cycle task about what the horizon is
 /// (R-91), a mismatch that now cannot arise.
-pub(crate) async fn sync_plan_ahead_session(state: &AppState, sim: &SimState, now: DateTime<Utc>) {
-    let Some((_, ev)) = sim.find_asset(ASSET_EV) else {
-        return;
+pub(crate) async fn sync_plan_ahead_session(
+    state: &AppState,
+    sim: &Mutex<SimState>,
+    now: DateTime<Utc>,
+) {
+    // What the EV predicts is read under the simulator lock and the lock is released before
+    // anything awaits: installing the sessions awaits on `AppState`, and the lock must never be
+    // held across that.
+    let planned = {
+        let sim = sim.lock().await;
+        let Some((_, ev)) = sim.find_asset(ASSET_EV) else {
+            return;
+        };
+        ev.planned_usage_sessions(now, Duration::days(ROLLING_WINDOW_DAYS))
     };
-    let planned = ev.planned_usage_sessions(now, Duration::days(ROLLING_WINDOW_DAYS));
     install_planned_sessions(state, planned).await;
 }
 
@@ -81,7 +92,7 @@ mod tests {
     #[tokio::test]
     async fn a_tick_queues_the_evs_predicted_week_once() {
         let state = AppState::new();
-        let sim = sim_with_plan_ahead();
+        let sim = Mutex::new(sim_with_plan_ahead());
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
 
         sync_plan_ahead_session(&state, &sim, now).await;
@@ -101,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn a_roster_without_an_ev_queues_nothing() {
         let state = AppState::new();
-        let sim = SimState::from_params(&[], Utc::now());
+        let sim = Mutex::new(SimState::from_params(&[], Utc::now()));
         sync_plan_ahead_session(&state, &sim, Utc::now()).await;
         assert!(state.ev_sessions().await.is_empty());
     }
