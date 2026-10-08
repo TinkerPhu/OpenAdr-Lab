@@ -3152,3 +3152,13 @@ Rules:
   (`eslint --print-config <file>`, `tsc --showConfig`) before and after, not by watching the build
   stay green: a green build cannot tell "the same settings" from "settings that happen to pass".
   `include` in a `tsconfig` is resolved relative to the file that declares it, so it stays per app.
+
+## Two types that must mirror each other: guard the drift, do not just document it (2026-10-08)
+
+- A YAML config struct and its domain twin are two types by design (`no profile in entities/`).
+  The failure to prevent is a field added to one and silently absent from the other. A conversion
+  that destructures the source with every field named and no `..`, and builds the target without
+  `..`, turns both directions into compile errors (`profile/planner.rs`, `From<&PlannerConfig>`).
+- Defaults declared in several places (serde attributes, `Default` impls) are pinned by tests that
+  compare them (`PlannerParams::from(&PlannerConfig::default()) == PlannerParams::default()`; an
+  empty YAML document equals `Default`), not by comments.

@@ -25,7 +25,7 @@ pub struct PenaltyRuleParams {
     pub penalty_eur_per_kw: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlannerParams {
     pub plan_step_s: u64,
     pub plan_horizon_h: u64,

@@ -9,11 +9,11 @@
 //! `profile::schema::PlannerConfig` paths keep resolving.
 
 use crate::entities::plan::PlanZone;
-use crate::entities::planner_params::PenaltyRuleParams;
+use crate::entities::planner_params::{PenaltyRuleParams, PlannerParams};
 use crate::entities::PlannerObjective;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PlannerConfig {
     /// Optional variable-step planning grid. When set, `plan_step_s` and `plan_horizon_h`
     /// are ignored and the effective values are derived from the zones list.
@@ -247,4 +247,162 @@ pub struct PlannerConfig {
     /// `Profile::validate` — see that method for the rules.
     #[serde(default)]
     pub penalty_rules: Vec<PenaltyRuleParams>,
+}
+
+/// The one translation from the YAML shape to the domain shape (R-117).
+///
+/// The `let PlannerConfig { .. }` below names every field with **no `..`**, and `PlannerParams`
+/// is built without `..` too, so adding a setting to either type fails to compile until it is
+/// handled here. The tests below pin the defaults of both types to each other.
+impl From<&PlannerConfig> for PlannerParams {
+    fn from(config: &PlannerConfig) -> Self {
+        let PlannerConfig {
+            plan_zones: _,
+            plan_step_s: _,
+            plan_horizon_h: _,
+            replan_interval_s: _,
+            w_energy: _,
+            w_ghg: _,
+            w_grid: _,
+            c_bat_wear_eur_kwh: _,
+            c_ev_startup_eur: _,
+            c_bat_startup_eur: _,
+            c_ev_ramp_eur_kw: _,
+            c_bat_ramp_eur_kw: _,
+            c_bat_ev_coexist_eur_kwh: _,
+            w_viol: _,
+            pen_imp_eur_kwh: _,
+            pen_exp_eur_kwh: _,
+            v_ev_extra_eur_kwh: _,
+            v_ev_core_eur_kwh: _,
+            w_tier_penalty_eur: _,
+            c_ctrl_imp_malus_eur_kwh: _,
+            objective: _,
+            plan_adoption_threshold_eur: _,
+            plan_adoption_decay_s: _,
+            phase2_epsilon_eur: _,
+            solver_timeout_s: _,
+            phase2_solver_timeout_s: _,
+            rate_change_trigger_delay_s: _,
+            rate_change_trigger_jitter_pct: _,
+            mip_gap_target: _,
+            planning_initial_delay_s: _,
+            gate_switch_penalty_eur: _,
+            simple_level1_import_cap_pct: _,
+            asap_lateness_eur_kwh_h: _,
+            v_ev_free_charge_eur_kwh: _,
+            stale_rate_policy: _,
+            stale_rate_safe_pctl: _,
+            penalty_rules: _,
+        } = config;
+        let step_s = config.effective_step_s();
+        let horizon_h = config.effective_horizon_h();
+        Self {
+            plan_step_s: step_s,
+            plan_horizon_h: horizon_h,
+            plan_zones: config.plan_zones.clone().unwrap_or_else(|| {
+                let slots = (horizon_h * 3600 / step_s) as usize;
+                vec![PlanZone { step_s, slots }]
+            }),
+            replan_interval_s: config.replan_interval_s,
+            w_energy: config.w_energy,
+            w_ghg: config.w_ghg,
+            w_grid: config.w_grid,
+            c_bat_wear_eur_kwh: config.c_bat_wear_eur_kwh,
+            c_ev_startup_eur: config.c_ev_startup_eur,
+            c_bat_startup_eur: config.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: config.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: config.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: config.c_bat_ev_coexist_eur_kwh,
+            w_viol: config.w_viol,
+            pen_imp_eur_kwh: config.pen_imp_eur_kwh,
+            pen_exp_eur_kwh: config.pen_exp_eur_kwh,
+            v_ev_extra_eur_kwh: config.v_ev_extra_eur_kwh,
+            v_ev_core_eur_kwh: config.v_ev_core_eur_kwh,
+            w_tier_penalty_eur: config.w_tier_penalty_eur,
+            c_ctrl_imp_malus_eur_kwh: config.c_ctrl_imp_malus_eur_kwh,
+            objective: config.objective,
+            plan_adoption_threshold_eur: config.plan_adoption_threshold_eur,
+            plan_adoption_decay_s: config.plan_adoption_decay_s,
+            phase2_epsilon_eur: config.phase2_epsilon_eur,
+            solver_timeout_s: config.solver_timeout_s,
+            phase2_solver_timeout_s: config.phase2_solver_timeout_s,
+            rate_change_trigger_delay_s: config.rate_change_trigger_delay_s,
+            rate_change_trigger_jitter_pct: config.rate_change_trigger_jitter_pct,
+            mip_gap_target: config.mip_gap_target,
+            planning_initial_delay_s: config.planning_initial_delay_s,
+            gate_switch_penalty_eur: config.gate_switch_penalty_eur,
+            simple_level1_import_cap_pct: config.simple_level1_import_cap_pct,
+            asap_lateness_eur_kwh_h: config.asap_lateness_eur_kwh_h,
+            v_ev_free_charge_eur_kwh: config.v_ev_free_charge_eur_kwh,
+            stale_rate_policy: config.stale_rate_policy.clone(),
+            stale_rate_safe_pctl: config.stale_rate_safe_pctl,
+            penalty_rules: config.penalty_rules.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // R-117: the YAML shape and the domain shape declare the same settings. These tests pin
+    // the three places defaults live (serde attributes, `PlannerConfig::default`,
+    // `PlannerParams::default`) to each other; the destructuring in `From` pins the field lists.
+
+    #[test]
+    fn planner_params_from_config_default_equals_params_default() {
+        assert_eq!(
+            PlannerParams::from(&PlannerConfig::default()),
+            PlannerParams::default()
+        );
+    }
+
+    #[test]
+    fn planner_config_empty_yaml_equals_default() {
+        let parsed: PlannerConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(parsed, PlannerConfig::default());
+    }
+
+    #[test]
+    fn planner_params_from_config_without_zones_derives_one_uniform_zone() {
+        let config = PlannerConfig {
+            plan_step_s: 900,
+            plan_horizon_h: 24,
+            plan_zones: None,
+            ..PlannerConfig::default()
+        };
+        let params = PlannerParams::from(&config);
+        assert_eq!(params.plan_step_s, 900);
+        assert_eq!(params.plan_horizon_h, 24);
+        assert_eq!(
+            params.plan_zones,
+            vec![PlanZone {
+                step_s: 900,
+                slots: 96
+            }]
+        );
+    }
+
+    #[test]
+    fn planner_params_from_config_with_zones_uses_them_and_derives_step_and_horizon() {
+        let zones = vec![
+            PlanZone {
+                step_s: 300,
+                slots: 12,
+            },
+            PlanZone {
+                step_s: 3600,
+                slots: 23,
+            },
+        ];
+        let config = PlannerConfig {
+            plan_zones: Some(zones.clone()),
+            ..PlannerConfig::default()
+        };
+        let params = PlannerParams::from(&config);
+        assert_eq!(params.plan_zones, zones);
+        assert_eq!(params.plan_step_s, 300);
+        assert_eq!(params.plan_horizon_h, 24);
+    }
 }
