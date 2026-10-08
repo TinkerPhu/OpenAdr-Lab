@@ -117,10 +117,10 @@ impl AssetState {
     }
 
     /// State of charge in [0.0, 1.0] for storage assets; None for all others.
-    pub fn soc(&self) -> Option<f64> {
+    pub fn soc_frac(&self) -> Option<f64> {
         match self {
-            Self::Battery(s) => Some(s.soc),
-            Self::Ev(s) => Some(s.soc),
+            Self::Battery(s) => Some(s.soc_frac),
+            Self::Ev(s) => Some(s.soc_frac),
             _ => None,
         }
     }
@@ -152,15 +152,15 @@ mod phase2a_battery_tests {
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
 
-    fn boxed_and_state(initial_soc: f64) -> (Box<dyn Asset>, AssetState) {
+    fn boxed_and_state(initial_soc_frac: f64) -> (Box<dyn Asset>, AssetState) {
         let params = BatteryParams {
             id: "battery".to_string(),
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
-            initial_soc,
+            initial_soc_frac,
             round_trip_efficiency: 0.9,
-            min_soc: 0.1,
+            min_soc_frac: 0.1,
             c_terminal_eur_kwh: None,
         };
         (
@@ -179,11 +179,11 @@ mod phase2a_battery_tests {
     fn reset_applies_soc_override() {
         let (boxed, _) = boxed_and_state(0.5);
         let mut state = AssetState::Battery(BatteryState {
-            soc: 0.5,
+            soc_frac: 0.5,
             actual_power_kw: 0.0,
         });
         boxed.reset(&mut state, HashMap::from([("soc".to_string(), 0.8)]));
-        assert_eq!(state.soc(), Some(0.8));
+        assert_eq!(state.soc_frac(), Some(0.8));
     }
 
     #[test]
@@ -315,10 +315,10 @@ mod phase2a_ev_tests {
             id: "ev".to_string(),
             max_charge_kw: 7.0,
             max_discharge_kw: 7.0,
-            initial_soc: 0.4,
+            initial_soc_frac: 0.4,
             battery_kwh: 50.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             default_charge_kw: 7.0,
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
@@ -357,7 +357,7 @@ mod phase2a_ev_tests {
             .expect("EvCharger must implement RequestResolvable")
             .request_defaults(&state);
         assert_eq!(defaults.current_soc, 0.4);
-        assert_eq!(defaults.default_soc_target, params.soc_target);
+        assert_eq!(defaults.default_soc_target, params.soc_target_frac);
         assert_eq!(defaults.capacity_kwh, params.battery_kwh);
         assert_eq!(defaults.max_charge_kw, params.max_charge_kw);
     }
@@ -376,7 +376,7 @@ mod phase2a_ev_tests {
     fn available_storage_kwh_none_when_unplugged() {
         let (boxed, _) = boxed_and_state();
         let unplugged = AssetState::Ev(EvState {
-            soc: 0.4,
+            soc_frac: 0.4,
             plugged: false,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -793,9 +793,9 @@ mod phase2a_trivial_delegation_smoke_tests {
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
-            initial_soc: 0.5,
+            initial_soc_frac: 0.5,
             round_trip_efficiency: 0.9,
-            min_soc: 0.1,
+            min_soc_frac: 0.1,
             c_terminal_eur_kwh: None,
         };
         exercise_trivial_methods(Box::new(Battery::from_params(&params)));
@@ -807,10 +807,10 @@ mod phase2a_trivial_delegation_smoke_tests {
             id: "ev".to_string(),
             max_charge_kw: 7.0,
             max_discharge_kw: 7.0,
-            initial_soc: 0.4,
+            initial_soc_frac: 0.4,
             battery_kwh: 50.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             default_charge_kw: 7.0,
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
@@ -886,9 +886,9 @@ mod phase2b_asset_type_and_downcast_tests {
                         capacity_kwh: 10.0,
                         max_charge_kw: 5.0,
                         max_discharge_kw: 5.0,
-                        initial_soc: 0.5,
+                        initial_soc_frac: 0.5,
                         round_trip_efficiency: 0.9,
-                        min_soc: 0.1,
+                        min_soc_frac: 0.1,
                         c_terminal_eur_kwh: None,
                     },
                 )),
@@ -901,10 +901,10 @@ mod phase2b_asset_type_and_downcast_tests {
                         id: "ev".into(),
                         max_charge_kw: 7.0,
                         max_discharge_kw: 7.0,
-                        initial_soc: 0.4,
+                        initial_soc_frac: 0.4,
                         battery_kwh: 50.0,
                         consumption_kwh_per_km: 0.18,
-                        soc_target: 0.8,
+                        soc_target_frac: 0.8,
                         default_charge_kw: 7.0,
                         min_charge_kw: 1.4,
                         response_delay_s: 0.0,
@@ -1169,10 +1169,10 @@ mod phase2b_tick_overridable_tests {
             id: "ev".to_string(),
             max_charge_kw: 7.0,
             max_discharge_kw: 7.0,
-            initial_soc: 0.4,
+            initial_soc_frac: 0.4,
             battery_kwh: 50.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             default_charge_kw: 7.0,
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
@@ -1193,7 +1193,7 @@ mod phase2b_tick_overridable_tests {
             panic!("expected Ev state")
         };
         assert!(!s.plugged, "plugged override must be applied to state");
-        assert_eq!(ev.soc_target, 0.6);
+        assert_eq!(ev.soc_target_frac, 0.6);
     }
 
     #[test]
@@ -1202,10 +1202,10 @@ mod phase2b_tick_overridable_tests {
             id: "ev".to_string(),
             max_charge_kw: 7.0,
             max_discharge_kw: 7.0,
-            initial_soc: 0.4,
+            initial_soc_frac: 0.4,
             battery_kwh: 50.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             default_charge_kw: 7.0,
             min_charge_kw: 1.4,
             response_delay_s: 0.0,
@@ -1213,7 +1213,7 @@ mod phase2b_tick_overridable_tests {
             usage_sim: None,
         };
         let mut ev = EvCharger::from_params(&params);
-        ev.soc_target = 0.5; // simulate a lingering override from a prior tick
+        ev.soc_target_frac = 0.5; // simulate a lingering override from a prior tick
         let mut state = AssetState::Ev(EvCharger::initial_state(&params));
         if let AssetState::Ev(s) = &mut state {
             s.plugged = false;
@@ -1226,7 +1226,7 @@ mod phase2b_tick_overridable_tests {
         };
         assert!(s.plugged, "no override must snap back to plugged=true");
         assert_eq!(
-            ev.soc_target, ev.soc_target_profile,
+            ev.soc_target_frac, ev.soc_target_profile,
             "no override must snap back to the profile soc_target"
         );
     }

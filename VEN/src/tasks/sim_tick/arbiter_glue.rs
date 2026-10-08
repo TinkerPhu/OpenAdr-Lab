@@ -268,7 +268,7 @@ mod tests {
     ) -> crate::entities::device_session::EvSession {
         crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
             window_start: ts(-1000),
             expected_trip_distance_km: None,
             expected_return_time: None,

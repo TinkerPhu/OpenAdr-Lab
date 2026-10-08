@@ -53,7 +53,7 @@ fn ev_session() -> EvSession {
         mode: Default::default(),
         origin: EvSessionOrigin::UserRequest,
         id: uuid::Uuid::from_u128(1),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,

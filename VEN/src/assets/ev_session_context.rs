@@ -47,7 +47,7 @@ fn uses_from_sessions(
             } else {
                 horizon_end
             },
-            target_soc: s.target_soc,
+            target_soc_frac: s.target_soc_frac,
             // A soft deadline is a preference priced by the curve, and the
             // free/opportunistic modes are gated by surplus rather than a deadline:
             // neither states a guarantee.
@@ -88,17 +88,17 @@ impl EvMilpContext {
     ) -> Self {
         use crate::entities::design_vocabulary::UserRequestMode;
         let (plugged, current_soc) = if let super::AssetState::Ev(s) = state {
-            (s.plugged, s.soc)
+            (s.plugged, s.soc_frac)
         } else {
             (false, 0.0)
         };
         // Idle/unplugged template — every branch below overrides only what differs.
         let base = Self {
             mode: EvMilpMode::MustNotRun,
-            soc_init: current_soc,
+            soc_init_frac: current_soc,
             // One declared ceiling for the whole context, so no arm below can plan past
             // what `capability_inner` will accept.
-            soc_max: cfg.soc_target,
+            soc_max_frac: cfg.soc_target_frac,
             a_ev: vec![false; n],
             soc_drops: None,
             obligations: Vec::new(),
@@ -106,7 +106,7 @@ impl EvMilpContext {
             p_max_kw: cfg.max_charge_kw,
             p_min_kw: min_charge_kw,
             segments: Vec::new(),
-            e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
+            e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target_frac),
             v_extra_eur_kwh: v_ev_extra_eur_kwh,
             asap_lateness_eur_kwh_h: 0.0,
             free_only: false,
@@ -154,8 +154,8 @@ impl EvMilpContext {
                     comfort_rates,
                     super::ev_comfort::EvBandRange {
                         init: current_soc,
-                        target: cfg.soc_target,
-                        max: cfg.soc_target,
+                        target: cfg.soc_target_frac,
+                        max: cfg.soc_target_frac,
                     },
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
@@ -169,7 +169,7 @@ impl EvMilpContext {
                 ..base
             };
         };
-        let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
+        let core_kwh = ((session.target_soc_frac - current_soc) * cfg.battery_kwh).max(0.0);
         // Chargeable inside any queued session's window, nowhere else. For a single
         // session this is the old "every slot up to the deadline"; for a queue it
         // also closes the gaps when the car is away, without a second rule saying so.
@@ -257,11 +257,11 @@ impl EvMilpContext {
                     &session.comfort_rates,
                     super::ev_comfort::EvBandRange {
                         init: current_soc,
-                        target: session.target_soc,
+                        target: session.target_soc_frac,
                         // The vehicle's limit, not the request's: a session asking for
                         // more than the charger accepts does not make it accept it. The
                         // gap surfaces as a reported shortfall, not as energy to buy.
-                        max: cfg.soc_target,
+                        max: cfg.soc_target_frac,
                     },
                     cfg.battery_kwh,
                     v_ev_core_eur_kwh,
@@ -322,7 +322,7 @@ mod tests {
     fn sess(window_start: DateTime<Utc>, departure: DateTime<Utc>) -> EvSession {
         EvSession {
             id: uuid::Uuid::new_v4(),
-            target_soc: 0.9,
+            target_soc_frac: 0.9,
             window_start,
             departure_time: departure,
             expected_trip_distance_km: None,
@@ -389,7 +389,7 @@ mod tests {
 
     fn plugged_state() -> super::super::AssetState {
         super::super::AssetState::Ev(super::super::EvState {
-            soc: 0.30,
+            soc_frac: 0.30,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,

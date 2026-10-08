@@ -21,7 +21,7 @@ fn clash_json(c: &ClashingSession) -> serde_json::Value {
         "id": c.id,
         "window_start": c.window_start,
         "departure_time": c.departure_time,
-        "target_soc": c.target_soc,
+        "target_soc": c.target_soc_frac,
     })
 }
 
@@ -76,7 +76,7 @@ mod tests {
             id: uuid::Uuid::nil(),
             window_start: Utc.with_ymd_and_hms(2026, 10, 4, 6, 0, 0).unwrap(),
             departure_time: Utc.with_ymd_and_hms(2026, 10, 4, 8, 0, 0).unwrap(),
-            target_soc: 0.8,
+            target_soc_frac: 0.8,
         }
     }
 

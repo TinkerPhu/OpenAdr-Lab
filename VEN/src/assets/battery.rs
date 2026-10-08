@@ -35,14 +35,16 @@ pub struct Battery {
     /// either changes; see `docs/history/project_journal.md`'s R-69 entry for the worked
     /// example.
     pub round_trip_efficiency: f64,
-    pub min_soc: f64,
+    #[serde(rename = "min_soc")]
+    pub min_soc_frac: f64,
 }
 
 /// Battery mutable state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryState {
     /// State of charge in [0.0, 1.0]. 0.0 = empty, 1.0 = full.
-    pub soc: f64,
+    #[serde(rename = "soc")]
+    pub soc_frac: f64,
     /// Actual power last tick. Positive = charging (import). Negative = discharging (export).
     pub actual_power_kw: f64,
 }
@@ -54,13 +56,13 @@ impl Battery {
             max_charge_kw: cfg.max_charge_kw,
             max_discharge_kw: cfg.max_discharge_kw,
             round_trip_efficiency: cfg.round_trip_efficiency,
-            min_soc: cfg.min_soc,
+            min_soc_frac: cfg.min_soc_frac,
         }
     }
 
     pub fn initial_state(cfg: &BatteryParams) -> BatteryState {
         BatteryState {
-            soc: cfg.initial_soc,
+            soc_frac: cfg.initial_soc_frac,
             actual_power_kw: 0.0,
         }
     }
@@ -76,8 +78,8 @@ impl Battery {
         let clamped = setpoint_kw
             .max(-self.max_discharge_kw)
             .min(self.max_charge_kw);
-        let actual = if (clamped > 0.0 && state.soc >= 1.0)
-            || (clamped < 0.0 && state.soc <= self.min_soc)
+        let actual = if (clamped > 0.0 && state.soc_frac >= 1.0)
+            || (clamped < 0.0 && state.soc_frac <= self.min_soc_frac)
         {
             0.0
         } else {
@@ -88,10 +90,10 @@ impl Battery {
         // battery-efficiency-model-reconciliation) -- was all-loss-on-charge.
         let eff = self.round_trip_efficiency.sqrt();
         let energy_kwh = actual * dt_h * if actual > 0.0 { eff } else { 1.0 / eff };
-        let new_soc = (state.soc + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc_frac + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
         (
             BatteryState {
-                soc: new_soc,
+                soc_frac: new_soc,
                 actual_power_kw: actual,
             },
             actual,
@@ -105,8 +107,8 @@ impl Battery {
     pub fn capability_inner(&self, state: &BatteryState) -> AssetCapability {
         let eff = self.round_trip_efficiency.sqrt();
         let window_h = crate::entities::units::dt_h_from_s(SUSTAINED_POWER_MIN_S);
-        let charge_room_kwh = (1.0 - state.soc) * self.capacity_kwh;
-        let discharge_room_kwh = (state.soc - self.min_soc) * self.capacity_kwh;
+        let charge_room_kwh = (1.0 - state.soc_frac) * self.capacity_kwh;
+        let discharge_room_kwh = (state.soc_frac - self.min_soc_frac) * self.capacity_kwh;
         AssetCapability {
             max_export_kw: if discharge_room_kwh > self.max_discharge_kw / eff * window_h {
                 -self.max_discharge_kw
@@ -134,18 +136,18 @@ impl Battery {
 
     pub fn state_values(&self, state: &BatteryState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("soc".into(), state.soc);
+        m.insert("soc".into(), state.soc_frac);
         m.insert("capacity_kwh".into(), self.capacity_kwh);
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("max_discharge_kw".into(), self.max_discharge_kw);
-        m.insert("min_soc".into(), self.min_soc);
+        m.insert("min_soc".into(), self.min_soc_frac);
         m.insert("round_trip_efficiency".into(), self.round_trip_efficiency);
         m
     }
 
     pub fn reset(&self, state: &mut BatteryState, values: HashMap<String, f64>) {
-        if let Some(&soc) = values.get("soc") {
-            state.soc = soc.clamp(0.0, 1.0);
+        if let Some(&soc_frac) = values.get("soc") {
+            state.soc_frac = soc_frac.clamp(0.0, 1.0);
         }
     }
 
@@ -165,10 +167,12 @@ impl Battery {
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
         let mut t = now;
-        let mut soc = state.soc;
+        let mut soc_frac = state.soc_frac;
 
         while t < end {
-            let kw = if (setpoint > 0.0 && soc >= 1.0) || (setpoint < 0.0 && soc <= self.min_soc) {
+            let kw = if (setpoint > 0.0 && soc_frac >= 1.0)
+                || (setpoint < 0.0 && soc_frac <= self.min_soc_frac)
+            {
                 0.0
             } else {
                 setpoint
@@ -179,14 +183,16 @@ impl Battery {
             // R-69: same symmetric sqrt(round_trip_efficiency) split as step_inner.
             let eff = self.round_trip_efficiency.sqrt();
             if kw > 0.0 {
-                soc += (kw * dt_h * eff) / self.capacity_kwh;
+                soc_frac += (kw * dt_h * eff) / self.capacity_kwh;
             } else {
-                soc += (kw * dt_h / eff) / self.capacity_kwh;
+                soc_frac += (kw * dt_h / eff) / self.capacity_kwh;
             }
-            soc = soc.clamp(0.0, 1.0);
+            soc_frac = soc_frac.clamp(0.0, 1.0);
             t += Duration::seconds(60);
         }
-        let end_kw = if (setpoint > 0.0 && soc >= 1.0) || (setpoint < 0.0 && soc <= self.min_soc) {
+        let end_kw = if (setpoint > 0.0 && soc_frac >= 1.0)
+            || (setpoint < 0.0 && soc_frac <= self.min_soc_frac)
+        {
             0.0
         } else {
             setpoint
@@ -257,7 +263,7 @@ impl Asset for Battery {
             self.capacity_kwh = v.max(0.1);
         }
         if let Some(&v) = values.get("min_soc") {
-            self.min_soc = v.clamp(0.0, 1.0);
+            self.min_soc_frac = v.clamp(0.0, 1.0);
         }
     }
 
@@ -265,12 +271,12 @@ impl Asset for Battery {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.20,
+                max_marginal_price_eur_kwh: 0.20,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.05,
+                max_marginal_price_eur_kwh: 0.05,
                 max_marginal_co2: 0.0,
             },
         ]
@@ -292,7 +298,7 @@ impl Asset for Battery {
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &BatteryState = own(state);
         AssetHistoryView {
-            soc_frac: Some(s.soc),
+            soc_frac: Some(s.soc_frac),
             ..Default::default()
         }
     }
@@ -373,7 +379,7 @@ impl RequestResolvable for Battery {
     fn request_defaults(&self, state: &AssetState) -> RequestDefaults {
         let s: &BatteryState = own(state);
         RequestDefaults {
-            current_soc: s.soc,
+            current_soc: s.soc_frac,
             default_soc_target: 1.0,
             capacity_kwh: self.capacity_kwh,
             max_charge_kw: self.max_charge_kw,
@@ -385,8 +391,8 @@ impl RequestResolvable for Battery {
     fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
         let s: &BatteryState = own(state);
         Some((
-            (s.soc - self.min_soc).max(0.0) * self.capacity_kwh,
-            (1.0 - s.soc).max(0.0) * self.capacity_kwh,
+            (s.soc_frac - self.min_soc_frac).max(0.0) * self.capacity_kwh,
+            (1.0 - s.soc_frac).max(0.0) * self.capacity_kwh,
         ))
     }
 
@@ -423,15 +429,15 @@ mod tests {
         assert_eq!(view.temperature_c, None);
     }
 
-    fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {
+    fn make_battery_cfg(initial_soc_frac: f64) -> (Battery, BatteryState) {
         let cfg = BatteryParams {
             id: "battery".to_string(),
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
             round_trip_efficiency: 0.95,
-            min_soc: 0.1,
-            initial_soc,
+            min_soc_frac: 0.1,
+            initial_soc_frac,
             c_terminal_eur_kwh: None,
         };
         (Battery::from_params(&cfg), Battery::initial_state(&cfg))
@@ -465,9 +471,9 @@ mod tests {
         // VEN1 parked at 99.955 % and kept reporting the full 5 kW for ~3 s of room.
         let (bat, mut state) = make_battery_cfg(0.99955);
         assert_eq!(bat.capability_inner(&state).max_import_kw, 0.0);
-        state.soc = 0.995;
+        state.soc_frac = 0.995;
         assert_eq!(bat.capability_inner(&state).max_import_kw, 0.0);
-        state.soc = 0.99; // 0.1 kWh room: more than 60 s at 5 kW
+        state.soc_frac = 0.99; // 0.1 kWh room: more than 60 s at 5 kW
         assert_eq!(bat.capability_inner(&state).max_import_kw, 5.0);
     }
 
@@ -475,7 +481,7 @@ mod tests {
     fn capability_reports_no_export_when_the_energy_cannot_sustain_max_discharge_for_60s() {
         let (bat, mut state) = make_battery_cfg(0.105); // min_soc 0.1: 0.05 kWh left
         assert_eq!(bat.capability_inner(&state).max_export_kw, 0.0);
-        state.soc = 0.11;
+        state.soc_frac = 0.11;
         assert_eq!(bat.capability_inner(&state).max_export_kw, -5.0);
     }
 
@@ -486,17 +492,17 @@ mod tests {
         let (bat, state) = make_battery_cfg(0.995);
         let (next, kw) = bat.step_inner(&state, 5.0, Duration::seconds(1));
         assert_eq!(kw, 5.0);
-        assert!(next.soc > 0.995);
+        assert!(next.soc_frac > 0.995);
     }
 
     #[test]
     fn flexibility_floor_is_always_zero_regardless_of_soc() {
-        for soc in [0.05, 0.5, 1.0] {
+        for soc_frac in [0.05, 0.5, 1.0] {
             // 0.05 is below min_soc=0.1; 1.0 is fully charged.
-            let (bat, state) = make_battery_cfg(soc);
+            let (bat, state) = make_battery_cfg(soc_frac);
             let floor = bat.flexibility_floor_inner(&state);
-            assert_eq!(floor.min_export_kw, 0.0, "soc={soc}");
-            assert_eq!(floor.min_import_kw, 0.0, "soc={soc}");
+            assert_eq!(floor.min_export_kw, 0.0, "soc={soc_frac}");
+            assert_eq!(floor.min_import_kw, 0.0, "soc={soc_frac}");
         }
     }
 
@@ -551,7 +557,7 @@ mod tests {
         bat.max_discharge_kw = 20.0;
         bat.round_trip_efficiency = 0.81;
         let state = BatteryState {
-            soc: 0.5,
+            soc_frac: 0.5,
             actual_power_kw: 0.0,
         };
 
@@ -559,9 +565,9 @@ mod tests {
         let (state, actual) = bat.step_inner(&state, 10.0, Duration::hours(1));
         assert_eq!(actual, 10.0);
         assert!(
-            (state.soc - 0.59).abs() < 1e-9,
+            (state.soc_frac - 0.59).abs() < 1e-9,
             "expected soc=0.59 (50 + 10*0.9 = 59 kWh / 100), got {}",
-            state.soc
+            state.soc_frac
         );
 
         // Discharge 9 kWh of AC export (9 kW for 1h) -> 10.0 kWh actually removed
@@ -569,9 +575,9 @@ mod tests {
         let (state, actual) = bat.step_inner(&state, -9.0, Duration::hours(1));
         assert_eq!(actual, -9.0);
         assert!(
-            (state.soc - 0.49).abs() < 1e-9,
+            (state.soc_frac - 0.49).abs() < 1e-9,
             "expected soc=0.49 (59 - 9/0.9 = 49 kWh / 100), got {}",
-            state.soc
+            state.soc_frac
         );
     }
 
@@ -582,7 +588,7 @@ mod tests {
             let (ns, _) = bat.step_inner(&state, 10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc - 1.0).abs() < 0.001);
+        assert!((state.soc_frac - 1.0).abs() < 0.001);
         let (_, actual) = bat.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
@@ -594,7 +600,7 @@ mod param_tests {
 
     #[test]
     fn battery_params_default_soc() {
-        assert!((BatteryParams::default().initial_soc - 0.5).abs() < f64::EPSILON);
+        assert!((BatteryParams::default().initial_soc_frac - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

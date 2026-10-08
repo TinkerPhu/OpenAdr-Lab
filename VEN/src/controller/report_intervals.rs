@@ -220,7 +220,7 @@ pub(crate) fn build_soc_intervals(
         let samples = asset_samples.get(key)?;
         let pts: Vec<(DateTime<Utc>, f64)> = samples
             .iter()
-            .filter_map(|s| s.soc.map(|soc| (s.ts, soc)))
+            .filter_map(|s| s.soc_frac.map(|soc_frac| (s.ts, soc_frac)))
             .collect();
         if pts.is_empty() {
             return None;
@@ -255,7 +255,7 @@ pub(crate) fn build_soc_intervals(
         .iter()
         .enumerate()
         .map(|(i, (ts, _))| {
-            let soc_value = soc_at_ends
+            let soc_frac = soc_at_ends
                 .samples
                 .iter()
                 .find(|(t, _)| *t == *ts + interval_width)
@@ -268,7 +268,10 @@ pub(crate) fn build_soc_intervals(
                 payloads: vec![
                     OadrReportPayload {
                         r#type: "STORAGE_CHARGE_LEVEL".to_string(),
-                        values: vec![serde_json::Value::from(format!("{:.1}", soc_value * 100.0))],
+                        values: vec![serde_json::Value::from(format!(
+                            "{:.1}",
+                            crate::entities::units::pct_from_frac(soc_frac)
+                        ))],
                     },
                     OadrReportPayload {
                         r#type: "OPERATING_STATE".to_string(),
@@ -292,7 +295,7 @@ mod tests {
             .map(|&(off_s, kw)| AssetReportSample {
                 ts: chrono::Utc.timestamp_opt(1_700_000_000 + off_s, 0).unwrap(),
                 power_kw: kw,
-                soc: None,
+                soc_frac: None,
             })
             .collect();
         let series = samples_to_power_ts(&samples, Interpolation::Step);
@@ -373,7 +376,7 @@ mod tests {
             .map(|&off_s| AssetReportSample {
                 ts: ts(off_s),
                 power_kw: 0.0, // irrelevant for BASELINE — only timestamps define the grid
-                soc: None,
+                soc_frac: None,
             })
             .collect()
     }

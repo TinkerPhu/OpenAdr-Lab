@@ -20,7 +20,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct CreateUserRequestParams {
     pub asset_id: String,
-    pub target_soc: Option<f64>,
+    pub target_soc_frac: Option<f64>,
     pub target_energy_kwh: Option<f64>,
     pub desired_power_kw: Option<f64>,
     pub deadlines: Vec<RequestDeadlineParams>,
@@ -124,7 +124,7 @@ pub struct ClashingSession {
     pub id: uuid::Uuid,
     pub window_start: DateTime<Utc>,
     pub departure_time: DateTime<Utc>,
-    pub target_soc: f64,
+    pub target_soc_frac: f64,
 }
 
 impl ClashingSession {
@@ -134,7 +134,7 @@ impl ClashingSession {
             id: s.id,
             window_start: s.window_start,
             departure_time: s.departure_time,
-            target_soc: s.target_soc,
+            target_soc_frac: s.target_soc_frac,
         }
     }
 }
@@ -194,7 +194,7 @@ pub fn create_from_body(
         (kwh, body.desired_power_kw.unwrap_or(1.0))
     } else {
         slice
-            .resolve_request_target(body.target_soc, body.desired_power_kw)
+            .resolve_request_target(body.target_soc_frac, body.desired_power_kw)
             .ok_or(RequestError::ZeroEnergy)?
     };
 
@@ -213,7 +213,7 @@ pub fn create_from_body(
             .iter()
             .map(|r| ComfortRate {
                 fill: r.fill,
-                max_marginal_price: r.bid,
+                max_marginal_price_eur_kwh: r.bid,
                 max_marginal_co2: r.co2.unwrap_or(0.0),
             })
             .collect()
@@ -250,7 +250,7 @@ pub fn create_from_body(
     let user_request = UserRequest {
         id: Uuid::new_v4(),
         asset_id: body.asset_id,
-        target_soc: slice.target_soc(body.target_soc),
+        target_soc_frac: slice.target_soc_frac(body.target_soc_frac),
         target_energy_kwh,
         desired_power_kw,
         deadlines: request_deadlines,
@@ -315,7 +315,7 @@ mod tests {
     fn base_body() -> CreateUserRequestParams {
         CreateUserRequestParams {
             asset_id: "ev".to_string(),
-            target_soc: None,
+            target_soc_frac: None,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![deadline_input(None)],
@@ -400,7 +400,7 @@ mod tests {
     fn resolves_target_energy_using_explicit_target_soc_over_asset_default() {
         let s = slice("ev"); // current_soc=0.3, default_soc_target=0.8
         let mut body = base_body();
-        body.target_soc = Some(0.6); // overrides the asset's default_soc_target of 0.8
+        body.target_soc_frac = Some(0.6); // overrides the asset's default_soc_target of 0.8
         let req = create_from_body(body, &[s], now()).unwrap();
         // (0.6 - 0.3) * 10.0 = 3.0 kWh, not (0.8-0.3)*10=5.0
         assert!((req.target_energy_kwh - 3.0).abs() < 1e-9);
@@ -458,7 +458,7 @@ mod tests {
         let mut s = slice("ev");
         s.comfort_rates = vec![ComfortRate {
             fill: 0.5,
-            max_marginal_price: 0.3,
+            max_marginal_price_eur_kwh: 0.3,
             max_marginal_co2: 200.0,
         }];
         let body = base_body();
@@ -476,7 +476,7 @@ mod tests {
         let mut s = slice("ev");
         s.comfort_rates = vec![ComfortRate {
             fill: 0.5,
-            max_marginal_price: 0.3,
+            max_marginal_price_eur_kwh: 0.3,
             max_marginal_co2: 200.0,
         }];
         let mut body = base_body();
@@ -488,7 +488,7 @@ mod tests {
         let req = create_from_body(body, &[s], now()).unwrap();
         assert_eq!(req.comfort_rates.len(), 1);
         assert!((req.comfort_rates[0].fill - 1.0).abs() < 1e-9);
-        assert!((req.comfort_rates[0].max_marginal_price - 0.5).abs() < 1e-9);
+        assert!((req.comfort_rates[0].max_marginal_price_eur_kwh - 0.5).abs() < 1e-9);
         assert!((req.comfort_rates[0].max_marginal_co2 - 0.0).abs() < 1e-9);
     }
 

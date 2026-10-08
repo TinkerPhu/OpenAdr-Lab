@@ -15,7 +15,7 @@ fn ev_session_with_mode(
     crate::entities::device_session::EvSession {
         id: uuid::Uuid::new_v4(),
         // soc 0.2 → 0.3 on 60 kWh = 6 kWh core; feasible within the 2 h horizon at 7.4 kW.
-        target_soc: 0.3,
+        target_soc_frac: 0.3,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -443,7 +443,7 @@ fn test_mode_asap_free_prefers_earliest_free_slots() {
     let tariffs = make_tariffs(-0.05, 0.08, 300.0);
     let mut session = ev_session_with_mode(now, UserRequestMode::AsapFree);
     // Target fits into a single slot: 0.2 → 0.2617 on 60 kWh ≈ 3.7 kWh = 7.4 kW × 0.5 h.
-    session.target_soc = 0.2 + 3.7 / 60.0;
+    session.target_soc_frac = 0.2 + 3.7 / 60.0;
     let plan = solve_with_session(&profile, &sim, &tariffs, now, &session);
     let ev = plan_ev_kw(&plan);
     // Phase 2 may spend its friction budget (phase2_epsilon_eur) on ramp
@@ -526,12 +526,12 @@ fn test_by_deadline_soft_comfort_curve_shapes_core_commitment() {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: bid,
+                max_marginal_price_eur_kwh: bid,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: bid,
+                max_marginal_price_eur_kwh: bid,
                 max_marginal_co2: 0.0,
             },
         ]
@@ -627,12 +627,12 @@ fn test_by_deadline_hard_extra_reward_drives_extra_charging() {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.0,
+                max_marginal_price_eur_kwh: 0.0,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: extra_price,
+                max_marginal_price_eur_kwh: extra_price,
                 max_marginal_co2: 0.0,
             },
         ]

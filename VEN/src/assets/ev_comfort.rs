@@ -52,14 +52,14 @@ pub(super) fn ev_energy_segments(
     v_ev_extra_eur_kwh: f64,
     w_ghg_eur_kg: f64,
 ) -> Vec<EvEnergySegment> {
-    let (soc_init, soc_target, soc_max) = (range.init, range.target, range.max);
-    let start = soc_init.clamp(0.0, 1.0);
+    let (soc_init_frac, soc_target_frac, soc_max_frac) = (range.init, range.target, range.max);
+    let start = soc_init_frac.clamp(0.0, 1.0);
     // The vehicle's charge limit, not a full pack, is where the bands stop.
     // `EvCharger::capability_inner` reports zero import capability at or above it, so
     // a band beyond it prices energy the charger will refuse — a plan promising charge
     // that never arrives. ven-2 was planned to 0.998 against a 0.85 limit while a week
     // of measurements never once exceeded 0.850.
-    let ceiling = soc_max.clamp(0.0, 1.0);
+    let ceiling = soc_max_frac.clamp(0.0, 1.0);
     if battery_kwh <= 0.0 || start >= ceiling {
         return Vec::new();
     }
@@ -73,7 +73,7 @@ pub(super) fn ev_energy_segments(
     // two prices below express.
     let mut bounds: Vec<f64> = vec![start, ceiling];
     if rates.is_empty() {
-        let target = soc_target.clamp(0.0, 1.0);
+        let target = soc_target_frac.clamp(0.0, 1.0);
         if target > start && target < ceiling {
             bounds.push(target);
         }
@@ -116,7 +116,7 @@ pub(super) fn ev_energy_segments(
         let mid = (lo + hi) / 2.0;
         let eur_per_kwh = if rates.is_empty() {
             // No bid expressed: the profile's own two-step default.
-            if mid <= soc_target {
+            if mid <= soc_target_frac {
                 v_ev_core_eur_kwh
             } else {
                 v_ev_extra_eur_kwh
@@ -166,7 +166,7 @@ mod tests {
     fn pt(fill: f64, bid: f64, co2: f64) -> ComfortRate {
         ComfortRate {
             fill,
-            max_marginal_price: bid,
+            max_marginal_price_eur_kwh: bid,
             max_marginal_co2: co2,
         }
     }
@@ -175,12 +175,16 @@ mod tests {
 
     /// A vehicle with no charge limit below full, so the existing expectations below
     /// are unchanged: the limit is a new dimension, not a new meaning for the old ones.
-    fn segments(rates: &[ComfortRate], soc_init: f64, soc_target: f64) -> Vec<EvEnergySegment> {
+    fn segments(
+        rates: &[ComfortRate],
+        soc_init_frac: f64,
+        soc_target_frac: f64,
+    ) -> Vec<EvEnergySegment> {
         ev_energy_segments(
             rates,
             EvBandRange {
-                init: soc_init,
-                target: soc_target,
+                init: soc_init_frac,
+                target: soc_target_frac,
                 max: 1.0,
             },
             BATTERY_KWH,
@@ -192,16 +196,16 @@ mod tests {
 
     fn segments_limited(
         rates: &[ComfortRate],
-        soc_init: f64,
-        soc_target: f64,
-        soc_max: f64,
+        soc_init_frac: f64,
+        soc_target_frac: f64,
+        soc_max_frac: f64,
     ) -> Vec<EvEnergySegment> {
         ev_energy_segments(
             rates,
             EvBandRange {
-                init: soc_init,
-                target: soc_target,
-                max: soc_max,
+                init: soc_init_frac,
+                target: soc_target_frac,
+                max: soc_max_frac,
             },
             BATTERY_KWH,
             1.0,

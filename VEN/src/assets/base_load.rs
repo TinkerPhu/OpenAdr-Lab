@@ -360,12 +360,12 @@ impl Asset for BaseLoad {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.0,
+                max_marginal_price_eur_kwh: 0.0,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.0,
+                max_marginal_price_eur_kwh: 0.0,
                 max_marginal_co2: 0.0,
             },
         ]

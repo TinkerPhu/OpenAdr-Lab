@@ -294,7 +294,7 @@ pub(crate) fn build_milp_inputs(
                 v_ev_extra = e.v_extra_eur_kwh;
 
                 ev_budget_eur = e.budget_eur;
-                soc_ev_init = Some(e.soc_init);
+                soc_ev_init = Some(e.soc_init_frac);
                 ev_soc_drops = e.soc_drops;
             }
             AssetMilpParams::Heater(h) => {

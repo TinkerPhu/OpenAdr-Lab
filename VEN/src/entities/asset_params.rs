@@ -9,9 +9,9 @@ pub struct BatteryParams {
     pub capacity_kwh: f64,
     pub max_charge_kw: f64,
     pub max_discharge_kw: f64,
-    pub initial_soc: f64,
+    pub initial_soc_frac: f64,
     pub round_trip_efficiency: f64,
-    pub min_soc: f64,
+    pub min_soc_frac: f64,
     /// Override for auto-computed terminal energy reward [EUR/kWh].
     /// None → auto-compute from avg import tariff × round_trip_efficiency.
     /// Some(0.0) → disabled. Some(x) → fixed at x EUR/kWh.
@@ -25,9 +25,9 @@ impl Default for BatteryParams {
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
-            initial_soc: 0.5,
+            initial_soc_frac: 0.5,
             round_trip_efficiency: 0.92,
-            min_soc: 0.10,
+            min_soc_frac: 0.10,
             c_terminal_eur_kwh: None,
         }
     }
@@ -40,9 +40,9 @@ pub struct EvParams {
     pub id: String,
     pub max_charge_kw: f64,
     pub max_discharge_kw: f64,
-    pub initial_soc: f64,
+    pub initial_soc_frac: f64,
     pub battery_kwh: f64,
-    pub soc_target: f64,
+    pub soc_target_frac: f64,
     pub default_charge_kw: f64,
     pub min_charge_kw: f64,
     /// BL-12: expected controller response delay (s), simulated as a single-tick lag.
@@ -69,9 +69,9 @@ impl Default for EvParams {
             id: crate::ids::ASSET_EV.to_string(),
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
-            initial_soc: 0.5,
+            initial_soc_frac: 0.5,
             battery_kwh: 60.0,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             default_charge_kw: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
@@ -221,8 +221,8 @@ pub fn battery_soc_from_energy(e_kwh: f64, capacity_kwh: f64) -> f64 {
 }
 
 /// A vehicle's state of charge held to the 0..1 a fraction of a pack can be.
-pub fn ev_soc_clamped(soc: f64) -> f64 {
-    soc.clamp(0.0, 1.0)
+pub fn ev_soc_clamped(soc_frac: f64) -> f64 {
+    soc_frac.clamp(0.0, 1.0)
 }
 
 // ── PV ───────────────────────────────────────────────────────────────────────
@@ -505,18 +505,18 @@ impl AssetRequestSlice {
     /// declared default (`RequestDefaults::default_soc_target`); `None` for an asset with no SoC.
     /// The one place this is decided, so the energy to charge and the session it creates can never
     /// aim at two different targets (R-112).
-    pub fn target_soc(&self, requested: Option<f64>) -> Option<f64> {
+    pub fn target_soc_frac(&self, requested: Option<f64>) -> Option<f64> {
         requested.or(self.default_soc_target)
     }
 
     pub fn resolve_request_target(
         &self,
-        target_soc: Option<f64>,
+        target_soc_frac: Option<f64>,
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
         let current_soc = self.current_soc?;
         let capacity_kwh = self.capacity_kwh?;
-        let target = self.target_soc(target_soc).unwrap_or(1.0);
+        let target = self.target_soc_frac(target_soc_frac).unwrap_or(1.0);
         let kwh = (target - current_soc).max(0.0) * capacity_kwh;
         if kwh < 1e-6 {
             return None;

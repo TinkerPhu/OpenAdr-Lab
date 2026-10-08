@@ -51,10 +51,10 @@ fn bench_profile(with_heater: bool) -> Profile {
         id: "ev".into(),
         max_charge_kw: 11.0,
         max_discharge_kw: 0.0,
-        initial_soc: 0.30,
+        initial_soc_frac: 0.30,
         battery_kwh: 75.0,
         consumption_kwh_per_km: 0.18,
-        soc_target: 0.80,
+        soc_target_frac: 0.80,
         default_charge_kw: 0.0,
         min_charge_kw: 0.0,
         response_delay_s: 10.0,
@@ -422,7 +422,7 @@ fn time_ev_solve_at(
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let session = crate::entities::device_session::EvSession {
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.80,
+        target_soc_frac: 0.80,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -2128,9 +2128,9 @@ fn bench_asset_mix_solve_cost() {
                         capacity_kwh: 11.0,
                         max_charge_kw: 5.5,
                         max_discharge_kw: 5.5,
-                        initial_soc: 0.50,
+                        initial_soc_frac: 0.50,
                         round_trip_efficiency: 0.92,
-                        min_soc: 0.10,
+                        min_soc_frac: 0.10,
                         c_terminal_eur_kwh: None,
                     },
                 ));
@@ -2229,9 +2229,9 @@ fn bench_min_epsilon_by_class() {
                         capacity_kwh: 11.0,
                         max_charge_kw: 5.5,
                         max_discharge_kw: 5.5,
-                        initial_soc: 0.50,
+                        initial_soc_frac: 0.50,
                         round_trip_efficiency: 0.92,
-                        min_soc: 0.10,
+                        min_soc_frac: 0.10,
                         c_terminal_eur_kwh: None,
                     },
                 ));
@@ -2363,9 +2363,9 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
                 capacity_kwh: 11.0,
                 max_charge_kw: 5.5,
                 max_discharge_kw: 5.5,
-                initial_soc: 0.90, // nearly full, so discharging is attractive
+                initial_soc_frac: 0.90, // nearly full, so discharging is attractive
                 round_trip_efficiency: 0.92,
-                min_soc: 0.10,
+                min_soc_frac: 0.10,
                 c_terminal_eur_kwh: Some(0.0), // no terminal reward, so it will discharge
             },
         ));
@@ -2465,9 +2465,9 @@ fn bench_epsilon_repeatability() {
                         capacity_kwh: 11.0,
                         max_charge_kw: 5.5,
                         max_discharge_kw: 5.5,
-                        initial_soc: 0.50,
+                        initial_soc_frac: 0.50,
                         round_trip_efficiency: 0.92,
-                        min_soc: 0.10,
+                        min_soc_frac: 0.10,
                         c_terminal_eur_kwh: None,
                     },
                 ));
@@ -2687,9 +2687,9 @@ fn bench_phase2_smoothing_reaches_relay() {
                         capacity_kwh: 11.0,
                         max_charge_kw: 5.5,
                         max_discharge_kw: 5.5,
-                        initial_soc: 0.50,
+                        initial_soc_frac: 0.50,
                         round_trip_efficiency: 0.92,
-                        min_soc: 0.10,
+                        min_soc_frac: 0.10,
                         c_terminal_eur_kwh: None,
                     },
                 ));
@@ -2819,9 +2819,9 @@ fn bench_heater_battery_gap_sweep() {
                     capacity_kwh: 11.0,
                     max_charge_kw: 5.5,
                     max_discharge_kw: 5.5,
-                    initial_soc: 0.50,
+                    initial_soc_frac: 0.50,
                     round_trip_efficiency: 0.92,
-                    min_soc: 0.10,
+                    min_soc_frac: 0.10,
                     c_terminal_eur_kwh: None,
                 },
             ));
@@ -2920,9 +2920,9 @@ fn bench_gap_executed_cost() {
                         capacity_kwh: 11.0,
                         max_charge_kw: 5.5,
                         max_discharge_kw: 5.5,
-                        initial_soc: 0.50,
+                        initial_soc_frac: 0.50,
                         round_trip_efficiency: 0.92,
-                        min_soc: 0.10,
+                        min_soc_frac: 0.10,
                         c_terminal_eur_kwh: None,
                     },
                 ));
@@ -3050,9 +3050,9 @@ fn bench_battery_ev_phase2_executed_window() {
                     capacity_kwh: 16.0,
                     max_charge_kw: 7.0,
                     max_discharge_kw: 7.0,
-                    initial_soc: 0.50,
+                    initial_soc_frac: 0.50,
                     round_trip_efficiency: eff,
-                    min_soc: 0.10,
+                    min_soc_frac: 0.10,
                     c_terminal_eur_kwh: None,
                 },
             ));

@@ -86,7 +86,7 @@ mod tests {
         SimState::from_params(
             &[AssetParams::Battery(BatteryParams {
                 id: crate::ids::ASSET_BATTERY.to_string(),
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 ..BatteryParams::default()
             })],
             chrono::Utc::now(),
@@ -106,7 +106,7 @@ mod tests {
         assert_eq!(cleared, vec!["battery_soc"]);
         let (entry, _) = sim.find_asset(crate::ids::ASSET_BATTERY).unwrap();
         match &entry.state {
-            AssetState::Battery(s) => assert!((s.soc - 0.8).abs() < 1e-9),
+            AssetState::Battery(s) => assert!((s.soc_frac - 0.8).abs() < 1e-9),
             other => panic!("expected Battery state, got {other:?}"),
         }
     }

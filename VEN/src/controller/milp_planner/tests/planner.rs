@@ -338,7 +338,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -467,10 +467,14 @@ fn run_planner_ev_must_run_energy_met() {
     // Set EV soc to 0.1
     if let Some(ev) = sim.assets.get_mut("ev") {
         let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
         let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
         ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
+            0.0
+        } else {
+            max_ch
+        };
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
@@ -479,7 +483,7 @@ fn run_planner_ev_must_run_energy_met() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -596,9 +600,9 @@ fn make_profile_n48() -> Profile {
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
                 max_discharge_kw: 5.0,
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 round_trip_efficiency: 0.9,
-                min_soc: 0.1,
+                min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
             AssetProfile::Ev(EvConfig {
@@ -606,9 +610,9 @@ fn make_profile_n48() -> Profile {
                 max_charge_kw: 7.2,
                 consumption_kwh_per_km: 0.18,
                 max_discharge_kw: 0.0,
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 battery_kwh: 40.0,
-                soc_target: 0.8,
+                soc_target_frac: 0.8,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
@@ -674,7 +678,7 @@ fn run_planner_n48_full_horizon() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -1306,10 +1310,14 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
     set_ev_plugged(&mut sim, true);
     if let Some(ev) = sim.assets.get_mut("ev") {
         let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
         let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
         ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
+            0.0
+        } else {
+            max_ch
+        };
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
@@ -1317,7 +1325,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -1420,7 +1428,7 @@ fn run_planner_ev_planned_plugged_ends_at_a_stated_departure() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,
@@ -1525,7 +1533,7 @@ fn marginal_cost_solves_with_every_asset_kind_active() {
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),
-        target_soc: 0.8,
+        target_soc_frac: 0.8,
         window_start: now,
         expected_trip_distance_km: None,
         expected_return_time: None,

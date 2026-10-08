@@ -34,19 +34,19 @@ impl AssetProfile {
                 capacity_kwh: c.capacity_kwh,
                 max_charge_kw: c.max_charge_kw,
                 max_discharge_kw: c.max_discharge_kw,
-                initial_soc: c.initial_soc,
+                initial_soc_frac: c.initial_soc_frac,
                 round_trip_efficiency: c.round_trip_efficiency,
-                min_soc: c.min_soc,
+                min_soc_frac: c.min_soc_frac,
                 c_terminal_eur_kwh: c.c_terminal_eur_kwh,
             }),
             AssetProfile::Ev(c) => AssetParams::Ev(EvParams {
                 id: c.id.clone(),
                 max_charge_kw: c.max_charge_kw,
                 max_discharge_kw: c.max_discharge_kw,
-                initial_soc: c.initial_soc,
+                initial_soc_frac: c.initial_soc_frac,
                 battery_kwh: c.battery_kwh,
                 consumption_kwh_per_km: c.consumption_kwh_per_km,
-                soc_target: c.soc_target,
+                soc_target_frac: c.soc_target_frac,
                 default_charge_kw: c.default_charge_kw,
                 min_charge_kw: c.min_charge_kw,
                 response_delay_s: c.response_delay_s,
@@ -242,7 +242,8 @@ pub struct EvConfig {
     #[serde(default = "super::defaults::default_ev_max_discharge")]
     pub max_discharge_kw: f64,
     #[serde(default = "super::defaults::default_ev_soc")]
-    pub initial_soc: f64,
+    #[serde(rename = "initial_soc")]
+    pub initial_soc_frac: f64,
     #[serde(default = "super::defaults::default_ev_battery")]
     pub battery_kwh: f64,
     /// Energy used per km driven [kWh/km]; converts a session's stated trip
@@ -250,7 +251,8 @@ pub struct EvConfig {
     #[serde(default = "super::defaults::default_ev_consumption_kwh_per_km")]
     pub consumption_kwh_per_km: f64,
     #[serde(default = "super::defaults::default_ev_soc_target")]
-    pub soc_target: f64,
+    #[serde(rename = "soc_target")]
+    pub soc_target_frac: f64,
     #[serde(default)]
     pub default_charge_kw: f64,
     /// Minimum charge power when plugged in (kW). EVSE semi-continuous lower bound:
@@ -418,11 +420,13 @@ pub struct BatteryConfig {
     #[serde(default = "super::defaults::default_battery_discharge")]
     pub max_discharge_kw: f64,
     #[serde(default = "super::defaults::default_battery_soc")]
-    pub initial_soc: f64,
+    #[serde(rename = "initial_soc")]
+    pub initial_soc_frac: f64,
     #[serde(default = "super::defaults::default_battery_efficiency")]
     pub round_trip_efficiency: f64,
     #[serde(default = "super::defaults::default_battery_min_soc")]
-    pub min_soc: f64,
+    #[serde(rename = "min_soc")]
+    pub min_soc_frac: f64,
     /// Optional override for auto-computed terminal energy reward [EUR/kWh].
     /// None (omitted in YAML): auto-compute from avg import tariff × round_trip_efficiency.
     /// Some(0.0): disabled. Some(x): fixed at x EUR/kWh.

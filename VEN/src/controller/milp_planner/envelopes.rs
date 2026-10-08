@@ -70,7 +70,8 @@ pub(crate) fn build_plan_envelopes(
                 .ev_obligations
                 .iter()
                 .map(|o| {
-                    ((o.target_soc - inputs.soc_ev_init.unwrap_or(0.0)) * inputs.ev_battery_kwh)
+                    ((o.target_soc_frac - inputs.soc_ev_init.unwrap_or(0.0))
+                        * inputs.ev_battery_kwh)
                         .max(0.0)
                 })
                 .fold(0.0_f64, f64::max);
@@ -109,8 +110,8 @@ pub(crate) fn build_plan_envelopes(
                     window_start,
                     window_end,
                     slots_available,
-                    max_acceptable_rate: 0.35,
-                    min_acceptable_rate: 0.05,
+                    max_acceptable_rate_eur_kwh: 0.35,
+                    min_acceptable_rate_eur_kwh: 0.05,
                     budget_remaining_eur: 1.0e9,
                     estimated_cost_eur,
                     estimated_co2_g,
@@ -148,8 +149,8 @@ pub(crate) fn build_plan_envelopes(
                     window_start,
                     window_end,
                     slots_available,
-                    max_acceptable_rate: 0.35,
-                    min_acceptable_rate: 0.05,
+                    max_acceptable_rate_eur_kwh: 0.35,
+                    min_acceptable_rate_eur_kwh: 0.05,
                     budget_remaining_eur: 1.0e9,
                     estimated_cost_eur,
                     estimated_co2_g,
@@ -193,8 +194,8 @@ pub(crate) fn build_plan_envelopes(
             window_start,
             window_end,
             slots_available,
-            max_acceptable_rate: 0.35,
-            min_acceptable_rate: 0.05,
+            max_acceptable_rate_eur_kwh: 0.35,
+            min_acceptable_rate_eur_kwh: 0.05,
             budget_remaining_eur: 1.0e9,
             estimated_cost_eur,
             estimated_co2_g,

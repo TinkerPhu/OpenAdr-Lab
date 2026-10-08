@@ -41,6 +41,11 @@ pub fn energy_kwh_from_min(power_kw: f64, minutes: f64) -> f64 {
     power_kw * minutes / 60.0
 }
 
+/// A fraction (0..1, e.g. a state of charge) as a percentage.
+pub fn pct_from_frac(frac: f64) -> f64 {
+    frac * 100.0
+}
+
 /// The profile's Zone A planning step [s] (5 minutes), for tests that need the default grid.
 #[cfg(test)]
 pub const ZONE_A_STEP_S: f64 = 300.0;
@@ -56,6 +61,13 @@ mod tests {
         }
         assert_eq!(kw_from_w(1500.0), 1.5);
         assert_eq!(w_from_kw(-2.5), -2500.0);
+    }
+
+    #[test]
+    fn a_fraction_becomes_a_percentage() {
+        assert_eq!(pct_from_frac(0.5), 50.0);
+        assert_eq!(pct_from_frac(1.0), 100.0);
+        assert_eq!(pct_from_frac(0.0), 0.0);
     }
 
     #[test]

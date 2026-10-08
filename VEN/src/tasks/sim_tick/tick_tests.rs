@@ -82,9 +82,9 @@ mod tests {
                     capacity_kwh: 10.0,
                     max_charge_kw: 5.0,
                     max_discharge_kw: 5.0,
-                    initial_soc: 0.5,
+                    initial_soc_frac: 0.5,
                     round_trip_efficiency: 0.95,
-                    min_soc: 0.1,
+                    min_soc_frac: 0.1,
                     c_terminal_eur_kwh: None,
                 }),
                 AssetParams::Pv(PvParams {

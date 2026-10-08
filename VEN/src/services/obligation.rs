@@ -261,17 +261,17 @@ mod tests {
                 AssetReportSample {
                     ts: ts(0),
                     power_kw: 1.0,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(900),
                     power_kw: 1.5,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(1800),
                     power_kw: 2.0,
-                    soc: None,
+                    soc_frac: None,
                 },
             ],
         );
@@ -342,17 +342,17 @@ mod tests {
                 AssetReportSample {
                     ts: ts(1800),
                     power_kw: 2.0,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(2700),
                     power_kw: 3.0,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(3600),
                     power_kw: 4.0,
-                    soc: None,
+                    soc_frac: None,
                 },
             ],
         );
@@ -407,17 +407,17 @@ mod tests {
                 AssetReportSample {
                     ts: ts(1800),
                     power_kw: 2.0,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(2700),
                     power_kw: 3.0,
-                    soc: None,
+                    soc_frac: None,
                 },
                 AssetReportSample {
                     ts: ts(3600),
                     power_kw: 4.0,
-                    soc: None,
+                    soc_frac: None,
                 },
             ],
         );

@@ -1128,12 +1128,12 @@ mod milp_context_trait_tests {
             comfort_rates: vec![
                 ComfortRate {
                     fill: 0.0,
-                    max_marginal_price: 0.30,
+                    max_marginal_price_eur_kwh: 0.30,
                     max_marginal_co2: 0.0,
                 },
                 ComfortRate {
                     fill: 1.0,
-                    max_marginal_price: 0.18,
+                    max_marginal_price_eur_kwh: 0.18,
                     max_marginal_co2: 0.0,
                 },
             ],
@@ -1201,12 +1201,12 @@ mod milp_context_trait_tests {
             comfort_rates: vec![
                 ComfortRate {
                     fill: 0.0,
-                    max_marginal_price: 0.30,
+                    max_marginal_price_eur_kwh: 0.30,
                     max_marginal_co2: 300.0,
                 },
                 ComfortRate {
                     fill: 1.0,
-                    max_marginal_price: 0.18,
+                    max_marginal_price_eur_kwh: 0.18,
                     max_marginal_co2: 200.0, // 0.2 kgCO2/kWh
                 },
             ],

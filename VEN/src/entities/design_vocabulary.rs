@@ -172,7 +172,8 @@ pub struct AssetProfile {
     pub bidirectional: bool,           // can both consume and produce? (battery, V2G)
     pub has_storage: bool,             // does it have an energy buffer?
     pub max_capacity_kwh: Option<f64>, // storage capacity if has_storage
-    pub min_soc: Option<f64>,          // minimum SoC for discharge (e.g. 0.10)
+    #[serde(rename = "min_soc")]
+    pub min_soc_frac: Option<f64>, // minimum SoC for discharge (e.g. 0.10)
     pub efficiency: f64,               // round-trip or conversion efficiency (0.0–1.0)
     pub response_delay_s: f64,         // expected time to confirm setpoint change
     pub deviation_threshold_kw: f64,   // |actual - planned| above this triggers replan
@@ -245,7 +246,8 @@ pub struct AssetForecast {
     /// Predicted power at each planning step (kW, positive = import)
     pub power_kw: Vec<f64>,
     /// Predicted SoC at each step (None for non-storage assets)
-    pub soc: Option<Vec<f64>>,
+    #[serde(rename = "soc")]
+    pub soc_frac: Option<Vec<f64>>,
     /// Predicted connection/availability windows (None = always available)
     pub availability_windows: Option<Vec<TimeRange>>,
 }

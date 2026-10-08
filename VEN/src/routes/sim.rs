@@ -111,13 +111,15 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
 
 #[derive(Deserialize)]
 pub struct SocBody {
-    pub soc: f64,
+    #[serde(rename = "soc")]
+    pub soc_frac: f64,
 }
 
 #[derive(Deserialize)]
 pub struct BatteryConfigBody {
     pub capacity_kwh: f64,
-    pub min_soc: Option<f64>,
+    #[serde(rename = "min_soc")]
+    pub min_soc_frac: Option<f64>,
 }
 
 /// GET /sim/schema — returns control descriptors for all configured assets.
@@ -137,7 +139,7 @@ pub async fn post_sim_reset(
     Path(asset_id): Path<String>,
     Json(body): Json<SocBody>,
 ) -> impl IntoResponse {
-    let values = std::collections::HashMap::from([("soc".to_string(), body.soc)]);
+    let values = std::collections::HashMap::from([("soc".to_string(), body.soc_frac)]);
     no_content_or_error(ctx.roster.reset_asset(&asset_id, values).await)
 }
 
@@ -148,8 +150,8 @@ pub async fn put_sim_config_battery(
 ) -> impl IntoResponse {
     let mut values = std::collections::HashMap::new();
     values.insert("capacity_kwh".to_string(), body.capacity_kwh);
-    if let Some(min_soc) = body.min_soc {
-        values.insert("min_soc".to_string(), min_soc);
+    if let Some(min_soc_frac) = body.min_soc_frac {
+        values.insert("min_soc".to_string(), min_soc_frac);
     }
     no_content_or_error(
         ctx.roster

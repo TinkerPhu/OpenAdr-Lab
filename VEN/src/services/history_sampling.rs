@@ -112,7 +112,7 @@ impl HistorySampler {
             acc.n += 1;
             let view = &snap.history;
             if let Some(soc_frac) = view.soc_frac {
-                acc.soc_pct_sum += soc_frac * 100.0;
+                acc.soc_pct_sum += crate::entities::units::pct_from_frac(soc_frac);
                 acc.soc_pct_n += 1;
             }
             if let Some(temperature_c) = view.temperature_c {
@@ -233,9 +233,9 @@ mod tests {
         Utc.timestamp_opt(secs, 0).unwrap()
     }
 
-    fn snap(now: DateTime<Utc>, power_kw: f64, soc: Option<f64>) -> SimSnapshot {
+    fn snap(now: DateTime<Utc>, power_kw: f64, soc_frac: Option<f64>) -> SimSnapshot {
         let history = AssetHistoryView {
-            soc_frac: soc,
+            soc_frac,
             ..Default::default()
         };
         let mut assets = HashMap::new();

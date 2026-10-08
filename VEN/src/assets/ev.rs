@@ -33,12 +33,14 @@ pub struct EvCharger {
     /// Energy used per kilometre driven [kWh/km] — see `EvParams`.
     pub consumption_kwh_per_km: f64,
     /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
-    pub soc_target: f64,
+    #[serde(rename = "soc_target")]
+    pub soc_target_frac: f64,
     /// Original profile value — used for snap-back when inject override is released.
     pub soc_target_profile: f64,
     pub default_charge_kw: f64,
     /// V2G floor; 0.0 if not specified in profile.
-    pub min_soc: f64,
+    #[serde(rename = "min_soc")]
+    pub min_soc_frac: f64,
     /// Minimum sustained charge rate — commanded setpoints strictly between 0 and
     /// this value snap to 0 (most EVSE controllers cannot hold an arbitrarily low
     /// current). Does not apply to V2G discharge.
@@ -71,7 +73,8 @@ pub struct EvCharger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvState {
     /// State of charge in [0.0, 1.0].
-    pub soc: f64,
+    #[serde(rename = "soc")]
+    pub soc_frac: f64,
     pub plugged: bool,
     /// Actual power last tick. Positive = charging (import). Negative = V2G (export).
     pub actual_power_kw: f64,
@@ -99,10 +102,10 @@ impl EvCharger {
             },
             v2g_capable: cfg.v2g_capable,
             battery_kwh: cfg.battery_kwh,
-            soc_target: cfg.soc_target,
-            soc_target_profile: cfg.soc_target,
+            soc_target_frac: cfg.soc_target_frac,
+            soc_target_profile: cfg.soc_target_frac,
             default_charge_kw: cfg.default_charge_kw,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: cfg.min_charge_kw,
             response_delay_s: cfg.response_delay_s,
             departure_time: None,
@@ -114,7 +117,7 @@ impl EvCharger {
 
     pub fn initial_state(cfg: &EvParams) -> EvState {
         EvState {
-            soc: cfg.initial_soc,
+            soc_frac: cfg.initial_soc_frac,
             plugged: true,
             actual_power_kw: cfg.max_charge_kw,
             pending_command_kw: cfg.max_charge_kw,
@@ -146,10 +149,10 @@ impl EvCharger {
         // now, and stage this tick's command to be applied one tick later.
         let applied_kw = state.pending_command_kw;
         let dt_h = crate::entities::units::dt_h_from_duration(dt);
-        let new_soc = (state.soc + (applied_kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc_frac + (applied_kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
         (
             EvState {
-                soc: new_soc,
+                soc_frac: new_soc,
                 plugged: state.plugged,
                 actual_power_kw: applied_kw,
                 pending_command_kw: kw,
@@ -170,12 +173,12 @@ impl EvCharger {
             };
         }
         AssetCapability {
-            max_export_kw: if state.soc <= self.min_soc {
+            max_export_kw: if state.soc_frac <= self.min_soc_frac {
                 0.0
             } else {
                 -self.max_discharge_kw
             },
-            max_import_kw: if state.soc >= self.soc_target {
+            max_import_kw: if state.soc_frac >= self.soc_target_frac {
                 0.0
             } else {
                 self.max_charge_kw
@@ -198,7 +201,7 @@ impl EvCharger {
     /// negative setpoint — so it's continuously
     /// controllable down to 0, same as battery, regardless of `max_export_kw`.
     pub fn flexibility_floor_inner(&self, state: &EvState) -> AssetFlexibilityFloor {
-        let min_import_kw = if !state.plugged || state.soc >= self.soc_target {
+        let min_import_kw = if !state.plugged || state.soc_frac >= self.soc_target_frac {
             0.0
         } else {
             self.min_charge_kw
@@ -211,13 +214,13 @@ impl EvCharger {
 
     pub fn state_values(&self, state: &EvState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("soc".into(), state.soc);
+        m.insert("soc".into(), state.soc_frac);
         m.insert("plugged".into(), if state.plugged { 1.0 } else { 0.0 });
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("max_discharge_kw".into(), self.max_discharge_kw);
         m.insert("min_charge_kw".into(), self.min_charge_kw);
-        m.insert("soc_target".into(), self.soc_target);
-        m.insert("min_soc".into(), self.min_soc);
+        m.insert("soc_target".into(), self.soc_target_frac);
+        m.insert("min_soc".into(), self.min_soc_frac);
         m.insert("battery_kwh".into(), self.battery_kwh);
         m
     }
@@ -228,8 +231,8 @@ impl EvCharger {
     // exists anywhere to drift from it.
 
     pub fn reset(&self, state: &mut EvState, values: HashMap<String, f64>) {
-        if let Some(&soc) = values.get("soc") {
-            state.soc = soc.clamp(0.0, 1.0);
+        if let Some(&soc_frac) = values.get("soc") {
+            state.soc_frac = soc_frac.clamp(0.0, 1.0);
         }
     }
 
@@ -326,12 +329,12 @@ impl Asset for EvCharger {
         vec![
             crate::entities::asset::ComfortRate {
                 fill: 0.0,
-                max_marginal_price: 0.45,
+                max_marginal_price_eur_kwh: 0.45,
                 max_marginal_co2: 0.0,
             },
             crate::entities::asset::ComfortRate {
                 fill: 1.0,
-                max_marginal_price: 0.30,
+                max_marginal_price_eur_kwh: 0.30,
                 max_marginal_co2: 0.0,
             },
         ]
@@ -361,7 +364,7 @@ impl Asset for EvCharger {
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &EvState = own(state);
         AssetHistoryView {
-            soc_frac: Some(s.soc),
+            soc_frac: Some(s.soc_frac),
             plugged: Some(s.plugged),
             ..Default::default()
         }
@@ -418,7 +421,7 @@ impl TickOverridable for EvCharger {
         // Refresh first so `is_away_at` below reads this tick's deadline.
         self.departure_time = overrides.ev_departure_time;
         // Behaviour C: ev_soc_target — override BMS charge ceiling.
-        self.soc_target = overrides
+        self.soc_target_frac = overrides
             .ev_soc_target_override
             .unwrap_or(self.soc_target_profile);
 
@@ -476,8 +479,8 @@ impl RequestResolvable for EvCharger {
     fn request_defaults(&self, state: &AssetState) -> RequestDefaults {
         let s: &EvState = own(state);
         RequestDefaults {
-            current_soc: s.soc,
-            default_soc_target: self.soc_target,
+            current_soc: s.soc_frac,
+            default_soc_target: self.soc_target_frac,
             capacity_kwh: self.battery_kwh,
             max_charge_kw: self.max_charge_kw,
         }
@@ -492,8 +495,8 @@ impl RequestResolvable for EvCharger {
             return None;
         }
         Some((
-            (s.soc - self.min_soc).max(0.0) * self.battery_kwh,
-            (1.0 - s.soc).max(0.0) * self.battery_kwh,
+            (s.soc_frac - self.min_soc_frac).max(0.0) * self.battery_kwh,
+            (1.0 - s.soc_frac).max(0.0) * self.battery_kwh,
         ))
     }
 
@@ -501,7 +504,7 @@ impl RequestResolvable for EvCharger {
     /// arm (EV is the only asset kind that absorbs surplus today).
     fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
         let s: &EvState = own(state);
-        if s.plugged && s.soc < self.soc_target {
+        if s.plugged && s.soc_frac < self.soc_target_frac {
             Some(surplus_kw.min(self.max_charge_kw))
         } else {
             None
@@ -537,17 +540,17 @@ mod tests {
         }
     }
 
-    fn make_ev(plugged: bool, soc: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
+    fn make_ev(plugged: bool, soc_frac: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
         let cfg = EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
             v2g_capable: false,
             battery_kwh: 40.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
@@ -555,7 +558,7 @@ mod tests {
             usage_sim_seed_tag: 0,
         };
         let state = EvState {
-            soc,
+            soc_frac,
             plugged,
             actual_power_kw,
             pending_command_kw: actual_power_kw,
@@ -616,9 +619,9 @@ mod tests {
         };
         let expected_soc = 0.5 + 7.4 * 0.25 / 40.0;
         assert!(
-            (s.soc - expected_soc).abs() < 1e-9,
+            (s.soc_frac - expected_soc).abs() < 1e-9,
             "slot 1 must start at the SoC slot 0's charge reached, got {}",
-            s.soc
+            s.soc_frac
         );
     }
 
@@ -656,8 +659,8 @@ mod tests {
 
     #[test]
     fn capability_reports_stepless_adjustability_plugged_and_unplugged() {
-        for (plugged, soc) in [(true, 0.5), (false, 0.5)] {
-            let (ev, state) = make_ev(plugged, soc, 0.0);
+        for (plugged, soc_frac) in [(true, 0.5), (false, 0.5)] {
+            let (ev, state) = make_ev(plugged, soc_frac, 0.0);
             let cap = ev.capability_inner(&state);
             assert_eq!(
                 cap.adjustability,
@@ -732,7 +735,7 @@ mod tests {
         let (ev, mut state) = make_ev(true, 0.99, 0.0);
         let ev = EvCharger {
             max_charge_kw: 10.0,
-            soc_target: 1.0,
+            soc_target_frac: 1.0,
             soc_target_profile: 1.0,
             battery_kwh: 10.0,
             consumption_kwh_per_km: 0.18,
@@ -742,7 +745,7 @@ mod tests {
             let (ns, _) = ev.step_inner(&state, 10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc - 1.0).abs() < 0.001);
+        assert!((state.soc_frac - 1.0).abs() < 0.001);
         let (_, actual) = ev.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
@@ -756,9 +759,9 @@ mod tests {
             state = ns;
         }
         assert!(
-            state.soc <= 0.8 + 0.01,
+            state.soc_frac <= 0.8 + 0.01,
             "soc should not exceed soc_target (0.8), got {}",
-            state.soc
+            state.soc_frac
         );
         let (_, actual) = ev.step_inner(&state, 7.4, Duration::seconds(1));
         assert_eq!(actual, 0.0, "charging must stop at soc_target");
@@ -772,10 +775,10 @@ mod tests {
             v2g_capable: true,
             battery_kwh: 10.0,
             consumption_kwh_per_km: 0.18,
-            soc_target: 1.0,
+            soc_target_frac: 1.0,
             soc_target_profile: 1.0,
             default_charge_kw: 0.0,
-            min_soc: 0.0,
+            min_soc_frac: 0.0,
             min_charge_kw: 1.4,
             response_delay_s: 10.0,
             departure_time: None,
@@ -783,7 +786,7 @@ mod tests {
             usage_sim_seed_tag: 0,
         };
         let mut state = EvState {
-            soc: 0.01,
+            soc_frac: 0.01,
             plugged: true,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -793,7 +796,7 @@ mod tests {
             let (ns, _) = ev.step_inner(&state, -10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc - 0.0).abs() < 0.001);
+        assert!((state.soc_frac - 0.0).abs() < 0.001);
         let (_, actual) = ev.step_inner(&state, -10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
@@ -889,7 +892,7 @@ mod tests {
         let (ev, state) = make_ev(true, 0.5, 7.4);
         let vals = ev.state_values(&state);
         assert_eq!(vals.get("max_discharge_kw"), Some(&ev.max_discharge_kw));
-        assert_eq!(vals.get("min_soc"), Some(&ev.min_soc));
+        assert_eq!(vals.get("min_soc"), Some(&ev.min_soc_frac));
     }
 }
 

@@ -146,9 +146,9 @@ fn make_profile() -> Profile {
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
                 max_discharge_kw: 5.0,
-                initial_soc: 0.5,
+                initial_soc_frac: 0.5,
                 round_trip_efficiency: 0.9,
-                min_soc: 0.1,
+                min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
             AssetProfile::Ev(EvConfig {
@@ -156,9 +156,9 @@ fn make_profile() -> Profile {
                 max_charge_kw: 7.4,
                 consumption_kwh_per_km: 0.18,
                 max_discharge_kw: 0.0,
-                initial_soc: 0.2,
+                initial_soc_frac: 0.2,
                 battery_kwh: 60.0,
-                soc_target: 0.8,
+                soc_target_frac: 0.8,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
                 response_delay_s: 10.0,
@@ -249,10 +249,10 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
             v2g_capable: v("max_discharge_kw") > 0.0,
             battery_kwh: v("battery_kwh"),
             consumption_kwh_per_km: 0.18,
-            soc_target: v("soc_target"),
+            soc_target_frac: v("soc_target"),
             soc_target_profile: v("soc_target"),
             default_charge_kw: ev.default_setpoint_kw,
-            min_soc: v("min_soc"),
+            min_soc_frac: v("min_soc"),
             min_charge_kw: v("min_charge_kw"),
             response_delay_s: 0.0,
             departure_time: None,
@@ -260,7 +260,7 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
             usage_sim_seed_tag: 0,
         };
         let state = AssetState::Ev(EvState {
-            soc: v("soc"),
+            soc_frac: v("soc"),
             plugged,
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
@@ -270,7 +270,7 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
     }
 }
 
-fn set_battery_soc(snap: &mut SimSnapshot, soc: f64) {
+fn set_battery_soc(snap: &mut SimSnapshot, soc_frac: f64) {
     if let Some(bat) = snap.assets.get_mut("battery") {
         let v = |k: &str| bat.val(k).unwrap_or(0.0);
         let battery = Battery {
@@ -278,10 +278,10 @@ fn set_battery_soc(snap: &mut SimSnapshot, soc: f64) {
             max_charge_kw: v("max_charge_kw"),
             max_discharge_kw: v("max_discharge_kw"),
             round_trip_efficiency: v("round_trip_efficiency"),
-            min_soc: v("min_soc"),
+            min_soc_frac: v("min_soc"),
         };
         let state = AssetState::Battery(BatteryState {
-            soc,
+            soc_frac,
             actual_power_kw: 0.0,
         });
         refresh_from_asset(bat, &battery, state);
@@ -448,13 +448,13 @@ fn build_asset_contexts(
     for ap in &profile.assets {
         match ap {
             AssetProfile::Battery(cfg) => {
-                let soc = snap
+                let soc_frac = snap
                     .assets
                     .get("battery")
                     .and_then(|s| s.val("soc"))
-                    .unwrap_or(cfg.initial_soc);
+                    .unwrap_or(cfg.initial_soc_frac);
                 let state = AssetState::Battery(BatteryState {
-                    soc,
+                    soc_frac,
                     actual_power_kw: 0.0,
                 });
                 let ac = Battery::from_params(cfg);
@@ -483,11 +483,11 @@ fn build_asset_contexts(
                 ));
             }
             AssetProfile::Ev(cfg) => {
-                let soc = snap
+                let soc_frac = snap
                     .assets
                     .get("ev")
                     .and_then(|s| s.val("soc"))
-                    .unwrap_or(cfg.initial_soc);
+                    .unwrap_or(cfg.initial_soc_frac);
                 let plugged = snap
                     .assets
                     .get("ev")
@@ -495,7 +495,7 @@ fn build_asset_contexts(
                     .map(|v| v > 0.5)
                     .unwrap_or(true);
                 let state = AssetState::Ev(EvState {
-                    soc,
+                    soc_frac,
                     actual_power_kw: 0.0,
                     plugged,
                     pending_command_kw: 0.0,
@@ -573,13 +573,13 @@ fn build_asset_contexts(
 /// kWh→SoC conversion cannot drift test by test.
 fn ev_firm_kwh(
     battery_kwh: f64,
-    soc_init: f64,
+    soc_init_frac: f64,
     kwh: f64,
     deadline_step: usize,
 ) -> Vec<crate::controller::milp_planner::asset_port::EvObligation> {
     vec![crate::controller::milp_planner::asset_port::EvObligation {
         deadline_step,
-        target_soc: soc_init + kwh / battery_kwh,
+        target_soc_frac: soc_init_frac + kwh / battery_kwh,
         session_id: None,
     }]
 }
@@ -589,18 +589,18 @@ fn ev_firm_kwh(
 /// `t_ev_dead_step` and `e_ev_required_kwh` as a pair call this instead, so the
 /// kWh→SoC conversion lives in one place.
 fn set_ev_firm(inputs: &mut MilpInputs, kwh: f64, deadline_step: usize) {
-    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
-    inputs.ev_obligations = ev_firm_kwh(inputs.ev_battery_kwh, soc_init, kwh, deadline_step);
+    let soc_init_frac = inputs.soc_ev_init.unwrap_or(0.0);
+    inputs.ev_obligations = ev_firm_kwh(inputs.ev_battery_kwh, soc_init_frac, kwh, deadline_step);
 }
 
 /// The firm energy a fixture's obligations demand above its live SoC [kWh] — the
 /// quantity the old scalar `e_ev_required_kwh` held directly.
 fn firm_kwh(inputs: &MilpInputs) -> f64 {
-    let soc_init = inputs.soc_ev_init.unwrap_or(0.0);
+    let soc_init_frac = inputs.soc_ev_init.unwrap_or(0.0);
     inputs
         .ev_obligations
         .iter()
-        .map(|o| ((o.target_soc - soc_init) * inputs.ev_battery_kwh).max(0.0))
+        .map(|o| ((o.target_soc_frac - soc_init_frac) * inputs.ev_battery_kwh).max(0.0))
         .fold(0.0_f64, f64::max)
 }
 
@@ -633,8 +633,8 @@ fn contexts_from_inputs(
         v.push(Box::new(MockEvCtx {
             ctx: EvMilpContext {
                 mode,
-                soc_init: inputs.soc_ev_init.unwrap_or(0.0),
-                soc_max: 1.0,
+                soc_init_frac: inputs.soc_ev_init.unwrap_or(0.0),
+                soc_max_frac: 1.0,
                 a_ev: inputs.a_ev.clone(),
                 // Forwarded, not dropped: R-93 put the trip drops inside the SoC
                 // balance, so a fixture that declares them must see them in the model.

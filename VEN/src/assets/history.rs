@@ -139,7 +139,7 @@ mod history_buffer_tests {
             ts,
             power_kw,
             state: AssetState::Battery(crate::assets::battery::BatteryState {
-                soc: 0.5,
+                soc_frac: 0.5,
                 actual_power_kw: power_kw,
             }),
         }

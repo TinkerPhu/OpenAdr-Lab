@@ -30,7 +30,7 @@ pub fn validate_curve(rates: &[ComfortRate]) -> Result<(), String> {
     let mut prev_price: Option<f64> = None;
     for (i, r) in rates.iter().enumerate() {
         if !(r.fill.is_finite()
-            && r.max_marginal_price.is_finite()
+            && r.max_marginal_price_eur_kwh.is_finite()
             && r.max_marginal_co2.is_finite())
         {
             return Err(format!("point {i}: values must be finite"));
@@ -44,25 +44,25 @@ pub fn validate_curve(rates: &[ComfortRate]) -> Result<(), String> {
                 r.fill
             ));
         }
-        if !(0.0..=MAX_BID_EUR_KWH).contains(&r.max_marginal_price) {
+        if !(0.0..=MAX_BID_EUR_KWH).contains(&r.max_marginal_price_eur_kwh) {
             return Err(format!(
                 "point {i}: max_marginal_price {} outside [0, {MAX_BID_EUR_KWH}] €/kWh",
-                r.max_marginal_price
+                r.max_marginal_price_eur_kwh
             ));
         }
         if r.max_marginal_co2 < 0.0 {
             return Err(format!("point {i}: max_marginal_co2 must be ≥ 0"));
         }
         if let Some(prev) = prev_price {
-            if r.max_marginal_price > prev {
+            if r.max_marginal_price_eur_kwh > prev {
                 return Err(format!(
                     "point {i}: max_marginal_price {} rises above the previous {prev} —                      bids must not increase with fill",
-                    r.max_marginal_price
+                    r.max_marginal_price_eur_kwh
                 ));
             }
         }
         prev_fill = r.fill;
-        prev_price = Some(r.max_marginal_price);
+        prev_price = Some(r.max_marginal_price_eur_kwh);
     }
     Ok(())
 }
@@ -105,7 +105,7 @@ pub fn comfort_curve_source(
 pub(crate) fn curve_point(fill: f64, bid: f64) -> ComfortRate {
     ComfortRate {
         fill,
-        max_marginal_price: bid,
+        max_marginal_price_eur_kwh: bid,
         max_marginal_co2: 0.0,
     }
 }
@@ -177,13 +177,13 @@ mod tests {
 
         let eff = effective_comfort_rates(&overrides, "ev", default_rates.clone());
         assert!(
-            (eff[0].max_marginal_price - 0.50).abs() < 1e-9,
+            (eff[0].max_marginal_price_eur_kwh - 0.50).abs() < 1e-9,
             "override wins"
         );
 
         let eff = effective_comfort_rates(&overrides, "heater", default_rates);
         assert!(
-            (eff[0].max_marginal_price - 0.30).abs() < 1e-9,
+            (eff[0].max_marginal_price_eur_kwh - 0.30).abs() < 1e-9,
             "no override → built-in default"
         );
     }

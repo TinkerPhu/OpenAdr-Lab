@@ -46,7 +46,7 @@ pub(crate) fn spawn_obligation_check(
                             .map(|p| AssetReportSample {
                                 ts: p.ts,
                                 power_kw: p.power_kw,
-                                soc: p.state.soc(),
+                                soc_frac: p.state.soc_frac(),
                             })
                             .collect();
                         (entry.id.clone(), samples)

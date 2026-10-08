@@ -165,7 +165,7 @@ impl BatteryMilpContext {
     /// Construct from a live `AssetState` and the current sim `Battery` config.
     pub fn from_state(state: &super::AssetState, cfg: &Battery, c_terminal_eur_kwh: f64) -> Self {
         let live_soc = if let super::AssetState::Battery(s) = state {
-            s.soc
+            s.soc_frac
         } else {
             0.5
         };
@@ -264,7 +264,7 @@ impl Battery {
         BatteryMilpContext {
             e_nom_kwh: cap,
             e_init_kwh: live_soc * cap,
-            e_min_kwh: self.min_soc * cap,
+            e_min_kwh: self.min_soc_frac * cap,
             e_max_kwh: cap,
             p_ch_max_kw: self.max_charge_kw,
             p_dis_max_kw: self.max_discharge_kw,

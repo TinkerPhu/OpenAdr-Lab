@@ -13,12 +13,12 @@ use crate::controller::milp_planner::asset_port::ExogenousSocDrops;
 
 /// An EV that is present throughout, cheap to charge, and obliged to reach a
 /// target — the shape every test here varies.
-fn ev_inputs(n: usize, battery_kwh: f64, soc_init: f64) -> MilpInputs {
+fn ev_inputs(n: usize, battery_kwh: f64, soc_init_frac: f64) -> MilpInputs {
     let mut inputs = make_solver_inputs(n, 0.0);
     inputs.a_ev = vec![true; n];
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.ev_battery_kwh = battery_kwh;
-    inputs.soc_ev_init = Some(soc_init);
+    inputs.soc_ev_init = Some(soc_init_frac);
     inputs.p_ev_max_kw = 7.2;
     inputs.p_ev_min_kw = 0.0;
     inputs
@@ -76,10 +76,10 @@ fn soc_never_exceeds_a_full_pack() {
 
     let sol = solve(&inputs);
 
-    for (t, &soc) in sol.soc_ev.iter().enumerate() {
+    for (t, &soc_frac) in sol.soc_ev.iter().enumerate() {
         assert!(
-            soc <= 1.0 + 1e-6,
-            "SoC must never exceed a full pack, got {soc} at step {t}"
+            soc_frac <= 1.0 + 1e-6,
+            "SoC must never exceed a full pack, got {soc_frac} at step {t}"
         );
     }
 }
@@ -203,12 +203,12 @@ fn two_obligations_are_each_met_at_their_own_step() {
     inputs.ev_obligations = vec![
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 2,
-            target_soc: 0.25,
+            target_soc_frac: 0.25,
             session_id: None,
         },
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 6,
-            target_soc: 0.75,
+            target_soc_frac: 0.75,
             session_id: None,
         },
     ];
@@ -332,12 +332,12 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     inputs.ev_obligations = vec![
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 1,
-            target_soc: 0.80,
+            target_soc_frac: 0.80,
             session_id: None,
         },
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 10,
-            target_soc: 0.80,
+            target_soc_frac: 0.80,
             session_id: None,
         },
     ];

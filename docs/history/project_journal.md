@@ -14956,3 +14956,18 @@ typed, and anything else a `POST /sensors` client sends is kept in a flattened `
 back, so the endpoint stays a passthrough. Only a non-object `raw` (accepted before) is now refused.
 The `to_value(..).unwrap_or_default()` in `GET /plan`, `/ledger` and `/sim` went the way of the one in
 `POST /user-requests` (R-113): `Json(x)` serialises directly.
+
+## R-115: the SoC and price fields say their unit, in Rust only (refactor/r115-unit-suffixes)
+
+`soc`, `soc_init`, `soc_max`, `target_soc`, `min_soc`, `initial_soc` and `soc_target` are fractions
+0..1 and now say so (`*_frac`); `max_marginal_price`, `max_acceptable_rate` and `min_acceptable_rate`
+are EUR/kWh (`*_eur_kwh`, as `max_marginal_rate_eur_kwh` already was). Decided with the user: Rust
+names only. Every serde type keeps its JSON, wire and profile-YAML name through `#[serde(rename)]` (19
+fields), so the UI, the stored state and the shipped profiles are unchanged. The rename was done by a
+lexer that left comments and string literals alone except format-string captures (`{soc}`), then
+checked by listing every renamed field declaration against its container's derives. `w_energy` keeps
+its name: it is a dimensionless weight on the cost term, and a unit suffix would claim one it does not
+have. Renaming made the fraction-to-percent conversion readable in two places, so it became
+`units::pct_from_frac` and audit rule 10 now refuses `_frac * 100.0`. Filed: the SoC-shaped names
+outside the list (`soc_ev`, `battery_soc`, `current_soc`, ...), which need their units checked one by
+one: the MILP's `soc_ev` may be kWh (R-125).

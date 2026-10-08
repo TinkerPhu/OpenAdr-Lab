@@ -119,7 +119,7 @@ fn predicted_uses(
         uses.push(ExpectedVehicleUse {
             window_start: now,
             departure_at: now,
-            target_soc: cfg.soc_target,
+            target_soc_frac: cfg.soc_target_frac,
             firm: false,
             consumption: Some(ExpectedTripConsumption {
                 return_at: active.return_at,
@@ -135,7 +135,7 @@ fn predicted_uses(
         uses.push(ExpectedVehicleUse {
             window_start: opens_at,
             departure_at: trip.leave_at,
-            target_soc: cfg.soc_target,
+            target_soc_frac: cfg.soc_target_frac,
             firm,
             // The generator states the trip's own consumption as a percentage of
             // pack, so no distance is involved and nothing is defaulted: this is a
@@ -161,7 +161,7 @@ fn predicted_uses(
         uses.push(ExpectedVehicleUse {
             window_start: window_open,
             departure_at: horizon_end,
-            target_soc: cfg.soc_target,
+            target_soc_frac: cfg.soc_target_frac,
             firm: false,
             consumption: None,
             session_id: None,
@@ -196,7 +196,7 @@ mod tests {
     fn forecast_cfg(leave_h: u32, return_h: u32, probability: f64) -> EvCharger {
         let mut ev = EvCharger::from_params(&EvParams {
             battery_kwh: 60.0,
-            soc_target: 0.8,
+            soc_target_frac: 0.8,
             ..Default::default()
         });
         ev.usage_sim = Some(EvUsageSimParams {
@@ -285,7 +285,7 @@ mod tests {
             2,
             "each departure binds its own target"
         );
-        assert!(out.obligations.iter().all(|o| o.target_soc == 0.8));
+        assert!(out.obligations.iter().all(|o| o.target_soc_frac == 0.8));
         assert_eq!(
             out.drop_frac_per_slot.iter().filter(|d| **d > 0.0).count(),
             2,

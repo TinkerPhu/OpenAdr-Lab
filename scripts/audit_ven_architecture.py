@@ -64,7 +64,8 @@ The rules, and why each exists:
   10. No inline unit conversions outside `entities/units.rs`: watts to kilowatts, a duration or a
      step in seconds to hours, and the `kw * dt_h` multiplication that follows (R-111: about 22
      copies in two spellings, `num_milliseconds() / 3_600_000.0` and `seconds / 3600.0`). Use
-     `kw_from_w`, `w_from_kw`, `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`. The patterns are
+     `kw_from_w`, `w_from_kw`, `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`, and
+     `pct_from_frac` for a `_frac` quantity as a percentage (R-115). The patterns are
      specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds), so
      hour-of-day arithmetic and physical constants such as `4.186 / 3600` do not match.
 
@@ -192,6 +193,7 @@ UNIT_CONVERSION = (
     r"|num_(milli)?seconds\(\) as f64 / 3[_]?6[0_]*\.?0*"
     r"|(\b[A-Z][A-Z_]*_S|_s)\)? as f64 / 3600\.0"
     r"|\b[A-Z][A-Z_]*_S / 3600\.0"
+    r"|_frac \* 100\.0"
 )
 
 
