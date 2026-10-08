@@ -14901,3 +14901,17 @@ concluded in the cold standing after the cold had gone; warm air now melts it.
 Learning: an interface that makes a default impossible to ignore (an explicit `initial_snow`
 parameter on the one forecast function) found all four callers, where a default argument would have
 kept them guessing.
+
+## R-111: unit arithmetic written once (refactor/r111-unit-helpers)
+
+The same conversions were spelled inline in about 22 places in two styles
+(`num_milliseconds() / 3_600_000.0` in the assets, `seconds / 3600.0` elsewhere). They now live in
+`entities/units.rs`: `kw_from_w`, `w_from_kw`, `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`,
+`energy_kwh_from_min`. Two details that mattered: `energy_kwh_from_min` multiplies before dividing so
+results stay bit-identical to the `power * minutes / 60.0` it replaced, and `dt_h_from_duration` is
+bit-identical to the seconds spelling for whole-second steps (pinned by a parity test). The row had two
+inaccuracies the survey caught: the three Zone A `300.0 / 3600.0` sites were all in tests (now a shared
+`ZONE_A_STEP_S`), and `finalize.rs` no longer converted watts (R-106 had moved that). The audit rule was
+added first, specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds) so
+hour-of-day arithmetic and `4.186 / 3600` do not match. `residual_kwh_by_asset` now takes seconds, which
+also kept `tick.rs` at its 200-line cap.

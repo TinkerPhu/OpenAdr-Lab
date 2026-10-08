@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 
 use super::{power_model, SimState};
+use crate::entities::units::{dt_h_from_s, w_from_kw};
 
 impl SimState {
     /// Derive `self.grid`'s import/export/voltage from this tick's summed
@@ -16,11 +17,11 @@ impl SimState {
         let meter_kw = total_kw;
         let import_kw = meter_kw.max(0.0);
         let export_kw = (-meter_kw).max(0.0);
-        let dt_h = dt_s / 3600.0;
+        let dt_h = dt_h_from_s(dt_s);
 
-        self.grid.net_power_w = meter_kw * 1000.0;
-        self.grid.import_w = import_kw * 1000.0;
-        self.grid.export_w = export_kw * 1000.0;
+        self.grid.net_power_w = w_from_kw(meter_kw);
+        self.grid.import_w = w_from_kw(import_kw);
+        self.grid.export_w = w_from_kw(export_kw);
         self.grid.voltage_v = power_model::random_voltage(&mut self.rng);
         self.grid.import_kwh += import_kw * dt_h;
         self.grid.export_kwh += export_kw * dt_h;

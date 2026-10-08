@@ -14,7 +14,7 @@ impl GridMeter {
     /// Net site power in kW (positive = import). The meter stores watts; this is the one
     /// conversion for the sim's own tail (the other readers are tracked in R-111).
     pub fn net_power_kw(&self) -> f64 {
-        self.net_power_w / 1000.0
+        crate::entities::units::kw_from_w(self.net_power_w)
     }
 }
 

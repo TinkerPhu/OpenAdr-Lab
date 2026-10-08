@@ -58,7 +58,7 @@ pub fn asset_max_power_series(
         // Mirrors `CapacityCurve::energy_kwh_total`'s own windows(2)
         // integration: each point holds constant power until the next one.
         if let Some(next) = trajectory.points.get(i + 1) {
-            let dt_h = (next.ts - point.ts).num_milliseconds() as f64 / 3_600_000.0;
+            let dt_h = crate::entities::units::dt_h_from_duration(next.ts - point.ts);
             cumulative_energy_kwh += point.power_kw.abs() * dt_h;
         }
     }

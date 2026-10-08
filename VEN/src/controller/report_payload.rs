@@ -90,7 +90,13 @@ impl OadrReportPayload {
     /// The one place kW becomes kWh. Four call sites each did their own
     /// `x 1000.0` into watts instead, which is what `kpi.py` then undid.
     pub fn energy_from_power_kw(payload_type: &str, kw: f64, interval_s: u64) -> Self {
-        Self::energy_kwh(payload_type, kw * (interval_s as f64 / 3600.0))
+        Self::energy_kwh(
+            payload_type,
+            crate::entities::units::energy_kwh(
+                kw,
+                crate::entities::units::dt_h_from_s(interval_s as f64),
+            ),
+        )
     }
 
     /// Power, in kW.

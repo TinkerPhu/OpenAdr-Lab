@@ -72,7 +72,7 @@ impl Battery {
         setpoint_kw: f64,
         dt: Duration,
     ) -> (BatteryState, f64) {
-        let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
+        let dt_h = crate::entities::units::dt_h_from_duration(dt);
         let clamped = setpoint_kw
             .max(-self.max_discharge_kw)
             .min(self.max_charge_kw);
@@ -104,7 +104,7 @@ impl Battery {
     /// Energy physics (`step_inner`, the MILP's energy balance) stay exact.
     pub fn capability_inner(&self, state: &BatteryState) -> AssetCapability {
         let eff = self.round_trip_efficiency.sqrt();
-        let window_h = SUSTAINED_POWER_MIN_S / 3600.0;
+        let window_h = crate::entities::units::dt_h_from_s(SUSTAINED_POWER_MIN_S);
         let charge_room_kwh = (1.0 - state.soc) * self.capacity_kwh;
         let discharge_room_kwh = (state.soc - self.min_soc) * self.capacity_kwh;
         AssetCapability {

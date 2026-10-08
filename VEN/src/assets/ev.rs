@@ -145,7 +145,7 @@ impl EvCharger {
         // BL-12 response delay: apply the command accepted on the *previous* tick
         // now, and stage this tick's command to be applied one tick later.
         let applied_kw = state.pending_command_kw;
-        let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
+        let dt_h = crate::entities::units::dt_h_from_duration(dt);
         let new_soc = (state.soc + (applied_kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
         (
             EvState {

@@ -77,7 +77,7 @@ mod tests {
             q_dem_kw: 0.5125, // ven-3 production value: draw + loss at T_min
             e_max_kwh: 3.489, // (60-45)*0.23256
         };
-        let dt_h = 300.0 / 3600.0; // 5-min slot (Zone A)
+        let dt_h = crate::entities::units::dt_h_from_s(crate::entities::units::ZONE_A_STEP_S); // 5-min slot (Zone A)
 
         let s0 = traj.next_slot(0.0, dt_h);
         let s1 = traj.next_slot(0.0, dt_h);

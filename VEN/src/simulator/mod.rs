@@ -27,6 +27,7 @@ use crate::assets::{
 };
 use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
+use crate::entities::units::w_from_kw;
 use energy::EnergyCounter;
 pub use handle::SimHandle;
 pub use pv_smoothing::PvSmoothingState;
@@ -419,7 +420,7 @@ impl SimState {
             entry.state = new_state;
             entry.last_power_kw = actual_kw;
             entry.setpoint_kw = sp;
-            entry.energy.integrate(actual_kw * 1000.0, dt_s);
+            entry.energy.integrate(w_from_kw(actual_kw), dt_s);
             total_kw += actual_kw;
         }
 

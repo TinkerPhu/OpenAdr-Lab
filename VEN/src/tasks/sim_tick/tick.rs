@@ -152,7 +152,7 @@ pub(crate) async fn tick_once(
         )
     };
 
-    let measured_net_kw = Some(tick_sim_snap.grid.net_power_w / 1000.0);
+    let measured_net_kw = Some(tick_sim_snap.grid.net_power_kw());
     super::arbiter_glue::record_arbiter_outcome(
         &state,
         &notifier,
@@ -161,7 +161,7 @@ pub(crate) async fn tick_once(
         now,
     )
     .await;
-    let residual_kwh_by_asset = arbiter_outcome.residual_kwh_by_asset(dt_s / 3600.0);
+    let residual_kwh_by_asset = arbiter_outcome.residual_kwh_by_asset(dt_s);
     super::arbiter_glue::apply_residual_escalation(
         &state,
         &trigger_tx,

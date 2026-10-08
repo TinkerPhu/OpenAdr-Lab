@@ -166,7 +166,7 @@ impl Heater {
         setpoint_kw: f64,
         dt: Duration,
     ) -> (HeaterState, f64) {
-        let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
+        let dt_h = crate::entities::units::dt_h_from_duration(dt);
         // Quantization to the nearest reachable stage (each stage is its own
         // contactor, so intermediate values are physically impossible) and the
         // thermostat's override both live in the capability's declared

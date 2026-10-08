@@ -24,6 +24,7 @@ pub mod sim_inject;
 pub mod solar;
 pub mod tariff_snapshot;
 pub mod timeline;
+pub mod units;
 pub mod user_request;
 pub mod weather;
 

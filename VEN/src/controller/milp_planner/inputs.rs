@@ -68,7 +68,7 @@ pub(crate) fn build_milp_inputs(
     cum_s.push(0);
     let mut dt_h: Vec<f64> = Vec::with_capacity(n);
     for zone in &planner.plan_zones {
-        let step_h = zone.step_s as f64 / 3600.0;
+        let step_h = crate::entities::units::dt_h_from_s(zone.step_s as f64);
         for _ in 0..zone.slots {
             dt_h.push(step_h);
             // SAFETY: cum_s is seeded with push(0) unconditionally above, so it

@@ -165,7 +165,7 @@ impl UserRequestService {
             id: Uuid::new_v4(),
             asset_id: body.asset_id,
             target_soc: None,
-            target_energy_kwh: (power * duration as f64) / 60.0,
+            target_energy_kwh: crate::entities::units::energy_kwh_from_min(power, duration as f64),
             desired_power_kw: power,
             deadlines: vec![],
             mode,

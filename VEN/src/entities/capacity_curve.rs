@@ -106,7 +106,7 @@ impl CapacityCurve {
         self.steps
             .windows(2)
             .map(|w| {
-                let dt_h = (w[1].elapsed_s - w[0].elapsed_s) as f64 / 3600.0;
+                let dt_h = super::units::dt_h_from_s((w[1].elapsed_s - w[0].elapsed_s) as f64);
                 w[0].power_kw.abs() * dt_h
             })
             .sum()

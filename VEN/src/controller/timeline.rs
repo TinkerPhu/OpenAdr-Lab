@@ -333,7 +333,7 @@ pub fn build_asset_timeline(
                 // Derive cost/CO2 rates from the allocation's pre-computed cost_eur / co2_g,
                 // which already account for the PV-surplus vs grid split (see alloc_cost_eur).
                 // PV has no allocation → both rates are 0 (no import cost for generation).
-                let slot_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+                let slot_h = crate::entities::units::dt_h_from_duration(slot.end - slot.start);
                 let (cost_rate, co2_rate) = if slot_h > 0.0 {
                     slot.allocations
                         .iter()
@@ -350,7 +350,7 @@ pub fn build_asset_timeline(
                 // trajectory is available (heater), otherwise use stored MILP values
                 // (battery SoC, EV SoC — replanned frequently enough to stay current).
                 if let Some(ref mut traj) = plan_traj {
-                    let dt_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+                    let dt_h = crate::entities::units::dt_h_from_duration(slot.end - slot.start);
                     let p_heat_kw = slot
                         .allocations
                         .iter()
@@ -527,8 +527,16 @@ mod tests {
                     surplus_power_kw: 0.0,
                     grid_power_kw: power_kw,
                     marginal_value: 1.0,
-                    cost_eur: power_kw * 0.20 * (300.0 / 3600.0),
-                    co2_g: power_kw * 300.0 * (300.0 / 3600.0),
+                    cost_eur: power_kw
+                        * 0.20
+                        * crate::entities::units::dt_h_from_s(
+                            crate::entities::units::ZONE_A_STEP_S,
+                        ),
+                    co2_g: power_kw
+                        * 300.0
+                        * crate::entities::units::dt_h_from_s(
+                            crate::entities::units::ZONE_A_STEP_S,
+                        ),
                 }]
             },
             net_import_kw: power_kw,
@@ -628,7 +636,7 @@ mod tests {
         let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now); // no default allocation
-        let slot_h = 300.0 / 3600.0;
+        let slot_h = crate::entities::units::dt_h_from_s(crate::entities::units::ZONE_A_STEP_S);
         slot.allocations.push(AssetAllocation {
             asset_id: "ev".to_string(),
             power_kw: 3.0,
