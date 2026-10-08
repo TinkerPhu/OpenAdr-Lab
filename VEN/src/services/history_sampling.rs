@@ -135,7 +135,7 @@ impl HistorySampler {
             }
         }
 
-        let net_kw = sim.grid.net_power_w / 1000.0;
+        let net_kw = sim.grid.net_power_kw();
         self.grid.import_kw_sum += net_kw.max(0.0);
         self.grid.export_kw_sum += (-net_kw).max(0.0);
         self.grid.n += 1;

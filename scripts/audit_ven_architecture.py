@@ -61,6 +61,13 @@ The rules, and why each exists:
      function that belongs to `entities/comfort.rs`). Test-only uses of `services::test_support`
      are in test blocks and are not flagged.
 
+  10. No inline unit conversions outside `entities/units.rs`: watts to kilowatts, a duration or a
+     step in seconds to hours, and the `kw * dt_h` multiplication that follows (R-111: about 22
+     copies in two spellings, `num_milliseconds() / 3_600_000.0` and `seconds / 3600.0`). Use
+     `kw_from_w`, `w_from_kw`, `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`. The patterns are
+     specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds), so
+     hour-of-day arithmetic and physical constants such as `4.186 / 3600` do not match.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -178,6 +185,16 @@ def simstate_in_services() -> "list[str]":
     return hits
 
 
+# The inline spellings of the unit conversions `entities/units.rs` owns.
+UNIT_CONVERSION = (
+    r"net_power_w / 1000\.0"
+    r"|dt_s / 3600\.0"
+    r"|num_(milli)?seconds\(\) as f64 / 3[_]?6[0_]*\.?0*"
+    r"|(\b[A-Z][A-Z_]*_S|_s)\)? as f64 / 3600\.0"
+    r"|\b[A-Z][A-Z_]*_S / 3600\.0"
+)
+
+
 CHECKS = [
     ("profile in inner rings",
      lambda: forbid("profile", [VEN_SRC / "entities", VEN_SRC / "controller",
@@ -192,6 +209,9 @@ CHECKS = [
      lambda: forbid("infra", [VEN_SRC / "controller"],
                     r"crate::(assets|simulator)\b")),
     ("new concrete SimState in the application ring", simstate_in_services),
+    ("inline unit conversion outside entities/units.rs",
+     lambda: [h for h in forbid("units", [VEN_SRC], UNIT_CONVERSION)
+              if "entities/units.rs" not in h.replace(os.sep, "/")]),
     ("application ring reached from infra",
      lambda: forbid("services", [VEN_SRC / "assets", VEN_SRC / "simulator"],
                     r"crate::services\b")),

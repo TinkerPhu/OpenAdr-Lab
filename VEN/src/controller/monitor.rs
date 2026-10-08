@@ -34,7 +34,7 @@ pub fn record_tick(
     now: DateTime<Utc>,
     pv_co2_g_kwh: f64,
 ) {
-    let dt_h = dt_s / 3600.0;
+    let dt_h = crate::entities::units::dt_h_from_s(dt_s);
 
     // Which tariff applies for this tick
     let applicable = crate::entities::tariff_snapshot::tariff_at(tariffs, now);

@@ -105,6 +105,13 @@ pub struct AssetSnapshot {
     pub ac_ceiling_kw: Option<f64>,
 }
 
+impl GridSnapshot {
+    /// Net site power [kW], positive = import. The snapshot carries the meter's raw watts.
+    pub fn net_power_kw(&self) -> f64 {
+        crate::entities::units::kw_from_w(self.net_power_w)
+    }
+}
+
 impl AssetSnapshot {
     /// Convenience: get a value from the state `values` map.
     #[inline]

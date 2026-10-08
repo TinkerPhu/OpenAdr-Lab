@@ -1,3 +1,4 @@
+use crate::entities::units::{dt_h_from_duration, energy_kwh_from_min};
 use chrono::{DateTime, Utc};
 
 use crate::entities::asset_params::{EvParams, HeaterParams};
@@ -22,7 +23,7 @@ fn solved_session_cost(
     let mut cost_eur = 0.0;
     let mut co2_g = 0.0;
     for slot in slots.iter().filter(|s| s.start < window_end) {
-        let dt_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+        let dt_h = dt_h_from_duration(slot.end - slot.start);
         for alloc in slot.allocations.iter().filter(|a| a.asset_id == asset_id) {
             found = true;
             cost_eur += (alloc.grid_power_kw * slot.import_tariff_eur_kwh
@@ -163,7 +164,7 @@ pub(crate) fn build_plan_envelopes(
             break;
         }
         let milp_sl = &inputs.shiftable_loads[s];
-        let energy_needed_kwh = sl.power_kw * sl.duration_min as f64 / 60.0;
+        let energy_needed_kwh = energy_kwh_from_min(sl.power_kw, sl.duration_min as f64);
         let window_start = sl.earliest_start.max(now);
         let window_end = sl.latest_end;
         let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;

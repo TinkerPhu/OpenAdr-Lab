@@ -379,7 +379,7 @@ fn residual_kwh_by_asset_counts_limit_adjustments_as_energy() {
         }),
         ..Default::default()
     };
-    let residual = outcome.residual_kwh_by_asset(1.0 / 3600.0);
+    let residual = outcome.residual_kwh_by_asset(1.0);
     assert!((residual["battery"] - (0.2 + 1.8) / 3600.0).abs() < 1e-12);
     assert!(
         !residual.contains_key("heater"),

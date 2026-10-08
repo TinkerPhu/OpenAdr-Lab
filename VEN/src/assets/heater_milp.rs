@@ -10,6 +10,7 @@ use crate::controller::milp_planner::asset_port::{
     pinned_binary, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
     ModeDecisions,
 };
+use crate::entities::units::dt_h_from_s;
 
 /// The anchor (the plan in force's heater block) up to the last slot the tank can hold:
 /// replayed from a tank that gained heat since, a block that filled it exactly overflows,
@@ -26,7 +27,7 @@ fn anchor_the_tank_can_hold(
     for t in 0..anchored_kw.len() {
         let Some(kw) = anchored_kw[t] else { break };
         let dt_h = match (cum_s.get(t), cum_s.get(t + 1)) {
-            (Some(&start_s), Some(&end_s)) => (end_s - start_s) as f64 / 3600.0,
+            (Some(&start_s), Some(&end_s)) => dt_h_from_s((end_s - start_s) as f64),
             _ => 0.0,
         };
         e_kwh += (kw - q_dem_kw) * dt_h;
@@ -1386,7 +1387,7 @@ mod milp_context_trait_tests {
         let mut e_kwh = ctx.e_init_kwh;
         for (t, kw) in ctx.anchored_kw.iter().enumerate() {
             let Some(kw) = kw else { break };
-            let dt_h = (cum_s[t + 1] - cum_s[t]) as f64 / 3600.0;
+            let dt_h = dt_h_from_s((cum_s[t + 1] - cum_s[t]) as f64);
             e_kwh += (kw - ctx.q_dem_kw) * dt_h;
             assert!(
                 e_kwh <= ctx.e_max_kwh + 1e-9,

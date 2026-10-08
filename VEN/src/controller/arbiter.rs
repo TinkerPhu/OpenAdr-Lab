@@ -93,16 +93,18 @@ pub struct ArbiterOutcome {
 impl ArbiterOutcome {
     /// What this tick adds to the residual accumulator (§5.5), per SoC-coupled
     /// asset: what both passes hold battery/EV away from their input, as energy over
-    /// `dt_h` — the deviation pass's displacement from plan and the limit pass's
+    /// `dt_s` seconds — the deviation pass's displacement from plan and the limit pass's
     /// adjustment. Energy, not a per-tick kW delta: a correction that is held, not
     /// moving, must keep counting, or the backstop never hears it (R-88). Heater pauses
     /// never feed it (no SoC to protect).
-    pub fn residual_kwh_by_asset(&self, dt_h: f64) -> HashMap<String, f64> {
+    pub fn residual_kwh_by_asset(&self, dt_s: f64) -> HashMap<String, f64> {
+        let dt_h = crate::entities::units::dt_h_from_s(dt_s);
         let mut residual_kwh: HashMap<String, f64> = HashMap::new();
         let limit_adjustments = self.limit.iter().flat_map(|l| &l.adjusted_kw_by_asset);
         for (asset_id, adjusted_kw) in self.displaced_kw_by_asset.iter().chain(limit_adjustments) {
             if asset_id == crate::ids::ASSET_BATTERY || asset_id == crate::ids::ASSET_EV {
-                *residual_kwh.entry(asset_id.clone()).or_insert(0.0) += adjusted_kw.abs() * dt_h;
+                *residual_kwh.entry(asset_id.clone()).or_insert(0.0) +=
+                    crate::entities::units::energy_kwh(adjusted_kw.abs(), dt_h);
             }
         }
         residual_kwh
