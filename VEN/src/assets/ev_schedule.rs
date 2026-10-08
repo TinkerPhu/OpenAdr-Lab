@@ -18,7 +18,8 @@ use rand_distr::{Distribution, Normal};
 use super::ev::{EvCharger, EvState};
 use super::own_state::own;
 use super::{Asset, AssetState, Trajectory, TrajectoryPoint};
-use crate::entities::asset_params::EvUsageSimParams;
+use crate::entities::asset_params::{EvUsageMode, EvUsageSimParams};
+use crate::entities::device_session::EvSession;
 use crate::entities::ev_usage::{EvUsageSimState, NextTrip};
 
 /// One simulated day's leave/return trip, per `ev-usage-simulation`.
@@ -159,6 +160,30 @@ pub fn next_trip_after(
     None
 }
 
+/// Every trip departing after `from` and no later than `horizon_end`, each paired with the
+/// instant its charging window opens: `first_window_open` for the first, the previous trip's
+/// return for each later one. The one walk that both the session queue (`usage_sim`) and the
+/// MILP's expected uses (`usage_forecast`) take, so "when is the car home between two trips"
+/// has a single answer.
+pub fn trip_windows(
+    cfg: &EvUsageSimParams,
+    seed_tag: u64,
+    from: DateTime<Utc>,
+    first_window_open: DateTime<Utc>,
+    horizon_end: DateTime<Utc>,
+) -> Vec<(DateTime<Utc>, UsageTrip)> {
+    let mut windows = Vec::new();
+    let mut cursor = from;
+    let mut window_open = first_window_open;
+    while let Some(trip) = next_trip_after(cfg, seed_tag, cursor, horizon_end) {
+        cursor = trip.leave_at;
+        let next_open = trip.return_at;
+        windows.push((window_open, trip));
+        window_open = next_open;
+    }
+    windows
+}
+
 /// The most recently ended trip at-or-before `ts`, among the two candidate
 /// leave-days — used to look up the SoC drop to apply at the exact tick a
 /// trip's `return_at` is reached (see `EvCharger::ended_trip_at`).
@@ -173,6 +198,38 @@ pub fn most_recently_ended_trip(
         .filter_map(|day| daily_trip(cfg, day, seed_tag))
         .filter(|trip| trip.return_at <= ts)
         .max_by_key(|trip| trip.return_at)
+}
+
+impl EvCharger {
+    /// The simulated-origin charge sessions for every predicted trip in `[now, now + window]`,
+    /// one per trip, each window opening where the previous trip returned (the first opens
+    /// now: the car is home or mid-trip, and either way charging may begin now). Empty unless
+    /// the profile declared the `usage_sim` class with plan-ahead engaged: `usage_forecast`
+    /// hands the planner its deadline directly (`EvMilpContext::apply_usage_forecast`), so a
+    /// session there would be a second, competing copy of the same goal.
+    pub(super) fn planned_usage_sessions(
+        &self,
+        now: DateTime<Utc>,
+        window: Duration,
+    ) -> Vec<EvSession> {
+        let Some(cfg) = self.usage_sim.as_ref() else {
+            return Vec::new();
+        };
+        if !cfg.engage_charge_planning || cfg.mode != EvUsageMode::Simulated {
+            return Vec::new();
+        }
+        trip_windows(cfg, self.usage_sim_seed_tag, now, now, now + window)
+            .into_iter()
+            .map(|(window_open, trip)| {
+                EvSession::simulated(
+                    self.soc_target_profile,
+                    window_open.max(now),
+                    trip.leave_at,
+                    now,
+                )
+            })
+            .collect()
+    }
 }
 
 /// How far ahead the diagnostics view looks for the next trip. For display only,
@@ -362,6 +419,115 @@ mod usage_sim_tests {
             usage_sim,
             ..Default::default()
         })
+    }
+
+    fn plan_ahead_cfg(mode: EvUsageMode, engage: bool, probability: f64) -> EvUsageSimParams {
+        let exact = |probability| EvUsageDayParams {
+            leave_jitter_min: 0.0,
+            return_jitter_min: 0.0,
+            soc_drop_pct_stddev: 0.0,
+            ..day_cfg(8, 16, probability)
+        };
+        let mut cfg = usage_cfg(exact(probability), exact(probability));
+        cfg.mode = mode;
+        cfg.engage_charge_planning = engage;
+        cfg
+    }
+
+    fn monday_6am() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn trip_windows_open_each_window_at_the_previous_return() {
+        let cfg = plan_ahead_cfg(EvUsageMode::Simulated, true, 1.0);
+        let now = monday_6am();
+        let windows = trip_windows(&cfg, 7, now, now, now + Duration::days(3));
+        assert_eq!(windows.len(), 3, "one trip per day");
+        assert_eq!(
+            windows[0].0, now,
+            "the first window opens at the caller's instant"
+        );
+        for pair in windows.windows(2) {
+            assert_eq!(
+                pair[1].0, pair[0].1.return_at,
+                "a window opens when the car is back"
+            );
+        }
+    }
+
+    #[test]
+    fn trip_windows_is_empty_when_no_trip_is_predicted() {
+        let cfg = plan_ahead_cfg(EvUsageMode::Simulated, true, 0.0);
+        let now = monday_6am();
+        assert!(trip_windows(&cfg, 7, now, now, now + Duration::days(7)).is_empty());
+    }
+
+    #[test]
+    fn planned_usage_sessions_has_one_session_per_predicted_trip_in_the_window() {
+        let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 1.0)));
+        let now = monday_6am();
+        let sessions = ev.planned_usage_sessions(now, Duration::days(7));
+        assert_eq!(sessions.len(), 7, "one per day of the rolling week");
+        assert!(sessions
+            .iter()
+            .all(|s| s.origin == crate::entities::device_session::EvSessionOrigin::SimulatedUsage));
+        assert_eq!(
+            sessions[0].departure_time,
+            Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap(),
+            "the first is today's 08:00 leave"
+        );
+        for pair in sessions.windows(2) {
+            assert_eq!(
+                pair[1].departure_time - pair[0].departure_time,
+                Duration::days(1)
+            );
+        }
+    }
+
+    /// Each session may charge from when the car got home, so a later session's window opens at
+    /// the previous trip's return - not at `now`, which would claim the car is available while
+    /// it is still out.
+    #[test]
+    fn planned_usage_sessions_open_a_later_window_at_the_previous_return() {
+        let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 1.0)));
+        let now = monday_6am();
+        let sessions = ev.planned_usage_sessions(now, Duration::days(7));
+        assert_eq!(sessions[0].window_start, now, "the imminent one starts now");
+        assert_eq!(
+            sessions[1].window_start,
+            Utc.with_ymd_and_hms(2026, 7, 20, 16, 0, 0).unwrap(),
+            "the profile returns at 16:00"
+        );
+    }
+
+    #[test]
+    fn planned_usage_sessions_are_empty_under_the_forecast_usage_class() {
+        // `usage_forecast` hands the deadline to the MILP directly; a session here would be a
+        // second copy of the same goal.
+        let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Forecast, true, 1.0)));
+        assert!(ev
+            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .is_empty());
+    }
+
+    #[test]
+    fn planned_usage_sessions_are_empty_when_plan_ahead_is_disabled() {
+        let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, false, 1.0)));
+        assert!(ev
+            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .is_empty());
+    }
+
+    #[test]
+    fn planned_usage_sessions_are_empty_without_a_schedule_or_predicted_trip() {
+        assert!(ev_with_schedule(None)
+            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .is_empty());
+        let never = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 0.0)));
+        assert!(never
+            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .is_empty());
     }
 
     #[test]

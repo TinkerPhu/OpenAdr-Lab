@@ -217,6 +217,13 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
     }
 
+    /// The simulated-origin charge sessions this asset's configured usage schedule predicts in
+    /// `[now, now + window]` (one per trip), for the session queue. Empty for every asset
+    /// without a plan-ahead schedule. Only the EV has one.
+    fn planned_usage_sessions(&self, _now: DateTime<Utc>, _window: Duration) -> Vec<EvSession> {
+        Vec::new()
+    }
+
     /// This asset's configured usage schedule as the diagnostics surface shows it
     /// (`GET /ev-usage-sim`), or `None` if it has none. Only the EV has one.
     fn usage_schedule_view(&self, _now: DateTime<Utc>) -> Option<EvUsageSimState> {
