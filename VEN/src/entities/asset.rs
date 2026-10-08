@@ -252,6 +252,16 @@ pub struct AssetHistoryView {
     pub curtailment_source: Option<crate::entities::asset_params::PvCurtailmentSource>,
 }
 
+/// A heater's own answers to the deviation arbiter's emergency-mode what-ifs (its thermostat rule
+/// evaluated under hypothetical modes), so the arbiter never re-derives them from temperatures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmergencyWhatIfs {
+    /// Heat the thermostat forces unless the emergency mode curtails it [kW].
+    pub emergency_heat_kw: f64,
+    /// Room the heater has to absorb surplus under the Absorb mode [kW].
+    pub absorb_headroom_kw: f64,
+}
+
 /// How to handle completion when the last DeadlineTier expires (§1.10).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

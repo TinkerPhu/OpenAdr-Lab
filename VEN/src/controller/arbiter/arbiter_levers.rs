@@ -8,6 +8,7 @@ use super::{
     DEAD_BAND_KW, HEATER_COMFORT_OVERRIDE_EUR_PER_KWH, LEVER_PREEMPTION_MARGIN_EUR_PER_KWH,
 };
 use crate::controller::SimSnapshot;
+use crate::entities::asset::EmergencyWhatIfs;
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
 
@@ -285,8 +286,10 @@ pub(super) fn heater_emergency_lever(
     let snap = sim.assets.get(crate::ids::ASSET_HEATER)?;
     // The heater's own answers (its thermostat rule under Normal/Absorb),
     // not a re-derivation from temperatures here.
-    let emergency_heat_kw = snap.val("emergency_heat_kw")?;
-    let absorb_headroom_kw = snap.val("absorb_headroom_kw")?;
+    let EmergencyWhatIfs {
+        emergency_heat_kw,
+        absorb_headroom_kw,
+    } = snap.emergency_what_ifs?;
     let threshold = if is_incumbent {
         HEATER_COMFORT_OVERRIDE_EUR_PER_KWH - LEVER_PREEMPTION_MARGIN_EUR_PER_KWH
     } else {

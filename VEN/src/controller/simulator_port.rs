@@ -95,6 +95,14 @@ pub struct AssetSnapshot {
     /// the same facts for the `/sim` API.
     #[serde(skip)]
     pub history: crate::entities::asset::AssetHistoryView,
+    /// The asset's own answers to the arbiter's emergency-mode what-ifs
+    /// (`Asset::emergency_what_ifs`) - heater only. Typed, so the arbiter never reads a
+    /// `values` key; `values` carries the same facts for the `/sim` API.
+    #[serde(skip)]
+    pub emergency_what_ifs: Option<crate::entities::asset::EmergencyWhatIfs>,
+    /// The asset's AC output ceiling [kW] (`Asset::ac_ceiling_kw`) - PV inverter only.
+    #[serde(skip)]
+    pub ac_ceiling_kw: Option<f64>,
 }
 
 impl AssetSnapshot {
@@ -194,6 +202,8 @@ mod tests {
             setpoint_kw: 0.0,
             values,
             history: Default::default(),
+            emergency_what_ifs: None,
+            ac_ceiling_kw: None,
         };
         assert_eq!(snap.val("soc"), Some(0.5));
         assert_eq!(snap.val("nonexistent"), None);

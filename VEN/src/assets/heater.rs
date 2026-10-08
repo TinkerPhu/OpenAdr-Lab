@@ -8,7 +8,8 @@ use super::{
     Thermostat, TickOverridable,
 };
 use crate::entities::asset::{
-    AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
+    AssetHistoryView, ComfortRate, CompletionPolicy, EmergencyWhatIfs, PowerAdjustability,
+    SetpointResponse,
 };
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
@@ -256,17 +257,24 @@ impl Heater {
             "emergency_absorb".into(),
             (self.emergency_mode == HeaterEmergencyMode::Absorb) as u8 as f64,
         );
-        // The heater's own answers to the arbiter's emergency-mode what-ifs:
-        // heat its thermostat forces unless curtailed, and room under Absorb.
-        let emergency_heat_kw = self
-            .thermostat_forced_kw_in(state, HeaterEmergencyMode::Normal)
-            .unwrap_or(0.0);
-        m.insert("emergency_heat_kw".into(), emergency_heat_kw);
-        let absorb_headroom_kw = self
-            .thermostat_forced_kw_in(state, HeaterEmergencyMode::Absorb)
-            .unwrap_or(self.max_kw);
-        m.insert("absorb_headroom_kw".into(), absorb_headroom_kw);
+        // The same answers `Asset::emergency_what_ifs` gives the arbiter, for the diagnostics map.
+        let what_ifs = self.emergency_what_ifs_inner(state);
+        m.insert("emergency_heat_kw".into(), what_ifs.emergency_heat_kw);
+        m.insert("absorb_headroom_kw".into(), what_ifs.absorb_headroom_kw);
         m
+    }
+
+    /// The heater's own answers to the arbiter's emergency-mode what-ifs: heat its thermostat
+    /// forces unless curtailed, and room under Absorb.
+    pub fn emergency_what_ifs_inner(&self, state: &HeaterState) -> EmergencyWhatIfs {
+        EmergencyWhatIfs {
+            emergency_heat_kw: self
+                .thermostat_forced_kw_in(state, HeaterEmergencyMode::Normal)
+                .unwrap_or(0.0),
+            absorb_headroom_kw: self
+                .thermostat_forced_kw_in(state, HeaterEmergencyMode::Absorb)
+                .unwrap_or(self.max_kw),
+        }
     }
 
     /// Create a plan trajectory starting from the current live state.
@@ -419,6 +427,11 @@ impl Asset for Heater {
         Self::state_values(self, s)
     }
 
+    fn emergency_what_ifs(&self, state: &AssetState) -> Option<EmergencyWhatIfs> {
+        let s: &HeaterState = own(state);
+        Some(self.emergency_what_ifs_inner(s))
+    }
+
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &HeaterState = own(state);
         AssetHistoryView {
@@ -522,6 +535,24 @@ mod tests {
             k_loss_kw_per_c: 0.003,
             draw_kw: 0.5,
             ambient_temp_c: 20.0,
+        }
+    }
+
+    #[test]
+    fn emergency_what_ifs_agree_with_the_state_values_map() {
+        let heater = default_heater();
+        for temperature_c in [18.5, 20.5, 22.9] {
+            let state = AssetState::Heater(state_at(temperature_c, 0.0));
+            let what_ifs = Asset::emergency_what_ifs(&heater, &state).expect("a heater answers");
+            let values = Asset::state_values(&heater, &state);
+            assert_eq!(
+                Some(&what_ifs.emergency_heat_kw),
+                values.get("emergency_heat_kw")
+            );
+            assert_eq!(
+                Some(&what_ifs.absorb_headroom_kw),
+                values.get("absorb_headroom_kw")
+            );
         }
     }
 

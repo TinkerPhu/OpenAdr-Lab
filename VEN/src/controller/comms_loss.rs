@@ -37,7 +37,7 @@ impl CommsLossState {
         }
         sim.assets
             .get(crate::ids::ASSET_PV)
-            .and_then(|s| s.val("inverter_max_kw"))
+            .and_then(|s| s.ac_ceiling_kw)
             .map(|max_kw| self.max_power_pct * max_kw)
     }
 }
