@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTheme, ThemeProvider, CssBaseline } from "@mui/material";
 import App from "./App";
-import { debugLog } from "./utils/debugLog";
+import { debugLog } from "@lab/charts/debugLog";
 
 const theme = createTheme({
   palette: {

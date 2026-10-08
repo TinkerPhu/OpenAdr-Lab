@@ -17,7 +17,7 @@ import type {
   WeatherResponse,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
-import { debugLog } from "../utils/debugLog";
+import { debugLog } from "@lab/charts/debugLog";
 import { parseEvSessionConflict } from "./evSessionConflict";
 
 let reqCounter = 0;

@@ -28,7 +28,7 @@ import { MeasurementPage } from "./pages/Measurement";
 import { DevicesPage } from "./pages/Devices";
 import { PlanHistoryPage } from "./pages/PlanHistory";
 import { CapacityForecastPage } from "./pages/CapacityForecast";
-import { debugLog } from "./utils/debugLog";
+import { debugLog } from "@lab/charts/debugLog";
 import { RefreshControls } from "@lab/charts/RefreshControls";
 
 function HealthChip() {

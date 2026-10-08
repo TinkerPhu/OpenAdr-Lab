@@ -13,7 +13,7 @@ import { FleetPage } from "./pages/Fleet";
 import { SignalsPage } from "./pages/Signals";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
-import { debugLog } from "./utils/debugLog";
+import { debugLog } from "@lab/charts/debugLog";
 import { BffContext } from "./api/bffContext";
 import { RefreshControls } from "@lab/charts/RefreshControls";
 
