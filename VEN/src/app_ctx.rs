@@ -5,13 +5,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use crate::assets::ControlDescriptor;
 use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::planner_params::PlannerObjective;
 use crate::planner_events::PlannerEventTx;
-use crate::simulator::SimState;
 use crate::state::AppState;
 use crate::vtn::VtnClient;
 use crate::{controller, services};
@@ -26,12 +25,13 @@ pub struct AppCtx {
     /// Built once at startup from `profile`; route handlers access it without
     /// touching the raw `Profile` type or acquiring any lock.
     pub sim_schema: Arc<HashMap<String, Vec<ControlDescriptor>>>,
-    pub sim: Arc<Mutex<SimState>>,
     /// The asset roster through its port (add/cancel a shiftable load, reset/configure an
     /// asset): the same shared simulator as `sim`, behind a handle that owns the lock.
     pub roster: Arc<dyn controller::SimRosterPort>,
     /// Site headroom / capacity-curve computations through their port (they read the live roster).
     pub headroom: Arc<dyn controller::HeadroomPort>,
+    /// What the asset routes read about the simulated assets, as plain data.
+    pub sim_read: Arc<dyn controller::SimReadPort>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
     pub planner_event_tx: PlannerEventTx,
     /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled`
