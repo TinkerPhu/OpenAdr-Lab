@@ -42,12 +42,17 @@ impl UserRequestService {
             };
         let mut req = create_from_body(body, asset_data, now)?;
 
+        // `create_from_body` refuses a request without deadlines, so the first one exists; and it
+        // resolved the target once (`AssetRequestSlice::target_soc`), for the energy and for this
+        // session alike.
         let departure = req
             .deadlines
             .first()
             .map(|d| d.latest_end)
-            .unwrap_or_else(|| now + chrono::Duration::hours(8));
-        let target_soc = req.target_soc.unwrap_or(0.9);
+            .ok_or(RequestError::NoDeadlines)?;
+        let target_soc = req.target_soc.ok_or_else(|| RequestError::MissingTarget {
+            asset_id: req.asset_id.clone(),
+        })?;
         let window_start = stated_window_start.unwrap_or(now);
         if window_start >= departure {
             return Err(RequestError::EmptyChargingWindow {
@@ -671,13 +676,45 @@ mod tests {
         }
     }
 
+    /// R-112: an EV request that states no target aims for the EV's own `soc_target` - in the
+    /// session AND in the energy computed for it (they used to be 0.9 and the asset default).
     #[test]
-    fn test_create_ev_builds_session() {
+    fn create_ev_without_a_target_aims_for_the_evs_own_default_everywhere() {
         let now = Utc::now();
-        let body = CreateUserRequestParams {
+        let (req, session) =
+            UserRequestService::create_ev(ev_body(now, None), &[ev_slice(0.5)], now).unwrap();
+        assert_eq!(
+            session.target_soc, 0.8,
+            "the slice's default_soc_target, not 0.9"
+        );
+        assert_eq!(
+            req.target_soc,
+            Some(0.8),
+            "the request records the target it aimed for"
+        );
+        // soc 0.5 -> 0.8 on a 60 kWh pack = 18 kWh
+        assert!(
+            (req.target_energy_kwh - 18.0).abs() < 1e-9,
+            "{}",
+            req.target_energy_kwh
+        );
+    }
+
+    #[test]
+    fn create_ev_keeps_a_stated_target() {
+        let now = Utc::now();
+        let (req, session) =
+            UserRequestService::create_ev(ev_body(now, Some(0.95)), &[ev_slice(0.5)], now).unwrap();
+        assert_eq!(session.target_soc, 0.95);
+        assert_eq!(req.target_soc, Some(0.95));
+    }
+
+    /// An EV request due in 6 h, stating `target_soc` or not.
+    fn ev_body(now: DateTime<Utc>, target_soc: Option<f64>) -> CreateUserRequestParams {
+        CreateUserRequestParams {
             mode: Default::default(),
             asset_id: ids::ASSET_EV.to_string(),
-            target_soc: Some(0.9),
+            target_soc,
             target_energy_kwh: None,
             desired_power_kw: None,
             deadlines: vec![crate::controller::user_request::RequestDeadlineParams {
@@ -700,7 +737,13 @@ mod tests {
             target_temp_c: None,
             expected_return_time: None,
             replace_session_ids: None,
-        };
+        }
+    }
+
+    #[test]
+    fn test_create_ev_builds_session() {
+        let now = Utc::now();
+        let body = ev_body(now, Some(0.9));
         let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
         assert_eq!(req.asset_id, ids::ASSET_EV);
         // soc 0.5 → target 0.9: (0.9-0.5)*60 = 24 kWh
