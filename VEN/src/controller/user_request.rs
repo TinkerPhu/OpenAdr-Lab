@@ -73,6 +73,10 @@ pub struct ComfortRateParams {
 pub enum RequestError {
     UnknownAsset(String),
     NoDeadlines,
+    /// The request states no target and the asset declares no default to fall back on.
+    MissingTarget {
+        asset_id: String,
+    },
     ZeroEnergy,
     /// `earliest_start` at or after the deadline: the charging window is empty, so
     /// no amount of planning could serve it. Distinct from a clash with another
@@ -140,6 +144,10 @@ impl std::fmt::Display for RequestError {
         match self {
             RequestError::UnknownAsset(id) => write!(f, "unknown asset '{id}'"),
             RequestError::NoDeadlines => write!(f, "at least one deadline is required"),
+            RequestError::MissingTarget { asset_id } => write!(
+                f,
+                "no target given and asset '{asset_id}' declares no default target"
+            ),
             RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative (asset may already be at or above the target SoC)"),
             RequestError::EmptyChargingWindow { earliest_start, latest_end } => write!(
                 f,
@@ -284,6 +292,7 @@ mod tests {
 
     fn slice(id: &str) -> AssetRequestSlice {
         AssetRequestSlice {
+            default_target_temp_c: None,
             id: id.to_string(),
             current_soc: Some(0.3),
             default_soc_target: Some(0.8),

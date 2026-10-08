@@ -93,6 +93,7 @@ impl AssetProfile {
                 temp_min_c: c.temp_min_c,
                 temp_max_c: c.temp_max_c,
                 temp_safety_max_c: c.temp_safety_max_c.unwrap_or(c.temp_max_c),
+                default_target_temp_c: c.default_target_temp_c,
                 thermostat_delta_c: c.thermostat_delta_c,
                 power_stages: c.power_stages,
                 thermal_mass_kwh_per_c: c.effective_thermal_mass(),
@@ -341,6 +342,11 @@ pub struct HeaterConfig {
     /// extra headroom) when omitted, so existing profiles are unaffected.
     #[serde(default)]
     pub temp_safety_max_c: Option<f64>,
+    /// The temperature (°C) a user request aims for when it states none. Declared here so the
+    /// heater - not the request code - answers it (R-112); must lie within
+    /// `[temp_min_c, temp_max_c]`. Without it, a heater request that states no target is refused.
+    #[serde(default)]
+    pub default_target_temp_c: Option<f64>,
     /// Thermostat deadband (°C), applied at BOTH ends of the band: the emergency
     /// at `temp_min_c` runs until `temp_min_c + delta`, and the forced-off ceiling
     /// at `temp_max_c` stays off until `temp_max_c - delta`. Must be smaller than

@@ -11,6 +11,7 @@ assets:
     temp_initial_c: 50.0
     temp_min_c: 42.0
     temp_max_c: 62.0
+    default_target_temp_c: 55.0   # hot-water target a request aims for when it states none
     thermostat_delta_c: 3.0   # deadband at BOTH ends: off at max until max-3, emergency at min until min+3
     volume_l: 200.0
     k_loss_kw_per_c: 0.0035

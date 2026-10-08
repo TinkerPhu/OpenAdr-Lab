@@ -472,6 +472,7 @@ mod phase2a_heater_tests {
 
     fn heater_params() -> HeaterParams {
         HeaterParams {
+            default_target_temp_c: None,
             id: "heater".to_string(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -821,6 +822,7 @@ mod phase2a_trivial_delegation_smoke_tests {
     #[test]
     fn heater_trivial_methods_reach_inherent_impl_not_infinite_recursion() {
         let params = HeaterParams {
+            default_target_temp_c: None,
             id: "heater".to_string(),
             max_kw: 3.0,
             temp_initial_c: 20.0,
@@ -1072,6 +1074,7 @@ mod phase2b_tick_overridable_tests {
     #[test]
     fn heater_apply_tick_overrides_matches_inherent_method() {
         let params = HeaterParams {
+            default_target_temp_c: None,
             id: "heater".to_string(),
             max_kw: 3.0,
             temp_initial_c: 20.0,

@@ -163,6 +163,7 @@ mod dispatch_override_tests {
     fn forced_heater_snap() -> AssetSnapshot {
         use crate::assets::heater::{Heater, HeaterEmergencyMode, HeaterState};
         let heater = Heater {
+            default_target_temp_c: None,
             max_kw: 3.0,
             power_stages: 1,
             temp_min_c: 20.0,

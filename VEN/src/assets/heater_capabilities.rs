@@ -84,6 +84,10 @@ impl Thermostat for Heater {
     /// original's `None` case was purely "not a Heater," which capability-gating
     /// (`as_thermostat() -> Option<&dyn Thermostat>`) already handles; within
     /// this arm the original always returned `Some(...)`.
+    fn default_request_target_c(&self) -> Option<f64> {
+        self.default_target_temp_c
+    }
+
     fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64 {
         let s: &HeaterState = own(state);
         if s.temperature_c < target_c {

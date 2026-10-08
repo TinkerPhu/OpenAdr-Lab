@@ -166,6 +166,7 @@ fn make_profile() -> Profile {
                 usage_sim: None,
             }),
             AssetProfile::Heater(HeaterConfig {
+                default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 3.0,
                 temp_initial_c: 20.0,
@@ -292,6 +293,7 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
     if let Some(h) = snap.assets.get_mut("heater") {
         let v = |k: &str| h.val(k).unwrap_or(0.0);
         let heater = Heater {
+            default_target_temp_c: None,
             max_kw: v("max_kw"),
             power_stages: v("power_stages") as u8,
             temp_min_c: v("temp_min_c"),
@@ -334,6 +336,7 @@ fn make_heater_only_profile(
     let thermal_mass = volume_l.map(|v| v * 4.186 / 3600.0).unwrap_or(2.0);
     Profile {
         assets: vec![AssetProfile::Heater(HeaterConfig {
+            default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
             temp_initial_c,

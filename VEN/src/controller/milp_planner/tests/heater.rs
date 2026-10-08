@@ -616,6 +616,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
     let profile = Profile {
         assets: vec![
             AssetProfile::Heater(HeaterParams {
+                default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 6.0,
                 power_stages: 2,
