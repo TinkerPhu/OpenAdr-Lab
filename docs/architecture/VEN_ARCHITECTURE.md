@@ -130,10 +130,21 @@ is what preserves fields this VEN has never heard of.
 
 Two consequences worth knowing when reading this code:
 
-* A payload value is an enum with separate `Number` and `Integer` variants, and
-  `EventType::Simple`'s declared kind is `Integer`. Read values through
-  `PayloadValues::numeric`, never by matching `Number` — that would drop every
-  load-shed level in silence.
+* An incoming number has a unit, so it is read through
+  `lab_core::wire_contract::PayloadReader` and nowhere else (`audit_ven_architecture.py`
+  rule 12 refuses `.numeric()`, `numeric_value(` and a `PayloadValue::Number` match in
+  `VEN/src`). The reader resolves the unit from the event's `payloadDescriptors`, else the
+  program's (`OadrProgram.payloadDescriptors`), else the profile default, and returns either
+  the value or a `Refusal`. It also takes `Integer` as well as `Number` (`SIMPLE`'s declared
+  kind is `Integer`). The event poll builds one reader from the stored programs
+  (`vtn_port::payload_reader`), every parser takes it, and `PayloadReader::audit` gives that
+  poll's assumptions and refusals to `services::notify::notify_unit_audit`:
+  a refusal is a wire rejection under `events:units` (`/health` `wire_conformance`
+  degraded, one notification), an assumed default is `GET /health` `wire_assumptions`
+  (never degraded) and a line in the Dashboard's Health card. The table of what each payload
+  type means is `lab_core::wire_contract` for both directions, shared with the BFF, whose
+  `/fleet/signals` bands are read through the same reader. Rules:
+  `docs/reference/WIRE_PROFILE.md`, "Reading what peers send".
 * An event that omits a field 3.1 requires is *refused*, not defaulted.
   `controller::wire_reject` makes that refusal cost only the offending object
   and surface on `/health`. The one place this VEN is stricter than the schema
@@ -163,7 +174,8 @@ number and a value whose quantity nobody decided cannot be sent; and
 `descriptors_for` derives the report's `payloadDescriptors` from the payloads
 actually present, so an undeclared payload is not something anyone has to
 remember. The quantity table is in `docs/reference/WIRE_PROFILE.md`, whose
-machine-readable half is `quantity_of`.
+machine-readable half is `lab_core::wire_contract` (`report_quantity_of`, re-exported here as
+`quantity_of`; the same module's `event_quantity_of` is what incoming values are read by).
 
 `USAGE` is **energy over the interval**, not instantaneous power — the spec
 defines it that way — which is why every report interval states the window its

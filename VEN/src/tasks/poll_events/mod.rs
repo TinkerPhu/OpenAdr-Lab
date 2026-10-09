@@ -26,6 +26,32 @@ pub(crate) struct EventPollTiming {
     pub ven_seed: String,
 }
 
+/// One poll's reading of `events`: every value through what its event and its program declare
+/// (GB-50, `lab_core::wire_contract`), and what that reading assumed or refused surfaced.
+async fn read_events(
+    state: &AppState,
+    notifier: &crate::services::notify::Notifier,
+    events: &[controller::vtn_port::OadrEvent],
+    (prev_ids, prev_tariff_count, prev_import_limit): (
+        &std::collections::HashSet<String>,
+        usize,
+        Option<f64>,
+    ),
+    now: chrono::DateTime<Utc>,
+) -> detect::EventChanges {
+    let reader = controller::vtn_port::payload_reader(&state.programs().await);
+    let changes = detect_event_changes(
+        events,
+        &reader,
+        prev_ids,
+        prev_tariff_count,
+        prev_import_limit,
+        now,
+    );
+    crate::services::notify::notify_unit_audit(notifier, state, now, &changes.wire_audit).await;
+    changes
+}
+
 pub(crate) fn spawn_event_poll(
     state: AppState,
     vtn: Arc<dyn VtnPort>,
@@ -83,24 +109,9 @@ pub(crate) fn spawn_event_poll(
                         &mut announced_staggered,
                     )
                     .await;
-                    // GB-50: every value is read through what its event and program declare.
-                    let reader = controller::vtn_port::payload_reader(&state.programs().await);
-                    let changes = detect_event_changes(
-                        &acted_on,
-                        &reader,
-                        &prev_event_ids,
-                        prev_tariff_count,
-                        prev_import_limit,
-                        now,
-                    );
+                    let prevs = (&prev_event_ids, prev_tariff_count, prev_import_limit);
+                    let changes = read_events(&state, &notifier, &acted_on, prevs, now).await;
 
-                    crate::services::notify::notify_unit_audit(
-                        &notifier,
-                        &state,
-                        now,
-                        &changes.wire_audit,
-                    )
-                    .await;
                     // Check before the trace_events vec is consumed by the for loop.
                     let any_change = !changes.trace_events.is_empty();
                     // Same reason, same place: which events moved, so a replan

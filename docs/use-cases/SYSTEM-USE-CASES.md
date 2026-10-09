@@ -199,6 +199,14 @@ successfully for ever. Same surface shows an object the VTN sent that this VEN
 refused — both are "something is wrong with what we are being given, and every
 request still succeeds".
 
+The same holds for a *value* the VEN cannot read. An event payload that declares a unit or
+currency the lab profile does not read (a capacity limit in `VOLTS`, a price in `USD`) is not
+used: that payload alone is dropped, `wire_conformance` turns degraded and names the event, the
+payload type, what was declared and what the profile reads, and it clears when the event goes.
+A payload whose unit nobody declared is legal: it is read from the profile default, health
+stays ok, and the Dashboard's Health card lists it under "wire assumptions" so the assumption
+is visible. Scenarios: `tests/features/ven_wire_units.feature`.
+
 **What to test:**
 - `tests/features/ven_health.feature` — health exposes wire conformance
 - `VEN/src/controller/token_scopes.rs` unit tests

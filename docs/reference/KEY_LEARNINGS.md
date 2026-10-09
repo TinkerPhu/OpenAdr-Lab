@@ -3218,3 +3218,12 @@ Rules:
 - When a scenario injects asset state, choose values outside the asset's latch bands, or restore a
   state that leaves the latch released. Read the failure's timeline against earlier scenarios'
   injects before suspecting the code under test: here the branch's code change was bit-identical.
+
+## A contract stated in three places needs a test per place, pinned to the published one (2026-10-09)
+
+- The wire profile lives as a markdown table, a Rust table and a Python table. Agreeing "they change
+  together" did not keep them equal: the first run of a test that parses the document found a payload
+  type (`DEMAND`) that two of the three knew and the published one did not. Pin each machine copy to
+  the human-readable document with a test that parses the document.
+- When a rule is needed by a second service, move it to the shared crate at that moment. The lenient
+  program-descriptor reader existed in the VEN for an hour before the BFF needed the same answer.
