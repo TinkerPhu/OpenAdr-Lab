@@ -65,7 +65,6 @@
   "VEN/src/controller/milp_planner/solver_phase2.rs::build_phase2_warm_start": 106,
   "VEN/src/controller/milp_planner/solver_phase2.rs::solve_milp_two_phase": 107,
   "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 175,
-  "VEN/src/controller/user_request.rs::create_from_body": 102,
   "VEN/src/profile/validate.rs::validate": 357,
   "VEN/src/routes/mod.rs::build_router": 119,
   "VEN/src/services/obligation.rs::check_and_report": 109,
