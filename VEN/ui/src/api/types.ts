@@ -552,7 +552,8 @@ export type CreateUserRequestBody = {
   latest_end?: string;
   // Per-device overrides (Plan D)
   soft_deadline?: boolean;
-  target_temp_c?: number;
+  /** Null = state none: the VEN applies the heater's declared default, or refuses. */
+  target_temp_c?: number | null;
   // Request mode (BL-28); omitted = BY_DEADLINE
   mode?: UserRequestMode;
   // MAX_COST (WP4.1-c): total charging-cost ceiling in €
@@ -915,6 +916,11 @@ export type AssetCapability = {
    * asset (`Asset::key_features`); empty when it declares none. `value` carries its unit, or
    * "-" when there is nothing to show yet. */
   key_features: KeyFeature[];
+  /** The target a user request aims for when it states none, as the asset declares it
+   * (R-123): a thermostat's temperature, a storage asset's SoC fraction. Null when the
+   * asset declares none. The request forms open on these. */
+  default_target_temp_c?: number | null;
+  default_target_soc_frac?: number | null;
 };
 
 export type KeyFeature = { label: string; value: string };

@@ -101,14 +101,12 @@ impl UserRequestService {
         let mut req = create_from_body(body, asset_data, now)?;
 
         // The heater answers what a request without a target aims for (its profile's
-        // `default_target_temp_c`); a heater that declares none gets a refusal, not a guess.
-        let target_temp_c = stated_target_temp_c
-            .or_else(|| {
-                asset_data
-                    .iter()
-                    .find(|s| s.id == req.asset_id)
-                    .and_then(|s| s.default_target_temp_c)
-            })
+        // `default_target_temp_c`), through the same `AssetRequestSlice::target_temp_c` that sized
+        // the energy above; a heater that declares none gets a refusal, not a guess.
+        let target_temp_c = asset_data
+            .iter()
+            .find(|s| s.id == req.asset_id)
+            .and_then(|s| s.target_temp_c(stated_target_temp_c))
             .ok_or_else(|| RequestError::MissingTarget {
                 asset_id: req.asset_id.clone(),
             })?;
@@ -646,6 +644,7 @@ pub(crate) mod tests {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
             default_target_temp_c: None,
+            thermal: None,
             id: ids::ASSET_EV.to_string(),
             current_soc: Some(soc_frac),
             default_soc_target: Some(0.8),
@@ -664,6 +663,7 @@ pub(crate) mod tests {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
             default_target_temp_c: None,
+            thermal: None,
             id: ids::ASSET_HEATER.to_string(),
             current_soc: None,
             default_soc_target: None,

@@ -504,6 +504,46 @@ def step_post_heater_request_without_target(context, energy):
     _post_heater_request(context, energy, None)
 
 
+@when("I POST the VEN UI's heater request with target_temp_c {temp:g}")
+def step_post_ui_heater_request(context, temp):
+    """The body HeaterCard.tsx sends: a temperature and a deadline, energy and power left null."""
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = {
+        "asset_id": "heater",
+        "target_soc": None,
+        "target_energy_kwh": None,
+        "desired_power_kw": None,
+        "target_temp_c": temp,
+        "mode": "BY_DEADLINE",
+        "completion_policy": "STOP",
+        "deadlines": [{
+            "latest_end": latest_end,
+            "max_total_cost_eur": None,
+            "max_marginal_rate_eur_kwh": None,
+            "min_completion": 1.0,
+        }],
+        "comfort_rates": None,
+    }
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@then("the saved user request runs at {kw:g} kW and needs a positive amount of energy")
+def step_saved_request_power_and_energy(context, kw):
+    r = ven_get("/user-requests")
+    assert r.status_code == 200, f"GET /user-requests: {r.status_code} {r.text[:200]}"
+    req = next((q for q in r.json() if q.get("id") == context.saved_request_id), None)
+    assert req is not None, f"request {context.saved_request_id} not in GET /user-requests"
+    assert abs(req.get("desired_power_kw") - kw) < 1e-9, f"desired_power_kw {req.get('desired_power_kw')}"
+    assert req.get("target_energy_kwh") > 0, f"target_energy_kwh {req.get('target_energy_kwh')}"
+
+
 @then("the heater session of the saved user request aims for {temp:g} °C")
 def step_heater_session_target(context, temp):
     r = ven_get("/user-requests")

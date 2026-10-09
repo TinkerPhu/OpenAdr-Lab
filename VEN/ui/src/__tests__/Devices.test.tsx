@@ -7,6 +7,7 @@ import { DevicesPage } from "../pages/Devices";
 import { EvSessionConflictError } from "../api/evSessionConflict";
 import type {
   UserRequestWithSession, EvSettings, EvUsageSimState, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
+  AssetCapability,
 } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
@@ -156,6 +157,12 @@ const emptyArbiterDiagnostics: ArbiterDiagnostics = {
   updated_at: null,
 };
 const mockArbiterDiagnosticsData = vi.fn((): ArbiterDiagnostics => emptyArbiterDiagnostics);
+/** What GET /capability/:id declares per asset (R-123): the targets the request forms open on. */
+const declaredTargets = (): Record<string, Partial<AssetCapability>> => ({
+  heater: { default_target_temp_c: 21 },
+  ev: { default_target_soc_frac: 0.9 },
+});
+const mockCapabilities = vi.fn(declaredTargets);
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
@@ -199,6 +206,7 @@ vi.mock("../api/hooks", () => ({
     data: mockArbiterDiagnosticsData(),
   }),
   useSim: () => ({ data: mockSimData() }),
+  useAssetCapabilities: (ids: string[]) => ids.map((id) => ({ data: mockCapabilities()[id] })),
   useBaselineOverride: () => ({ data: null }),
   usePostBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteBaselineOverride: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -222,6 +230,7 @@ function renderPage() {
 describe("DevicesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCapabilities.mockImplementation(declaredTargets);
     mockRequestsData.mockReturnValue([]);
     mockEvSettingsData.mockReturnValue({
       opportunistic_charging_enabled: true,
@@ -340,6 +349,15 @@ describe("DevicesPage", () => {
         expected_return_time: expect.stringContaining("2026-10-06"),
       }),
     );
+  });
+
+  // R-123: the plan dialog opens on the EV's declared target SoC (0.9), not a literal 80 %.
+  it("opens the EV plan dialog on the EV's declared target SoC", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(expect.objectContaining({ target_soc: 0.9 }));
   });
 
   it("will not submit half a trip estimate", async () => {
@@ -509,6 +527,30 @@ describe("DevicesPage", () => {
         target_temp_c: expect.any(Number),
         deadlines: expect.any(Array),
       }),
+    );
+  });
+
+  // R-123: the form opens on the heater's declared target, not a literal of its own.
+  it("opens the heater dialog on the heater's declared default target", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("heater-set-btn"));
+    await user.click(screen.getByTestId("heater-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ asset_id: "heater", target_temp_c: 21 }),
+    );
+  });
+
+  // R-123: a heater that declares no default leaves the target to the VEN (which refuses
+  // visibly) instead of the form inventing one.
+  it("sends no heater target when the heater declares none and the user typed none", async () => {
+    mockCapabilities.mockReturnValue({});
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("heater-set-btn"));
+    await user.click(screen.getByTestId("heater-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ asset_id: "heater", target_temp_c: null }),
     );
   });
 

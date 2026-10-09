@@ -86,6 +86,13 @@ pub trait Thermostat {
     /// The target (°C) a user request aims for when it states none, or `None` when this
     /// thermostat declares no default (then such a request is refused, not guessed).
     fn default_request_target_c(&self) -> Option<f64>;
+
+    /// What a request is sized against: the current temperature, the energy per degree and the
+    /// rating (R-124: a request that states only a temperature gets its energy from here).
+    fn thermal_request_defaults(
+        &self,
+        state: &AssetState,
+    ) -> crate::entities::asset_params::ThermalRequestDefaults;
 }
 
 /// Capability: this asset accepts tick-time environment/Behaviour-C overrides
