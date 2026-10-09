@@ -3206,3 +3206,15 @@ Rules:
   the audit scripts, not by reading the row.
 - The primary checkout is shared. Before any commit there, read `git branch --show-current` and
   `git status`; `git commit -a` in a tree that is not yours commits someone else's work.
+
+## A scenario that leaves an asset latched leaks into every later scenario (2026-10-09)
+
+- Cleanup hooks reset requests, sessions and overrides, but not physics: a temperature the
+  simulator carries on from. A scenario that set the test heater to 19 C and let a request run it
+  at full power latched its thermostat on (below `temp_min + thermostat_delta`, a heater that runs
+  stays on until it leaves the band). That outlived the scenario by an hour and failed three
+  `@isolated` scenarios 20 minutes later, whose plan-vs-site checks met a heater no plan had asked
+  for (the MILP does not model the latch, R-94).
+- When a scenario injects asset state, choose values outside the asset's latch bands, or restore a
+  state that leaves the latch released. Read the failure's timeline against earlier scenarios'
+  injects before suspecting the code under test: here the branch's code change was bit-identical.

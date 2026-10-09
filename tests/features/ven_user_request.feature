@@ -184,12 +184,16 @@ Feature: VEN User Request Manager — Stage 5
   # power). The heater answers how much energy that needs and runs at its own rating; this
   # request used to be refused with ZeroEnergy, so the form's "Set Target" never worked.
   Scenario: The VEN UI's heater request, a temperature by a time, is accepted
-    # The "test" profile's heater: 3.0 kW, 18-23 C. 19 C now, so 22 C needs energy.
-    Given I inject heater_temp_c 19.0 via sim inject
-    When I POST the VEN UI's heater request with target_temp_c 22
+    # The "test" profile's heater: 3.0 kW, 18-23 C. 21.5 C now, so 22.5 C needs energy.
+    # Not lower: below temp_min + thermostat_delta (21 C) a heater that runs latches its
+    # thermostat on at full power until 21 C, and that outlives this scenario by an hour,
+    # so later scenarios (the @isolated pass's plan-vs-site checks) met a heater no plan
+    # had asked for (R-94: the MILP does not model the latch).
+    Given I inject heater_temp_c 21.5 via sim inject
+    When I POST the VEN UI's heater request with target_temp_c 22.5
     Then the response status is 201
     When I save the request ID
-    Then the heater session of the saved user request aims for 22 °C
+    Then the heater session of the saved user request aims for 22.5 °C
     And the saved user request runs at 3 kW and needs a positive amount of energy
     When I DELETE the saved user request
     Then the response status is 204
