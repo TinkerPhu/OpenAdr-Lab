@@ -15024,3 +15024,14 @@ build and test tooling.
 Issues: the first attempt at the four-row fix was committed in the shared primary checkout, which
 another session had on its own branch with uncommitted work; the commit swept that work in. The push
 was rejected, the commit was undone with a mixed reset and the fix redone in a worktree.
+
+## Architecture sweep of 2026-10-09 (refactor/smell-sweep-v2)
+
+A sweep after R-112..R-115 and R-110's first step, recorded in `docs/reference/architectural_smells.md`.
+Its first finding, rows R-107..R-109 brought back by the R-111 rebase, was fixed in parallel by the
+register clean-up. The inline `kw * dt_h` that R-111 had not caught turned out to live in nine places
+(ledger, battery and EV state of charge, grid meter, capacity curve, max-power trajectory), not the four
+the sweep had counted; all call `units::energy_kwh` now, bit-identical, and audit rule 10 refuses the
+spelling. Filed R-127..R-133 (renumbered on rebase: the clean-up had issued R-126 meanwhile). Decided
+with the user: delete the old `SimulatorPort` (done by the clean-up work) and generate the UI's API
+types with ts-rs, incrementally (R-133).
