@@ -149,7 +149,9 @@ impl EvCharger {
         // now, and stage this tick's command to be applied one tick later.
         let applied_kw = state.pending_command_kw;
         let dt_h = crate::entities::units::dt_h_from_duration(dt);
-        let new_soc = (state.soc_frac + (applied_kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc_frac
+            + crate::entities::units::energy_kwh(applied_kw, dt_h) / self.battery_kwh)
+            .clamp(0.0, 1.0);
         (
             EvState {
                 soc_frac: new_soc,

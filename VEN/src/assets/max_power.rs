@@ -59,7 +59,7 @@ pub fn asset_max_power_series(
         // integration: each point holds constant power until the next one.
         if let Some(next) = trajectory.points.get(i + 1) {
             let dt_h = crate::entities::units::dt_h_from_duration(next.ts - point.ts);
-            cumulative_energy_kwh += point.power_kw.abs() * dt_h;
+            cumulative_energy_kwh += crate::entities::units::energy_kwh(point.power_kw.abs(), dt_h);
         }
     }
     series

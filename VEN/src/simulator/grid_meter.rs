@@ -23,8 +23,8 @@ impl SimState {
         self.grid.import_w = w_from_kw(import_kw);
         self.grid.export_w = w_from_kw(export_kw);
         self.grid.voltage_v = power_model::random_voltage(&mut self.rng);
-        self.grid.import_kwh += import_kw * dt_h;
-        self.grid.export_kwh += export_kw * dt_h;
+        self.grid.import_kwh += crate::entities::units::energy_kwh(import_kw, dt_h);
+        self.grid.export_kwh += crate::entities::units::energy_kwh(export_kw, dt_h);
 
         self.last_tick = now;
     }
