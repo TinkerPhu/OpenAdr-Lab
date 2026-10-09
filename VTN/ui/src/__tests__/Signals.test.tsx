@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
+import { useFleetSignals } from "../api/hooks";
 import { SignalsPage } from "../pages/Signals";
 import { bandGeometry } from "../utils/signalBandGeometry";
 import type { FleetSignals } from "../api/types";
@@ -73,6 +74,35 @@ describe("bandGeometry", () => {
 });
 
 describe("SignalsPage", () => {
+  /* GB-50: the BFF reads a band's value the way a VEN does. The tooltip says when the unit
+   * was assumed, and when a value was not read at all and why -- otherwise a band without a
+   * number looks like a signal that carried none. */
+  it("says in the band's label when its unit was assumed or its value was not read", () => {
+    const band = mockSignals.vens[0].bands[0];
+    vi.mocked(useFleetSignals).mockReturnValueOnce({
+      data: {
+        ...mockSignals,
+        vens: [
+          {
+            venName: "ven-1",
+            bands: [
+              { ...band, unitsDeclaredBy: "PROFILE_DEFAULT" },
+              {
+                ...band,
+                value: null,
+                refused: "event ev-9f3 IMPORT_CAPACITY_LIMIT declares units VOLTS, this profile reads units KW",
+              },
+            ],
+          },
+        ],
+      },
+      isError: false,
+    } as ReturnType<typeof useFleetSignals>);
+    renderSignals();
+    expect(screen.getByTestId("signals-band-ven-1-0")).toHaveAccessibleName(/profile default assumed/);
+    expect(screen.getByTestId("signals-band-ven-1-1")).toHaveAccessibleName(/not read: .*units VOLTS/);
+  });
+
   it("draws a row for a VEN that was under a signal", () => {
     renderSignals();
     expect(screen.getByTestId("signals-row-ven-1")).toBeVisible();

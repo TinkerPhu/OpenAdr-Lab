@@ -45,6 +45,12 @@ export type HealthResponse = {
   };
   /** Server clock (ISO 8601) — lets a client detect/correct for its own clock skew. */
   server_time: string;
+  /**
+   * Event payload types whose unit the latest poll read from the profile default because
+   * neither the event nor its program declared one, with how many payloads (GB-50). Legal, so
+   * it never makes `status` degraded; shown so the assumption is not silent.
+   */
+  wire_assumptions?: Record<string, number>;
 };
 
 export type VtnStatus = {

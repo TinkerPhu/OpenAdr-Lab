@@ -57,29 +57,13 @@ pub fn payload_reader(programs: &[OadrProgram]) -> lab_core::wire_contract::Payl
     )
 }
 
-/// A program's `payloadDescriptors` list mixes event and report descriptors, told apart by
-/// `objectType`. The event ones are kept; a report descriptor, or an entry that is not a valid
-/// event descriptor, is skipped rather than failing the whole program: a peer is not refused
-/// for a descriptor this reader has no use for.
+/// The event descriptors of a program's `payloadDescriptors` list, absent or null included
+/// (`lab_core::wire_contract::program_event_descriptors` is the one rule for which entries count).
 fn event_payload_descriptors<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<openleadr_wire::event::EventPayloadDescriptor>, D::Error> {
-    use openleadr_wire::program::PayloadDescriptor;
     let entries = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?.unwrap_or_default();
-    Ok(entries
-        .into_iter()
-        .filter_map(|entry| {
-            // `objectType` is optional on the wire; the wire crate's enum requires it.
-            let tagged = entry.get("objectType").is_some();
-            match tagged {
-                true => match serde_json::from_value(entry).ok()? {
-                    PayloadDescriptor::EventPayloadDescriptor(d) => Some(d),
-                    PayloadDescriptor::ReportPayloadDescriptor(_) => None,
-                },
-                false => serde_json::from_value(entry).ok(),
-            }
-        })
-        .collect())
+    Ok(lab_core::wire_contract::program_event_descriptors(entries))
 }
 
 // ── Event types: the wire crate's, not ours ───────────────────────────────────

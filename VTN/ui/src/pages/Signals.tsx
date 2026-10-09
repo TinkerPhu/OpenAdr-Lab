@@ -125,6 +125,8 @@ export function SignalsPage() {
                   const label =
                     `${band.payloadType}` +
                     (band.value !== null ? ` ${band.value}` : "") +
+                    (band.unitsDeclaredBy === "PROFILE_DEFAULT" ? " (unit not declared, profile default assumed)" : "") +
+                    (band.refused ? ` · not read: ${band.refused}` : "") +
                     ` · ${new Date(band.from).toLocaleTimeString()}–${new Date(band.to).toLocaleTimeString()}` +
                     (band.eventName ? ` · ${band.eventName}` : "");
                   return (

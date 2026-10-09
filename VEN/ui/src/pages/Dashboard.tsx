@@ -192,6 +192,17 @@ export function DashboardPage() {
                   {c.detail ? `: ${c.detail}` : ""}
                 </Typography>
               ))}
+            {/* GB-50: not a fault, so not in the list above and not a warning colour. A unit
+                the VTN left undeclared was read from the profile default; said here because
+                nothing else would show it (`ui-transparency`). */}
+            {Object.keys(health.data?.wire_assumptions ?? {}).length > 0 && (
+              <Typography variant="body2" color="text.secondary" data-testid="dash-wire-assumptions">
+                wire assumptions: unit not declared, profile default used for{" "}
+                {Object.entries(health.data?.wire_assumptions ?? {})
+                  .map(([payloadType, count]) => `${payloadType} (${count})`)
+                  .join(", ")}
+              </Typography>
+            )}
           </Stack>
         </Paper>
       </Grid>

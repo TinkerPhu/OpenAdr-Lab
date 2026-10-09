@@ -160,7 +160,37 @@ pub struct PayloadReader {
     program_descriptors: HashMap<String, Vec<EventPayloadDescriptor>>,
 }
 
+/// The event payload descriptors in a program's `payloadDescriptors` list.
+///
+/// The list mixes event and report descriptors, told apart by `objectType`, which is optional on
+/// the wire while the wire crate's enum requires it. The event ones are kept; a report
+/// descriptor, or an entry that is not a valid event descriptor, is skipped rather than failing
+/// the whole program: a peer is not refused for a descriptor this reader has no use for.
+pub fn program_event_descriptors(entries: Vec<serde_json::Value>) -> Vec<EventPayloadDescriptor> {
+    use openleadr_wire::program::PayloadDescriptor;
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry.get("objectType").is_some() {
+            true => match serde_json::from_value(entry).ok()? {
+                PayloadDescriptor::EventPayloadDescriptor(d) => Some(d),
+                PayloadDescriptor::ReportPayloadDescriptor(_) => None,
+            },
+            false => serde_json::from_value(entry).ok(),
+        })
+        .collect()
+}
+
 impl PayloadReader {
+    /// A reader from program objects as the VTN lists them (`id`, `payloadDescriptors`), for a
+    /// caller that holds the raw rows. A row without an id contributes nothing.
+    pub fn from_program_rows(rows: &[serde_json::Value]) -> Self {
+        Self::with_programs(rows.iter().filter_map(|row| {
+            let id = row.get("id")?.as_str()?.to_string();
+            let entries = row.get("payloadDescriptors")?.as_array()?.clone();
+            Some((id, program_event_descriptors(entries)))
+        }))
+    }
+
     /// A reader that also knows each program's event payload descriptors, by program id.
     pub fn with_programs(
         programs: impl IntoIterator<Item = (String, Vec<EventPayloadDescriptor>)>,
@@ -487,6 +517,21 @@ mod tests {
         assert_eq!(audit.assumed, BTreeMap::from([("GHG".to_string(), 1), ("PRICE".to_string(), 2)]));
         assert_eq!(audit.refusals.len(), 1, "two intervals of one event and type are one refusal");
         assert_eq!(audit.refusals[0].event_id, "evt-volts");
+    }
+
+    #[test]
+    fn a_reader_built_from_program_rows_reads_their_event_descriptors() {
+        let reader = PayloadReader::from_program_rows(&[
+            json!({ "id": "prog-1", "payloadDescriptors": [
+                { "objectType": "REPORT_PAYLOAD_DESCRIPTOR", "payloadType": "USAGE", "units": "KWH" },
+                { "objectType": "EVENT_PAYLOAD_DESCRIPTOR", "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" },
+                { "units": "KW" },
+            ]}),
+            json!({ "programName": "no id" }),
+            json!({ "id": "prog-2" }),
+        ]);
+        let ev = event("IMPORT_CAPACITY_LIMIT", json!(4.5), json!(null));
+        assert_eq!(read(&reader, &ev).unwrap().unwrap().declared_by, DeclaredBy::Program);
     }
 
     /// The Rust table is the same table `docs/reference/WIRE_PROFILE.md` publishes.
