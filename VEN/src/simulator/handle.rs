@@ -126,6 +126,12 @@ impl SimReadPort for SimHandle {
         Some(AssetCapabilityView {
             is_fixed: capability.is_fixed(&floor),
             key_features: cfg.key_features(&entry.state),
+            default_target_temp_c: cfg
+                .as_thermostat()
+                .and_then(|t| t.default_request_target_c()),
+            default_target_soc_frac: cfg
+                .as_request_resolvable()
+                .map(|r| r.request_defaults(&entry.state).default_soc_target),
             capability,
             floor,
         })
@@ -217,6 +223,9 @@ impl SimReadPort for SimHandle {
                     default_target_temp_c: cfg
                         .as_thermostat()
                         .and_then(|t| t.default_request_target_c()),
+                    thermal: cfg
+                        .as_thermostat()
+                        .map(|t| t.thermal_request_defaults(&entry.state)),
                 }
             })
             .collect()
@@ -423,6 +432,50 @@ mod tests {
             let expected = (slice.id == crate::ids::ASSET_HEATER).then_some(21.0);
             assert_eq!(slice.default_target_temp_c, expected, "on '{}'", slice.id);
         }
+    }
+
+    /// R-124: the heater's slice carries what a temperature-only request is sized against, from
+    /// the heater itself (its rating and thermal mass); no other asset has one.
+    #[tokio::test]
+    async fn request_slices_carry_the_heaters_thermal_answer_and_none_for_other_assets() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        for slice in handle.request_slices().await {
+            let heater = slice.id == crate::ids::ASSET_HEATER;
+            assert_eq!(slice.thermal.is_some(), heater, "on '{}'", slice.id);
+            if let Some(t) = slice.thermal {
+                assert!(t.rated_kw > 0.0 && t.thermal_mass_kwh_per_c > 0.0, "{t:?}");
+            }
+        }
+    }
+
+    /// R-123: the capability view carries each asset's declared request target, so the UI's
+    /// request forms need no defaults of their own.
+    #[tokio::test]
+    async fn asset_capability_carries_the_declared_request_targets() {
+        use crate::entities::asset_params::HeaterParams;
+        let heater = AssetParams::Heater(HeaterParams {
+            default_target_temp_c: Some(21.0),
+            ..HeaterParams::default()
+        });
+        let (handle, _sim) = handle_with(&[heater, AssetParams::Battery(BatteryParams::default())]);
+        let h = handle
+            .asset_capability(crate::ids::ASSET_HEATER)
+            .await
+            .unwrap();
+        assert_eq!(
+            (h.default_target_temp_c, h.default_target_soc_frac),
+            (Some(21.0), None)
+        );
+        let b = handle
+            .asset_capability(crate::ids::ASSET_BATTERY)
+            .await
+            .unwrap();
+        assert_eq!(b.default_target_temp_c, None);
+        assert_eq!(
+            b.default_target_soc_frac,
+            Some(1.0),
+            "the battery declares a full target"
+        );
     }
 
     #[tokio::test]

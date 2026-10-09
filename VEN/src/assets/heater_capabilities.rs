@@ -88,6 +88,19 @@ impl Thermostat for Heater {
         self.default_target_temp_c
     }
 
+    fn thermal_request_defaults(
+        &self,
+        state: &AssetState,
+    ) -> crate::entities::asset_params::ThermalRequestDefaults {
+        let s: &HeaterState = own(state);
+        crate::entities::asset_params::ThermalRequestDefaults {
+            temperature_c: s.temperature_c,
+            temp_min_c: self.temp_min_c,
+            thermal_mass_kwh_per_c: self.thermal_mass_kwh_per_c,
+            rated_kw: self.max_kw,
+        }
+    }
+
     fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64 {
         let s: &HeaterState = own(state);
         if s.temperature_c < target_c {

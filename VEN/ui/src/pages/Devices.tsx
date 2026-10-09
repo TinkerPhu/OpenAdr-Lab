@@ -16,6 +16,7 @@ import {
   usePutArbiterSettings,
   useArbiterDiagnostics,
   useSim,
+  useAssetCapabilities,
 } from "../api/hooks";
 import { EvCard } from "../components/devices/EvCard";
 import { HeaterCard } from "../components/devices/HeaterCard";
@@ -36,6 +37,8 @@ export function DevicesPage() {
     (arbiterSettings?.deviation_arbiter_enabled ?? false) ||
       (arbiterSettings?.limit_enforcement_enabled ?? false),
   );
+  // What each request form opens on, as the asset declares it (R-123).
+  const [heaterCapability, evCapability] = useAssetCapabilities(["heater", "ev"]);
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();
   const putEvMut = usePutEvSettings();
@@ -72,6 +75,7 @@ export function DevicesPage() {
         <Grid item xs={12} md={4}>
           <EvCard
             requests={evRequests}
+            declaredTargetSocFrac={evCapability?.data?.default_target_soc_frac}
             evSettings={evSettings}
             usageSim={evUsageSim}
             postRequest={postMut.mutateAsync}
@@ -84,6 +88,7 @@ export function DevicesPage() {
         <Grid item xs={12} md={4}>
           <HeaterCard
             request={heaterRequest}
+            declaredTargetTempC={heaterCapability?.data?.default_target_temp_c}
             postRequest={postMut.mutateAsync}
             deleteRequest={deleteMut.mutateAsync}
             isPosting={postMut.isPending}

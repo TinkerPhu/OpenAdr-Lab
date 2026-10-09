@@ -180,6 +180,20 @@ Feature: VEN User Request Manager — Stage 5
     When I DELETE the saved user request
     Then the response status is 204
 
+  # R-124: the VEN UI's heater form states a temperature and nothing else (no energy, no
+  # power). The heater answers how much energy that needs and runs at its own rating; this
+  # request used to be refused with ZeroEnergy, so the form's "Set Target" never worked.
+  Scenario: The VEN UI's heater request, a temperature by a time, is accepted
+    # The "test" profile's heater: 3.0 kW, 18-23 C. 19 C now, so 22 C needs energy.
+    Given I inject heater_temp_c 19.0 via sim inject
+    When I POST the VEN UI's heater request with target_temp_c 22
+    Then the response status is 201
+    When I save the request ID
+    Then the heater session of the saved user request aims for 22 °C
+    And the saved user request runs at 3 kW and needs a positive amount of energy
+    When I DELETE the saved user request
+    Then the response status is 204
+
   Scenario: A heater request without a target aims for the heater's declared default
     # The "test" profile's heater declares default_target_temp_c: 21.0.
     When I POST a heater user request for 3 kWh without a target temperature

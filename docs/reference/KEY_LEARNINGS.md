@@ -3188,3 +3188,10 @@ Rules:
 - One E2E run on the tip of a stack of branches covers all of them when they are merged together as
   that same tip (R-113..R-110: one ~55 min run instead of four). It does not cover merging them one at
   a time on top of something else.
+
+## A BDD scenario must post what the UI posts (2026-10-09)
+
+- The heater's "Set Target" was refused for as long as it existed while unit tests and two heater
+  scenarios passed: both scenarios added an explicit `target_energy_kwh` the UI never sends. When a
+  scenario stands for a UI flow, copy the form's body field for field (nulls included), or the test
+  proves a request nobody makes.

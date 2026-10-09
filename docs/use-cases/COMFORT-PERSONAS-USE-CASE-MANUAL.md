@@ -48,6 +48,14 @@ through API and UI, default to `BY_DEADLINE`, and change no planning behaviour.
 7. Repeat the same check on the **Water Heater** card (Set Target dialog) and the
    **Shiftable Loads** card (Add Load dialog): both dialogs show the same Mode
    dropdown.
+8. The Set Target dialog opens on the heater's own declared target
+   (`default_target_temp_c` in its profile), and the EV's Plan Charging dialog on
+   the EV's declared target SoC; leaving the heater field empty sends no target, so
+   the VEN applies the heater's default (or refuses visibly if it declares none).
+   **Expected:** Confirm creates the heater session; the request runs at the
+   heater's rating, sized by the energy from today's temperature to the target
+   (scenario "The VEN UI's heater request, a temperature by a time, is accepted" in
+   `tests/features/ven_user_request.feature`).
 
 ### Steps (API)
 

@@ -350,6 +350,11 @@ pub struct AssetCapabilityView {
     pub floor: AssetFlexibilityFloor,
     pub is_fixed: bool,
     pub key_features: Vec<KeyFeature>,
+    /// The target a user request aims for when it states none, as the asset declares it: a
+    /// thermostat's temperature [°C], a storage asset's SoC [fraction]. The VEN UI's request
+    /// forms open on these instead of keeping their own (R-123).
+    pub default_target_temp_c: Option<f64>,
+    pub default_target_soc_frac: Option<f64>,
 }
 
 /// One row of an asset's recent state history: its timestamp and its `state_values()` (plus

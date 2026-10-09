@@ -14983,3 +14983,22 @@ each handler from its `ctx.<field>` uses; it flagged locals that shadow an extra
 bug in waiting: `vtn_status` bound the connection status to `vtn`, hiding the `VtnClient` it then called.
 Two helpers that took `&AppCtx` now take the part they read. Audit rule 11 refuses `State<AppCtx>` in
 `routes/`. The row stays open, narrowed to `state/mod.rs`, `simulator/mod.rs` and `capacity_headroom.rs`.
+
+## The VEN UI's heater request is accepted; a request's power is the asset's rating (fix/heater-request, R-122..R-124)
+
+Why: the heater card's "Set Target" sends a temperature and a deadline, with no energy and no power.
+`create_from_body` sized a request only from a SoC gap, so for the heater it found nothing and refused
+with `ZeroEnergy`: the form had never worked, while every unit test passed and the only heater BDD
+(R-113) posted an explicit kWh the UI never sends. Filed as R-124 (needs-evidence) by the R-112 work;
+confirmed by reading the path end to end.
+What: the heater declares a `ThermalRequestDefaults` (current temperature, thermal mass, rating) through
+`Thermostat::thermal_request_defaults`; `AssetRequestSlice::energy_to_target_kwh` is the one place that
+sizes a request, from a SoC gap or a temperature gap, and `target_temp_c` is the one target rule for the
+energy and the heater session. R-122 (user decision 2026-10-09): an omitted power is the asset's rating
+(`rated_power_kw`), and an asset with none is refused with `NoPowerRating`; both `1.0 kW` literals are
+gone. R-123: `GET /capability/:id` carries `default_target_temp_c`/`default_target_soc_frac`, and the
+heater and EV forms open on them (the heater's "55" and the EV's fixed 80 % are gone; an empty heater
+field sends no target). The 4 h ready-by and 8 h departure stay in the forms: they are the user's time,
+not something an asset declares. A BDD scenario posts the UI's exact payload.
+Issues: the R-112/R-113 heater scenarios proved the default and stated targets with a kWh in the body,
+so the one shape the product actually sends stayed untested.

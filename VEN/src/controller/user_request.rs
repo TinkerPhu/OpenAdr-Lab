@@ -78,6 +78,10 @@ pub enum RequestError {
         asset_id: String,
     },
     ZeroEnergy,
+    /// The request states no power and the asset declares no rating to run at.
+    NoPowerRating {
+        asset_id: String,
+    },
     /// `earliest_start` at or after the deadline: the charging window is empty, so
     /// no amount of planning could serve it. Distinct from a clash with another
     /// session - this request is malformed on its own terms.
@@ -148,7 +152,11 @@ impl std::fmt::Display for RequestError {
                 f,
                 "no target given and asset '{asset_id}' declares no default target"
             ),
-            RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative (asset may already be at or above the target SoC)"),
+            RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative (asset may already be at or above the target)"),
+            RequestError::NoPowerRating { asset_id } => write!(
+                f,
+                "no desired_power_kw given and asset '{asset_id}' declares no rating"
+            ),
             RequestError::EmptyChargingWindow { earliest_start, latest_end } => write!(
                 f,
                 "charging window is empty: available from {earliest_start} but due by {latest_end}"
@@ -166,6 +174,32 @@ impl std::fmt::Display for RequestError {
             RequestError::EvReplaceRejected { rejection, .. } => write!(f, "{rejection}"),
         }
     }
+}
+
+/// A request's energy and power: the stated values, else the asset's own answers - the energy its
+/// stated (or declared) target needs, and its rating (R-122, R-124).
+fn energy_and_power(
+    body: &CreateUserRequestParams,
+    slice: &AssetRequestSlice,
+) -> Result<(f64, f64), RequestError> {
+    let target_energy_kwh = match body.target_energy_kwh {
+        Some(kwh) => kwh,
+        None => slice
+            .energy_to_target_kwh(body.target_soc_frac, body.target_temp_c)
+            .ok_or_else(|| RequestError::MissingTarget {
+                asset_id: body.asset_id.clone(),
+            })?,
+    };
+    if target_energy_kwh < 1e-6 {
+        return Err(RequestError::ZeroEnergy);
+    }
+    let desired_power_kw = body
+        .desired_power_kw
+        .or_else(|| slice.rated_power_kw())
+        .ok_or_else(|| RequestError::NoPowerRating {
+            asset_id: body.asset_id.clone(),
+        })?;
+    Ok((target_energy_kwh, desired_power_kw))
 }
 
 /// Create a UserRequest from POST /user-requests params.
@@ -186,17 +220,7 @@ pub fn create_from_body(
         .find(|s| s.id == body.asset_id)
         .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))?;
 
-    // Compute target energy and desired power
-    let (target_energy_kwh, desired_power_kw) = if let Some(kwh) = body.target_energy_kwh {
-        if kwh <= 0.0 {
-            return Err(RequestError::ZeroEnergy);
-        }
-        (kwh, body.desired_power_kw.unwrap_or(1.0))
-    } else {
-        slice
-            .resolve_request_target(body.target_soc_frac, body.desired_power_kw)
-            .ok_or(RequestError::ZeroEnergy)?
-    };
+    let (target_energy_kwh, desired_power_kw) = energy_and_power(&body, slice)?;
 
     // Build completion policy string for storage
     let completion_policy_str = body.completion_policy.unwrap_or_else(|| {
@@ -298,6 +322,7 @@ mod tests {
             default_soc_target: Some(0.8),
             capacity_kwh: Some(10.0),
             max_charge_kw: Some(3.7),
+            thermal: None,
             completion_policy: CompletionPolicy::Continue,
             comfort_rates: vec![],
         }
@@ -335,6 +360,93 @@ mod tests {
             mode: None,
             replace_session_ids: None,
         }
+    }
+
+    /// A heater slice: 40 °C now, 30 °C floor, 0.2 kWh/°C, rated 6 kW (`ThermalRequestDefaults`).
+    fn heater_slice(default_target_temp_c: Option<f64>) -> AssetRequestSlice {
+        use crate::entities::asset_params::ThermalRequestDefaults;
+        AssetRequestSlice {
+            default_target_temp_c,
+            current_soc: None,
+            default_soc_target: None,
+            capacity_kwh: None,
+            max_charge_kw: None,
+            thermal: Some(ThermalRequestDefaults {
+                temperature_c: 40.0,
+                temp_min_c: 30.0,
+                thermal_mass_kwh_per_c: 0.2,
+                rated_kw: 6.0,
+            }),
+            ..slice("heater")
+        }
+    }
+
+    fn heater_body(target_temp_c: Option<f64>) -> CreateUserRequestParams {
+        CreateUserRequestParams {
+            asset_id: "heater".to_string(),
+            target_temp_c,
+            ..base_body()
+        }
+    }
+
+    /// R-124: the VEN UI's heater request states a temperature and no energy. The heater answers
+    /// how much energy that target needs, and its rating is the power.
+    #[test]
+    fn heater_request_with_only_a_target_temperature_gets_the_heaters_energy_and_rating() {
+        let req = create_from_body(heater_body(Some(55.0)), &[heater_slice(None)], now()).unwrap();
+        assert!(
+            (req.target_energy_kwh - 3.0).abs() < 1e-9,
+            "(55-40) * 0.2 kWh"
+        );
+        assert!((req.desired_power_kw - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn heater_request_without_a_target_needs_the_energy_of_the_declared_default() {
+        let req = create_from_body(heater_body(None), &[heater_slice(Some(50.0))], now()).unwrap();
+        assert!(
+            (req.target_energy_kwh - 2.0).abs() < 1e-9,
+            "(50-40) * 0.2 kWh"
+        );
+    }
+
+    #[test]
+    fn heater_already_at_the_target_is_zero_energy() {
+        let err =
+            create_from_body(heater_body(Some(40.0)), &[heater_slice(None)], now()).unwrap_err();
+        assert!(matches!(err, RequestError::ZeroEnergy), "got {err:?}");
+    }
+
+    #[test]
+    fn heater_request_with_no_target_and_no_declared_default_is_missing_target() {
+        let err = create_from_body(heater_body(None), &[heater_slice(None)], now()).unwrap_err();
+        assert!(
+            matches!(err, RequestError::MissingTarget { .. }),
+            "got {err:?}"
+        );
+    }
+
+    /// R-122: a request that states energy but no power runs at the asset's own rating.
+    #[test]
+    fn explicit_energy_without_power_runs_at_the_heaters_rating() {
+        let mut body = heater_body(Some(55.0));
+        body.target_energy_kwh = Some(4.0);
+        let req = create_from_body(body, &[heater_slice(None)], now()).unwrap();
+        assert!((req.desired_power_kw - 6.0).abs() < 1e-9);
+    }
+
+    /// R-122: an asset with no rating and no stated power is refused, never given a guessed 1 kW.
+    #[test]
+    fn no_stated_power_and_no_rating_is_refused() {
+        let mut s = slice("ev");
+        s.max_charge_kw = None;
+        let mut body = base_body();
+        body.target_energy_kwh = Some(4.0);
+        let err = create_from_body(body, &[s], now()).unwrap_err();
+        assert!(
+            matches!(&err, RequestError::NoPowerRating { asset_id } if asset_id == "ev"),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -407,13 +519,16 @@ mod tests {
     }
 
     #[test]
-    fn explicit_target_energy_kwh_defaults_desired_power_to_one_kw_when_unspecified() {
+    fn explicit_target_energy_kwh_defaults_desired_power_to_the_assets_rating() {
         let mut body = base_body();
         body.target_energy_kwh = Some(8.0);
         body.desired_power_kw = None;
         let req = create_from_body(body, &[slice("ev")], now()).unwrap();
         assert!((req.target_energy_kwh - 8.0).abs() < 1e-9);
-        assert!((req.desired_power_kw - 1.0).abs() < 1e-9);
+        assert!(
+            (req.desired_power_kw - 3.7).abs() < 1e-9,
+            "the EV's max_charge_kw, not 1 kW"
+        );
     }
 
     #[test]

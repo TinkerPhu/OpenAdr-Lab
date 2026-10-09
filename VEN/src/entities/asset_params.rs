@@ -1,4 +1,3 @@
-use crate::entities::asset::{ComfortRate, CompletionPolicy};
 use serde::{Deserialize, Serialize};
 
 // ── Battery ─────────────────────────────────────────────────────────────────
@@ -466,64 +465,7 @@ impl AssetParams {
     }
 }
 
-/// What a storage-shaped asset (battery, EV) declares about itself when a user request is
-/// resolved against it — the asset's own answer, so no route or service reads its config to
-/// decide. SoC is a fraction 0..1.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RequestDefaults {
-    pub current_soc: f64,
-    /// Target applied when the request names none.
-    pub default_soc_target: f64,
-    pub capacity_kwh: f64,
-    /// Default desired power when the request names none.
-    pub max_charge_kw: f64,
-}
-
-/// Minimal asset snapshot for user-request creation.
-/// Built by the adapter layer (routes/hems.rs) from a locked SimState.
-/// Pure domain type — no assets/ or simulator/ imports.
-#[derive(Debug, Clone)]
-pub struct AssetRequestSlice {
-    pub id: String,
-    /// Current SoC [0.0, 1.0] for storage assets; None for non-storage.
-    pub current_soc: Option<f64>,
-    /// Default SoC target when body.target_soc is None.
-    pub default_soc_target: Option<f64>,
-    /// Usable capacity in kWh; None for non-storage assets.
-    pub capacity_kwh: Option<f64>,
-    /// Max charge rate (kW); used as default desired_power when not specified.
-    pub max_charge_kw: Option<f64>,
-    pub completion_policy: CompletionPolicy,
-    pub comfort_rates: Vec<ComfortRate>,
-    /// A thermostat asset's declared default target (°C) for a request that states none
-    /// (`Thermostat::default_request_target_c`); `None` for every other asset.
-    pub default_target_temp_c: Option<f64>,
-}
-
-impl AssetRequestSlice {
-    /// The state-of-charge target a request aims for: the one it states, else the asset's own
-    /// declared default (`RequestDefaults::default_soc_target`); `None` for an asset with no SoC.
-    /// The one place this is decided, so the energy to charge and the session it creates can never
-    /// aim at two different targets (R-112).
-    pub fn target_soc_frac(&self, requested: Option<f64>) -> Option<f64> {
-        requested.or(self.default_soc_target)
-    }
-
-    pub fn resolve_request_target(
-        &self,
-        target_soc_frac: Option<f64>,
-        desired_power_kw: Option<f64>,
-    ) -> Option<(f64, f64)> {
-        let current_soc = self.current_soc?;
-        let capacity_kwh = self.capacity_kwh?;
-        let target = self.target_soc_frac(target_soc_frac).unwrap_or(1.0);
-        let kwh = (target - current_soc).max(0.0) * capacity_kwh;
-        if kwh < 1e-6 {
-            return None;
-        }
-        Some((kwh, desired_power_kw.or(self.max_charge_kw).unwrap_or(1.0)))
-    }
-}
+pub use super::request_slice::{AssetRequestSlice, RequestDefaults, ThermalRequestDefaults};
 
 #[cfg(test)]
 mod tests {

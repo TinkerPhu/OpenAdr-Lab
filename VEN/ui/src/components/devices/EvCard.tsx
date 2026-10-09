@@ -78,6 +78,8 @@ export type EvCardProps = {
    * loading, null when the EV has no usage schedule configured (the common
    * case). */
   usageSim: EvUsageSimState | null | undefined;
+  /** The EV's own default target SoC fraction (`GET /capability/ev`); the form opens on it. */
+  declaredTargetSocFrac?: number | null;
   postRequest: (body: CreateUserRequestBody) => Promise<unknown>;
   deleteRequest: (id: string) => Promise<unknown>;
   putEvSettings: (body: UpdateEvSettingsBody) => void;
@@ -88,13 +90,19 @@ export type EvCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function EvCard(props: EvCardProps) {
-  const { requests, evSettings, usageSim, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
+  const { requests, evSettings, usageSim, declaredTargetSocFrac, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
   const [departure, setDeparture] = useState(defaultDateTime(8));
   const [softDeadline, setSoftDeadline] = useState(false);
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
+  /** Open the plan dialog on the EV's declared target; the slider keeps its last position when
+   * the EV declares none. */
+  function openPlanDialog() {
+    if (declaredTargetSocFrac != null) setTargetSoc(Math.round(declaredTargetSocFrac * 100));
+    setDialogOpen(true);
+  }
   const [budgetEur, setBudgetEur] = useState("2.00");
   // Empty = "available now" and "use the EV's own default distance" - the two
   // things a user may state but usually will not.
@@ -224,7 +232,7 @@ export function EvCard(props: EvCardProps) {
               size="small"
               data-testid="ev-plan-another-btn"
               disabled={isPosting}
-              onClick={() => setDialogOpen(true)}
+              onClick={openPlanDialog}
             >
               Plan another
             </Button>
@@ -238,7 +246,7 @@ export function EvCard(props: EvCardProps) {
               sx={{ mt: 1 }}
               data-testid="ev-plan-btn"
               disabled={isPosting}
-              onClick={() => setDialogOpen(true)}
+              onClick={openPlanDialog}
             >
               Plan Charging
             </Button>

@@ -1048,8 +1048,15 @@ Unit arithmetic is written once in `entities/units.rs` (`kw_from_w`, `w_from_kw`
 `GridMeter::net_power_kw` are the two meter views over it (rule 10 keeps the inline spellings out).
 A request that states no target is answered by the asset, not by a literal in `services/`: the EV's
 `default_soc_target` and the heater's `default_target_temp_c` (through `Thermostat::default_request_target_c`)
-ride on `AssetRequestSlice`, and `AssetRequestSlice::target_soc` is the one resolution the energy and the
-session both use. A heater that declares no default gets `RequestError::MissingTarget`. Handlers
+ride on `AssetRequestSlice`, and `AssetRequestSlice::target_soc_frac`/`target_temp_c` are the one
+resolution the energy and the session both use. A heater that declares no default gets
+`RequestError::MissingTarget`. The energy a request needs is also the asset's answer:
+`AssetRequestSlice::energy_to_target_kwh` takes a SoC gap for storage and, for a thermostat, the
+heater's `ThermalRequestDefaults` (current temperature, thermal mass, rating, from
+`Thermostat::thermal_request_defaults`), so a request that states only a temperature is sized by the
+heater. A request that states no power runs at the asset's rating (`rated_power_kw`); an asset with
+none gets `RequestError::NoPowerRating`, never a guessed kW. `GET /capability/:id` carries the declared
+targets (`default_target_temp_c`, `default_target_soc_frac`), and the VEN UI's request forms open on them. Handlers
 only parse and map a status: creating and cancelling a user request (install the session, record it,
 one `RequestTransition` event and one replan trigger through `announce_request_transition`) is
 `services::request_submission::{submit, cancel_and_announce}`, and a value set through `/sim/reset` or

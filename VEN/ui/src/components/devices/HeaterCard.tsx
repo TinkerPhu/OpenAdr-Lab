@@ -41,6 +41,8 @@ function fmtDate(iso: string): string {
 
 export type HeaterCardProps = {
   request: UserRequestWithSession | undefined;
+  /** The heater's own default target (`GET /capability/heater`); the form opens on it. */
+  declaredTargetTempC?: number | null;
   postRequest: (body: CreateUserRequestBody) => Promise<unknown>;
   deleteRequest: (id: string) => Promise<unknown>;
   isPosting: boolean;
@@ -50,11 +52,13 @@ export type HeaterCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function HeaterCard(props: HeaterCardProps) {
-  const { request, postRequest, deleteRequest, isPosting, isDeleting } = props;
+  const { request, declaredTargetTempC, postRequest, deleteRequest, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const { submit: submitRequest, error: submitError } = useSubmitRequest(postRequest);
-  const [tempC, setTempC] = useState("55");
+  // Empty until the dialog opens on the heater's declared target; left empty, the request
+  // states none and the VEN applies (or, with none declared, refuses) the heater's default.
+  const [tempC, setTempC] = useState("");
   const [readyBy, setReadyBy] = useState(defaultDateTime(4));
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
 
@@ -67,7 +71,7 @@ export function HeaterCard(props: HeaterCardProps) {
       target_soc: null,
       target_energy_kwh: null,
       desired_power_kw: null,
-      target_temp_c: Number(tempC),
+      target_temp_c: tempC.trim() === "" ? null : Number(tempC),
       mode,
       completion_policy: "STOP",
       deadlines: [{
@@ -120,7 +124,10 @@ export function HeaterCard(props: HeaterCardProps) {
               sx={{ mt: 1 }}
               data-testid="heater-set-btn"
               disabled={isPosting}
-              onClick={() => setDialogOpen(true)}
+              onClick={() => {
+                setTempC(declaredTargetTempC == null ? "" : String(declaredTargetTempC));
+                setDialogOpen(true);
+              }}
             >
               Set Target
             </Button>
