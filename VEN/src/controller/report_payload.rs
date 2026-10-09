@@ -26,54 +26,9 @@ use tracing::warn;
 
 use crate::controller::vtn_port::{OadrReportInterval, OadrReportPayload};
 
-/// The quantity a report payload type carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Quantity {
-    /// Energy accumulated over the interval. `units: "KWH"`.
-    EnergyKwh,
-    /// Instantaneous or interval-average power. `units: "KW"`.
-    PowerKw,
-    /// A percentage, 0–100. `units: "PERCENT"`.
-    Percent,
-    /// A label, not a measurement — no unit applies.
-    State,
-    /// A number with no unit, e.g. `SIMPLE`'s 0–3 shed level.
-    Dimensionless,
-}
-
-impl Quantity {
-    /// The `units` string this quantity declares on the wire, if any.
-    fn units(self) -> Option<&'static str> {
-        match self {
-            Quantity::EnergyKwh => Some("KWH"),
-            Quantity::PowerKw => Some("KW"),
-            Quantity::Percent => Some("PERCENT"),
-            Quantity::State | Quantity::Dimensionless => None,
-        }
-    }
-}
-
-/// What each report payload type this VEN emits means.
-///
-/// `None` is not "dimensionless" — it is "this lab has not decided", which is
-/// why an unknown type is reported rather than quietly given a unit.
-pub fn quantity_of(payload_type: &str) -> Option<Quantity> {
-    Some(match payload_type {
-        // Spec: "Energy usage over an interval."
-        "USAGE" | "USAGE_FORECAST" | "BASELINE" | "DELTA_USAGE" => Quantity::EnergyKwh,
-        // Spec: "Power usage for an interval, i.e. Real Power." The fleet
-        // series: instantaneous site power, signed, not accumulated energy.
-        "DEMAND" => Quantity::PowerKw,
-        // Spec: additional import/export capacity requested — a power.
-        "IMPORT_RESERVATION_CAPACITY" | "EXPORT_RESERVATION_CAPACITY" => Quantity::PowerKw,
-        // A battery's charge/discharge limit is a power, not a consumption.
-        "STORAGE_MAX_CHARGE_POWER" | "STORAGE_MAX_DISCHARGE_POWER" => Quantity::PowerKw,
-        "STORAGE_CHARGE_LEVEL" => Quantity::Percent,
-        "OPERATING_STATE" | "DATA_QUALITY" => Quantity::State,
-        "SIMPLE" => Quantity::Dimensionless,
-        _ => return None,
-    })
-}
+// What each payload type means is one table for both directions, shared with the BFF:
+// `lab_core::wire_contract` (pinned to `docs/reference/WIRE_PROFILE.md` by a test there).
+pub use lab_core::wire_contract::{report_quantity_of as quantity_of, Quantity};
 
 impl OadrReportPayload {
     /// Energy over the interval, in kWh.

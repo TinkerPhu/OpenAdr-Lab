@@ -8,9 +8,10 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::vtn_port::{EventTypeName, OadrEvent, PayloadValues};
+use crate::controller::vtn_port::{EventTypeName, OadrEvent};
 use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
+use lab_core::wire_contract::PayloadReader;
 
 /// One requested payload type's value in a resolved segment, with the event it
 /// came from (the highest-ranked event covering the segment).
@@ -50,7 +51,14 @@ struct Candidate<'a> {
 /// `resolve_segments`), so every consumer — tick-time cost, history sampler,
 /// planner tariff series, planned capacity limits — reads the same value for the
 /// same instant without a resolution rule of its own.
-fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<IntervalGroup> {
+///
+/// Every value is read through `reader` (GB-50): a payload whose declared unit cannot be
+/// honoured contributes nothing, exactly as if the event did not carry that type.
+fn collect_interval_groups(
+    events: &[OadrEvent],
+    reader: &PayloadReader,
+    payload_types: &[&str],
+) -> Vec<IntervalGroup> {
     let mut candidates: Vec<Candidate> = Vec::new();
 
     // ── BL-02: priority order ───────────────────────────────────────────────
@@ -88,7 +96,7 @@ fn collect_interval_groups(events: &[OadrEvent], payload_types: &[&str]) -> Vec<
                         let name = p.value_type.wire_name();
                         payload_types
                             .contains(&name.as_str())
-                            .then(|| Some((name, p.numeric()?)))
+                            .then(|| Some((name, reader.value(event, p)?)))
                             .flatten()
                     })
                     .collect();
@@ -169,8 +177,8 @@ fn resolve_segments(candidates: &[Candidate<'_>]) -> Vec<IntervalGroup> {
 /// Parse all rate snapshots from a slice of OpenADR events.
 /// Handles PRICE, EXPORT_PRICE, GHG payload types per event interval.
 /// Multiple payload types for the same interval are merged into one TariffSnapshot.
-pub fn parse_rate_snapshots(events: &[OadrEvent]) -> Vec<TariffSnapshot> {
-    collect_interval_groups(events, &["PRICE", "EXPORT_PRICE", "GHG"])
+pub fn parse_rate_snapshots(events: &[OadrEvent], reader: &PayloadReader) -> Vec<TariffSnapshot> {
+    collect_interval_groups(events, reader, &["PRICE", "EXPORT_PRICE", "GHG"])
         .into_iter()
         .filter_map(|(interval_start, interval_end, payloads)| {
             let value = |t: &str| payloads.get(t).map(|v| v.value);
@@ -199,23 +207,30 @@ pub fn parse_rate_snapshots(events: &[OadrEvent]) -> Vec<TariffSnapshot> {
 /// IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT payload types per event interval.
 /// The single source for "which limit applies when" (GB-48): read it through
 /// `entities::capacity::tightest_capacity_limit`.
-pub fn parse_capacity_schedule(events: &[OadrEvent]) -> Vec<CapacitySnapshot> {
-    collect_interval_groups(events, &["IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"])
-        .into_iter()
-        .filter_map(|(interval_start, interval_end, payloads)| {
-            let import = payloads.get("IMPORT_CAPACITY_LIMIT");
-            let export = payloads.get("EXPORT_CAPACITY_LIMIT");
-            if import.is_none() && export.is_none() {
-                return None;
-            }
-            Some(CapacitySnapshot {
-                interval_start,
-                interval_end,
-                import_limit_kw: import.map(|v| v.value),
-                export_limit_kw: export.map(|v| v.value),
-                import_limit_event_id: import.map(|v| v.event_id.clone()),
-                export_limit_event_id: export.map(|v| v.event_id.clone()),
-            })
+pub fn parse_capacity_schedule(
+    events: &[OadrEvent],
+    reader: &PayloadReader,
+) -> Vec<CapacitySnapshot> {
+    collect_interval_groups(
+        events,
+        reader,
+        &["IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"],
+    )
+    .into_iter()
+    .filter_map(|(interval_start, interval_end, payloads)| {
+        let import = payloads.get("IMPORT_CAPACITY_LIMIT");
+        let export = payloads.get("EXPORT_CAPACITY_LIMIT");
+        if import.is_none() && export.is_none() {
+            return None;
+        }
+        Some(CapacitySnapshot {
+            interval_start,
+            interval_end,
+            import_limit_kw: import.map(|v| v.value),
+            export_limit_kw: export.map(|v| v.value),
+            import_limit_event_id: import.map(|v| v.event_id.clone()),
+            export_limit_event_id: export.map(|v| v.event_id.clone()),
         })
-        .collect()
+    })
+    .collect()
 }

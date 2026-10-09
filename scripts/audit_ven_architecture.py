@@ -74,6 +74,12 @@ The rules, and why each exists:
      uses (`State<AppState>`, `State<Roster>`, ...), each of which has its own
      `impl FromRef<AppCtx>` in `app_ctx.rs` (R-110), so a signature says what the route can reach.
 
+  12. No raw read of an incoming event value's number in the VEN (`.numeric()`, `numeric_value(`,
+     a `PayloadValue::Number`/`Integer` match). An incoming number has a unit, so it is read
+     through `lab_core::wire_contract::PayloadReader`, which consults what the event and its
+     program declare and reports an assumed default or a refused unit (GB-50: five readers each
+     assumed kW, EUR/kWh or a level from the payload type's name alone).
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -233,6 +239,9 @@ CHECKS = [
          r"(Utc|chrono::Utc)::now\(\)")),
     ("a handler taking the whole AppCtx",
      lambda: forbid("appctx", [VEN_SRC / "routes"], r"State<AppCtx>")),
+    ("an incoming event value read without its declared unit",
+     lambda: forbid("payload-value", [VEN_SRC],
+                    r"\.numeric\(\)|numeric_value\(|PayloadValue::(Number|Integer)")),
 ]
 
 

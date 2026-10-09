@@ -402,6 +402,9 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     outside `entities/units.rs`
     no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
     each has an `impl FromRef<AppCtx>` in `app_ctx.rs`
+    no raw read of an incoming event value's number (`.numeric()`, `numeric_value(`,
+    `PayloadValue::Number`) — read it through `lab_core::wire_contract::PayloadReader`, which
+    applies what the event and its program declare
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md

@@ -30,6 +30,9 @@ pub struct DiagnosticsState {
     /// Objects the VTN sent that we refused, keyed by resource. See
     /// `state/wire_health.rs`.
     pub wire_rejections: Arc<RwLock<BTreeMap<String, String>>>,
+    /// Event payload types whose unit was read from the profile default in the latest event
+    /// poll, with how many payloads. Legal, so not a rejection; shown so it is not silent.
+    pub wire_assumptions: Arc<RwLock<BTreeMap<String, usize>>>,
     /// WP-T1: whether the last state-persist write succeeded, written by
     /// `tasks::state_persist`, read by `GET /health`.
     pub storage_ok: Arc<RwLock<bool>>,
@@ -52,6 +55,7 @@ impl DiagnosticsState {
         Self {
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
             wire_rejections: Arc::new(RwLock::new(BTreeMap::new())),
+            wire_assumptions: Arc::new(RwLock::new(BTreeMap::new())),
             storage_ok: Arc::new(RwLock::new(true)),
             task_status: Arc::new(RwLock::new(HashMap::new())),
         }
