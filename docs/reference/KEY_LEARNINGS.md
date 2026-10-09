@@ -3171,3 +3171,20 @@ Rules:
 - A conclusion drawn from a live signal needs its own decay path: a "covered" state concluded in the
   cold must melt when the air warms even if the measurement that raised it is gone, or it outlives
   its evidence.
+
+## Mechanical renames and rewrites: let a tool do it, then check what the tool cannot see (R-115, R-110, 2026-10-09)
+
+- Renaming fields across ~70 files (R-115, `soc` -> `soc_frac`) is safe with a lexer, not a regex:
+  rename identifier tokens, leave comments and string literals alone, but do rewrite format-string
+  captures (`{soc}`), which name the variable. Then list every renamed field *declaration* against
+  its container's derives: a field of a `Serialize`/`Deserialize` type needs `#[serde(rename =
+  "<old>")]` (honouring `rename_all` / `rename_all_fields`), or the JSON, the stored state and the
+  profile YAML change silently. Compiling proves the Rust side only; the wire side needs that list.
+- Rewriting handlers from `ctx.field` to one extractor per field (R-110) creates new local names.
+  A local that already uses the name hides the extractor: `vtn_status` bound the VTN connection
+  status to `vtn` and then called `vtn.token_expires_at` on it. Have the rewrite flag every handler
+  with a `let`/pattern binding of an extractor's name and read each one; the compiler catches it only
+  when the types happen to differ.
+- One E2E run on the tip of a stack of branches covers all of them when they are merged together as
+  that same tip (R-113..R-110: one ~55 min run instead of four). It does not cover merging them one at
+  a time on top of something else.
