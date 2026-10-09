@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Asset type classification (§1.1).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -455,7 +456,7 @@ impl PlanTriggerSignal {
 
 /// One point on the comfort/value curve (§2.7).
 /// MaxMarginalPrice is a priority bid, not the actual price paid.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ComfortRate {
     pub fill: f64, // 0.0..1.0 task completion fraction
     #[serde(rename = "max_marginal_price")]

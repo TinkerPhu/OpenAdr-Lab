@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::entities::asset::ComfortRate;
 use crate::entities::design_vocabulary::UserRequestMode;
+use ts_rs::TS;
 
 /// Who created an `EvSession` (`ev-usage-simulation`) — used only for
 /// precedence, never by the MILP: a real user or VTN request always wins over
@@ -12,7 +13,7 @@ use crate::entities::design_vocabulary::UserRequestMode;
 /// already `SimulatedUsage`-origin. No `Default` on purpose (see
 /// `EvSession.origin`'s doc comment) — every construction site must say which
 /// this is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvSessionOrigin {
     UserRequest,
@@ -29,7 +30,7 @@ fn default_ev_session_origin() -> EvSessionOrigin {
 /// A device-centric EV charging session.
 /// Only carries user intent — sim state (current_soc, plugged) is
 /// injected at solve time from `SimState::ev_state()`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EvSession {
     pub id: Uuid,
     /// Target SoC (0.0–1.0). E.g. 0.80 = "charge to 80%".
@@ -414,7 +415,7 @@ impl EvSessionQueue {
 /// A device-centric heater temperature target.
 /// Only carries user intent — sim state (current_temp_c) is
 /// injected at solve time from `SimState::heater_state()`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct HeaterTarget {
     pub id: Uuid,
     /// Desired water/room temperature in °C.
@@ -435,7 +436,7 @@ pub struct HeaterTarget {
 ///
 /// Fixed power level for a fixed duration; the MILP chooses optimal
 /// start time within `[earliest_start, latest_end - duration]`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ShiftableLoad {
     pub id: Uuid,
     /// Asset identifier (e.g. "wm", "hp").

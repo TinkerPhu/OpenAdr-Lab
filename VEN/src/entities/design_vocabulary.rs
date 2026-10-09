@@ -15,9 +15,10 @@
 use crate::entities::asset::{ComfortRate, PowerAdjustability};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// How a user expressed an energy task request (§1.9).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserRequestMode {
     Asap,           // as soon as possible, cost-aware

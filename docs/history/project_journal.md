@@ -15035,3 +15035,20 @@ the sweep had counted; all call `units::energy_kwh` now, bit-identical, and audi
 spelling. Filed R-127..R-133 (renumbered on rebase: the clean-up had issued R-126 meanwhile). Decided
 with the user: delete the old `SimulatorPort` (done by the clean-up work) and generate the UI's API
 types with ts-rs, incrementally (R-133).
+
+## R-133 increment 1: the UI's request and session types are generated from Rust (refactor/r133-ui-types-ts-rs)
+
+`VEN/ui/src/api/types.ts` was a hand-written copy of 99 Rust response types, checked against nothing.
+Decided with the user: ts-rs, incrementally. ts-rs 12 (MIT) derives `TS` beside `Serialize` and honours
+the serde attributes, including R-115's renames (`target_soc` stays `target_soc` on the wire); its
+`Config::with_large_int("number")` keeps 64-bit integers as `number`. Rather than `#[ts(export)]`, whose
+per-type tests rewrite files on every `cargo test`, one test-only module (`ui_types.rs`) lists the root
+types, exports them with their dependencies into a temporary directory and compares that with
+`ui/src/api/generated/` file for file: stale, missing and extra files all fail `cargo test`.
+`.gitattributes` pins the generated files to LF so a Windows checkout cannot trip the comparison.
+The first area, user requests and sessions, showed the drift was real: `EvSession` had gained `origin`
+and `comfort_rates`, `HeaterTarget` `comfort_rates`, and the TS types had neither. Production UI code
+compiled unchanged; eight test fixtures that built sessions without those fields had to be completed.
+Lesson for the guard's own test: a probe that adds a field fails on struct initialisers before the
+guard runs; a probe that renames a field on the wire (`#[serde(rename)]`) compiles and shows the guard
+working. The remaining areas are R-133.

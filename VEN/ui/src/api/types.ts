@@ -1,3 +1,28 @@
+// Generated from the Rust types (R-133): `VEN/src/ui_types.rs` lists them and
+// `UPDATE_UI_TYPES=1 cargo test ui_types` regenerates them. Do not edit `./generated/`.
+import type { ComfortRate } from "./generated/ComfortRate";
+import type { EvSession } from "./generated/EvSession";
+import type { HeaterTarget } from "./generated/HeaterTarget";
+import type { SessionDetail } from "./generated/SessionDetail";
+import type { SessionType } from "./generated/SessionType";
+import type { ShiftableLoad } from "./generated/ShiftableLoad";
+import type { UserRequest } from "./generated/UserRequest";
+import type { UserRequestMode } from "./generated/UserRequestMode";
+import type { UserRequestStatus } from "./generated/UserRequestStatus";
+import type { UserRequestWithSession } from "./generated/UserRequestWithSession";
+export type {
+  ComfortRate,
+  EvSession,
+  HeaterTarget,
+  SessionDetail,
+  SessionType,
+  ShiftableLoad,
+  UserRequest,
+  UserRequestMode,
+  UserRequestStatus,
+  UserRequestWithSession,
+};
+
 // WP-T1 (docs/history/project_journal.md, search "WP-T"): componentised health, replacing the
 // previous plain "ok" string GET /health used to return.
 export type HealthComponentStatus = { status: "ok" | "degraded"; detail?: string };
@@ -384,18 +409,6 @@ export type AssetLedger = {
   started_at: string | null;
 };
 
-export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
-
-/** WP4.2 (BL-19): one point of a comfort/value curve (domain passthrough). */
-export type ComfortRate = {
-  /** Task completion fraction 0.0–1.0. */
-  fill: number;
-  /** Max €/kWh the user bids at this fill level. */
-  max_marginal_price: number;
-  /** Max gCO2/kWh the user accepts at this fill level. */
-  max_marginal_co2: number;
-};
-
 /** WP4.2: GET /assets/:id/comfort_curve response. */
 export type ComfortCurveResponse = {
   source: "default" | "override";
@@ -468,57 +481,6 @@ export type UserNotification = {
   last_seen_at: string;
 };
 
-/** How the user expressed the request (BL-28). Omitted = BY_DEADLINE (legacy). */
-export type UserRequestMode =
-  | "ASAP"
-  | "ASAP_FREE"
-  | "BY_DEADLINE"
-  | "BY_DEADLINE_FREE"
-  | "MAX_COST"
-  | "OPPORTUNISTIC";
-
-export type SessionType = "ev" | "heater" | "shiftable_load";
-
-export type UserRequest = {
-  id: string;
-  asset_id: string;
-  target_energy_kwh: number;
-  target_soc: number | null;
-  desired_power_kw: number;
-  completion_policy: string;
-  deadlines: Array<{
-    latest_end: string;
-    max_total_cost_eur: number | null;
-    max_marginal_rate_eur_kwh: number | null;
-    min_completion: number;
-  }>;
-  mode: UserRequestMode;
-  max_total_cost_eur: number | null;
-  tier_count: number;
-  session_id: string | null;
-  session_type: SessionType | null;
-  status: UserRequestStatus;
-  estimated_cost_eur: number;
-  estimated_co2_g: number;
-  /** BL-39: real money spent so far, accumulated per dispatcher tick from
-   * this request's own asset — distinct from the plan-time estimate above. */
-  accumulated_cost_eur: number;
-  interruptible: boolean;
-  tolerance_min: number | null;
-  budget_eur: number | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type SessionDetail =
-  | { type: "ev" } & EvSession
-  | { type: "heater" } & HeaterTarget
-  | { type: "shiftable_load" } & ShiftableLoad;
-
-export type UserRequestWithSession = UserRequest & {
-  session: SessionDetail | null;
-};
-
 export type CreateUserRequestBody = {
   asset_id: string;
   target_soc: number | null;
@@ -570,27 +532,6 @@ export type CreateUserRequestBody = {
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
-
-export type EvSession = {
-  id: string;
-  target_soc: number;
-  /** When the vehicle becomes available for this session; with `departure_time` it
-   *  forms the half-open charging window [window_start, departure_time). */
-  window_start: string;
-  departure_time: string;
-  /** Distance expected after this session's departure, in km. `null` = the user did
-   *  not say, and the EV's own configured default is used. */
-  expected_trip_distance_km: number | null;
-  /** When the car is expected back from that trip; null = not stated. */
-  expected_return_time: string | null;
-  /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
-  soft_deadline: boolean;
-  mode: UserRequestMode;
-  /** MAX_COST (WP4.1-c): total charging-cost ceiling in €, null otherwise. */
-  budget_eur: number | null;
-  created_at: string;
-  updated_at: string;
-};
 
 export type EvSettings = {
   opportunistic_charging_enabled: boolean;
@@ -669,27 +610,6 @@ export type ArbiterDiagnostics = {
    * into the next tick (R-104). */
   battery_bridge_kw: number;
   updated_at: string | null;
-};
-
-export type HeaterTarget = {
-  id: string;
-  target_temp_c: number;
-  ready_by: string;
-  mode: UserRequestMode;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ShiftableLoad = {
-  id: string;
-  asset_id: string;
-  power_kw: number;
-  duration_min: number;
-  earliest_start: string;
-  latest_end: string;
-  mode: UserRequestMode;
-  created_at: string;
-  updated_at: string;
 };
 
 export type BaselineSlot = { slot_start: string; add_kw: number };
