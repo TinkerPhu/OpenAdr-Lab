@@ -183,9 +183,11 @@ impl Battery {
             // R-69: same symmetric sqrt(round_trip_efficiency) split as step_inner.
             let eff = self.round_trip_efficiency.sqrt();
             if kw > 0.0 {
-                soc_frac += (kw * dt_h * eff) / self.capacity_kwh;
+                soc_frac +=
+                    (crate::entities::units::energy_kwh(kw, dt_h) * eff) / self.capacity_kwh;
             } else {
-                soc_frac += (kw * dt_h / eff) / self.capacity_kwh;
+                soc_frac +=
+                    (crate::entities::units::energy_kwh(kw, dt_h) / eff) / self.capacity_kwh;
             }
             soc_frac = soc_frac.clamp(0.0, 1.0);
             t += Duration::seconds(60);

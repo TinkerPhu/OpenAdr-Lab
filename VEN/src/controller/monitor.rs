@@ -53,19 +53,19 @@ pub fn record_tick(
         let entry = ledger
             .entry(asset_id.clone())
             .or_insert_with(|| AssetLedgerEntry::new(asset_id, now));
-        entry.energy_kwh += kw.abs() * dt_h;
+        entry.energy_kwh += crate::entities::units::energy_kwh(kw.abs(), dt_h);
         let import_cost_eur = if kw > 0.0 {
-            kw * dt_h * import_tariff
+            crate::entities::units::energy_kwh(kw, dt_h) * import_tariff
         } else {
             0.0
         };
         if kw > 0.0 {
             entry.cost_eur += import_cost_eur;
-            entry.co2_g += kw * dt_h * co2_rate;
+            entry.co2_g += crate::entities::units::energy_kwh(kw, dt_h) * co2_rate;
         } else if asset_id == crate::ids::ASSET_PV {
             // BL-17: PV's own embodied/lifecycle carbon, reporting-only — distinct
             // from the grid-import CO2 term above, does not enter the planner.
-            entry.co2_g += kw.abs() * dt_h * pv_co2_g_kwh;
+            entry.co2_g += crate::entities::units::energy_kwh(kw.abs(), dt_h) * pv_co2_g_kwh;
         }
         entry.updated_at = Some(now);
 
