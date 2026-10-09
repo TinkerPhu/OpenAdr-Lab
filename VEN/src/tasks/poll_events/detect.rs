@@ -8,9 +8,10 @@
 use chrono::{DateTime, Utc};
 
 use crate::controller;
-use crate::controller::vtn_port::{EventTypeName, OadrEvent, PayloadValues};
+use crate::controller::vtn_port::{EventTypeName, OadrEvent};
 use crate::entities;
 use crate::tasks::poll_signals;
+use lab_core::wire_contract::{PayloadReader, WireAudit};
 
 /// Output of `detect_event_changes` — all side-effect-free results of one poll tick.
 pub(crate) struct EventChanges {
@@ -30,6 +31,8 @@ pub(crate) struct EventChanges {
     /// History rows for events newly seen this tick (R-64) — one per
     /// `OpenAdrArrived` above, durable record of what VEN actually received.
     pub event_records: Vec<entities::history::EventReceived>,
+    /// What this poll's values assumed or had refused about their units (GB-50).
+    pub wire_audit: WireAudit,
 }
 
 /// `events` as this VEN acts on them: each declared start moved by the VEN's own
@@ -51,18 +54,19 @@ pub(crate) fn events_this_ven_acts_on(events: &[OadrEvent], ven_seed: &str) -> V
 /// state mutations — safe to unit-test.
 pub(crate) fn detect_event_changes(
     events: &[OadrEvent],
+    reader: &PayloadReader,
     prev_ids: &std::collections::HashSet<String>,
     prev_tariff_count: usize,
     prev_import_limit: Option<f64>,
     now: DateTime<Utc>,
 ) -> EventChanges {
-    let rates = controller::openadr_interface::parse_rate_snapshots(events);
-    let capacity = controller::openadr_interface::parse_capacity_state(events, now);
-    let capacity_schedule = controller::openadr_interface::parse_capacity_schedule(events);
+    let rates = controller::openadr_interface::parse_rate_snapshots(events, reader);
+    let capacity = controller::openadr_interface::parse_capacity_state(events, reader, now);
+    let capacity_schedule = controller::openadr_interface::parse_capacity_schedule(events, reader);
     let signals = poll_signals::ParsedSignals {
         alerts: controller::openadr_interface::parse_alert_windows(events),
-        simple: controller::openadr_interface::parse_simple_windows(events),
-        dispatch: controller::openadr_interface::parse_dispatch_windows(events),
+        simple: controller::openadr_interface::parse_simple_windows(events, reader),
+        dispatch: controller::openadr_interface::parse_dispatch_windows(events, reader),
         unapplied: controller::openadr_interface::parse_unapplied_payloads(events),
     };
 
@@ -89,9 +93,9 @@ pub(crate) fn detect_event_changes(
             .and_then(|iv| iv.payloads.first())
             .map(|p| {
                 let sig = p.value_type.wire_name();
-                // `numeric()`, not a `Number` match: SIMPLE's values are
-                // `Integer` on the wire and would otherwise read as 0.0.
-                let val = p.numeric().unwrap_or(0.0);
+                // Through the reader, like every other value: a refused or non-numeric
+                // payload traces as 0.0.
+                let val = reader.value(evt, p).unwrap_or(0.0);
                 (sig, val, intervals.len() as u32)
             })
             .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
@@ -157,6 +161,7 @@ pub(crate) fn detect_event_changes(
         capacity_schedule,
         signals,
         event_records,
+        wire_audit: reader.audit(events),
     }
 }
 
@@ -192,7 +197,14 @@ mod event_poll_tests {
     #[test]
     fn new_event_emits_arrived() {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
-        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &empty_ids(),
+            0,
+            None,
+            ts(),
+        );
         let arrived: Vec<_> = changes
             .trace_events
             .iter()
@@ -218,7 +230,14 @@ mod event_poll_tests {
     #[test]
     fn arrived_carries_the_event_id_and_the_version_it_saw() {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
-        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &empty_ids(),
+            0,
+            None,
+            ts(),
+        );
         let controller::trace::ControllerEvent::OpenAdrArrived {
             event_id,
             modification_date_time,
@@ -244,7 +263,8 @@ mod event_poll_tests {
         let mut prev_ids = empty_ids();
         prev_ids.insert("gone".to_string());
         let events = vec![make_event("fresh", "New", "PRICE", 0.2)];
-        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+        let changes =
+            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
 
         let causes: Vec<String> = changes
             .trace_events
@@ -273,7 +293,8 @@ mod event_poll_tests {
     fn expired_carries_the_event_id() {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes = detect_event_changes(&[], &prev_ids, 0, None, ts());
+        let changes =
+            detect_event_changes(&[], &PayloadReader::default(), &prev_ids, 0, None, ts());
         let expired = changes
             .trace_events
             .iter()
@@ -291,7 +312,14 @@ mod event_poll_tests {
     #[test]
     fn new_event_emits_history_record() {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
-        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &empty_ids(),
+            0,
+            None,
+            ts(),
+        );
         assert_eq!(changes.event_records.len(), 1);
         let row = &changes.event_records[0];
         assert_eq!(row.event_id, "ev1");
@@ -306,7 +334,8 @@ mod event_poll_tests {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+        let changes =
+            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
         assert!(changes.event_records.is_empty());
     }
 
@@ -315,7 +344,8 @@ mod event_poll_tests {
     fn removed_event_emits_expired() {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes = detect_event_changes(&[], &prev_ids, 0, None, ts());
+        let changes =
+            detect_event_changes(&[], &PayloadReader::default(), &prev_ids, 0, None, ts());
         let expired: Vec<_> = changes
             .trace_events
             .iter()
@@ -342,7 +372,8 @@ mod event_poll_tests {
         }));
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
-        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+        let changes =
+            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
         // Only assert if the parser actually produced rates (depends on parser internals)
         if !changes.rates.is_empty() {
             let rate_changes: Vec<_> = changes
@@ -370,7 +401,14 @@ mod event_poll_tests {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen
         let prev_limit: Option<f64> = None;
-        let changes = detect_event_changes(&events, &prev_ids, 0, prev_limit, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            prev_limit,
+            ts(),
+        );
         if changes.capacity.import_limit_kw != prev_limit {
             let cap_changes: Vec<_> = changes
                 .trace_events
@@ -388,7 +426,14 @@ mod event_poll_tests {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
         // Same event already seen, no capacity limit in payload, same import limit (None)
-        let changes = detect_event_changes(&events, &prev_ids, 999, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &prev_ids,
+            999,
+            None,
+            ts(),
+        );
         let no_arrived = !changes
             .trace_events
             .iter()
@@ -433,6 +478,7 @@ mod event_poll_tests {
         // First poll still has ev1 — obligation survives.
         let first = detect_event_changes(
             &[make_event("ev1", "Peak DR", "PRICE", 0.30)],
+            &PayloadReader::default(),
             &empty_ids(),
             0,
             None,
@@ -446,7 +492,14 @@ mod event_poll_tests {
         );
 
         // Second poll: ev1 no longer present — obligation is retired.
-        let second = detect_event_changes(&[], &first.current_ids, 0, None, now);
+        let second = detect_event_changes(
+            &[],
+            &PayloadReader::default(),
+            &first.current_ids,
+            0,
+            None,
+            now,
+        );
         state.retire_obligations_not_in(&second.current_ids).await;
         assert!(
             state.report_obligations().await.is_empty(),
@@ -469,9 +522,16 @@ mod event_poll_tests {
 
     fn simple_start(events: &[OadrEvent], seed: &str) -> DateTime<Utc> {
         let acted_on = events_this_ven_acts_on(events, seed);
-        detect_event_changes(&acted_on, &empty_ids(), 0, None, ts())
-            .signals
-            .simple[0]
+        detect_event_changes(
+            &acted_on,
+            &PayloadReader::default(),
+            &empty_ids(),
+            0,
+            None,
+            ts(),
+        )
+        .signals
+        .simple[0]
             .start
     }
 
@@ -520,6 +580,40 @@ mod event_poll_tests {
         assert_eq!(
             declared.start,
             Utc.with_ymd_and_hms(2026, 3, 21, 11, 0, 0).unwrap()
+        );
+    }
+
+    /// GB-50: one poll reports what it assumed and what it refused, and a refused value is
+    /// neither a rate nor a traced number.
+    #[test]
+    fn a_poll_reports_assumed_and_refused_units() {
+        let mut refused =
+            serde_json::to_value(make_event("ev-usd", "USD price", "PRICE", 0.30)).unwrap();
+        refused["payloadDescriptors"] =
+            serde_json::json!([{ "payloadType": "PRICE", "units": "KWH", "currency": "USD" }]);
+        let events = vec![
+            make_event("ev-undeclared", "limit", "IMPORT_CAPACITY_LIMIT", 4.0),
+            serde_json::from_value(refused).unwrap(),
+        ];
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &empty_ids(),
+            0,
+            None,
+            ts(),
+        );
+        assert_eq!(
+            changes.wire_audit.assumed.get("IMPORT_CAPACITY_LIMIT"),
+            Some(&1)
+        );
+        assert_eq!(changes.wire_audit.refusals.len(), 1);
+        assert_eq!(changes.wire_audit.refusals[0].event_id, "ev-usd");
+        assert!(changes.rates.is_empty(), "the USD price is not used");
+        assert_eq!(
+            changes.capacity.import_limit_kw,
+            Some(4.0),
+            "the undeclared limit still applies"
         );
     }
 }

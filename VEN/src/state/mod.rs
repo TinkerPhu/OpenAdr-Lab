@@ -870,6 +870,7 @@ mod tests {
         let prog = OadrProgram {
             id: "p1".to_string(),
             programName: "TestProgram".to_string(),
+            ..Default::default()
         };
         state.set_programs(vec![prog]).await;
         let json_str = state.to_json().await.unwrap();

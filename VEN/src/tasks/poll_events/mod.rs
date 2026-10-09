@@ -83,14 +83,24 @@ pub(crate) fn spawn_event_poll(
                         &mut announced_staggered,
                     )
                     .await;
+                    // GB-50: every value is read through what its event and program declare.
+                    let reader = controller::vtn_port::payload_reader(&state.programs().await);
                     let changes = detect_event_changes(
                         &acted_on,
+                        &reader,
                         &prev_event_ids,
                         prev_tariff_count,
                         prev_import_limit,
                         now,
                     );
 
+                    crate::services::notify::notify_unit_audit(
+                        &notifier,
+                        &state,
+                        now,
+                        &changes.wire_audit,
+                    )
+                    .await;
                     // Check before the trace_events vec is consumed by the for loop.
                     let any_change = !changes.trace_events.is_empty();
                     // Same reason, same place: which events moved, so a replan

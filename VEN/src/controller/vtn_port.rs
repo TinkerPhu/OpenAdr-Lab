@@ -38,10 +38,48 @@ pub trait VtnPort: Send + Sync {
 
 // ── OadrProgram ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct OadrProgram {
     pub id: String,
     pub programName: String,
+    /// What the program declares about its *event* payload types: the second place an incoming
+    /// value's unit is looked up, after the event itself (`lab_core::wire_contract`, GB-50).
+    #[serde(default, deserialize_with = "event_payload_descriptors")]
+    pub payloadDescriptors: Vec<openleadr_wire::event::EventPayloadDescriptor>,
+}
+
+/// The reader for incoming event values, knowing what each of `programs` declares.
+pub fn payload_reader(programs: &[OadrProgram]) -> lab_core::wire_contract::PayloadReader {
+    lab_core::wire_contract::PayloadReader::with_programs(
+        programs
+            .iter()
+            .map(|p| (p.id.clone(), p.payloadDescriptors.clone())),
+    )
+}
+
+/// A program's `payloadDescriptors` list mixes event and report descriptors, told apart by
+/// `objectType`. The event ones are kept; a report descriptor, or an entry that is not a valid
+/// event descriptor, is skipped rather than failing the whole program: a peer is not refused
+/// for a descriptor this reader has no use for.
+fn event_payload_descriptors<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<openleadr_wire::event::EventPayloadDescriptor>, D::Error> {
+    use openleadr_wire::program::PayloadDescriptor;
+    let entries = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?.unwrap_or_default();
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| {
+            // `objectType` is optional on the wire; the wire crate's enum requires it.
+            let tagged = entry.get("objectType").is_some();
+            match tagged {
+                true => match serde_json::from_value(entry).ok()? {
+                    PayloadDescriptor::EventPayloadDescriptor(d) => Some(d),
+                    PayloadDescriptor::ReportPayloadDescriptor(_) => None,
+                },
+                false => serde_json::from_value(entry).ok(),
+            }
+        })
+        .collect())
 }
 
 // ── Event types: the wire crate's, not ours ───────────────────────────────────
@@ -128,19 +166,11 @@ impl EventTypeName for EventType {
     }
 }
 
-/// `OadrPayload::numeric` used to live here as an inherent method. The type is
-/// now the wire crate's `EventValuesMap`, so it becomes an extension trait --
-/// same single reader, same reason for existing.
+/// A payload's text. Its *number* is deliberately not readable from here: an incoming number
+/// has a unit, so it is read through `lab_core::wire_contract::PayloadReader` (GB-50), which
+/// consults what the event and its program declare. `audit_ven_architecture.py` keeps a
+/// raw numeric reader from coming back.
 pub trait PayloadValues {
-    /// This payload's first value as a number, when it has one.
-    ///
-    /// The one place a payload value becomes an `f64`. It matters more now
-    /// than it did as a DTO method: the wire value is an enum with *separate*
-    /// `Number` and `Integer` variants, and `EventType::Simple`'s declared kind
-    /// is `Integer`. A reader matching only `Number` drops every SIMPLE window
-    /// silently -- exactly the class of failure this migration keeps finding.
-    fn numeric(&self) -> Option<f64>;
-
     /// This payload's first value as text, when it is text.
     ///
     /// The alert payload types carry a human-readable message here; every
@@ -150,17 +180,6 @@ pub trait PayloadValues {
 }
 
 impl PayloadValues for OadrPayload {
-    fn numeric(&self) -> Option<f64> {
-        match self.values.first()? {
-            PayloadValue::Number(n) => Some(*n),
-            // `Integer` is not an afterthought: `EventType::Simple`'s declared
-            // value kind *is* Integer, so a reader that only matched `Number`
-            // would drop every load-shed level and say nothing.
-            PayloadValue::Integer(i) => Some(*i as f64),
-            _ => None,
-        }
-    }
-
     fn text(&self) -> Option<&str> {
         match self.values.first()? {
             PayloadValue::String(s) => Some(s),
@@ -230,6 +249,49 @@ pub struct OadrReportPayload {
 }
 
 // ── Contract tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod program_tests {
+    use super::OadrProgram;
+    use serde_json::json;
+
+    fn program(descriptors: serde_json::Value) -> OadrProgram {
+        serde_json::from_value(json!({
+            "id": "p1", "programName": "tariffs", "payloadDescriptors": descriptors,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_program_keeps_its_event_payload_descriptors() {
+        let p = program(json!([
+            { "objectType": "EVENT_PAYLOAD_DESCRIPTOR", "payloadType": "PRICE", "units": "KWH", "currency": "EUR" },
+            { "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" },
+            { "objectType": "REPORT_PAYLOAD_DESCRIPTOR", "payloadType": "USAGE", "units": "KWH" },
+        ]));
+        let types: Vec<String> = p
+            .payloadDescriptors
+            .iter()
+            .map(|d| lab_core::event_timing::wire_name(&d.payload_type))
+            .collect();
+        assert_eq!(
+            types,
+            ["PRICE", "IMPORT_CAPACITY_LIMIT"],
+            "the report descriptor is not ours to read"
+        );
+    }
+
+    #[test]
+    fn a_program_without_descriptors_or_with_a_broken_one_still_parses() {
+        let none: OadrProgram =
+            serde_json::from_value(json!({ "id": "p1", "programName": "x" })).unwrap();
+        assert!(none.payloadDescriptors.is_empty());
+        let null = program(json!(null));
+        assert!(null.payloadDescriptors.is_empty());
+        let broken = program(json!([{ "units": "KW" }, { "payloadType": "GHG", "units": "GHG" }]));
+        assert_eq!(broken.payloadDescriptors.len(), 1);
+    }
+}
 
 #[cfg(test)]
 mod tests {

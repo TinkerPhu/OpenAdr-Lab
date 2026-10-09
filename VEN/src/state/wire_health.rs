@@ -32,6 +32,17 @@ impl AppState {
         self.diagnostics.wire_rejections.read().await.clone()
     }
 
+    /// GB-50: replace what the latest event poll read from the profile default (payload type ->
+    /// payloads). Replaced, not merged, so it empties once the peer declares its units.
+    pub async fn set_wire_assumptions(&self, assumed: BTreeMap<String, usize>) {
+        *self.diagnostics.wire_assumptions.write().await = assumed;
+    }
+
+    /// Payload types whose unit the latest event poll assumed from the profile default.
+    pub async fn wire_assumptions(&self) -> BTreeMap<String, usize> {
+        self.diagnostics.wire_assumptions.read().await.clone()
+    }
+
     /// GB-49: record (or clear) that this VEN's own token lacks VEN scopes.
     /// Stored alongside the wire rejections because it is the same class of
     /// fault -- something is wrong with what the VTN is giving us, and every
@@ -47,6 +58,17 @@ const SCOPE_KEY: &str = "token-scopes";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn wire_assumptions_are_replaced_by_each_poll() {
+        let state = AppState::new();
+        state
+            .set_wire_assumptions(BTreeMap::from([("PRICE".to_string(), 3)]))
+            .await;
+        assert_eq!(state.wire_assumptions().await.get("PRICE"), Some(&3));
+        state.set_wire_assumptions(BTreeMap::new()).await;
+        assert!(state.wire_assumptions().await.is_empty());
+    }
 
     #[tokio::test]
     async fn set_wire_rejections_records_then_clears_per_resource() {

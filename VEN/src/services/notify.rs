@@ -256,6 +256,57 @@ pub async fn notify_wire_rejections<T>(
         .await;
 }
 
+/// The `wire_rejections` key unit refusals are filed under: the events parsed, but one of their
+/// payloads declares a unit this profile does not read.
+pub const UNIT_REFUSALS_KEY: &str = "events:units";
+
+/// Surface what one event poll assumed and refused about units (GB-50).
+///
+/// An assumption (the peer declared nothing, the profile default was applied) is recorded for
+/// `/health` and the Dashboard and is not a fault. A refusal (the peer declared something this
+/// profile does not read) is a wire rejection like any other: logged, counted, on `/health` as
+/// degraded, and one deduplicated notification. Both follow the latest poll, so they clear.
+pub async fn notify_unit_audit(
+    notifier: &Notifier,
+    state: &AppState,
+    now: DateTime<Utc>,
+    audit: &lab_core::wire_contract::WireAudit,
+) {
+    for (payload_type, count) in &audit.assumed {
+        metrics::counter!("wire_unit_assumed_total", "payload_type" => payload_type.clone())
+            .increment(*count as u64);
+    }
+    state.set_wire_assumptions(audit.assumed.clone()).await;
+
+    if audit.refusals.is_empty() {
+        state.set_wire_rejections(UNIT_REFUSALS_KEY, None).await;
+        return;
+    }
+    let details: Vec<String> = audit.refusals.iter().map(ToString::to_string).collect();
+    let summary = format!(
+        "{} event payload(s) not used, their declared unit is not the one this profile reads: {}",
+        audit.refusals.len(),
+        details.join("; ")
+    );
+    warn!(refused = audit.refusals.len(), "{summary}");
+    metrics::counter!("wire_rejected_total", "resource" => UNIT_REFUSALS_KEY)
+        .increment(audit.refusals.len() as u64);
+    state
+        .set_wire_rejections(UNIT_REFUSALS_KEY, Some(summary.clone()))
+        .await;
+    notifier
+        .notify(
+            state,
+            now,
+            UserNotificationSeverity::Warn,
+            summary,
+            None,
+            None,
+            Some(format!("wire-reject-{UNIT_REFUSALS_KEY}")),
+        )
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,5 +789,53 @@ mod tests {
         let filtered = state.notifications_since(Some(ts(30))).await;
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].message, "new");
+    }
+
+    // ── GB-50: what a poll assumed and refused about units ──────────────────────────
+
+    fn unit_audit(assumed: &[(&str, usize)], refused: usize) -> lab_core::wire_contract::WireAudit {
+        lab_core::wire_contract::WireAudit {
+            assumed: assumed.iter().map(|(t, n)| (t.to_string(), *n)).collect(),
+            refusals: (0..refused)
+                .map(|i| lab_core::wire_contract::Refusal {
+                    event_id: format!("evt-{i}"),
+                    payload_type: "IMPORT_CAPACITY_LIMIT".into(),
+                    declared: "units VOLTS".into(),
+                    expected: "units KW".into(),
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_assumed_default_is_recorded_and_is_not_a_rejection() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_unit_audit(&notifier, &state, ts(0), &unit_audit(&[("PRICE", 4)], 0)).await;
+        assert_eq!(state.wire_assumptions().await.get("PRICE"), Some(&4));
+        assert!(state.wire_rejections().await.is_empty());
+        assert!(
+            state.notifications_since(None).await.is_empty(),
+            "an assumption is not news"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_unit_is_a_named_wire_rejection_and_clears_on_a_clean_poll() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_unit_audit(&notifier, &state, ts(0), &unit_audit(&[], 1)).await;
+        let rejections = state.wire_rejections().await;
+        let detail = rejections
+            .get(UNIT_REFUSALS_KEY)
+            .expect("filed under events:units");
+        for part in ["evt-0", "IMPORT_CAPACITY_LIMIT", "units VOLTS", "units KW"] {
+            assert!(detail.contains(part), "{part} missing from: {detail}");
+        }
+        assert_eq!(state.notifications_since(None).await.len(), 1);
+
+        notify_unit_audit(&notifier, &state, ts(60), &unit_audit(&[], 0)).await;
+        assert!(state.wire_rejections().await.is_empty());
+        assert!(state.wire_assumptions().await.is_empty());
     }
 }

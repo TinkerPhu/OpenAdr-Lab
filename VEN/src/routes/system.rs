@@ -63,6 +63,11 @@ pub struct HealthResponse {
     /// section — not a component (never makes `status` "degraded" on its
     /// own; it's an intentional safety response, not a fault).
     comms_loss_active: bool,
+    /// GB-50: event payload types whose unit the latest poll read from the profile default
+    /// because neither the event nor its program declared one, with how many payloads. Legal
+    /// for a conformant peer, so it never makes `status` "degraded"; shown so the assumption
+    /// is not silent (`docs/reference/WIRE_PROFILE.md`, "Reading what peers send").
+    wire_assumptions: std::collections::BTreeMap<String, usize>,
 }
 
 fn component(ok: bool, detail: Option<String>) -> HealthComponent {
@@ -126,6 +131,7 @@ fn build_health_response(
         components,
         server_time: now,
         comms_loss_active: comms_loss_active(vtn, comms_loss_debounce_s, now),
+        wire_assumptions: Default::default(),
     }
 }
 
@@ -153,7 +159,7 @@ pub async fn health(
     // `None` when this VEN does not publish at all, which must not read as a
     // failure -- see the field's doc comment.
     let telemetry_connected = telemetry.publishes().then(|| telemetry.is_connected());
-    Json(build_health_response(
+    let mut response = build_health_response(
         &vtn,
         storage_ok,
         plan_is_ok(plan_solve_status),
@@ -161,7 +167,9 @@ pub async fn health(
         &wire_rejections,
         telemetry_connected,
         Utc::now(),
-    ))
+    );
+    response.wire_assumptions = state.wire_assumptions().await;
+    Json(response)
 }
 
 #[derive(Serialize)]

@@ -7,6 +7,7 @@ use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
 use lab_core::event_timing::{timed_intervals, TimedInterval};
+use lab_core::wire_contract::PayloadReader;
 use openleadr_wire::report::ReportDescriptor as WireReportDescriptor;
 
 // Rate/capacity-schedule parsing lives in `rate_schedule.rs` (split out to stay under the
@@ -25,16 +26,20 @@ pub use crate::controller::rate_schedule::{parse_capacity_schedule, parse_rate_s
 /// strictest value over all listed events (making them time-aware is a separate
 /// step, BACKLOG GB-48 option C). `last_updated` is set when any capacity payload
 /// is listed.
-pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCapacityState {
+pub fn parse_capacity_state(
+    events: &[OadrEvent],
+    reader: &PayloadReader,
+    now: DateTime<Utc>,
+) -> OadrCapacityState {
     use crate::entities::capacity::tightest_capacity_limit;
     use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
 
     let strictest = |payload_type: &str| {
         events
             .iter()
-            .flat_map(event_payloads)
-            .filter(|p| p.value_type.wire_name() == payload_type)
-            .filter_map(|p| p.numeric())
+            .flat_map(|event| event_payloads(event).map(move |p| (event, p)))
+            .filter(|(_, p)| p.value_type.wire_name() == payload_type)
+            .filter_map(|(event, p)| reader.value(event, p))
             .reduce(f64::min)
     };
     let found_any = [
@@ -51,7 +56,7 @@ pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCap
         return OadrCapacityState::default();
     }
 
-    let schedule = parse_capacity_schedule(events);
+    let schedule = parse_capacity_schedule(events, reader);
     let import = tightest_capacity_limit(&schedule, Import, now, now);
     let export = tightest_capacity_limit(&schedule, Export, now, now);
     OadrCapacityState {
@@ -120,13 +125,14 @@ pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
 /// SIMPLE load-shed windows, levels 1–3 (WP3.2). Level 0 ("normal") windows
 /// are dropped — they constrain nothing. Non-numeric or out-of-range values
 /// are skipped.
-pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
+pub fn parse_simple_windows(events: &[OadrEvent], reader: &PayloadReader) -> Vec<SimpleWindow> {
     timed_payloads(events, &["SIMPLE"])
         .filter_map(|(event, timed, payload)| {
-            // `numeric()` deliberately, not a `Number` match: SIMPLE's
-            // declared value kind is `Integer`, so matching only `Number`
-            // would drop every load-shed level silently.
-            let level = payload.numeric().filter(|v| (1.0..=3.0).contains(v))? as u8;
+            // The reader takes `Integer` as well as `Number`: SIMPLE's declared value kind is
+            // `Integer`, so matching only `Number` would drop every load-shed level silently.
+            let level = reader
+                .value(event, payload)
+                .filter(|v| (1.0..=3.0).contains(v))? as u8;
             Some(SimpleWindow {
                 level,
                 start: timed.start,
@@ -143,11 +149,11 @@ pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
 
 /// DISPATCH_SETPOINT windows; the payload value is the commanded net site
 /// setpoint in kW.
-pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
+pub fn parse_dispatch_windows(events: &[OadrEvent], reader: &PayloadReader) -> Vec<DispatchWindow> {
     timed_payloads(events, &["DISPATCH_SETPOINT"])
         .filter_map(|(event, timed, payload)| {
             Some(DispatchWindow {
-                setpoint_kw: payload.numeric()?,
+                setpoint_kw: reader.value(event, payload)?,
                 start: timed.start,
                 end: timed.end,
                 event_id: event.id.to_string(),
@@ -409,7 +415,10 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT15M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [1.5] }] }]
         }]);
-        let w = parse_dispatch_windows(&lab_core::test_fixtures::events_from_json(events));
+        let w = parse_dispatch_windows(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].setpoint_kw, 1.5);
         assert_eq!((w[0].end - w[0].start).num_minutes(), 15);
@@ -492,6 +501,7 @@ mod tests {
         }]);
         let cap = parse_capacity_state(
             &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
             Utc::now(),
         );
         assert_eq!(cap.export_subscription_kw, Some(4.0));
@@ -508,7 +518,10 @@ mod tests {
             "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
             "intervals": [{ "id": 0, "payloads": [{ "type": "SIMPLE", "values": [2] }] }]
         }]);
-        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
+        let windows = parse_simple_windows(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].level, 2);
         assert_eq!(windows[0].event_id, "simple-1");
@@ -527,7 +540,10 @@ mod tests {
                 { "id": 2, "payloads": [{ "type": "SIMPLE", "values": ["high"] }] }
             ]
         }]);
-        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
+        let windows = parse_simple_windows(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert!(windows.is_empty());
     }
 
@@ -542,7 +558,10 @@ mod tests {
                 "payloads": [{ "type": "PRICE", "values": [0.25] }]
             }]
         }]);
-        let windows = parse_simple_windows(&lab_core::test_fixtures::events_from_json(events));
+        let windows = parse_simple_windows(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert!(windows.is_empty());
     }
 
@@ -592,13 +611,19 @@ mod tests {
         assert_eq!((alerts[0].start, alerts[0].end), (t0, t30));
         assert_eq!((alerts[1].start, alerts[1].end), (t30, t60));
 
-        let simple = parse_simple_windows(&events("SIMPLE", json!(1), json!(3)));
+        let simple = parse_simple_windows(
+            &events("SIMPLE", json!(1), json!(3)),
+            &PayloadReader::default(),
+        );
         assert_eq!(
             (simple[1].level, simple[1].start, simple[1].end),
             (3, t30, t60)
         );
 
-        let dispatch = parse_dispatch_windows(&events("DISPATCH_SETPOINT", json!(1.0), json!(2.0)));
+        let dispatch = parse_dispatch_windows(
+            &events("DISPATCH_SETPOINT", json!(1.0), json!(2.0)),
+            &PayloadReader::default(),
+        );
         assert_eq!((dispatch[1].setpoint_kw, dispatch[1].start), (2.0, t30));
     }
 
@@ -643,7 +668,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -670,7 +698,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -720,7 +751,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].co2_g_kwh, Some(280.0));
         assert_eq!(snapshots[1].co2_g_kwh, Some(320.0));
@@ -747,7 +781,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -783,7 +820,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_capacity_schedule(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         // Unlike parse_capacity_state (which collapses to the strictest single value),
         // the schedule keeps both intervals with their own distinct limits.
         assert_eq!(snapshots.len(), 2);
@@ -813,7 +853,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_capacity_schedule(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert!(snapshots.is_empty());
     }
 
@@ -848,7 +891,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_capacity_schedule(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(
             snapshots.len(),
             1,
@@ -887,7 +933,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_capacity_schedule(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_capacity_schedule(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let got: Vec<_> = snapshots
             .iter()
@@ -939,7 +988,7 @@ mod tests {
         // limit has not started — this test used to expect 5.0 here, which is
         // exactly the bug (a future limit applied now).
         let before = Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap();
-        let cap = parse_capacity_state(&events, before);
+        let cap = parse_capacity_state(&events, &PayloadReader::default(), before);
         assert_eq!(
             cap.import_limit_kw, None,
             "not in force before its interval"
@@ -950,11 +999,14 @@ mod tests {
             "last_updated must equal the injected clock, not wall-clock Utc::now()"
         );
         let during = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(&events, during);
+        let cap = parse_capacity_state(&events, &PayloadReader::default(), during);
         assert_eq!(cap.import_limit_kw, Some(5.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
         let after = Utc.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap();
-        assert_eq!(parse_capacity_state(&events, after).import_limit_kw, None);
+        assert_eq!(
+            parse_capacity_state(&events, &PayloadReader::default(), after).import_limit_kw,
+            None
+        );
     }
 
     // GB-48: overlapping limits resolve like every other payload type — by
@@ -986,7 +1038,11 @@ mod tests {
             }
         ]);
         let now = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(&lab_core::test_fixtures::events_from_json(events), now);
+        let cap = parse_capacity_state(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+            now,
+        );
         assert_eq!(
             cap.import_limit_kw,
             Some(10.0),
@@ -1005,6 +1061,7 @@ mod tests {
         }]);
         let cap = parse_capacity_state(
             &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
             Utc::now(),
         );
         assert_eq!(cap.import_limit_kw, Some(10000.0));
@@ -1103,7 +1160,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert_eq!(
             snapshots.len(),
             2,
@@ -1134,7 +1194,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -1170,7 +1233,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -1203,7 +1269,10 @@ mod tests {
             "intervalPeriod": {"start": "2026-01-01T00:00:00Z"},
             "intervals": intervals
         }]);
-        let snapshots = parse_rate_snapshots(&lab_core::test_fixtures::events_from_json(events));
+        let snapshots = parse_rate_snapshots(
+            &lab_core::test_fixtures::events_from_json(events),
+            &PayloadReader::default(),
+        );
 
         assert!(
             snapshots.len() > 24,
@@ -1248,7 +1317,7 @@ mod tests {
             vec![high.clone(), low.clone()],
             vec![low.clone(), high.clone()],
         ] {
-            let snapshots = parse_rate_snapshots(&events);
+            let snapshots = parse_rate_snapshots(&events, &PayloadReader::default());
             assert_eq!(snapshots.len(), 1);
             assert_eq!(
                 snapshots[0].import_tariff_eur_kwh,
@@ -1264,7 +1333,7 @@ mod tests {
         let older = price_event("evt-old", Some(2), Some("2026-01-15T08:00:00Z"), 0.20);
 
         // older last in the array — would win under naive last-write-wins
-        let snapshots = parse_rate_snapshots(&[newer, older]);
+        let snapshots = parse_rate_snapshots(&[newer, older], &PayloadReader::default());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(
             snapshots[0].import_tariff_eur_kwh,
@@ -1279,7 +1348,7 @@ mod tests {
         let none = price_event("evt-none", None, Some("2026-02-01T00:00:00Z"), 0.99);
 
         // None-priority event last in the array — would win under naive last-write-wins
-        let snapshots = parse_rate_snapshots(&[explicit, none]);
+        let snapshots = parse_rate_snapshots(&[explicit, none], &PayloadReader::default());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(
             snapshots[0].import_tariff_eur_kwh,
@@ -1365,7 +1434,7 @@ mod tests {
             day_ahead_and_intra_hour(),
             day_ahead_and_intra_hour().into_iter().rev().collect(),
         ] {
-            let snaps = parse_rate_snapshots(&events);
+            let snaps = parse_rate_snapshots(&events, &PayloadReader::default());
             assert_eq!(
                 segments(&snaps),
                 vec![
@@ -1399,7 +1468,7 @@ mod tests {
                 &[("PRICE", 0.10)],
             ),
         ];
-        let snaps = parse_rate_snapshots(&events);
+        let snaps = parse_rate_snapshots(&events, &PayloadReader::default());
         assert_eq!(import_at(&snaps, "2026-08-31T05:28:59Z"), Some(0.09));
         for minute in 29..59 {
             assert_eq!(
@@ -1433,7 +1502,7 @@ mod tests {
             vec![older.clone(), newer.clone()],
             vec![newer.clone(), older.clone()],
         ] {
-            let snaps = parse_rate_snapshots(&events);
+            let snaps = parse_rate_snapshots(&events, &PayloadReader::default());
             assert_eq!(
                 segments(&snaps),
                 vec![
@@ -1475,7 +1544,7 @@ mod tests {
             "PT1H",
             &[("PRICE", 0.30)],
         );
-        let snaps = parse_rate_snapshots(&[p9, none]);
+        let snaps = parse_rate_snapshots(&[p9, none], &PayloadReader::default());
         assert_eq!(import_at(&snaps, "2026-02-01T10:15:00Z"), Some(0.99));
         assert_eq!(import_at(&snaps, "2026-02-01T10:45:00Z"), Some(0.30));
         assert_eq!(import_at(&snaps, "2026-02-01T11:15:00Z"), Some(0.30));
@@ -1499,7 +1568,7 @@ mod tests {
             "PT1H",
             &[("PRICE", 0.09), ("GHG", 300.0)],
         );
-        let snaps = parse_rate_snapshots(&[price_only, price_ghg]);
+        let snaps = parse_rate_snapshots(&[price_only, price_ghg], &PayloadReader::default());
         let at = |s: &str| {
             let t = ts(s);
             let snap = crate::entities::tariff_snapshot::tariff_at(&snaps, t).expect("covered");
@@ -1548,7 +1617,7 @@ mod tests {
             &[("PRICE", 77.0)],
         ));
 
-        let snaps = parse_rate_snapshots(&events);
+        let snaps = parse_rate_snapshots(&events, &PayloadReader::default());
         for w in snaps.windows(2) {
             assert!(
                 w[0].interval_end <= w[1].interval_start,
@@ -1587,7 +1656,7 @@ mod tests {
                 &[("IMPORT_CAPACITY_LIMIT", 2.0)],
             ),
         ];
-        let got: Vec<_> = parse_capacity_schedule(&events)
+        let got: Vec<_> = parse_capacity_schedule(&events, &PayloadReader::default())
             .into_iter()
             .map(|c| (c.interval_start, c.interval_end, c.import_limit_kw))
             .collect();
@@ -1616,7 +1685,7 @@ mod tests {
     #[test]
     fn parse_rate_snapshots_planner_series_agrees_with_tick_lookup() {
         use crate::entities::tariff_snapshot::TariffTimeSeries;
-        let snaps = parse_rate_snapshots(&day_ahead_and_intra_hour());
+        let snaps = parse_rate_snapshots(&day_ahead_and_intra_hour(), &PayloadReader::default());
         let series = TariffTimeSeries::from_snapshots(&snaps);
         for at in [
             "2026-08-31T05:10:00Z",
@@ -1826,5 +1895,91 @@ mod tests {
             "reportDescriptors": [descriptor],
             "intervals": intervals
         }]))
+    }
+
+    // ── GB-50: values are read through what the event and its program declare ───────
+
+    /// `window_event` plus `payloadDescriptors`.
+    fn declared_event(
+        id: &str,
+        payloads: &[(&str, f64)],
+        descriptors: serde_json::Value,
+    ) -> OadrEvent {
+        let mut ev = serde_json::to_value(window_event(
+            id,
+            Some(1),
+            "2026-09-08T00:00:00Z",
+            "2026-09-09T00:00:00Z",
+            "PT24H",
+            payloads,
+        ))
+        .unwrap();
+        ev["payloadDescriptors"] = descriptors;
+        serde_json::from_value(ev).unwrap()
+    }
+
+    #[test]
+    fn a_limit_declared_in_another_unit_is_not_applied_and_a_valid_one_still_is() {
+        let events = vec![
+            declared_event(
+                "volts",
+                &[("IMPORT_CAPACITY_LIMIT", 230.0)],
+                json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "VOLTS" }]),
+            ),
+            declared_event(
+                "kw",
+                &[("EXPORT_CAPACITY_LIMIT", 3.0)],
+                json!([{ "payloadType": "EXPORT_CAPACITY_LIMIT", "units": "KW" }]),
+            ),
+        ];
+        let reader = PayloadReader::default();
+        let cap = parse_capacity_state(&events, &reader, ts("2026-09-09T12:00:00Z"));
+        assert_eq!(cap.import_limit_kw, None, "230 VOLTS is not a kW limit");
+        assert_eq!(cap.export_limit_kw, Some(3.0));
+        let schedule = parse_capacity_schedule(&events, &reader);
+        assert!(schedule.iter().all(|s| s.import_limit_kw.is_none()));
+    }
+
+    #[test]
+    fn a_price_in_another_currency_is_dropped_and_ghg_from_the_same_event_is_kept() {
+        let events = vec![declared_event(
+            "usd",
+            &[("PRICE", 0.21), ("GHG", 300.0)],
+            json!([
+                { "payloadType": "PRICE", "units": "KWH", "currency": "USD" },
+                { "payloadType": "GHG", "units": "GHG" },
+            ]),
+        )];
+        let snaps = parse_rate_snapshots(&events, &PayloadReader::default());
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(
+            snaps[0].import_tariff_eur_kwh, None,
+            "a USD price is not a EUR price"
+        );
+        assert_eq!(snaps[0].co2_g_kwh, Some(300.0));
+    }
+
+    #[test]
+    fn a_dispatch_setpoint_is_read_from_what_its_program_declares() {
+        let events = vec![window_event(
+            "d1",
+            Some(1),
+            "2026-09-08T00:00:00Z",
+            "2026-09-09T00:00:00Z",
+            "PT1H",
+            &[("DISPATCH_SETPOINT", 2.5)],
+        )];
+        let kw: Vec<openleadr_wire::event::EventPayloadDescriptor> =
+            serde_json::from_value(json!([{ "payloadType": "DISPATCH_SETPOINT", "units": "KW" }]))
+                .unwrap();
+        let reader = PayloadReader::with_programs([("prog-1".to_string(), kw)]);
+        assert_eq!(parse_dispatch_windows(&events, &reader)[0].setpoint_kw, 2.5);
+
+        let amps: Vec<openleadr_wire::event::EventPayloadDescriptor> = serde_json::from_value(
+            json!([{ "payloadType": "DISPATCH_SETPOINT", "units": "AMPS" }]),
+        )
+        .unwrap();
+        let reader = PayloadReader::with_programs([("prog-1".to_string(), amps)]);
+        assert!(parse_dispatch_windows(&events, &reader).is_empty());
     }
 }
