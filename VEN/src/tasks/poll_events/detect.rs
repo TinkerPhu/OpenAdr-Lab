@@ -63,12 +63,7 @@ pub(crate) fn detect_event_changes(
     let rates = controller::openadr_interface::parse_rate_snapshots(events, reader);
     let capacity = controller::openadr_interface::parse_capacity_state(events, reader, now);
     let capacity_schedule = controller::openadr_interface::parse_capacity_schedule(events, reader);
-    let signals = poll_signals::ParsedSignals {
-        alerts: controller::openadr_interface::parse_alert_windows(events),
-        simple: controller::openadr_interface::parse_simple_windows(events, reader),
-        dispatch: controller::openadr_interface::parse_dispatch_windows(events, reader),
-        unapplied: controller::openadr_interface::parse_unapplied_payloads(events),
-    };
+    let signals = poll_signals::ParsedSignals::parse(events, reader);
 
     let current_ids: std::collections::HashSet<String> =
         events.iter().map(|e| e.id.to_string()).collect();

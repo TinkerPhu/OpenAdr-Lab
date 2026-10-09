@@ -21,6 +21,22 @@ pub(crate) struct ParsedSignals {
     pub unapplied: Vec<controller::openadr_interface::UnappliedPayload>,
 }
 
+impl ParsedSignals {
+    /// Every windowed signal in `events`, numbers read through `reader` (GB-50).
+    pub(crate) fn parse(
+        events: &[controller::vtn_port::OadrEvent],
+        reader: &lab_core::wire_contract::PayloadReader,
+    ) -> Self {
+        use controller::openadr_interface as oadr;
+        Self {
+            alerts: oadr::parse_alert_windows(events),
+            simple: oadr::parse_simple_windows(events, reader),
+            dispatch: oadr::parse_dispatch_windows(events, reader),
+            unapplied: oadr::parse_unapplied_payloads(events),
+        }
+    }
+}
+
 /// Previous-poll signal state, owned by the poll loop across iterations.
 #[derive(Default)]
 pub(crate) struct SignalPrevs {

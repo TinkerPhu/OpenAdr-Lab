@@ -235,9 +235,29 @@ pub async fn notify_wire_rejections<T>(
         state.set_wire_rejections(resource, None).await;
         return;
     };
-    warn!(resource, rejected = outcome.rejected.len(), "{summary}");
-    metrics::counter!("wire_rejected_total", "resource" => resource)
-        .increment(outcome.rejected.len() as u64);
+    surface_wire_rejection(
+        notifier,
+        state,
+        now,
+        resource,
+        outcome.rejected.len(),
+        summary,
+    )
+    .await;
+}
+
+/// A standing wire rejection under `resource`: a warning in the log, a counter, the `/health`
+/// entry and one deduplicated notification. The one tail of every kind of rejection.
+async fn surface_wire_rejection(
+    notifier: &Notifier,
+    state: &AppState,
+    now: DateTime<Utc>,
+    resource: &'static str,
+    rejected: usize,
+    summary: String,
+) {
+    warn!(resource, rejected, "{summary}");
+    metrics::counter!("wire_rejected_total", "resource" => resource).increment(rejected as u64);
     state
         .set_wire_rejections(resource, Some(summary.clone()))
         .await;
@@ -288,23 +308,8 @@ pub async fn notify_unit_audit(
         audit.refusals.len(),
         details.join("; ")
     );
-    warn!(refused = audit.refusals.len(), "{summary}");
-    metrics::counter!("wire_rejected_total", "resource" => UNIT_REFUSALS_KEY)
-        .increment(audit.refusals.len() as u64);
-    state
-        .set_wire_rejections(UNIT_REFUSALS_KEY, Some(summary.clone()))
-        .await;
-    notifier
-        .notify(
-            state,
-            now,
-            UserNotificationSeverity::Warn,
-            summary,
-            None,
-            None,
-            Some(format!("wire-reject-{UNIT_REFUSALS_KEY}")),
-        )
-        .await;
+    let refused = audit.refusals.len();
+    surface_wire_rejection(notifier, state, now, UNIT_REFUSALS_KEY, refused, summary).await;
 }
 
 #[cfg(test)]

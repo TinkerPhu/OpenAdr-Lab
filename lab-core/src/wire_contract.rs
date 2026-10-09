@@ -310,11 +310,14 @@ fn check(descriptor: &EventPayloadDescriptor, quantity: Quantity) -> Declaration
     };
     if differs(&units, quantity.units()) || differs(&currency, quantity.currency()) {
         let side = |unit: Option<&str>, currency: Option<&str>| {
-            [unit.map(|u| format!("units {u}")), currency.map(|c| format!("currency {c}"))]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" ")
+            [
+                unit.map(|u| format!("units {u}")),
+                currency.map(|c| format!("currency {c}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
         };
         let expected = match side(quantity.units(), quantity.currency()) {
             s if s.is_empty() => "no unit".to_string(),
@@ -335,7 +338,11 @@ mod tests {
     use serde_json::json;
 
     /// One event with one payload of `payload_type` = `value`, and the given event descriptors.
-    fn event(payload_type: &str, value: serde_json::Value, descriptors: serde_json::Value) -> OadrEvent {
+    fn event(
+        payload_type: &str,
+        value: serde_json::Value,
+        descriptors: serde_json::Value,
+    ) -> OadrEvent {
         let mut ev = json!({
             "id": "evt-a",
             "programID": "prog-1",
@@ -368,15 +375,22 @@ mod tests {
         );
         assert_eq!(
             read(&PayloadReader::default(), &ev),
-            Some(Ok(Reading { value: 4.5, declared_by: DeclaredBy::Event }))
+            Some(Ok(Reading {
+                value: 4.5,
+                declared_by: DeclaredBy::Event
+            }))
         );
     }
 
     #[test]
     fn the_programs_declaration_is_used_when_the_event_is_silent() {
         let ev = event("IMPORT_CAPACITY_LIMIT", json!(4.5), json!(null));
-        let reader = program_reader(json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" }]));
-        assert_eq!(read(&reader, &ev).unwrap().unwrap().declared_by, DeclaredBy::Program);
+        let reader =
+            program_reader(json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" }]));
+        assert_eq!(
+            read(&reader, &ev).unwrap().unwrap().declared_by,
+            DeclaredBy::Program
+        );
     }
 
     #[test]
@@ -386,8 +400,12 @@ mod tests {
             json!(4.5),
             json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "VOLTS" }]),
         );
-        let reader = program_reader(json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" }]));
-        assert!(read(&reader, &ev).unwrap().is_err(), "the event said VOLTS; the program cannot rescue it");
+        let reader =
+            program_reader(json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" }]));
+        assert!(
+            read(&reader, &ev).unwrap().is_err(),
+            "the event said VOLTS; the program cannot rescue it"
+        );
     }
 
     #[test]
@@ -395,16 +413,35 @@ mod tests {
         let ev = event("PRICE", json!(0.21), json!(null));
         assert_eq!(
             read(&PayloadReader::default(), &ev),
-            Some(Ok(Reading { value: 0.21, declared_by: DeclaredBy::ProfileDefault }))
+            Some(Ok(Reading {
+                value: 0.21,
+                declared_by: DeclaredBy::ProfileDefault
+            }))
         );
     }
 
     #[test]
     fn a_descriptor_for_another_type_or_without_units_declares_nothing() {
-        let other = event("PRICE", json!(0.21), json!([{ "payloadType": "GHG", "units": "GHG" }]));
-        assert_eq!(read(&PayloadReader::default(), &other).unwrap().unwrap().declared_by, DeclaredBy::ProfileDefault);
+        let other = event(
+            "PRICE",
+            json!(0.21),
+            json!([{ "payloadType": "GHG", "units": "GHG" }]),
+        );
+        assert_eq!(
+            read(&PayloadReader::default(), &other)
+                .unwrap()
+                .unwrap()
+                .declared_by,
+            DeclaredBy::ProfileDefault
+        );
         let bare = event("PRICE", json!(0.21), json!([{ "payloadType": "PRICE" }]));
-        assert_eq!(read(&PayloadReader::default(), &bare).unwrap().unwrap().declared_by, DeclaredBy::ProfileDefault);
+        assert_eq!(
+            read(&PayloadReader::default(), &bare)
+                .unwrap()
+                .unwrap()
+                .declared_by,
+            DeclaredBy::ProfileDefault
+        );
     }
 
     #[test]
@@ -424,7 +461,11 @@ mod tests {
                 expected: "units KW".into(),
             }
         );
-        assert_eq!(PayloadReader::default().value(&ev, &ev.content.intervals.as_ref().unwrap()[0].payloads[0]), None);
+        assert_eq!(
+            PayloadReader::default()
+                .value(&ev, &ev.content.intervals.as_ref().unwrap()[0].payloads[0]),
+            None
+        );
     }
 
     #[test]
@@ -446,7 +487,13 @@ mod tests {
             json!(0.21),
             json!([{ "payloadType": "PRICE", "units": "KWH", "currency": "EUR" }]),
         );
-        assert_eq!(read(&PayloadReader::default(), &ev).unwrap().unwrap().declared_by, DeclaredBy::Event);
+        assert_eq!(
+            read(&PayloadReader::default(), &ev)
+                .unwrap()
+                .unwrap()
+                .declared_by,
+            DeclaredBy::Event
+        );
     }
 
     #[test]
@@ -456,7 +503,13 @@ mod tests {
             json!(4500.0),
             json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "W" }]),
         );
-        assert_eq!(read(&PayloadReader::default(), &ev).unwrap().unwrap_err().declared, "units W");
+        assert_eq!(
+            read(&PayloadReader::default(), &ev)
+                .unwrap()
+                .unwrap_err()
+                .declared,
+            "units W"
+        );
     }
 
     /// No magnitude guessing: 0.8 declared PERCENT is 0.8 percent.
@@ -467,7 +520,10 @@ mod tests {
             json!(0.8),
             json!([{ "payloadType": "CHARGE_STATE_SETPOINT", "units": "PERCENT" }]),
         );
-        assert_eq!(read(&PayloadReader::default(), &ev).unwrap().unwrap().value, 0.8);
+        assert_eq!(
+            read(&PayloadReader::default(), &ev).unwrap().unwrap().value,
+            0.8
+        );
     }
 
     #[test]
@@ -475,16 +531,35 @@ mod tests {
         let ev = event("SIMPLE", json!(2), json!(null));
         assert_eq!(
             read(&PayloadReader::default(), &ev),
-            Some(Ok(Reading { value: 2.0, declared_by: DeclaredBy::NothingToDeclare }))
+            Some(Ok(Reading {
+                value: 2.0,
+                declared_by: DeclaredBy::NothingToDeclare
+            }))
         );
-        let with_unit = event("SIMPLE", json!(2), json!([{ "payloadType": "SIMPLE", "units": "KW" }]));
-        assert_eq!(read(&PayloadReader::default(), &with_unit).unwrap().unwrap_err().expected, "no unit");
+        let with_unit = event(
+            "SIMPLE",
+            json!(2),
+            json!([{ "payloadType": "SIMPLE", "units": "KW" }]),
+        );
+        assert_eq!(
+            read(&PayloadReader::default(), &with_unit)
+                .unwrap()
+                .unwrap_err()
+                .expected,
+            "no unit"
+        );
     }
 
     #[test]
     fn a_type_the_profile_does_not_define_passes_through_and_text_is_not_a_number() {
         let private = event("MY_PRIVATE_SIGNAL", json!(7.0), json!(null));
-        assert_eq!(read(&PayloadReader::default(), &private).unwrap().unwrap().declared_by, DeclaredBy::NothingToDeclare);
+        assert_eq!(
+            read(&PayloadReader::default(), &private)
+                .unwrap()
+                .unwrap()
+                .declared_by,
+            DeclaredBy::NothingToDeclare
+        );
         let text = event("ALERT_GRID_EMERGENCY", json!("grid emergency"), json!(null));
         assert_eq!(read(&PayloadReader::default(), &text), None);
     }
@@ -514,8 +589,15 @@ mod tests {
             },
         ]));
         let audit = PayloadReader::default().audit(&events);
-        assert_eq!(audit.assumed, BTreeMap::from([("GHG".to_string(), 1), ("PRICE".to_string(), 2)]));
-        assert_eq!(audit.refusals.len(), 1, "two intervals of one event and type are one refusal");
+        assert_eq!(
+            audit.assumed,
+            BTreeMap::from([("GHG".to_string(), 1), ("PRICE".to_string(), 2)])
+        );
+        assert_eq!(
+            audit.refusals.len(),
+            1,
+            "two intervals of one event and type are one refusal"
+        );
         assert_eq!(audit.refusals[0].event_id, "evt-volts");
     }
 
@@ -531,7 +613,10 @@ mod tests {
             json!({ "id": "prog-2" }),
         ]);
         let ev = event("IMPORT_CAPACITY_LIMIT", json!(4.5), json!(null));
-        assert_eq!(read(&reader, &ev).unwrap().unwrap().declared_by, DeclaredBy::Program);
+        assert_eq!(
+            read(&reader, &ev).unwrap().unwrap().declared_by,
+            DeclaredBy::Program
+        );
     }
 
     /// The Rust table is the same table `docs/reference/WIRE_PROFILE.md` publishes.
@@ -546,11 +631,19 @@ mod tests {
         for line in doc.lines().filter(|l| l.starts_with("| `")) {
             let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
             let units = cells[2].split('`').nth(1);
-            let currency = cells[2].split("currency: ").nth(1).map(|c| c.trim_end_matches('`'));
-            for payload_type in cells[0].split('`').filter(|s| s.chars().all(|c| c.is_ascii_uppercase() || c == '_') && !s.is_empty()) {
+            let currency = cells[2]
+                .split("currency: ")
+                .nth(1)
+                .map(|c| c.trim_end_matches('`'));
+            for payload_type in cells[0]
+                .split('`')
+                .filter(|s| s.chars().all(|c| c.is_ascii_uppercase() || c == '_') && !s.is_empty())
+            {
                 let quantity = event_quantity_of(payload_type)
                     .or_else(|| report_quantity_of(payload_type))
-                    .unwrap_or_else(|| panic!("{payload_type} is in WIRE_PROFILE.md but not in the table"));
+                    .unwrap_or_else(|| {
+                        panic!("{payload_type} is in WIRE_PROFILE.md but not in the table")
+                    });
                 assert_eq!(quantity.units(), units, "{payload_type} units");
                 if quantity.currency().is_some() {
                     assert_eq!(quantity.currency(), currency, "{payload_type} currency");
@@ -558,6 +651,9 @@ mod tests {
                 seen += 1;
             }
         }
-        assert!(seen >= 20, "expected the event and report tables, parsed {seen} types");
+        assert!(
+            seen >= 20,
+            "expected the event and report tables, parsed {seen} types"
+        );
     }
 }

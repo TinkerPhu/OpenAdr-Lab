@@ -188,7 +188,11 @@ pub fn randomized_start_offset(
         return chrono::Duration::zero();
     }
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in seed.bytes().chain(std::iter::once(0)).chain(event_id.bytes()) {
+    for b in seed
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(event_id.bytes())
+    {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -314,7 +318,10 @@ mod tests {
     fn randomized_start_offset_is_inside_the_window_and_stable() {
         let window = chrono::Duration::minutes(10);
         let first = randomized_start_offset("ven-1", "evt-a", window);
-        assert!(first >= chrono::Duration::zero() && first < window, "{first}");
+        assert!(
+            first >= chrono::Duration::zero() && first < window,
+            "{first}"
+        );
         assert_eq!(first, randomized_start_offset("ven-1", "evt-a", window));
     }
 
@@ -325,7 +332,11 @@ mod tests {
         let distinct: std::collections::HashSet<_> = (1..=20)
             .map(|n| randomized_start_offset(&format!("ven-{n}"), "evt-a", window))
             .collect();
-        assert!(distinct.len() >= 18, "20 VENs gave only {} offsets", distinct.len());
+        assert!(
+            distinct.len() >= 18,
+            "20 VENs gave only {} offsets",
+            distinct.len()
+        );
     }
 
     #[test]

@@ -15052,3 +15052,26 @@ compiled unchanged; eight test fixtures that built sessions without those fields
 Lesson for the guard's own test: a probe that adds a field fails on struct initialisers before the
 guard runs; a probe that renames a field on the wire (`#[serde(rename)]`) compiles and shows the guard
 working. The remaining areas are R-133.
+
+## The VEN and the BFF read every incoming value through its declaration (fix/gb-50-inbound-payload-descriptors, GB-50)
+
+Why: the outbound half of the wire contract was done on 2026-09-20; the inbound half was a design
+that sat unimplemented. The VEN read each incoming payload by its type name and assumed kW, EUR/kWh
+or a level; the `payloadDescriptors` an event carries were parsed and never consulted, and the BFF
+drew fleet signal bands from a second raw reader.
+What: `lab_core::wire_contract` holds the one table of what each payload type means (events and
+reports) and `PayloadReader`: the event's descriptors, else the program's, else the profile default,
+returning the value or a `Refusal`; nothing is converted or rescaled. The VEN's five readers and the
+BFF's band reader go through it, `PayloadValues::numeric` is deleted and audit rule 12 keeps a raw
+read out. A refused unit drops that payload only and is a wire rejection (`events:units`); an
+assumed default shows as `wire_assumptions` on `/health` and in the Dashboard without degrading it.
+`WIRE_PROFILE.md` v2 defines `DISPATCH_SETPOINT` and the capacity subscription/reservation types as
+kW (user decision 2026-10-09) and states the reading rules.
+What changed from the 2026-10-04 design: the reader lives in `lab-core`, not in the VEN, because the
+BFF reads the same events; the `CHARGE_STATE_SETPOINT` percent guess it wanted to remove was already
+gone with R-100; and the audit is one pass per poll (`PayloadReader::audit`) so the pure parsers stay
+pure.
+Issues: pinning the tables to the published document found `DEMAND` emitted and seeded but absent
+from the profile's report table. The lenient reading of a program's descriptor list was first
+written in the VEN and needed again in the BFF an hour later; it moved to `lab-core` before a second
+copy existed.
