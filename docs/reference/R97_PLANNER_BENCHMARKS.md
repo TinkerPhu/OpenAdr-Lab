@@ -794,3 +794,571 @@ ven-7/18/19 here. The EV's R-93 integrity slacks (`DROP_UNMET_PENALTY_EUR`,
 phase 2's "friction" as well as the cap. That does not change decisions, since the cap holds
 them too, but it makes `friction_eur` useless as a smoothing metric whenever a trip forces a
 shortfall.
+
+---
+
+## Appendix A — investigation log moved from `TECHNICAL_DEBTS.md` R-97 (2026-09-27 to 2026-10-06)
+
+Moved here unchanged on 2026-10-09 so the register keeps conclusions only. It is a log: later
+entries correct earlier ones (several are marked CORRECTED or RETRACTED in their own text), and the
+sections above supersede it where they disagree. Two statements in it are out of date: the phase-2
+budget default is 15 s (it says 5 s in one place), and phase 2 is effective (an early entry asks
+why it is inert).
+
+### R-97 — MILP solve time sits close to its own timeout
+
+**Live evidence, 2026-10-06: heater + battery sites pulse, and phase 2 cannot merge it cheaply.**
+ven-5 and ven-17 run the heater in single 5-minute slots through the PV hours, and the battery
+mirrors each pulse (it charges from the surplus except under the pulse). `bench_ven5_heater_fragmentation`
+replays ven-5's plan of 07:25Z exactly (`ven5_heater_frag_data.rs`). Unlike ven-1's EV, which was an
+equal-cost tie fixed by a tie-breaker (b632c6dc), this one isn't a tie: a heater tie-breaker of
+1e-4 or 1e-3, and a phase-1 gap of 0.02 instead of 0.30, left it at about 30 heater runs, 26 of them
+single slots. Phase 2 returns the same plan at 15 s and 60 s for cost allowances of 0.02 to 0.5 EUR.
+Only 2 EUR with 60 s halves it (13 runs), at +0.7 EUR of grid cost over 48 h. So the remaining
+question is a policy one (what a heater switch is worth in EUR) plus phase 2's search, not a
+missing tie-break.
+
+**A claimed regression from `ev-comfort-piecewise-core`, retracted the same day (2026-09-29).**
+Kept because the method is the lesson, not the conclusion.
+
+Post-deploy sampling showed ven-11 (EV + base load, no heater) at a 6.4 s median against 114 ms
+the day before, and ven-2 at 45-54 % TIME_LIMIT against 5.6 %. That was reported as a 56x
+regression caused by the change. **It was not established, and the attribution was wrong.**
+
+What refuted it:
+
+- **The step precedes the deploy.** Plotting consecutive solves instead of hourly medians, ven-2
+  jumps 15.4 s -> 66.0 s between 08:13:28Z and 08:18:44Z, and ven-11 402 ms -> 21984 ms between
+  08:09:54Z and 08:14:54Z. Both hosts stepped within five minutes of each other at ~08:15Z. The
+  feature reached Node1 at 09:17Z and Node2 at ~09:20Z. A cause cannot follow its effect.
+- **It does not reproduce offline.** Seven band shapes on the production 288-slot grid solve in
+  0.04-0.09 s (`bench_ev_band_solve_cost`), including the fleet's actual shape — no bands at all,
+  one synthetic zero-reward guarantee band, which is the *fastest* of the seven. Through the full
+  two-phase planner with `usage_forecast` and charge planning, 0.08-0.22 s
+  (`bench_ev_session_solve_cost`). Nothing in the band model costs seconds.
+- **Other VENs moved the other way in the same window.** ven-7 went 28.3 s -> 5.0 s across 08:15Z
+  while ven-19 and ven-15 stayed flat — all pre-deploy. That is host and fleet conditions, not a
+  code change.
+
+**The methodological failures, which are why this entry is kept.**
+
+1. *A one-sample baseline.* The change's own baseline table held one `solver_ms` per VEN. ven-2's
+   entry was 11.9 s; its real distribution over the preceding 1910 solves was median 15.7 s, p90
+   31.5 s, tail to the ceiling. A single draw cannot distinguish a 4x regression from an ordinary
+   sample — in either direction.
+2. *Time-of-day matching is not load control.* Comparing the same clock window on consecutive days
+   looks controlled and is not, when the second day is full of E2E runs, image builds and fleet
+   redeploys on those same hosts — activity caused by the very work being measured.
+3. *Hourly medians hid the boundary.* They placed the jump "somewhere in the 08-09Z hour", which
+   was compatible with the deploy. Consecutive-solve sequences placed it at 08:15Z, which is not.
+4. *A confident fix for an unverified cause.* Band merging was shipped as the remedy and changed
+   nothing (6406 -> 6752 ms). That should have been read immediately as the diagnosis being wrong
+   rather than the fix being insufficient. The merge is kept on its own merits — fewer variables,
+   provably identical valuation, pinned by `bands_at_the_same_bid_are_one_band`.
+
+**What did cause the step: an EV usage-forecast transition.** Both VENs stepped as their EV
+changed availability state, not as code was deployed.
+
+- **ven-11** (assets: `base_load` + `ev` only — nothing else can explain it): `GET /ev-usage-sim`
+  gives `leave_at 2026-09-29T08:09:39Z` with a **65.1 % expected SoC drop**. The step is the very
+  next replan, 08:14:54Z.
+- **ven-2** (evening departure / morning return pattern, `return_at ~07:59`): its EV **returned**
+  at ~07:59Z with a 17.4 % drop; the step follows three cycles later at 08:18:44Z.
+
+The mechanism is the same in both directions: once a car is away and returning with a real SoC
+drop, the planner must place a substantial charge *after a predicted return* instead of charging a
+car that is present — a materially harder problem, and one whose difficulty varies day to day with
+the randomised drop (`soc_drop_pct_mean`/`stddev`). That is why the effect appears on one morning
+and not the previous one.
+
+This capability is `ev-usage-forecast`'s, made reachable for an away-now car by `96f259e9`
+(deployed 2026-09-27) — which is also when ven-11's daily median first stepped, 136 ms on the 26th
+to 563 ms on the 27th, two days before `ev-comfort-piecewise-core` existed on any host.
+
+**Confidence:** strong for ven-11 (one cycle, single-asset site, exact time match), good for ven-2
+(same mechanism class, three cycles). Neither is proof of a *quantitative* cost model for
+away-window planning, which is what the next measurement should establish.
+
+**The EV half, measured properly (2026-09-29).** `bench_ev_session_solve_cost` now repeats each
+variant five times and reports min/median/max, because single samples on a laptop swing 3-6x —
+enough to invent or erase the whole effect. With that, the away-window step is solid and repeatable
+on an EV-only site at 288 slots through the real two-phase planner:
+
+| variant | min | median |
+|---|---|---|
+| no EV session | 0.16 s | 0.17 s |
+| firm EV session | 0.26 s | 0.31 s |
+| forecast, car **home** | 0.19 s | 0.21 s |
+| forecast, car **away** (20/65/90 % drop) | 0.90-0.94 s | 0.95-1.09 s |
+| forecast, just returned | 1.02 s | 1.36 s |
+
+So ~5x for a car that is out, and **the SoC drop size is irrelevant** (20 %, 65 % and 90 % all land
+together) — the cost is the away window itself, not the energy the trip needs. That kills the
+"large drop means a large charge to place" reading.
+
+**Re-measured after R-93 (2026-10-02), same bench, same machine.** Making the EV's SoC a solved
+variable did not cost solve time — it reduced it, and the away-window penalty this entry was opened
+to explain is largely gone:
+
+| variant | before (min) | after R-93 (min) | status after |
+|---|---|---|---|
+| no EV session | 0.16 s | **0.05 s** | Optimal |
+| firm EV session | 0.26 s | **0.11 s** | GapLimit |
+| forecast, car **home** | 0.19 s | **0.18 s** | GapLimit |
+| forecast, car **away** 20 % | 0.90 s | **0.74 s** | Optimal |
+| forecast, car **away** 65 % | ~0.90 s | **0.15 s** | GapLimit |
+| forecast, car **away** 90 % | ~0.94 s | **0.14 s** | GapLimit |
+| forecast, just returned | 1.02 s | **0.20 s** | GapLimit |
+
+These are 5-repeat minima, the estimator this entry already argued for, and "noise only ever adds
+time" makes a *lower* minimum the trustworthy direction — so the drop is real rather than a quiet
+laptop.
+
+**One caveat, stated rather than buried:** the "after" column reports `GapLimit` on five of seven
+variants, and the earlier table did not record status at all, so part of the speed-up may be the
+solver reaching its 2 % `mip_gap_target` sooner on the new formulation rather than doing less work
+to the same quality. A fair like-for-like needs the gap sweep
+(`bench_mip_gap_quality_sweep`) re-run against the SoC-variable model; until then read the table as
+"no regression, probably a real improvement", not as a certified 5x.
+
+Why it would plausibly be faster: the obligation is now a bound on one `soc_ev` variable instead of
+a cumulative-energy sum over a deadline-masked slot range plus a floor that had to be pre-capped at
+a reachability estimate, and the penalised shortfall slack removes a tight equality that sat next to
+infeasibility. Fewer vacuous rows per away slot, and a relaxation the solver can bound earlier.
+
+**Attempt 1 — tighten the away slots — is not demonstrated.** Away slots declare `p_ev` over the
+full `[0, p_max]` range and force it to zero only through `p_ev[t] <= 0 * z_ev_on[t]`, and their
+`z_ev_on` is a *binary* fixed at 0. Bounding that power to zero directly, declaring those `z`
+continuous, and skipping the two now-vacuous rows per away slot gives: away-20 % 1.25 -> 0.94 s,
+away-65 % 1.10 -> 0.91 s, but away-90 % 0.81 -> 0.90 s and just-returned 0.54 -> 1.02 s. Two better,
+two worse, i.e. inside cross-process variance. **Not shipped** — model size looks like the wrong
+lever here, exactly as it was for the heater (see GB-40's refuted single-integer encoding).
+
+**Next measurement, before any further attempt:** time the two phases separately, as
+`bench_heater_variants` already does for the heater. GB-40 established that phase 2 never binds and
+burns its full budget; if the EV's 5x also lands in phase 2 then the away window is a phase-2
+problem and every model-size idea is aimed at the wrong half.
+
+**Phase split settles it: the EV away window is not worth optimising (2026-09-29).**
+`bench_ev_phase_split` times the two phases separately, five repeats, minimum reported.
+
+EV-only site, 288 slots:
+
+| variant | phase 1 | phase 2 | statuses |
+|---|---|---|---|
+| no forecast | 0.044 s | 0.036 s | Optimal / Optimal |
+| forecast, car home | 0.035 s | 0.079 s | Optimal / Optimal |
+| forecast, car **away** | 0.039 s | **0.833 s** | Optimal / GapLimit |
+| forecast, away, 90 % drop | 0.033 s | 0.681 s | Optimal / GapLimit |
+| forecast, just returned | 0.037 s | 0.490 s | GapLimit / Optimal |
+
+**Phase 1 is flat.** The entire away-window cost is phase 2 — ~20x — which is why the phase-1
+tightening above was inconclusive: it aimed at the half that spends 40 ms.
+
+Same site **with a heater**, the shape that actually times out:
+
+| variant | phase 1 | phase 2 | statuses |
+|---|---|---|---|
+| heater + EV, no forecast | 57.5 s | 57.4 s | TimeLimit / TimeLimit |
+| heater + EV, car home | 57.3 s | 57.2 s | TimeLimit / TimeLimit |
+| heater + EV, car away | 56.9 s | 56.3 s | TimeLimit / TimeLimit |
+
+**Both phases are already pinned at the timeout with or without the EV, and with no usage forecast
+at all.** There is no headroom for the EV to consume, so removing the away-window cost cannot move
+any VEN that times out; and the VENs where the 20x is visible (EV-only, e.g. ven-11) run at
+0.8 s against a 60 s-per-phase budget, solving OPTIMAL. **Conclusion: do not optimise the EV away
+window.** It has no operational payoff at either end of the fleet. 100 % of the real timeout is the
+heater (GB-40).
+
+**The cheap option this exposes, which is not EV-specific.** Phase 2 minimises friction subject to
+`phase1_cap_expr <= c_star + epsilon`, so *by construction* everything phase 2 can change is
+bounded by `phase2_epsilon_eur`. On a heater VEN it spends its entire 57 s budget and still returns
+TimeLimit — i.e. it cannot prove the refinement it is buying, while the most that refinement can be
+worth is one epsilon. A separately configurable, much shorter phase-2 timeout would therefore cut
+heater-VEN solve time by roughly half at a cost bounded by epsilon, without touching the
+formulation. That is a measurement worth doing (`planner.mip_gap_target` already makes the gap configurable per
+profile; the phase budgets are not).
+
+**CORRECTED: phase 2 is *effective*; the earlier "inert" finding was a test-fixture artefact
+(2026-09-30).** The conclusion below about the 5 s budget stands, but the reasoning that produced it
+was wrong and is replaced here.
+
+*What was claimed:* that phase 2 returns its warm start unchanged on every instance — 0 of 288 slots
+moved, friction identical from a 1 s to a 60 s budget — and therefore burns half the planner's
+budget for nothing.
+
+*Why it was wrong:* every one of those runs used `make_tariffs(...)`, a **flat** tariff. Flat prices
+give phase 1 no reason to fragment the heater schedule, so there was no chatter for phase 2 to
+remove. The inertness was a property of the fixture, not the planner.
+
+*What phase 2 actually does,* measured with a diurnal tariff at ven-2's own production settings
+(`mip_gap 0.06`, `phase2_epsilon_eur 1.00`, `bench_phase2_epsilon_sweep`): it moves 68 of 288 heater
+slots and 31 import slots, cutting friction from 4.62 to 2.08 EUR. Against phase 1 alone it roughly
+**halves heater switching** — 58 switches over 48 h down to 32, and 28 down to 11 over the first 8 h.
+Phase 2 earns its place.
+
+*The starvation threshold is real, just below production.* At `mip_gap 0.06`: epsilon 0.17 moves
+nothing, epsilon 0.50 moves 59 heater slots, 1.00 moves 68, 5.00 moves 87. ven-2's 1.00 sits
+comfortably above the threshold. A profile left at a tight epsilon would get no smoothing at all.
+
+*Budget vs value* (`bench_phase2_budget_with_real_prices`, same settings): friction 4.6201 at 1-2 s
+(no change), **3.4555 at 5, 10 and 20 s** (an exact plateau — 76 heater slots), 2.0805 at 60 s. So
+there is no useful middle setting: 10 s and 20 s buy nothing over 5 s, and the remaining gain
+appears only somewhere past 20 s.
+
+*Why 5 s is nonetheless right* (`bench_phase2_budget_executed_window`): with `replan_interval_s` at
+300 s only a plan's first slots ever reach the relay, and there 5 s and 60 s are **identical** — 2
+switches at 25 min and 2 at 1 h under both. Over 8 h the 5 s solution has *fewer* switches (11 vs
+15). The horizon-wide friction difference lives in slots that are replaced before they run.
+
+**Phase 2 returns provably suboptimal incumbents, and its response to configuration is not
+monotone (2026-09-30).** This is the sharpest thing the sweeps show, and it comes out of the data
+without needing a mechanism.
+
+Phase 2 minimises friction subject to `cost <= c_star + epsilon`. Raising epsilon strictly enlarges
+the feasible set, so the true optimum at a larger epsilon **cannot be worse**. The sweep violates
+that in both gap rows:
+
+| mip_gap | epsilon | heat slots moved | friction |
+|---|---|---|---|
+| 0.02 | 0.17 | 51 | 2.2916 |
+| 0.02 | **0.50** | **0** | **4.9113** |
+| 0.02 | 1.00 | 47 | 1.9949 |
+| 0.02 | 5.00 | 74 | 1.2471 |
+| 0.06 | 0.17 | 0 | 4.6201 |
+| 0.06 | **0.50** | 59 | **1.8315** |
+| 0.06 | **1.00** | 68 | **2.0805** |
+| 0.06 | 5.00 | 87 | 1.4559 |
+
+Friction *rises* from 2.29 to 4.91 as the cap loosens from 0.17 to 0.50 (gap 0.02), and from 1.83 to
+2.08 loosening 0.50 to 1.00 (gap 0.06). Both are impossible for optimal solutions, so phase 2 is
+landing on substantially suboptimal incumbents — consistent with TimeLimit at 58-59 s in all eight
+cells. The cells showing zero movement are therefore **search failures, not structural inertness**.
+
+Three consequences:
+
+1. **`phase2_epsilon_eur` cannot be tuned by measurement on one instance.** The response is not
+   monotone, so a sweep can rank a tighter cap above a looser one purely by incumbent luck.
+2. **Phase 2's freedom is inversely coupled to phase 1's quality.** The cap is anchored on
+   `c_star` = phase 1's objective, so a sloppier phase 1 gives phase 2 more absolute room. Visible
+   at epsilon 0.17: a timed-out phase 1 (gap 0.02) lets phase 2 move 51 heater slots, a converged
+   one (gap 0.06) lets it move none. Tuning `mip_gap_target` therefore silently retunes how much
+   smoothing the plan gets — an odd property for a lexicographic two-phase design.
+3. **Phase 2 is a heater-only pass in practice.** The EV column is 0 in all eight cells.
+
+**The budget is a staircase, not a curve** (`bench_phase2_budget_with_real_prices`): nothing below
+~5 s, an exact plateau at 5/10/20 s (friction 3.4555, 76 heater slots), then a better basin past
+20 s (2.0805, and only 68 slots moved — fewer edits, better result). Classic incumbent-update
+behaviour.
+
+**Default raised 5 s -> 15 s as a result.** The plateau means 15 s delivers the same plan quality as
+5 s, while the threshold behaviour means 5 s is fragile: it is a **wall-clock** budget, not a work
+budget, and production hosts run 85-89 % busy, so 5 s there buys less solver work than 5 s on an
+idle laptop and would intermittently land in the found-nothing regime. 15 s keeps the plateau with
+2-3x margin, still far below the 60 s it replaced (ven-2 total was 64 s before any of this).
+
+**Heater MILP difficulty is set by the tank's thermal slack — a property of the installation, not
+the formulation (2026-09-30).** This is the first mechanism proposed today that survived its control,
+and it bears directly on GB-40.
+
+Live ven-2 and ven-3 run the same assets, the same 288-slot 48 h grid and the same
+`mip_gap_target` (0.06 — confirmed in both profiles, so the tolerance is controlled), yet phase 1
+takes **227-309 ms** on ven-2 and **11-46 s** on ven-3. The profiles differ in tank physics:
+ven-2 has 2000 L across a 40 K band, ven-3 has 200 L across 15 K — about 27x the usable slack.
+
+`bench_phase1_vs_tank_slack` varies volume and band with grid, tariffs, gap and assets held fixed,
+three repeats:
+
+| volume L | band K | slack kWh | phase 1 (3 runs) | switches |
+|---|---|---|---|---|
+| 200 | 15 (**ven-3**) | 3.5 | 1.29 / 1.22 / 2.00 s | 53 |
+| 200 | 40 | 9.3 | 0.66 / 0.70 / 1.21 s | 14 |
+| 500 | 15 | 8.7 | 0.61 / 0.61 / 0.67 s | 12 |
+| 1000 | 15 | 17.4 | 0.44 / 0.42 / 0.50 s | 16 |
+| 2000 | 15 | 34.9 | 0.22 / 0.18 / 0.19 s | 4 |
+| 2000 | 40 (**ven-2**) | 93.0 | 0.19 / 0.21 / 0.24 s | 22 |
+
+Monotone in slack in every run, ~6-8x end to end, and the endpoints are exactly the two live VENs.
+These solves finish (GapLimit) so they are deterministic — switch counts are identical across runs,
+unlike the time-limited phase-2 measurements elsewhere in this entry.
+
+**Switch count does *not* predict difficulty** (2000 L/40 K has 22 switches and is fastest; 500 L/15 K
+has 12 and is slower), so "number of forced thermostat cycles" is not the mechanism. Slack itself is
+the predictor. The likely reason is that low slack narrows the feasible tank-trajectory corridor
+until integrality binds hard — standard MILP behaviour — but that is **not verified**.
+
+**Why this matters for GB-40.** GB-40 has pursued the formulation for weeks on the theory that the
+stage binaries carry the power level and weaken the relaxation, and three reformulations failed:
+the single-integer encoding bought nothing, tier-bounded continuous power was unsound (~25 % cheaper
+unphysical answers), dwell-time constraints were worse. GB-40 also records variance it cannot
+explain — "not every heater VEN is slow (ven-2 18.2 s, ven-20 29.0 s)". Thermal slack explains that
+variance, and explains why the reformulations failed: when slack is tight the discreteness they tried
+to relax away is load-bearing.
+
+**Levers this opens, none of them a reformulation:**
+1. **Widen a needlessly narrow thermostat band** where the installation permits. Measured: 200 L
+   going 15 K -> 40 K roughly halves phase 1 (1.29 -> 0.66 s). A physical/config change, and it
+   also reduces switching (53 -> 14).
+2. **Treat slack-poor VENs differently** — a looser `mip_gap_target` or coarser far zones for them
+   specifically, rather than fleet-wide settings that are wasted on slack-rich sites.
+3. Far-zone coarsening (measured 2.6x earlier in this entry) now has a mechanism behind it.
+
+**Caveat on magnitude:** the bench's hardest row is 1.3-2.0 s while production ven-3 is 11-46 s, so
+the bench under-represents ven-3 by roughly an order of magnitude — its base load, PV, EV state and
+real tariffs compound on top. The *direction* is confirmed; the absolute scale is not this bench's
+to give.
+
+**ROOT CAUSE of ineffective smoothing: 9 of 11 heater VENs run an epsilon below the threshold at
+which phase 2 can do anything (2026-09-30).** Found by the new `planner: phase timings` log, within
+minutes of deploying it.
+
+Live ven-2 vs ven-3, same host, same code:
+
+| | ven-2 | ven-3 |
+|---|---|---|
+| phase 1 | **227-309 ms** | **11 131-45 566 ms** |
+| phase 2 | 13-15 s, sometimes GapLimit | ~15 s, always TimeLimit |
+| `phase2_epsilon_eur` | **1.00** | **0.17** |
+| friction | ~1.33 | 4.30-5.60 |
+
+Auditing every profile: `default_phase2_epsilon()` is **0.02**, and the sweep above shows epsilon
+0.17 already yields **zero** heater slot changes at gap 0.06. Only **ven-2** sets a working value
+(1.00); ven-3 sets 0.17; every other heater VEN — ven-5, ven-10, ven-12, ven-14, ven-15, ven-17,
+ven-18, ven-20 — runs the 0.02 default. **They get no smoothing at all, and now pay a 15 s phase 2
+for it.**
+
+There is a mechanical floor behind this, not just a tuning preference: removing a heater switch
+requires moving energy in time, which costs something. If epsilon is below that cost, no improving
+move is feasible and phase 2 provably finds nothing however long it runs. ven-2's own profile
+comment states the scale — effective switching cost `3.0 x 10/60 = 0.50 EUR/switch`, epsilon set to
+2x that. The 0.02 default is **25x below a single switch**.
+
+**Validation gap:** `validate.rs` already rejects an epsilon that is too *large* relative to
+switching cost, but has no lower bound — nothing warns that phase 2 has been configured into
+uselessness. A check that epsilon is at least the effective cost of one switch (when a heater is
+present) would have caught this on every one of those nine profiles. Making it a hard error would
+stop nine VENs from booting, so it should warn, or ship together with the profile fix.
+
+**Remedies, for a decision rather than an unattended change:**
+1. Raise `phase2_epsilon_eur` to ~2x effective switching cost on heater VENs (ven-2's 1.00 is the
+   worked example) — phase 2 then halves switching, 58 -> 32 over the horizon.
+2. Or set `phase2_epsilon_eur: 0.0` on them, which disables phase 2 outright and reclaims the 15 s.
+   Honest, and strictly better than paying for a pass that cannot act.
+Doing neither is the only option with no argument for it.
+
+**Also corrects a claim made earlier today:** "phase 1 is negligible in production (~0.25 s)" was
+drawn from ven-2 alone and is **wrong for ven-3**, whose phase 1 runs 11-46 s. Phase-1 cost is
+strongly VEN-dependent, so parking phase-1 optimisation fleet-wide was premature — it is negligible
+on ven-2 and dominant on ven-3.
+
+**Phase 2's result at a fixed budget is NOT reproducible — every budget comparison here is
+suspect (2026-09-30).** Two runs of `bench_what_is_in_phase2_friction` / `bench_phase2_budget_with_real_prices`
+on the same instance, same code, same 60 s budget returned friction **2.0805** and **3.4555**. A
+time-limited search explores however many nodes the host grants in that window, so its incumbent
+depends on machine load. GB-40's finding that "HiGHS is deterministic here" applies to solves that
+*finish*; it does not extend to time-limited ones.
+
+Consequences for everything measured on this axis:
+
+- The 5/10/20 s "plateau" and the better basin "past 20 s" may both be single-run artefacts. In the
+  second run **5 s and 60 s were identical** (friction 3.4555, 32 switches), which argues 5 s is
+  sufficient.
+- `phase2_solver_timeout_s: 15` remains defensible as **load margin** — phase 2 achieves nothing
+  below ~5 s, and a wall-clock budget pinned at that threshold on an 85-89 %-busy host would
+  intermittently deliver no smoothing. The separate claim that a longer budget *captures more value*
+  does not survive.
+- Any future budget or epsilon decision needs repeated runs, not one sweep. This is the same
+  one-sample trap that produced the retracted regression earlier in this file, in a new place.
+
+**What is robust across both runs:** phase 2 halves heater switching, 58 -> 32 over the horizon.
+Its value is real; only its budget-sensitivity was noise.
+
+**A refuted hypothesis, recorded so it is not re-proposed.** `PV_USE_TIEBREAK_EUR_PER_KWH` (0.005
+EUR/kWh) is documented as a bias "small enough that any real constraint still dominates" — which is
+calibrated against phase 1's objective (tens of EUR of energy cost), while phase 2's objective is
+friction-only (a few EUR). The concern was that the same constant becomes first-order in phase 2 and
+that `friction_eur` is really a switching/PV blend. **It is not:** PV utilisation is identical
+(91.87 kWh) across phase 1, the 5 s and the 60 s solutions — it is saturated, nothing is traded —
+and the term is worth only -0.4594 EUR, not the ~2 EUR estimated from assuming continuous 6 kW
+output. The estimate, not the constant, was wrong.
+
+**Rule for any future phase-2 measurement: use a varying tariff.** A flat fixture makes phase 2 look
+inert and will reproduce this wrong conclusion.
+
+**Fix shipped:** `planner.phase2_solver_timeout_s`, separate from `solver_timeout_s`, defaulting to
+**5 s** (validated non-zero; `phase2_epsilon_eur = 0.0` remains the documented way to disable phase
+2 entirely). This is safe by construction as well as by measurement: phase 2's cap
+`phase1_cost <= c_star + phase2_epsilon_eur` is a hard constraint in its own model, so any
+incumbent it returns — however early — already respects the cost bound. Truncating it can only cost
+smoothing, and measurably costs none. 5 s leaves ample headroom for the sites where phase 2 does
+finish (EV-only: 0.08-0.83 s, Optimal).
+
+**Result:** `bench_heater_solve_cost` total for the heater site falls from the **108.55 s** recorded
+under GB-40 to **61.41 s** — phase 1's budget plus a bounded phase 2. The whole Rust suite also
+halved, 117 s to 63 s.
+
+**What this does *not* fix:** phase 1 still hits TimeLimit at ~57 s on every heater instance. That
+is GB-40's standing problem and the remaining half. The two known levers there are already measured
+in GB-40: a looser `mip_gap_target` (10 % put phase 1 on GapLimit for nine of ten instances at
++2.05 % mean cost) and the refuted reformulations. Phase 2 is no longer part of that problem.
+
+**Open question worth answering:** *why* is phase 2 inert? Either phase 1's schedule is already
+friction-optimal within the 0.17 EUR epsilon — plausible, since rescheduling a heater stage costs
+more than epsilon allows — or the search cannot find the improvement. Raising `phase2_epsilon_eur`
+and re-running `bench_phase2_changes_across_instances` distinguishes the two. If epsilon is the
+binding constraint then phase 2 is not broken, it is starved, and the friction it is meant to remove
+is simply unaffordable under the current cap.
+
+**Production verification of the phase-2 budget, and two side effects (2026-09-30).** Measured from
+`plan_history` before (29th 13:00-16:00Z) and after (30th 05:45Z+) the deploy:
+
+| VEN | before median | after median | TIME_LIMIT before -> after |
+|---|---|---|---|
+| ven-2 (heater) | 64.0 s | **10.3 s** | 57 % -> 100 % |
+| ven-3 (heater) | 72.2 s | **8.5 s** | 90 % -> 100 % |
+| ven-1 (no heater) | 4.2 s | 4.6 s | 0 % -> **27 %** |
+
+A 6-8x win on exactly the VENs that were hurting, with tight distributions (ven-2 min 9.8 s,
+p90 10.4 s, n=11). It also corrects the model this work was reasoning from: live ven-2's phase 1 is
+only ~5 s, so **phase 2 was consuming nearly all of its 64 s**, and the benchmark instance
+(phase 1 at 57 s) is considerably harder than any real fleet VEN.
+
+Two side effects, neither predicted:
+
+1. **`TIME_LIMIT` is now the normal state for a heater VEN, which breaks it as a health signal.**
+   Phase 2 always hits its 5 s cap, so `solve_status` reports TIME_LIMIT on ~100 % of cycles by
+   design. GB-38 and GB-40 both use the TIME_LIMIT *rate* as the fleet's headline symptom, and that
+   metric is now uninformative: it can no longer distinguish "phase 1 could not solve this site"
+   (a real problem) from "phase 2 stopped at its intended budget" (normal). The status should
+   carry the two phases separately — e.g. record phase-1 and phase-2 status independently on
+   `Plan`, rather than one field that collapses them. Until then, treat TIME_LIMIT on a heater VEN
+   as uninformative rather than as GB-40 evidence.
+2. **Non-heater VENs lose some smoothing in their tail.** ven-1 went from 0 % to 27 % TIME_LIMIT:
+   phase 2 used to converge there within 60 s and now the slowest quarter of its cycles are cut at
+   5 s. The cost impact is bounded by `phase2_epsilon_eur` by construction, so this is lost
+   friction smoothing rather than lost cost-optimality — but it is a real behaviour change the
+   bench did not predict (an EV-only bench site finishes phase 2 in 0.08-0.83 s; production ven-1
+   evidently carries more). If that smoothing turns out to matter, 10-15 s would still cut the
+   heater VENs by ~4x while leaving non-heater sites room to converge.
+
+**Phase-1 optimisation is parked; the 48 h horizon stays (2026-09-30).** Decided with the user.
+Two reasons:
+
+- **The 48 h span is a requirement, not an accident.** A receding-horizon controller needs lookahead
+  well past the window it optimises, or end-of-horizon effects distort the near term — battery
+  drained at the boundary, tank left cold, no preparation for the next morning's departure. The
+  profiles say so explicitly (`plan_horizon_h: 48 # 2 solar windows for the 15.5 h-fill tank`). The
+  executed-window comparison below is consistent with keeping it: 24 h and 48 h produce identical
+  near-term behaviour, so the long horizon is not costing anything in decisions.
+- **Phase 1 is only ~5 s on a live VEN.** ven-2's pre-deploy total was 64 s, of which phase 2 was
+  ~57 s. The 57 s phase-1 figure that drove this investigation came from the *benchmark* instance
+  (mip_gap 0.02, emergency-full heater), which is harder than any real fleet VEN — ven-2 runs
+  mip_gap 0.06. Phase-1 work would therefore shave seconds off a solve that is no longer the
+  problem.
+
+If a real VEN ever does sit at the benchmark's difficulty, the measured options are recorded above:
+coarsening the far zones keeps the 48 h span and bought 2.6x (192 vs 288 slots at the same span);
+`mip_gap_target` 0.06 -> 0.10 has GB-40's 10-instance cost measurement behind it (+2.05 % mean); and
+relaxing heater integrality in *far zones only* is the strongest untested idea but must be weighed
+against GB-40's Arm 1, where decoupling heater power from the stage integer produced ~25 % cheaper
+unphysical answers — confined to slots that never execute it may be acceptable, but it biases
+lookahead optimistically, which can distort near-term deferral.
+
+**The open item is phase 2's effectiveness, not its cost.** Its cost is now bounded at 5 s. What is
+unexplained is why it changes nothing, and therefore whether even 5 s is worth spending or
+`phase2_epsilon_eur = 0.0` (disable) is the honest setting.
+
+**Methodological flaw found in this work's own bench:** it ran mip_gap 0.02 / epsilon 0.17 while
+ven-2 runs 0.06 / 1.00. At 0.02 the bench's phase 1 *times out*, so its phase 2 inherits a poor
+incumbent and a `c_star` derived from it — not the situation on a live VEN, whose phase 1 finishes.
+Every phase-2 conclusion here was drawn on that unrepresentative configuration and is being re-run
+across both gaps.
+
+**Root cause of phase 1's time: horizon DURATION, not model size (2026-09-30).** Four controls,
+all on the heater+EV site, phase 1 only, `bench_phase1_vs_horizon` /
+`bench_phase1_flat_vs_priced_far_horizon` / `bench_phase1_count_vs_duration`:
+
+| grid | slots | hours | phase 1 | status |
+|---|---|---|---|---|
+| 96 x 300 s | 96 | 8 | 0.39 s | GapLimit |
+| **288 x 300 s** | **288** | **24** | **2.14 s** | GapLimit |
+| **192 x 900 s** | **192** | **48** | **23.15 s** | GapLimit |
+| 96x300 + 96x600 + 96x900 (**production**) | 288 | 48 | **60.03 s** | **TimeLimit** |
+
+288 slots solve in 2 s over 24 h; 192 slots take 23 s over 48 h. **The cost scales with the span of
+time modelled, not the number of integer decisions.** Production sits at 48 h and times out.
+
+Three mechanisms were proposed and refuted along the way, each by its own control — worth recording
+so they are not re-proposed:
+- *EV comfort-band count* — merging equal-bid bands changed nothing (6406 -> 6752 ms).
+- *Away-slot variables* — tightening them was inside cross-process variance, and the phase split
+  later showed phase 1 spends 40 ms on the EV regardless.
+- *Flat far-horizon pricing* (the GB-42 interaction) — 288 slots time out at 60 s whether the far
+  half is flat-held or fully priced (60.03 s both ways). Pricing does improve plan *quality*
+  (-5.08 -> -7.04 EUR) but not solve time.
+
+Unverified hypothesis for *why* duration dominates: the tank cycles roughly every 100 min, so 48 h
+holds about twice as many near-interchangeable thermostat cycles to coordinate as 24 h, and
+interchangeable patterns are what stop branch-and-bound pruning. Not tested.
+
+**It is waste, not harm — an earlier claim here is retracted.** `bench_does_the_far_horizon_harm_execution`
+compares the part of the plan that actually runs before the next cycle replaces it:
+
+| horizon | phase 1 | first-8 h cost | EV kWh (8 h) | heater switches (8 h) |
+|---|---|---|---|---|
+| 24 h | 2.05 s | 1.4994 EUR | 22.00 | 28 |
+| 48 h (production) | 60.03 s | 1.4875 EUR | 22.00 | 28 |
+
+Identical EV energy and switch count, and the 48 h plan's executed cost is marginally *lower*. So
+the long horizon costs ~58 s per cycle and changes nothing the VEN carries out.
+
+An interim claim that the 48 h horizon produced *worse* plans was wrong, and the reasoning behind it
+was invalid: it argued a 48 h optimum could replicate a 24 h plan and then idle, making -7.04 vs
+-9.98 EUR proof of suboptimality. The second day carries its own unavoidable base load and tank
+losses, so the two objectives span different periods and cannot be compared that way.
+
+**Candidate fix, not yet validated:** `plan_horizon_h` 48 -> 24 would buy ~28x on phase 1 for no
+measured change in executed behaviour — the first change that addresses the fleet's actual timeout
+rather than a neighbouring cost. Before proposing it as a default: repeat the executed-window
+comparison across all ten `HEATER_VARIANTS` (one instance is not a result), and establish what the
+far horizon is currently relied on for — EV deadlines beyond 24 h, VTN capacity obligations, and the
+far-horizon zone's documented role in `VEN_ARCHITECTURE.md`.
+
+**Still missing, and the reason this took a wrong turn first:** `plan_history` records
+`solver_ms` but nothing about the *inputs*. A slow solve cannot be replayed. The targeted fix is
+an input digest recorded when a solve exceeds a threshold — slot count, distinct tariff levels,
+EV availability pattern and required energy, binary count — so the next occurrence is
+reproducible offline instead of inferred from correlations.
+
+**Where:** `VEN/src/controller/milp_planner/` (two-phase solve, `solver_timeout_s` default 60 s
+per phase).
+
+Solves of **20.8 s and 63.6 s** were recorded during E2E on 2026-09-27 on a host under load —
+against a 60 s per-phase timeout, i.e. at and past the ceiling that produced GB-38 (three VENs
+hitting TIME_LIMIT on essentially every solve for 24 h and never charging their EVs). GB-38 is
+marked resolved for that specific run, but nothing has reduced the underlying solve cost, so
+the same failure is one busy host away.
+
+**To resolve:** measure where the time goes before tuning anything — heater tier binaries and
+EV semi-continuous constraints are the usual suspects — then decide between a cheaper
+formulation, a coarser far-horizon zone, or an honest raise of the timeout with a visible
+TIME_LIMIT surface. Related: R-93 (a per-slot EV SoC variable would *add* variables, so it
+must be costed against this).
+
+---
+
+## Appendix B — GB-40's backlog entry, moved from `docs/BACKLOG.md` (2026-08-24 to 2026-09-30)
+
+GB-40 and R-97 were the same subject and were merged into R-97 on 2026-10-09. The entry's text is
+kept here unchanged. One statement in it is out of date: the MIP gap is a live per-profile setting
+(`planner.mip_gap_target`), not reverted.
+
+**Finding (2026-09-30).** **Thermal slack explains the per-VEN variance this entry could not (2026-09-30, R-97).** Live ven-2 and ven-3 share assets, grid, horizon and `mip_gap_target` 0.06, yet phase 1 takes 227-309 ms on ven-2 and 11-46 s on ven-3. ven-2 has a 2000 L tank across a 40 K band, ven-3 has 200 L across 15 K — ~27x the usable slack. `bench_phase1_vs_tank_slack` (three repeats, everything else held fixed) is monotone in slack, ~6-8x end to end, with the two live VENs as its endpoints. Switch count does **not** predict difficulty, so it is slack rather than cycle count; the likely mechanism (unverified) is that low slack narrows the feasible tank-trajectory corridor until integrality binds. This explains why all three reformulations below failed — with tight slack the discreteness they tried to relax away is load-bearing — and points at levers that are not reformulations: widen a needlessly narrow thermostat band where the installation allows (200 L at 15 K -> 40 K roughly halves phase 1 and cuts switching 53 -> 14), or treat slack-poor VENs specifically with a looser gap or coarser far zones instead of fleet-wide settings wasted on slack-rich sites.
+
+**History and measurements.** A heater in a VEN's asset mix costs ~4.7× the MILP solve time of any other mix, and is the concrete driver behind GB-38's fleet-wide `TIME_LIMIT` symptom. Measured across all 20 VENs in one S-7 window (`experiments/results/20260824-0312-s7_stress/*-plan-history.json`): heater VENs mean **84.2 s** per solve (n=10) vs **18.0 s** without (n=10), and the eight slowest VENs in the fleet *all* carry a heater. Six of them sit at 105–121 s, i.e. pinned to the `solver_timeout_s: 60` two-phase ceiling, so they time out on essentially every cycle. This compounds: a `TIME_LIMIT` solve burns its **full** budget before giving up, so the slowest VENs are also the most CPU-expensive, which starves the rest and pushes more of them into timeout. Node2 (17 VENs, 4 cores) consequently runs 85–89% busy with a run queue of 4–5 — expected concurrent solves ≈ 17 × 51.7 s / 300 s ≈ 2.9 on 4 cores (measured 2026-08-25, `docs/history/fleet_run_journal.md`). **Confirmed fleet-wide on the 24h S-9 run (2026-08-26, 5111 solves): heater VENs `TIME_LIMIT` on 70% of solves (1643/2332) against 8% (226/2779) without — a ~9× split, the clearest signal in the whole fleet dataset.** That run also bounds the *consequence*: `TIME_LIMIT` degrades cost-optimality, it does not break function — ven-3 and ven-5 timed out on ~100% of solves and still charged their EVs to 76.6% and 79.5%, because a timed-out MILP returns a feasible incumbent. An interim claim that this superseded GB-38's root cause was wrong and has been retracted there. Not every heater VEN is slow (ven-2 18.2 s, ven-20 29.0 s are both heater-bearing), so it is the heater's integer relay/staging variables *interacting* with other assets' continuous variables that should be suspected, not the heater alone. **Measured in isolation (2026-08-25, `VEN/src/controller/milp_planner/tests/solve_cost.rs`)**: the same ven-3-shaped site on the same 288-slot grid, solved with and without the heater and nothing else changed, gives **0.19 s without / 108.55 s with — 561×**. The with-heater figure is essentially the two-phase `solver_timeout_s` ceiling, i.e. an *active* heater does not merely slow the solve, it **times it out**. The fleet's gentler 4.7× is an average that dilutes active heaters with idle ones (`MustNotRun` fixes every `z` to 0, leaving nothing to branch on), so 561× is the real cost of a heater that is actually running. Debug build, but the caveat is immaterial here: the no-heater case at 0.19 s shows Rust-side constraint building is negligible, so the 108.55 s is essentially all HiGHS branch-and-bound. **Diagnosis (code-grounded)**: the cause is not binary *count* — battery VENs declare comparable numbers (`u_bat` + `z_active` + `delta_active`) and solve in 18–50 s. It is that the heater's binaries carry the **power level itself**, not a mode. Battery/EV power (`p_ch`/`p_dis`) are continuous variables whose binary only picks a direction, so the LP relaxation is tight; the heater has *no* continuous power variable at all — `P_heat = p_mid·z_mid + p_full·z_full` (`heater_milp.rs` C2), so the only way the relaxation can express the intermediate power that tank-trajectory tracking almost always wants is a fractional `z`. Nearly every slot therefore relaxes fractional, and branch-and-bound must branch across all 2n heater binaries (n=288 on the standard `plan_zones` grid, identical for every heater VEN, so the grid is not the differentiator). Compounding it, **no min-up/min-down (dwell-time) constraints exist anywhere** — anti-chatter is only the soft `sw` switching penalty, which prices chatter but does nothing to tighten the relaxation or prune the tree. Likely also why ven-2/ven-20 are fast: a heater in `MustNotRun` has all `z` fixed to 0 (`heater_milp.rs` build), leaving nothing to branch on — worth confirming those two were simply idle in that window rather than structurally cheaper. **Single-integer stage encoding: REFUTED the degeneracy diagnosis (2026-08-28).** The heater's two tier binaries (`z_heat_mid`/`z_heat_full` + mutual exclusion) were replaced by one general integer `y ∈ [0, n_stages]` with `P = p_step_kw · y`, on the theory that the old encoding was *degenerate* — the LP could express one power several ways (4.5 kW as `(0.5, 0.5)` or `(0, 0.75)`), and that redundancy stalls branch-and-bound. The reformulation halved heater variables (576 binaries → 288 integers), deleted all 288 mutual-exclusion rows and halved the switching rows. **Solve time did not improve**: benchmark with-heater went 108.55 s → 116.60 s, both pinned at the two-phase `solver_timeout_s` ceiling (the without-heater case moved 0.19 s → 0.08 s on a warm cache, which is why the printed ratio rose to 1373× — noise, not signal). So the bottleneck is **neither variable count nor representation degeneracy**. What this usefully isolates: the original diagnosis bundled two claims — (a) *the binaries carry the power level, so the relaxation is weak*, and (b) *there are redundant fractional representations*. Fixing (b) alone bought nothing, so (a) is the live hypothesis and (b) is dead. A fractional `y = 1.5` still fakes 4.5 kW, exactly as fractional `z` did; removing the duplicate spellings of that fake did not make it any less available to the relaxation. The remaining GB-40 options are therefore re-ranked: **tier-bounded continuous power** (give the heater a real continuous `P` variable bounded by the stage integer, so the relaxation stops needing fractional integrality to express intermediate power) now looks like the only one that attacks (a) directly; dwell-time constraints and horizon truncation attack tree size rather than relaxation strength, which is the thing just shown not to be the binding constraint. The reformulation itself was kept for reasons independent of solve time — see the entry below. **Both re-ranked options were then A/B tested and both failed (2026-08-28, branch `experiment/heater-milp-tightening`, harness `bench_heater_variants` — five fixed start conditions, phases solved and timed separately so a single status cannot hide which phase timed out).** Baseline phase 1: `TimeLimit` on all five at 54–57 s, objectives 5.5849 / 5.6611 / 5.3549 / 5.4285 / 9.2006, totals ~109–112 s. **Arm 1 (tier-bounded continuous power)** is dramatically faster — phase 1 `Optimal` in 0.14–0.24 s, totals 2.0–12.4 s — but **unsound**: its objectives are 4.1297 / 4.1891 / 4.0993 / 4.0296 / 7.2566, ~25% *below* baseline on every instance. A valid reformulation of the same problem cannot find a cheaper optimum than a feasible incumbent of the original; a lower objective means it is solving an easier, unphysical problem — decoupling `P` from the stage integer lets the model draw any power while holding the stage flat, evading both the staging physics and C5's switching cost. The speed is the symptom, not the prize. This kills hypothesis (a) as a *fixable* weakness: the relaxation is weak precisely because the discreteness is real. **Arm 2 (min-up/min-down dwell constraints, k=3 slots)** gave no speedup at all — phase 1 still `TimeLimit` at 54–57 s on all five — with objectives *worse* (6.8738 / 24.0659 / 7.3568 / 6.9771 / 10.4853; instance 2's 24.07 is a 4× degradation, dwell forcing long uneconomic on-blocks) and phase 2 returning `Err` on four of five. So tightening via dwell also fails. **Standing diagnostic**: relaxing integrality outright makes the instance trivial (0.2 s vs a 54 s timeout), and two independent measurements bracket the relaxation gap at ~20–26%, so the entire difficulty lives in the discrete stage decisions and no reformulation tested so far removes it without changing the physics. Neither arm merits merging; the branch exists only as the record. **Reproduced on the 2026-09-08/09 S-9 re-run** (`docs/history/fleet_run_journal.md`, "S-9 re-run #4"): heater VENs `TIME_LIMIT` on 1512/2409 distinct plans (63%) vs 152/5399 (3%) without — the same ~9-10× split as 70%/8%. Within the heater group: ven-15/ven-3 100%, ven-5 89%, ven-18 87%, ven-10 80%, ven-17 66%, ven-12 58%, ven-14 48%, ven-20 15%, ven-2 8%. Time spent in the heater's emergency latch (GB-44, fixed 2026-09-12) does not explain the spread (ven-3/ven-15: 100% with 0% latch time). **TIME_LIMIT can break cap compliance, not just optimality (2026-09-12 smoke run):** ven-3's first plan after a 1.5 kW `capacity_limit` arrived (`RATE_CHANGE`, `TIME_LIMIT` at 120 s) scheduled its heater at 3.0 kW inside the cap (tank 58.8 °C, far above its 45 °C floor, so a planner choice, not the thermostat). Imported 3.0 kW against 1.5. A timed-out solve returns its incumbent, and since the cap is a penalised slack, not a hard constraint, that incumbent can violate it. This contradicts the earlier "degrades cost-optimality, not function" bound for the grid-compliance case. Single observation (4-min cap, shorter than the 5-min pass bar); the 2026-09-12 campaign's S-3/S-7/S-9 compliance per heater VEN should confirm or bound it. **Execution side closed by GB-47 (2026-09-15):** the arbiter's limit-enforcement pass (on by default) sheds a stage a timed-out incumbent put inside a hard limit, from the next tick — the S-7 re-run with it off reproduced ven-10/ven-12's failure, with it on both held their floor (`docs/history/fleet_run_journal.md`). What remains here is the planner side: a feasibility-first phase (or a repair step) so a timed-out incumbent respects the cap in the first place, instead of relying on execution to correct it. (A same-day note here claiming the split "does not reproduce" was a classification error — VENs were picked by grepping profiles for the word "heater", which matched comments — and has been replaced.)
+
+**MIP gap: measured, then reverted (2026-08-27).** The gap was briefly made per-profile configurable to test whether loosening it relieves the timeouts; the code was reverted, but the measurement is kept so nobody repeats it. Swept at 2/5/10/20/35/50% on the benchmark, three repeats, phases timed separately: phase 1 holds `TimeLimit` at ~54 s through 10%, then flips to `GapLimit` at 20% (9.96 s), 35% (10.84 s) and 50% (7.38 s); total falls ~109 s → ~64 s. **Phase 1's achieved gap therefore lies between 10% and 20%** — a healthy MILP would close to 2%, so this quantifies the weak relaxation diagnosed above, and it is otherwise unobservable through `good_lp` (R-65). **Phase 2 never binds at any gap**, burning its full ~54 s in all six rows, so it is the larger remaining half and needs its own answer. The quality price was never established: the benchmark reported phase 2's objective, which tracks wall-clock work when both phases time out (two rows varied across repeats; 35% returned exactly the 2% objective; 50% appeared *better*), so an interim claim that 10% cost +8.72% in plan quality was noise. **The quality price has since been measured properly (2026-08-28)** — paired against the baseline series below, same five instances, `MIP_GAP_TARGET` the only difference, reading phase 1's own objective: 5.5849→5.6547 (+1.25%), 5.6611→5.8694 (+3.68%), 5.3549→5.4907 (+2.54%), 5.4285→5.7339 (+5.63%), 9.2006→9.8103 (+6.63%); **mean +3.9%**, while phase 1 goes from `TimeLimit` on all five (54–57 s) to `GapLimit` on all five (2.8–16.2 s). Two things follow. First, the realized loss is far below the tolerance: a 20% gap bounds the *worst case* distance to the true optimum, and branch-and-bound reaches a near-optimal incumbent early and then spends nearly all its time proving optimality — the gap buys out the proving, not the solution. Second, **it does not fix GB-40**, because phase 2 still burns ~55 s `TimeLimit` on all five; totals only fall ~110 s → 57–71 s. Caveat, in the safe direction only: gap-20 also had ~4× less search time, so +3.9% is an *upper* bound on the tolerance's own cost. This makes the 2026-08-27 revert look premature — it was decided on an assumed quality cost, and the measured one is small — but reinstating configurability should be argued on its own merits (R-27), not as a GB-40 fix. Note R-27 in `docs/reference/TECHNICAL_DEBTS.md` still asks for this constant to be exposed via config — that request predates and outlives this revert
+
+**MIP gap: fine sweep finds 10% is the actual optimum, not 20% (2026-08-29).** The 2026-08-28 measurement above priced two points (2% and 20%) and reported +3.9% as *the* quality cost — accurate for that point, but never checked whether a better point existed between them. Swept 9 gaps (2/4/7/10/13/16/18/20/22%) across the same 5 fixed instances (`bench_mip_gap_quality_sweep`, 45 debug-build solves, 4012 s total), reading each instance's own phase-1 objective against its 2% baseline: mean cost is +0.00% (2%), +0.21% (4%), +0.43% (7%), **+0.65% (10%)**, then jumps to +5.55% (13%) and stays in a noisy +4–7% band through 22% with no further trend (16% +7.13%, 18% +6.70%, 20% +3.94%, 22% +6.53% — bouncing, not climbing, so branch-and-bound incumbent variance past 10%, not a cost that scales with gap size). The gap starts binding (`GapLimit` on phase 1) at **7%**, earlier than the previous sweep's "somewhere between 10% and 20%" bracket. **10% is therefore the target, not 20%**: same qualitative win (phase 1 off `TimeLimit`) at roughly a sixth of the quality cost. Caveat: even past the binding point, per-instance phase-1 time is not uniformly low (instance 4 took 46.81 s at 10%, instance 1 took 48.43 s at 18%) — "loose gap" lowers the average, it does not guarantee a fast solve on every instance. Phase 2 remains untouched at every gap tested (`TimeLimit`, ~54–57 s on all 45 solves), reconfirming it as the actual remaining bottleneck. This does not change the standing conclusion that the gap knob does not fix GB-40 — it only refines what the knob should be set to if used
+
+**MIP gap: extended to 10 instances — the instability is real dispersion, not noise, and "10% ≈ free" doesn't survive harder instances (2026-08-29).** The many conclusions on this topic had been unstable (20%→10% as "the" optimum, a noisy non-monotonic band above 13%), so this re-run doubled the instance count precisely to tell real signal from an artifact of too few samples. **Reproducibility is confirmed first**: the original 5 instances are the first five entries of the now-10-entry `HEATER_VARIANTS`, and every one of their phase-1 objectives reproduced bit-for-bit against the prior run at every gap checked (15/15 spot-checked points, zero mismatches) — HiGHS is deterministic here, so the instability is not run-to-run solver noise. The 5 new instances push into ground the original 5 barely touched: both temperature extremes (against `temp_min_c=45`/`temp_max_c=60`, not just the mid-band), all three power stages evenly, and — the load-bearing change — a price range of 0.10–0.60 €/kWh against the original 0.25–0.40. Result, mean Δ vs each instance's own 2% baseline: +0.00% (2%), +0.87% (4%), +1.78% (7%), **+2.05% (10%)**, +3.98% (13%), then +9.58% (16%) / +6.59% (18%) / +7.35% (20%) / +8.51% (22%). Two things follow. First, **the 10%≈"nearly free" framing does not hold up**: 10 instances put the true mean at 10% around **3× higher** (+2.05% vs the 5-instance +0.65%) — the smaller sample was biased toward easier, more typical mid-band conditions and understated the cost of the two price-extreme instances added here. Second, **the per-gap spread (max − min across instances) grows from 0 at 2% to ~17 percentage points by 20%**, and one instance ("cool-ish, mid stage, very expensive power") returns the *identical* objective (+16.63%) at 16%, 18%, 20% and 22% — the same incumbent, because branch-and-bound already stopped there and every looser setting past that point is moot for that instance. That is a real structural property of this MILP (each instance has its own gap threshold where a step-jump happens, and averaging superimposes different thresholds), not measurement noise, so no single gap value produces a clean monotonic quality curve across a mixed fleet. Practically, **10% and 13% are the two defensible choices, not one clear optimum**: at 10%, nine of ten instances flip off `TimeLimit` and mean cost is the lowest post-binding value (+2.05%); at 13%, all ten flip (the first gap where every instance is `GapLimit`) but mean cost nearly doubles (+3.98%). Past 13%, cost keeps climbing with no further status-flip benefit, since everything is already off the clock. Phase 2 remains `TimeLimit` on all 90 solves regardless of gap, unchanged from every prior measurement — still the actual bottleneck

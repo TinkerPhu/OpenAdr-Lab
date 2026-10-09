@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 /// Abstraction over the physics simulator for controller logic.
 ///
 /// Snapshot-only: production injection flows through the tick loop, not this port.
-/// `MockSimulatorPort` exposes a standalone `inject()` method for test assertions.
 pub trait SimulatorPort: Send + Sync {
     /// Take a point-in-time snapshot of simulator state.
     fn snapshot(&self) -> Result<SimSnapshot, SnapshotError>;
@@ -149,23 +148,6 @@ impl AssetSnapshot {
             kw,
         )
     }
-}
-
-/// State overrides for the `inject()` port method (used by MockSimulatorPort and tests).
-///
-/// This is the controller-side inject state type. The UI layer uses the richer
-/// `crate::entities::sim_inject::SimInjectState` which is mapped to this type before
-/// calling `inject()`.
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // fields read only in mock test assertions
-pub struct SimInjectState {
-    pub ambient_temp_c_override: Option<f64>,
-    pub pv_irradiance_override: Option<f64>,
-    pub base_load_kw_override: Option<f64>,
-    pub ev_plugged_override: Option<bool>,
-    pub ev_soc_target_override: Option<f64>,
-    pub pv_tau_s: f64,
-    pub base_load_alpha: f64,
 }
 
 /// Error returned by `SimulatorPort::snapshot()`.

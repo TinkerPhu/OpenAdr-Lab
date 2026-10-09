@@ -3195,3 +3195,14 @@ Rules:
   scenarios passed: both scenarios added an explicit `target_energy_kwh` the UI never sends. When a
   scenario stands for a UI flow, copy the form's body field for field (nulls included), or the test
   proves a request nobody makes.
+
+## Registers drift unless rows are edited, never rewritten (2026-10-09)
+
+- A commit that writes a register file from a copy read earlier brings back every row deleted in
+  between: `01ba552c` resurrected four fixed rows. Edit the rows a change concerns and leave the
+  rest of the file as `origin/main` has it; after a rebase, diff the register against `main`.
+- A register row is a claim about the code and goes stale like a comment: counts, line numbers and
+  "in progress" need the date they were measured, and a periodic pass that re-measures them with
+  the audit scripts, not by reading the row.
+- The primary checkout is shared. Before any commit there, read `git branch --show-current` and
+  `git status`; `git commit -a` in a tree that is not yours commits someone else's work.

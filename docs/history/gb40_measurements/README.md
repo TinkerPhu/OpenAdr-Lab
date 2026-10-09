@@ -1,6 +1,7 @@
 # GB-40 raw measurement logs
 
-Raw solver output behind the GB-40 conclusions in `docs/BACKLOG.md` and the
+Raw solver output behind the GB-40 conclusions (now R-97 in `docs/reference/TECHNICAL_DEBTS.md`;
+GB-40's own text is Appendix B of `docs/reference/R97_PLANNER_BENCHMARKS.md`) and the
 summarised tables in `docs/reference/GB40_MIP_GAP_BENCHMARK.md`. Kept because
 the published tables report *aggregates* (per-gap means, the fixture
 definition) while these files hold the **per-instance rows** — the only record

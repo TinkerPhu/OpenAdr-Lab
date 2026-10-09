@@ -15002,3 +15002,25 @@ field sends no target). The 4 h ready-by and 8 h departure stay in the forms: th
 not something an asset declares. A BDD scenario posts the UI's exact payload.
 Issues: the R-112/R-113 heater scenarios proved the default and stated targets with a kWh in the body,
 so the one shape the product actually sends stayed untested.
+
+## Register clean-up: both issue lists checked row by row against the source (docs/register-cleanup, 2026-10-09)
+
+Why: the registers had drifted from the code. Numbers were weeks old, paths pointed at files that
+had moved, one row said "in progress" for a plan that was never committed, and a commit that wrote
+`TECHNICAL_DEBTS.md` from a stale copy (`01ba552c`) had brought four fixed rows back.
+What: every open row of `docs/reference/TECHNICAL_DEBTS.md` and `docs/BACKLOG.md` was checked
+against `origin/main` (counts re-measured with the audit scripts, cited functions and paths opened).
+`TECHNICAL_DEBTS.md` went from 710 to about 165 lines: R-97's 540-line investigation log moved
+unchanged to `docs/reference/R97_PLANNER_BENCHMARKS.md` (Appendix A) and the register keeps its
+conclusions; GB-40, the same subject, was merged into R-97 and its text moved to Appendix B. The
+Notes section is gone: two entries were history already in this journal, one became R-126 (two
+types both called `AssetProfile`), and one was dead code, deleted in this branch (a controller-side
+`SimInjectState` used only by `MockSimulatorPort::inject` and that method's own two tests).
+`BACKLOG.md` went from 151 to 50 lines: BL-29 and BL-35 became rows with the four fields, the
+mostly empty "User-Value View" was removed, GB-50 now says what exists (a design, nothing built),
+and the vulnerability section lists only what is open after a fresh `cargo audit` / `npm audit`.
+`source-map-js` 1.2.1 -> 1.2.2 in `package-lock.json` closes a high-severity advisory in the
+build and test tooling.
+Issues: the first attempt at the four-row fix was committed in the shared primary checkout, which
+another session had on its own branch with uncommitted work; the commit swept that work in. The push
+was rejected, the commit was undone with a mixed reset and the fix redone in a worktree.
