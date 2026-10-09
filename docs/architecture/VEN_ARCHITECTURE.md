@@ -1313,6 +1313,13 @@ holds `AppCtx`, but no handler takes the whole of it: each extracts only the par
 having its own type and `impl FromRef<AppCtx>` in `app_ctx.rs` (R-110), so a signature says what the
 route can reach. `audit_ven_architecture.py` rule 11 refuses `State<AppCtx>` in `routes/`.
 
+The VEN UI's API types are generated from these Rust types, not written by hand (R-133, migrating by
+area): `#[derive(TS)]` (ts-rs) sits beside `Serialize`, `VEN/src/ui_types.rs` lists the root types once,
+and ts-rs writes each with its dependencies to `VEN/ui/src/api/generated/`, which `api/types.ts`
+re-exports. The test `generated_ui_types_are_current` fails when a Rust change is not regenerated
+(`UPDATE_UI_TYPES=1 cargo test ui_types`), so a field added on the wire cannot be missing in the UI.
+A 64-bit integer is generated as `number`, an `Option` as `T | null`.
+
 ### 4.1 Infrastructure
 
 | Method | Path | Description |

@@ -17,6 +17,8 @@ mod services;
 mod simulator;
 mod state;
 mod tasks;
+#[cfg(test)]
+mod ui_types;
 mod vtn;
 mod vtn_reports;
 mod weather;

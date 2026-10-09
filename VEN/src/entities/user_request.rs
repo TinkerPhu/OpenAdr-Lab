@@ -8,9 +8,10 @@ use uuid::Uuid;
 
 use crate::entities::asset::ComfortRate;
 use crate::entities::design_vocabulary::UserRequestMode;
+use ts_rs::TS;
 
 /// A single deadline tier from the user's request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RequestDeadline {
     pub latest_end: DateTime<Utc>,
     pub max_total_cost_eur: Option<f64>,
@@ -19,7 +20,7 @@ pub struct RequestDeadline {
 }
 
 /// Status of the overall user request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserRequestStatus {
     Active,    // packet is scheduled or executing
@@ -29,7 +30,7 @@ pub enum UserRequestStatus {
 }
 
 /// Discriminator for the linked device session type.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionType {
     Ev,
@@ -38,7 +39,7 @@ pub enum SessionType {
 }
 
 /// A user-originated energy task request, linking to a device session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct UserRequest {
     pub id: Uuid,
     pub asset_id: String,

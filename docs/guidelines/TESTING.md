@@ -70,6 +70,11 @@ React component tests using Vitest + React Testing Library. Run locally, no Dock
 
 **Prerequisites:** Node.js, `npm install` in each UI directory.
 
+**Generated API types (VEN UI):** `VEN/ui/src/api/generated/` is written from the Rust types (R-133).
+After changing a Rust type the UI reads, run `UPDATE_UI_TYPES=1 cargo test ui_types` in `VEN/` and
+commit the regenerated files; `cargo test` fails (`generated_ui_types_are_current`) until you do. Then
+`npm run build` (its `tsc`) shows every UI place the change reaches.
+
 **Windows note:** If using a subst drive (D: -> C:\DriveD), vitest may resolve paths through the real filesystem. Run from the real path if you get module resolution errors.
 
 ### 2. openleadr-rs Cargo Tests (Node1)

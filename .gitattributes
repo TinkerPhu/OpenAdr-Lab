@@ -2,3 +2,5 @@
 VEN/tests/fixtures/*.json text eol=lf
 # Shell scripts must stay LF: docker_host_lock.sh pipes a heredoc to the Node1's Linux bash, which rejects CRLF.
 *.sh text eol=lf
+# Generated from the Rust types (R-133); the guard test compares them byte for byte, so a CRLF checkout must not change them.
+VEN/ui/src/api/generated/*.ts text eol=lf

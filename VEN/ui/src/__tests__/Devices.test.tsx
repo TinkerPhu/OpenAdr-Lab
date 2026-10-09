@@ -26,6 +26,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     tier_count: 1,
     session_id: "sess-ev-001",
     session_type: "ev",
+    comfort_rates: [],
     status: "ACTIVE",
     estimated_cost_eur: 1.23,
     estimated_co2_g: 300,
@@ -37,6 +38,8 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     updated_at: "2026-04-11T06:00:00Z",
     session: {
       type: "ev",
+      origin: "USER_REQUEST",
+      comfort_rates: [],
       id: "sess-ev-001",
       target_soc: 0.8,
       window_start: new Date(Date.now() - 3600_000).toISOString(),
@@ -67,6 +70,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
     tier_count: 1,
     session_id: "sess-ht-001",
     session_type: "heater",
+    comfort_rates: [],
     status: "ACTIVE",
     estimated_cost_eur: 0.34,
     estimated_co2_g: 80,
@@ -78,6 +82,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
     updated_at: "2026-04-11T06:00:00Z",
     session: {
       type: "heater",
+      comfort_rates: [],
       id: "sess-ht-001",
       target_temp_c: 55,
       ready_by: "2026-04-12T09:00:00Z",
@@ -103,6 +108,7 @@ function makeShiftableRequest(id: string, overrides: Partial<UserRequestWithSess
     tier_count: 0,
     session_id: `sess-${id}`,
     session_type: "shiftable_load",
+    comfort_rates: [],
     status: "ACTIVE",
     estimated_cost_eur: 0.12,
     estimated_co2_g: 30,
@@ -292,7 +298,7 @@ describe("DevicesPage", () => {
       makeEvRequest({
         id: "ur-ev-mon",
         session: {
-          type: "ev", id: "sess-mon", target_soc: 0.8,
+          type: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-mon", target_soc: 0.8,
           window_start: "2026-04-06T18:00:00Z", departure_time: "2026-04-07T07:00:00Z",
           expected_trip_distance_km: 120, expected_return_time: "2026-04-07T17:00:00Z",
           soft_deadline: false, mode: "BY_DEADLINE",
@@ -302,7 +308,7 @@ describe("DevicesPage", () => {
       makeEvRequest({
         id: "ur-ev-wed",
         session: {
-          type: "ev", id: "sess-wed", target_soc: 0.9,
+          type: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-wed", target_soc: 0.9,
           window_start: "2026-04-07T18:00:00Z", departure_time: "2026-04-08T07:00:00Z",
           expected_trip_distance_km: null, expected_return_time: null,
           soft_deadline: false, mode: "BY_DEADLINE",

@@ -38,6 +38,10 @@ rand = "0.8"
 # `rand` itself has no distributions beyond uniform. MIT OR Apache-2.0, same
 # `rand` 0.8 generation.
 rand_distr = "0.4"
+# The VEN UI's API types are generated from the Rust types (R-133): `#[derive(TS)]` beside
+# `Serialize`, listed once in `src/ui_types.rs`. A proc-macro plus traits; nothing is called at
+# runtime. MIT.
+ts-rs = { version = "12.0", features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }
 good_lp = { version = "1", features = ["highs"], default-features = false }
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
