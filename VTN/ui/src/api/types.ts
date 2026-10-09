@@ -110,6 +110,14 @@ export type SignalBand = {
   eventName: string | null;
   payloadType: string;
   value: number | null;
+  /**
+   * Who said what unit `value` is in: the event, its program, or nobody (`PROFILE_DEFAULT`:
+   * the lab profile's default was assumed). Null when the type has no unit to declare.
+   */
+  unitsDeclaredBy?: "EVENT" | "PROGRAM" | "PROFILE_DEFAULT" | null;
+  /** Why `value` was not read: the payload declares a unit the profile does not read, so a
+   *  VEN drops it too. Null otherwise. */
+  refused?: string | null;
 };
 
 export type FleetSignals = {

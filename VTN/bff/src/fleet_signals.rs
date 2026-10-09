@@ -12,7 +12,8 @@
 //! interval *i* runs, which is precisely what GB-48 was.
 
 use chrono::{DateTime, Utc};
-use lab_core::event_timing::{numeric_value, timed_intervals, wire_name, OadrEvent};
+use lab_core::event_timing::{timed_intervals, wire_name, OadrEvent};
+use lab_core::wire_contract::{DeclaredBy, PayloadReader};
 use serde::Serialize;
 
 /// One interval of one event, as it applies to one VEN.
@@ -29,8 +30,17 @@ pub struct SignalBand {
     /// the wire, the API and the chart legend (`dto`).
     pub payload_type: String,
     /// The first numeric value, when the payload has one. `None` for payload
-    /// types that carry no number (a state, say) rather than a zero.
+    /// types that carry no number (a state, say) rather than a zero, and for a
+    /// value whose declared unit this profile does not read (see `refused`).
     pub value: Option<f64>,
+    /// Who said what unit `value` is in: `EVENT`, `PROGRAM`, or `PROFILE_DEFAULT` when nobody
+    /// did and `docs/reference/WIRE_PROFILE.md`'s default was assumed. `None` when there is no
+    /// unit to declare. The same reader the VEN acts through (`lab_core::wire_contract`), so a
+    /// band and the limit a VEN applied cannot read one value two ways.
+    pub units_declared_by: Option<&'static str>,
+    /// Why `value` was not read, when the payload declares a unit or currency this profile does
+    /// not read. A VEN drops such a payload too.
+    pub refused: Option<String>,
 }
 
 // Priority is deliberately absent: `openleadr_wire::event::Priority` is a
@@ -52,6 +62,7 @@ pub fn targets_ven(targets: &[String], ven_name: &str) -> bool {
 /// to the window so a month-long tariff does not arrive as a month-long band.
 pub fn bands_for_ven(
     event: &OadrEvent,
+    reader: &PayloadReader,
     ven_name: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
@@ -78,13 +89,24 @@ pub fn bands_for_ven(
             let band_from = iv.start.max(from);
             let band_to = iv.end.min(to);
             let (id, name) = (event_id.clone(), event_name.clone());
-            iv.interval.payloads.iter().map(move |p| SignalBand {
-                from: band_from,
-                to: band_to,
-                event_id: id.clone(),
-                event_name: name.clone(),
-                payload_type: wire_name(&p.value_type),
-                value: p.values.first().and_then(numeric_value),
+            iv.interval.payloads.iter().map(move |p| {
+                let read = reader.read(event, p);
+                let reading = read.as_ref().and_then(|r| r.as_ref().ok());
+                SignalBand {
+                    from: band_from,
+                    to: band_to,
+                    event_id: id.clone(),
+                    event_name: name.clone(),
+                    payload_type: wire_name(&p.value_type),
+                    value: reading.map(|r| r.value),
+                    units_declared_by: reading.and_then(|r| match r.declared_by {
+                        DeclaredBy::Event => Some("EVENT"),
+                        DeclaredBy::Program => Some("PROGRAM"),
+                        DeclaredBy::ProfileDefault => Some("PROFILE_DEFAULT"),
+                        DeclaredBy::NothingToDeclare => None,
+                    }),
+                    refused: read.and_then(|r| r.err()).map(|refusal| refusal.to_string()),
+                }
             })
         })
         .collect()
@@ -119,7 +141,7 @@ mod tests {
     #[test]
     fn a_targeted_ven_gets_the_band_with_its_value_and_type() {
         let bands = bands_for_ven(
-            &limit_event(serde_json::json!(["ven-1"])),
+            &limit_event(serde_json::json!(["ven-1"])), &PayloadReader::default(),
             "ven-1",
             t("2026-09-22T08:00:00Z"),
             t("2026-09-22T11:00:00Z"),
@@ -134,7 +156,7 @@ mod tests {
     #[test]
     fn a_ven_the_event_does_not_target_gets_nothing() {
         let bands = bands_for_ven(
-            &limit_event(serde_json::json!(["ven-1"])),
+            &limit_event(serde_json::json!(["ven-1"])), &PayloadReader::default(),
             "ven-7",
             t("2026-09-22T08:00:00Z"),
             t("2026-09-22T11:00:00Z"),
@@ -148,7 +170,7 @@ mod tests {
     #[test]
     fn an_empty_target_list_reaches_every_ven() {
         let bands = bands_for_ven(
-            &limit_event(serde_json::json!([])),
+            &limit_event(serde_json::json!([])), &PayloadReader::default(),
             "ven-19",
             t("2026-09-22T08:00:00Z"),
             t("2026-09-22T11:00:00Z"),
@@ -161,7 +183,7 @@ mod tests {
     #[test]
     fn bands_are_clipped_to_the_asked_for_window() {
         let bands = bands_for_ven(
-            &limit_event(serde_json::json!([])),
+            &limit_event(serde_json::json!([])), &PayloadReader::default(),
             "ven-1",
             t("2026-09-22T09:15:00Z"),
             t("2026-09-22T09:45:00Z"),
@@ -173,7 +195,7 @@ mod tests {
     #[test]
     fn an_event_entirely_outside_the_window_contributes_nothing() {
         let bands = bands_for_ven(
-            &limit_event(serde_json::json!([])),
+            &limit_event(serde_json::json!([])), &PayloadReader::default(),
             "ven-1",
             t("2026-09-22T12:00:00Z"),
             t("2026-09-22T13:00:00Z"),
@@ -191,11 +213,51 @@ mod tests {
             "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [2]}]}]
         }));
         let bands = bands_for_ven(
-            &ev,
+            &ev, &PayloadReader::default(),
             "ven-1",
             t("2026-09-22T08:00:00Z"),
             t("2026-09-22T11:00:00Z"),
         );
         assert_eq!(bands[0].value, Some(2.0));
+    }
+
+    // ── GB-50: a band says who declared its unit, or why it was not read ─────────────
+
+    fn limit_event_declaring(units: Option<&str>) -> OadrEvent {
+        let mut ev = serde_json::to_value(limit_event(serde_json::json!([]))).unwrap();
+        if let Some(units) = units {
+            ev["payloadDescriptors"] =
+                serde_json::json!([{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": units }]);
+        }
+        serde_json::from_value(ev).unwrap()
+    }
+
+    fn one_band(ev: &OadrEvent, reader: &PayloadReader) -> SignalBand {
+        bands_for_ven(ev, reader, "ven-1", t("2026-09-22T08:00:00Z"), t("2026-09-22T11:00:00Z"))
+            .remove(0)
+    }
+
+    #[test]
+    fn a_band_says_who_declared_its_unit() {
+        let declared = one_band(&limit_event_declaring(Some("KW")), &PayloadReader::default());
+        assert_eq!(declared.units_declared_by, Some("EVENT"));
+
+        let assumed = one_band(&limit_event_declaring(None), &PayloadReader::default());
+        assert_eq!((assumed.value, assumed.units_declared_by), (Some(3.0), Some("PROFILE_DEFAULT")));
+
+        let by_program = PayloadReader::from_program_rows(&[serde_json::json!({
+            "id": "p", "payloadDescriptors": [{ "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" }],
+        })]);
+        assert_eq!(one_band(&limit_event_declaring(None), &by_program).units_declared_by, Some("PROGRAM"));
+    }
+
+    /// A VEN drops a payload whose declared unit it cannot read; a band showing its number
+    /// anyway would draw a limit no site applied.
+    #[test]
+    fn a_band_with_a_unit_this_profile_does_not_read_has_no_value_and_says_why() {
+        let band = one_band(&limit_event_declaring(Some("VOLTS")), &PayloadReader::default());
+        assert_eq!(band.value, None);
+        let why = band.refused.expect("the refusal is stated");
+        assert!(why.contains("units VOLTS") && why.contains("units KW"), "{why}");
     }
 }

@@ -181,6 +181,49 @@ describe("DashboardPage", () => {
     expect(row).toHaveTextContent("evt-9");
   });
 
+  // GB-50: a unit the VTN did not declare is read from the profile default. That is legal, so
+  // the VEN stays "ok" -- which is exactly why it needs its own line to be seen at all.
+  it("shows which payload units were assumed while the VEN is healthy", () => {
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        status: "ok",
+        components: {
+          ven_process: { status: "ok" },
+          vtn_connection: { status: "ok" },
+          storage: { status: "ok" },
+          planner: { status: "ok" },
+          wire_conformance: { status: "ok" },
+        },
+        wire_assumptions: { IMPORT_CAPACITY_LIMIT: 1, PRICE: 4 },
+      },
+      isError: false,
+    } as unknown as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-value")).toHaveTextContent("ok");
+    const row = screen.getByTestId("dash-wire-assumptions");
+    expect(row).toHaveTextContent("IMPORT_CAPACITY_LIMIT (1)");
+    expect(row).toHaveTextContent("PRICE (4)");
+    expect(row).toHaveTextContent("profile default");
+  });
+
+  it("shows no wire-assumptions line when every unit was declared", () => {
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        status: "ok",
+        components: {
+          ven_process: { status: "ok" },
+          vtn_connection: { status: "ok" },
+          storage: { status: "ok" },
+          planner: { status: "ok" },
+        },
+        wire_assumptions: {},
+      },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.queryByTestId("dash-wire-assumptions")).toBeNull();
+  });
+
   // `fleet_telemetry` deliberately does not change the overall status -- the
   // fleet view going dark is an observability problem, not an operational one
   // -- so the component list is the only place it can be seen at all.
