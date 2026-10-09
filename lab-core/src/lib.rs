@@ -21,5 +21,6 @@ pub mod event_timing;
 pub mod test_fixtures;
 pub mod time_series;
 pub mod time_window;
+pub mod wire_contract;
 
 pub use time_window::TimeWindow;

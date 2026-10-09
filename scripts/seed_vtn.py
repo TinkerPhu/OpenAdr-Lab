@@ -39,7 +39,7 @@ import requests
 # so there is one copy of that truth and it is not this file.
 LAB_PROFILE_ATTRIBUTE = {
     "type": "openadr-lab.profile",
-    "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v1"],
+    "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v2"],
 }
 
 # How often each VEN reports its own telemetry, and over what interval.
@@ -545,6 +545,12 @@ PAYLOAD_CONTRACT = {
     "PRICE": {"units": "KWH", "currency": "EUR"},
     "EXPORT_PRICE": {"units": "KWH", "currency": "EUR"},
     "GHG": {"units": "GHG"},
+    # Profile v2: power, like the capacity limits.
+    "DISPATCH_SETPOINT": {"units": "KW"},
+    "IMPORT_CAPACITY_SUBSCRIPTION": {"units": "KW"},
+    "EXPORT_CAPACITY_SUBSCRIPTION": {"units": "KW"},
+    "IMPORT_CAPACITY_RESERVATION": {"units": "KW"},
+    "EXPORT_CAPACITY_RESERVATION": {"units": "KW"},
     # Report payload types. `DEMAND` is the spec's real-power type ("Power
     # usage for an interval, i.e. Real Power"), which is what a fleet view
     # wants -- `USAGE` is energy and would need dividing by the interval to

@@ -6,7 +6,7 @@ from a convention it has to already know:
 
 ```json
 { "type": "openadr-lab.profile",
-  "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v1"] }
+  "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v2"] }
 ```
 
 This profile is **stricter than OpenADR 3.1, never a variant of it**. Everything below either
@@ -41,6 +41,7 @@ present by `controller::report_payload::descriptors_for` in the VEN:
 | report payload type | quantity | `units` |
 |---|---|---|
 | `USAGE`, `USAGE_FORECAST`, `BASELINE`, `DELTA_USAGE` | energy over the interval | `KWH` |
+| `DEMAND` | real power, signed (positive = import) | `KW` |
 | `IMPORT_RESERVATION_CAPACITY`, `EXPORT_RESERVATION_CAPACITY` | power | `KW` |
 | `STORAGE_MAX_CHARGE_POWER`, `STORAGE_MAX_DISCHARGE_POWER` | power | `KW` |
 | `STORAGE_CHARGE_LEVEL` | state of charge | `PERCENT` |
@@ -141,9 +142,53 @@ no opinion about what the strings mean. An empty target list means every VEN, pe
 3.1 makes `eventID` a report's only object link. Reports from this lab always carry one; there
 is no program-level reporting.
 
+## v2
+
+v2 adds to v1 and changes nothing in it: an object created under v1 reads the same under v2.
+
+### More payload types are defined
+
+The VEN acted on these before the profile said what unit they are in. They are power, like the
+capacity limits:
+
+| payload type | quantity | `units` | notes |
+|---|---|---|---|
+| `DISPATCH_SETPOINT` | power | `KW` | net site power; positive = import |
+| `IMPORT_CAPACITY_SUBSCRIPTION` | power | `KW` | positive at the grid coupling point |
+| `EXPORT_CAPACITY_SUBSCRIPTION` | power | `KW` | positive at the grid coupling point |
+| `IMPORT_CAPACITY_RESERVATION` | power | `KW` | positive at the grid coupling point |
+| `EXPORT_CAPACITY_RESERVATION` | power | `KW` | positive at the grid coupling point |
+
+### Reading what peers send
+
+Sending is strict (above); receiving is explicit. Every event value the VEN acts on, and every
+one the VTN UI draws, is read through one reader (`lab_core::wire_contract::PayloadReader`):
+
+1. **The event's own `payloadDescriptors`** say what unit a payload type is in.
+2. If the event does not say, **the program's `payloadDescriptors`** do.
+3. If neither says, **the default in the tables above is assumed, and the assumption is shown**:
+   the VEN's `GET /health` lists it under `wire_assumptions` (payload type and how many payloads
+   were read that way in the latest poll) and its Dashboard shows a "Wire assumptions" row. A
+   peer is never refused for omitting what OpenADR lets it omit, and an assumption does not make
+   the VEN degraded.
+
+A payload that declares a unit or currency **other than the one in the tables** is not used: not
+converted, not guessed. OpenADR's `Unit` enum has no watt, so there is no neighbouring unit to
+convert from; a declaration that differs is a different quantity. Only that payload type of that
+event is dropped; the rest of the event and of the poll are read as usual. The refusal is a wire
+rejection: `GET /health` reports `wire_conformance` degraded with the event, the payload type,
+what was declared and what this profile reads, and the user is notified once.
+
+A value is never rescaled by its size. `0.8` declared `PERCENT` is 0.8 percent.
+
+A payload type these tables do not list is passed through as written. Nothing in the VEN acts on
+it, so there is nothing to assume and nothing to refuse.
+
 ## Changing this profile
 
-Add a new version heading and a new `#vN` fragment rather than editing v1 in place — objects
-already on the wire point at the version they were created under. The `PAYLOAD_CONTRACT` table in
-`scripts/seed_vtn.py` is the machine-readable half of this document; the two change together or
-the contract is no longer one copy.
+Add a new version heading and a new `#vN` fragment rather than editing an existing version in
+place — objects already on the wire point at the version they were created under. Three tables
+state this contract and are pinned to this document by tests, so they cannot drift from it:
+`lab_core::wire_contract` (`the_table_matches_the_published_profile`), which the VEN and the BFF
+read and the VEN's report builder emits from, and `PAYLOAD_CONTRACT` in `scripts/seed_vtn.py`
+(`scripts/test_seed_payload_contract.py`), which the seeder emits from.
