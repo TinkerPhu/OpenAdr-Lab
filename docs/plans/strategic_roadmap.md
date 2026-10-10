@@ -141,6 +141,9 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
   choice* is an experiment variable.
 - **Capacity negotiation (`OadrCapacityRequest`)** — no driving experiment yet (S-7
   placeholder above).
+- **Several assets of one kind in a VEN** (two PV arrays, two batteries, two EV chargers) — out of
+  scope: it does not fit into this project (decision 2026-10-10; R-127 closed on it). A VEN has at
+  most one asset of each kind, shiftable loads excepted; see `docs/reference/architectural_smells.md`.
 - **MQTT notifier conformance** — planned in `docs/plans/mqtt_notifier_conformance.md`; the lab's
   VENs poll over HTTP, so it changes nothing they do today (decision 2026-10-10).
 - **Fleet scale N=10** — the Node1 resource budget caps practical fleet size; larger

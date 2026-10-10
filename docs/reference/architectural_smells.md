@@ -5,7 +5,7 @@ filter `scripts/audit_ven_architecture.py` uses) and the VEN UI, made on `main` 
 R-112..R-115 and R-110's first step merged. Items already in `docs/reference/TECHNICAL_DEBTS.md` are
 listed at the end, not repeated. Severity uses the S1..S4 scale of `docs/reference/ISSUE_KINDS.md`.
 
-Every item is now either fixed or a register row (R-127..R-132); the register is the authority on
+Every item is now either fixed, a register row (R-129..R-132) or closed as out of scope (#1); the register is the authority on
 what is open, this file only records the sweep and maps its numbers to rows.
 
 ## First: the register itself is wrong
@@ -20,7 +20,7 @@ restored in `4d8b0447`). **Fixed**: the rows are deleted (by the `docs/register-
 
 | # | Sev | Smell | Where | Cost | Now |
 |---|---|---|---|---|---|
-| 1 | S3 | **The plan contract hard-codes one PV and one battery.** `PlanSlot` carries `baseline_kw`, `pv_forecast_kw`, `pv_used_kw`, `bat_charge_kw`, `bat_discharge_kw` beside the generic `allocations`, and readers branch on asset id to pick the field (`controller/timeline.rs:316-330`). A second PV or battery cannot be represented; the UI reads the same fields. | `VEN/src/entities/plan.rs` (PlanSlot), `VEN/src/controller/timeline.rs` | Medium (wire contract to the UI) | R-127 |
+| 1 | S3 | **The plan contract hard-codes one PV and one battery.** `PlanSlot` carries `baseline_kw`, `pv_forecast_kw`, `pv_used_kw`, `bat_charge_kw`, `bat_discharge_kw` beside the generic `allocations`, and readers branch on asset id to pick the field (`controller/timeline.rs:316-330`). A second PV or battery cannot be represented; the UI reads the same fields. | `VEN/src/entities/plan.rs` (PlanSlot), `VEN/src/controller/timeline.rs` | Medium (wire contract to the UI) | Closed, out of scope (2026-10-10): see below |
 | 2 | S3 | **The controller decides by asset identity instead of asking the asset.** "battery or EV = has a SoC to protect" (`controller/arbiter.rs:105`), "EV planned?" (`controller/dispatcher.rs:69`), "PV's own embodied CO2" (`controller/monitor.rs:65`), and request routing `is_ev` / `is_heater` compare ids with `"ev"`, `"heater"`, `"boiler"` (`services/user_request.rs:270-279`): an asset named `ev2` is "unrecognised". An `asset-competence` violation; the asset should declare it (has storage, request kind). | `VEN/src/controller/arbiter.rs`, `VEN/src/controller/dispatcher.rs`, `VEN/src/controller/monitor.rs`, `VEN/src/services/user_request.rs` | Small–Medium | **fixed** (R-128) |
 | 3 | S3 | **The report routes bypass `VtnPort` and call the concrete `VtnClient`.** `post_reports` / `put_report` cannot be unit-tested (a comment in `routes/reports.rs` says so); `/health` and `/vtn/status` reach the concrete client too. | `VEN/src/routes/reports.rs`, `VEN/src/routes/system.rs` | Small | R-129 |
 | 4 | S4 | **Request transitions are string-typed and partly invented.** `ControllerEvent::RequestTransition { from_status, to_status }` are `String`s made with `format!("{:?}")`; cancelling always records `from_status: "Active"`, although `cancel` also accepts a `Failed` request, which is then logged as `Active -> Cancelled`. | `VEN/src/controller/trace.rs`, `VEN/src/services/request_submission.rs` | Small | **fixed** (R-130) |
@@ -50,5 +50,11 @@ duplication), R-125 (SoC names without a unit), R-121 (`ui-charts/` holds more t
 
 - Fixed: the register drift (`docs/register-cleanup`) and #6 (`refactor/smell-sweep-v2`).
 - Fixed since: #2 (R-128).
-- Filed: #1 R-127, #3 R-129, #4 R-130, #5 R-131, #7 R-132.
+- Filed: #3 R-129, #4 R-130, #5 R-131, #7 R-132.
+- Closed without a fix: #1 (R-127). **Several assets of one kind in a VEN do not fit into this
+  project** (user decision, 2026-10-10). The plan fields are only the visible part: the MILP has one
+  variable slot each for battery, EV and heater, takes one PV and one base-load series, and about
+  70 places look an asset up by its fixed id. Lifting that is a different product, beyond what an
+  OpenADR lab needs. A VEN has at most one asset of each kind (shiftable loads excepted), and the
+  one-PV / one-battery plan fields are that boundary written down, not a debt. Do not re-file.
 - Decided: #8 delete `SimulatorPort` (tasks call `to_sim_snapshot()` directly; done by the `docs/register-cleanup` work); #9 ts-rs, incrementally (R-133).
