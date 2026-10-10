@@ -16,8 +16,11 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 Each VEN instance loads a per-VEN YAML profile (`profile.rs`) declaring its assets and their
 physical parameters. The profile is validated on startup, before any task is spawned: an invalid
 profile (out-of-range numeric fields, an absorber referencing an undeclared asset, an empty asset
-list) exits with every violation listed at once, rather than starting into an inconsistent state
-or failing piecemeal later.
+list, more than one asset of a kind) exits with every violation listed at once, rather than starting
+into an inconsistent state or failing piecemeal later. A VEN has at most one EV, heater, PV, battery
+and base load: the planner has one slot per kind, and several assets of one kind are outside this
+project's scope (`docs/reference/architectural_smells.md`); shiftable loads are created by requests
+and are not limited.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐

@@ -57,4 +57,6 @@ duplication), R-125 (SoC names without a unit), R-121 (`ui-charts/` holds more t
   70 places look an asset up by its fixed id. Lifting that is a different product, beyond what an
   OpenADR lab needs. A VEN has at most one asset of each kind (shiftable loads excepted), and the
   one-PV / one-battery plan fields are that boundary written down, not a debt. Do not re-file.
+  The boundary is enforced: `profile::validate` refuses a profile with two assets of a kind
+  (`validate_asset_roster`), which before 2026-10-10 loaded and was silently mis-planned.
 - Decided: #8 delete `SimulatorPort` (tasks call `to_sim_snapshot()` directly; done by the `docs/register-cleanup` work); #9 ts-rs, incrementally (R-133).
