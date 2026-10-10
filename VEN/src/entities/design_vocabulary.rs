@@ -63,38 +63,6 @@ impl Default for UserRequestMode {
     }
 }
 
-/// Used in capacity requests: which direction we're requesting from VTN (§1.6).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum FlexibilityDirection {
-    Import, // requesting additional import capacity
-    Export, // requesting additional export capacity
-}
-
-/// Rate type: how the rate is measured (§1.7).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum RateType {
-    PerKwh, // €/kWh or gCO2/kWh — per-timeslot optimization
-    PerKw,  // €/kW — capacity-based rate (translated to constraints before optimization)
-}
-
-/// Rate unit: what the rate is denominated in (§1.8).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum RateUnit {
-    Eur,
-    Usd,
-    Chf,
-    #[serde(rename = "g_CO2_eq")]
-    GCo2Eq, // grams CO2 equivalent (grid intensity)
-    #[serde(rename = "kg_CO2_eq")]
-    KgCo2Eq, // kilograms CO2 equivalent (user-facing budgets)
-}
-
 /// How the Planner handles slots beyond the last known rate data (§1.10.1).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -326,7 +294,6 @@ pub struct PenaltyRule {
     pub threshold: PenaltyThreshold,
     /// Total cost in local currency if triggered (e.g. €100)
     pub cost: f64,
-    pub cost_unit: RateUnit,
     /// Billing period (seconds), e.g. 2592000 = 30 days
     pub period_s: u64,
     /// Rolling average window for threshold evaluation (seconds), e.g. 900 = 15 min
