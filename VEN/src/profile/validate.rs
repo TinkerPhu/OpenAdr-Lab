@@ -19,10 +19,7 @@ impl Profile {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
 
-        // At least one asset declared.
-        if self.assets.is_empty() {
-            errors.push("profile must declare at least one asset".into());
-        }
+        validate_asset_roster(&self.assets, &mut errors);
 
         // Planner numeric bounds.
         if self.planner.replan_interval_s == 0 {
@@ -377,6 +374,33 @@ impl Profile {
 
 /// The checks one heater block must pass: its power stages, its thermostat deadband and its
 /// declared request default (R-112).
+/// At least one asset, and at most one of each kind. The planner has one slot per kind (one battery, EV
+/// and heater in the MILP, one PV and one base-load series), so a second one would not be an error
+/// there, only silently wrong; several assets of one kind are outside this project's scope
+/// (`docs/reference/architectural_smells.md`). Shiftable loads are not profile assets and are
+/// not limited here.
+fn validate_asset_roster(assets: &[AssetProfile], errors: &mut Vec<String>) {
+    if assets.is_empty() {
+        errors.push("profile must declare at least one asset".into());
+    }
+    let kind = |a: &AssetProfile| match a {
+        AssetProfile::Ev(_) => "ev",
+        AssetProfile::Heater(_) => "heater",
+        AssetProfile::Pv(_) => "pv",
+        AssetProfile::Battery(_) => "battery",
+        AssetProfile::BaseLoad(_) => "base_load",
+    };
+    let mut count: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for asset in assets {
+        *count.entry(kind(asset)).or_default() += 1;
+    }
+    for (kind, n) in count.into_iter().filter(|(_, n)| *n > 1) {
+        errors.push(format!(
+            "assets: at most one '{kind}' per VEN, found {n} (several assets of one kind are not supported)"
+        ));
+    }
+}
+
 fn validate_heater(h: &HeaterConfig, errors: &mut Vec<String>) {
     if !(1..=2).contains(&h.power_stages) {
         errors.push(format!(
@@ -548,6 +572,65 @@ spikes:
             )],
             ..Profile::default()
         }
+    }
+
+    fn profile_with_assets(assets_yaml: &str) -> Profile {
+        serde_yaml::from_str(&format!(
+            "assets:
+{assets_yaml}"
+        ))
+        .expect("test profile parses")
+    }
+
+    /// A VEN has at most one asset of each kind: the planner has one slot per kind, so a second
+    /// battery (or PV, EV, heater, base load) would be silently mis-planned. Refused at start-up.
+    #[test]
+    fn validate_rejects_two_assets_of_one_kind() {
+        let profile = profile_with_assets(
+            "  - {type: base_load, id: base_load}
+  - {type: base_load, id: base_load_2}
+",
+        );
+        let errors = profile.validate().unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("at most one") && e.contains("base_load")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn validate_names_every_duplicated_kind_once() {
+        let profile = profile_with_assets(
+            "  - {type: base_load, id: a}
+  - {type: base_load, id: b}
+  - {type: base_load, id: c}
+  - {type: pv, id: east}
+  - {type: pv, id: west}
+",
+        );
+        let errors = profile.validate().unwrap_err();
+        let dup: Vec<_> = errors
+            .iter()
+            .filter(|e| e.contains("at most one"))
+            .collect();
+        assert_eq!(dup.len(), 2, "one message per kind, got {errors:?}");
+        assert!(dup.iter().any(|e| e.contains("pv")), "got {errors:?}");
+    }
+
+    #[test]
+    fn validate_accepts_one_asset_of_each_kind() {
+        let profile = profile_with_assets(
+            "  - {type: base_load, id: base_load}
+  - {type: pv, id: pv}
+",
+        );
+        let errors = profile.validate().err().unwrap_or_default();
+        assert!(
+            !errors.iter().any(|e| e.contains("at most one")),
+            "got {errors:?}"
+        );
     }
 
     fn valid_spike() -> crate::profile::schema::SpikeConfig {

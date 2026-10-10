@@ -15113,3 +15113,17 @@ needs migrating; BFF rows recorded before the change keep the old spelling.
 **Learnings.** None beyond the register's own lesson: a value typed as `String` admits states the
 domain does not have, and the UI fixture had quietly used two of them.
 
+
+## A profile may declare at most one asset of each kind (fix/one-asset-per-kind)
+
+Why: closing R-127 as out of scope (several assets of one kind do not fit into this project) left
+the boundary unenforced. A profile with two batteries, PV arrays or base loads parsed and validated,
+and the planner then used one of them: the MILP's variable pool has one slot per kind and a second
+context overwrites the first, and PV and base load are looked up by one fixed id each.
+What: `profile::validate` now calls `validate_asset_roster`, which holds the existing "at least one
+asset" check and refuses more than one EV, heater, PV, battery or base load, one message per kind.
+Tests first, written against YAML so they exercise the real parse path; they failed with
+`unwrap_err() on an Ok value`, which is the bug stated in one line. All 26 shipped profiles pass.
+Issues: the duplication ratchet refused the change because `validate` grew by one line (357 to
+358). Moving the neighbouring empty-list check into the new function made it shorter instead, and
+the baseline was tightened.
