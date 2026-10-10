@@ -67,5 +67,35 @@ class Ratchet(unittest.TestCase):
         self.assertEqual(len(dup.regressions({("a.rs", "b.rs"): 5}, {"a.rs::big": 120, "x.rs::new": 101}, self.BASE)), 1)
 
 
+class TestCodeRatchet(unittest.TestCase):
+    """Test fixtures are measured as one total per directory: refactoring moves windows between
+    file sets, so only the sum can be held to "may not grow"."""
+
+    BASE = {"clusters": {}, "long_functions": {}, "test_duplicated_windows": {"tests/dir": 10}}
+
+    def test_total_counts_every_duplicated_window_once_per_file_set(self):
+        files = {"a.rs": src(BLOCK), "b.rs": src(BLOCK), "c.rs": src(BLOCK, ["let gap = 1;"], BLOCK)}
+        clusters = dup.duplicate_clusters(files)
+        self.assertEqual(dup.duplicated_windows(files), sum(clusters.values()))
+        self.assertGreater(dup.duplicated_windows(files), 0)
+
+    def test_distinct_files_have_no_duplicated_windows(self):
+        files = {"a.rs": src(BLOCK), "b.rs": src([f"let other_{i} = 0;" for i in range(10)])}
+        self.assertEqual(dup.duplicated_windows(files), 0)
+
+    def test_fewer_or_equal_test_windows_pass(self):
+        self.assertEqual(dup.regressions({}, {}, self.BASE, {"tests/dir": 10}), [])
+        self.assertEqual(dup.regressions({}, {}, self.BASE, {"tests/dir": 3}), [])
+
+    def test_more_test_windows_fail_and_name_the_directory(self):
+        out = dup.regressions({}, {}, self.BASE, {"tests/dir": 11})
+        self.assertEqual(len(out), 1)
+        self.assertIn("tests/dir", out[0])
+
+    def test_a_directory_without_a_baseline_is_not_gated(self):
+        base = {"clusters": {}, "long_functions": {}}
+        self.assertEqual(dup.regressions({}, {}, base, {"tests/dir": 99}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

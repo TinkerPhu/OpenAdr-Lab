@@ -7,6 +7,9 @@ Two measures over production code (Rust and TypeScript, test code excluded):
                    counted per set of files they occur in
   long functions   Rust functions longer than MAX_FN_LINES lines
 
+Test code is not measured file set by file set (a fixture refactor moves windows between sets)
+but as one total of duplicated windows per directory in TEST_ROOTS, which may not grow (R-120).
+
 The existing state is the baseline (scripts/audit_duplication_baseline.json). The gate fails only
 when a branch ADDS a cluster, GROWS one, adds a long function or lengthens one; improvements pass
 and are recorded by `--update`. It makes `one-concept-one-function` checkable instead of
@@ -26,6 +29,7 @@ ROOTS = ["VEN/src", "lab-core/src", "VTN/bff/src", "VTN/ui/src", "VEN/ui/src", "
 EXTENSIONS = (".rs", ".ts", ".tsx")
 WINDOW = 8
 MAX_FN_LINES = 100
+TEST_ROOTS = ["VEN/src/controller/milp_planner/tests"]
 BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audit_duplication_baseline.json")
 
 _BRACKETS_ONLY = re.compile(r"[\}\)\];,{(]*")
@@ -112,7 +116,12 @@ def long_functions(files):
     return out
 
 
-def regressions(clusters, long_fns, baseline):
+def duplicated_windows(files):
+    """Total duplicated windows in `files`: the one number test directories are held to."""
+    return sum(duplicate_clusters(files).values())
+
+
+def regressions(clusters, long_fns, baseline, test_windows=None):
     out = []
     for files, count in sorted(clusters.items()):
         before = baseline["clusters"].get("|".join(files), 0)
@@ -124,6 +133,10 @@ def regressions(clusters, long_fns, baseline):
         if length > before:
             what = f"new function over {MAX_FN_LINES} lines" if before == 0 else f"function grew {before} -> {length} lines"
             out.append(f"{what}: {name}")
+    tracked = baseline.get("test_duplicated_windows", {})
+    for directory, count in sorted((test_windows or {}).items()):
+        if directory in tracked and count > tracked[directory]:
+            out.append(f"test fixtures duplicated more, {tracked[directory]} -> {count} windows: {directory}")
     return out
 
 
@@ -141,22 +154,37 @@ def collect(root="."):
     return files
 
 
+def collect_tests(directory, root="."):
+    """Every Rust file under one test directory, whole (no production cut)."""
+    files = {}
+    for base, _, names in os.walk(os.path.join(root, directory)):
+        for name in names:
+            if name.endswith(".rs"):
+                path = os.path.join(base, name).replace("\\", "/")
+                with open(path, encoding="utf-8", errors="ignore") as f:
+                    files[os.path.relpath(path, root).replace("\\", "/")] = f.read()
+    return files
+
+
 def main(argv):
     files = collect()
     clusters, long_fns = duplicate_clusters(files), long_functions(files)
+    test_windows = {d: duplicated_windows(collect_tests(d)) for d in TEST_ROOTS}
     current = {
         "clusters": {"|".join(k): v for k, v in sorted(clusters.items())},
         "long_functions": dict(sorted(long_fns.items())),
+        "test_duplicated_windows": test_windows,
     }
     if "--update" in argv:
         with open(BASELINE, "w", encoding="utf-8", newline="\n") as f:
             json.dump(current, f, indent=1)
             f.write("\n")
-        print(f"baseline written: {len(current['clusters'])} clusters, {len(current['long_functions'])} long functions")
+        print(f"baseline written: {len(current['clusters'])} clusters, {len(current['long_functions'])} long functions, "
+              f"test windows {test_windows}")
         return 0
     with open(BASELINE, encoding="utf-8") as f:
         baseline = json.load(f)
-    bad = regressions(clusters, long_fns, baseline)
+    bad = regressions(clusters, long_fns, baseline, test_windows)
     for line in bad:
         print("FAIL", line)
     if bad:
@@ -164,7 +192,7 @@ def main(argv):
               "justified, run --update and say why in the commit message.")
         return 1
     print(f"OK    duplication: {len(current['clusters'])} clusters and {len(current['long_functions'])} "
-          "long functions, none added or grown against the baseline")
+          f"long functions, none added or grown against the baseline; test windows {test_windows}")
     return 0
 
 
