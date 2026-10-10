@@ -43,3 +43,5 @@ implemented:
 - The historical record of what was built, why, and what was learned lives
   in `docs/history/project_journal.md` and `docs/reference/KEY_LEARNINGS.md`
   (both exempt from this rule), plus git history — not in the plan itself.
+- The journal and git history are also the project's changelog: there is no `CHANGELOG.md`, because
+  the lab has no versioned releases for one to key on.
