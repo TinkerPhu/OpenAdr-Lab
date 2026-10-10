@@ -12,9 +12,7 @@
 use super::*;
 use crate::entities::capacity::{AlertWindow, CapacitySnapshot, SimpleWindow};
 use crate::entities::design_vocabulary::{StaleRatePolicy, UserRequestMode};
-use crate::entities::device_session::{
-    BaselineOverride, BaselineSlot, EvSession, ShiftableLoad,
-};
+use crate::entities::device_session::{BaselineOverride, BaselineSlot, EvSession, ShiftableLoad};
 use lab_core::time_series::{Interpolation, TimeSeries};
 
 const GOLDEN: &str = include_str!("golden/milp_inputs.txt");

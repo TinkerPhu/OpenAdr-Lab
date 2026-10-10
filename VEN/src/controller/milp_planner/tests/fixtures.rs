@@ -119,3 +119,22 @@ pub(super) fn ev_session_until(
         updated_at: now,
     }
 }
+
+/// A lossless battery on synthetic inputs: `capacity_kwh` usable up to full, holding `init_kwh`,
+/// never below `min_kwh`, charging and discharging at up to `p_max_kw`.
+pub(super) fn set_lossless_battery(
+    inputs: &mut MilpInputs,
+    capacity_kwh: f64,
+    init_kwh: f64,
+    min_kwh: f64,
+    p_max_kw: f64,
+) {
+    inputs.e_bat_nom_kwh = Some(capacity_kwh);
+    inputs.e_bat_init_kwh = Some(init_kwh);
+    inputs.e_bat_min_kwh = Some(min_kwh);
+    inputs.e_bat_max_kwh = Some(capacity_kwh);
+    inputs.p_bat_ch_max_kw = Some(p_max_kw);
+    inputs.p_bat_dis_max_kw = Some(p_max_kw);
+    inputs.eff_bat_ch = Some(1.0);
+    inputs.eff_bat_dis = Some(1.0);
+}

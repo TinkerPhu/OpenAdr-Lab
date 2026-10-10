@@ -225,14 +225,7 @@ fn solve_battery_arbitrage() {
                                                  // Cheap then expensive tariff
     inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.30, 0.30];
     // Add battery: init=0, can hold 5 kWh, eff=1
-    inputs.e_bat_nom_kwh = Some(5.0);
-    inputs.e_bat_init_kwh = Some(0.0);
-    inputs.e_bat_min_kwh = Some(0.0);
-    inputs.e_bat_max_kwh = Some(5.0);
-    inputs.p_bat_ch_max_kw = Some(5.0);
-    inputs.p_bat_dis_max_kw = Some(5.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 5.0, 0.0, 0.0, 5.0);
 
     let result = solve_phase1(
         &inputs,
@@ -273,14 +266,7 @@ fn battery_arbitrage_driven_by_ghg_intensity_alone() {
     let mut inputs = make_solver_inputs(4, 1.0); // base = 1.0 kW
     inputs.c_imp_eur_kwh = vec![0.20; 4]; // flat price — no price signal
     inputs.g_imp_kgco2_kwh = vec![0.10, 0.10, 0.50, 0.50]; // clean then dirty grid
-    inputs.e_bat_nom_kwh = Some(5.0);
-    inputs.e_bat_init_kwh = Some(0.0);
-    inputs.e_bat_min_kwh = Some(0.0);
-    inputs.e_bat_max_kwh = Some(5.0);
-    inputs.p_bat_ch_max_kw = Some(5.0);
-    inputs.p_bat_dis_max_kw = Some(5.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 5.0, 0.0, 0.0, 5.0);
 
     let weights = Phase1Weights {
         w_ghg: 5.0, // large enough to dominate the flat price term
@@ -433,14 +419,7 @@ fn battery_startup_penalty_minimises_active_restarts() {
     let n = 6;
     let mut inputs = make_solver_inputs(n, 0.0);
     inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.10, 0.30, 0.30, 0.30];
-    inputs.e_bat_nom_kwh = Some(6.0);
-    inputs.e_bat_init_kwh = Some(3.0);
-    inputs.e_bat_min_kwh = Some(0.6);
-    inputs.e_bat_max_kwh = Some(6.0);
-    inputs.p_bat_ch_max_kw = Some(2.0);
-    inputs.p_bat_dis_max_kw = Some(2.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 6.0, 3.0, 0.6, 2.0);
 
     let mut weights = make_phase2_weights();
     weights.c_bat_startup_eur = 0.5; // high penalty
@@ -484,14 +463,7 @@ fn phase2_feasible_with_pv_and_production_epsilon() {
     let n = 24;
     let mut inputs = make_solver_inputs(n, 1.0);
     inputs.p_pv_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
-    inputs.e_bat_nom_kwh = Some(10.0);
-    inputs.e_bat_init_kwh = Some(5.0);
-    inputs.e_bat_min_kwh = Some(1.0);
-    inputs.e_bat_max_kwh = Some(10.0);
-    inputs.p_bat_ch_max_kw = Some(5.0);
-    inputs.p_bat_dis_max_kw = Some(5.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 10.0, 5.0, 1.0, 5.0);
 
     let p1w = make_phase1_weights();
     let mut p2w = make_phase2_weights();
@@ -526,14 +498,7 @@ fn solve_power_balance_holds() {
     let mut inputs = make_solver_inputs(4, 1.5);
     inputs.p_pv_kw = vec![2.0; 4]; // PV exceeds base, forces export
                                    // Add battery so there are non-trivial flows to check
-    inputs.e_bat_nom_kwh = Some(5.0);
-    inputs.e_bat_init_kwh = Some(2.5);
-    inputs.e_bat_min_kwh = Some(0.5);
-    inputs.e_bat_max_kwh = Some(5.0);
-    inputs.p_bat_ch_max_kw = Some(3.0);
-    inputs.p_bat_dis_max_kw = Some(3.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 5.0, 2.5, 0.5, 3.0);
 
     let out = solve_phase1(
         &inputs,
@@ -606,14 +571,7 @@ fn battery_ramp_penalty_produces_smooth_power() {
     let n = 6;
     let mut inputs = make_solver_inputs(n, 1.0); // 1 kW base load
     inputs.c_imp_eur_kwh = vec![0.08, 0.08, 0.08, 0.30, 0.30, 0.30];
-    inputs.e_bat_nom_kwh = Some(6.0);
-    inputs.e_bat_init_kwh = Some(3.0);
-    inputs.e_bat_min_kwh = Some(0.6);
-    inputs.e_bat_max_kwh = Some(6.0);
-    inputs.p_bat_ch_max_kw = Some(3.0);
-    inputs.p_bat_dis_max_kw = Some(3.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 6.0, 3.0, 0.6, 3.0);
 
     let mut weights = make_phase2_weights();
     weights.c_bat_startup_eur = 0.5; // keep blocks contiguous
@@ -674,14 +632,7 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
     let mut inputs = make_solver_inputs(n, 0.5);
     inputs.p_pv_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
 
-    inputs.e_bat_nom_kwh = Some(10.0);
-    inputs.e_bat_init_kwh = Some(8.0);
-    inputs.e_bat_min_kwh = Some(0.0);
-    inputs.e_bat_max_kwh = Some(10.0);
-    inputs.p_bat_ch_max_kw = Some(3.0);
-    inputs.p_bat_dis_max_kw = Some(3.0);
-    inputs.eff_bat_ch = Some(1.0);
-    inputs.eff_bat_dis = Some(1.0);
+    set_lossless_battery(&mut inputs, 10.0, 8.0, 0.0, 3.0);
 
     inputs.ev_mode = MilpLoadMode::MustRun;
     inputs.a_ev = vec![true; n];

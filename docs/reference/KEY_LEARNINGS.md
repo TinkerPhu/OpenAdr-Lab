@@ -3227,3 +3227,17 @@ Rules:
   the human-readable document with a test that parses the document.
 - When a rule is needed by a second service, move it to the shared crate at that moment. The lenient
   program-descriptor reader existed in the VEN for an hour before the BFF needed the same answer.
+
+## Splitting a long builder: record its whole output first, for every branch (2026-10-10)
+
+- A model-level golden does not cover an input builder. `model_fingerprint.rs` pinned the MILP
+  model, yet none of its scenarios took the builder's schedule, alert, SIMPLE, stale-rate, override
+  or budget branches. Before a behaviour-preserving split, record the function's complete output
+  (`Debug` text is enough) for scenarios that take every branch, on the untouched code, and assert
+  that each scenario really takes its branch.
+- Prove the net by mutation before trusting it: change one value by 1e-9 and watch it fail.
+- Order between stages is behaviour. SIMPLE level 2 caps import at the base load *before* the
+  baseline override; a split that moved the override into the forecast stage would have changed
+  plans silently. Make such an edge a parameter with a comment, not an accident of statement order.
+- Check a debt row's premise before planning its fix: R-120 named eight files hand-building a
+  struct; three did. The measure (duplicated windows per directory) found what actually repeated.

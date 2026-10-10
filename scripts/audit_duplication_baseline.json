@@ -76,6 +76,6 @@
   "VTN/bff/src/main.rs::main": 134
  },
  "test_duplicated_windows": {
-  "VEN/src/controller/milp_planner/tests": 410
+  "VEN/src/controller/milp_planner/tests": 218
  }
 }

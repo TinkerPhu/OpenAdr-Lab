@@ -15,51 +15,10 @@ fn make_profile_1800s() -> Profile {
     p
 }
 
-fn make_two_zone_tariffs(imp_cheap: f64, imp_exp: f64) -> TariffTimeSeries {
-    let now = fixed_now();
-    TariffTimeSeries::from_snapshots(&[
-        TariffSnapshot {
-            interval_start: now - Duration::hours(1),
-            interval_end: now + Duration::hours(1),
-            import_tariff_eur_kwh: Some(imp_cheap),
-            export_tariff_eur_kwh: Some(0.08),
-            co2_g_kwh: Some(300.0),
-        },
-        TariffSnapshot {
-            interval_start: now + Duration::hours(1),
-            interval_end: now + Duration::hours(3),
-            import_tariff_eur_kwh: Some(imp_exp),
-            export_tariff_eur_kwh: Some(0.08),
-            co2_g_kwh: Some(300.0),
-        },
-    ])
-}
-
 #[test]
 fn run_planner_no_assets_covers_base_load() {
     let now = fixed_now();
-    let profile = Profile {
-        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
-            id: "base_load".into(),
-            baseline_kw: 1.0,
-            spikes: vec![],
-        })],
-        simulator: SimulatorConfig,
-        planner: PlannerConfig {
-            plan_step_s: 1800,
-            plan_horizon_h: 2,
-            plan_zones: vec![crate::entities::plan::PlanZone {
-                step_s: 1800,
-                slots: 4,
-            }],
-            ..PlannerConfig::default()
-        },
-        grid: GridConfig {
-            max_import_kw: 25.0,
-            max_export_kw: 10.0,
-        },
-        packets: vec![],
-    };
+    let profile = base_load_only_profile();
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
@@ -93,28 +52,7 @@ fn run_planner_no_assets_covers_base_load() {
 #[test]
 fn test_plan_carries_optimal_status_and_objective_value() {
     let now = fixed_now();
-    let profile = Profile {
-        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
-            id: "base_load".into(),
-            baseline_kw: 1.0,
-            spikes: vec![],
-        })],
-        simulator: SimulatorConfig,
-        planner: PlannerConfig {
-            plan_step_s: 1800,
-            plan_horizon_h: 2,
-            plan_zones: vec![crate::entities::plan::PlanZone {
-                step_s: 1800,
-                slots: 4,
-            }],
-            ..PlannerConfig::default()
-        },
-        grid: GridConfig {
-            max_import_kw: 25.0,
-            max_export_kw: 10.0,
-        },
-        packets: vec![],
-    };
+    let profile = base_load_only_profile();
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
@@ -150,28 +88,7 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
     // scalar — this is the literal fix for the Controller tab's
     // previously-flat future-horizon base_load line.
     let now = fixed_now(); // 2026-04-11 06:00:00 UTC
-    let profile = Profile {
-        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
-            id: "base_load".into(),
-            baseline_kw: 1.0,
-            spikes: vec![],
-        })],
-        simulator: SimulatorConfig,
-        planner: PlannerConfig {
-            plan_step_s: 1800,
-            plan_horizon_h: 2,
-            plan_zones: vec![crate::entities::plan::PlanZone {
-                step_s: 1800,
-                slots: 4,
-            }],
-            ..PlannerConfig::default()
-        },
-        grid: GridConfig {
-            max_import_kw: 25.0,
-            max_export_kw: 10.0,
-        },
-        packets: vec![],
-    };
+    let profile = base_load_only_profile();
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
 
@@ -231,28 +148,7 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
     let tuesday = Utc.with_ymd_and_hms(2023, 1, 3, 6, 0, 0).unwrap();
     let saturday = Utc.with_ymd_and_hms(2023, 1, 7, 6, 0, 0).unwrap();
 
-    let profile = Profile {
-        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
-            id: "base_load".into(),
-            baseline_kw: 1.0,
-            spikes: vec![],
-        })],
-        simulator: SimulatorConfig,
-        planner: PlannerConfig {
-            plan_step_s: 1800,
-            plan_horizon_h: 2,
-            plan_zones: vec![crate::entities::plan::PlanZone {
-                step_s: 1800,
-                slots: 4,
-            }],
-            ..PlannerConfig::default()
-        },
-        grid: GridConfig {
-            max_import_kw: 25.0,
-            max_export_kw: 10.0,
-        },
-        packets: vec![],
-    };
+    let profile = base_load_only_profile();
 
     let mut weekday_profile = vec![0.0; 24];
     weekday_profile[6] = 6.0;
@@ -451,19 +347,7 @@ fn run_planner_ev_must_run_energy_met() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     // Set EV soc to 0.1
-    if let Some(ev) = sim.assets.get_mut("ev") {
-        let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
-        let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
-        ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
-            0.0
-        } else {
-            max_ch
-        };
-        ev.available_discharge_kwh = Some(0.1 * bat_kwh);
-        ev.available_charge_kwh = Some(0.9 * bat_kwh);
-    }
+    set_ev_soc(&mut sim, 0.1);
     let e_required_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
     let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
@@ -1240,19 +1124,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         .collect();
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
-    if let Some(ev) = sim.assets.get_mut("ev") {
-        let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
-        let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
-        ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
-            0.0
-        } else {
-            max_ch
-        };
-        ev.available_discharge_kwh = Some(0.1 * bat_kwh);
-        ev.available_charge_kwh = Some(0.9 * bat_kwh);
-    }
+    set_ev_soc(&mut sim, 0.1);
     let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_two_zone_tariffs(0.10, 0.50);
     let plan = run_planner(

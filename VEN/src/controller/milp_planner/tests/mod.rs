@@ -151,17 +151,7 @@ const NO_REFS: StaleRateRefs<'static> = StaleRateRefs {
 };
 
 fn no_capacity() -> OadrCapacityState {
-    OadrCapacityState {
-        import_limit_kw: None,
-        export_limit_kw: None,
-        import_subscription_kw: None,
-        import_reservation_kw: None,
-        export_subscription_kw: None,
-        export_reservation_kw: None,
-        import_limit_event_id: None,
-        export_limit_event_id: None,
-        last_updated: None,
-    }
+    OadrCapacityState::default()
 }
 
 fn make_profile() -> Profile {
@@ -267,6 +257,17 @@ fn refresh_from_asset(
 }
 
 fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
+    set_ev_state(snap, Some(plugged), None);
+}
+
+/// Set the EV's state of charge; the EV itself answers what it can then take and give.
+fn set_ev_soc(snap: &mut SimSnapshot, soc_frac: f64) {
+    set_ev_state(snap, None, Some(soc_frac));
+}
+
+/// Rebuild the EV's snapshot entry from the real `EvCharger` with `plugged` and/or `soc_frac`
+/// replaced, so capability and the available energies are the asset's own answer.
+fn set_ev_state(snap: &mut SimSnapshot, plugged: Option<bool>, soc_frac: Option<f64>) {
     if let Some(ev) = snap.assets.get_mut("ev") {
         let v = |k: &str| ev.val(k).unwrap_or(0.0);
         let charger = EvCharger {
@@ -286,8 +287,8 @@ fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
             usage_sim_seed_tag: 0,
         };
         let state = AssetState::Ev(EvState {
-            soc_frac: v("soc"),
-            plugged,
+            soc_frac: soc_frac.unwrap_or_else(|| v("soc")),
+            plugged: plugged.unwrap_or_else(|| v("plugged") > 0.5),
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
@@ -388,6 +389,32 @@ fn make_heater_only_profile(
             // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
             // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
             c_ctrl_imp_malus_eur_kwh: 0.0,
+            ..PlannerConfig::default()
+        },
+        grid: GridConfig {
+            max_import_kw: 25.0,
+            max_export_kw: 10.0,
+        },
+        packets: vec![],
+    }
+}
+
+/// A site with nothing but a 1 kW base load, planned in 4 x 1800 s slots on a 25 kW / 10 kW grid.
+fn base_load_only_profile() -> Profile {
+    Profile {
+        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
+            id: "base_load".into(),
+            baseline_kw: 1.0,
+            spikes: vec![],
+        })],
+        simulator: SimulatorConfig,
+        planner: PlannerConfig {
+            plan_step_s: 1800,
+            plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 4,
+            }],
             ..PlannerConfig::default()
         },
         grid: GridConfig {

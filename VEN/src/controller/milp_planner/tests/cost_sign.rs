@@ -89,19 +89,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
 
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
-    if let Some(ev) = sim.assets.get_mut("ev") {
-        let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
-        let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
-        ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
-            0.0
-        } else {
-            max_ch
-        };
-        ev.available_discharge_kwh = Some(0.1 * bat_kwh);
-        ev.available_charge_kwh = Some(0.9 * bat_kwh);
-    }
+    set_ev_soc(&mut sim, 0.1);
     let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
@@ -278,19 +266,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
     let mut sim = make_snap_from_profile(&profile);
     set_heater_temp(&mut sim, 19.0);
     set_ev_plugged(&mut sim, true);
-    if let Some(ev) = sim.assets.get_mut("ev") {
-        let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
-        let soc_target_frac = ev.val("soc_target").unwrap_or(0.8);
-        let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
-        ev.values.insert("soc".into(), 0.1);
-        ev.cap_max_import_kw = if 0.1_f64 >= soc_target_frac {
-            0.0
-        } else {
-            max_ch
-        };
-        ev.available_discharge_kwh = Some(0.1 * bat_kwh);
-        ev.available_charge_kwh = Some(0.9 * bat_kwh);
-    }
+    set_ev_soc(&mut sim, 0.1);
     let ev_session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let heater_target = crate::entities::device_session::HeaterTarget {
         mode: Default::default(),
