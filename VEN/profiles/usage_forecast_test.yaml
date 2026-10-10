@@ -61,12 +61,16 @@ planner:
   # Matches plan_horizon_h below exactly, so plan-ahead's own horizon check
   # (which reads plan_horizon_h regardless of plan_zones) agrees with what the
   # MILP actually solves over — coarse 1h slots keep the solve fast for CI.
-  # 48 h, not 30: the generator produces at most one trip per calendar day, so a
-  # 30 h horizon can contain at most one return - which makes "charging is planned
-  # before EVERY departure" unobservable, the behaviour 051 added. 48 one-hour slots
-  # is still a trivial solve.
+  # 60 h, not 30 and not 48: the generator produces at most one trip per calendar day, so a
+  # 30 h horizon can contain at most one return - which makes "charging is planned before
+  # EVERY departure" unobservable, the behaviour 051 added. And a trip's consumption shows as
+  # a fall in planned SoC one slot after its return, so with 48 h the second return (up to
+  # 48 h + 1 h away when a weekend return at 16:00 is followed by a weekday one at 17:00)
+  # lands in or past the last slot whenever the plan starts within two hours after a return
+  # time: the scenario then saw one trip and failed, by time of day (18:00-19:59 UTC on
+  # 2026-10-10, on main and on a branch alike). 60 one-hour slots is still a trivial solve.
   plan_zones:
     - step_s: 3600
-      slots: 48
-  plan_horizon_h: 48
+      slots: 60
+  plan_horizon_h: 60
   replan_interval_s: 20
