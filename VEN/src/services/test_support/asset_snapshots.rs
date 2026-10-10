@@ -33,6 +33,7 @@ pub fn snapshot_from_asset(
         setpoint_kw,
         values: asset.state_values(&state).into_iter().collect(),
         history: asset.history_view(&state),
+        embodied_co2_g_kwh: asset.embodied_co2_g_kwh(),
         emergency_what_ifs: asset.emergency_what_ifs(&state),
         ac_ceiling_kw: asset.ac_ceiling_kw(),
     }

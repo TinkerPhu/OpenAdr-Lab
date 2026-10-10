@@ -316,6 +316,7 @@ mod tests {
 
     fn slice(id: &str) -> AssetRequestSlice {
         AssetRequestSlice {
+            request_kind: None,
             default_target_temp_c: None,
             id: id.to_string(),
             current_soc: Some(0.3),

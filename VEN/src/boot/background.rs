@@ -77,7 +77,7 @@ fn spawn_vtn_polls(w: &World) {
 }
 
 fn spawn_sim_tick(w: &World) {
-    let (s, sim, sp, vn, tx, dd, etx, wp, wpp, pvco2, pvm, pvme, blm, blme, nf, cl, tp) = (
+    let (s, sim, sp, vn, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, nf, cl, tp) = (
         w.state.clone(),
         w.sim.clone(),
         w.sim_params.clone(),
@@ -87,7 +87,6 @@ fn spawn_sim_tick(w: &World) {
         w.planner_event_tx.clone(),
         w.ports.weather.clone(),
         w.weather_pv_params,
-        w.pv_co2_g_kwh,
         w.ports.pv_measurement.clone(),
         w.pv_measurement_enabled,
         w.ports.base_load_measurement.clone(),
@@ -108,7 +107,6 @@ fn spawn_sim_tick(w: &World) {
             etx.clone(),
             wp.clone(),
             wpp,
-            pvco2,
             pvm.clone(),
             pvme,
             blm.clone(),

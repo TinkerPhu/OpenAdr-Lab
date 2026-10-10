@@ -226,6 +226,7 @@ impl SimReadPort for SimHandle {
                     thermal: cfg
                         .as_thermostat()
                         .map(|t| t.thermal_request_defaults(&entry.state)),
+                    request_kind: cfg.request_kind(),
                 }
             })
             .collect()
@@ -431,6 +432,21 @@ mod tests {
         for slice in handle.request_slices().await {
             let expected = (slice.id == crate::ids::ASSET_HEATER).then_some(21.0);
             assert_eq!(slice.default_target_temp_c, expected, "on '{}'", slice.id);
+        }
+    }
+
+    /// R-128: each slice says what a request against its asset becomes, from the asset.
+    #[tokio::test]
+    async fn request_slices_carry_each_assets_declared_request_kind() {
+        use crate::entities::asset_params::RequestKind;
+        let (handle, _sim) = handle_with(&all_kinds());
+        for slice in handle.request_slices().await {
+            let expected = match slice.id.as_str() {
+                crate::ids::ASSET_EV => Some(RequestKind::ChargeSession),
+                crate::ids::ASSET_HEATER => Some(RequestKind::TemperatureTarget),
+                _ => None,
+            };
+            assert_eq!(slice.request_kind, expected, "on '{}'", slice.id);
         }
     }
 

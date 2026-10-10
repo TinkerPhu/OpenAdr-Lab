@@ -24,7 +24,6 @@ const DEFAULT_CO2_G_KWH: f64 = 300.0;
 /// Update the per-asset cumulative energy ledger from the current sim snapshot,
 /// and (BL-39) attribute each asset's import cost to any active `UserRequest`
 /// targeting it.
-#[allow(clippy::too_many_arguments)] // one scalar coefficient added for BL-17's PV embodied-carbon reporting
 pub fn record_tick(
     ledger: &mut HashMap<String, AssetLedgerEntry>,
     requests: &mut [UserRequest],
@@ -32,7 +31,6 @@ pub fn record_tick(
     tariffs: &[TariffSnapshot],
     dt_s: f64,
     now: DateTime<Utc>,
-    pv_co2_g_kwh: f64,
 ) {
     let dt_h = crate::entities::units::dt_h_from_s(dt_s);
 
@@ -62,10 +60,11 @@ pub fn record_tick(
         if kw > 0.0 {
             entry.cost_eur += import_cost_eur;
             entry.co2_g += crate::entities::units::energy_kwh(kw, dt_h) * co2_rate;
-        } else if asset_id == crate::ids::ASSET_PV {
-            // BL-17: PV's own embodied/lifecycle carbon, reporting-only — distinct
-            // from the grid-import CO2 term above, does not enter the planner.
-            entry.co2_g += crate::entities::units::energy_kwh(kw.abs(), dt_h) * pv_co2_g_kwh;
+        } else if let Some(embodied_co2_g_kwh) = asset_snap.embodied_co2_g_kwh {
+            // BL-17: generation's own embodied/lifecycle carbon, as the generating asset
+            // declares it (PV); reporting-only — distinct from the grid-import CO2 term
+            // above, does not enter the planner.
+            entry.co2_g += crate::entities::units::energy_kwh(kw.abs(), dt_h) * embodied_co2_g_kwh;
         }
         entry.updated_at = Some(now);
 
@@ -113,6 +112,7 @@ mod tests {
                     setpoint_kw: power_kw,
                     values: HashMap::new(),
                     history: Default::default(),
+                    embodied_co2_g_kwh: None,
                     emergency_what_ifs: None,
                     ac_ceiling_kw: None,
                 },
@@ -125,7 +125,7 @@ mod tests {
         let sub_threshold = NEAR_ZERO_KW * 0.5;
         let sim = make_sim("ev", sub_threshold);
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now(), 0.0);
+        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now());
         assert!(
             ledger.is_empty(),
             "ledger must not accumulate sub-threshold power"
@@ -137,7 +137,7 @@ mod tests {
         let above_threshold = NEAR_ZERO_KW * 2.0;
         let sim = make_sim("ev", above_threshold);
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now(), 0.0);
+        record_tick(&mut ledger, &mut [], &sim, &[], 1.0, Utc::now());
         let entry = ledger
             .get("ev")
             .expect("ledger must have an entry for above-threshold power");
@@ -166,7 +166,7 @@ mod tests {
             co2_g_kwh: Some(400.0),
         };
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[tariff], 3600.0, now, 0.0);
+        record_tick(&mut ledger, &mut [], &sim, &[tariff], 3600.0, now);
 
         let entry = ledger.get("battery").expect("battery ledger entry");
         // energy = 5 kW * 1 h = 5 kWh
@@ -245,7 +245,6 @@ mod tests {
                 std::slice::from_ref(&tariff),
                 900.0,
                 now,
-                0.0,
             );
         }
 
@@ -265,15 +264,7 @@ mod tests {
             make_request("ev", UserRequestStatus::Active),
             make_request("heater", UserRequestStatus::Active),
         ];
-        record_tick(
-            &mut ledger,
-            &mut requests,
-            &sim,
-            &[],
-            3600.0,
-            Utc::now(),
-            0.0,
-        );
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
 
         assert!(
             requests[0].accumulated_cost_eur > 0.0,
@@ -290,15 +281,7 @@ mod tests {
         let sim = make_sim("ev", 3.0);
         let mut ledger = HashMap::new();
         let mut requests = vec![make_request("ev", UserRequestStatus::Completed)];
-        record_tick(
-            &mut ledger,
-            &mut requests,
-            &sim,
-            &[],
-            3600.0,
-            Utc::now(),
-            0.0,
-        );
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
 
         assert_eq!(
             requests[0].accumulated_cost_eur, 0.0,
@@ -312,26 +295,25 @@ mod tests {
         let sim = make_sim("battery", -3.0);
         let mut ledger = HashMap::new();
         let mut requests = vec![make_request("battery", UserRequestStatus::Active)];
-        record_tick(
-            &mut ledger,
-            &mut requests,
-            &sim,
-            &[],
-            3600.0,
-            Utc::now(),
-            0.0,
-        );
+        record_tick(&mut ledger, &mut requests, &sim, &[], 3600.0, Utc::now());
 
         assert_eq!(requests[0].accumulated_cost_eur, 0.0);
     }
 
-    // ── BL-17: PV embodied-carbon reporting ──────────────────────────────────
+    // ── BL-17: embodied carbon, as the generating asset declares it (R-128) ──
+
+    /// `make_sim` with the asset declaring `embodied_co2_g_kwh` on its snapshot.
+    fn make_sim_declaring(asset_id: &str, power_kw: f64, embodied: Option<f64>) -> SimSnapshot {
+        let mut sim = make_sim(asset_id, power_kw);
+        sim.assets.get_mut(asset_id).unwrap().embodied_co2_g_kwh = embodied;
+        sim
+    }
 
     #[test]
-    fn pv_generation_accumulates_embodied_co2_when_pv_co2_g_kwh_is_set() {
-        let sim = make_sim(crate::ids::ASSET_PV, -5.0); // generation is negative power
+    fn generation_accumulates_the_embodied_co2_its_asset_declares() {
+        let sim = make_sim_declaring(crate::ids::ASSET_PV, -5.0, Some(40.0)); // generation is negative
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[], 3600.0, Utc::now(), 40.0);
+        record_tick(&mut ledger, &mut [], &sim, &[], 3600.0, Utc::now());
 
         let entry = ledger.get(crate::ids::ASSET_PV).expect("pv ledger entry");
         // 5 kWh generated * 40 gCO2/kWh = 200 g
@@ -343,30 +325,34 @@ mod tests {
     }
 
     #[test]
-    fn pv_generation_leaves_co2_g_at_zero_when_pv_co2_g_kwh_is_unset() {
-        let sim = make_sim(crate::ids::ASSET_PV, -5.0);
+    fn generation_declaring_zero_embodied_co2_leaves_co2_g_at_zero() {
+        let sim = make_sim_declaring(crate::ids::ASSET_PV, -5.0, Some(0.0));
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[], 3600.0, Utc::now(), 0.0);
+        record_tick(&mut ledger, &mut [], &sim, &[], 3600.0, Utc::now());
 
         let entry = ledger.get(crate::ids::ASSET_PV).expect("pv ledger entry");
-        assert_eq!(
-            entry.co2_g, 0.0,
-            "no behavior change from before this feature when pv_co2_g_kwh is 0.0"
-        );
+        assert_eq!(entry.co2_g, 0.0);
     }
 
+    /// The term follows the asset's declaration, not its id: an exporting asset that declares
+    /// none adds none even under the PV's id, and one that declares it counts under any id.
     #[test]
-    fn non_pv_exporting_asset_does_not_accumulate_embodied_co2() {
-        // The PV embodied-carbon term is keyed on asset_id == ASSET_PV specifically —
-        // any other exporting asset (e.g. a discharging battery) must not pick it up.
-        let sim = make_sim("battery", -5.0);
+    fn embodied_co2_follows_the_declaration_not_the_asset_id() {
         let mut ledger = HashMap::new();
-        record_tick(&mut ledger, &mut [], &sim, &[], 3600.0, Utc::now(), 40.0);
-
-        let entry = ledger.get("battery").expect("battery ledger entry");
+        let silent_pv = make_sim_declaring(crate::ids::ASSET_PV, -5.0, None);
+        record_tick(&mut ledger, &mut [], &silent_pv, &[], 3600.0, Utc::now());
         assert_eq!(
-            entry.co2_g, 0.0,
-            "pv_co2_g_kwh must not apply to a non-PV exporting asset"
+            ledger[crate::ids::ASSET_PV].co2_g,
+            0.0,
+            "a discharging battery, say"
+        );
+
+        let second_array = make_sim_declaring("pv-east", -5.0, Some(40.0));
+        record_tick(&mut ledger, &mut [], &second_array, &[], 3600.0, Utc::now());
+        assert!(
+            (ledger["pv-east"].co2_g - 200.0).abs() < 1e-6,
+            "{:?}",
+            ledger["pv-east"]
         );
     }
 }

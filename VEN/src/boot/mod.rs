@@ -51,10 +51,6 @@ pub struct World {
 
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    /// BL-17: PV embodied carbon is a per-asset profile scalar resolved once
-    /// at startup, same pattern as `min_ev_charge_kw` in
-    /// `simulator/plan_context.rs`.
-    pub pv_co2_g_kwh: f64,
     pub weather_pv_params: Option<PvForecastParams>,
     pub pv_measurement_enabled: bool,
     pub base_load_measurement_enabled: bool,
@@ -158,7 +154,6 @@ impl World {
             persist_path: cfg.persist_path.clone(),
             grid_max_import_kw: profile.grid.max_import_kw,
             grid_max_export_kw: profile.grid.max_export_kw,
-            pv_co2_g_kwh: pv_co2_g_kwh(&asset_params),
             weather_pv_params: profile.weather_pv_params(),
             pv_measurement_enabled: profile.pv_measurement_enabled(),
             base_load_measurement_enabled: profile.base_load_measurement_enabled(),
@@ -198,16 +193,6 @@ fn data_dir_from(cfg: &Config) -> String {
         .and_then(|p| p.to_str())
         .unwrap_or("/data")
         .to_string()
-}
-
-fn pv_co2_g_kwh(asset_params: &[AssetParams]) -> f64 {
-    asset_params
-        .iter()
-        .find_map(|p| match p {
-            AssetParams::Pv(pv) => Some(pv.co2_g_kwh),
-            _ => None,
-        })
-        .unwrap_or(0.0)
 }
 
 /// Re-seed the two in-memory feeds that outlive a restart: WP4.2 (BL-19)

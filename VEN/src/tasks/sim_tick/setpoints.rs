@@ -65,7 +65,7 @@ pub(crate) fn build_tick_setpoints(
         plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
         plan_has_ev_allocation: plan_snap
-            .is_some_and(|p| controller::dispatcher::plan_has_ev_allocation(p, now)),
+            .is_some_and(|p| controller::dispatcher::plan_allocates(p, now, crate::ids::ASSET_EV)),
         overlay_enabled: ctx.overlay_enabled,
         live_pv_kw,
         live_pv_released_kw,

@@ -465,7 +465,9 @@ impl AssetParams {
     }
 }
 
-pub use super::request_slice::{AssetRequestSlice, RequestDefaults, ThermalRequestDefaults};
+pub use super::request_slice::{
+    AssetRequestSlice, RequestDefaults, RequestKind, ThermalRequestDefaults,
+};
 
 #[cfg(test)]
 mod tests {

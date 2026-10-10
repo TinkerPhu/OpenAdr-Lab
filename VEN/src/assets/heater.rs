@@ -463,6 +463,10 @@ impl Asset for Heater {
         Some(self)
     }
 
+    fn request_kind(&self) -> Option<crate::entities::asset_params::RequestKind> {
+        Some(crate::entities::asset_params::RequestKind::TemperatureTarget)
+    }
+
     fn asset_type(&self) -> crate::entities::asset::AssetType {
         crate::entities::asset::AssetType::Heater
     }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::controller::user_request::{ClashingSession, CreateUserRequestParams, RequestError};
 use crate::controller::{SimReadPort, SimRosterPort};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
-use crate::entities::asset_params::AssetRequestSlice;
+use crate::entities::asset_params::{AssetRequestSlice, RequestKind};
 use crate::entities::user_request::UserRequest;
 use crate::entities::DomainError;
 use crate::services::user_request::UserRequestService;
@@ -71,39 +71,58 @@ pub async fn submit(
     }
 
     let slices = request_slices(state, sim_read).await;
-    if UserRequestService::is_ev(&body) {
-        let replace_ids = body.replace_session_ids.clone();
-        let (user_req, session) =
-            UserRequestService::create_ev(body, &slices, now).map_err(SubmitError::Request)?;
-        match &replace_ids {
-            Some(ids) => state
-                .replace_ev_sessions(ids, session)
-                .await
-                .map(|_| ())
-                .map_err(|refusal| RequestError::EvReplaceRejected {
-                    rejection: refusal.rejection,
-                    conflicts: refusal.conflicts.iter().map(ClashingSession::of).collect(),
-                }),
-            None => state.insert_ev_session(session).await.map_err(|clash| {
-                RequestError::EvSessionsConflict {
-                    conflicts: clash.conflicts.iter().map(ClashingSession::of).collect(),
-                }
-            }),
+    // The asset says what a request against it becomes; its id decides nothing (R-128).
+    let kind = slices
+        .iter()
+        .find(|s| s.id == body.asset_id)
+        .and_then(|s| s.request_kind);
+    match kind {
+        Some(RequestKind::ChargeSession) => {
+            submit_charge_session(body, &slices, now, state, trigger_tx).await
         }
-        .map_err(SubmitError::Request)?;
-        state.upsert_request(user_req.clone()).await;
-        announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
-        Ok(user_req)
-    } else if UserRequestService::is_heater(&body) {
-        let (user_req, target) =
-            UserRequestService::create_heater(body, &slices, now).map_err(SubmitError::Request)?;
-        state.set_heater_target(Some(target)).await;
-        state.upsert_request(user_req.clone()).await;
-        announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
-        Ok(user_req)
-    } else {
-        Err(SubmitError::UnrecognisedAsset)
+        Some(RequestKind::TemperatureTarget) => {
+            let (user_req, target) = UserRequestService::create_heater(body, &slices, now)
+                .map_err(SubmitError::Request)?;
+            state.set_heater_target(Some(target)).await;
+            state.upsert_request(user_req.clone()).await;
+            announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
+            Ok(user_req)
+        }
+        None => Err(SubmitError::UnrecognisedAsset),
     }
+}
+
+/// The EV path: build the session, queue it (or displace exactly the named ones), record and
+/// announce the request.
+async fn submit_charge_session(
+    body: CreateUserRequestParams,
+    slices: &[AssetRequestSlice],
+    now: DateTime<Utc>,
+    state: &AppState,
+    trigger_tx: &watch::Sender<PlanTriggerSignal>,
+) -> Result<UserRequest, SubmitError> {
+    let replace_ids = body.replace_session_ids.clone();
+    let (user_req, session) =
+        UserRequestService::create_ev(body, slices, now).map_err(SubmitError::Request)?;
+    match &replace_ids {
+        Some(ids) => state
+            .replace_ev_sessions(ids, session)
+            .await
+            .map(|_| ())
+            .map_err(|refusal| RequestError::EvReplaceRejected {
+                rejection: refusal.rejection,
+                conflicts: refusal.conflicts.iter().map(ClashingSession::of).collect(),
+            }),
+        None => state.insert_ev_session(session).await.map_err(|clash| {
+            RequestError::EvSessionsConflict {
+                conflicts: clash.conflicts.iter().map(ClashingSession::of).collect(),
+            }
+        }),
+    }
+    .map_err(SubmitError::Request)?;
+    state.upsert_request(user_req.clone()).await;
+    announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
+    Ok(user_req)
 }
 
 /// Cancel a user request (`UserRequestService::cancel`) and announce it.
@@ -179,16 +198,20 @@ mod tests {
     /// A real `AppState` and a real simulator roster holding an EV and a heater that declares a
     /// 21 °C default request target.
     fn fixture() -> Fixture {
-        let now = Utc::now();
         let heater = HeaterParams {
             default_target_temp_c: Some(21.0),
             ..HeaterParams::default()
         };
-        let params = [
+        fixture_with(&[
             AssetParams::Ev(EvParams::default()),
             AssetParams::Heater(heater),
-        ];
-        let sim = Arc::new(Mutex::new(SimState::from_params(&params, now)));
+        ])
+    }
+
+    /// The same, over a roster of the caller's choosing.
+    fn fixture_with(params: &[AssetParams]) -> Fixture {
+        let now = Utc::now();
+        let sim = Arc::new(Mutex::new(SimState::from_params(params, now)));
         let (trigger_tx, mut trigger_rx) =
             watch::channel(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
         trigger_rx.mark_unchanged();
@@ -302,6 +325,56 @@ mod tests {
             .expect("the heater target is set");
         assert_eq!(target.target_temp_c, 21.0);
         assert_eq!(Some(target.id), req.session_id);
+    }
+
+    /// R-128: a request is routed by what the asset declares, so an EV and a heater under
+    /// other names are served, and a battery (which takes no user request) is refused, as
+    /// before, without any id list deciding it.
+    #[tokio::test]
+    async fn submit_routes_by_what_the_asset_declares_not_by_its_id() {
+        use crate::entities::asset_params::BatteryParams;
+        let ev2 = EvParams {
+            id: "ev2".into(),
+            ..EvParams::default()
+        };
+        let boiler2 = HeaterParams {
+            id: "boiler-2".into(),
+            default_target_temp_c: Some(21.0),
+            ..HeaterParams::default()
+        };
+        let f = fixture_with(&[
+            AssetParams::Ev(ev2),
+            AssetParams::Heater(boiler2),
+            AssetParams::Battery(BatteryParams::default()),
+        ]);
+
+        let mut ev_req = ev_body(f.now, Some(0.9));
+        ev_req.asset_id = "ev2".into();
+        let req = f.submit(ev_req).await.expect("the EV path serves ev2");
+        assert!(f
+            .state
+            .ev_sessions()
+            .await
+            .iter()
+            .any(|s| Some(s.id) == req.session_id));
+
+        let mut heater_req = heater_body(f.now, None);
+        heater_req.asset_id = "boiler-2".into();
+        f.submit(heater_req)
+            .await
+            .expect("the heater path serves boiler-2");
+        assert_eq!(
+            f.state.heater_target().await.map(|t| t.target_temp_c),
+            Some(21.0)
+        );
+
+        let mut battery_req = ev_body(f.now, Some(0.9));
+        battery_req.asset_id = crate::ids::ASSET_BATTERY.into();
+        let refused = f.submit(battery_req).await;
+        assert!(
+            matches!(refused, Err(SubmitError::UnrecognisedAsset)),
+            "{refused:?}"
+        );
     }
 
     #[tokio::test]

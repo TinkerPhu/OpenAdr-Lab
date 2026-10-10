@@ -379,11 +379,41 @@ fn residual_kwh_by_asset_counts_limit_adjustments_as_energy() {
         }),
         ..Default::default()
     };
-    let residual = outcome.residual_kwh_by_asset(1.0);
+    let sim = make_sim(vec![
+        ("battery", battery_snap(0.0, 0.5)),
+        ("heater", heater_snap(20.0, 18.0, 23.0, 25.0)),
+    ]);
+    let residual = outcome.residual_kwh_by_asset(1.0, &sim);
     assert!((residual["battery"] - (0.2 + 1.8) / 3600.0).abs() < 1e-12);
     assert!(
         !residual.contains_key("heater"),
         "heater pause feeds no residual"
+    );
+}
+
+/// R-128: an asset counts because its snapshot carries a state of charge, not because of its
+/// id. A second battery under another name counts; a heater does not, whatever it is called.
+#[test]
+fn residual_kwh_by_asset_counts_what_declares_a_state_of_charge_not_an_id_list() {
+    let outcome = ArbiterOutcome {
+        displaced_kw_by_asset: StdHashMap::from([
+            ("battery-2".to_string(), 1.0),
+            ("battery".to_string(), 1.0),
+        ]),
+        ..Default::default()
+    };
+    let sim = make_sim(vec![
+        ("battery-2", battery_snap(0.0, 0.5)),
+        ("battery", heater_snap(20.0, 18.0, 23.0, 25.0)),
+    ]);
+    let residual = outcome.residual_kwh_by_asset(1.0, &sim);
+    assert!(
+        (residual["battery-2"] - 1.0 / 3600.0).abs() < 1e-12,
+        "{residual:?}"
+    );
+    assert!(
+        !residual.contains_key("battery"),
+        "an asset without a state of charge is not counted, even under that name"
     );
 }
 

@@ -59,15 +59,13 @@ pub fn build_setpoints(
     setpoints
 }
 
-/// Whether the plan has an EV allocation in the slot covering `now` — the
-/// arbiter's EV lever is only offered when this is `false` (opportunistic
-/// regime; a plan-committed EV rate is never second-guessed).
-pub fn plan_has_ev_allocation(plan: &Plan, now: DateTime<Utc>) -> bool {
-    plan.current_slot(now).is_some_and(|s| {
-        s.allocations
-            .iter()
-            .any(|a| a.asset_id == crate::ids::ASSET_EV)
-    })
+/// Whether the plan allocates `asset_id` in the slot covering `now`. The arbiter's EV lever
+/// asks it for the EV lever's asset and is only offered when the answer is `false`
+/// (opportunistic regime; a plan-committed EV rate is never second-guessed). Which asset is
+/// asked about is the caller's: the question itself knows no ids (R-128).
+pub fn plan_allocates(plan: &Plan, now: DateTime<Utc>, asset_id: &str) -> bool {
+    plan.current_slot(now)
+        .is_some_and(|s| s.allocations.iter().any(|a| a.asset_id == asset_id))
 }
 
 /// Result of resolving the effective PV generation limit for the current tick.
@@ -377,6 +375,19 @@ mod tests {
     }
 
     // ── T012: build_setpoints & overlay edge-case tests ──────────────────────
+
+    /// R-128: the question names the asset; nothing in it is tied to one id.
+    #[test]
+    fn plan_allocates_answers_for_the_asset_it_is_asked_about() {
+        let now = Utc::now();
+        let plan = make_test_plan(2.0, now);
+        assert!(plan_allocates(&plan, now, "battery"));
+        assert!(!plan_allocates(&plan, now, crate::ids::ASSET_EV));
+        assert!(
+            !plan_allocates(&plan, now + chrono::Duration::hours(1), "battery"),
+            "no slot covers that time"
+        );
+    }
 
     /// Build a minimal Plan with one slot covering `now` allocating `battery_kw` to battery.
     fn make_test_plan(battery_kw: f64, now: chrono::DateTime<Utc>) -> crate::entities::plan::Plan {

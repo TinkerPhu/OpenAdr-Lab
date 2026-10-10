@@ -43,6 +43,11 @@ pub struct PvPowerInputs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvInverter {
     pub rated_kw: f64,
+    /// Lifecycle/embodied carbon of the energy this inverter generates [gCO2eq/kWh]
+    /// (`PvParams::co2_g_kwh`, BL-17), declared through `Asset::embodied_co2_g_kwh`.
+    /// `#[serde(default)]`: older persisted state has no such field.
+    #[serde(default)]
+    pub embodied_co2_g_kwh: f64,
     /// Inverter's true AC output capability (kW); distinct from `rated_kw` (DC panel peak).
     /// DC potential is clamped to this before any commanded `generation_limit_kw` — see
     /// `docs/reference/KEY_LEARNINGS.md` (PV Curtailment History). Defaults to `rated_kw` (no hardware ceiling
@@ -150,6 +155,7 @@ impl PvInverter {
     pub fn from_params(cfg: &PvParams) -> Self {
         Self {
             rated_kw: cfg.rated_kw,
+            embodied_co2_g_kwh: cfg.co2_g_kwh,
             inverter_max_kw: cfg.inverter_max_kw,
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
@@ -377,6 +383,10 @@ impl Asset for PvInverter {
         Some(self.inverter_max_kw)
     }
 
+    fn embodied_co2_g_kwh(&self) -> Option<f64> {
+        Some(self.embodied_co2_g_kwh)
+    }
+
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &PvState = own(state);
         AssetHistoryView {
@@ -525,6 +535,16 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
+    /// R-128: the inverter declares its embodied carbon from its own params.
+    #[test]
+    fn embodied_co2_is_declared_from_the_params() {
+        let pv = PvInverter::from_params(&PvParams {
+            co2_g_kwh: 42.0,
+            ..PvParams::default()
+        });
+        assert_eq!(Asset::embodied_co2_g_kwh(&pv), Some(42.0));
+    }
+
     #[test]
     fn key_features_declare_peak_power_from_the_profile() {
         let (pv, state) = make_pv(5.0);
@@ -574,6 +594,7 @@ mod tests {
     fn make_pv(rated_kw: f64) -> (PvInverter, PvState) {
         (
             PvInverter {
+                embodied_co2_g_kwh: 0.0,
                 rated_kw,
                 irradiance: 0.0,
                 irradiance_offset: 0.0,

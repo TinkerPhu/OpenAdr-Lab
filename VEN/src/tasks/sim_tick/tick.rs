@@ -23,7 +23,6 @@ pub(crate) async fn tick_once(
     tick_s: u64,
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
-    pv_co2_g_kwh: f64,
     pv_measurement: Arc<dyn MeasurementPort>,
     pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
@@ -161,7 +160,7 @@ pub(crate) async fn tick_once(
         now,
     )
     .await;
-    let residual_kwh_by_asset = arbiter_outcome.residual_kwh_by_asset(dt_s);
+    let residual_kwh_by_asset = arbiter_outcome.residual_kwh_by_asset(dt_s, &tick_sim_snap);
     super::arbiter_glue::apply_residual_escalation(
         &state,
         &trigger_tx,
@@ -184,7 +183,6 @@ pub(crate) async fn tick_once(
         &ctx.rates_snap,
         dt_s,
         now,
-        pv_co2_g_kwh,
         telemetry.as_ref(),
         &ven_name,
     )
