@@ -144,6 +144,19 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
 - **Several assets of one kind in a VEN** (two PV arrays, two batteries, two EV chargers) — out of
   scope: it does not fit into this project (decision 2026-10-10; R-127 closed on it). A VEN has at
   most one asset of each kind, shiftable loads excepted; see `docs/reference/architectural_smells.md`.
+- **The EV as a vehicle-to-grid battery in the planner (GB-43)** — closed for now, probably too far
+  for the lab (decision 2026-10-10). Today the EV only charges; V2G would need a cycle-cost model
+  (degradation, round-trip loss) and a discharge leg in `ev_milp.rs`.
+- **One batched endpoint for per-asset capabilities and forecasts (R-48)** — closed for now, too
+  much for the lab (decision 2026-10-10). The VEN UI fires one request per asset, which is fine with
+  at most one asset of each kind.
+- **VEN self-registration via `POST /vens` (GB-51)** — closed for now, deferred for later (decision
+  2026-10-10). `scripts/seed_vtn.py` provisions every VEN with its own `clientID`; self-registration
+  would need a rule for which side wins.
+- **Credentials on the house MQTT broker (R-54)** — abandoned (decision 2026-10-10). The house
+  broker on :1883 stays anonymous for the home automation; it carries only the inbound weather and
+  measurement feeds, on a trusted LAN. Everything the lab generates is on `lab-mqtt` (:1884), which
+  authenticates every client. Comments that cite "R-54" refer to this entry.
 - **MQTT notifier conformance** — planned in `docs/plans/mqtt_notifier_conformance.md`; the lab's
   VENs poll over HTTP, so it changes nothing they do today (decision 2026-10-10).
 - **Fleet scale N=10** — the Node1 resource budget caps practical fleet size; larger
