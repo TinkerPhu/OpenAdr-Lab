@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 use crate::controller;
 use crate::controller::SimSnapshot;
-use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
+use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -47,8 +47,10 @@ pub(crate) async fn publish_sim_tick_result(
         for load in &loads {
             if !sim_snap.assets.contains_key(load.asset_id.as_str()) {
                 info!(asset_id = %load.asset_id, "shiftable load completed");
-                state.complete_shiftable(load.id, now).await;
-                let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+                crate::services::request_submission::complete_shiftable_and_announce(
+                    load.id, now, state, trigger_tx,
+                )
+                .await;
             }
         }
     }

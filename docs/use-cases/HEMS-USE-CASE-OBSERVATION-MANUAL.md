@@ -1151,6 +1151,12 @@ curl -s -X POST http://Node1:8211/user-requests \
 curl -s -X DELETE http://Node1:8211/user-requests/<REQUEST_ID>
 ```
 
+Every status change of a request is a `RequestTransition` row in **Planner → Decision Trace** and
+`GET /trace/events`, in the spelling `/user-requests` uses: `NEW → ACTIVE` when it is created
+(`from_status: null`), then `ACTIVE → CANCELLED` or `ACTIVE → COMPLETED` (a finished shiftable load).
+Scenario: `ven_user_request.feature` "Creating and cancelling a request is traced with the request's
+own statuses".
+
 ### List all requests
 
 ```bash

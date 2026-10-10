@@ -1077,9 +1077,12 @@ heater's `ThermalRequestDefaults` (current temperature, thermal mass, rating, fr
 heater. A request that states no power runs at the asset's rating (`rated_power_kw`); an asset with
 none gets `RequestError::NoPowerRating`, never a guessed kW. `GET /capability/:id` carries the declared
 targets (`default_target_temp_c`, `default_target_soc_frac`), and the VEN UI's request forms open on them. Handlers
-only parse and map a status: creating and cancelling a user request (install the session, record it,
-one `RequestTransition` event and one replan trigger through `announce_request_transition`) is
-`services::request_submission::{submit, cancel_and_announce}`, and a value set through `/sim/reset` or
+only parse and map a status: creating, cancelling and completing a user request (install the session,
+record it, one `RequestTransition` event and one replan trigger through `announce_request_transition`)
+is `services::request_submission::{submit, cancel_and_announce, complete_shiftable_and_announce}`. The
+event carries both statuses as `UserRequestStatus`, spelled as `/user-requests` spells them
+(`"ACTIVE"`, …), with `from_status: null` for a created request and the status the request actually
+had for a cancel (R-130); the VEN UI renders it through `requestTransitionText` (`NEW → ACTIVE`). And a value set through `/sim/reset` or
 `/sim/config/battery` is checked by the asset itself (`Asset::validate_values`, called by `SimHandle`;
 `DomainError::InvalidValue` -> 400, `AssetNotFound` -> 404). Tests: `services/request_submission.rs`,
 `simulator/handle.rs` `the_battery_refuses_*`. No `serde_json::Value` crosses a domain port: the
