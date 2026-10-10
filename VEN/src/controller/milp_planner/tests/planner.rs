@@ -334,21 +334,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
         .retain(|a| !matches!(a, AssetProfile::Battery(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
@@ -479,21 +465,7 @@ fn run_planner_ev_must_run_energy_met() {
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
     let e_required_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
@@ -674,21 +646,7 @@ fn run_planner_n48_full_horizon() {
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.5);
     set_ev_plugged(&mut sim, true);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(24),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(24));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
@@ -940,29 +898,16 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
 
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: cap.clone(),
-            capacity_schedule: vec![],
+        &GridSignals {
             alert_windows: (std::slice::from_ref(&alert)).to_vec(),
-            simple_windows: vec![],
+            ..test_grid(&tariffs, &cap)
         },
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
+        &SiteInputs {
             base_load: None,
-            baseline_override: None,
-            pv_forecast_override: None,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
+            ..site_inputs(&profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     );
 
@@ -1063,32 +1008,13 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
 
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: cap.clone(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
+        &GridSignals {
             simple_windows: simple,
+            ..test_grid(&tariffs, &cap)
         },
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
-            base_load: profile.assets.iter().find_map(|a| match a {
-                AssetProfile::BaseLoad(v) => Some(v),
-                _ => None,
-            }),
-            baseline_override: None,
-            pv_forecast_override: None,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
-        },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &site_inputs(&profile),
+        &NO_REFS,
         now,
     );
 
@@ -1111,29 +1037,17 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
     };
     let inputs2 = super::super::inputs::build_milp_inputs(
         &build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: cap.clone(),
-            capacity_schedule: vec![],
+        &GridSignals {
             alert_windows: (std::slice::from_ref(&alert)).to_vec(),
             simple_windows: vec![win(1, 0, 1)],
+            ..test_grid(&tariffs, &cap)
         },
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
+        &SiteInputs {
             base_load: None,
-            baseline_override: None,
-            pv_forecast_override: None,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
+            ..site_inputs(&profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     );
     assert_eq!(
@@ -1339,21 +1253,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_two_zone_tariffs(0.10, 0.50);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
@@ -1442,21 +1342,7 @@ fn run_planner_ev_planned_plugged_ends_at_a_stated_departure() {
     let now = fixed_now();
     // Half-way through the 2 h (4 x 1800 s) horizon: two slots before it, two after.
     let departure = now + Duration::hours(1);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: departure,
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, departure);
     let planned = planned_ev_plugged(true, Some(&session));
     assert!(
         planned.iter().any(|(start, _)| *start >= departure),
@@ -1547,21 +1433,7 @@ fn marginal_cost_solves_with_every_asset_kind_active() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     set_battery_soc(&mut sim, 0.3);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let load = make_shiftable(now, 60, 120);
     let mut ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);

@@ -19,7 +19,7 @@ use super::*;
 
 use crate::controller::milp_planner::model_probe::recorder;
 use crate::controller::milp_planner::solver_phase2::solve_milp_two_phase;
-use crate::entities::device_session::{EvSession, EvSessionOrigin, ShiftableLoad};
+use crate::entities::device_session::{EvSession, ShiftableLoad};
 use crate::entities::planner_params::PenaltyRuleParams;
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -49,20 +49,9 @@ fn snapshot(profile: &Profile) -> SimSnapshot {
 
 fn ev_session() -> EvSession {
     let now = fixed_now();
-    EvSession {
-        mode: Default::default(),
-        origin: EvSessionOrigin::UserRequest,
+    crate::entities::device_session::EvSession {
         id: uuid::Uuid::from_u128(1),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
+        ..ev_session_until(now, 0.8, now + Duration::hours(2))
     }
 }
 

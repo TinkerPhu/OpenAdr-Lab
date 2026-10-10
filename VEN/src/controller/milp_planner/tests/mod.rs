@@ -12,6 +12,7 @@ use crate::entities::asset_params::{
     BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
 use crate::entities::device_session::HeaterTarget;
+use crate::entities::grid_signals::GridSignals;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -123,6 +124,31 @@ pub(super) fn test_grid(
         simple_windows: vec![],
     }
 }
+
+/// The site half of a `build_milp_inputs` call for a test profile: its grid limits, PV and base
+/// load, and nothing else. A test names what it adds through struct-update syntax.
+fn site_inputs(profile: &Profile) -> SiteInputs<'_> {
+    SiteInputs {
+        grid_max_import_kw: profile.grid.max_import_kw,
+        grid_max_export_kw: profile.grid.max_export_kw,
+        pv_cfg: profile.pv_config(),
+        base_load: profile.assets.iter().find_map(|a| match a {
+            AssetProfile::BaseLoad(v) => Some(v),
+            _ => None,
+        }),
+        baseline_override: None,
+        pv_forecast_override: None,
+        pv_live_forecast_kw: None,
+        base_load_live_forecast_kw: None,
+        weather_pv_kw: None,
+    }
+}
+
+/// No diurnal reference series: history disabled, as in almost every planner test.
+const NO_REFS: StaleRateRefs<'static> = StaleRateRefs {
+    import: None,
+    co2: None,
+};
 
 fn no_capacity() -> OadrCapacityState {
     OadrCapacityState {
@@ -768,32 +794,14 @@ fn build_milp_inputs_with_override(
 ) -> MilpInputs {
     super::build_milp_inputs(
         ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: cap.clone(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
-            simple_windows: vec![],
-        },
+        &test_grid(tariffs, cap),
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
-            base_load: profile.assets.iter().find_map(|a| match a {
-                AssetProfile::BaseLoad(v) => Some(v),
-                _ => None,
-            }),
+        &SiteInputs {
             baseline_override,
             pv_forecast_override,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
+            ..site_inputs(profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     )
 }
@@ -847,6 +855,9 @@ fn bmi(
     let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
     build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None)
 }
+
+mod fixtures;
+use fixtures::*;
 
 mod base_load;
 mod basic;

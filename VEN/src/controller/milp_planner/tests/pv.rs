@@ -45,29 +45,14 @@ fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     super::super::inputs::build_milp_inputs(
         &ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: TariffTimeSeries::from_snapshots(&[]),
-            capacity: no_capacity(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
-            simple_windows: vec![],
-        },
+        &test_grid(&TariffTimeSeries::from_snapshots(&[]), &no_capacity()),
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
+        &SiteInputs {
             base_load: None,
-            baseline_override: None,
-            pv_forecast_override: None,
             pv_live_forecast_kw: pv_live_forecast_kw.as_deref(),
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
+            ..site_inputs(profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     )
 }
@@ -277,29 +262,15 @@ fn bmi_with_weather(
 ) -> MilpInputs {
     super::super::inputs::build_milp_inputs(
         ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: cap.clone(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
-            simple_windows: vec![],
-        },
+        &test_grid(tariffs, cap),
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
+        &SiteInputs {
             base_load: None,
-            baseline_override: None,
             pv_forecast_override,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
             weather_pv_kw,
+            ..site_inputs(profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     )
 }

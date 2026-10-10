@@ -553,21 +553,7 @@ fn ev_planned_state_soc_populated() {
         ev.available_discharge_kwh = Some(0.2 * bat_kwh);
         ev.available_charge_kwh = Some(0.8 * bat_kwh);
     }
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),

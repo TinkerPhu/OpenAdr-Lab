@@ -102,21 +102,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
@@ -305,21 +291,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         ev.available_discharge_kwh = Some(0.1 * bat_kwh);
         ev.available_charge_kwh = Some(0.9 * bat_kwh);
     }
-    let ev_session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.8,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let ev_session = ev_session_until(now, 0.8, now + Duration::hours(2));
     let heater_target = crate::entities::device_session::HeaterTarget {
         mode: Default::default(),
         id: uuid::Uuid::new_v4(),

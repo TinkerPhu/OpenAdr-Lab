@@ -7,7 +7,6 @@
 //! the plan the solver produces, so each one runs a real solve and reads
 //! `SolveOutput::soc_ev` rather than calling a helper that no longer exists.
 
-use super::solver::{make_phase1_weights, make_solver_inputs};
 use super::*;
 use crate::controller::milp_planner::asset_port::ExogenousSocDrops;
 
