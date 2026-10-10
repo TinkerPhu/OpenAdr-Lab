@@ -6,76 +6,6 @@ use crate::entities::planner_params::PenaltyRuleParams;
 // (no profile/asset-context machinery needed beyond an EV, which gives us a
 // divisible, reschedulable load across slots).
 
-fn base_inputs(n: usize) -> MilpInputs {
-    MilpInputs {
-        n,
-        dt_h: vec![1.0; n],
-        cum_s: (0..=n as i64).map(|i| i * 3600).collect(),
-        c_imp_eur_kwh: vec![0.25; n],
-        rate_stale: vec![false; n],
-        stale_rate_warning: None,
-        co2_stale_rate_warning: None,
-        budget_warning: None,
-        c_exp_eur_kwh: vec![0.08; n],
-        g_imp_kgco2_kwh: vec![0.30; n],
-        p_pv_kw: vec![0.0; n],
-        p_base_kw: vec![0.0; n],
-        p_imp_max_phys_kw: vec![25.0; n],
-        p_exp_max_phys_kw: vec![10.0; n],
-        p_imp_max_cont_kw: vec![25.0; n],
-        p_exp_max_cont_kw: vec![10.0; n],
-        pen_imp_eur_kwh: 0.0,
-        pen_exp_eur_kwh: 0.0,
-        mip_gap_target: 0.02,
-        penalty_rules: vec![],
-        e_bat_nom_kwh: None,
-        e_bat_init_kwh: None,
-        e_bat_min_kwh: None,
-        e_bat_max_kwh: None,
-        p_bat_ch_max_kw: None,
-        p_bat_dis_max_kw: None,
-        eff_bat_ch: None,
-        eff_bat_dis: None,
-        a_ev: vec![false; n],
-        ev_mode: MilpLoadMode::MustNotRun,
-        ev_obligations: vec![],
-        ev_battery_kwh: 60.0,
-        p_ev_max_kw: 0.0,
-        p_ev_min_kw: 0.0,
-        ev_segments: vec![],
-        e_ev_extra_max_kwh: 0.0,
-        v_ev_extra_eur_kwh: 0.0,
-        heater_mode: MilpLoadMode::MustNotRun,
-        t_heat_dead_step: None,
-        p_heat_step_kw: 0.0,
-        heat_n_stages: 0,
-        e_heat_init_kwh: 0.0,
-        e_heat_max_kwh: 0.0,
-        q_heat_dem_kw: 0.0,
-        e_heat_target_kwh: 0.0,
-        lambda_heat_sw_eur: 0.0,
-        w_tier_penalty_eur: 0.0,
-        heat_initial_y: 0.0,
-        shiftable_loads: vec![],
-        soc_ev_init: None,
-        ev_soc_drops: None,
-    }
-}
-
-fn p1w() -> Phase1Weights {
-    Phase1Weights {
-        w_energy: 1.0,
-        w_ghg: 0.0,
-        w_grid: 0.0,
-        w_import: 0.0,
-        w_viol: 1.0,
-        c_bat_wear_eur_kwh: 0.0,
-        c_bat_ev_coexist_eur_kwh: 0.0,
-        c_ctrl_imp_malus_eur_kwh: 0.0,
-        w_services: 1.0,
-    }
-}
-
 fn penalty_rule(threshold_kw: f64, window_s: u64, penalty_eur_per_kw: f64) -> PenaltyRuleParams {
     PenaltyRuleParams {
         rule_id: "peak-10kw".to_string(),
@@ -90,7 +20,7 @@ fn penalty_rule_disabled_by_default_adds_no_slack_and_matches_unmodified_plan() 
     // Same EV demand as the split test below, but with no penalty rules —
     // must be free to front-load into a single slot with zero penalty cost,
     // and s_penalty_kw must be empty (no rules -> no windows).
-    let mut inputs = base_inputs(2);
+    let mut inputs = make_solver_inputs(2, 0.0);
     inputs.a_ev = vec![true; 2];
     inputs.ev_mode = MilpLoadMode::MustRun;
 
@@ -98,7 +28,12 @@ fn penalty_rule_disabled_by_default_adds_no_slack_and_matches_unmodified_plan() 
     inputs.p_ev_min_kw = 0.0;
     set_ev_firm(&mut inputs, 12.0, 1);
 
-    let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
     assert!(
@@ -113,7 +48,7 @@ fn add_penalty_constraints_splits_load_below_threshold() {
     // 12 kWh EV demand over 2 one-hour slots (MustRun, deadline at slot 1),
     // 10 kW threshold with a 1-slot window and a penalty rate high enough
     // that paying it is never cheaper than the (cost-neutral) even split.
-    let mut inputs = base_inputs(2);
+    let mut inputs = make_solver_inputs(2, 0.0);
     inputs.a_ev = vec![true; 2];
     inputs.ev_mode = MilpLoadMode::MustRun;
 
@@ -122,7 +57,12 @@ fn add_penalty_constraints_splits_load_below_threshold() {
     set_ev_firm(&mut inputs, 12.0, 1);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
-    let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -150,7 +90,7 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
     // Single one-hour slot, EV MustRun deadline at slot 0 -> no alternative
     // slot exists. 12 kWh in 1 hour forces 12 kW import against a 10 kW
     // threshold; the penalty must be accepted, not silently ignored.
-    let mut inputs = base_inputs(1);
+    let mut inputs = make_solver_inputs(1, 0.0);
     inputs.a_ev = vec![true; 1];
     inputs.ev_mode = MilpLoadMode::MustRun;
 
@@ -159,7 +99,12 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
     set_ev_firm(&mut inputs, 12.0, 0);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
-    let result = solve_phase1(&inputs, &p1w(), &contexts_from_inputs(&inputs), 60.0);
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -178,7 +123,7 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
 
 #[test]
 fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
-    let mut inputs = base_inputs(1);
+    let mut inputs = make_solver_inputs(1, 0.0);
     inputs.a_ev = vec![true; 1];
     inputs.ev_mode = MilpLoadMode::MustRun;
 
@@ -186,7 +131,7 @@ fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
     set_ev_firm(&mut inputs, 12.0, 0);
     inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
-    let weights = p1w();
+    let weights = make_phase1_weights();
     let contexts = contexts_from_inputs(&inputs);
     let sol = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("solve must succeed");
 

@@ -421,19 +421,8 @@ fn time_ev_solve_at(
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let session = crate::entities::device_session::EvSession {
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.80,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + chrono::Duration::hours(12),
-        soft_deadline: false,
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        budget_eur: None,
-        comfort_rates: vec![],
         mode: crate::entities::design_vocabulary::UserRequestMode::ByDeadline,
-        created_at: now,
-        updated_at: now,
+        ..ev_session_until(now, 0.80, now + chrono::Duration::hours(12))
     };
     let sess = with_session.then_some(&session);
 

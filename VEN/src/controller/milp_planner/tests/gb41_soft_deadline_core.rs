@@ -15,7 +15,6 @@
 //! diagnosable from the test output alone — the thing the original investigation
 //! could not do, because that run's per-slot `p_ev_kw` was never retained.
 
-use super::solver::make_phase1_weights;
 use super::*;
 use crate::controller::milp_planner::asset_port::EvEnergySegment;
 
@@ -88,62 +87,29 @@ fn inputs_for(site: &Site) -> MilpInputs {
         })
         .collect();
 
-    MilpInputs {
-        n,
-        dt_h: vec![1.0; n],
-        cum_s: (0..=n as i64).map(|i| i * 3600).collect(),
-        c_imp_eur_kwh: c_imp,
-        rate_stale: vec![false; n],
-        stale_rate_warning: None,
-        co2_stale_rate_warning: None,
-        budget_warning: None,
-        c_exp_eur_kwh: vec![0.08; n],
-        g_imp_kgco2_kwh: vec![0.30; n],
-        p_pv_kw: p_pv,
-        p_base_kw: vec![0.5; n],
-        p_imp_max_phys_kw: vec![25.0; n],
-        p_exp_max_phys_kw: vec![10.0; n],
-        p_imp_max_cont_kw: vec![25.0; n],
-        p_exp_max_cont_kw: vec![10.0; n],
-        pen_imp_eur_kwh: 0.0,
-        pen_exp_eur_kwh: 0.0,
-        mip_gap_target: 0.02,
-        penalty_rules: vec![],
-        e_bat_nom_kwh: site.battery.then_some(10.0),
-        e_bat_init_kwh: site.battery.then_some(5.0),
-        e_bat_min_kwh: site.battery.then_some(1.0),
-        e_bat_max_kwh: site.battery.then_some(9.0),
-        p_bat_ch_max_kw: site.battery.then_some(5.0),
-        p_bat_dis_max_kw: site.battery.then_some(5.0),
-        eff_bat_ch: site.battery.then_some(0.96),
-        eff_bat_dis: site.battery.then_some(0.96),
-        a_ev: vec![true; n],
-        // Soft deadline: nothing guaranteed, the bids decide.
-        ev_mode: MilpLoadMode::MayRun,
-        // A soft deadline states no obligation at all: the window is already in
-        // `a_ev`, and the bids decide how far to charge inside it.
-        ev_obligations: vec![],
-        ev_battery_kwh: BATTERY_KWH,
-        p_ev_max_kw: P_EV_MAX_KW,
-        p_ev_min_kw: 1.4,
-        ev_segments: bands(DEFAULT_CORE_BID, 0.10),
-        e_ev_extra_max_kwh: 0.0,
-        v_ev_extra_eur_kwh: 0.0,
-        heater_mode: MilpLoadMode::MustNotRun,
-        t_heat_dead_step: None,
-        p_heat_step_kw: 0.0,
-        heat_n_stages: 0,
-        e_heat_init_kwh: 0.0,
-        e_heat_max_kwh: 0.0,
-        q_heat_dem_kw: 0.0,
-        e_heat_target_kwh: 0.0,
-        lambda_heat_sw_eur: 0.0,
-        w_tier_penalty_eur: 0.0,
-        heat_initial_y: 0.0,
-        shiftable_loads: vec![],
-        soc_ev_init: Some(SOC_START),
-        ev_soc_drops: None,
+    let mut inputs = make_solver_inputs(n, 0.5);
+    inputs.c_imp_eur_kwh = c_imp;
+    inputs.p_pv_kw = p_pv;
+    if site.battery {
+        inputs.e_bat_nom_kwh = Some(10.0);
+        inputs.e_bat_init_kwh = Some(5.0);
+        inputs.e_bat_min_kwh = Some(1.0);
+        inputs.e_bat_max_kwh = Some(9.0);
+        inputs.p_bat_ch_max_kw = Some(5.0);
+        inputs.p_bat_dis_max_kw = Some(5.0);
+        inputs.eff_bat_ch = Some(0.96);
+        inputs.eff_bat_dis = Some(0.96);
     }
+    inputs.a_ev = vec![true; n];
+    // Soft deadline: nothing guaranteed and no obligation stated. The window is already in
+    // `a_ev`, and the bids decide how far to charge inside it.
+    inputs.ev_mode = MilpLoadMode::MayRun;
+    inputs.ev_battery_kwh = BATTERY_KWH;
+    inputs.p_ev_max_kw = P_EV_MAX_KW;
+    inputs.p_ev_min_kw = 1.4;
+    inputs.ev_segments = bands(DEFAULT_CORE_BID, 0.10);
+    inputs.soc_ev_init = Some(SOC_START);
+    inputs
 }
 
 fn delivered_kwh(inputs: &MilpInputs, out: &SolveOutput) -> f64 {
@@ -475,21 +441,14 @@ fn sweep_sites_against_pricing_and_limits() {
 #[cfg(test)]
 fn ev_inputs_288(segments: Vec<EvEnergySegment>, required_kwh: f64) -> MilpInputs {
     let n = 288;
-    let mut inputs = inputs_for(&SITES[0]);
-    inputs.n = n;
-    inputs.dt_h = vec![5.0 / 60.0; n];
-    inputs.cum_s = (0..=n as i64).map(|i| i * 300).collect();
+    // The bare site's EV (`inputs_for(&SITES[0])`) on the production grid of 5-minute slots.
+    let mut inputs = synthetic_inputs(n, 300, 0.5);
     // Same diurnal shape as the 24-slot probe, at 5-minute resolution.
     inputs.c_imp_eur_kwh = (0..n).map(|t| if t < 72 { 0.06 } else { 0.25 }).collect();
-    inputs.rate_stale = vec![false; n];
-    inputs.c_exp_eur_kwh = vec![0.08; n];
-    inputs.g_imp_kgco2_kwh = vec![0.30; n];
-    inputs.p_pv_kw = vec![0.0; n];
-    inputs.p_base_kw = vec![0.5; n];
-    inputs.p_imp_max_phys_kw = vec![25.0; n];
-    inputs.p_exp_max_phys_kw = vec![10.0; n];
-    inputs.p_imp_max_cont_kw = vec![25.0; n];
-    inputs.p_exp_max_cont_kw = vec![10.0; n];
+    inputs.ev_battery_kwh = BATTERY_KWH;
+    inputs.p_ev_max_kw = P_EV_MAX_KW;
+    inputs.p_ev_min_kw = 1.4;
+    inputs.soc_ev_init = Some(SOC_START);
     inputs.a_ev = vec![true; n];
     inputs.ev_mode = MilpLoadMode::MustRun; // the fleet's mode
     set_ev_firm(&mut inputs, required_kwh, n - 1);

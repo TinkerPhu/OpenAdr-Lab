@@ -13,7 +13,7 @@ use super::*;
 use crate::entities::capacity::{AlertWindow, CapacitySnapshot, SimpleWindow};
 use crate::entities::design_vocabulary::{StaleRatePolicy, UserRequestMode};
 use crate::entities::device_session::{
-    BaselineOverride, BaselineSlot, EvSession, EvSessionOrigin, ShiftableLoad,
+    BaselineOverride, BaselineSlot, EvSession, ShiftableLoad,
 };
 use lab_core::time_series::{Interpolation, TimeSeries};
 
@@ -52,29 +52,22 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
     push_shiftable_load_contexts(&mut ctxs, &case.shiftables, profile, now);
     super::super::inputs::build_milp_inputs(
         &ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: tariffs.clone(),
-            capacity: capacity.clone(),
+        &GridSignals {
             capacity_schedule: case.schedule.clone(),
             alert_windows: case.alerts.clone(),
             simple_windows: case.simple.clone(),
+            ..test_grid(&tariffs, &capacity)
         },
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
-            base_load: profile.assets.iter().find_map(|a| match a {
-                AssetProfile::BaseLoad(v) => Some(v),
-                _ => None,
-            }),
+        &SiteInputs {
             baseline_override: case.baseline_override.as_ref(),
             pv_forecast_override: case.pv_forecast_override,
             pv_live_forecast_kw: case.pv_live_forecast_kw.as_deref(),
             base_load_live_forecast_kw: case.base_load_live_forecast_kw.as_deref(),
             weather_pv_kw: case.weather_pv_kw.as_deref(),
+            ..site_inputs(profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
+        &StaleRateRefs {
             import: case.diurnal_import_ref.as_ref(),
             co2: case.diurnal_co2_ref.as_ref(),
         },
@@ -159,20 +152,11 @@ fn diurnal(base: f64) -> TimeSeries {
 
 fn ev_session(mode: UserRequestMode, budget_eur: Option<f64>) -> EvSession {
     let now = fixed_now();
-    EvSession {
+    crate::entities::device_session::EvSession {
         mode,
-        origin: EvSessionOrigin::UserRequest,
         id: uuid::Uuid::from_u128(1),
-        target_soc_frac: 0.9,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
         budget_eur,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
+        ..ev_session_until(now, 0.9, now + Duration::hours(2))
     }
 }
 

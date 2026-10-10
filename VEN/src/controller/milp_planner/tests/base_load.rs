@@ -53,32 +53,13 @@ fn build_milp_inputs_p_base_kw_matches_live_base_load_forecast_kw_at() {
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     let inputs = super::super::inputs::build_milp_inputs(
         &ctxs,
-        &crate::entities::grid_signals::GridSignals {
-            tariffs: TariffTimeSeries::from_snapshots(&[]),
-            capacity: no_capacity(),
-            capacity_schedule: vec![],
-            alert_windows: vec![],
-            simple_windows: vec![],
-        },
+        &test_grid(&TariffTimeSeries::from_snapshots(&[]), &no_capacity()),
         &profile.planner,
-        &crate::controller::milp_planner::inputs::SiteInputs {
-            grid_max_import_kw: profile.grid.max_import_kw,
-            grid_max_export_kw: profile.grid.max_export_kw,
-            pv_cfg: profile.pv_config(),
-            base_load: profile.assets.iter().find_map(|a| match a {
-                AssetProfile::BaseLoad(v) => Some(v),
-                _ => None,
-            }),
-            baseline_override: None,
-            pv_forecast_override: None,
-            pv_live_forecast_kw: None,
+        &SiteInputs {
             base_load_live_forecast_kw: base_load_live_forecast_kw.as_deref(),
-            weather_pv_kw: None,
+            ..site_inputs(&profile)
         },
-        &crate::controller::milp_planner::inputs::StaleRateRefs {
-            import: None,
-            co2: None,
-        },
+        &NO_REFS,
         now,
     );
 

@@ -103,21 +103,7 @@ fn ev_mask_plugged_with_session_deadline() {
     let profile = make_profile(); // plan_step_s=300, plan_horizon_h=2 → 24 steps
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.9,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(1),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.9, now + Duration::hours(1));
     let inp = bmi(
         &profile,
         &sim,
@@ -146,21 +132,7 @@ fn ev_mask_unplugged_all_false() {
     let profile = make_profile();
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, false);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.9,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(1),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.9, now + Duration::hours(1));
     let inp = bmi(
         &profile,
         &sim,
@@ -180,21 +152,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
     let profile = make_profile();
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
-    let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.9,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let session = ev_session_until(now, 0.9, now + Duration::hours(2));
     let inp = bmi(
         &profile,
         &sim,
@@ -214,19 +172,8 @@ fn ev_mode_may_run_for_soft_deadline_session() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
-        mode: Default::default(),
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        id: uuid::Uuid::new_v4(),
-        target_soc_frac: 0.9,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
         soft_deadline: true,
-        budget_eur: None,
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
+        ..ev_session_until(now, 0.9, now + Duration::hours(2))
     };
     let inp = bmi(
         &profile,

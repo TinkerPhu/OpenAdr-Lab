@@ -12,21 +12,10 @@ fn ev_session_with_mode(
     now: DateTime<Utc>,
     mode: UserRequestMode,
 ) -> crate::entities::device_session::EvSession {
+    // soc 0.2 → 0.3 on 60 kWh = 6 kWh core; feasible within the 2 h horizon at 7.4 kW.
     crate::entities::device_session::EvSession {
-        id: uuid::Uuid::new_v4(),
-        // soc 0.2 → 0.3 on 60 kWh = 6 kWh core; feasible within the 2 h horizon at 7.4 kW.
-        target_soc_frac: 0.3,
-        window_start: now,
-        expected_trip_distance_km: None,
-        expected_return_time: None,
-        departure_time: now + Duration::hours(2),
-        soft_deadline: false,
-        origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
-        budget_eur: None,
-        comfort_rates: vec![],
         mode,
-        created_at: now,
-        updated_at: now,
+        ..ev_session_until(now, 0.3, now + Duration::hours(2))
     }
 }
 
