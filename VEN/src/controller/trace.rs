@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
 
+use crate::entities::user_request::UserRequestStatus;
+
 /// A single row in the timeline output.
 #[derive(Debug, Clone)]
 pub struct AssetTimelinePoint {
@@ -76,12 +78,14 @@ pub enum ControllerEvent {
         event_ids: Vec<String>,
         total_slots: usize,
     },
+    /// A user request changed status. Both statuses are spelled as `/user-requests` spells
+    /// them (`"ACTIVE"`, …); `from_status` is `null` for a newly created request (R-130).
     RequestTransition {
         ts: DateTime<Utc>,
         request_id: Uuid,
         asset_id: String,
-        from_status: String,
-        to_status: String,
+        from_status: Option<UserRequestStatus>,
+        to_status: UserRequestStatus,
     },
     /// WP3.4: a DISPATCH_SETPOINT override became active (with its commanded
     /// site setpoint) or cleared (`active: false`, `setpoint_kw: None`).

@@ -43,6 +43,16 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 204
     And the EV session is cleared after cancellation
 
+  # R-130: the planner's trace tells the request's story in the words /user-requests uses —
+  # created (no previous status), then cancelled from the status it really had.
+  Scenario: Creating and cancelling a request is traced with the request's own statuses
+    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
+    And I save the request ID
+    And I DELETE the saved user request
+    Then the response status is 204
+    And the trace shows the saved request going from nothing to "ACTIVE"
+    And the trace shows the saved request going from "ACTIVE" to "CANCELLED"
+
   # --- Several charging sessions at once (ev-session-queue) ---
 
   # The capability itself: a household EV has a sequence of departures, and before

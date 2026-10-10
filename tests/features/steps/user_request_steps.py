@@ -555,3 +555,30 @@ def step_heater_session_target(context, temp):
     assert abs(session.get("target_temp_c") - temp) < 1e-9, (
         f"expected target_temp_c {temp}, got {session.get('target_temp_c')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Then: the controller trace of a request (R-130)
+# ---------------------------------------------------------------------------
+
+def _saved_request_transitions(context):
+    """`(from_status, to_status)` of every RequestTransition the trace holds for the saved request."""
+    r = ven_get("/trace/events?limit=500")
+    r.raise_for_status()
+    return [
+        (e.get("from_status"), e.get("to_status"))
+        for e in r.json()
+        if e.get("type") == "RequestTransition" and e.get("request_id") == context.saved_request_id
+    ]
+
+
+@then('the trace shows the saved request going from nothing to "{to_status}"')
+def step_trace_request_created(context, to_status):
+    transitions = _saved_request_transitions(context)
+    assert (None, to_status) in transitions, f"Expected (null -> {to_status}) in {transitions}"
+
+
+@then('the trace shows the saved request going from "{from_status}" to "{to_status}"')
+def step_trace_request_transition(context, from_status, to_status):
+    transitions = _saved_request_transitions(context)
+    assert (from_status, to_status) in transitions, f"Expected ({from_status} -> {to_status}) in {transitions}"

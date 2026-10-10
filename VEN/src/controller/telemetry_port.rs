@@ -218,8 +218,8 @@ mod tests {
             ts: chrono::Utc::now(),
             request_id: uuid::Uuid::new_v4(),
             asset_id: "ev".into(),
-            from_status: "None".into(),
-            to_status: "Active".into(),
+            from_status: None,
+            to_status: crate::entities::user_request::UserRequestStatus::Active,
         };
         let expected = with_name(serde_json::to_value(&event).unwrap());
         assert_eq!(

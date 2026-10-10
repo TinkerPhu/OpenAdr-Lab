@@ -11,7 +11,7 @@ use crate::controller::user_request::{ClashingSession, CreateUserRequestParams, 
 use crate::controller::{SimReadPort, SimRosterPort};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::{AssetRequestSlice, RequestKind};
-use crate::entities::user_request::UserRequest;
+use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::entities::DomainError;
 use crate::services::user_request::UserRequestService;
 use crate::state::AppState;
@@ -59,7 +59,7 @@ pub async fn submit(
             warn!(asset_id = %load.asset_id, error = %msg, "add_asset failed after add_shiftable_load succeeded");
         }
         state.upsert_request(user_req.clone()).await;
-        announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
+        announce_request_transition(state, trigger_tx, &user_req, None, now).await;
         info!(
             request_id = %user_req.id,
             asset_id = %user_req.asset_id,
@@ -85,7 +85,7 @@ pub async fn submit(
                 .map_err(SubmitError::Request)?;
             state.set_heater_target(Some(target)).await;
             state.upsert_request(user_req.clone()).await;
-            announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
+            announce_request_transition(state, trigger_tx, &user_req, None, now).await;
             Ok(user_req)
         }
         None => Err(SubmitError::UnrecognisedAsset),
@@ -121,11 +121,11 @@ async fn submit_charge_session(
     }
     .map_err(SubmitError::Request)?;
     state.upsert_request(user_req.clone()).await;
-    announce_request_transition(state, trigger_tx, &user_req, "None", now).await;
+    announce_request_transition(state, trigger_tx, &user_req, None, now).await;
     Ok(user_req)
 }
 
-/// Cancel a user request (`UserRequestService::cancel`) and announce it.
+/// Cancel a user request (`UserRequestService::cancel`) and announce it, from the status it had.
 pub async fn cancel_and_announce(
     id: Uuid,
     now: DateTime<Utc>,
@@ -133,10 +133,35 @@ pub async fn cancel_and_announce(
     roster: &dyn SimRosterPort,
     trigger_tx: &watch::Sender<PlanTriggerSignal>,
 ) -> Result<UserRequest, DomainError> {
-    let req = UserRequestService::cancel(id, state, roster).await?;
-    announce_request_transition(state, trigger_tx, &req, "Active", now).await;
+    let (was, req) = UserRequestService::cancel(id, state, roster).await?;
+    announce_request_transition(state, trigger_tx, &req, Some(was), now).await;
     info!(request_id = %id, "user request cancelled");
     Ok(req)
+}
+
+/// Close out a finished shiftable load (`AppState::complete_shiftable`) and announce its
+/// request's completion. A load with no open request still asks for a replan: its asset left.
+pub async fn complete_shiftable_and_announce(
+    load_id: Uuid,
+    now: DateTime<Utc>,
+    state: &AppState,
+    trigger_tx: &watch::Sender<PlanTriggerSignal>,
+) {
+    match state.complete_shiftable(load_id, now).await {
+        Some(req) => {
+            announce_request_transition(
+                state,
+                trigger_tx,
+                &req,
+                Some(UserRequestStatus::Active),
+                now,
+            )
+            .await
+        }
+        None => {
+            let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+        }
+    }
 }
 
 /// What a request is resolved against: each asset's request slice, with the user's comfort-curve
@@ -160,7 +185,7 @@ async fn announce_request_transition(
     state: &AppState,
     trigger_tx: &watch::Sender<PlanTriggerSignal>,
     request: &UserRequest,
-    from_status: &str,
+    from_status: Option<UserRequestStatus>,
     now: DateTime<Utc>,
 ) {
     state
@@ -169,8 +194,8 @@ async fn announce_request_transition(
                 ts: now,
                 request_id: request.id,
                 asset_id: request.asset_id.clone(),
-                from_status: from_status.to_string(),
-                to_status: format!("{:?}", request.status),
+                from_status,
+                to_status: request.status.clone(),
             },
         )
         .await;
@@ -238,7 +263,10 @@ mod tests {
         }
 
         /// The `(from, to)` of every `RequestTransition` recorded for `id`.
-        async fn transitions(&self, id: Uuid) -> Vec<(String, String)> {
+        async fn transitions(
+            &self,
+            id: Uuid,
+        ) -> Vec<(Option<UserRequestStatus>, UserRequestStatus)> {
             self.state
                 .controller_trace()
                 .await
@@ -272,7 +300,7 @@ mod tests {
             .any(|r| r.id == req.id));
         assert_eq!(
             f.transitions(req.id).await,
-            [("None".into(), "Active".into())]
+            [(None, UserRequestStatus::Active)]
         );
         assert!(
             f.trigger_rx.has_changed().unwrap(),
@@ -397,11 +425,78 @@ mod tests {
         let cancelled = cancel_and_announce(req.id, f.now, &f.state, &f.handle, &f.trigger_tx)
             .await
             .unwrap();
-        assert_eq!(format!("{:?}", cancelled.status), "Cancelled");
+        assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
         assert_eq!(
             f.transitions(req.id).await.last().cloned(),
-            Some(("Active".into(), "Cancelled".into()))
+            Some((
+                Some(UserRequestStatus::Active),
+                UserRequestStatus::Cancelled
+            ))
         );
         assert!(f.trigger_rx.has_changed().unwrap());
+    }
+
+    /// R-130: the trace says what the request was, not what the cancel path assumes it was.
+    #[tokio::test]
+    async fn cancel_and_announce_records_the_status_the_request_actually_had() {
+        let f = fixture();
+        let req = f.submit(ev_body(f.now, Some(0.9))).await.unwrap();
+        f.state
+            .upsert_request(UserRequest {
+                status: UserRequestStatus::Failed,
+                ..req.clone()
+            })
+            .await;
+        cancel_and_announce(req.id, f.now, &f.state, &f.handle, &f.trigger_tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            f.transitions(req.id).await.last().cloned(),
+            Some((
+                Some(UserRequestStatus::Failed),
+                UserRequestStatus::Cancelled
+            ))
+        );
+    }
+
+    /// R-130: a finished shiftable load's request completes through the same announcement as
+    /// every other transition (it used to change status with no trace entry).
+    #[tokio::test]
+    async fn complete_shiftable_and_announce_records_the_completion_and_asks_for_a_replan() {
+        let mut f = fixture();
+        let req = f.submit(shiftable_body(60, 4)).await.unwrap();
+        let load_id = req.session_id.expect("a shiftable request links its load");
+        f.trigger_rx.mark_unchanged();
+        complete_shiftable_and_announce(load_id, f.now, &f.state, &f.trigger_tx).await;
+        assert_eq!(
+            f.transitions(req.id).await.last().cloned(),
+            Some((
+                Some(UserRequestStatus::Active),
+                UserRequestStatus::Completed
+            ))
+        );
+        assert!(
+            f.trigger_rx.has_changed().unwrap(),
+            "a replan was asked for"
+        );
+    }
+
+    /// R-130: a request's status crosses the wire in the one spelling `/user-requests` uses.
+    #[test]
+    fn a_request_transition_spells_statuses_as_the_requests_do() {
+        let event = ControllerEvent::RequestTransition {
+            ts: Utc::now(),
+            request_id: Uuid::nil(),
+            asset_id: "ev".into(),
+            from_status: None,
+            to_status: UserRequestStatus::Active,
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["from_status"], serde_json::Value::Null);
+        assert_eq!(wire["to_status"], "ACTIVE");
+        assert_eq!(
+            wire["to_status"],
+            serde_json::to_value(UserRequestStatus::Active).unwrap()
+        );
     }
 }

@@ -207,7 +207,7 @@ impl UserRequestService {
 
     /// Cancel a user request by id.
     ///
-    /// Returns the cancelled request on success, or:
+    /// Returns the status the request had and the cancelled request on success, or:
     /// - `DomainError::NotFound` if no request with that id exists.
     /// - `DomainError::SessionConflict` if the request is already in a terminal
     ///   state, or (shiftable-load-as-asset design.md D6) if it is a shiftable
@@ -218,7 +218,7 @@ impl UserRequestService {
         id: Uuid,
         state: &AppState,
         roster: &dyn crate::controller::SimRosterPort,
-    ) -> Result<UserRequest, DomainError> {
+    ) -> Result<(UserRequestStatus, UserRequest), DomainError> {
         // Check existence and terminal state before calling the state method.
         let requests = state.active_requests().await;
         let req = requests
@@ -259,7 +259,7 @@ impl UserRequestService {
             .find(|r| r.id == id)
             .ok_or(DomainError::NotFound { id })?;
 
-        Ok(updated)
+        Ok((req.status, updated))
     }
 
     /// Determine which creation path to use based on the request body.
@@ -479,7 +479,7 @@ pub(crate) mod tests {
 
         let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
         let roster = SimHandle::new(sim.clone());
-        let cancelled = UserRequestService::cancel(id, &state, &roster)
+        let (_, cancelled) = UserRequestService::cancel(id, &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
@@ -622,7 +622,7 @@ pub(crate) mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let cancelled = UserRequestService::cancel(id, &state, &roster)
+        let (_, cancelled) = UserRequestService::cancel(id, &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);

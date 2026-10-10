@@ -4,6 +4,7 @@ import {
 } from "@mui/material";
 import type { TraceEntry } from "../../api/types";
 import { arbiterDecisionText, isUnresolved } from "./arbiterDecisionText";
+import { requestTransitionText } from "./requestTransitionText";
 
 // ─── Chip appearance per event type ──────────────────────────────────────────
 
@@ -36,7 +37,7 @@ function chipFor(event: TraceEntry): ChipProps {
     case "OpenAdrExpired":
       return { label: `☆ ${event.event_name.slice(0, 10)} ✗`, color: "default" };
     case "RequestTransition":
-      return { label: `→ req: ${event.from_status}→${event.to_status}`, color: "secondary" };
+      return { label: `→ req: ${requestTransitionText(event)}`, color: "secondary" };
     case "DispatchOverride":
       return {
         label: event.active ? `⚡ dispatch ${event.setpoint_kw ?? "?"} kW` : "⚡ dispatch cleared",
@@ -143,7 +144,7 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" fontWeight="bold">RequestTransition</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">asset: {event.asset_id}</Typography>
-          <Typography variant="caption" display="block">{event.from_status} → {event.to_status}</Typography>
+          <Typography variant="caption" display="block">{requestTransitionText(event)}</Typography>
           <Typography variant="caption" display="block">request: …{event.request_id.slice(-6)}</Typography>
         </>
       );

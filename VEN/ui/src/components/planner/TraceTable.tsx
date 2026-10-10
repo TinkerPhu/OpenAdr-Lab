@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import type { TraceEntry } from "../../api/types";
 import { arbiterDecisionText } from "./arbiterDecisionText";
+import { requestTransitionText } from "./requestTransitionText";
 
 function TypeChip({ type: t }: { type: string }) {
   const color =
@@ -60,7 +61,7 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
     case "RequestTransition":
       return (
         <span>
-          <b>{entry.asset_id}</b> · {entry.from_status} → {entry.to_status}
+          <b>{entry.asset_id}</b> · {requestTransitionText(entry)}
           · <code style={{ fontSize: "0.7rem" }}>{entry.request_id.slice(0, 8)}</code>
         </span>
       );

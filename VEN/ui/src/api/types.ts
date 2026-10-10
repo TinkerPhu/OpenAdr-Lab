@@ -220,7 +220,8 @@ export type TraceEntry =
   // periodic or local trigger). Optional here because rows written before the
   // field existed are still read back.
   | { type: "PlanCycle";        ts: string; trigger_reason: string; event_ids?: string[]; total_slots: number }
-  | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string }
+  // Statuses as `/user-requests` spells them; `from_status` is null for a created request.
+  | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: UserRequestStatus | null; to_status: UserRequestStatus }
   | { type: "DispatchOverride";  ts: string; setpoint_kw: number | null; active: boolean }
   | { type: "ArbiterDecision";   ts: string; pass: string; active_lever: string | null; target_kw: number | null; excess_kw: number | null; unresolved_kw: number };
 

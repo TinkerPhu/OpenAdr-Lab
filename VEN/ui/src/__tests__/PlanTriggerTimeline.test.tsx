@@ -223,10 +223,23 @@ describe("PlanTriggerTimeline", () => {
       makeCapacityChange(),
       makeOpenAdrArrived(),
       makeOpenAdrExpired(),
-      { type: "RequestTransition", ts: "2026-04-04T09:30:00Z", request_id: "req-001", asset_id: "ev", from_status: "PENDING", to_status: "SCHEDULED" },
+      { type: "RequestTransition", ts: "2026-04-04T09:30:00Z", request_id: "req-001", asset_id: "ev", from_status: null, to_status: "ACTIVE" },
     ];
     render(<PlanTriggerTimeline events={events} />);
     const chips = document.querySelectorAll('[data-testid^="trigger-chip-"]');
     expect(chips.length).toBe(6);
+  });
+
+  // R-130: a request's statuses arrive as `/user-requests` spells them; a created request has
+  // no previous status (`null`), which reads as NEW rather than the word "null".
+  it("labels a created request NEW and a later transition with both statuses", () => {
+    const events: TraceEntry[] = [
+      { type: "RequestTransition", ts: "2026-04-04T09:30:00Z", request_id: "req-001", asset_id: "ev", from_status: null, to_status: "ACTIVE" },
+      { type: "RequestTransition", ts: "2026-04-04T10:30:00Z", request_id: "req-001", asset_id: "ev", from_status: "ACTIVE", to_status: "CANCELLED" },
+    ];
+    render(<PlanTriggerTimeline events={events} />);
+    expect(screen.getByText(/NEW → ACTIVE/)).toBeInTheDocument();
+    expect(screen.getByText(/ACTIVE → CANCELLED/)).toBeInTheDocument();
+    expect(screen.queryByText(/null/)).not.toBeInTheDocument();
   });
 });

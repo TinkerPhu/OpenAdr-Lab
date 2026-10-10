@@ -15090,3 +15090,26 @@ was deleted. `plan_has_ev_allocation` became `plan_allocates(plan, now, asset_id
 looking up *the* battery by its canonical id (the arbiter's named levers, the one-asset-per-kind
 design) is not an inference and stays. The audit rule against id comparisons waits for R-127, whose
 `timeline.rs` branches are the last ones.
+
+## R-130: a request's status change is typed, true and complete (refactor/r130-typed-request-transitions)
+
+**What.** `ControllerEvent::RequestTransition` carried `from_status`/`to_status` as `String`s: the new
+status from `format!("{:?}")` (`"Active"`, while `/user-requests` says `"ACTIVE"`), the old one a literal
+the caller supplied (`"None"` on create, always `"Active"` on cancel, though `cancel` also accepts a
+`Failed` request). Both are now `UserRequestStatus` (`from_status: Option<…>`, `null` = created), so the
+trace spells a status exactly as the request does. `UserRequestService::cancel` returns the status it
+found, and `cancel_and_announce` records that. A finished shiftable load's request changed to
+`Completed` with no trace entry at all; `AppState::complete_shiftable` now returns the request and
+`complete_shiftable_and_announce` announces it through the same function as every other transition
+(replacing the bare trigger `tasks/sim_tick/publish.rs` sent). The VEN UI's two trace views format the
+transition through one `requestTransitionText` (`NEW → ACTIVE`); its type is a `UserRequestStatus` union,
+and the test fixture that used the non-existent `"PENDING"`/`"SCHEDULED"` uses real statuses.
+
+**Why.** Decision taken on this branch: one spelling everywhere (the DTO rule), accepting that
+`/trace/events` and the fleet trace change from `"Active"` to `"ACTIVE"`. The VEN trace is an in-memory
+ring and the BFF stores fleet trace bodies as raw JSON without reading these fields, so no stored data
+needs migrating; BFF rows recorded before the change keep the old spelling.
+
+**Learnings.** None beyond the register's own lesson: a value typed as `String` admits states the
+domain does not have, and the UI fixture had quietly used two of them.
+

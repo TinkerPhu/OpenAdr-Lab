@@ -484,18 +484,22 @@ impl AppState {
     /// (detected by `tasks::sim_tick::publish` as its asset_id disappearing
     /// from the live `SimSnapshot` — see `SimState::tick()`'s `is_removable`
     /// pass, design.md D3a of `shiftable-load-as-asset`).
-    pub async fn complete_shiftable(&self, load_id: uuid::Uuid, now: DateTime<Utc>) {
+    /// Returns the request it completed, if one was still active.
+    pub async fn complete_shiftable(
+        &self,
+        load_id: uuid::Uuid,
+        now: DateTime<Utc>,
+    ) -> Option<UserRequest> {
         let mut w = self.hems.write().await;
         w.shiftable_loads.retain(|l| l.id != load_id);
         // Also mark linked UserRequest as Completed.
-        if let Some(req) = w
+        let req = w
             .active_requests
             .iter_mut()
-            .find(|r| r.session_id == Some(load_id) && r.status == UserRequestStatus::Active)
-        {
-            req.status = UserRequestStatus::Completed;
-            req.updated_at = now;
-        }
+            .find(|r| r.session_id == Some(load_id) && r.status == UserRequestStatus::Active)?;
+        req.status = UserRequestStatus::Completed;
+        req.updated_at = now;
+        Some(req.clone())
     }
 
     pub async fn baseline_override(&self) -> Option<BaselineOverride> {
@@ -563,8 +567,13 @@ mod tests {
         state.upsert_request(req).await;
 
         let now = "2026-10-06T12:00:00Z".parse().unwrap();
-        state.complete_shiftable(load_id, now).await;
+        let completed = state.complete_shiftable(load_id, now).await;
 
+        assert_eq!(
+            completed.map(|r| r.id),
+            Some(req_id),
+            "returns what it completed"
+        );
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
         let requests = state.active_requests().await;
         let done = requests.iter().find(|r| r.id == req_id).unwrap();
