@@ -1,416 +1,141 @@
-use chrono::{DateTime, Duration, Utc};
+//! Builds `MilpInputs`, the planner's complete input parameter set, from the asset contexts,
+//! the grid signals and the site's own forecasts.
+//!
+//! Owns the order of the stages (`input_stages`) and the one full spelling of `MilpInputs`'s
+//! fields, so a new field is a compile error here and nowhere else. It decides nothing itself:
+//! every rule (stale rates, the PV precedence chain, SIMPLE and alert caps, the baseline
+//! override) lives in its stage. It must stay infallible and free of logging; warnings travel as
+//! fields of the result.
 
-use super::asset_port::AssetMilpParams;
+use chrono::{DateTime, Utc};
+
+use super::input_stages::{
+    apply_baseline_override, asset_scalars, capacity_limits, ev_budget_warning, forecast_series,
+    slot_bounds, tariff_series,
+};
+use super::types::*;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
-use crate::entities::capacity::{
-    tightest_capacity_limit, AlertWindow, CapacitySnapshot, OadrCapacityState, SimpleWindow,
-};
-use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
+use crate::entities::grid_signals::GridSignals;
 use crate::entities::planner_params::PlannerParams;
-use crate::entities::tariff_snapshot::TariffTimeSeries;
+use crate::entities::time_grid::TimeGrid;
 use lab_core::time_series::TimeSeries;
-use lab_core::time_window::TimeWindow;
 
-use super::types::*;
+/// What the site contributes besides its schedulable assets: the grid connection's physical
+/// limits and where the PV and base-load forecasts come from.
+pub(crate) struct SiteInputs<'a> {
+    pub grid_max_import_kw: f64,
+    pub grid_max_export_kw: f64,
+    pub pv_cfg: Option<&'a PvParams>,
+    pub base_load: Option<&'a BaseLoadParams>,
+    pub baseline_override: Option<&'a BaselineOverride>,
+    /// Deterministic-testing pin: always wins over every other PV source.
+    pub pv_forecast_override: Option<f64>,
+    /// pv-competence-consolidation section 4: live PvInverter-derived export
+    /// ceiling per slot (simulator::plan_context::resolve_pv_forecast_kw).
+    /// None when no live "pv" asset exists this cycle.
+    pub pv_live_forecast_kw: Option<&'a [f64]>,
+    /// base-load-competence-consolidation: live BaseLoad-derived forecast per
+    /// slot (simulator::plan_context::resolve_base_load_forecast_kw). None
+    /// when no live "base_load" asset exists this cycle.
+    pub base_load_live_forecast_kw: Option<&'a [f64]>,
+    /// Weather-sourced PV forecast (R-50), pre-aligned to this call's own
+    /// slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
+    /// Only consulted when pv_live_forecast_kw is None (no live "pv" asset
+    /// this cycle) — when a live asset exists, its own weather_forecast field
+    /// already factors weather in, so this and pv_live_forecast_kw are never
+    /// both meaningfully in play for the same slot. Falls back further to the
+    /// static pv_cfg sin-model curve when this is also None.
+    pub weather_pv_kw: Option<&'a [f64]>,
+}
+
+/// GB-42: history-store-backed diurnal reference series for HEURISTIC_FORECAST's
+/// 168h-back (day-type-mismatch) lookback, resolved once per cycle by the caller
+/// (services::planning::build_solve_request). `None` when history is disabled or
+/// has no data yet for a series.
+pub(crate) struct StaleRateRefs<'a> {
+    pub import: Option<&'a TimeSeries>,
+    pub co2: Option<&'a TimeSeries>,
+}
 
 /// Build the full MILP input parameter set from asset contexts and current runtime state.
 ///
-/// Asset-specific parameters (battery, EV, heater) are extracted via the `AssetMilpContext`
-/// trait; grid, PV, and baseline parameters come from `profile`.
-#[allow(clippy::too_many_arguments)]
+/// Asset-specific parameters (battery, EV, heater, shiftable loads) come through the
+/// `AssetMilpContext` trait; prices and limits from `grid`; PV and base load from `site`.
 pub(crate) fn build_milp_inputs(
     asset_contexts: &[Box<dyn AssetMilpContext>],
-    tariffs: &TariffTimeSeries,
-    capacity: &OadrCapacityState,
-    // GB-48: the priority-resolved capacity-limit schedule; each slot is capped
-    // by the tightest limit overlapping it (`capacity` supplies only the
-    // subscription/reservation allowance).
-    capacity_schedule: &[CapacitySnapshot],
-    alert_windows: &[AlertWindow],
-    simple_windows: &[SimpleWindow],
+    grid: &GridSignals,
     planner: &PlannerParams,
-    phys_imp: f64,
-    phys_exp: f64,
-    pv_cfg: Option<&PvParams>,
-    base_load: Option<&BaseLoadParams>,
+    site: &SiteInputs,
+    refs: &StaleRateRefs,
     now: DateTime<Utc>,
-    baseline_override: Option<&BaselineOverride>,
-    pv_forecast_override: Option<f64>,
-    // pv-competence-consolidation section 4: live PvInverter-derived export
-    // ceiling per slot (simulator::plan_context::resolve_pv_forecast_kw).
-    // None when no live "pv" asset exists this cycle.
-    pv_live_forecast_kw: Option<&[f64]>,
-    // base-load-competence-consolidation: live BaseLoad-derived forecast per
-    // slot (simulator::plan_context::resolve_base_load_forecast_kw). None
-    // when no live "base_load" asset exists this cycle.
-    base_load_live_forecast_kw: Option<&[f64]>,
-    // Weather-sourced PV forecast (R-50), pre-aligned to this call's own
-    // slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
-    // Only consulted when pv_live_forecast_kw is None (no live "pv" asset
-    // this cycle) — when a live asset exists, its own weather_forecast field
-    // already factors weather in (pv-competence-consolidation section 4), so
-    // this and pv_live_forecast_kw are never both meaningfully in play for
-    // the same slot. Falls back further to the static pv_cfg sin-model curve
-    // when this is also None. Never wins over pv_forecast_override
-    // (deterministic-testing pin always wins over everything).
-    weather_pv_kw: Option<&[f64]>,
-    // GB-42: history-store-backed diurnal reference series for
-    // HEURISTIC_FORECAST's 168h-back (day-type-mismatch) lookback, resolved
-    // once per cycle by the caller (services::planning::build_solve_request).
-    // `None` when history is disabled or has no data yet for either series.
-    diurnal_import_ref: Option<&TimeSeries>,
-    diurnal_co2_ref: Option<&TimeSeries>,
 ) -> MilpInputs {
-    let n: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
-    let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
-    cum_s.push(0);
-    let mut dt_h: Vec<f64> = Vec::with_capacity(n);
-    for zone in &planner.plan_zones {
-        let step_h = crate::entities::units::dt_h_from_s(zone.step_s as f64);
-        for _ in 0..zone.slots {
-            dt_h.push(step_h);
-            // SAFETY: cum_s is seeded with push(0) unconditionally above, so it
-            // always has >= 1 element by the time this loop runs.
-            cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
-        }
-    }
-    // ── Per-step grid arrays ──────────────────────────────────────────────────
-    // WP3.3 (§8.10): subscription + reservation form one contracted allowance
-    // — the rule itself now lives on `OadrCapacityState`, since the
-    // reservation request the VEN reports back asks the same question (R-76).
-    let imp_allowance = capacity.import_allowance_kw();
-    let exp_allowance = capacity.export_allowance_kw();
-    // GB-48: a slot's contractual cap is the tightest scheduled limit
-    // overlapping it (never planning through the capped part of a coarse
-    // slot, like alerts/SIMPLE), else the physical bound, and never above the
-    // allowance. The folded `capacity.import/export_limit_kw` ("in force now")
-    // is not a planner input.
-    let slot_cap = |direction: CommitmentDirection, from, to, phys: f64, allowance: f64| {
-        tightest_capacity_limit(capacity_schedule, direction, from, to)
-            .map_or(phys, |l| l.limit_kw)
-            .min(allowance)
-    };
-    // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no live
-    // "base_load" asset exists this cycle — see the per-slot loop below.
-    let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
-
-    // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
-    // slots use the time-weighted mean over the slot (R-16), slots beyond
-    // tariff coverage are filled per policy.
-    let slot_bounds: Vec<(DateTime<Utc>, DateTime<Utc>)> = (0..n)
-        .map(|i| {
-            (
-                now + Duration::seconds(cum_s[i]),
-                now + Duration::seconds(cum_s[i + 1]),
-            )
-        })
-        .collect();
-    let stale_outcome = super::stale_rates::apply_stale_rate_policy(
-        &planner.stale_rate_policy,
-        planner.stale_rate_safe_pctl,
-        &tariffs.import_eur_kwh,
-        tariffs.import_coverage_end,
-        &slot_bounds,
-        0.25,
-        "Tariff data",
-        diurnal_import_ref,
+    let time = TimeGrid::from_zones(&planner.plan_zones);
+    let bounds = slot_bounds(&time, now);
+    let tariffs = tariff_series(&grid.tariffs, planner, &bounds, refs);
+    let (p_pv_kw, mut p_base_kw) = forecast_series(&bounds, site);
+    // Before the override: SIMPLE level 2 caps import at the forecast base load.
+    let limits = capacity_limits(grid, planner, site, &bounds, &p_base_kw);
+    apply_baseline_override(&mut p_base_kw, &time, now, site.baseline_override);
+    let assets = asset_scalars(asset_contexts, time.n, now);
+    let budget_warning = ev_budget_warning(
+        &tariffs.c_imp_eur_kwh,
+        assets.ev_budget_eur,
+        assets.e_ev_extra_max_kwh,
     );
-    let c_imp = stale_outcome.values;
-
-    // BL-17 closeout: CO2 intensity gets the same staleness-policy parity as
-    // the import tariff, instead of silently holding the last known value
-    // forward forever. Default 300.0 g/kWh matches the pre-existing fallback.
-    let co2_stale_outcome = super::stale_rates::apply_stale_rate_policy(
-        &planner.stale_rate_policy,
-        planner.stale_rate_safe_pctl,
-        &tariffs.co2_g_kwh,
-        tariffs.co2_coverage_end,
-        &slot_bounds,
-        300.0,
-        "GHG data",
-        diurnal_co2_ref,
-    );
-    // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh.
-    let g_co2: Vec<f64> = co2_stale_outcome
-        .values
-        .iter()
-        .map(|v| v / 1000.0)
-        .collect();
-
-    let mut c_exp = Vec::with_capacity(n);
-    let mut p_pv = Vec::with_capacity(n);
-    let mut p_base = Vec::with_capacity(n);
-    let mut p_imp_phys = Vec::with_capacity(n);
-    let mut p_exp_phys = Vec::with_capacity(n);
-    let mut p_imp_cont = Vec::with_capacity(n);
-    let mut p_exp_cont = Vec::with_capacity(n);
-
-    for (i, &slot_s) in cum_s[0..n].iter().enumerate() {
-        let slot_t = now + Duration::seconds(slot_s);
-        let slot_end = now + Duration::seconds(cum_s[i + 1]);
-        // R-16: time-weighted means so boundary-straddling slots blend rates;
-        // falls back to the slot-start sample when the mean is undefined.
-        c_exp.push(
-            tariffs
-                .export_eur_kwh
-                .time_weighted_mean(slot_t, slot_end)
-                .or_else(|| tariffs.export_eur_kwh.interpolate_at(slot_t))
-                .unwrap_or(0.08),
-        );
-        // pv-competence-consolidation section 4: `pv_live_forecast_kw`
-        // (resolved by the caller from a live `PvInverter` via
-        // `uncurtailed_power_kw_at` — the same weather/decay-aware method
-        // `max_effort_schedule`/`forecast()` use) is now PV's own authority
-        // for this slot, superseding the raw-snapshot `pv_ceiling_kw`
-        // reconstruction this used to do here. `pv_forecast_override` (the
-        // deterministic-testing pin) always wins over it; `weather_pv_kw`
-        // (R-50) and the static `pv_cfg` sin-model curve are the fallback
-        // chain for when no live "pv" asset exists at all (site described,
-        // not simulated) — `pv_live_forecast_kw` is `None` in exactly that
-        // case, since it's derived from the same live snapshot.
-        let pv_kw = pv_forecast_override
-            .map(|kw| kw.max(0.0))
-            .or_else(|| pv_live_forecast_kw.and_then(|v| v.get(i)).copied())
-            .or_else(|| weather_pv_kw.and_then(|v| v.get(i)).map(|kw| kw.max(0.0)))
-            .unwrap_or_else(|| pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0));
-        p_pv.push(pv_kw);
-        // base-load-competence-consolidation: `base_load_live_forecast_kw`
-        // (resolved by the caller from the live `BaseLoad`'s own
-        // `forecast_kw_at`, the same heuristic-aware method `forecast()`
-        // uses) supersedes the direct `asset_heuristics` HashMap read this
-        // used to do here. `flat_base_kw` (the static profile) is the
-        // fallback for when no live "base_load" asset exists at all.
-        let base_kw_t = base_load_live_forecast_kw
-            .and_then(|v| v.get(i))
-            .copied()
-            .unwrap_or(flat_base_kw);
-        p_base.push(base_kw_t);
-        p_imp_phys.push(phys_imp);
-        p_exp_phys.push(phys_exp);
-        let cont_imp = slot_cap(
-            CommitmentDirection::Import,
-            slot_t,
-            slot_end,
-            phys_imp,
-            imp_allowance,
-        );
-        let cont_exp = slot_cap(
-            CommitmentDirection::Export,
-            slot_t,
-            slot_end,
-            phys_exp,
-            exp_allowance,
-        );
-        // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
-        // configurable fraction of the contractual limit, level 2 to the
-        // baseline forecast (defer all flexible draw), level 3 to 0. Highest
-        // overlapping level wins; combined with the contractual cap via min.
-        let simple_level = simple_windows
-            .iter()
-            .filter(|w| w.overlaps(slot_t, slot_end))
-            .map(|w| w.level)
-            .max();
-        let simple_cap = match simple_level {
-            Some(1) => cont_imp * planner.simple_level1_import_cap_pct,
-            Some(2) => base_kw_t.max(0.0),
-            Some(l) if l >= 3 => 0.0,
-            _ => cont_imp,
-        };
-        // WP3.1 (BL-04): slots overlapping an active grid-alert window get an
-        // import cap of 0 ("minimize electricity use", both alert types). The
-        // cap is soft in the solver (slack + violation penalty), so unavoidable
-        // base load yields a warned violation, never infeasibility. Export is
-        // left untouched — the spec prescribes nothing for it. Alerts override
-        // any SIMPLE level.
-        let in_alert = alert_windows.iter().any(|a| a.overlaps(slot_t, slot_end));
-        p_imp_cont.push(if in_alert {
-            0.0
-        } else {
-            cont_imp.min(simple_cap)
-        });
-        p_exp_cont.push(cont_exp);
-    }
-
-    // ── Asset-context dispatch: battery / EV / heater scalars ────────────────
-    let mut e_bat_nom: Option<f64> = None;
-    let mut e_bat_init: Option<f64> = None;
-    let mut e_bat_min: Option<f64> = None;
-    let mut e_bat_max: Option<f64> = None;
-    let mut p_bat_ch_max: Option<f64> = None;
-    let mut p_bat_dis_max: Option<f64> = None;
-    let mut eff_ch: Option<f64> = None;
-    let mut eff_dis: Option<f64> = None;
-
-    let mut a_ev = vec![false; n];
-    let mut ev_mode = MilpLoadMode::MustNotRun;
-    let mut ev_obligations: Vec<super::asset_port::EvObligation> = Vec::new();
-    let mut ev_battery_kwh = 0.0_f64;
-    let mut p_ev_max = 0.0_f64;
-    let mut p_ev_min = 0.0_f64;
-    let mut ev_segments: Vec<super::asset_port::EvEnergySegment> = Vec::new();
-    let mut e_ev_extra = 0.0_f64;
-    let mut v_ev_extra = 0.0_f64;
-
-    let mut ev_budget_eur: Option<f64> = None;
-    let mut soc_ev_init: Option<f64> = None;
-    let mut ev_soc_drops: Option<super::asset_port::ExogenousSocDrops> = None;
-
-    let mut milp_loads: Vec<ShiftableLoadMilpContext> = Vec::new();
-
-    let mut heater_mode = MilpLoadMode::MustNotRun;
-    let mut t_heat_dead: Option<usize> = None;
-    let mut p_step = 0.0_f64;
-    let mut heat_n_stages = 0_u8;
-    let mut e_heat_init = 0.0_f64;
-    let mut e_heat_max = 0.0_f64;
-    let mut q_heat_dem = 0.0_f64;
-    let mut e_heat_target = 0.0_f64;
-    let mut lambda_sw = 0.0_f64;
-    let mut heat_iy = 0.0_f64;
-
-    for ctx in asset_contexts {
-        match ctx.milp_params(n, now) {
-            AssetMilpParams::Battery(b) => {
-                e_bat_nom = Some(b.e_nom_kwh);
-                e_bat_init = Some(b.e_init_kwh);
-                e_bat_min = Some(b.e_min_kwh);
-                e_bat_max = Some(b.e_max_kwh);
-                p_bat_ch_max = Some(b.p_ch_max_kw);
-                p_bat_dis_max = Some(b.p_dis_max_kw);
-                eff_ch = Some(b.eff_ch);
-                eff_dis = Some(b.eff_dis);
-            }
-            AssetMilpParams::Ev(e) => {
-                a_ev = e.a_ev;
-                ev_mode = e.mode;
-                ev_obligations = e.obligations;
-                ev_battery_kwh = e.battery_kwh;
-                p_ev_max = e.p_max_kw;
-                p_ev_min = e.p_min_kw;
-                ev_segments = e.segments;
-                e_ev_extra = e.e_extra_max_kwh;
-                v_ev_extra = e.v_extra_eur_kwh;
-
-                ev_budget_eur = e.budget_eur;
-                soc_ev_init = Some(e.soc_init_frac);
-                ev_soc_drops = e.soc_drops;
-            }
-            AssetMilpParams::Heater(h) => {
-                heater_mode = h.mode;
-                t_heat_dead = h.t_dead_step;
-                p_step = h.p_step_kw;
-                heat_n_stages = h.n_stages;
-                e_heat_init = h.e_init_kwh;
-                e_heat_max = h.e_max_kwh;
-                q_heat_dem = h.q_dem_kw;
-                e_heat_target = h.e_target_kwh;
-                lambda_sw = h.lambda_sw_eur;
-                heat_iy = h.initial_y;
-            }
-            AssetMilpParams::ShiftableLoad(s) => {
-                milp_loads.push(ShiftableLoadMilpContext {
-                    asset_id: ctx.asset_id().to_string(),
-                    power_kw: s.power_kw,
-                    duration_slots: s.duration_slots,
-                    valid_start_slots: s.valid_start_slots,
-                });
-            }
-            AssetMilpParams::Unknown => {}
-        }
-    }
-
-    // Maps a non-negative offset_s to the latest slot index t where cum_s[t] <= offset_s.
-    let time_to_slot = |offset_s: i64| -> usize {
-        cum_s
-            .partition_point(|&s| s <= offset_s)
-            .saturating_sub(1)
-            .min(n.saturating_sub(1))
-    };
-
-    // ── Baseline override: additive per-slot kW adjustments ─────────────────
-    if let Some(bo) = baseline_override {
-        for slot in &bo.slots {
-            let offset_s = (slot.slot_start - now).num_seconds();
-            if offset_s < 0 {
-                continue;
-            }
-            let idx = time_to_slot(offset_s);
-            if idx < n {
-                p_base[idx] += slot.add_kw;
-            }
-        }
-    }
-
-    // Shiftable loads: `milp_loads` is now populated generically above, from
-    // each ShiftableLoadMilpContext's own `milp_params()` (shiftable-load-as-asset),
-    // not from a bolt-on `&[ShiftableLoad]` parameter.
-
-    // WP4.1-c: even at the cheapest slot rate the target energy (all "extra"
-    // headroom in MAX_COST mode) exceeds the budget → charging will stop
-    // early. Stable text — WP4.3's notification dedup keys on it.
-    let budget_warning = ev_budget_eur.and_then(|budget_eur| {
-        let min_rate = c_imp.iter().cloned().fold(f64::INFINITY, f64::min);
-        (e_ev_extra * min_rate > budget_eur).then(|| {
-            "EV charging budget too low to reach the session target — \
-             charging stops at the budget (MAX_COST)"
-                .to_string()
-        })
-    });
 
     MilpInputs {
-        n,
-        dt_h,
-        cum_s,
-        c_imp_eur_kwh: c_imp,
-        rate_stale: stale_outcome.rate_stale,
-        stale_rate_warning: stale_outcome.warning,
-        co2_stale_rate_warning: co2_stale_outcome.warning,
+        n: time.n,
+        dt_h: time.dt_h,
+        cum_s: time.cum_s,
+        c_imp_eur_kwh: tariffs.c_imp_eur_kwh,
+        rate_stale: tariffs.rate_stale,
+        stale_rate_warning: tariffs.stale_rate_warning,
+        co2_stale_rate_warning: tariffs.co2_stale_rate_warning,
         budget_warning,
-        c_exp_eur_kwh: c_exp,
-        g_imp_kgco2_kwh: g_co2,
-        p_pv_kw: p_pv,
-        p_base_kw: p_base,
-        p_imp_max_phys_kw: p_imp_phys,
-        p_exp_max_phys_kw: p_exp_phys,
-        p_imp_max_cont_kw: p_imp_cont,
-        p_exp_max_cont_kw: p_exp_cont,
+        c_exp_eur_kwh: tariffs.c_exp_eur_kwh,
+        g_imp_kgco2_kwh: tariffs.g_imp_kgco2_kwh,
+        p_pv_kw,
+        p_base_kw,
+        p_imp_max_phys_kw: limits.p_imp_max_phys_kw,
+        p_exp_max_phys_kw: limits.p_exp_max_phys_kw,
+        p_imp_max_cont_kw: limits.p_imp_max_cont_kw,
+        p_exp_max_cont_kw: limits.p_exp_max_cont_kw,
         pen_imp_eur_kwh: planner.pen_imp_eur_kwh,
         pen_exp_eur_kwh: planner.pen_exp_eur_kwh,
         mip_gap_target: planner.mip_gap_target,
         penalty_rules: planner.penalty_rules.clone(),
-        e_bat_nom_kwh: e_bat_nom,
-        e_bat_init_kwh: e_bat_init,
-        e_bat_min_kwh: e_bat_min,
-        e_bat_max_kwh: e_bat_max,
-        p_bat_ch_max_kw: p_bat_ch_max,
-        p_bat_dis_max_kw: p_bat_dis_max,
-        eff_bat_ch: eff_ch,
-        eff_bat_dis: eff_dis,
-        a_ev,
-        ev_mode,
-        ev_obligations,
-        ev_battery_kwh,
-        p_ev_max_kw: p_ev_max,
-        p_ev_min_kw: p_ev_min,
-        ev_segments,
-        e_ev_extra_max_kwh: e_ev_extra,
-
-        v_ev_extra_eur_kwh: v_ev_extra,
-        heater_mode,
-        t_heat_dead_step: t_heat_dead,
-        p_heat_step_kw: p_step,
-        heat_n_stages,
-        e_heat_init_kwh: e_heat_init,
-        e_heat_max_kwh: e_heat_max,
-        q_heat_dem_kw: q_heat_dem,
-        e_heat_target_kwh: e_heat_target,
-        lambda_heat_sw_eur: lambda_sw,
+        e_bat_nom_kwh: assets.e_bat_nom_kwh,
+        e_bat_init_kwh: assets.e_bat_init_kwh,
+        e_bat_min_kwh: assets.e_bat_min_kwh,
+        e_bat_max_kwh: assets.e_bat_max_kwh,
+        p_bat_ch_max_kw: assets.p_bat_ch_max_kw,
+        p_bat_dis_max_kw: assets.p_bat_dis_max_kw,
+        eff_bat_ch: assets.eff_bat_ch,
+        eff_bat_dis: assets.eff_bat_dis,
+        a_ev: assets.a_ev,
+        ev_mode: assets.ev_mode,
+        ev_obligations: assets.ev_obligations,
+        ev_battery_kwh: assets.ev_battery_kwh,
+        p_ev_max_kw: assets.p_ev_max_kw,
+        p_ev_min_kw: assets.p_ev_min_kw,
+        ev_segments: assets.ev_segments,
+        e_ev_extra_max_kwh: assets.e_ev_extra_max_kwh,
+        v_ev_extra_eur_kwh: assets.v_ev_extra_eur_kwh,
+        heater_mode: assets.heater_mode,
+        t_heat_dead_step: assets.t_heat_dead_step,
+        p_heat_step_kw: assets.p_heat_step_kw,
+        heat_n_stages: assets.heat_n_stages,
+        e_heat_init_kwh: assets.e_heat_init_kwh,
+        e_heat_max_kwh: assets.e_heat_max_kwh,
+        q_heat_dem_kw: assets.q_heat_dem_kw,
+        e_heat_target_kwh: assets.e_heat_target_kwh,
+        lambda_heat_sw_eur: assets.lambda_heat_sw_eur,
         w_tier_penalty_eur: planner.w_tier_penalty_eur,
-        heat_initial_y: heat_iy,
-        shiftable_loads: milp_loads,
-        soc_ev_init,
-        ev_soc_drops,
+        heat_initial_y: assets.heat_initial_y,
+        shiftable_loads: assets.shiftable_loads,
+        soc_ev_init: assets.soc_ev_init,
+        ev_soc_drops: assets.ev_soc_drops,
     }
 }

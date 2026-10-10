@@ -27,7 +27,7 @@ see [[milp-over-greedy]].
 
 - **Grid-signal import caps** (Phase 3): alerts, SIMPLE levels 1–3, and capacity
   subscription+reservation allowances all converge on the per-slot contractual
-  import cap (`p_imp_max_cont_kw` in `inputs.rs`) — alert → 0 (overrides all),
+  import cap (`p_imp_max_cont_kw`, `input_stages.rs::capacity_limits`) — alert → 0 (overrides all),
   SIMPLE L1 → `simple_level1_import_cap_pct` × contract, L2 → baseline forecast,
   L3 → 0, reservation allowance → min with the limit. The cap is a *soft*
   constraint (slack + violation penalty, warned in the plan), so no signal
@@ -182,7 +182,7 @@ see [[milp-over-greedy]].
 |---|---|
 | Entry point (`run_planner`) + `SolverPort` impl (`MilpSolver`) | `VEN/src/controller/milp_planner/mod.rs` |
 | `SolverPort` trait + `SolveRequest` | `VEN/src/controller/solver_port.rs` |
-| Input tensors | `inputs.rs` |
+| Input tensors | `inputs.rs` (stage order, the full `MilpInputs` literal), `input_stages.rs` (one function per field group) |
 | Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
 | Asset port (trait + var/context structs) | `asset_port.rs` |
 | Phase 1 / Phase 2 | `solver_phase1.rs` / `solver_phase2.rs` |

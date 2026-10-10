@@ -48,6 +48,7 @@ use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 pub mod asset_port;
 mod envelopes;
 mod ev_diagnostics;
+mod input_stages;
 mod inputs;
 // Defines `probe!`; must precede the solver modules that use it.
 #[macro_use]
@@ -160,36 +161,26 @@ pub fn run_planner(
     let heater = heater_params(asset_params);
     let pv = pv_params(asset_params);
     let base_load = base_load_params(asset_params);
-    // Destructured here rather than pushed into `build_milp_inputs`: that is
-    // an internal function one layer below the port, and grouping it reaches
-    // ~45 test call sites. The port's own surface is what gained the name.
-    let crate::entities::grid_signals::GridSignals {
-        tariffs,
-        capacity,
-        capacity_schedule,
-        alert_windows,
-        simple_windows,
-    } = grid;
     let inputs = build_milp_inputs(
         &asset_contexts,
-        tariffs,
-        capacity,
-        capacity_schedule,
-        alert_windows,
-        simple_windows,
+        grid,
         planner,
-        grid_max_import_kw,
-        grid_max_export_kw,
-        pv,
-        base_load,
+        &inputs::SiteInputs {
+            grid_max_import_kw,
+            grid_max_export_kw,
+            pv_cfg: pv,
+            base_load,
+            baseline_override,
+            pv_forecast_override,
+            pv_live_forecast_kw,
+            base_load_live_forecast_kw,
+            weather_pv_kw,
+        },
+        &inputs::StaleRateRefs {
+            import: diurnal_import_ref,
+            co2: diurnal_co2_ref,
+        },
         now,
-        baseline_override,
-        pv_forecast_override,
-        pv_live_forecast_kw,
-        base_load_live_forecast_kw,
-        weather_pv_kw,
-        diurnal_import_ref,
-        diurnal_co2_ref,
     );
     // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
     // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).

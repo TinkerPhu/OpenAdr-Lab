@@ -410,16 +410,8 @@ fn build_asset_contexts(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     tariffs: &TariffTimeSeries,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-    let n: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
-    let cum_s: Vec<i64> = {
-        let mut v = vec![0i64];
-        for zone in &profile.planner.plan_zones {
-            for _ in 0..zone.slots {
-                v.push(v.last().unwrap() + zone.step_s as i64);
-            }
-        }
-        v
-    };
+    let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+        crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
     let lambda_sw = profile
         .heater_config()
         .map(|h| h.switching_penalty_eur)
@@ -697,16 +689,8 @@ fn push_shiftable_load_contexts(
     profile: &Profile,
     now: DateTime<Utc>,
 ) {
-    let n: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
-    let cum_s: Vec<i64> = {
-        let mut v = vec![0i64];
-        for zone in &profile.planner.plan_zones {
-            for _ in 0..zone.slots {
-                v.push(v.last().unwrap() + zone.step_s as i64);
-            }
-        }
-        v
-    };
+    let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+        crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
     for load in loads {
         let asset = ShiftableLoadAsset {
             power_kw: load.power_kw,
@@ -784,27 +768,33 @@ fn build_milp_inputs_with_override(
 ) -> MilpInputs {
     super::build_milp_inputs(
         ctxs,
-        tariffs,
-        cap,
-        &[],
-        &[],
-        &[],
+        &crate::entities::grid_signals::GridSignals {
+            tariffs: tariffs.clone(),
+            capacity: cap.clone(),
+            capacity_schedule: vec![],
+            alert_windows: vec![],
+            simple_windows: vec![],
+        },
         &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        profile.pv_config(),
-        profile.assets.iter().find_map(|a| match a {
-            AssetProfile::BaseLoad(v) => Some(v),
-            _ => None,
-        }),
+        &crate::controller::milp_planner::inputs::SiteInputs {
+            grid_max_import_kw: profile.grid.max_import_kw,
+            grid_max_export_kw: profile.grid.max_export_kw,
+            pv_cfg: profile.pv_config(),
+            base_load: profile.assets.iter().find_map(|a| match a {
+                AssetProfile::BaseLoad(v) => Some(v),
+                _ => None,
+            }),
+            baseline_override,
+            pv_forecast_override,
+            pv_live_forecast_kw: None,
+            base_load_live_forecast_kw: None,
+            weather_pv_kw: None,
+        },
+        &crate::controller::milp_planner::inputs::StaleRateRefs {
+            import: None,
+            co2: None,
+        },
         now,
-        baseline_override,
-        pv_forecast_override,
-        None,
-        None,
-        None,
-        None,
-        None,
     )
 }
 

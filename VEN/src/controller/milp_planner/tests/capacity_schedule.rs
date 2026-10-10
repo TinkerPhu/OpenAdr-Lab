@@ -22,27 +22,33 @@ fn inputs_with_windows(
     let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
     super::super::inputs::build_milp_inputs(
         &ctxs,
-        &tariffs,
-        cap,
-        schedule,
-        alerts,
-        simple,
+        &crate::entities::grid_signals::GridSignals {
+            tariffs: tariffs.clone(),
+            capacity: cap.clone(),
+            capacity_schedule: schedule.to_vec(),
+            alert_windows: alerts.to_vec(),
+            simple_windows: simple.to_vec(),
+        },
         &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        profile.pv_config(),
-        profile.assets.iter().find_map(|a| match a {
-            AssetProfile::BaseLoad(v) => Some(v),
-            _ => None,
-        }),
+        &crate::controller::milp_planner::inputs::SiteInputs {
+            grid_max_import_kw: profile.grid.max_import_kw,
+            grid_max_export_kw: profile.grid.max_export_kw,
+            pv_cfg: profile.pv_config(),
+            base_load: profile.assets.iter().find_map(|a| match a {
+                AssetProfile::BaseLoad(v) => Some(v),
+                _ => None,
+            }),
+            baseline_override: None,
+            pv_forecast_override: None,
+            pv_live_forecast_kw: None,
+            base_load_live_forecast_kw: None,
+            weather_pv_kw: None,
+        },
+        &crate::controller::milp_planner::inputs::StaleRateRefs {
+            import: None,
+            co2: None,
+        },
         now,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
     )
 }
 

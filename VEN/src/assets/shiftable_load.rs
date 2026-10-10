@@ -367,15 +367,8 @@ impl MilpParticipant for ShiftableLoadAsset {
     ) -> Box<dyn AssetMilpContext> {
         let s: &ShiftableLoadState = own(state);
 
-        // Maps a non-negative offset_s to the latest slot index t where
-        // cum_s[t] <= offset_s. Mirrors `inputs.rs`'s pre-Spec-B helper of
-        // the same name exactly, for solver parity.
-        let time_to_slot = |offset_s: i64| -> usize {
-            cum_s
-                .partition_point(|&c| c <= offset_s)
-                .saturating_sub(1)
-                .min(n.saturating_sub(1))
-        };
+        // The one slot rule the planner's own inputs use (`entities::time_grid`).
+        let time_to_slot = |offset_s: i64| crate::entities::time_grid::slot_at(cum_s, n, offset_s);
 
         let (duration_slots, valid_start_slots) = if s.started {
             // Already running: the start decision is made, not a MILP choice
