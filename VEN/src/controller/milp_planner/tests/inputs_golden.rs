@@ -52,27 +52,33 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
     push_shiftable_load_contexts(&mut ctxs, &case.shiftables, profile, now);
     super::super::inputs::build_milp_inputs(
         &ctxs,
-        &tariffs,
-        &capacity,
-        &case.schedule,
-        &case.alerts,
-        &case.simple,
+        &crate::entities::grid_signals::GridSignals {
+            tariffs: tariffs.clone(),
+            capacity: capacity.clone(),
+            capacity_schedule: case.schedule.clone(),
+            alert_windows: case.alerts.clone(),
+            simple_windows: case.simple.clone(),
+        },
         &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        profile.pv_config(),
-        profile.assets.iter().find_map(|a| match a {
-            AssetProfile::BaseLoad(v) => Some(v),
-            _ => None,
-        }),
+        &crate::controller::milp_planner::inputs::SiteInputs {
+            grid_max_import_kw: profile.grid.max_import_kw,
+            grid_max_export_kw: profile.grid.max_export_kw,
+            pv_cfg: profile.pv_config(),
+            base_load: profile.assets.iter().find_map(|a| match a {
+                AssetProfile::BaseLoad(v) => Some(v),
+                _ => None,
+            }),
+            baseline_override: case.baseline_override.as_ref(),
+            pv_forecast_override: case.pv_forecast_override,
+            pv_live_forecast_kw: case.pv_live_forecast_kw.as_deref(),
+            base_load_live_forecast_kw: case.base_load_live_forecast_kw.as_deref(),
+            weather_pv_kw: case.weather_pv_kw.as_deref(),
+        },
+        &crate::controller::milp_planner::inputs::StaleRateRefs {
+            import: case.diurnal_import_ref.as_ref(),
+            co2: case.diurnal_co2_ref.as_ref(),
+        },
         now,
-        case.baseline_override.as_ref(),
-        case.pv_forecast_override,
-        case.pv_live_forecast_kw.as_deref(),
-        case.base_load_live_forecast_kw.as_deref(),
-        case.weather_pv_kw.as_deref(),
-        case.diurnal_import_ref.as_ref(),
-        case.diurnal_co2_ref.as_ref(),
     )
 }
 

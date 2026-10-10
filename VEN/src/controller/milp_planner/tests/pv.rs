@@ -37,37 +37,38 @@ fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f
         pv.irradiance_offset = offset;
         pv.tau_s = tau_s;
     }
-    let n_slots: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
-    let mut cum_s: Vec<i64> = Vec::with_capacity(n_slots + 1);
-    cum_s.push(0);
-    for zone in &profile.planner.plan_zones {
-        for _ in 0..zone.slots {
-            cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
-        }
-    }
+    let crate::entities::time_grid::TimeGrid {
+        n: n_slots, cum_s, ..
+    } = crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
     let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_state, n_slots, &cum_s, now);
 
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     super::super::inputs::build_milp_inputs(
         &ctxs,
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &[],
-        &[],
-        &[],
+        &crate::entities::grid_signals::GridSignals {
+            tariffs: TariffTimeSeries::from_snapshots(&[]),
+            capacity: no_capacity(),
+            capacity_schedule: vec![],
+            alert_windows: vec![],
+            simple_windows: vec![],
+        },
         &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        profile.pv_config(),
-        None,
+        &crate::controller::milp_planner::inputs::SiteInputs {
+            grid_max_import_kw: profile.grid.max_import_kw,
+            grid_max_export_kw: profile.grid.max_export_kw,
+            pv_cfg: profile.pv_config(),
+            base_load: None,
+            baseline_override: None,
+            pv_forecast_override: None,
+            pv_live_forecast_kw: pv_live_forecast_kw.as_deref(),
+            base_load_live_forecast_kw: None,
+            weather_pv_kw: None,
+        },
+        &crate::controller::milp_planner::inputs::StaleRateRefs {
+            import: None,
+            co2: None,
+        },
         now,
-        None,
-        None,
-        pv_live_forecast_kw.as_deref(),
-        None,
-        None,
-        None,
-        None,
     )
 }
 
@@ -276,24 +277,30 @@ fn bmi_with_weather(
 ) -> MilpInputs {
     super::super::inputs::build_milp_inputs(
         ctxs,
-        tariffs,
-        cap,
-        &[],
-        &[],
-        &[],
+        &crate::entities::grid_signals::GridSignals {
+            tariffs: tariffs.clone(),
+            capacity: cap.clone(),
+            capacity_schedule: vec![],
+            alert_windows: vec![],
+            simple_windows: vec![],
+        },
         &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        profile.pv_config(),
-        None,
+        &crate::controller::milp_planner::inputs::SiteInputs {
+            grid_max_import_kw: profile.grid.max_import_kw,
+            grid_max_export_kw: profile.grid.max_export_kw,
+            pv_cfg: profile.pv_config(),
+            base_load: None,
+            baseline_override: None,
+            pv_forecast_override,
+            pv_live_forecast_kw: None,
+            base_load_live_forecast_kw: None,
+            weather_pv_kw,
+        },
+        &crate::controller::milp_planner::inputs::StaleRateRefs {
+            import: None,
+            co2: None,
+        },
         now,
-        None,
-        pv_forecast_override,
-        None,
-        None,
-        weather_pv_kw,
-        None,
-        None,
     )
 }
 

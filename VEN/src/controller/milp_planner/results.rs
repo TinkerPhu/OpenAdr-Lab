@@ -32,7 +32,7 @@ pub(crate) fn fallback_plan(
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
 ) -> Plan {
-    let total_steps: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
+    let total_steps = crate::entities::time_grid::slot_count(&planner.plan_zones);
     let total_horizon_s: i64 = planner
         .plan_zones
         .iter()

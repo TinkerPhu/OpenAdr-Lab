@@ -356,14 +356,8 @@ impl HeaterMilpContext {
             )
             .clamp(0.0, e_max);
             let secs = (target.ready_by - now).num_seconds();
-            let t_dead = if secs <= 0 {
-                0
-            } else {
-                cum_s
-                    .partition_point(|&s| s <= secs)
-                    .saturating_sub(1)
-                    .min(n.saturating_sub(1))
-            };
+            // A deadline already past is slot 0, as `slot_at` answers for any offset <= 0.
+            let t_dead = crate::entities::time_grid::slot_at(cum_s, n, secs);
             let comfort_full_reward_eur_kwh = if target.comfort_rates.is_empty() {
                 0.0
             } else {

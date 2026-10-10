@@ -1066,6 +1066,9 @@ rule under Normal/Absorb, for the arbiter) and `Asset::ac_ceiling_kw` (the PV in
 comms-loss curtailment); `audit_ven_architecture.py` rule 8 enforces it. The comfort-curve rules (`validate_curve`,
 `effective_comfort_rates`, `comfort_curve_source`) are pure domain logic in `entities/comfort.rs`,
 so `simulator::plan_context` resolves a user override without importing `services` (rule 9).
+The planning time grid is written once in `entities/time_grid.rs`: `TimeGrid::from_zones` turns the
+profile's plan zones into slots, and `slot_at` answers which slot holds an instant; the planner's
+input builder, `PlanCycleInputs` and the shiftable-load and heater MILP contexts all call it.
 Unit arithmetic is written once in `entities/units.rs` (`kw_from_w`, `w_from_kw`, `dt_h_from_s`,
 `dt_h_from_duration`, `energy_kwh`, `energy_kwh_from_min`); `GridSnapshot::net_power_kw` and
 `GridMeter::net_power_kw` are the two meter views over it (rule 10 keeps the inline spellings out).
@@ -1791,7 +1794,7 @@ Tests: `openadr_interface.rs` `parse_rate_snapshots_*` / `parse_capacity_schedul
 (incl. `parse_rate_snapshots_planner_series_agrees_with_tick_lookup`).
 
 The MILP planner prices each slot at its **time-weighted mean** tariff
-(`TimeSeries::time_weighted_mean` via `milp_planner/inputs.rs` and
+(`TimeSeries::time_weighted_mean` via `milp_planner/input_stages.rs` and
 `stale_rates.rs`), so a slot straddling a tariff boundary blends both rates —
 import, export, and CO₂ alike.
 

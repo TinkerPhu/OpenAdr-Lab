@@ -227,19 +227,9 @@ pub fn build_plan_cycle_inputs(
 ) -> PlanCycleInputs {
     let tariff_ts = TariffTimeSeries::from_snapshots(rates);
 
-    let n_slots: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
-    let cum_s: Vec<i64> = {
-        let mut v = Vec::with_capacity(n_slots + 1);
-        v.push(0i64);
-        for zone in &planner.plan_zones {
-            for _ in 0..zone.slots {
-                // SAFETY: v is seeded with push(0i64) unconditionally above, so it
-                // always has >= 1 element by the time this loop runs.
-                v.push(v.last().unwrap() + zone.step_s as i64);
-            }
-        }
-        v
-    };
+    let crate::entities::time_grid::TimeGrid {
+        n: n_slots, cum_s, ..
+    } = crate::entities::time_grid::TimeGrid::from_zones(&planner.plan_zones);
 
     let heater_anchor = build_heater_anchor(current_plan, anchor_until, now, n_slots);
 
