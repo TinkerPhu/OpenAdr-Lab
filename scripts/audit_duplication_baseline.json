@@ -74,5 +74,8 @@
   "VEN/src/tasks/sim_tick/tick.rs::tick_once": 180,
   "VEN/src/vtn_reports.rs::upsert_report": 102,
   "VTN/bff/src/main.rs::main": 134
+ },
+ "test_duplicated_windows": {
+  "VEN/src/controller/milp_planner/tests": 410
  }
 }
