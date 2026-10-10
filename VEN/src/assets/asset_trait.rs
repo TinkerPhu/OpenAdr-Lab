@@ -247,6 +247,19 @@ pub trait Asset: Send + Sync {
         None
     }
 
+    /// What a user request against this asset becomes, or `None` if it takes none. Request
+    /// routing asks this instead of matching asset ids (R-128).
+    fn request_kind(&self) -> Option<crate::entities::asset_params::RequestKind> {
+        None
+    }
+
+    /// Lifecycle/embodied carbon of the energy this asset generates [gCO2eq/kWh], or `None`
+    /// if it generates none. Only the PV inverter does (BL-17); the ledger reads it from the
+    /// snapshot instead of deciding by asset id which asset that is (R-128).
+    fn embodied_co2_g_kwh(&self) -> Option<f64> {
+        None
+    }
+
     /// What this asset tells the history recorder about itself at this state, typed — the
     /// recorder must not read `state_values()` keys or decode them. Default: nothing to
     /// report (base load, grid, shiftable load).

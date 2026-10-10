@@ -43,7 +43,6 @@ mod tests {
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
-            0.0,  // pv_co2_g_kwh
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
@@ -199,7 +198,6 @@ mod tests {
             1,
             Arc::new(crate::controller::NoopWeatherPort),
             None,
-            0.0, // pv_co2_g_kwh
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
             Arc::new(crate::controller::NoopMeasurementPort),

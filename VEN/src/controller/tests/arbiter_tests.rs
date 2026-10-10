@@ -1069,7 +1069,8 @@ fn a_held_correction_feeds_the_replan_backstop_as_energy() {
     // settled -2 kW battery is 2 kW off-plan for the whole tick.
     let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
     let dt_h = 1.0 / 3600.0;
-    let residual = held.residual_kwh_by_asset(1.0);
+    let residual =
+        held.residual_kwh_by_asset(1.0, &make_sim(vec![("battery", battery_snap(-2.0, 0.5))]));
     let battery_kwh = residual.get("battery").copied().unwrap_or(0.0);
     assert!(
         (battery_kwh - 2.0 * dt_h).abs() < 1e-12,
@@ -1080,7 +1081,8 @@ fn a_held_correction_feeds_the_replan_backstop_as_energy() {
 #[test]
 fn a_released_correction_feeds_the_backstop_nothing() {
     let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery"));
-    let residual = released.residual_kwh_by_asset(1.0);
+    let residual =
+        released.residual_kwh_by_asset(1.0, &make_sim(vec![("battery", battery_snap(-2.0, 0.5))]));
     assert!(
         residual.values().all(|&kwh| kwh.abs() < 1e-12),
         "{residual:?}"

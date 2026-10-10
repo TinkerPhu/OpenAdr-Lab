@@ -130,6 +130,7 @@ mod dispatch_override_tests {
             setpoint_kw: power_kw,
             values: std::collections::HashMap::new(),
             history: Default::default(),
+            embodied_co2_g_kwh: None,
             emergency_what_ifs: None,
             ac_ceiling_kw: None,
         }

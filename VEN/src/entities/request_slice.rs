@@ -38,6 +38,16 @@ impl ThermalRequestDefaults {
     }
 }
 
+/// What a user request against an asset becomes, as the asset declares it
+/// (`Asset::request_kind`). Request routing asks this, never the asset's id (R-128).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestKind {
+    /// A charge session toward a state of charge by a departure (the EV).
+    ChargeSession,
+    /// A temperature target by a time (a heater).
+    TemperatureTarget,
+}
+
 /// Minimal asset snapshot for user-request creation.
 /// Built by the adapter layer (routes/hems.rs) from a locked SimState.
 /// Pure domain type — no assets/ or simulator/ imports.
@@ -60,6 +70,9 @@ pub struct AssetRequestSlice {
     /// A thermostat asset's answer for sizing a request (`ThermalRequestDefaults`); `None` for
     /// every other asset.
     pub thermal: Option<ThermalRequestDefaults>,
+    /// What a request against this asset becomes (`Asset::request_kind`); `None` = the asset
+    /// takes no user request (battery, PV, base load).
+    pub request_kind: Option<RequestKind>,
 }
 
 impl AssetRequestSlice {

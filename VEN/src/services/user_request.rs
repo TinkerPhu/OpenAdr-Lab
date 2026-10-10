@@ -8,7 +8,6 @@ use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::DomainError;
-use crate::ids;
 use crate::state::AppState;
 
 pub struct UserRequestService;
@@ -267,14 +266,6 @@ impl UserRequestService {
     pub fn is_shiftable(body: &CreateUserRequestParams) -> bool {
         body.power_kw.is_some() && body.duration_min.is_some()
     }
-
-    pub fn is_ev(body: &CreateUserRequestParams) -> bool {
-        body.asset_id == ids::ASSET_EV
-    }
-
-    pub fn is_heater(body: &CreateUserRequestParams) -> bool {
-        body.asset_id == ids::ASSET_HEATER || body.asset_id == ids::ASSET_BOILER
-    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -284,6 +275,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::entities::user_request::UserRequestStatus;
     use crate::entities::DomainError;
+    use crate::ids;
     use crate::simulator::{SimHandle, SimState};
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -643,6 +635,7 @@ pub(crate) mod tests {
     fn ev_slice(soc_frac: f64) -> AssetRequestSlice {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
+            request_kind: Some(crate::entities::asset_params::RequestKind::ChargeSession),
             default_target_temp_c: None,
             thermal: None,
             id: ids::ASSET_EV.to_string(),
@@ -662,6 +655,7 @@ pub(crate) mod tests {
     fn heater_slice() -> AssetRequestSlice {
         use crate::entities::asset::{ComfortRate, CompletionPolicy};
         AssetRequestSlice {
+            request_kind: Some(crate::entities::asset_params::RequestKind::TemperatureTarget),
             default_target_temp_c: None,
             thermal: None,
             id: ids::ASSET_HEATER.to_string(),
@@ -989,7 +983,6 @@ pub(crate) mod tests {
             replace_session_ids: None,
             ..base
         };
-        assert!(UserRequestService::is_ev(&ev_body));
         assert!(!UserRequestService::is_shiftable(&ev_body));
     }
 }

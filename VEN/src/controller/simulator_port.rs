@@ -94,6 +94,9 @@ pub struct AssetSnapshot {
     /// the same facts for the `/sim` API.
     #[serde(skip)]
     pub history: crate::entities::asset::AssetHistoryView,
+    /// The asset's own embodied carbon per kWh it generates (`Asset::embodied_co2_g_kwh`);
+    /// `None` for an asset that generates nothing.
+    pub embodied_co2_g_kwh: Option<f64>,
     /// The asset's own answers to the arbiter's emergency-mode what-ifs
     /// (`Asset::emergency_what_ifs`) - heater only. Typed, so the arbiter never reads a
     /// `values` key; `values` carries the same facts for the `/sim` API.
@@ -191,6 +194,7 @@ mod tests {
             setpoint_kw: 0.0,
             values,
             history: Default::default(),
+            embodied_co2_g_kwh: None,
             emergency_what_ifs: None,
             ac_ceiling_kw: None,
         };

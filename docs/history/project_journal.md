@@ -15075,3 +15075,18 @@ Issues: pinning the tables to the published document found `DEMAND` emitted and 
 from the profile's report table. The lenient reading of a program's descriptor list was first
 written in the VEN and needed again in the BFF an hour later; it moved to `lab-core` before a second
 copy existed.
+
+## R-128: what an asset is comes from the asset, not from its id (refactor/r128-ask-the-asset)
+
+Four places inferred a property from an asset's id. The residual accumulator counted "battery or EV"
+as the assets with a state of charge; it now counts those whose snapshot carries one
+(`AssetHistoryView::soc_frac`). The ledger added embodied carbon when `asset_id == "pv"`, with one
+scalar that boot took from the *first* PV and threaded through four signatures; the PV inverter now
+declares its own `co2_g_kwh` (`Asset::embodied_co2_g_kwh`, on `AssetSnapshot`) and the scalar, its
+plumbing and a `too_many_arguments` allow are gone. Request routing matched `"ev"`, `"heater"` and
+`"boiler"`; the asset now declares what a request against it becomes (`Asset::request_kind`, on
+`AssetRequestSlice`), so an EV named `ev2` or a heater named `boiler-2` is served and `ASSET_BOILER`
+was deleted. `plan_has_ev_allocation` became `plan_allocates(plan, now, asset_id)`. The line drawn:
+looking up *the* battery by its canonical id (the arbiter's named levers, the one-asset-per-kind
+design) is not an inference and stays. The audit rule against id comparisons waits for R-127, whose
+`timeline.rs` branches are the last ones.

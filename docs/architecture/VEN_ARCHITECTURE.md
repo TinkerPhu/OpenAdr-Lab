@@ -1026,7 +1026,15 @@ asset must arrive there as the asset's own answer, never as raw values they inte
 60 s sustain rule, the EV's plugged/target gate), `available_*_kwh`, and `forced_power_kw`
 (`Asset::forced_power_kw`: what it will draw regardless of its setpoint, e.g. the heater's
 thermostat emergency/cutoff). The dispatcher, arbiter and dispatch override read these; the
-2026-09-12 sweep removed their SoC/temperature re-derivations. Questions that depend on
+2026-09-12 sweep removed their SoC/temperature re-derivations. Nor is an asset's id evidence of
+what it is (R-128): the residual accumulator counts the assets whose snapshot carries a state of
+charge (`AssetHistoryView::soc_frac`), the ledger's embodied carbon comes from
+`AssetSnapshot::embodied_co2_g_kwh` (`Asset::embodied_co2_g_kwh`, the PV inverter's own
+`co2_g_kwh`), a user request is routed by `AssetRequestSlice::request_kind`
+(`Asset::request_kind`: the EV takes a charge session, a heater a temperature target, under any
+id), and `dispatcher::plan_allocates` names the asset it asks about. Looking up *the* battery or
+*the* EV by its canonical id (`ids.rs`, the arbiter's named levers) stays: that is the
+one-asset-per-kind design, not an inference. Questions that depend on
 something the snapshot can't know are still answered by the asset, just asked where that input
 exists: a user comfort target via `SimState::thermostat_setpoints_kw` (each `Thermostat`
 asset's own `thermostat_setpoint_kw`), and the arbiter's emergency-mode what-ifs via the

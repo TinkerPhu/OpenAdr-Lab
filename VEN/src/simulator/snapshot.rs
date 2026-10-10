@@ -119,6 +119,7 @@ impl SimState {
                     setpoint_kw: entry.setpoint_kw,
                     values,
                     history: cfg.history_view(&entry.state),
+                    embodied_co2_g_kwh: cfg.embodied_co2_g_kwh(),
                     emergency_what_ifs: cfg.emergency_what_ifs(&entry.state),
                     ac_ceiling_kw: cfg.ac_ceiling_kw(),
                 },
