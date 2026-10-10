@@ -15127,3 +15127,29 @@ Tests first, written against YAML so they exercise the real parse path; they fai
 Issues: the duplication ratchet refused the change because `validate` grew by one line (357 to
 358). Moving the neighbouring empty-list check into the new function made it shorter instead, and
 the baseline was tightened.
+
+## The planner's input builder in stages, and its tests on shared fixtures (refactor/planner-inputs-and-fixtures: BL-29, R-118, R-120)
+
+Why: three decisions of 2026-10-10 on one branch, because they meet at the planner's inputs. BL-29:
+three sketch enums nobody used. R-118: `build_milp_inputs` was the longest function in the VEN (394
+lines, 19 parameters). R-120: the planner tests repeated their fixtures.
+What:
+- BL-29: `FlexibilityDirection`, `RateType`, `RateUnit` deleted, with the one `cost_unit` field that
+  referenced `RateUnit` inside the `PenaltyRule` sketch.
+- R-118: first a golden of the builder's whole output (`tests/inputs_golden.rs`, 18 scenarios, every
+  branch, 6488 lines of `Debug` text), recorded from the untouched code and checked by mutation (a
+  1e-9 change fails it). Then the split: `inputs.rs` keeps the stage order and the one full spelling
+  of `MilpInputs`; `input_stages.rs` holds one function per field group. The 19 parameters became 6
+  (`GridSignals`, new `SiteInputs` and `StaleRateRefs`). The time grid, computed in five places,
+  is `entities/time_grid.rs`. Both goldens stayed byte-identical.
+- R-120: `tests/fixtures.rs` (`synthetic_inputs`, the weights, `ev_session_until`,
+  `set_lossless_battery`), `site_inputs` / `NO_REFS` for the builder calls, four bench helpers in
+  `solve_cost.rs`, `set_ev_soc` through the real `EvCharger` in place of four hand-computed
+  capabilities, three copied helpers deleted. Duplicated 8-line windows in the planner tests went
+  from 410 to 218 and are now ratcheted; the directory lost about 1500 lines.
+Issues: (1) R-120's row said eight files hand-build `MilpInputs`; there were three, and the real
+repetition was the 19-argument call, a solve-and-time block and copied helpers. (2) The model
+fingerprint looked like enough of a safety net for the split and was not: its scenarios never take
+the schedule, alert, SIMPLE, stale-fill, override or budget branches. (3) Not done from the plan:
+setters for the EV and heater field groups. Those are four to seven named assignments, several with
+their own comment, and a positional call would read worse.

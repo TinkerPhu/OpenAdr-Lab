@@ -227,9 +227,7 @@ fn solve_at(
     let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
     let cap = no_capacity();
 
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
@@ -557,9 +555,7 @@ fn ev_phase_split_cfg(
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let cap = no_capacity();
 
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
@@ -694,9 +690,7 @@ fn phase2_at_timeout_for(
     let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
     let cap = no_capacity();
 
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1_timeout = profile.planner.solver_timeout_s as f64;
 
@@ -794,9 +788,7 @@ fn phase2_schedule_diff(heater: bool) {
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let cap = no_capacity();
 
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
@@ -873,9 +865,7 @@ fn bench_phase2_changes_across_instances() {
         set_heater_power(&mut sim, initial_kw);
         let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
         let timeout = profile.planner.solver_timeout_s as f64;
 
@@ -963,9 +953,7 @@ fn bench_phase2_epsilon_sweep() {
             set_heater_power(&mut sim, 6.0);
             let tariffs = make_diurnal_tariffs(50);
             let cap = no_capacity();
-            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
             let p2w = build_phase2_weights(&inputs, &profile.planner);
 
             let t = Instant::now();
@@ -1077,9 +1065,7 @@ fn bench_phase1_vs_horizon() {
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_tariffs(0.25, 0.08, 300.0);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let t = Instant::now();
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         println!(
@@ -1090,6 +1076,64 @@ fn bench_phase1_vs_horizon() {
         );
     }
     println!("\n  (the production grid is the last row: 288 slots over three zones)\n");
+}
+
+/// ven-3's tank on a bench profile: 200 L across 45-60 C, starting at 47.82 C (R-97's slack-poor
+/// case).
+fn set_ven3_tank(profile: &mut Profile) {
+    let thermal_mass = 200.0 * 4.186 / 3600.0;
+    for a in profile.assets.iter_mut() {
+        if let crate::entities::asset_params::AssetParams::Heater(h) = a {
+            h.thermal_mass_kwh_per_c = thermal_mass;
+            h.temp_min_c = 45.0;
+            h.temp_max_c = 60.0;
+            h.temp_safety_max_c = 60.0;
+            h.temp_initial_c = 47.82;
+        }
+    }
+}
+
+/// The 11 kWh / 5.5 kW battery of the heater + battery fleet VENs (ven-5, ven-17).
+fn ven5_battery() -> crate::entities::asset_params::AssetParams {
+    crate::entities::asset_params::AssetParams::Battery(BatteryParams {
+        id: "battery".into(),
+        capacity_kwh: 11.0,
+        max_charge_kw: 5.5,
+        max_discharge_kw: 5.5,
+        initial_soc_frac: 0.50,
+        round_trip_efficiency: 0.92,
+        min_soc_frac: 0.10,
+        c_terminal_eur_kwh: None,
+    })
+}
+
+/// Contexts, inputs and min-cost weights for one phase-1 solve of `profile` as `sim` stands.
+fn phase1_setup(
+    profile: &Profile,
+    sim: &SimSnapshot,
+    now: DateTime<Utc>,
+    tariffs: &TariffTimeSeries,
+    cap: &OadrCapacityState,
+) -> (
+    Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    MilpInputs,
+    Phase1Weights,
+) {
+    let ctxs = build_asset_contexts(profile, sim, now, None, None, tariffs);
+    let inputs = build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None);
+    let p1w = build_phase1_weights(profile, PlannerObjective::MinCost);
+    (ctxs, inputs, p1w)
+}
+
+/// One phase-1 solve under the 60 s budget, and how long it took.
+fn timed_phase1(
+    inputs: &MilpInputs,
+    p1w: &Phase1Weights,
+    ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
+) -> (SolveOutput, f64) {
+    let t = Instant::now();
+    let p1 = solve_phase1(inputs, p1w, ctxs, 60.0).expect("phase 1 feasible");
+    (p1, t.elapsed().as_secs_f64())
 }
 
 /// A diurnal tariff series covering `hours` ahead, one snapshot per hour, so the
@@ -1177,9 +1221,7 @@ fn bench_phase1_flat_vs_priced_far_horizon() {
             let mut sim = make_snap_from_profile(&profile);
             set_heater_power(&mut sim, 6.0);
             let cap = no_capacity();
-            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+            let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
             let t = Instant::now();
             let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
             println!(
@@ -1246,12 +1288,8 @@ fn bench_phase1_count_vs_duration() {
             set_heater_power(&mut sim, 6.0);
             let tariffs = make_diurnal_tariffs(50);
             let cap = no_capacity();
-            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-            let t = Instant::now();
-            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-            let secs = t.elapsed().as_secs_f64();
+            let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+            let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
             println!(
                 "  {label:>34} {mip_gap:>8.2} {n:>6} {hours:>6.0} {secs:>10.2} {:>13.4}  {:?}",
                 p1.objective_eur, p1.status
@@ -1293,12 +1331,8 @@ fn bench_does_the_far_horizon_harm_execution() {
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        let secs = t.elapsed().as_secs_f64();
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+        let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
 
         // Economic cost of the first 8 hours only — the part that actually runs
         // before the next cycle replaces it. Same pricing in both, so comparable.
@@ -1370,9 +1404,7 @@ fn bench_phase2_budget_with_real_prices() {
     set_heater_power(&mut sim, 6.0);
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
@@ -1450,9 +1482,7 @@ fn bench_phase2_budget_executed_window() {
     set_heater_power(&mut sim, 6.0);
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
@@ -1550,9 +1580,7 @@ fn bench_what_is_in_phase2_friction() {
     set_heater_power(&mut sim, 6.0);
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
@@ -1671,12 +1699,8 @@ fn bench_phase1_vs_tank_slack() {
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        let secs = t.elapsed().as_secs_f64();
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+        let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
         let switches = (1..inputs.n)
             .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
             .count();
@@ -1758,16 +1782,7 @@ fn bench_phase1_vs_zones() {
         let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
         profile.planner.mip_gap_target = 0.06;
         // ven-3's tank: 200 L across 45-60 C, the slack-poor case.
-        let thermal_mass = 200.0 * 4.186 / 3600.0;
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                h.thermal_mass_kwh_per_c = thermal_mass;
-                h.temp_min_c = 45.0;
-                h.temp_max_c = 60.0;
-                h.temp_safety_max_c = 60.0;
-                h.temp_initial_c = 47.82;
-            }
-        }
+        set_ven3_tank(&mut profile);
         let n: usize = zones.iter().map(|x| x.slots).sum();
         let hours: f64 = zones
             .iter()
@@ -1779,12 +1794,8 @@ fn bench_phase1_vs_zones() {
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        let secs = t.elapsed().as_secs_f64();
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+        let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
 
         // Executed window: the part that runs before the next replan replaces it.
         let mut cost_8h = 0.0;
@@ -1918,12 +1929,8 @@ fn bench_bisect_ven3_gap() {
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        let secs = t.elapsed().as_secs_f64();
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+        let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
         let switches = (1..inputs.n)
             .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
             .count();
@@ -1985,24 +1992,13 @@ fn bench_phase2_startup_binaries() {
         profile.planner.c_bat_startup_eur = startup;
         profile.planner.c_ev_ramp_eur_kw = ramp;
         profile.planner.c_bat_ramp_eur_kw = ramp;
-        let thermal_mass = 200.0 * 4.186 / 3600.0;
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                h.thermal_mass_kwh_per_c = thermal_mass;
-                h.temp_min_c = 45.0;
-                h.temp_max_c = 60.0;
-                h.temp_safety_max_c = 60.0;
-                h.temp_initial_c = 47.82;
-            }
-        }
+        set_ven3_tank(&mut profile);
         let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 47.82);
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
@@ -2078,7 +2074,6 @@ fn bench_phase2_startup_binaries() {
 #[test]
 #[ignore = "R-97: 4 two-phase heater-sized solves, run with --ignored --nocapture"]
 fn bench_asset_mix_solve_cost() {
-    use crate::entities::asset_params::BatteryParams;
     println!("\n── R-97: solve cost by fleet asset-mix class ──");
     println!("   (gap 0.06, epsilon 1.00, 288 slots, ven-3 tank where a heater is present)\n");
     println!(
@@ -2096,33 +2091,11 @@ fn bench_asset_mix_solve_cost() {
         profile.planner.mip_gap_target = 0.06;
         profile.planner.phase2_epsilon_eur = 1.00;
         if heater {
-            let thermal_mass = 200.0 * 4.186 / 3600.0;
-            for a in profile.assets.iter_mut() {
-                if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                    h.thermal_mass_kwh_per_c = thermal_mass;
-                    h.temp_min_c = 45.0;
-                    h.temp_max_c = 60.0;
-                    h.temp_safety_max_c = 60.0;
-                    h.temp_initial_c = 47.82;
-                }
-            }
+            set_ven3_tank(&mut profile);
         }
         if battery {
             // ven-5's battery.
-            profile
-                .assets
-                .push(crate::entities::asset_params::AssetParams::Battery(
-                    BatteryParams {
-                        id: "battery".into(),
-                        capacity_kwh: 11.0,
-                        max_charge_kw: 5.5,
-                        max_discharge_kw: 5.5,
-                        initial_soc_frac: 0.50,
-                        round_trip_efficiency: 0.92,
-                        min_soc_frac: 0.10,
-                        c_terminal_eur_kwh: None,
-                    },
-                ));
+            profile.assets.push(ven5_battery());
         }
         let mut sim = make_snap_from_profile(&profile);
         if heater {
@@ -2131,9 +2104,7 @@ fn bench_asset_mix_solve_cost() {
         }
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
 
         let t = Instant::now();
@@ -2191,7 +2162,6 @@ fn bench_asset_mix_solve_cost() {
 #[test]
 #[ignore = "R-97: 2 phase-1 + 16 phase-2 solves, run with --ignored --nocapture"]
 fn bench_min_epsilon_by_class() {
-    use crate::entities::asset_params::BatteryParams;
     const P2_BUDGET_S: f64 = 30.0;
     println!("\n── R-97: minimum working epsilon by asset-mix class ──");
     println!("   (gap 0.06, 288 slots, ven-3 tank, phase-2 budget {P2_BUDGET_S:.0} s)\n");
@@ -2199,40 +2169,16 @@ fn bench_min_epsilon_by_class() {
         let now = fixed_now();
         let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
         profile.planner.mip_gap_target = 0.06;
-        let thermal_mass = 200.0 * 4.186 / 3600.0;
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                h.thermal_mass_kwh_per_c = thermal_mass;
-                h.temp_min_c = 45.0;
-                h.temp_max_c = 60.0;
-                h.temp_safety_max_c = 60.0;
-                h.temp_initial_c = 47.82;
-            }
-        }
+        set_ven3_tank(&mut profile);
         if battery {
-            profile
-                .assets
-                .push(crate::entities::asset_params::AssetParams::Battery(
-                    BatteryParams {
-                        id: "battery".into(),
-                        capacity_kwh: 11.0,
-                        max_charge_kw: 5.5,
-                        max_discharge_kw: 5.5,
-                        initial_soc_frac: 0.50,
-                        round_trip_efficiency: 0.92,
-                        min_soc_frac: 0.10,
-                        c_terminal_eur_kwh: None,
-                    },
-                ));
+            profile.assets.push(ven5_battery());
         }
         let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 47.82);
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         // Phase 1 is independent of epsilon — solve once, reuse across the sweep.
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_switches = (1..inputs.n)
@@ -2336,7 +2282,6 @@ fn bench_min_epsilon_by_class() {
 /// warm-start value is correct and must stay as it is.
 #[test]
 fn phase2_warm_start_respects_the_battery_direction_selector() {
-    use crate::entities::asset_params::BatteryParams;
     let now = fixed_now();
     let mut profile = ev_bench_profile_with_heater(true, 20.0, false);
     // Small grid: this is a correctness test, not a benchmark.
@@ -2362,9 +2307,7 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
     // Expensive import makes discharging the cheap option.
     let tariffs = make_tariffs(0.60, 0.08, 300.0);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
     let discharging: Vec<usize> = (0..inputs.n)
@@ -2422,7 +2365,6 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
 #[test]
 #[ignore = "R-97: 2 phase-1 + 10 phase-2 solves, run with --ignored --nocapture"]
 fn bench_epsilon_repeatability() {
-    use crate::entities::asset_params::BatteryParams;
     const REPEATS: usize = 5;
     const P2_BUDGET_S: f64 = 30.0;
     println!("\n── R-97: repeatability of a working epsilon ──");
@@ -2435,40 +2377,16 @@ fn bench_epsilon_repeatability() {
         let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
         profile.planner.mip_gap_target = 0.06;
         profile.planner.phase2_epsilon_eur = epsilon;
-        let thermal_mass = 200.0 * 4.186 / 3600.0;
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                h.thermal_mass_kwh_per_c = thermal_mass;
-                h.temp_min_c = 45.0;
-                h.temp_max_c = 60.0;
-                h.temp_safety_max_c = 60.0;
-                h.temp_initial_c = 47.82;
-            }
-        }
+        set_ven3_tank(&mut profile);
         if battery {
-            profile
-                .assets
-                .push(crate::entities::asset_params::AssetParams::Battery(
-                    BatteryParams {
-                        id: "battery".into(),
-                        capacity_kwh: 11.0,
-                        max_charge_kw: 5.5,
-                        max_discharge_kw: 5.5,
-                        initial_soc_frac: 0.50,
-                        round_trip_efficiency: 0.92,
-                        min_soc_frac: 0.10,
-                        c_terminal_eur_kwh: None,
-                    },
-                ));
+            profile.assets.push(ven5_battery());
         }
         let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 47.82);
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_sw = (1..inputs.n)
@@ -2572,9 +2490,7 @@ fn bench_epsilon_across_instances() {
         set_heater_power(&mut sim, initial_kw);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_sw = (1..inputs.n)
             .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
@@ -2700,9 +2616,7 @@ fn bench_phase2_smoothing_reaches_relay() {
         set_heater_power(&mut sim, initial_kw);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let (p2, _friction) = solve_phase2(
@@ -2778,7 +2692,6 @@ fn bench_phase2_smoothing_reaches_relay() {
 #[test]
 #[ignore = "R-97: 5 heater+battery phase-1 solves, run with --ignored --nocapture"]
 fn bench_heater_battery_gap_sweep() {
-    use crate::entities::asset_params::BatteryParams;
     println!("\n── R-97: heater+battery phase 1 vs mip_gap_target ──");
     println!("   (ven-5 shape: 200 L/15 K tank + 11 kWh battery, 288 slots, 48 h)\n");
     println!(
@@ -2790,41 +2703,15 @@ fn bench_heater_battery_gap_sweep() {
         let now = fixed_now();
         let mut profile = ev_bench_profile_with_heater(true, 20.0, true);
         profile.planner.mip_gap_target = gap;
-        let thermal_mass = 200.0 * 4.186 / 3600.0;
-        for a in profile.assets.iter_mut() {
-            if let crate::entities::asset_params::AssetParams::Heater(h) = a {
-                h.thermal_mass_kwh_per_c = thermal_mass;
-                h.temp_min_c = 45.0;
-                h.temp_max_c = 60.0;
-                h.temp_safety_max_c = 60.0;
-                h.temp_initial_c = 47.82;
-            }
-        }
-        profile
-            .assets
-            .push(crate::entities::asset_params::AssetParams::Battery(
-                BatteryParams {
-                    id: "battery".into(),
-                    capacity_kwh: 11.0,
-                    max_charge_kw: 5.5,
-                    max_discharge_kw: 5.5,
-                    initial_soc_frac: 0.50,
-                    round_trip_efficiency: 0.92,
-                    min_soc_frac: 0.10,
-                    c_terminal_eur_kwh: None,
-                },
-            ));
+        set_ven3_tank(&mut profile);
+        profile.assets.push(ven5_battery());
         let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 47.82);
         set_heater_power(&mut sim, 6.0);
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let t = Instant::now();
-        let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-        let secs = t.elapsed().as_secs_f64();
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+        let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
         if baseline.is_none() {
             baseline = Some(p1.objective_eur);
         }
@@ -2871,7 +2758,6 @@ fn bench_heater_battery_gap_sweep() {
 #[test]
 #[ignore = "R-97: 2 heater+battery phase-1 solves, run with --ignored --nocapture"]
 fn bench_gap_executed_cost() {
-    use crate::entities::asset_params::BatteryParams;
     println!("\n── R-97: executed-window cost of a looser gap (heater+battery) ──");
     println!("   (replan every 300 s, so the first slots are what actually run)\n");
     println!(
@@ -2901,31 +2787,14 @@ fn bench_gap_executed_cost() {
                     h.temp_initial_c = temp_c;
                 }
             }
-            profile
-                .assets
-                .push(crate::entities::asset_params::AssetParams::Battery(
-                    BatteryParams {
-                        id: "battery".into(),
-                        capacity_kwh: 11.0,
-                        max_charge_kw: 5.5,
-                        max_discharge_kw: 5.5,
-                        initial_soc_frac: 0.50,
-                        round_trip_efficiency: 0.92,
-                        min_soc_frac: 0.10,
-                        c_terminal_eur_kwh: None,
-                    },
-                ));
+            profile.assets.push(ven5_battery());
             let mut sim = make_snap_from_profile(&profile);
             set_heater_temp(&mut sim, temp_c);
             set_heater_power(&mut sim, initial_kw);
             let tariffs = make_diurnal_tariffs(50);
             let cap = no_capacity();
-            let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-            let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-            let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-            let t = Instant::now();
-            let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-            let secs = t.elapsed().as_secs_f64();
+            let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
+            let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
 
             // Net grid cost over the first `hours`, priced identically in both rows.
             let cost_within = |hours: f64| -> f64 {
@@ -2999,8 +2868,6 @@ fn bench_gap_executed_cost() {
 #[test]
 #[ignore = "R-97: 2 solves per efficiency, run with --ignored --nocapture"]
 fn bench_battery_ev_phase2_executed_window() {
-    use crate::entities::asset_params::BatteryParams;
-
     let now = fixed_now();
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
@@ -3047,9 +2914,7 @@ fn bench_battery_ev_phase2_executed_window() {
             ));
 
         let sim = make_snap_from_profile(&profile);
-        let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
-        let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
+        let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p2w = build_phase2_weights(&inputs, &profile.planner);
 
         let t0 = std::time::Instant::now();
