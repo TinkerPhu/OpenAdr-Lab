@@ -327,6 +327,10 @@ function/variable names) so a reader can grep from a UI string straight to its
 implementation. When adding new code, check nearby code/sibling modules and the
 corresponding UI for existing wording before inventing a new term.
 
+file-headers: when you edit a VEN module that has no header comment, give it one: what the module
+decides or owns, what it reads, and what it must never do, in a few lines. Only as files are
+touched; no sweep, and no register row for the ones still missing.
+
 asset-competence-assurance: infrastructure/data-acquisition (MQTT reception, weather APIs, a
 heuristics-learning store) may live outside an asset's own module, and may be shared across
 assets. But interpretation — "what is this asset's current state" or "what is this asset's
