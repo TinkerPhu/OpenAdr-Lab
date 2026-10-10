@@ -37,64 +37,52 @@ def step_given_post_ev_session(context, soc, hours):
 
 # ── Shiftable Loads (now via /user-requests) ────────────────────────────────────
 
-@when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window:d} hours')
-def step_when_post_shiftable_load(context, asset_id, kw, minutes, window):
-    now = datetime.now(timezone.utc)
-    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _post_shiftable_load(context, asset_id, kw, minutes, opens_in, window, require_ok):
+    """POST a shiftable-load request whose window opens `opens_in` from now and stays open for
+    `window`. On success, its request id is what DELETE /user-requests/:id needs (the request's
+    own id, not the linked session_id)."""
+    earliest_start = datetime.now(timezone.utc) + opens_in
     r = ven_post("/user-requests", json={
         "asset_id": asset_id,
         "deadlines": [],
         "power_kw": kw,
         "duration_min": minutes,
-        "earliest_start": earliest_start,
-        "latest_end": latest_end,
+        "earliest_start": earliest_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "latest_end": (earliest_start + window).strftime("%Y-%m-%dT%H:%M:%SZ"),
     })
     context.last_response = r
+    if require_ok:
+        assert r.ok, f"POST /user-requests (shiftable) refused: {r.status_code} {r.text}"
     try:
         context.last_response_json = r.json()
     except Exception:
         context.last_response_json = None
+    if r.ok:
+        context.last_shiftable_load_id = context.last_response_json.get("id")
+
+
+@when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window:d} hours')
+def step_when_post_shiftable_load(context, asset_id, kw, minutes, window):
+    _post_shiftable_load(context, asset_id, kw, minutes, timedelta(0), timedelta(hours=window), False)
 
 
 @given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window:d} hours')
 def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
-    now = datetime.now(timezone.utc)
-    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/user-requests", json={
-        "asset_id": asset_id,
-        "deadlines": [],
-        "power_kw": kw,
-        "duration_min": minutes,
-        "earliest_start": earliest_start,
-        "latest_end": latest_end,
-    })
-    r.raise_for_status()
-    context.last_response = r
-    context.last_response_json = r.json()
-    # /user-requests returns the UserRequest, not the ShiftableLoad — its own "id" is what
-    # DELETE /user-requests/:id needs (not the linked session_id).
-    context.last_shiftable_load_id = r.json().get("id")
+    _post_shiftable_load(context, asset_id, kw, minutes, timedelta(0), timedelta(hours=window), True)
 
 
 @given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')
 def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, window_min):
-    now = datetime.now(timezone.utc)
-    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/user-requests", json={
-        "asset_id": asset_id,
-        "deadlines": [],
-        "power_kw": kw,
-        "duration_min": minutes,
-        "earliest_start": earliest_start,
-        "latest_end": latest_end,
-    })
-    r.raise_for_status()
-    context.last_response = r
-    context.last_response_json = r.json()
-    context.last_shiftable_load_id = r.json().get("id")
+    _post_shiftable_load(context, asset_id, kw, minutes, timedelta(0), timedelta(minutes=window_min), True)
+
+
+# A window that opens later: the load is planned but does not start during the scenario, so it
+# can still be cancelled and cannot run on into later scenarios (a started load is not
+# cancellable). GB-35: a main-pass wm-1 left running for an hour pushed the @isolated pass's
+# loads out of their first slot.
+@given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes opening in {opens_h:d} hours for {window:d} hours')
+def step_given_post_shiftable_load_opening_later(context, asset_id, kw, minutes, opens_h, window):
+    _post_shiftable_load(context, asset_id, kw, minutes, timedelta(hours=opens_h), timedelta(hours=window), True)
 
 
 @when('I DELETE shiftable load with saved id')
