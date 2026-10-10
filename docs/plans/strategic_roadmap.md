@@ -41,6 +41,9 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
   planning objective (common non-planning HEMS behaviour: PV-surplus-only, no look-ahead) and
   fleet-level forecast diffing, so flipping the fleet's objective shows an immediate forecast
   change instead of requiring a day-long recording comparison.
+- `docs/plans/mqtt_notifier_conformance.md` — planned, not scheduled: make the VTN's MQTT notifier
+  binding conform to 3.1 (TLS for every broker client, bearer-token login, per-client topic
+  access). Records seven verified gaps, among them that the announced login cannot work today.
 
 ---
 
@@ -138,5 +141,7 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
   choice* is an experiment variable.
 - **Capacity negotiation (`OadrCapacityRequest`)** — no driving experiment yet (S-7
   placeholder above).
+- **MQTT notifier conformance** — planned in `docs/plans/mqtt_notifier_conformance.md`; the lab's
+  VENs poll over HTTP, so it changes nothing they do today (decision 2026-10-10).
 - **Fleet scale N=10** — the Node1 resource budget caps practical fleet size; larger
   fleets need a second host or lighter VEN builds.
