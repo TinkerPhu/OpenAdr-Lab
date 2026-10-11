@@ -434,6 +434,20 @@ impl VtnPort for VtnClient {
         self.upsert_report(body).await
     }
 
+    async fn update_report(&self, id: &str, body: OadrReportBody) -> Result<OadrReport> {
+        let value = serde_json::to_value(&body).context("serialize report body")?;
+        // The inherent method: the one PUT, shared with `upsert_report`.
+        let answer = self.update_report(id, value).await?;
+        serde_json::from_value(answer).context("parse the report the VTN returned")
+    }
+
+    async fn token_expires_at(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        VtnClient::token_expires_at(self, now).await
+    }
+
     async fn scope_warning(&self) -> Option<String> {
         self.scope_warning.read().await.clone()
     }
@@ -995,5 +1009,45 @@ mod tests {
             "ven".to_string(),
         );
         assert_eq!(client.token_expires_at(chrono::Utc::now()).await, None);
+    }
+
+    /// R-129: the port's `update_report` is one PUT of the typed body to `/reports/{id}`, and
+    /// what the VTN answers comes back typed, its other fields kept.
+    #[tokio::test]
+    async fn update_report_puts_the_typed_body_and_returns_the_typed_report() {
+        async fn put_handler(
+            axum::extract::Path(id): axum::extract::Path<String>,
+            Json(mut body): Json<serde_json::Value>,
+        ) -> Json<serde_json::Value> {
+            body["id"] = json!(id);
+            body["createdDateTime"] = json!("2026-01-01T00:00:00Z");
+            Json(body)
+        }
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route("/reports/:id", axum::routing::put(put_handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = make_client(format!("http://{addr}"));
+        let body = OadrReportBody {
+            eventID: Some("evt-1".into()),
+            clientName: "test-ven".into(),
+            reportName: Some("r-1".into()),
+            resources: vec![],
+            payloadDescriptors: vec![],
+        };
+
+        let report = VtnPort::update_report(&client, "rep-7", body)
+            .await
+            .unwrap();
+
+        assert_eq!(report.id, "rep-7");
+        assert_eq!(report.reportName.as_deref(), Some("r-1"));
+        assert_eq!(report.extra["eventID"], "evt-1");
+        assert_eq!(report.extra["clientName"], "test-ven");
+        assert_eq!(report.extra["createdDateTime"], "2026-01-01T00:00:00Z");
     }
 }

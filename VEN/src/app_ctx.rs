@@ -18,7 +18,6 @@ use crate::entities::asset_params::PvForecastParams;
 use crate::entities::planner_params::PlannerObjective;
 use crate::planner_events::PlannerEventTx;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 use crate::{controller, services};
 
 pub type MetricsHandle = Arc<metrics_exporter_prometheus::PrometheusHandle>;
@@ -26,6 +25,8 @@ pub type PlanTriggerTx = Arc<tokio::sync::watch::Sender<PlanTriggerSignal>>;
 /// Pre-computed simulator schema (asset → control descriptors), built once at startup from the
 /// profile, so a route reads it without the raw `Profile` type or any lock.
 pub type SimSchema = Arc<HashMap<String, Vec<ControlDescriptor>>>;
+/// The VTN through its port (submit or update a report, read the token's expiry).
+pub type Vtn = Arc<dyn controller::VtnPort>;
 /// The asset roster through its port (add/cancel a shiftable load, reset/configure an asset).
 pub type Roster = Arc<dyn controller::SimRosterPort>;
 /// Site headroom / capacity-curve computations through their port.
@@ -78,7 +79,7 @@ pub struct CommsLoss {
 #[derive(Clone)]
 pub struct AppCtx {
     pub state: AppState,
-    pub vtn: VtnClient,
+    pub vtn: Vtn,
     pub metrics_handle: MetricsHandle,
     pub trigger_tx: PlanTriggerTx,
     pub sim_schema: SimSchema,
@@ -112,7 +113,7 @@ macro_rules! parts {
 
 parts! {
     state: AppState,
-    vtn: VtnClient,
+    vtn: Vtn,
     metrics_handle: MetricsHandle,
     trigger_tx: PlanTriggerTx,
     sim_schema: SimSchema,

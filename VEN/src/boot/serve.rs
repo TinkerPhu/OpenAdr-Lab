@@ -33,7 +33,7 @@ fn app_ctx(w: World) -> AppCtx {
         sim_schema: Arc::new(simulator::schema_from_params(&w.asset_params)),
         telemetry: w.ports.telemetry,
         state: w.state,
-        vtn: w.ports.vtn,
+        vtn: w.ports.vtn_port,
         metrics_handle: w.metrics_handle,
         trigger_tx: w.trigger_tx,
         roster: handle.clone(),

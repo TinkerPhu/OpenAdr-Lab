@@ -87,6 +87,10 @@ The rules, and why each exists:
      `VtnHttpError`; the sensor types are in `entities/sensor.rs` and a non-2xx VTN answer is
      `DomainError::VtnRejected`, translated in `vtn.rs`.
 
+  14. No `crate::vtn` in routes/ or tasks/ (R-129). The adapters reach the VTN through
+     `VtnPort` (`app_ctx::Vtn`), so a handler can be driven with `MockVtn`. The report routes
+     and `/vtn/status` held the concrete `VtnClient` and could not be unit-tested.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -248,10 +252,13 @@ CHECKS = [
      lambda: forbid("appctx", [VEN_SRC / "routes"], r"State<AppCtx>")),
     ("infrastructure types held below the adapters",
      lambda: forbid("infra-types", [VEN_SRC / d for d in ("entities", "services", "state")],
-                    r"crate::(vtn|simulator)")),
+                    r"crate::(vtn|simulator)\b")),
+    ("the concrete VTN client in the adapters",
+     lambda: forbid("vtn-client", [VEN_SRC / d for d in ("routes", "tasks")],
+                    r"crate::vtn\b")),
     ("an incoming event value read without its declared unit",
      lambda: forbid("payload-value", [VEN_SRC],
-                    r"\.numeric\(\)|numeric_value\(|PayloadValue::(Number|Integer)")),
+                    r"\.numeric\(\)|\bnumeric_value\(|PayloadValue::(Number|Integer)")),
 ]
 
 

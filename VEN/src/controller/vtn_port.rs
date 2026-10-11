@@ -29,6 +29,13 @@ pub trait VtnPort: Send + Sync {
     /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
     /// propagated from the VTN HTTP response.
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
+    /// Replace the report the VTN holds under `id`. Returns the report as the VTN now has it.
+    async fn update_report(&self, id: &str, body: OadrReportBody) -> Result<OadrReport>;
+    /// When the access token this client holds runs out, for `GET /vtn/status`. `None` when
+    /// no token has been fetched yet. An expired token gives a time in the past.
+    async fn token_expires_at(&self, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        None
+    }
     /// GB-49: `Some(reason)` when the last token this client obtained lacked
     /// VEN scopes. `None` means correctly provisioned, or no token fetched yet.
     async fn scope_warning(&self) -> Option<String> {

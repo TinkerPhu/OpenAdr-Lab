@@ -15230,3 +15230,22 @@ hiding it; the single-slot windows bound such a leak to its 5-minute duration. F
 requests are never pruned from the VEN's state (R-137, filed). Lessons in KEY_LEARNINGS. Two full
 Node2 runs on the branch were green (331 + 16 scenarios) before the merge.
 
+## R-129: the report routes reach the VTN through `VtnPort` (refactor/r129-report-routes-vtn-port)
+
+**What.** `AppCtx` holds `Vtn = Arc<dyn VtnPort>` and no longer the concrete `VtnClient`;
+`Ports.vtn` is gone. The port gained `update_report(id, OadrReportBody) -> OadrReport` and
+`token_expires_at(now)`. `post_reports` and `put_report` share one tail (`conclude`: record the
+outcome, count, log to history, answer), and `put_report` takes the typed body instead of a
+`serde_json::Value` it picked three fields out of. `vtn_status` reads the token expiry through the
+port. Audit rule 14 forbids `crate::vtn` in `routes/` and `tasks/`. Tests: four handler tests with
+`MockVtn` in `routes/reports.rs`, one in `routes/system.rs`, one adapter-contract test in `vtn.rs`.
+BDD: the never-run `@wip` scenario is deleted (it posted ids that do not exist and asserted
+`programID`, which 3.1 removed); its echo check moved into the round-trip scenario, and a new
+scenario updates a submitted report (`PUT /reports/{id}` had no BDD coverage).
+
+**Why.** Sweep #3: the handlers could not be unit-tested, and a comment in the test module said so.
+
+**Issues.** A `PUT /reports/:id` body without `clientName` or `resources` is now refused by the VEN
+(422) instead of forwarded for the VTN to refuse. The audit script held two literal backspace bytes
+where `\b` was meant, so rule 13 (R-131) and half of rule 12 (GB-50) matched nothing since they
+were written; both are repaired and both still pass. Lesson in KEY_LEARNINGS.

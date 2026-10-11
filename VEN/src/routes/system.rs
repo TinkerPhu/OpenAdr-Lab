@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::app_ctx::{CommsLoss, MetricsHandle, Telemetry};
+use crate::app_ctx::{CommsLoss, MetricsHandle, Telemetry, Vtn};
 use crate::entities::plan::SolveStatus;
 use crate::state::AppState;
 use crate::state::{TaskStatus, VtnConnectionStatus};
-use crate::vtn::VtnClient;
 
 /// R-59: whether the comms-loss curtailment fail-safe is currently active —
 /// `false` unconditionally when the profile has no `comms_loss:` section.
@@ -207,7 +206,7 @@ fn build_vtn_status_response(
 /// `token_expires_at`; this endpoint answers "what exactly, in detail."
 pub async fn vtn_status(
     State(state): State<AppState>,
-    State(vtn): State<VtnClient>,
+    State(vtn): State<Vtn>,
     State(comms_loss): State<CommsLoss>,
 ) -> Json<VtnStatusResponse> {
     let connection = state.vtn_connection_status().await;
@@ -523,6 +522,20 @@ mod tests {
         assert!(!resp.connected);
         assert_eq!(resp.last_error, Some("connection refused".to_string()));
         assert_eq!(resp.current_backoff_s, 60.0);
+    }
+
+    #[tokio::test]
+    async fn vtn_status_reads_token_expiry_through_the_port() {
+        use crate::services::test_support::mock_vtn::MockVtn;
+        let expires_at = Utc::now() + chrono::Duration::minutes(30);
+        let vtn: Vtn = std::sync::Arc::new(MockVtn::new().with_token_expires_at(expires_at));
+        let Json(resp) = vtn_status(
+            State(AppState::new()),
+            State(vtn),
+            State(CommsLoss { debounce_s: None }),
+        )
+        .await;
+        assert_eq!(resp.token_expires_at, Some(expires_at));
     }
 
     #[test]
