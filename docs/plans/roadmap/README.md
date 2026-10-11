@@ -7,7 +7,7 @@
 | Phase | Plan | Goal | Exit demonstration |
 |-------|------|------|--------------------|
 | 5 | [phase-5-forecast-and-baseline.md](phase-5-forecast-and-baseline.md) | Heuristics from history, external feeds, baselines | Heuristic forecast beats last-known on a held-out week |
-| 6 | [phase-6-fidelity-and-cert.md](phase-6-fidelity-and-cert.md) | Planner fidelity, transport modernisation, hygiene | Cert-readiness re-audit; slot costs match real bills |
+| 6 | [phase-6-fidelity-and-cert.md](phase-6-fidelity-and-cert.md) | Transport modernisation (certification cluster); not scheduled | Cert-readiness re-audit |
 
 Phases 0–4 (quick wins, data foundation, fleet enablement, control-method lab,
 comfort & personas) are fully implemented; their plan documents were removed.
