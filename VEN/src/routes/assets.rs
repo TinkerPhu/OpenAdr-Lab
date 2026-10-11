@@ -7,14 +7,7 @@ use serde::Deserialize;
 
 use crate::app_ctx::SimRead;
 
-/// The 404 every per-asset route answers for an id the roster does not hold.
-fn unknown_asset(asset_id: &str) -> axum::response::Response {
-    (
-        axum::http::StatusCode::NOT_FOUND,
-        Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
-    )
-        .into_response()
-}
+use crate::routes::error::unknown_asset;
 
 /// A time series as `{"samples": [{"ts": ..., "value": ...}], "interpolation": ...}` - the one
 /// wire shape of the forecast and history routes.

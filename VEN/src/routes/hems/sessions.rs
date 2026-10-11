@@ -7,6 +7,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tracing::warn;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{SessionDetail, UserRequestWithSession};
@@ -22,7 +23,8 @@ use crate::state::AppState;
 /// R-25: HTTP DTO for POST /user-requests — owned by the routes layer.
 /// Converts into the domain-owned `CreateUserRequestParams` before crossing
 /// into `controller::user_request`/`services::user_request`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct CreateUserRequestBody {
     pub asset_id: String,
     #[serde(rename = "target_soc")]
@@ -64,7 +66,8 @@ pub struct CreateUserRequestBody {
     pub replace_session_ids: Option<Vec<uuid::Uuid>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct RequestDeadlineInput {
     pub latest_end: DateTime<Utc>,
     pub max_total_cost_eur: Option<f64>,
@@ -72,7 +75,8 @@ pub struct RequestDeadlineInput {
     pub min_completion: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct ComfortRateInput {
     pub fill: f64,
     pub bid: f64,
@@ -217,9 +221,7 @@ pub async fn post_requests(
 /// An EV clash keeps its 409 wire contract (`ev_conflict::conflict_response`); a duplicate
 /// shiftable load is 409; everything else the request got wrong is 422.
 fn submit_error_response(e: SubmitError) -> axum::response::Response {
-    let error = |status: StatusCode, message: String| {
-        (status, Json(serde_json::json!({ "error": message }))).into_response()
-    };
+    use crate::routes::error::error_response as error;
     match e {
         SubmitError::Request(e) => super::ev_conflict::conflict_response(&e)
             .unwrap_or_else(|| error(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())),

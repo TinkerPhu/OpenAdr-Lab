@@ -24,9 +24,7 @@ pub struct HistoryRangeParams {
     pub asset_id: Option<String>,
 }
 
-fn error(status: StatusCode, msg: impl Into<String>) -> axum::response::Response {
-    (status, Json(serde_json::json!({ "error": msg.into() }))).into_response()
-}
+use crate::routes::error::error_response as error;
 
 /// Resolve and validate the `[from, to)` window: `to` defaults to now, `from`
 /// defaults to `to - MAX_RANGE_DAYS`; any explicit range over the cap, or with

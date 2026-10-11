@@ -9,11 +9,36 @@
 //! look for it.
 
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Serialize;
+use ts_rs::TS;
 
 use crate::entities::DomainError;
 
-impl From<DomainError> for (StatusCode, Json<serde_json::Value>) {
+/// The one error body every route answers with: `{ "error": "<message>" }` (R-133).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub struct ErrorBody {
+    pub error: String,
+}
+
+/// A refused request: `status` and an `ErrorBody` saying why.
+pub fn error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(ErrorBody {
+            error: message.into(),
+        }),
+    )
+        .into_response()
+}
+
+/// The 404 every per-asset route answers for an id the roster does not hold.
+pub fn unknown_asset(asset_id: &str) -> Response {
+    error_response(StatusCode::NOT_FOUND, format!("unknown asset: {asset_id}"))
+}
+
+impl From<DomainError> for (StatusCode, Json<ErrorBody>) {
     fn from(e: DomainError) -> Self {
         let status = match e {
             DomainError::NotFound { .. } | DomainError::AssetNotFound { .. } => {
@@ -23,7 +48,12 @@ impl From<DomainError> for (StatusCode, Json<serde_json::Value>) {
             DomainError::SessionConflict(_) => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        (status, Json(serde_json::json!({ "error": e.to_string() })))
+        (
+            status,
+            Json(ErrorBody {
+                error: e.to_string(),
+            }),
+        )
     }
 }
 
@@ -32,7 +62,7 @@ mod tests {
     use super::*;
 
     fn status_of(e: DomainError) -> StatusCode {
-        let (status, _): (StatusCode, Json<serde_json::Value>) = e.into();
+        let (status, _): (StatusCode, Json<ErrorBody>) = e.into();
         status
     }
 
@@ -76,7 +106,12 @@ mod tests {
     fn the_body_carries_the_errors_own_display() {
         let e = DomainError::SessionConflict("ev busy".to_string());
         let expected = e.to_string();
-        let (_, Json(body)): (StatusCode, Json<serde_json::Value>) = e.into();
-        assert_eq!(body["error"], expected);
+        let (_, Json(body)): (StatusCode, Json<ErrorBody>) = e.into();
+        assert_eq!(body.error, expected);
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            serde_json::json!({ "error": expected }),
+            "the wire shape every route's error body keeps"
+        );
     }
 }

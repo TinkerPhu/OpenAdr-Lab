@@ -11,19 +11,27 @@ import type { AssetLedgerEntry } from "./generated/AssetLedgerEntry";
 import type { AssetSnapshot } from "./generated/AssetSnapshot";
 import type { BaselineOverride } from "./generated/BaselineOverride";
 import type { BaselineSlot } from "./generated/BaselineSlot";
+import type { BaselineSlotBody } from "./generated/BaselineSlotBody";
 import type { CapacityCurve } from "./generated/CapacityCurve";
 import type { CapacityCurveStep } from "./generated/CapacityCurveStep";
 import type { CapacityCurves } from "./generated/CapacityCurves";
 import type { CapacitySnapshot } from "./generated/CapacitySnapshot";
+import type { ClashingSession } from "./generated/ClashingSession";
 import type { ComfortCurveResponse } from "./generated/ComfortCurveResponse";
 import type { ComfortCurveSource } from "./generated/ComfortCurveSource";
 import type { ComfortRate } from "./generated/ComfortRate";
+import type { ComfortRateInput } from "./generated/ComfortRateInput";
 import type { CommitmentDirection } from "./generated/CommitmentDirection";
 import type { ControlDescriptor } from "./generated/ControlDescriptor";
 import type { ControlKind } from "./generated/ControlKind";
 import type { ControllerEvent } from "./generated/ControllerEvent";
 import type { CostBreakdown } from "./generated/CostBreakdown";
+import type { CreateBaselineOverrideBody } from "./generated/CreateBaselineOverrideBody";
+import type { CreateUserRequestBody } from "./generated/CreateUserRequestBody";
 import type { DispatchWindow } from "./generated/DispatchWindow";
+import type { ErrorBody } from "./generated/ErrorBody";
+import type { EvConflictBody } from "./generated/EvConflictBody";
+import type { EvConflictKind } from "./generated/EvConflictKind";
 import type { EvSession } from "./generated/EvSession";
 import type { EvSessionOrigin } from "./generated/EvSessionOrigin";
 import type { EvSettings } from "./generated/EvSettings";
@@ -62,10 +70,12 @@ import type { PlannerEvent } from "./generated/PlannerEvent";
 import type { PlannerObjective } from "./generated/PlannerObjective";
 import type { PlanningHorizon } from "./generated/PlanningHorizon";
 import type { PowerAdjustability } from "./generated/PowerAdjustability";
+import type { ReplaceRejection } from "./generated/ReplaceRejection";
 import type { ReportSent } from "./generated/ReportSent";
 import type { ReportSubmissionRecord } from "./generated/ReportSubmissionRecord";
 import type { ReportWindowSize } from "./generated/ReportWindowSize";
 import type { RequestDeadline } from "./generated/RequestDeadline";
+import type { RequestDeadlineInput } from "./generated/RequestDeadlineInput";
 import type { ReservationRequest } from "./generated/ReservationRequest";
 import type { SensorRaw } from "./generated/SensorRaw";
 import type { SensorSnapshot } from "./generated/SensorSnapshot";
@@ -87,6 +97,8 @@ import type { TariffSnapshot } from "./generated/TariffSnapshot";
 import type { TaskStatusEntry } from "./generated/TaskStatusEntry";
 import type { TickSample } from "./generated/TickSample";
 import type { TimeRange } from "./generated/TimeRange";
+import type { UpdateArbiterSettingsBody } from "./generated/UpdateArbiterSettingsBody";
+import type { UpdateEvSettingsBody } from "./generated/UpdateEvSettingsBody";
 import type { UserNotification } from "./generated/UserNotification";
 import type { UserNotificationSeverity } from "./generated/UserNotificationSeverity";
 import type { UserRequest } from "./generated/UserRequest";
@@ -113,19 +125,27 @@ export type {
   AssetSnapshot,
   BaselineOverride,
   BaselineSlot,
+  BaselineSlotBody,
   CapacityCurve,
   CapacityCurveStep,
   CapacityCurves,
   CapacitySnapshot,
+  ClashingSession,
   ComfortCurveResponse,
   ComfortCurveSource,
   ComfortRate,
+  ComfortRateInput,
   CommitmentDirection,
   ControlDescriptor,
   ControlKind,
   ControllerEvent,
   CostBreakdown,
+  CreateBaselineOverrideBody,
+  CreateUserRequestBody,
   DispatchWindow,
+  ErrorBody,
+  EvConflictBody,
+  EvConflictKind,
   EvSession,
   EvSessionOrigin,
   EvSettings,
@@ -164,10 +184,12 @@ export type {
   PlannerObjective,
   PlanningHorizon,
   PowerAdjustability,
+  ReplaceRejection,
   ReportSent,
   ReportSubmissionRecord,
   ReportWindowSize,
   RequestDeadline,
+  RequestDeadlineInput,
   ReservationRequest,
   SensorRaw,
   SensorSnapshot,
@@ -189,6 +211,8 @@ export type {
   TaskStatusEntry,
   TickSample,
   TimeRange,
+  UpdateArbiterSettingsBody,
+  UpdateEvSettingsBody,
   UserNotification,
   UserNotificationSeverity,
   UserRequest,
@@ -288,71 +312,9 @@ export type PlannedRates = TariffSnapshot[];
 
 export type CapacitySchedule = CapacitySnapshot[];
 
-export type CreateUserRequestBody = {
-  asset_id: string;
-  target_soc: number | null;
-  target_energy_kwh: number | null;
-  desired_power_kw: number | null;
-  completion_policy: string | null;
-  deadlines: Array<{
-    latest_end: string;
-    max_total_cost_eur: number | null;
-    max_marginal_rate_eur_kwh: number | null;
-    min_completion: number | null;
-  }>;
-  comfort_rates: null;
-  // WM shiftable-load fields (optional) — `earliest_start` is shared with the EV,
-  // where it means the instant the vehicle becomes available for the session.
-  power_kw?: number;
-  duration_min?: number;
-  earliest_start?: string;
-  /** EV only: km expected after this session's departure. Omitted = use the EV's
-   *  own configured default. */
-  expected_trip_distance_km?: number;
-  /**
-   * EV only: when the car is expected back from that trip.
-   *
-   * Paired with `expected_trip_distance_km` — both or neither. The server refuses a
-   * half-stated estimate: a distance with no return time is energy with no instant to
-   * apply it to. With neither, the plan projects no drop and waits for the measured
-   * return rather than inventing one.
-   */
-  expected_return_time?: string;
-  latest_end?: string;
-  // Per-device overrides (Plan D)
-  soft_deadline?: boolean;
-  /** Null = state none: the VEN applies the heater's declared default, or refuses. */
-  target_temp_c?: number | null;
-  // Request mode (BL-28); omitted = BY_DEADLINE
-  mode?: UserRequestMode;
-  // MAX_COST (WP4.1-c): total charging-cost ceiling in €
-  budget_eur?: number;
-  /**
-   * EV only: the queued sessions this submission means to displace.
-   *
-   * Omitted = displace nothing, so a clash is refused — the default and the safe
-   * answer. Sent, it must be exactly the ids the refusal quoted back as
-   * `replaceable_session_ids`, so the confirmation refers to the plans the user was
-   * actually shown rather than to whatever clashes by the time the server acts.
-   */
-  replace_session_ids?: string[];
-};
-
 // ─── Device Session types ─────────────────────────────────────────────────────
 
 // ─── EV usage simulation / forecast (ev-usage-simulation, ev-usage-forecast) ──
-
-export type UpdateEvSettingsBody = {
-  opportunistic_charging_enabled: boolean;
-};
-
-/** Each toggle optional — one switch changes without restating the other. */
-export type UpdateArbiterSettingsBody = {
-  deviation_arbiter_enabled?: boolean;
-  limit_enforcement_enabled?: boolean;
-};
-
-export type CreateBaselineOverrideBody = { slots: BaselineSlot[] };
 
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 

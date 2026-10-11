@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use crate::routes::error::ErrorBody;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -70,15 +71,15 @@ fn parse_severity(s: &str) -> Option<UserNotificationSeverity> {
 async fn notifications_history(
     history: Option<Arc<dyn HistoryPort>>,
     q: NotificationsHistoryQuery,
-) -> Result<Vec<UserNotification>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Vec<UserNotification>, (StatusCode, Json<ErrorBody>)> {
     let severity = match q.severity.as_deref() {
         None => None,
         Some(s) => Some(parse_severity(s).ok_or_else(|| {
             (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("invalid severity: {s} (expected INFO, WARN or ALERT)")
-                })),
+                Json(ErrorBody {
+                    error: format!("invalid severity: {s} (expected INFO, WARN or ALERT)"),
+                }),
             )
         })?),
     };
@@ -91,13 +92,17 @@ async fn notifications_history(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("query task panicked: {e}") })),
+                Json(ErrorBody {
+                    error: format!("query task panicked: {e}"),
+                }),
             )
         })?
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
+                Json(ErrorBody {
+                    error: e.to_string(),
+                }),
             )
         })
 }
@@ -213,10 +218,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(err.1 .0["error"]
-            .as_str()
-            .unwrap()
-            .contains("invalid severity"));
+        assert!(err.1 .0.error.contains("invalid severity"));
     }
 
     #[tokio::test]

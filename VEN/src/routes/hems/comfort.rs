@@ -45,11 +45,7 @@ pub async fn get_comfort_curve(
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
     let Some(default) = default_rates(sim_read.as_ref(), &asset_id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {asset_id}") })),
-        )
-            .into_response();
+        return crate::routes::error::unknown_asset(&asset_id);
     };
     let overrides = state.comfort_overrides_map().await;
     let source = crate::entities::comfort::comfort_curve_source(&overrides, &asset_id);
@@ -66,11 +62,7 @@ pub async fn post_comfort_curve(
     Json(rates): Json<Vec<ComfortRate>>,
 ) -> impl IntoResponse {
     if default_rates(sim_read.as_ref(), &asset_id).await.is_none() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {asset_id}") })),
-        )
-            .into_response();
+        return crate::routes::error::unknown_asset(&asset_id);
     }
     match crate::services::comfort::set_override(
         &state,
@@ -92,11 +84,7 @@ pub async fn post_comfort_curve(
             )
                 .into_response()
         }
-        Err(e) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response(),
+        Err(e) => crate::routes::error::error_response(StatusCode::UNPROCESSABLE_ENTITY, e),
     }
 }
 

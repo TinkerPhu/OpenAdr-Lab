@@ -30,7 +30,8 @@ pub async fn get_arbiter_settings(State(state): State<AppState>) -> impl IntoRes
 
 /// PUT /arbiter-settings body — each toggle is optional, so one switch can
 /// change without restating the other.
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct UpdateArbiterSettingsBody {
     pub deviation_arbiter_enabled: Option<bool>,
     pub limit_enforcement_enabled: Option<bool>,

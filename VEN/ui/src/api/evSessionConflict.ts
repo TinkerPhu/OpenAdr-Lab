@@ -7,19 +7,9 @@
 // We branch on that declared value — never on the HTTP status alone, and never by
 // matching the human-readable message, which is free to change.
 
-/** One queued plan a submission clashes with, as the prompt renders it. */
-export type ClashingSession = {
-  id: string;
-  window_start: string;
-  departure_time: string;
-  target_soc: number;
-};
-
-/** Why a stated replace instruction was refused, when one was stated. */
-export type ReplaceRejection =
-  | { reason: "not_queued"; ids: string[] }
-  | { reason: "not_the_conflict_set"; missing: string[]; extra: string[] }
-  | { reason: "still_conflicts"; ids: string[] };
+// The body's shape is generated from Rust (`EvConflictBody`, R-133).
+import type { ClashingSession, EvConflictBody, ReplaceRejection } from "./types";
+export type { ClashingSession, ReplaceRejection };
 
 export class EvSessionConflictError extends Error {
   /** The plans this submission clashes with, in window order. */
@@ -65,16 +55,8 @@ export function parseEvSessionConflict(text: string): EvSessionConflictError | n
     return null;
   }
   if (typeof body !== "object" || body === null) return null;
-  const b = body as Record<string, unknown>;
-  if (b.kind !== "ev_session_conflict" && b.kind !== "ev_replace_rejected") return null;
-  const conflicts = Array.isArray(b.conflicts) ? (b.conflicts as ClashingSession[]) : [];
-  const ids = Array.isArray(b.replaceable_session_ids)
-    ? (b.replaceable_session_ids as string[])
-    : conflicts.map((c) => c.id);
-  return new EvSessionConflictError(
-    typeof b.error === "string" ? b.error : "This charging plan conflicts with an existing one.",
-    conflicts,
-    ids,
-    b.rejection as ReplaceRejection | undefined,
-  );
+  const kind = (body as { kind?: unknown }).kind;
+  if (kind !== "ev_session_conflict" && kind !== "ev_replace_rejected") return null;
+  const b = body as EvConflictBody;
+  return new EvSessionConflictError(b.error, b.conflicts, b.replaceable_session_ids, b.rejection);
 }
