@@ -177,7 +177,7 @@ pub(crate) fn translate_to_plan(
         let mut allocations = Vec::new();
 
         // ── EV allocation ───────────────────────────────────────────────
-        if inputs.ev_mode != MilpLoadMode::MustNotRun && sol.p_ev_kw[t] > 0.01 {
+        if inputs.assets.ev_mode != MilpLoadMode::MustNotRun && sol.p_ev_kw[t] > 0.01 {
             if let Some(ref eid) = ev_id {
                 let power_kw = sol.p_ev_kw[t];
                 let surplus_power_kw = surplus_remaining_kw.min(power_kw);
@@ -197,8 +197,8 @@ pub(crate) fn translate_to_plan(
         }
 
         // ── Heater allocation ───────────────────────────────────────────
-        if inputs.heater_mode != MilpLoadMode::MustNotRun {
-            let heat_kw = sol.y_heat[t] * inputs.p_heat_step_kw;
+        if inputs.assets.heater_mode != MilpLoadMode::MustNotRun {
+            let heat_kw = sol.y_heat[t] * inputs.assets.p_heat_step_kw;
             if heat_kw > 0.01 {
                 if let Some(ref hid) = heater_id {
                     let surplus_power_kw = surplus_remaining_kw.min(heat_kw);
@@ -219,7 +219,7 @@ pub(crate) fn translate_to_plan(
         }
 
         // ── Shiftable load allocations ──────────────────────────────────
-        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+        for (s, sl) in inputs.assets.shiftable_loads.iter().enumerate() {
             let power = sol.p_shiftable_kw[s][t];
             if power > 0.01 {
                 let surplus_power_kw = surplus_remaining_kw.min(power);
@@ -321,7 +321,7 @@ pub(crate) fn translate_to_plan(
         &mut slots,
         n,
         sol,
-        &inputs.a_ev,
+        &inputs.assets.a_ev,
         battery_cfg,
         ev_cfg,
         heat_cfg,

@@ -315,14 +315,14 @@ fn test_mode_opportunistic_has_no_deadline_constraint() {
     let ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);
     let inp = build_milp_inputs(&ctxs, &tariffs, &no_capacity(), &profile, now, &[], None);
     assert!(
-        inp.a_ev.iter().all(|&v| v),
+        inp.assets.a_ev.iter().all(|&v| v),
         "OPPORTUNISTIC ignores the departure deadline, mask {:?}",
-        inp.a_ev
+        inp.assets.a_ev
     );
     assert!(
-        inp.ev_obligations.is_empty(),
+        inp.assets.ev_obligations.is_empty(),
         "OPPORTUNISTIC has no core obligation, got {:?}",
-        inp.ev_obligations
+        inp.assets.ev_obligations
     );
 }
 

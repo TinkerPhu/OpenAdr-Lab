@@ -17,7 +17,7 @@ Key source files:
 | Concern | File |
 |---|---|
 | Entry point | `VEN/src/controller/milp_planner/mod.rs` |
-| Input tensors | `VEN/src/controller/milp_planner/inputs.rs` (the stage order and the one full spelling of `MilpInputs`), `input_stages.rs` (one function per field group: tariffs, forecasts, capacity limits, asset scalars, baseline override, budget warning) |
+| Input tensors | `VEN/src/controller/milp_planner/inputs.rs` (the stage order and the one full spelling of `MilpInputs`), `input_stages.rs` (one function per field group: tariffs, forecasts, capacity limits, asset scalars, baseline override, budget warning). `MilpInputs.assets` (`AssetScalars`) holds only what the code around the solve reads from the asset contexts (envelopes, diagnostics, result mapping); a parameter only the solve needs stays in the asset's own context. Planner tests state an asset the same way, as its context (`tests/fixtures.rs::SyntheticSite`), the battery's built by the real `Battery` |
 | Time grid | `VEN/src/entities/time_grid.rs` (`TimeGrid::from_zones`, `slot_at`: the one slot layout and the one "which slot holds this instant" rule, shared with the assets' MILP contexts and the plan-cycle inputs) |
 | Phase 1 solver | `VEN/src/controller/milp_planner/solver_phase1.rs` |
 | Phase 2 solver | `VEN/src/controller/milp_planner/solver_phase2.rs` |

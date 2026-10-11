@@ -15324,3 +15324,29 @@ yet, no history store configured, and a store that failed to answer. It now answ
 and a 500, and the card words each one differently. A browser scenario cannot produce a closed
 period (it needs a month boundary), so it asserts the "none yet" answer and the populated table is
 a UI unit test.
+
+## R-134: planner tests state an asset as its context, not through `MilpInputs` (refactor/r134-planner-fixtures)
+
+**What.** `MilpInputs` lost the 17 per-asset fields nothing in production read (battery energy,
+power and efficiency; EV power limits, extra-charge reward and trip drops; heater tank, demand,
+deadline and switching penalty). What production does read from the contexts is one nested value,
+`MilpInputs.assets` (`input_stages::AssetScalars`, 14 fields), filled by `asset_scalars` alone.
+Planner tests state assets on a `SyntheticSite` (`tests/fixtures.rs`): the grid side plus each
+asset's real MILP context, the battery's built by the real `Battery`; its `inputs()` derives the
+asset part through the production `asset_scalars`. `contexts_from_inputs` and
+`services/test_support/milp_mocks.rs` are deleted. `AssetScalars::ev_firm_kwh` /
+`ev_obligation_kwh` replace three copies of "energy an obligation needs above the live SoC".
+
+**Why.** The fields existed so tests could describe an asset on `MilpInputs` and have a helper
+turn that into mock contexts: the fixture direction was the reverse of production, which builds
+the inputs from the contexts.
+
+**Issues.** The register said 17 fields; the compiler, once the `#[allow(dead_code)]` was removed,
+listed 18 (the heater switching penalty too). The three `Mock*Ctx` types were line-for-line copies
+of the `AssetMilpContext` impls the real context types already have, and had drifted: the EV
+mock's `milp_params` dropped the trip drops. The recorded inputs golden
+(`tests/golden/milp_inputs.txt`) changed shape and was regenerated; a script compared old and new
+field by field over all 18 scenarios and found every kept field identical. The duplication ratchet
+tripped twice (one function a line longer, five more duplicated test windows); both were fixed by
+consolidating, not by raising the baseline. Left as is: `BatteryScalars` (the port's
+`milp_params`) is now read only by tests, which is the asset answering for itself, not a copy.

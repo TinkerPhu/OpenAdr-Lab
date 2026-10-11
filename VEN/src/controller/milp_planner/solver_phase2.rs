@@ -38,7 +38,7 @@ pub(crate) fn build_phase2_warm_start(
         iv.push((grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
     }
     if let Some(v) = &pool.heater {
-        let iy = inputs.heat_initial_y;
+        let iy = inputs.assets.heat_initial_y;
         for t in 0..n {
             let y = p1.y_heat[t];
             iv.push((v.y_heat[t], y));

@@ -63,22 +63,11 @@ pub(crate) fn build_plan_envelopes(
             // `ev-comfort-piecewise-core`: what the user asked for is the firm
             // requirement when there is one, else the energy their bids cover
             // (the bands' total) — there is no single "core" block any more.
-            // R-92: an obligation states a target SoC, so the firm energy is what
-            // it needs above the live reading — the largest such demand when more
-            // than one departure is queued.
-            let firm_kwh = inputs
-                .ev_obligations
-                .iter()
-                .map(|o| {
-                    ((o.target_soc_frac - inputs.soc_ev_init.unwrap_or(0.0))
-                        * inputs.ev_battery_kwh)
-                        .max(0.0)
-                })
-                .fold(0.0_f64, f64::max);
+            let firm_kwh = inputs.assets.ev_firm_kwh();
             let energy_needed_kwh = if firm_kwh > 0.0 {
                 firm_kwh
             } else {
-                inputs.ev_segments.iter().map(|s| s.kwh).sum()
+                inputs.assets.ev_segments.iter().map(|s| s.kwh).sum()
             };
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
@@ -123,7 +112,7 @@ pub(crate) fn build_plan_envelopes(
     // Heater envelope
     if let Some(target) = heater_target {
         if let Some(heat_cfg) = heat_cfg {
-            let energy_needed_kwh = inputs.e_heat_target_kwh;
+            let energy_needed_kwh = inputs.assets.e_heat_target_kwh;
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
                 let window_end = target.ready_by;
@@ -145,7 +134,7 @@ pub(crate) fn build_plan_envelopes(
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
                     power_min_kw: 0.0,
-                    power_max_kw: inputs.p_heat_step_kw * inputs.heat_n_stages as f64,
+                    power_max_kw: inputs.assets.p_heat_step_kw * inputs.assets.heat_n_stages as f64,
                     window_start,
                     window_end,
                     slots_available,
@@ -161,10 +150,10 @@ pub(crate) fn build_plan_envelopes(
 
     // Shiftable load envelopes
     for (s, sl) in shiftable_loads.iter().enumerate() {
-        if s >= inputs.shiftable_loads.len() {
+        if s >= inputs.assets.shiftable_loads.len() {
             break;
         }
-        let milp_sl = &inputs.shiftable_loads[s];
+        let milp_sl = &inputs.assets.shiftable_loads[s];
         let energy_needed_kwh = energy_kwh_from_min(sl.power_kw, sl.duration_min as f64);
         let window_start = sl.earliest_start.max(now);
         let window_end = sl.latest_end;

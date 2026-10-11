@@ -36,9 +36,8 @@ fn firm_shortfall(inputs: &MilpInputs, sol: &SolveOutput) -> Option<PlanWarning>
         .filter(|(_, &kwh)| kwh > 1e-3)
         .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(i, &kwh)| (i, kwh))?;
-    let ob = inputs.ev_obligations.get(idx)?;
-    let required =
-        ((ob.target_soc_frac - inputs.soc_ev_init.unwrap_or(0.0)) * inputs.ev_battery_kwh).max(0.0);
+    let ob = inputs.assets.ev_obligations.get(idx)?;
+    let required = inputs.assets.ev_obligation_kwh(ob);
     let delivered = (required - short).max(0.0);
     let whose = match ob.session_id {
         Some(id) => format!(" for request {id}"),

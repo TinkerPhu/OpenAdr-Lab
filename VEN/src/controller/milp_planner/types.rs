@@ -81,7 +81,6 @@ pub(crate) struct Phase2Weights {
 /// Created by `build_milp_inputs()`; consumed by `solve_milp_two_phase()` (Phase 3).
 /// All per-step `Vec<f64>` fields have length `n`.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // R-134: 17 per-asset fields (battery, EV, heater) only tests read; each asset's MILP context is what the solve uses
 pub(crate) struct MilpInputs {
     /// Number of planning steps.
     pub(crate) n: usize,
@@ -136,84 +135,11 @@ pub(crate) struct MilpInputs {
     /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty = feature disabled.
     pub(crate) penalty_rules: Vec<PenaltyRuleParams>,
 
-    // ── Battery (None when no battery asset present in profile) ──────────────
-    /// Nameplate capacity [kWh]
-    pub(crate) e_bat_nom_kwh: Option<f64>,
-    /// Initial SoC energy at call time [kWh]. Uses LIVE SimState SoC, NOT profile initial_soc.
-    pub(crate) e_bat_init_kwh: Option<f64>,
-    /// Operational lower bound = min_soc × capacity [kWh]
-    pub(crate) e_bat_min_kwh: Option<f64>,
-    /// Operational upper bound = capacity (no upper SoC cap today) [kWh]
-    pub(crate) e_bat_max_kwh: Option<f64>,
-    /// Max charge power [kW]
-    pub(crate) p_bat_ch_max_kw: Option<f64>,
-    /// Max discharge power [kW]
-    pub(crate) p_bat_dis_max_kw: Option<f64>,
-    /// One-way charge efficiency = √(round_trip_efficiency)
-    pub(crate) eff_bat_ch: Option<f64>,
-    /// One-way discharge efficiency = √(round_trip_efficiency)
-    pub(crate) eff_bat_dis: Option<f64>,
-
-    // ── EV (MustNotRun when EV absent or unplugged) ───────────────────────────
-    /// Per-step plugged-in availability mask. False forces p_ev[t] = 0.
-    pub(crate) a_ev: Vec<bool>,
-    pub(crate) ev_mode: MilpLoadMode,
-    /// Every charging obligation this EV must meet inside the horizon (R-92).
-    /// Empty = open horizon (plugged, no departure to charge for).
-    ///
-    /// Same type as `EvMilpContext::obligations`, moved across rather than
-    /// re-expressed: one definition of "a charging obligation" in the planner.
-    pub(crate) ev_obligations: Vec<super::asset_port::EvObligation>,
-    /// Usable pack size [kWh]; 0.0 when EV absent. Turns an obligation's target
-    /// SoC into the energy the diagnostics and envelopes report.
-    pub(crate) ev_battery_kwh: f64,
-    /// Max charge power [kW]; 0.0 when EV absent
-    pub(crate) p_ev_max_kw: f64,
-    /// Semi-continuous minimum charge power [kW] (EvConfig.min_charge_kw)
-    pub(crate) p_ev_min_kw: f64,
-    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
-    pub(crate) ev_segments: Vec<super::asset_port::EvEnergySegment>,
-    /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
-    pub(crate) e_ev_extra_max_kwh: f64,
-    /// One-time reward in EUR for committing to meet the core energy target (MayRun only; 0.0 otherwise).
-    /// Reward per kWh of extra opportunistic charging [€/kWh]
-    pub(crate) v_ev_extra_eur_kwh: f64,
-
-    // ── Heater (MustNotRun when heater absent) ────────────────────────────────
-    pub(crate) heater_mode: MilpLoadMode,
-    /// Deadline step index. None = no hard deadline (autonomous MayRun path).
-    pub(crate) t_heat_dead_step: Option<usize>,
-    /// Power per heater stage [kW] = max_kw / n_stages.
-    pub(crate) p_heat_step_kw: f64,
-    /// Number of heater stages (1 or 2).
-    pub(crate) heat_n_stages: u8,
-    /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
-    pub(crate) e_heat_init_kwh: f64,
-    /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
-    pub(crate) e_heat_max_kwh: f64,
-    /// Constant per-step thermal demand [kW]: draw_kw + k_loss × (T_mid − ambient).
-    pub(crate) q_heat_dem_kw: f64,
-    /// Target tank energy at deadline [kWh above T_min]. = e_heat_max_kwh in autonomous mode.
-    pub(crate) e_heat_target_kwh: f64,
-    /// Relay switching penalty [EUR/switch event].
-    pub(crate) lambda_heat_sw_eur: f64,
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
     pub(crate) w_tier_penalty_eur: f64,
-    /// Stage index the heater was at on the last real tick.
-    pub(crate) heat_initial_y: f64,
-
-    // ── Shiftable loads (Phase B) ────────────────────────────────────────────
-    /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
-    pub(crate) shiftable_loads: Vec<ShiftableLoadMilpContext>,
-
-    /// Live SoC of the EV at plan-build time [0.0..1.0].
-    /// Used to integrate the planned EV charge power into a SoC trajectory for
-    /// the timeline API. None when no EV asset is present or EV state is unavailable.
-    pub(crate) soc_ev_init: Option<f64>,
-    /// `ev-usage-forecast`: exogenous SoC changes to fold into the EV's
-    /// projected SoC trajectory (see `asset_port::ExogenousSocDrops`).
-    /// None when no EV is present or no usage forecast is configured.
-    pub(crate) ev_soc_drops: Option<super::asset_port::ExogenousSocDrops>,
+    /// What the asset contexts declare that the code around the solve reads (envelopes,
+    /// diagnostics, the result mapping). The solve itself reads each asset's own context.
+    pub(crate) assets: super::input_stages::AssetScalars,
 }
 
 /// Internal MILP descriptor for one shiftable load block. Implements

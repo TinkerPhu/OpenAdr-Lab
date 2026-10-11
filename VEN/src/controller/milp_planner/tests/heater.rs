@@ -20,9 +20,9 @@ fn heater_inputs_e_init_positive_above_min() {
     );
     let expected = 20.0 * 200.0 * 4.186 / 3600.0;
     assert!(
-        (inp.e_heat_init_kwh - expected).abs() < 0.01,
+        (inp.heater().e_init_kwh - expected).abs() < 0.01,
         "e_init={:.4} expected≈{:.4}",
-        inp.e_heat_init_kwh,
+        inp.heater().e_init_kwh,
         expected
     );
 }
@@ -44,9 +44,9 @@ fn heater_inputs_e_init_negative_below_min() {
         None,
     );
     assert!(
-        inp.e_heat_init_kwh < 0.0,
+        inp.heater().e_init_kwh < 0.0,
         "e_init {} should be negative when temp < T_min",
-        inp.e_heat_init_kwh
+        inp.heater().e_init_kwh
     );
 }
 
@@ -67,9 +67,9 @@ fn heater_inputs_e_max_formula() {
     );
     let expected = 40.0 * 200.0 * 4.186 / 3600.0;
     assert!(
-        (inp.e_heat_max_kwh - expected).abs() < 0.01,
+        (inp.heater().e_max_kwh - expected).abs() < 0.01,
         "e_max={:.4} expected≈{:.4}",
-        inp.e_heat_max_kwh,
+        inp.heater().e_max_kwh,
         expected
     );
 }
@@ -92,9 +92,9 @@ fn heater_inputs_q_dem_scalar() {
         None,
     );
     assert!(
-        (inp.q_heat_dem_kw - 5.0).abs() < 0.01,
+        (inp.heater().q_dem_kw - 5.0).abs() < 0.01,
         "q_dem={:.4} expected 5.0",
-        inp.q_heat_dem_kw
+        inp.heater().q_dem_kw
     );
 }
 
@@ -125,9 +125,9 @@ fn heater_inputs_e_target_from_heater_target() {
     );
     let expected = 30.0 * 200.0 * 4.186 / 3600.0;
     assert!(
-        (inp.e_heat_target_kwh - expected).abs() < 0.01,
+        (inp.assets.e_heat_target_kwh - expected).abs() < 0.01,
         "e_target={:.4} expected≈{:.4}",
-        inp.e_heat_target_kwh,
+        inp.assets.e_heat_target_kwh,
         expected
     );
 }
@@ -148,10 +148,10 @@ fn heater_inputs_autonomous_e_target_is_e_max() {
         None,
     );
     assert!(
-        (inp.e_heat_target_kwh - inp.e_heat_max_kwh).abs() < 1e-9,
+        (inp.assets.e_heat_target_kwh - inp.heater().e_max_kwh).abs() < 1e-9,
         "autonomous: e_target {} should equal e_max {}",
-        inp.e_heat_target_kwh,
-        inp.e_heat_max_kwh
+        inp.assets.e_heat_target_kwh,
+        inp.heater().e_max_kwh
     );
 }
 
@@ -170,7 +170,7 @@ fn heater_inputs_autonomous_mode_is_may_run() {
         None,
         None,
     );
-    assert_eq!(inp.heater_mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.assets.heater_mode, MilpLoadMode::MayRun);
 }
 
 #[test]
@@ -189,9 +189,9 @@ fn heater_inputs_switching_penalty_defaults() {
         None,
     );
     assert!(
-        (inp.lambda_heat_sw_eur - 0.01).abs() < 1e-9,
+        (inp.heater().lambda_sw_eur - 0.01).abs() < 1e-9,
         "lambda_sw={} expected 0.01",
-        inp.lambda_heat_sw_eur
+        inp.heater().lambda_sw_eur
     );
 }
 

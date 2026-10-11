@@ -512,7 +512,13 @@ fn scenarios_take_their_branches() {
     );
     assert!(s["ev_budget_too_low"].budget_warning.is_some());
     assert!(s["ev_budget_ample"].budget_warning.is_none());
-    assert_eq!(s["ev_deadline_and_two_shiftables"].shiftable_loads.len(), 2);
+    assert_eq!(
+        s["ev_deadline_and_two_shiftables"]
+            .assets
+            .shiftable_loads
+            .len(),
+        2
+    );
     assert_eq!(s["two_zones"].n, 9);
     assert_eq!(s["two_zones"].cum_s[9], 6 * 300 + 3 * 1800);
 }

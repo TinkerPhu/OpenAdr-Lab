@@ -8,29 +8,24 @@
 //! `SolveOutput::soc_ev` rather than calling a helper that no longer exists.
 
 use super::*;
-use crate::controller::milp_planner::asset_port::ExogenousSocDrops;
+use crate::controller::milp_planner::asset_port::{EvObligation, ExogenousSocDrops};
 
 /// An EV that is present throughout, cheap to charge, and obliged to reach a
 /// target — the shape every test here varies.
-fn ev_inputs(n: usize, battery_kwh: f64, soc_init_frac: f64) -> MilpInputs {
-    let mut inputs = make_solver_inputs(n, 0.0);
-    inputs.a_ev = vec![true; n];
-    inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.ev_battery_kwh = battery_kwh;
-    inputs.soc_ev_init = Some(soc_init_frac);
-    inputs.p_ev_max_kw = 7.2;
-    inputs.p_ev_min_kw = 0.0;
-    inputs
+fn ev_inputs(n: usize, battery_kwh: f64, soc_init_frac: f64) -> SyntheticSite {
+    let mut site = make_solver_site(n, 0.0);
+    site.ev.a_ev = vec![true; n];
+    site.ev.mode = EvMilpMode::MustRun;
+    site.ev.battery_kwh = battery_kwh;
+    site.ev.soc_init_frac = soc_init_frac;
+    site.ev.p_max_kw = 7.2;
+    site.ev.p_min_kw = 0.0;
+    site
 }
 
-fn solve(inputs: &MilpInputs) -> SolveOutput {
-    solve_phase1(
-        inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(inputs),
-        60.0,
-    )
-    .expect("solve must succeed")
+fn solve(site: &SyntheticSite) -> SolveOutput {
+    site.solve_phase1(&make_phase1_weights())
+        .expect("solve must succeed")
 }
 
 #[test]
@@ -38,10 +33,10 @@ fn soc_rises_by_the_energy_charged() {
     // 10 kWh pack, a firm 5 kWh by the last slot: the curve must end half a pack
     // above where it started, and never step down while charging.
     let n = 5;
-    let mut inputs = ev_inputs(n, 10.0, 0.0);
-    inputs.ev_obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
+    let mut site = ev_inputs(n, 10.0, 0.0);
+    site.ev.obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert_eq!(sol.soc_ev.len(), n + 1, "one SoC value per step boundary");
     assert!(
@@ -69,11 +64,11 @@ fn soc_never_exceeds_a_full_pack() {
     // Far more charging opportunity than the pack can hold, and a per-kWh reward
     // that would happily buy more: the ceiling is what stops it.
     let n = 10;
-    let mut inputs = ev_inputs(n, 5.0, 0.5);
-    inputs.e_ev_extra_max_kwh = 100.0;
-    inputs.v_ev_extra_eur_kwh = 10.0;
+    let mut site = ev_inputs(n, 5.0, 0.5);
+    site.ev.e_extra_max_kwh = 100.0;
+    site.ev.v_extra_eur_kwh = 10.0;
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     for (t, &soc_frac) in sol.soc_ev.iter().enumerate() {
         assert!(
@@ -87,15 +82,15 @@ fn soc_never_exceeds_a_full_pack() {
 fn a_predicted_drop_lands_at_its_own_slot() {
     // No obligation and no reward, so the only movement in the curve is the trip.
     let n = 5;
-    let mut inputs = ev_inputs(n, 10.0, 0.80);
+    let mut site = ev_inputs(n, 10.0, 0.80);
     let mut drop_frac_per_slot = vec![0.0; n];
     drop_frac_per_slot[2] = 0.30;
-    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+    site.ev.soc_drops = Some(ExogenousSocDrops {
         drop_frac_per_slot,
         floor_frac: 0.05,
     });
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         (sol.soc_ev[2] - 0.80).abs() < 1e-3,
@@ -120,13 +115,13 @@ fn an_oversized_drop_settles_at_the_floor_rather_than_going_infeasible() {
     // clamped this after the fact; the model now absorbs it with the penalised
     // `drop_unmet` slack, so the solve must still succeed and settle at the floor.
     let n = 3;
-    let mut inputs = ev_inputs(n, 10.0, 0.20);
-    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+    let mut site = ev_inputs(n, 10.0, 0.20);
+    site.ev.soc_drops = Some(ExogenousSocDrops {
         drop_frac_per_slot: vec![0.0, 0.90, 0.0],
         floor_frac: 0.05,
     });
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         (sol.soc_ev[2] - 0.05).abs() < 1e-3,
@@ -140,13 +135,13 @@ fn a_drop_the_pack_can_absorb_is_applied_in_full() {
     // The guard on the slack above: where the floor is not binding, the whole
     // drop must land. Otherwise `drop_unmet` would be a way to dodge a trip.
     let n = 3;
-    let mut inputs = ev_inputs(n, 10.0, 0.90);
-    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+    let mut site = ev_inputs(n, 10.0, 0.90);
+    site.ev.soc_drops = Some(ExogenousSocDrops {
         drop_frac_per_slot: vec![0.0, 0.40, 0.0],
         floor_frac: 0.05,
     });
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         (sol.soc_ev[2] - 0.50).abs() < 1e-3,
@@ -158,11 +153,11 @@ fn a_drop_the_pack_can_absorb_is_applied_in_full() {
 #[test]
 fn without_declared_drops_the_curve_only_reflects_charging() {
     let n = 4;
-    let mut inputs = ev_inputs(n, 10.0, 0.30);
-    inputs.ev_soc_drops = None;
-    inputs.ev_obligations = ev_firm_kwh(10.0, 0.30, 2.0, n - 1);
+    let mut site = ev_inputs(n, 10.0, 0.30);
+    site.ev.soc_drops = None;
+    site.ev.obligations = ev_firm_kwh(10.0, 0.30, 2.0, n - 1);
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         (sol.soc_ev[n] - 0.50).abs() < 1e-3,
@@ -176,10 +171,10 @@ fn without_declared_drops_the_curve_only_reflects_charging() {
 #[test]
 fn a_firm_obligation_is_met_at_its_deadline_step() {
     let n = 6;
-    let mut inputs = ev_inputs(n, 20.0, 0.0);
-    inputs.ev_obligations = ev_firm_kwh(20.0, 0.0, 10.0, 3);
+    let mut site = ev_inputs(n, 20.0, 0.0);
+    site.ev.obligations = ev_firm_kwh(20.0, 0.0, 10.0, 3);
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         sol.soc_ev[4] >= 0.5 - 1e-3,
@@ -198,8 +193,8 @@ fn two_obligations_are_each_met_at_their_own_step() {
     // The capability R-92 was opened for: two departures inside one horizon, each
     // with its own target, both binding.
     let n = 8;
-    let mut inputs = ev_inputs(n, 20.0, 0.0);
-    inputs.ev_obligations = vec![
+    let mut site = ev_inputs(n, 20.0, 0.0);
+    site.ev.obligations = vec![
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 2,
             target_soc_frac: 0.25,
@@ -212,7 +207,7 @@ fn two_obligations_are_each_met_at_their_own_step() {
         },
     ];
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     assert!(
         sol.soc_ev[3] >= 0.25 - 1e-3,
@@ -231,10 +226,10 @@ fn an_unreachable_obligation_reports_the_gap_instead_of_failing_the_solve() {
     // 7.2 kW for two slots cannot fill a 100 kWh pack. The old model pre-clamped
     // the requirement so the gap was invisible; the slack now carries it.
     let n = 2;
-    let mut inputs = ev_inputs(n, 100.0, 0.0);
-    inputs.ev_obligations = ev_firm_kwh(100.0, 0.0, 90.0, 1);
+    let mut site = ev_inputs(n, 100.0, 0.0);
+    site.ev.obligations = ev_firm_kwh(100.0, 0.0, 90.0, 1);
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     let short: f64 = sol.ev_shortfall_kwh.iter().copied().fold(0.0, f64::max);
     assert!(
@@ -252,11 +247,11 @@ fn an_unreachable_obligation_reports_the_gap_instead_of_failing_the_solve() {
 #[test]
 fn charging_while_away_is_never_scheduled() {
     let n = 6;
-    let mut inputs = ev_inputs(n, 20.0, 0.0);
-    inputs.a_ev = vec![true, true, false, false, true, true];
-    inputs.ev_obligations = ev_firm_kwh(20.0, 0.0, 5.0, n - 1);
+    let mut site = ev_inputs(n, 20.0, 0.0);
+    site.ev.a_ev = vec![true, true, false, false, true, true];
+    site.ev.obligations = ev_firm_kwh(20.0, 0.0, 5.0, n - 1);
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
 
     for t in [2usize, 3] {
         assert!(
@@ -284,20 +279,20 @@ fn charging_while_away_is_never_scheduled() {
 #[test]
 fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
     let n = 12;
-    let mut inputs = ev_inputs(n, 20.0, 0.50);
-    inputs.p_ev_max_kw = 2.0; // 1 h slots -> 2 kWh per slot
-                              // Firm obligation by slot 1: 2 kWh. The window 0..=1 can absorb at most 4 kWh.
-    inputs.ev_obligations = ev_firm_kwh(20.0, 0.50, 2.0, 1);
+    let mut site = ev_inputs(n, 20.0, 0.50);
+    site.ev.p_max_kw = 2.0; // 1 h slots -> 2 kWh per slot
+                            // Firm obligation by slot 1: 2 kWh. The window 0..=1 can absorb at most 4 kWh.
+    site.ev.obligations = ev_firm_kwh(20.0, 0.50, 2.0, 1);
     // Bands that would sell 10 kWh - half the pack - cheaply, exactly as
     // `ev_energy_segments` builds them all the way to a full pack.
-    inputs.ev_segments = vec![
+    site.ev.segments = vec![
         crate::controller::milp_planner::asset_port::EvEnergySegment {
             kwh: 10.0,
             eur_per_kwh: 5.0,
         },
     ];
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
     let total_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots
 
     assert!(
@@ -327,8 +322,8 @@ fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
 #[test]
 fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     let n = 12;
-    let mut inputs = ev_inputs(n, 20.0, 0.80);
-    inputs.ev_obligations = vec![
+    let mut site = ev_inputs(n, 20.0, 0.80);
+    site.ev.obligations = vec![
         crate::controller::milp_planner::asset_port::EvObligation {
             deadline_step: 1,
             target_soc_frac: 0.80,
@@ -343,12 +338,12 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     // The trip between them costs 30 % of a 20 kWh pack = 6 kWh.
     let mut drop_frac_per_slot = vec![0.0; n];
     drop_frac_per_slot[4] = 0.30;
-    inputs.ev_soc_drops = Some(ExogenousSocDrops {
+    site.ev.soc_drops = Some(ExogenousSocDrops {
         drop_frac_per_slot,
         floor_frac: 0.05,
     });
 
-    let sol = solve(&inputs);
+    let sol = solve(&site);
     let charged_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots
 
     assert!(
@@ -366,4 +361,32 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
         "nothing should be given up as shortfall here, got {:?}",
         sol.ev_shortfall_kwh
     );
+}
+
+/// R-134: the firm energy is the largest demand above the live SoC among the obligations, and
+/// an obligation already met demands nothing.
+#[test]
+fn ev_firm_kwh_is_the_largest_demand_above_the_live_soc() {
+    let mut site = ev_inputs(4, 50.0, 0.40);
+    assert_eq!(site.inputs().assets.ev_firm_kwh(), 0.0, "no obligation");
+
+    site.ev.obligations = [0.30, 0.60, 0.80]
+        .iter()
+        .enumerate()
+        .map(|(deadline_step, &target_soc_frac)| EvObligation {
+            deadline_step,
+            target_soc_frac,
+            session_id: None,
+        })
+        .collect();
+    let assets = site.inputs().assets;
+
+    let per_obligation: Vec<f64> = assets
+        .ev_obligations
+        .iter()
+        .map(|o| assets.ev_obligation_kwh(o))
+        .collect();
+    assert_eq!(per_obligation[0], 0.0, "already above 30 %");
+    assert!((per_obligation[1] - 10.0).abs() < 1e-9);
+    assert!((assets.ev_firm_kwh() - 20.0).abs() < 1e-9);
 }

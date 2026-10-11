@@ -585,12 +585,14 @@ fn run_planner_n48_empty_asset_contexts_no_panic() {
 // (b) EV in MustNotRun mode → no EV power in any slot
 #[test]
 fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
-    use crate::services::test_support::milp_mocks::MockEvCtx;
     let now = fixed_now();
     let profile = make_profile_n48();
     let n = 48_usize;
     let ev_ctx: Box<dyn crate::controller::milp_planner::AssetMilpContext> =
-        Box::new(MockEvCtx::must_not_run(n, 7.2));
+        Box::new(EvMilpContext {
+            p_max_kw: 7.2,
+            ..absent_ev(n)
+        });
     let plan = run_planner(
         vec![ev_ctx],
         &make_tariffs(0.25, 0.08, 300.0),
@@ -622,12 +624,11 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "duplicate AssetKind")]
 fn run_planner_duplicate_asset_kind_panics() {
-    use crate::services::test_support::milp_mocks::MockBatteryCtx;
     let now = fixed_now();
     let profile = make_profile_n48();
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![
-        Box::new(MockBatteryCtx::new(10.0, 5.0, 1.0, 5.0, 0.9487)),
-        Box::new(MockBatteryCtx::new(5.0, 2.5, 0.5, 3.0, 0.9487)), // duplicate Battery kind
+        Box::new(battery_ctx(10.0, 5.0, 1.0, 5.0, 0.9487)),
+        Box::new(battery_ctx(5.0, 2.5, 0.5, 3.0, 0.9487)), // duplicate Battery kind
     ];
     let _ = run_planner(
         ctxs,
@@ -649,12 +650,11 @@ fn run_planner_duplicate_asset_kind_panics() {
 fn run_planner_infeasible_constraints_fallback_no_panic() {
     use crate::controller::milp_interactions::MilpVarPool;
     use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
-    use crate::services::test_support::milp_mocks::MockBatteryCtx;
     use chrono::{DateTime, Utc};
     use good_lp::{Constraint, Expression, ProblemVariables};
 
     struct InfeasibleBatCtx {
-        inner: MockBatteryCtx,
+        inner: BatteryMilpContext,
     }
     impl AssetMilpContext for InfeasibleBatCtx {
         fn asset_id(&self) -> &str {
@@ -687,7 +687,7 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
                 .declare_pinned_vars_into_pool(n, winning, vars, pool);
         }
         fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
-            let mut cs = self.inner.constraints(pool, n, dt_h);
+            let mut cs = AssetMilpContext::constraints(&self.inner, pool, n, dt_h);
             // Contradiction: require p_ch[0] ≥ 9999 while battery bounds p_ch[0] ≤ 5 kW
             if let Some(bat) = &pool.bat {
                 if !bat.p_ch.is_empty() {
@@ -713,7 +713,7 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
     let now = fixed_now();
     let profile = make_profile_n48();
     let infeasible: Box<dyn AssetMilpContext> = Box::new(InfeasibleBatCtx {
-        inner: MockBatteryCtx::new(10.0, 5.0, 1.0, 5.0, 0.9487),
+        inner: battery_ctx(10.0, 5.0, 1.0, 5.0, 0.9487),
     });
     // run_planner catches the solver Err and returns a fallback plan — must not panic
     let plan = run_planner(

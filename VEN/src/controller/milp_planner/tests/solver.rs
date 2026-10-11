@@ -6,36 +6,31 @@ use super::*;
 /// alone — no firm obligation involved (`ev_obligations` stays empty).
 #[test]
 fn ev_may_run_charges_when_the_bid_exceeds_cost() {
-    let mut inputs = make_solver_inputs(4, 0.0);
-    inputs.a_ev = vec![true; 4];
-    inputs.ev_mode = MilpLoadMode::MayRun;
+    let mut site = make_solver_site(4, 0.0);
+    site.ev.a_ev = vec![true; 4];
+    site.ev.mode = EvMilpMode::MayRun;
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 0.0, 3);
-    inputs.e_ev_extra_max_kwh = 20.0;
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(0.0, 3);
+    site.ev.e_extra_max_kwh = 20.0;
     // tariff = 0.25, so 4 kWh costs up to 1 EUR; a 5 EUR/kWh bid clears it easily.
     let wanted_kwh = 4.0;
-    inputs.ev_segments = vec![
+    site.ev.segments = vec![
         crate::controller::milp_planner::asset_port::EvEnergySegment {
             kwh: wanted_kwh,
             eur_per_kwh: 5.0,
         },
     ];
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
     let ev_energy: f64 = out
         .p_ev_kw
         .iter()
-        .zip(inputs.dt_h.iter())
+        .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
         .sum();
     assert!(
@@ -47,13 +42,8 @@ fn ev_may_run_charges_when_the_bid_exceeds_cost() {
 #[test]
 fn solve_feasible_no_optional_assets() {
     // Minimal case: no battery, no EV, no heater. Import exactly covers base load.
-    let inputs = make_solver_inputs(4, 0.5); // base = 0.5 kW
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let site = make_solver_site(4, 0.5); // base = 0.5 kW
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
     for t in 0..4 {
@@ -74,13 +64,8 @@ fn solve_base_kw_flows_into_net_import() {
     // The baseline load is the sole non-controllable demand term in the power
     // balance — with no controllable asset able to serve it, it must show up
     // one-for-one as grid import.
-    let inputs = make_solver_inputs(4, 0.3);
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let site = make_solver_site(4, 0.3);
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
     for t in 0..4 {
@@ -95,28 +80,23 @@ fn solve_base_kw_flows_into_net_import() {
 #[test]
 fn solve_ev_must_run_meets_its_required_energy() {
     // A firm EV request: the optimizer must reach the obligation's target SoC by its deadline.
-    let mut inputs = make_solver_inputs(4, 0.0); // no base load
-    inputs.a_ev = vec![true; 4];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(4, 0.0); // no base load
+    site.ev.a_ev = vec![true; 4];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 0.0; // no semi-continuous (cleaner test)
-    set_ev_firm(&mut inputs, 4.0, 3);
-    inputs.e_ev_extra_max_kwh = 20.0;
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 0.0; // no semi-continuous (cleaner test)
+    site.set_ev_firm(4.0, 3);
+    site.ev.e_extra_max_kwh = 20.0;
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
     let ev_energy: f64 = out
         .p_ev_kw
         .iter()
-        .zip(inputs.dt_h.iter())
+        .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
         .sum();
     assert!(
@@ -132,22 +112,17 @@ fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
     // those slots stay at zero power; the reachable core energy is what the
     // remaining available slots can deliver. Verify the solve still succeeds and
     // leaves the masked slots dark.
-    let mut inputs = make_solver_inputs(4, 0.0);
+    let mut site = make_solver_site(4, 0.0);
     // Away for slots 1 and 2; only slot 0 (and slot 3, past the deadline) are home.
-    inputs.a_ev = vec![true, false, false, true];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    site.ev.a_ev = vec![true, false, false, true];
+    site.ev.mode = EvMilpMode::MustRun;
     // deadline inside the away window
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 7.4, 2); // exactly what the single available slot can deliver
-    inputs.e_ev_extra_max_kwh = 20.0;
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(7.4, 2); // exactly what the single available slot can deliver
+    site.ev.e_extra_max_kwh = 20.0;
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -176,21 +151,16 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
     // (`clamp_core_to_reachable_energy`), then the floor was pre-capped at a
     // `reachable_energy_kwh` estimate — either way the shortfall was something
     // outside the model had to re-derive.
-    let mut inputs = make_solver_inputs(4, 0.0);
-    inputs.a_ev = vec![true, false, false, true];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(4, 0.0);
+    site.ev.a_ev = vec![true, false, false, true];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 20.0, 2); // unreachable: only 7.4 kWh of window is left
-    inputs.e_ev_extra_max_kwh = 20.0;
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(20.0, 2); // unreachable: only 7.4 kWh of window is left
+    site.ev.e_extra_max_kwh = 20.0;
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(
         result.is_ok(),
         "an unreachable guarantee must still solve: {:?}",
@@ -200,7 +170,7 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
     let ev_energy: f64 = out
         .p_ev_kw
         .iter()
-        .zip(inputs.dt_h.iter())
+        .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
         .sum();
     assert!(
@@ -209,7 +179,8 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
          for is all the window allows; got {ev_energy:.4} kWh from {:?}",
         out.p_ev_kw
     );
-    let warnings = crate::controller::milp_planner::ev_diagnostics::ev_warnings(&inputs, &out);
+    let warnings =
+        crate::controller::milp_planner::ev_diagnostics::ev_warnings(&site.inputs(), &out);
     assert!(
         warnings
             .iter()
@@ -221,26 +192,21 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
 #[test]
 fn solve_battery_arbitrage() {
     // Battery should charge at cheap tariff (t=0,1) and discharge at expensive (t=2,3).
-    let mut inputs = make_solver_inputs(4, 1.0); // base = 1.0 kW
-                                                 // Cheap then expensive tariff
-    inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.30, 0.30];
+    let mut site = make_solver_site(4, 1.0); // base = 1.0 kW
+                                             // Cheap then expensive tariff
+    site.grid.c_imp_eur_kwh = vec![0.10, 0.10, 0.30, 0.30];
     // Add battery: init=0, can hold 5 kWh, eff=1
-    set_lossless_battery(&mut inputs, 5.0, 0.0, 0.0, 5.0);
+    site.battery = Some(lossless_battery(5.0, 0.0, 0.0, 5.0));
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
     // Both charge patterns are degenerate-optimalat 0.40 EUR. Verify objective value only.
     let obj: f64 = (0..4)
         .map(|t| {
-            inputs.c_imp_eur_kwh[t] * out.p_imp_kw[t] * inputs.dt_h[t]
-                - inputs.c_exp_eur_kwh[t] * out.p_exp_kw[t] * inputs.dt_h[t]
+            site.grid.c_imp_eur_kwh[t] * out.p_imp_kw[t] * site.grid.dt_h[t]
+                - site.grid.c_exp_eur_kwh[t] * out.p_exp_kw[t] * site.grid.dt_h[t]
         })
         .sum();
     assert!(
@@ -263,17 +229,17 @@ fn solve_battery_arbitrage() {
 /// `w_ghg > 0` makes that choice cheaper in the objective.
 #[test]
 fn battery_arbitrage_driven_by_ghg_intensity_alone() {
-    let mut inputs = make_solver_inputs(4, 1.0); // base = 1.0 kW
-    inputs.c_imp_eur_kwh = vec![0.20; 4]; // flat price — no price signal
-    inputs.g_imp_kgco2_kwh = vec![0.10, 0.10, 0.50, 0.50]; // clean then dirty grid
-    set_lossless_battery(&mut inputs, 5.0, 0.0, 0.0, 5.0);
+    let mut site = make_solver_site(4, 1.0); // base = 1.0 kW
+    site.grid.c_imp_eur_kwh = vec![0.20; 4]; // flat price — no price signal
+    site.grid.g_imp_kgco2_kwh = vec![0.10, 0.10, 0.50, 0.50]; // clean then dirty grid
+    site.battery = Some(lossless_battery(5.0, 0.0, 0.0, 5.0));
 
     let weights = Phase1Weights {
         w_ghg: 5.0, // large enough to dominate the flat price term
         ..make_phase1_weights()
     };
 
-    let result = solve_phase1(&inputs, &weights, &contexts_from_inputs(&inputs), 60.0);
+    let result = site.solve_phase1(&weights);
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -303,14 +269,12 @@ fn battery_arbitrage_driven_by_ghg_intensity_alone() {
 #[test]
 fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
     use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
-    use crate::services::test_support::milp_mocks::MockHeaterCtx;
 
     let n = 4;
-    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh import, dt_h=1.0, no load
+    let site = make_solver_site(n, 0.0); // flat 0.25 EUR/kWh import, dt_h=1.0, no load
 
     let make_ctxs = |co2_reward_eur_kwh: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        vec![Box::new(MockHeaterCtx {
-            ctx: HeaterMilpContext {
+        vec![Box::new(HeaterMilpContext {
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw: 1.0,
@@ -325,8 +289,7 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
                 anchored_kw: vec![],
                 comfort_full_reward_eur_kwh: 0.0,
                 comfort_full_co2_reward_eur_kwh: co2_reward_eur_kwh,
-            },
-        })]
+            })]
     };
 
     let p1w = make_phase1_weights();
@@ -338,17 +301,31 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
     // epsilon must cover running it in every slot (4 * 0.50 = 2.0 EUR) with margin.
     let epsilon = 2.5;
 
-    let out_no_reward =
-        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.0), 60.0, 60.0)
-            .expect("solver failed (no CO2 reward)")
-            .0;
+    let out_no_reward = solve_milp_two_phase(
+        &site.inputs(),
+        &p1w,
+        &p2w,
+        epsilon,
+        &make_ctxs(0.0),
+        60.0,
+        60.0,
+    )
+    .expect("solver failed (no CO2 reward)")
+    .0;
     // Reward (0.50) exceeds both the tier penalty (0.05) and the real energy
     // cost (0.50) is covered separately by epsilon — net friction benefit per
     // full-tier slot is unambiguous.
-    let out_with_reward =
-        solve_milp_two_phase(&inputs, &p1w, &p2w, epsilon, &make_ctxs(0.50), 60.0, 60.0)
-            .expect("solver failed (CO2 reward=0.50)")
-            .0;
+    let out_with_reward = solve_milp_two_phase(
+        &site.inputs(),
+        &p1w,
+        &p2w,
+        epsilon,
+        &make_ctxs(0.50),
+        60.0,
+        60.0,
+    )
+    .expect("solver failed (CO2 reward=0.50)")
+    .0;
 
     let at_full = |o: &SolveOutput| -> f64 {
         // "at full" is the top stage now, not a dedicated indicator.
@@ -376,23 +353,23 @@ fn ev_startup_penalty_produces_contiguous_block() {
     // p_ev_min_kw > 0 makes the semi-continuous constraint bind: z_ev_on=1 forces p_ev >= min,
     // so the solver cannot trivially keep z_ev_on=1 everywhere at zero charging cost.
     let n = 6;
-    let mut inputs = make_solver_inputs(n, 0.0);
-    inputs.a_ev = vec![true; n];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(n, 0.0);
+    site.ev.a_ev = vec![true; n];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
-    set_ev_firm(&mut inputs, 3.0 * 7.4, n - 1); // needs 3 full slots at 1 h each
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
+    site.set_ev_firm(3.0 * 7.4, n - 1); // needs 3 full slots at 1 h each
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
 
     let out = solve_milp_two_phase(
-        &inputs,
+        &site.inputs(),
         &make_phase1_weights(),
         &weights,
         1.0,
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
         60.0,
     )
@@ -417,19 +394,19 @@ fn battery_startup_penalty_minimises_active_restarts() {
     // With high startup penalty: battery should activate in contiguous blocks (≤2 startups:
     // one for charging, one for discharging).
     let n = 6;
-    let mut inputs = make_solver_inputs(n, 0.0);
-    inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.10, 0.30, 0.30, 0.30];
-    set_lossless_battery(&mut inputs, 6.0, 3.0, 0.6, 2.0);
+    let mut site = make_solver_site(n, 0.0);
+    site.grid.c_imp_eur_kwh = vec![0.10, 0.10, 0.10, 0.30, 0.30, 0.30];
+    site.battery = Some(lossless_battery(6.0, 3.0, 0.6, 2.0));
 
     let mut weights = make_phase2_weights();
     weights.c_bat_startup_eur = 0.5; // high penalty
 
     let out = solve_milp_two_phase(
-        &inputs,
+        &site.inputs(),
         &make_phase1_weights(),
         &weights,
         1.0,
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
         60.0,
     )
@@ -461,20 +438,21 @@ fn battery_startup_penalty_minimises_active_restarts() {
 #[test]
 fn phase2_feasible_with_pv_and_production_epsilon() {
     let n = 24;
-    let mut inputs = make_solver_inputs(n, 1.0);
-    inputs.p_pv_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
-    set_lossless_battery(&mut inputs, 10.0, 5.0, 1.0, 5.0);
+    let mut site = make_solver_site(n, 1.0);
+    site.grid.p_pv_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
+    site.battery = Some(lossless_battery(10.0, 5.0, 1.0, 5.0));
 
     let p1w = make_phase1_weights();
     let mut p2w = make_phase2_weights();
     p2w.c_bat_startup_eur = 0.01; // production default
 
-    let contexts = contexts_from_inputs(&inputs);
-    let phase1_sol = solve_phase1(&inputs, &p1w, &contexts, 60.0).expect("phase 1 solve failed");
+    let contexts = site.contexts();
+    let phase1_sol =
+        solve_phase1(&site.inputs(), &p1w, &contexts, 60.0).expect("phase 1 solve failed");
     let c_star = phase1_sol.objective_eur;
 
     let result = solve_phase2(
-        &inputs,
+        &site.inputs(),
         &p1w,
         &p2w,
         c_star,
@@ -495,23 +473,19 @@ fn phase2_feasible_with_pv_and_production_epsilon() {
 #[test]
 fn solve_power_balance_holds() {
     // For every step the power balance constraint must hold in the solution.
-    let mut inputs = make_solver_inputs(4, 1.5);
-    inputs.p_pv_kw = vec![2.0; 4]; // PV exceeds base, forces export
-                                   // Add battery so there are non-trivial flows to check
-    set_lossless_battery(&mut inputs, 5.0, 2.5, 0.5, 3.0);
+    let mut site = make_solver_site(4, 1.5);
+    site.grid.p_pv_kw = vec![2.0; 4]; // PV exceeds base, forces export
+                                      // Add battery so there are non-trivial flows to check
+    site.battery = Some(lossless_battery(5.0, 2.5, 0.5, 3.0));
 
-    let out = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    )
-    .expect("solver failed");
+    let out = site
+        .solve_phase1(&make_phase1_weights())
+        .expect("solver failed");
 
     for t in 0..4 {
         // p_imp + p_pv + p_bat_dis = p_base + p_bat_ch + p_exp (EV=0, heater=0)
-        let residual = out.p_imp_kw[t] + inputs.p_pv_kw[t] + out.p_bat_dis_kw[t]
-            - inputs.p_base_kw[t]
+        let residual = out.p_imp_kw[t] + site.grid.p_pv_kw[t] + out.p_bat_dis_kw[t]
+            - site.grid.p_base_kw[t]
             - out.p_bat_ch_kw[t]
             - out.p_exp_kw[t];
         assert!(
@@ -526,24 +500,24 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
     // 6 slots, flat tariff → solver is indifferent between e.g. [7.4,1.4,7.4,…] and [4.0,4.0,…].
     // High ramp penalty forces the solver to keep p_ev constant across slots.
     let n = 6;
-    let mut inputs = make_solver_inputs(n, 0.0);
-    inputs.a_ev = vec![true; n];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(n, 0.0);
+    site.ev.a_ev = vec![true; n];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 1.4;
-    set_ev_firm(&mut inputs, 3.0 * 7.4, n - 1); // needs ~3 full slots at max
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 1.4;
+    site.set_ev_firm(3.0 * 7.4, n - 1); // needs ~3 full slots at max
 
     let mut weights = make_phase2_weights();
     weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
     weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
 
     let out = solve_milp_two_phase(
-        &inputs,
+        &site.inputs(),
         &make_phase1_weights(),
         &weights,
         1.0,
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
         60.0,
     )
@@ -569,20 +543,20 @@ fn battery_ramp_penalty_produces_smooth_power() {
     // in expensive slots. With high ramp penalty the solver should keep charge and
     // discharge power levels constant across their respective blocks.
     let n = 6;
-    let mut inputs = make_solver_inputs(n, 1.0); // 1 kW base load
-    inputs.c_imp_eur_kwh = vec![0.08, 0.08, 0.08, 0.30, 0.30, 0.30];
-    set_lossless_battery(&mut inputs, 6.0, 3.0, 0.6, 3.0);
+    let mut site = make_solver_site(n, 1.0); // 1 kW base load
+    site.grid.c_imp_eur_kwh = vec![0.08, 0.08, 0.08, 0.30, 0.30, 0.30];
+    site.battery = Some(lossless_battery(6.0, 3.0, 0.6, 3.0));
 
     let mut weights = make_phase2_weights();
     weights.c_bat_startup_eur = 0.5; // keep blocks contiguous
     weights.c_bat_ramp_eur_kw = 1.0; // very high — force flat power
 
     let out = solve_milp_two_phase(
-        &inputs,
+        &site.inputs(),
         &make_phase1_weights(),
         &weights,
         1.0,
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
         60.0,
     )
@@ -629,25 +603,25 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
     // Battery has stored energy. EV must charge.
     // High c_bat_ev_coexist → battery should not discharge during EV-on slots.
     let n = 4;
-    let mut inputs = make_solver_inputs(n, 0.5);
-    inputs.p_pv_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
+    let mut site = make_solver_site(n, 0.5);
+    site.grid.p_pv_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
 
-    set_lossless_battery(&mut inputs, 10.0, 8.0, 0.0, 3.0);
+    site.battery = Some(lossless_battery(10.0, 8.0, 0.0, 3.0));
 
-    inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.a_ev = vec![true; n];
+    site.ev.mode = EvMilpMode::MustRun;
+    site.ev.a_ev = vec![true; n];
 
-    inputs.p_ev_max_kw = 7.4;
-    inputs.p_ev_min_kw = 1.4;
-    set_ev_firm(&mut inputs, 4.0 * 1.4, n - 1); // 5.6 kWh — easily met by PV alone
+    site.ev.p_max_kw = 7.4;
+    site.ev.p_min_kw = 1.4;
+    site.set_ev_firm(4.0 * 1.4, n - 1); // 5.6 kWh — easily met by PV alone
 
     let out = solve_phase1(
-        &inputs,
+        &site.inputs(),
         &Phase1Weights {
             c_bat_ev_coexist_eur_kwh: 10.0,
             ..make_phase1_weights()
         },
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
     )
     .expect("solver failed");
@@ -668,24 +642,24 @@ fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
     // PV surplus = 3 kW exactly matches heater mid tier.
     // With a high malus, importing 3 kW extra for full tier is penalised → planner picks mid.
     let n = 4;
-    let mut inputs = make_solver_inputs(n, 2.0); // base = 2 kW
-    inputs.p_pv_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
-    inputs.c_imp_eur_kwh = vec![0.0; n]; // free energy — removes tariff signal, malus must do the work
-    inputs.heater_mode = MilpLoadMode::MayRun;
-    inputs.p_heat_step_kw = 3.0;
-    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
-    inputs.e_heat_init_kwh = 2.0; // warm tank, not in thermal emergency
-    inputs.e_heat_max_kwh = 10.0;
-    inputs.e_heat_target_kwh = 10.0;
-    inputs.q_heat_dem_kw = 0.1;
+    let mut site = make_solver_site(n, 2.0); // base = 2 kW
+    site.grid.p_pv_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
+    site.grid.c_imp_eur_kwh = vec![0.0; n]; // free energy — removes tariff signal, malus must do the work
+    site.heater.mode = HeaterMilpMode::MayRun;
+    site.heater.p_step_kw = 3.0;
+    site.heater.n_stages = 2; // levels 0 / 3.0 / 6.0
+    site.heater.e_init_kwh = 2.0; // warm tank, not in thermal emergency
+    site.heater.e_max_kwh = 10.0;
+    site.heater.e_target_kwh = 10.0;
+    site.heater.q_dem_kw = 0.1;
 
     let out = solve_phase1(
-        &inputs,
+        &site.inputs(),
         &Phase1Weights {
             c_ctrl_imp_malus_eur_kwh: 0.25,
             ..make_phase1_weights()
         },
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
     )
     .expect("solver failed");
@@ -710,22 +684,22 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
     // Without malus the planner should run full tier in free slots to pre-store,
     // avoiding expensive grid heating later.
     let n = 4;
-    let mut inputs = make_solver_inputs(n, 2.0);
-    inputs.p_pv_kw = vec![5.0, 5.0, 0.0, 0.0]; // surplus=3 kW in first 2 slots only
-    inputs.c_imp_eur_kwh = vec![0.0, 0.0, 0.40, 0.40];
-    inputs.heater_mode = MilpLoadMode::MustRun;
-    inputs.t_heat_dead_step = Some(n - 1);
-    inputs.p_heat_step_kw = 3.0;
-    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
-    inputs.e_heat_init_kwh = 0.0; // cold tank — must heat
-    inputs.e_heat_max_kwh = 10.0;
-    inputs.e_heat_target_kwh = 6.0; // reachable in free slots at full tier
-    inputs.q_heat_dem_kw = 0.1;
+    let mut site = make_solver_site(n, 2.0);
+    site.grid.p_pv_kw = vec![5.0, 5.0, 0.0, 0.0]; // surplus=3 kW in first 2 slots only
+    site.grid.c_imp_eur_kwh = vec![0.0, 0.0, 0.40, 0.40];
+    site.heater.mode = HeaterMilpMode::MustRun;
+    site.heater.t_dead_step = Some(n - 1);
+    site.heater.p_step_kw = 3.0;
+    site.heater.n_stages = 2; // levels 0 / 3.0 / 6.0
+    site.heater.e_init_kwh = 0.0; // cold tank — must heat
+    site.heater.e_max_kwh = 10.0;
+    site.heater.e_target_kwh = 6.0; // reachable in free slots at full tier
+    site.heater.q_dem_kw = 0.1;
 
     let out = solve_phase1(
-        &inputs,
+        &site.inputs(),
         &make_phase1_weights(), // c_ctrl_imp_malus_eur_kwh = 0.0
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
     )
     .expect("solver failed");
@@ -747,30 +721,27 @@ fn heater_already_above_its_ceiling_still_solves() {
     // site solve failed at presolve. The ceiling binds what the plan adds, not the
     // state it starts from.
     use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
-    use crate::services::test_support::milp_mocks::MockHeaterCtx;
 
     let n = 4;
-    let inputs = make_solver_inputs(n, 0.5);
+    let site = make_solver_site(n, 0.5);
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> =
-        vec![Box::new(MockHeaterCtx {
-            ctx: HeaterMilpContext {
-                mode: HeaterMilpMode::MayRun,
-                t_dead_step: None,
-                p_step_kw: 1.5,
-                n_stages: 2,
-                e_init_kwh: 10.2,
-                e_max_kwh: 10.0,
-                q_dem_kw: 0.1,
-                e_target_kwh: 10.0,
-                lambda_sw_eur: 0.0,
-                initial_y: 0.0,
-                c_terminal_eur_kwh: 0.0,
-                anchored_kw: vec![],
-                comfort_full_reward_eur_kwh: 0.0,
-                comfort_full_co2_reward_eur_kwh: 0.0,
-            },
+        vec![Box::new(HeaterMilpContext {
+            mode: HeaterMilpMode::MayRun,
+            t_dead_step: None,
+            p_step_kw: 1.5,
+            n_stages: 2,
+            e_init_kwh: 10.2,
+            e_max_kwh: 10.0,
+            q_dem_kw: 0.1,
+            e_target_kwh: 10.0,
+            lambda_sw_eur: 0.0,
+            initial_y: 0.0,
+            c_terminal_eur_kwh: 0.0,
+            anchored_kw: vec![],
+            comfort_full_reward_eur_kwh: 0.0,
+            comfort_full_co2_reward_eur_kwh: 0.0,
         })];
-    let out = solve_phase1(&inputs, &make_phase1_weights(), &ctxs, 60.0)
+    let out = solve_phase1(&site.inputs(), &make_phase1_weights(), &ctxs, 60.0)
         .expect("a tank above its ceiling must not make the site infeasible");
     assert!(
         out.y_heat.iter().all(|&y| y < 0.5),
@@ -785,37 +756,44 @@ fn heater_terminal_reward_raises_end_state() {
     // Without c_terminal: no incentive to heat → tank stays empty.
     // With c_terminal=0.40 > tariff: filling gains 0.15 EUR/kWh → optimizer fills.
     use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
-    use crate::services::test_support::milp_mocks::MockHeaterCtx;
 
     let n = 4;
-    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
+    let site = make_solver_site(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
 
     let make_ctxs =
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-            vec![Box::new(MockHeaterCtx {
-                ctx: HeaterMilpContext {
-                    mode: HeaterMilpMode::MayRun,
-                    t_dead_step: None,
-                    p_step_kw: 1.0,
-                    n_stages: 2,
-                    e_init_kwh: 0.0,
-                    e_max_kwh: 4.0,
-                    q_dem_kw: 0.0,
-                    e_target_kwh: 4.0,
-                    lambda_sw_eur: 0.0,
-                    initial_y: 0.0,
-                    c_terminal_eur_kwh: c_terminal,
-                    anchored_kw: vec![],
-                    comfort_full_reward_eur_kwh: 0.0,
-                    comfort_full_co2_reward_eur_kwh: 0.0,
-                },
+            vec![Box::new(HeaterMilpContext {
+                mode: HeaterMilpMode::MayRun,
+                t_dead_step: None,
+                p_step_kw: 1.0,
+                n_stages: 2,
+                e_init_kwh: 0.0,
+                e_max_kwh: 4.0,
+                q_dem_kw: 0.0,
+                e_target_kwh: 4.0,
+                lambda_sw_eur: 0.0,
+                initial_y: 0.0,
+                c_terminal_eur_kwh: c_terminal,
+                anchored_kw: vec![],
+                comfort_full_reward_eur_kwh: 0.0,
+                comfort_full_co2_reward_eur_kwh: 0.0,
             })]
         };
 
-    let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
-        .expect("solver failed (no c_terminal)");
-    let out_yes = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.40), 60.0)
-        .expect("solver failed (c_terminal=0.40)");
+    let out_no = solve_phase1(
+        &site.inputs(),
+        &make_phase1_weights(),
+        &make_ctxs(0.0),
+        60.0,
+    )
+    .expect("solver failed (no c_terminal)");
+    let out_yes = solve_phase1(
+        &site.inputs(),
+        &make_phase1_weights(),
+        &make_ctxs(0.40),
+        60.0,
+    )
+    .expect("solver failed (c_terminal=0.40)");
 
     let e_end_no = out_no.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
     let e_end_yes = out_yes.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
@@ -831,32 +809,39 @@ fn battery_terminal_reward_raises_end_soc() {
     // Without c_terminal: no incentive to charge → battery stays empty.
     // With c_terminal=0.40 > tariff: charging gains 0.15 EUR/kWh → optimizer charges.
     use crate::controller::milp_planner::asset_port::BatteryMilpContext;
-    use crate::services::test_support::milp_mocks::MockBatteryCtx;
 
     let n = 4;
-    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
+    let site = make_solver_site(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
 
     let make_ctxs =
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-            vec![Box::new(MockBatteryCtx {
-                ctx: BatteryMilpContext {
-                    e_nom_kwh: 4.0,
-                    e_init_kwh: 0.0,
-                    e_min_kwh: 0.0,
-                    e_max_kwh: 4.0,
-                    p_ch_max_kw: 2.0,
-                    p_dis_max_kw: 2.0,
-                    eff_ch: 1.0,
-                    eff_dis: 1.0,
-                    c_terminal_eur_kwh: c_terminal,
-                },
+            vec![Box::new(BatteryMilpContext {
+                e_nom_kwh: 4.0,
+                e_init_kwh: 0.0,
+                e_min_kwh: 0.0,
+                e_max_kwh: 4.0,
+                p_ch_max_kw: 2.0,
+                p_dis_max_kw: 2.0,
+                eff_ch: 1.0,
+                eff_dis: 1.0,
+                c_terminal_eur_kwh: c_terminal,
             })]
         };
 
-    let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
-        .expect("solver failed (no c_terminal)");
-    let out_yes = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.40), 60.0)
-        .expect("solver failed (c_terminal=0.40)");
+    let out_no = solve_phase1(
+        &site.inputs(),
+        &make_phase1_weights(),
+        &make_ctxs(0.0),
+        60.0,
+    )
+    .expect("solver failed (no c_terminal)");
+    let out_yes = solve_phase1(
+        &site.inputs(),
+        &make_phase1_weights(),
+        &make_ctxs(0.40),
+        60.0,
+    )
+    .expect("solver failed (c_terminal=0.40)");
 
     // e_bat_kwh has len n+1; index n is the post-horizon end state
     let e_end_no = out_no.e_bat_kwh[n];
@@ -871,24 +856,24 @@ fn battery_terminal_reward_raises_end_soc() {
 fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
     // PV surplus > full tier — no import needed regardless. Malus slack = 0, both tiers are free.
     let n = 4;
-    let mut inputs = make_solver_inputs(n, 2.0);
-    inputs.p_pv_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
-    inputs.c_imp_eur_kwh = vec![0.0; n];
-    inputs.heater_mode = MilpLoadMode::MayRun;
-    inputs.p_heat_step_kw = 3.0;
-    inputs.heat_n_stages = 2; // levels 0 / 3.0 / 6.0
-    inputs.e_heat_init_kwh = 0.0;
-    inputs.e_heat_max_kwh = 10.0;
-    inputs.e_heat_target_kwh = 10.0;
-    inputs.q_heat_dem_kw = 0.1;
+    let mut site = make_solver_site(n, 2.0);
+    site.grid.p_pv_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
+    site.grid.c_imp_eur_kwh = vec![0.0; n];
+    site.heater.mode = HeaterMilpMode::MayRun;
+    site.heater.p_step_kw = 3.0;
+    site.heater.n_stages = 2; // levels 0 / 3.0 / 6.0
+    site.heater.e_init_kwh = 0.0;
+    site.heater.e_max_kwh = 10.0;
+    site.heater.e_target_kwh = 10.0;
+    site.heater.q_dem_kw = 0.1;
 
     let out = solve_phase1(
-        &inputs,
+        &site.inputs(),
         &Phase1Weights {
             c_ctrl_imp_malus_eur_kwh: 0.25,
             ..make_phase1_weights()
         },
-        &contexts_from_inputs(&inputs),
+        &site.contexts(),
         60.0,
     )
     .expect("solver failed");
@@ -912,20 +897,21 @@ fn marginal_cost_matches_tariff_when_nothing_binding() {
     // power-balance row should collapse to the plain per-kWh objective coefficient
     // on p_imp (§5.2 worked example row 1: "nothing else is binding").
     let n = 4;
-    let inputs = make_solver_inputs(n, 0.5);
-    let contexts = contexts_from_inputs(&inputs);
+    let site = make_solver_site(n, 0.5);
+    let contexts = site.contexts();
     let weights = make_phase1_weights();
 
-    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
-    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0)
+    let winning =
+        solve_phase1(&site.inputs(), &weights, &contexts, 60.0).expect("phase1 solve failed");
+    let marginal = solve_marginal_costs(&site.inputs(), &weights, &contexts, &winning, 60.0)
         .expect("dual LP solve failed");
 
     assert_eq!(marginal.len(), n);
     for (t, &m) in marginal.iter().enumerate() {
         assert!(
-            (m - inputs.c_imp_eur_kwh[t]).abs() < 1e-3,
+            (m - site.grid.c_imp_eur_kwh[t]).abs() < 1e-3,
             "slot {t}: expected marginal cost ≈ tariff {:.3}, got {:.6}",
-            inputs.c_imp_eur_kwh[t],
+            site.grid.c_imp_eur_kwh[t],
             m
         );
     }
@@ -943,24 +929,25 @@ fn marginal_cost_reflects_binding_import_violation_penalty() {
     // sitting at its own power bound does *not* by itself move this slot's dual —
     // only a constraint that p_imp itself participates in does.
     let n = 1;
-    let mut inputs = make_solver_inputs(n, 10.0);
-    inputs.p_imp_max_cont_kw = vec![2.0; n];
-    inputs.pen_imp_eur_kwh = 1.0;
+    let mut site = make_solver_site(n, 10.0);
+    site.grid.p_imp_max_cont_kw = vec![2.0; n];
+    site.grid.pen_imp_eur_kwh = 1.0;
 
-    let contexts = contexts_from_inputs(&inputs);
+    let contexts = site.contexts();
     let weights = make_phase1_weights(); // w_viol = 1.0
 
-    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
+    let winning =
+        solve_phase1(&site.inputs(), &weights, &contexts, 60.0).expect("phase1 solve failed");
     assert!(
         winning.s_imp_viol_kw[0] > 1.0,
         "expected the import violation slack to be active, got {:.3}",
         winning.s_imp_viol_kw[0]
     );
 
-    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0)
+    let marginal = solve_marginal_costs(&site.inputs(), &weights, &contexts, &winning, 60.0)
         .expect("dual LP solve failed");
 
-    let expected = inputs.c_imp_eur_kwh[0] + weights.w_viol * inputs.pen_imp_eur_kwh;
+    let expected = site.grid.c_imp_eur_kwh[0] + weights.w_viol * site.grid.pen_imp_eur_kwh;
     assert!(
         (marginal[0] - expected).abs() < 1e-3,
         "slot 0: expected marginal cost ≈ tariff + violation penalty {:.3}, got {:.6}",
@@ -977,27 +964,28 @@ fn marginal_cost_reflects_binding_import_violation_penalty() {
 #[test]
 fn marginal_cost_solves_for_an_ev_with_an_unpriced_firm_obligation() {
     let n = 4;
-    let mut inputs = make_solver_inputs(n, 0.5);
-    inputs.a_ev = vec![true; n];
-    inputs.ev_mode = MilpLoadMode::MustRun;
-    inputs.ev_battery_kwh = 10.0;
-    inputs.soc_ev_init = Some(0.0);
-    inputs.p_ev_max_kw = 7.2;
-    inputs.p_ev_min_kw = 1.4;
-    inputs.ev_segments = vec![]; // no comfort bid: the guarantee is the only band
-    inputs.e_ev_extra_max_kwh = 0.0;
-    inputs.ev_obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
+    let mut site = make_solver_site(n, 0.5);
+    site.ev.a_ev = vec![true; n];
+    site.ev.mode = EvMilpMode::MustRun;
+    site.ev.battery_kwh = 10.0;
+    site.ev.soc_init_frac = 0.0;
+    site.ev.p_max_kw = 7.2;
+    site.ev.p_min_kw = 1.4;
+    site.ev.segments = vec![]; // no comfort bid: the guarantee is the only band
+    site.ev.e_extra_max_kwh = 0.0;
+    site.ev.obligations = ev_firm_kwh(10.0, 0.0, 5.0, n - 1);
 
-    let contexts = contexts_from_inputs(&inputs);
+    let contexts = site.contexts();
     let weights = make_phase1_weights();
-    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
+    let winning =
+        solve_phase1(&site.inputs(), &weights, &contexts, 60.0).expect("phase1 solve failed");
     assert!(
         winning.z_ev_on.iter().any(|&z| z > 0.5),
         "the firm obligation must make the winning plan charge, z_ev_on {:?}",
         winning.z_ev_on
     );
 
-    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0);
+    let marginal = solve_marginal_costs(&site.inputs(), &weights, &contexts, &winning, 60.0);
     assert!(
         marginal.is_ok(),
         "the dual LP must solve the same EV model the winning plan did: {:?}",

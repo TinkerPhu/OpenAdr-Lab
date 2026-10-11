@@ -559,7 +559,7 @@ fn bench_ven5_heater_fragmentation() {
         profile,
     } = ven5_frag_instance();
     let mismatched = (0..inputs.n)
-        .filter(|&t| inputs.a_ev[t] != frag5::PLUGGED[t])
+        .filter(|&t| inputs.assets.a_ev[t] != frag5::PLUGGED[t])
         .count();
     println!(
         "
@@ -727,12 +727,12 @@ fn bench_ven1_ev_fragmentation() {
         profile,
     } = ven1_frag_instance();
     let mismatched = (0..inputs.n)
-        .filter(|&t| inputs.a_ev[t] != frag::PLUGGED[t])
+        .filter(|&t| inputs.assets.a_ev[t] != frag::PLUGGED[t])
         .count();
     println!(
         "
 -- ven-1 2026-10-05T19:40Z | obligations {} | plugged mask differs from live in {mismatched} slots",
-        inputs.ev_obligations.len()
+        inputs.assets.ev_obligations.len()
     );
     println!(
         "   runs/one-slot blips over 48 h; grid = import - export at the tariffs
