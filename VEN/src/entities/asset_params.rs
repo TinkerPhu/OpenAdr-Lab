@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ── Battery ─────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ impl Default for EvParams {
 /// Both modes simulate the same physics; they differ only in what the planner
 /// is told. One field rather than two `Option`s, so "both at once" is
 /// structurally impossible below the YAML layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum EvUsageMode {
     /// `usage_sim`: physics only. The planner learns nothing in advance (unless

@@ -9,7 +9,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import type { TraceEntry } from "../../api/types";
+import type { ControllerEvent } from "../../api/types";
 import { arbiterDecisionText } from "./arbiterDecisionText";
 import { requestTransitionText } from "./requestTransitionText";
 
@@ -24,7 +24,7 @@ function TypeChip({ type: t }: { type: string }) {
   return <Chip label={t} size="small" color={color} />;
 }
 
-function DetailCell({ entry }: { entry: TraceEntry }) {
+function DetailCell({ entry }: { entry: ControllerEvent }) {
   switch (entry.type) {
     case "OpenAdrArrived":
       return (
@@ -79,7 +79,7 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
 }
 
 type TraceTableProps = {
-  entries: TraceEntry[];
+  entries: ControllerEvent[];
 };
 
 export function TraceTable(props: TraceTableProps) {

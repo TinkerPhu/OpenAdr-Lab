@@ -5,11 +5,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::entities::design_vocabulary::UserNotificationSeverity;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct UserNotification {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,

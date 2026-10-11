@@ -9,18 +9,19 @@ import { deriveAssetSummaries, computeCostRateEurH, computeCo2RateGH } from "../
 import type { SimSnapshot, TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 import { makeGrid, makeAssets } from "./fixtures/sim";
+import { makeTariff } from "./fixtures/tariff";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const NOW = 1_000_000_000_000; // arbitrary epoch ms anchor
 const H = 3_600_000;           // one hour in ms
 
-const TARIFF: ApiTariffSnapshot = {
+const TARIFF: ApiTariffSnapshot = makeTariff({
   interval_start: new Date(NOW - H).toISOString(),
   import_tariff_eur_kwh: 0.25,
   export_tariff_eur_kwh: 0.05,
   co2_g_kwh: 300,
-};
+});
 
 /** Minimal SimSnapshot with just an ev asset */
 const sim: SimSnapshot = {

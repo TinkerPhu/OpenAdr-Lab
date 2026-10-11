@@ -1,5 +1,5 @@
 import { Stack, Typography } from "@mui/material";
-import type { CapacityCurve, CapacityCurvesResponse } from "../../../api/types";
+import type { CapacityCurve, CapacityCurves } from "../../../api/types";
 import type { NamedSample, TimestampedRow } from "@lab/charts/mergeSeries";
 import {
   mergeTimestampedSeries,
@@ -21,7 +21,7 @@ import { formatTs } from "./tariffChartShared";
 
 interface CapacityForecastChartProps {
   /** `GET /flexibility/capacity` — null before the first dispatcher tick. */
-  curves: CapacityCurvesResponse | null;
+  curves: CapacityCurves | null;
   height?: number;
 }
 

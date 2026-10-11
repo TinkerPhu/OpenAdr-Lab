@@ -7,11 +7,12 @@
 use axum::{extract::State, Json};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::app_ctx::MeasurementFeeds;
 use crate::entities::measurement::{resolve_measured_kw, MEASUREMENT_STALENESS_THRESHOLD};
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum MeasurementStatus {
     Ok,
@@ -20,7 +21,7 @@ pub enum MeasurementStatus {
     NotConfigured,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct SignalResponse {
     status: MeasurementStatus,
     is_fresh: bool,
@@ -31,7 +32,7 @@ pub struct SignalResponse {
     raw_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct MeasurementResponse {
     pv: SignalResponse,
     base_load: SignalResponse,

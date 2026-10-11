@@ -12,7 +12,7 @@ use crate::entities::plan::{SolveStatus, WarningKind};
 
 /// One asset's mean power (and, where applicable, SoC/temperature) over a
 /// 1-minute downsample window.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct TickSample {
     pub ts: DateTime<Utc>,
     pub asset_id: String,
@@ -39,7 +39,7 @@ pub struct TickSample {
 }
 
 /// Site-level grid exchange and prevailing tariff over a 1-minute downsample window.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct GridSample {
     pub ts: DateTime<Utc>,
     pub import_kw: f64,
@@ -64,7 +64,7 @@ pub struct GridSample {
 }
 
 /// An OpenADR event as accepted from the VTN.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct EventReceived {
     pub received_at: DateTime<Utc>,
     pub event_id: String,
@@ -73,7 +73,7 @@ pub struct EventReceived {
 }
 
 /// An OpenADR report as submitted to the VTN.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ReportSent {
     pub sent_at: DateTime<Utc>,
     pub report_type: String,
@@ -85,7 +85,7 @@ pub struct ReportSent {
 /// plus `total` — the full count matching the query's `[from, to)` filter
 /// regardless of paging. Lets a UI table show "X-Y of total" and enable/disable
 /// prev/next without a second round trip.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct HistoryPage<T> {
     pub rows: Vec<T>,
     pub total: u64,
@@ -106,7 +106,7 @@ pub struct LedgerPeriod {
 /// genuinely-future instant — `slots[0]` is what's currently being commanded, not a forecast
 /// about to be tested); `Far` = `slots.last()`, the longest-lead prediction the current horizon
 /// reaches. See `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ForecastLeadKind {
     Near,
@@ -139,7 +139,7 @@ impl std::str::FromStr for ForecastLeadKind {
 /// One forecast made for `target_ts`, recorded at `predicted_at` (the plan cycle that produced
 /// it). `actual_kw`/`actual_at` start `None` and are filled in once `history_sampler` flushes a
 /// downsampled window covering `target_ts` (`forecast-accuracy-tracking`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ForecastAccuracySample {
     pub asset_id: String,
     pub lead_kind: ForecastLeadKind,

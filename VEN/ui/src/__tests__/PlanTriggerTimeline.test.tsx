@@ -2,21 +2,22 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
-import type { TraceEntry } from "../api/types";
+import type { ControllerEvent } from "../api/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makePlanCycle(overrides: Partial<Extract<TraceEntry, { type: "PlanCycle" }>> = {}): TraceEntry {
+function makePlanCycle(overrides: Partial<Extract<ControllerEvent, { type: "PlanCycle" }>> = {}): ControllerEvent {
   return {
     type: "PlanCycle",
     ts: "2026-04-04T10:00:00Z",
     trigger_reason: "Periodic",
+    event_ids: [],
     total_slots: 48,
     ...overrides,
   };
 }
 
-function makeRateChange(overrides: Partial<Extract<TraceEntry, { type: "RateChange" }>> = {}): TraceEntry {
+function makeRateChange(overrides: Partial<Extract<ControllerEvent, { type: "RateChange" }>> = {}): ControllerEvent {
   return {
     type: "RateChange",
     ts: "2026-04-04T09:55:00Z",
@@ -27,7 +28,7 @@ function makeRateChange(overrides: Partial<Extract<TraceEntry, { type: "RateChan
   };
 }
 
-function makeCapacityChange(): TraceEntry {
+function makeCapacityChange(): ControllerEvent {
   return {
     type: "CapacityChange",
     ts: "2026-04-04T09:50:00Z",
@@ -36,7 +37,7 @@ function makeCapacityChange(): TraceEntry {
   };
 }
 
-function makeOpenAdrArrived(): TraceEntry {
+function makeOpenAdrArrived(): ControllerEvent {
   return {
     type: "OpenAdrArrived",
     ts: "2026-04-04T09:45:00Z",
@@ -49,10 +50,11 @@ function makeOpenAdrArrived(): TraceEntry {
   };
 }
 
-function makeOpenAdrExpired(): TraceEntry {
+function makeOpenAdrExpired(): ControllerEvent {
   return {
     type: "OpenAdrExpired",
     ts: "2026-04-04T09:40:00Z",
+    event_id: "evt-001",
     event_name: "SummerPeakDR",
   };
 }
@@ -68,7 +70,7 @@ describe("PlanTriggerTimeline", () => {
   });
 
   it("renders one chip per event", () => {
-    const events: TraceEntry[] = [makePlanCycle(), makeRateChange()];
+    const events: ControllerEvent[] = [makePlanCycle(), makeRateChange()];
     render(<PlanTriggerTimeline events={events} />);
     // Two chips expected
     const chips = document.querySelectorAll('[data-testid^="trigger-chip-"]');
@@ -148,7 +150,7 @@ describe("PlanTriggerTimeline", () => {
 
   it("renders events in oldest-left order (reverses newest-first input)", () => {
     // Input is newest-first (as returned by API ring buffer)
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       makePlanCycle({ ts: "2026-04-04T10:05:00Z", trigger_reason: "Periodic" }),  // newest
       makeRateChange({ ts: "2026-04-04T09:55:00Z" }),                             // older
     ];
@@ -161,7 +163,7 @@ describe("PlanTriggerTimeline", () => {
 
   it("collapses consecutive identical events into one chip with a count badge", () => {
     // Three consecutive RateChange events with the same tariff → one chip showing ×3
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       makeRateChange({ ts: "2026-04-04T10:02:00Z" }),  // newest
       makeRateChange({ ts: "2026-04-04T10:01:00Z" }),
       makeRateChange({ ts: "2026-04-04T10:00:00Z" }),  // oldest
@@ -175,7 +177,7 @@ describe("PlanTriggerTimeline", () => {
 
   it("does not collapse non-consecutive identical events", () => {
     // RateChange, PlanCycle, RateChange (same tariff but not adjacent) → 3 chips
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       makeRateChange({ ts: "2026-04-04T10:02:00Z" }),
       makePlanCycle({ ts: "2026-04-04T10:01:00Z" }),
       makeRateChange({ ts: "2026-04-04T10:00:00Z" }),
@@ -187,7 +189,7 @@ describe("PlanTriggerTimeline", () => {
 
   it("popover shows count and time range for grouped events", async () => {
     const user = userEvent.setup();
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       makeRateChange({ ts: "2026-04-04T10:01:00Z" }),
       makeRateChange({ ts: "2026-04-04T10:00:00Z" }),
     ];
@@ -198,7 +200,7 @@ describe("PlanTriggerTimeline", () => {
   });
 
   it("shows the pass and lever in an ArbiterDecision chip and popover", async () => {
-    const decision: TraceEntry = {
+    const decision: ControllerEvent = {
       type: "ArbiterDecision",
       ts: "2026-04-04T10:00:00Z",
       pass: "limit",
@@ -217,7 +219,7 @@ describe("PlanTriggerTimeline", () => {
   });
 
   it("renders all 6 event types without throwing", () => {
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       makePlanCycle(),
       makeRateChange(),
       makeCapacityChange(),
@@ -233,7 +235,7 @@ describe("PlanTriggerTimeline", () => {
   // R-130: a request's statuses arrive as `/user-requests` spells them; a created request has
   // no previous status (`null`), which reads as NEW rather than the word "null".
   it("labels a created request NEW and a later transition with both statuses", () => {
-    const events: TraceEntry[] = [
+    const events: ControllerEvent[] = [
       { type: "RequestTransition", ts: "2026-04-04T09:30:00Z", request_id: "req-001", asset_id: "ev", from_status: null, to_status: "ACTIVE" },
       { type: "RequestTransition", ts: "2026-04-04T10:30:00Z", request_id: "req-001", asset_id: "ev", from_status: "ACTIVE", to_status: "CANCELLED" },
     ];

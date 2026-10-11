@@ -15,13 +15,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// The site's grid direction — import or export. Named for the sustained
 /// commitment a capacity curve models (the two curves are not mirror images:
 /// the contributing asset set and bounds differ per direction), and the one
 /// import/export selector elsewhere too, e.g. which capacity limit
 /// `entities::capacity::tightest_capacity_limit` reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum CommitmentDirection {
     /// Sustained maximum import (site draws more from the grid).
@@ -59,7 +60,7 @@ pub enum LimitTier {
 /// shiftable load is placed). `power_kw` holds from this step's `elapsed_s`
 /// until the next step (or the horizon end) — a step function, not an
 /// interpolated line.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CapacityCurveStep {
     /// Seconds elapsed since `CapacityCurve::start`.
     pub elapsed_s: i64,
@@ -78,7 +79,7 @@ pub struct CapacityCurveStep {
 /// A closed-form power/duration/energy capacity forecast for one commitment
 /// direction, anchored at `start`. Not cached or treated as binding across
 /// ticks — recompute fresh whenever a fresh answer is needed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CapacityCurve {
     pub direction: CommitmentDirection,
     pub start: DateTime<Utc>,
@@ -90,7 +91,7 @@ pub struct CapacityCurve {
 /// `GET /flexibility/capacity` response body. `start` is the instant both
 /// curves are anchored at: the per-tick `now`, or, for a `?start=` request,
 /// the plan slot boundary the requested start snapped down to.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CapacityCurves {
     pub start: DateTime<Utc>,
     pub import: CapacityCurve,

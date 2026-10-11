@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
 import type {
-  CapacityCurvesResponse,
+  CapacityCurves,
   SiteFlexibilityEnvelope,
   SiteFlexibilitySample,
   SiteFlexibilityForecastSlot,
@@ -18,7 +18,7 @@ import type {
 const { chartProps, curvesAtCalls, curvesAtResponse } = vi.hoisted(() => ({
   chartProps: [] as Array<Record<string, unknown>>,
   curvesAtCalls: [] as Array<number | null>,
-  curvesAtResponse: { current: null as ((startMs: number) => CapacityCurvesResponse) | null },
+  curvesAtResponse: { current: null as ((startMs: number) => CapacityCurves) | null },
 }));
 
 vi.mock("../components/controller/charts/SiteHeadroomChart", () => ({
@@ -196,7 +196,7 @@ describe("GridHeadroomCell — click moves the commitment start", () => {
     up_kw: -3,
     down_kw: 4,
   }));
-  const curvesAnchoredAt = (startMs: number): CapacityCurvesResponse => {
+  const curvesAnchoredAt = (startMs: number): CapacityCurves => {
     const start = new Date(startMs).toISOString();
     return {
       start,
@@ -206,11 +206,11 @@ describe("GridHeadroomCell — click moves the commitment start", () => {
   };
   const perTick = curvesAnchoredAt(nowMs);
   // Stands in for the server: it, not the cell, snaps a requested time down to its plan slot.
-  const serverAnswer = (requestedMs: number): CapacityCurvesResponse =>
+  const serverAnswer = (requestedMs: number): CapacityCurves =>
     curvesAnchoredAt(slotStartsMs.filter((s) => s <= requestedMs).pop() ?? nowMs);
 
   const lastChart = () => chartProps[chartProps.length - 1] as {
-    capacity: CapacityCurvesResponse | null;
+    capacity: CapacityCurves | null;
     commitmentStartMs: number | null;
     onCursorClick?: (tsMs: number) => void;
   };

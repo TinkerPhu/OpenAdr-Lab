@@ -6,11 +6,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Generic, supplier-agnostic sky-condition vocabulary. Each MQTT adapter
 /// translates its own supplier's icon/description code into this shared set
 /// — the translation table lives with the adapter, never here.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SkyCondition {
     Clear,
@@ -26,7 +27,7 @@ pub enum SkyCondition {
 }
 
 /// One hour of forecast, as delivered by whichever supplier is configured.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct WeatherForecastSample {
     /// Hour this sample is *for* (not when it was fetched).
     pub valid_at: DateTime<Utc>,
@@ -49,7 +50,7 @@ pub struct WeatherForecastSample {
 }
 
 /// A full forecast pull: one fetch, many hourly samples, tied to a location.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct WeatherForecast {
     pub source_id: String, // e.g. "srf_meteo"
     pub location: GeoPosition,
@@ -58,7 +59,7 @@ pub struct WeatherForecast {
     pub samples: Vec<WeatherForecastSample>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 pub struct GeoPosition {
     pub latitude_deg: f64,
     pub longitude_deg: f64,

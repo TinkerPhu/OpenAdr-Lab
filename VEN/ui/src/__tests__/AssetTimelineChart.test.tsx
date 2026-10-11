@@ -48,7 +48,7 @@ vi.mock("recharts", () => ({
 
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { assetChartSpec } from "../components/controller/assetChartSpecs";
-import type { ForecastAccuracySample } from "../api/types";
+import type { ForecastAccuracyRow } from "../api/types";
 
 const now = new Date("2026-01-01T12:00:00Z").getTime();
 const pvShadings = assetChartSpec("pv").shadings;
@@ -59,7 +59,7 @@ function point(offsetMs: number, values: Record<string, number>): AssetTimelineP
   return { ts: now + offsetMs, values };
 }
 
-function forecastSample(leadKind: "near" | "far", targetTs: number): ForecastAccuracySample {
+function forecastSample(leadKind: "near" | "far", targetTs: number): ForecastAccuracyRow {
   return {
     asset_id: "pv",
     lead_kind: leadKind,

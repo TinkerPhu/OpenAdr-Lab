@@ -10,7 +10,7 @@ import {
 } from "@lab/charts/chartLayout";
 import type { AssetTimelinePoint } from "./types";
 import type {
-  CapacityCurvesResponse,
+  CapacityCurves,
   SiteFlexibilityEnvelope,
   SiteFlexibilitySample,
   SiteFlexibilityForecastSlot,
@@ -24,7 +24,7 @@ interface GridHeadroomCellProps {
   envelope: SiteFlexibilityEnvelope | null | undefined;
   history: SiteFlexibilitySample[];
   forecast: SiteFlexibilityForecastSlot[];
-  capacity?: CapacityCurvesResponse | null;
+  capacity?: CapacityCurves | null;
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
   extended: boolean;

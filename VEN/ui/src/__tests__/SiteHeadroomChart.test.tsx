@@ -29,7 +29,7 @@ vi.mock("@lab/charts/TimeSeriesChart", () => ({
 import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
 import type { AssetTimelinePoint } from "../components/controller/types";
 import type {
-  CapacityCurvesResponse,
+  CapacityCurves,
   SiteFlexibilitySample,
   SiteFlexibilityForecastSlot,
 } from "../api/types";
@@ -203,7 +203,7 @@ describe("SiteHeadroomChart — capacity curve overlay starts exactly at now, no
       { ts: nowMs, values: { power_kw: 2.0 } },
       { ts: nowMs + 300_000, values: { power_kw: 2.0 } },
     ];
-    const capacity: CapacityCurvesResponse = {
+    const capacity: CapacityCurves = {
       start: new Date(nowMs).toISOString(),
       import: {
         direction: "import",

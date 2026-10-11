@@ -8,6 +8,7 @@ import {
 } from "../components/controller/tariffBuilders";
 import type { TariffSnapshot as ApiTariffSnapshot, CapacitySnapshot as ApiCapacitySnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
+import { makeTariff } from "./fixtures/tariff";
 
 // ─── buildTariffPricePoints ───────────────────────────────────────────────────
 
@@ -15,6 +16,7 @@ describe("buildTariffPricePoints", () => {
   function makeTariff(overrides: Partial<ApiTariffSnapshot> = {}): ApiTariffSnapshot {
     return {
       interval_start: "2026-01-01T10:00:00Z",
+      interval_end: new Date(new Date("2026-01-01T10:00:00Z").getTime() + 3_600_000).toISOString(),
       import_tariff_eur_kwh: 0.25,
       export_tariff_eur_kwh: 0.10,
       co2_g_kwh: 350,
@@ -65,8 +67,11 @@ describe("buildCapacityLimitPoints", () => {
   function makeCapacitySnapshot(overrides: Partial<ApiCapacitySnapshot> = {}): ApiCapacitySnapshot {
     return {
       interval_start: "2026-01-01T10:00:00Z",
+      interval_end: new Date(new Date("2026-01-01T10:00:00Z").getTime() + 3_600_000).toISOString(),
       import_limit_kw: 5.0,
       export_limit_kw: 3.0,
+      import_limit_event_id: null,
+      export_limit_event_id: null,
       ...overrides,
     };
   }
@@ -157,6 +162,7 @@ function makeTariffSnapshot(
 ): ApiTariffSnapshot {
   return {
     interval_start: new Date(intervalStartMs).toISOString(),
+    interval_end: new Date(new Date(new Date(intervalStartMs).toISOString()).getTime() + 3_600_000).toISOString(),
     import_tariff_eur_kwh: importEurKwh,
     export_tariff_eur_kwh: exportEurKwh,
     co2_g_kwh: co2GKwh,
@@ -298,12 +304,12 @@ describe("enrichAllAssetTimelines", () => {
 
   it("PV export: negative cost_rate (revenue) using export_tariff", () => {
     // PV generates 5 kW → power_kw = -5; export tariff = 0.06
-    const tariffs = [{
+    const tariffs = [makeTariff({
       interval_start: new Date(100).toISOString(),
       import_tariff_eur_kwh: 0.20,
       export_tariff_eur_kwh: 0.06,
       co2_g_kwh: 300,
-    }];
+    })];
     const timelines = makeAllTimelines(0, -5.0, -5.0);
     const result = enrichAllAssetTimelines(timelines, tariffs);
     // pv power_kw = -5; cost = -5 × 0.06 = -0.30
@@ -347,12 +353,12 @@ describe("enrichAllAssetTimelines", () => {
 
   it("snaps sub-1W export power to 0 (tiny PV trickle)", () => {
     // PV produces 0.0005 kW (half a watt — below snap threshold)
-    const tariffs = [{
+    const tariffs = [makeTariff({
       interval_start: new Date(100).toISOString(),
       import_tariff_eur_kwh: 0.20,
       export_tariff_eur_kwh: 0.06,
       co2_g_kwh: 300,
-    }];
+    })];
     const timelines = makeAllTimelines(0, -0.0005, -0.0005);
     const result = enrichAllAssetTimelines(timelines, tariffs);
     expect(result["pv"][0].values?.["cost_rate_eur_h"]).toBe(0);
@@ -386,18 +392,18 @@ describe("enrichAllAssetTimelines", () => {
 describe("merge and sort tariff + power points", () => {
   it("sorts combined points by ts", () => {
     const tariffPoints = buildTariffPricePoints([
-      {
+      makeTariff({
         interval_start: new Date(100).toISOString(),
         import_tariff_eur_kwh: 0.2,
         export_tariff_eur_kwh: null,
         co2_g_kwh: null,
-      },
-      {
+      }),
+      makeTariff({
         interval_start: new Date(300).toISOString(),
         import_tariff_eur_kwh: 0.3,
         export_tariff_eur_kwh: null,
         co2_g_kwh: null,
-      },
+      }),
     ]);
     const powerPoints = buildPowerPoints([{ ts: 200, values: { power_kw: 5.0 } }]);
     const merged = [...tariffPoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
@@ -407,12 +413,12 @@ describe("merge and sort tariff + power points", () => {
 
   it("tariff point has price fields set and null power; power point has power fields set and null prices", () => {
     const tariffPoints = buildTariffPricePoints([
-      {
+      makeTariff({
         interval_start: new Date(100).toISOString(),
         import_tariff_eur_kwh: 0.2,
         export_tariff_eur_kwh: 0.1,
         co2_g_kwh: 350,
-      },
+      }),
     ]);
     const powerPoints = buildPowerPoints([
       { ts: 200, values: { cost_rate_eur_h: 0.6, power_kw: 4.0 } },

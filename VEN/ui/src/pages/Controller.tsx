@@ -4,7 +4,7 @@ import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema, useFlexibility, useFlexibilityHistory, useFlexibilityForecast, useCapacityCurves } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller/types";
-import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller/dataBuilders";
+import { deriveAssetSummaries, deriveTariffConditions } from "../components/controller/dataBuilders";
 import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
 import { AssetCell } from "../components/controller/AssetCell";
 import { PinnedZone } from "../components/controller/PinnedZone";
@@ -126,7 +126,7 @@ export function ControllerPage() {
   const tariffSnapshot = useMemo(() => {
     if (!sim) return null;
     // eslint-disable-next-line react-hooks/purity -- intentional: passes current wall time into pure snapshot derivation
-    return deriveTariffSnapshot(sim, tariffs, Date.now());
+    return deriveTariffConditions(sim, tariffs, Date.now());
   }, [sim, tariffs]);
 
   if (simLoading) {

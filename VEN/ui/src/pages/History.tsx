@@ -15,7 +15,7 @@ import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomC
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import { assetChartSpec } from "../components/controller/assetChartSpecs";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
-import type { ForecastAccuracySample, SiteFlexibilitySample } from "../api/types";
+import type { ForecastAccuracyRow, SiteFlexibilitySample } from "../api/types";
 
 /** History rows are one-minute means (`history_sampling.rs`). Rows further apart than this
  * mean the VEN was not sampling — a shading must not paint a state across that hole. */
@@ -108,7 +108,7 @@ export function HistoryPage() {
   const reports = reportsPage.rows;
   const { data: pvForecast = [] } = pvForecastQuery;
   const { data: baseLoadForecast = [] } = baseLoadForecastQuery;
-  const forecastByAsset: Record<string, ForecastAccuracySample[]> = {
+  const forecastByAsset: Record<string, ForecastAccuracyRow[]> = {
     pv: pvForecast,
     base_load: baseLoadForecast,
   };

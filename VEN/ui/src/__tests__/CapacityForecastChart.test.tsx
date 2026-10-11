@@ -20,7 +20,7 @@ vi.mock("@lab/charts/TimeSeriesChart", () => ({
 }));
 
 import { CapacityForecastChart } from "../components/controller/charts/CapacityForecastChart";
-import type { CapacityCurvesResponse } from "../api/types";
+import type { CapacityCurves } from "../api/types";
 
 describe("CapacityForecastChart — empty state before first tick", () => {
   it("shows a waiting message and renders no chart when curves is null", () => {
@@ -38,7 +38,7 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
   it("forwards import and export series with stepAfter type, and the curve's own step points", () => {
     const start = "2026-08-20T12:00:00.000Z";
     const startMs = new Date(start).getTime();
-    const curves: CapacityCurvesResponse = {
+    const curves: CapacityCurves = {
       start,
       import: {
         direction: "import",
@@ -94,7 +94,7 @@ describe("CapacityForecastChart — both directions rendered as step lines", () 
 
   it("shows each direction's cumulative energy total", () => {
     const start = "2026-08-20T12:00:00.000Z";
-    const curves: CapacityCurvesResponse = {
+    const curves: CapacityCurves = {
       start,
       import: {
         direction: "import",

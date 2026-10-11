@@ -1,12 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use lab_core::time_window::TimeWindow;
 
 /// Capacity state in force now, derived from the listed OpenADR events
 /// (`controller::openadr_interface::parse_capacity_state`, GB-48).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct OadrCapacityState {
     /// Import limit in force at the last poll (kW); None = no limit now. A
     /// limit scheduled for later is in `CapacitySnapshot`s, not here.
@@ -153,7 +154,7 @@ mod injected_limit_tests {
 /// payloads (the OpenADR 3.1 "Dynamic Operating Envelope", User Guide §8.10.1),
 /// priority-resolved and non-overlapping. The schedule is the single source
 /// for which limit applies when — read it through `tightest_capacity_limit`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CapacitySnapshot {
     pub interval_start: DateTime<Utc>,
     #[serde(skip_serializing)]
@@ -211,7 +212,7 @@ pub fn tightest_capacity_limit(
 /// import cap to 0 over the window (soft constraint — unavoidable base load
 /// becomes a penalized violation with a PlanWarning, never infeasibility);
 /// export is left untouched since the spec prescribes nothing for it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct AlertWindow {
     pub alert_type: String,
     pub start: DateTime<Utc>,
@@ -232,7 +233,7 @@ pub struct AlertWindow {
 ///       violation slack, penalized + warned),
 ///   3 = severe — import cap 0, same as the WP3.1 alert path.
 /// Overlaps: highest level wins per slot; alert windows override everything.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct SimpleWindow {
     pub level: u8,
     pub start: DateTime<Utc>,
@@ -247,7 +248,7 @@ pub struct SimpleWindow {
 /// bypassing the plan. The planner keeps running; normal plan-following
 /// resumes when the window ends. Precedence (decision): an active alert
 /// window wins over dispatch — safety over instruction.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct DispatchWindow {
     pub setpoint_kw: f64,
     pub start: DateTime<Utc>,
@@ -256,7 +257,7 @@ pub struct DispatchWindow {
 }
 
 /// Pending report obligation derived from OpenADR event's reportDescriptors (§5.3).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct OadrReportObligation {
     pub id: Uuid,
     pub event_id: String,

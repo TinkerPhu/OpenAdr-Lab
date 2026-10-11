@@ -8,7 +8,7 @@ import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "@lab/charts/chartLayout";
-import type { TariffSnapshot, AssetTimelinePoint } from "./types";
+import type { TariffConditions, AssetTimelinePoint } from "./types";
 import { TariffEnvelopeChart } from "./charts/TariffEnvelopeChart";
 import type { ZoneDef } from "../../api/types";
 import { useTariffs, useCapacitySchedule } from "../../api/hooks";
@@ -18,7 +18,7 @@ import {
 import { formatFixedOrDash } from "@lab/charts/unitFormat";
 
 interface GridTariffCellProps {
-  snapshot: TariffSnapshot;
+  snapshot: TariffConditions;
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
   extended: boolean;

@@ -5,8 +5,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct ReportSubmissionRecord {
     pub report_name: Option<String>,
     pub event_id: Option<String>,

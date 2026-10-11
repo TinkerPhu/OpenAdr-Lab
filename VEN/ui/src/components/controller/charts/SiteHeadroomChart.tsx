@@ -1,7 +1,7 @@
 import { renderTimeMarkerLine } from "@lab/charts/NowLine";
 import type { AssetTimelinePoint } from "../types";
 import type {
-  CapacityCurvesResponse,
+  CapacityCurves,
   SiteFlexibilitySample,
   SiteFlexibilityForecastSlot,
 } from "../../../api/types";
@@ -38,7 +38,7 @@ interface SiteHeadroomChartProps {
    * dispatcher tick or wherever unavailable; optional so this component still works
    * without it. See this component's own doc comment for how these curves relate to
    * the achievable-range band. */
-  capacity?: CapacityCurvesResponse | null;
+  capacity?: CapacityCurves | null;
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;

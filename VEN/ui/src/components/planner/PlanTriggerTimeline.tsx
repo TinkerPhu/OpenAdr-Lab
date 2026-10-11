@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import {
   Badge, Box, Chip, Popover, Stack, Typography,
 } from "@mui/material";
-import type { TraceEntry } from "../../api/types";
+import type { ControllerEvent } from "../../api/types";
 import { arbiterDecisionText, isUnresolved } from "./arbiterDecisionText";
 import { requestTransitionText } from "./requestTransitionText";
 
@@ -10,7 +10,7 @@ import { requestTransitionText } from "./requestTransitionText";
 
 type ChipProps = { label: string; color: "default" | "primary" | "secondary" | "info" | "success" | "warning" | "error" };
 
-function chipFor(event: TraceEntry): ChipProps {
+function chipFor(event: ControllerEvent): ChipProps {
   switch (event.type) {
     case "PlanCycle": {
       const colorMap: Record<string, ChipProps["color"]> = {
@@ -53,9 +53,9 @@ function chipFor(event: TraceEntry): ChipProps {
 
 // ─── Consecutive-group accumulator (like browser console) ────────────────────
 
-type Group = { events: TraceEntry[]; label: string; color: ChipProps["color"] };
+type Group = { events: ControllerEvent[]; label: string; color: ChipProps["color"] };
 
-function groupConsecutive(ordered: TraceEntry[]): Group[] {
+function groupConsecutive(ordered: ControllerEvent[]): Group[] {
   const groups: Group[] = [];
   for (const ev of ordered) {
     const { label, color } = chipFor(ev);
@@ -173,7 +173,7 @@ function EventDetail({ group }: { group: Group }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type Props = { events: TraceEntry[] };
+type Props = { events: ControllerEvent[] };
 
 export function PlanTriggerTimeline({ events }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);

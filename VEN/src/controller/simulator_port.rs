@@ -68,17 +68,14 @@ pub struct AssetSnapshot {
     pub cap_max_export_kw: f64,
     /// Available energy for discharge (kWh), if applicable (battery/EV only).
     #[ts(optional)]
-    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_discharge_kwh: Option<f64>,
     /// Available energy for charge (kWh), if applicable (battery/EV only).
-    #[ts(optional)]
     #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_charge_kwh: Option<f64>,
     /// Power the asset will draw/produce regardless of its setpoint this tick
     /// (`Asset::forced_power_kw`, e.g. a heater's thermostat override).
-    #[ts(optional)]
     #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forced_power_kw: Option<f64>,

@@ -195,7 +195,7 @@ pub struct FlexibilityEnvelope {
 ///
 /// Duration fields estimate how long the VEN can sustain the headroom based
 /// on available storage energy. None if no storage assets are present.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct SiteFlexibilityEnvelope {
     pub ts: DateTime<Utc>,
     /// Net signed power (kW) under a sustained Export commitment. See this
@@ -214,7 +214,7 @@ pub struct SiteFlexibilityEnvelope {
 /// in-memory ring (`AppState::flexibility_history`, BL-43) so the UI can plot a
 /// live headroom band over time — `SiteFlexibilityEnvelope` itself is
 /// instant-only and has no forward schedule (see its own doc comment).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SiteFlexibilitySample {
     pub ts: DateTime<Utc>,
     pub up_kw: f64,
@@ -248,7 +248,7 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 /// `CapacityCurveStep::power_kw`'s convention — see `SiteFlexibilityEnvelope`'s
 /// own doc comment for the sign convention and why base load (now included)
 /// can push `up_kw` positive.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct SiteFlexibilityForecastSlot {
     pub ts: DateTime<Utc>,
     /// Absolute max achievable Export at this slot (kW). Always ≥ 0.

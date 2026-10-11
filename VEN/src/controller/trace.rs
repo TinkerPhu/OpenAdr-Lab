@@ -2,6 +2,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::entities::user_request::UserRequestStatus;
@@ -18,7 +19,7 @@ pub struct AssetTimelinePoint {
 // ---------------------------------------------------------------------------
 
 /// A significant controller decision or state change, stored in the event log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum ControllerEvent {
     OpenAdrArrived {

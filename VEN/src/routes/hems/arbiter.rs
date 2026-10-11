@@ -6,10 +6,11 @@
 
 use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct ArbiterSettings {
     pub deviation_arbiter_enabled: bool,
     pub limit_enforcement_enabled: bool,

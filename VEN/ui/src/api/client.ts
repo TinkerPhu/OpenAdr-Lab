@@ -1,18 +1,19 @@
 import type {
-  VtnEvent, Program, Report, ReportSubmission, ReportWindow, SensorSnapshot, SimSnapshot, TraceEntry,
+  VtnEvent, Program, Report, ReportSubmissionRecord, ReportWindowSize, SensorSnapshot, SimSnapshot, ControllerEvent,
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
-  CapacityCurvesResponse,
+  CapacityCurves,
   EvSettings, UpdateEvSettingsBody, EvUsageSimState,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
-  ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
+  ForecastAccuracyRow, ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
+  TickSample, GridSample, EventReceived, ReportSent,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
-  HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
-  ReportObligation, AssetCapabilityView, AssetForecast,
+  HealthResponse, VtnStatusResponse, TaskStatusEntry, EventLogEntry,
+  OadrReportObligation, AssetCapabilityView, AssetForecast,
   MeasurementResponse,
   WeatherResponse,
 } from "./types";
@@ -73,7 +74,7 @@ export class VenApi {
     return r.json();
   }
 
-  async vtnStatus(): Promise<VtnStatus> {
+  async vtnStatus(): Promise<VtnStatusResponse> {
     const r = await this.getReq("/vtn/status");
     if (!r.ok) throw new Error(`vtn/status ${r.status}`);
     return r.json();
@@ -188,13 +189,13 @@ export class VenApi {
     return r.json();
   }
 
-  async reportSubmissions(): Promise<ReportSubmission[]> {
+  async reportSubmissions(): Promise<ReportSubmissionRecord[]> {
     const r = await this.getReq("/reports/submissions");
     if (!r.ok) throw new Error(`report submissions ${r.status}`);
     return r.json();
   }
 
-  async reportWindows(): Promise<ReportWindow[]> {
+  async reportWindows(): Promise<ReportWindowSize[]> {
     const r = await this.getReq("/reports/windows");
     if (!r.ok) throw new Error(`report windows ${r.status}`);
     return r.json();
@@ -206,7 +207,7 @@ export class VenApi {
     return r.json();
   }
 
-  async trace(limit = 50): Promise<TraceEntry[]> {
+  async trace(limit = 50): Promise<ControllerEvent[]> {
     const r = await this.getReq(`/trace/events?limit=${limit}`);
     if (!r.ok) throw new Error(`trace/events ${r.status}`);
     return r.json();
@@ -365,7 +366,7 @@ export class VenApi {
 
   /** Omit `startMs` for the per-tick curves anchored at now; pass it to anchor
    * both curves at the future plan slot it snaps down to. */
-  async capacityCurves(startMs?: number): Promise<CapacityCurvesResponse | null> {
+  async capacityCurves(startMs?: number): Promise<CapacityCurves | null> {
     const query = startMs === undefined ? "" : `?start=${encodeURIComponent(new Date(startMs).toISOString())}`;
     const r = await this.getReq(`/flexibility/capacity${query}`);
     if (r.status === 204) return null;
@@ -382,7 +383,7 @@ export class VenApi {
     if (params.assetId) qs.set("asset_id", params.assetId);
     const r = await this.getReq(`/history/ticks?${qs}`);
     if (!r.ok) throw new Error(`history/ticks ${r.status}`);
-    const raw: (Omit<HistoryTickSample, "ts"> & { ts: string })[] = await r.json();
+    const raw: TickSample[] = await r.json();
     return raw.map((row) => ({ ...row, ts: new Date(row.ts).getTime() }));
   }
 
@@ -390,7 +391,7 @@ export class VenApi {
     const qs = new URLSearchParams({ from: params.from, to: params.to });
     const r = await this.getReq(`/history/grid?${qs}`);
     if (!r.ok) throw new Error(`history/grid ${r.status}`);
-    const raw: (Omit<HistoryGridSample, "ts"> & { ts: string })[] = await r.json();
+    const raw: GridSample[] = await r.json();
     return raw.map((row) => ({ ...row, ts: new Date(row.ts).getTime() }));
   }
 
@@ -399,17 +400,13 @@ export class VenApi {
     to: string;
     assetId?: string;
     leadKind?: "near" | "far";
-  }): Promise<ForecastAccuracySample[]> {
+  }): Promise<ForecastAccuracyRow[]> {
     const qs = new URLSearchParams({ from: params.from, to: params.to });
     if (params.assetId) qs.set("asset_id", params.assetId);
     if (params.leadKind) qs.set("lead_kind", params.leadKind);
     const r = await this.getReq(`/history/forecast-accuracy?${qs}`);
     if (!r.ok) throw new Error(`history/forecast-accuracy ${r.status}`);
-    const raw: (Omit<ForecastAccuracySample, "target_ts" | "predicted_at" | "actual_at"> & {
-      target_ts: string;
-      predicted_at: string;
-      actual_at: string | null;
-    })[] = await r.json();
+    const raw: ForecastAccuracySample[] = await r.json();
     return raw.map((row) => ({
       ...row,
       target_ts: new Date(row.target_ts).getTime(),
@@ -435,7 +432,7 @@ export class VenApi {
     });
     const r = await this.getReq(`/history/events?${qs}`);
     if (!r.ok) throw new Error(`history/events ${r.status}`);
-    const raw: HistoryPage<Omit<HistoryEventReceived, "received_at"> & { received_at: string }> =
+    const raw: HistoryPage<EventReceived> =
       await r.json();
     return {
       total: raw.total,
@@ -452,7 +449,7 @@ export class VenApi {
     });
     const r = await this.getReq(`/history/reports?${qs}`);
     if (!r.ok) throw new Error(`history/reports ${r.status}`);
-    const raw: HistoryPage<Omit<HistoryReportSent, "sent_at"> & { sent_at: string }> =
+    const raw: HistoryPage<ReportSent> =
       await r.json();
     return {
       total: raw.total,
@@ -461,7 +458,7 @@ export class VenApi {
   }
 
 
-  async obligations(): Promise<ReportObligation[]> {
+  async obligations(): Promise<OadrReportObligation[]> {
     const r = await this.getReq("/obligations");
     if (!r.ok) throw new Error(`obligations ${r.status}`);
     return r.json();
