@@ -27,6 +27,10 @@ macro_rules! ui_types {
 ui_types![
     crate::entities::user_request::UserRequest,
     crate::routes::hems::UserRequestWithSession,
+    // Plan and planner (increment 2)
+    crate::entities::plan::Plan,
+    crate::entities::history::PlanHistorySample,
+    crate::planner_events::PlannerEvent,
 ];
 
 /// Where the UI imports the generated files from.

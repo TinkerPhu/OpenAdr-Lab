@@ -6,21 +6,16 @@ import {
   TaskSummaryRow,
 } from "../components/dashboard/StatusRows";
 import type { Plan, TaskStatusEntry, VtnStatus } from "../api/types";
+import { makePlan as basePlan } from "./fixtures/plan";
 
 function makePlan(overrides: Partial<Plan> = {}): Plan {
-  return {
+  return basePlan({
     id: "p1",
     created_at: new Date(Date.now() - 45_000).toISOString(),
-    trigger: "Periodic",
     slots: [],
     summary: { total_cost_eur: 0, total_co2_g: 0, total_import_kwh: 0, total_export_kwh: 0 },
-    envelopes: [],
-    warnings: [],
-    objective_eur: 0,
-    friction_eur: 0,
-    solve_status: "OPTIMAL",
     ...overrides,
-  };
+  });
 }
 
 describe("VtnConnectionRow", () => {

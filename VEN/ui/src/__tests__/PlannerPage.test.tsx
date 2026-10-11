@@ -2,7 +2,7 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PlannerPage } from "../pages/Planner";
-import type { Plan, TraceEntry, PlanTimeSlot, PlannerEvent, UserRequestWithSession } from "../api/types";
+import type { Plan, TraceEntry, PlannerEvent, UserRequestWithSession } from "../api/types";
 
 // ─── Mock hooks ───────────────────────────────────────────────────────────────
 
@@ -24,44 +24,15 @@ vi.mock("../api/hooks", () => ({
 }));
 
 import { usePlan, useTrace, useRequests, useSim, useSetObjective, usePlannerEvents } from "../api/hooks";
+import { makePlan, makeSlot } from "./fixtures/plan";
 
 /** Captured SSE callback from the most recent usePlannerEvents call. */
 let capturedOnEvent: ((event: PlannerEvent) => void) | null = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
-  return {
-    slot_index: 0,
-    start: "2026-04-04T10:00:00Z",
-    end: "2026-04-04T10:05:00Z",
-    import_tariff_eur_kwh: 0.12,
-    export_tariff_eur_kwh: 0.05,
-    co2_g_kwh: 200,
-    import_cap_kw: 10,
-    export_cap_kw: 10,
-    allocations: [],
-    net_import_kw: 0,
-    net_export_kw: 0,
-    pv_forecast_kw: 0,
-    baseline_kw: 1.0,
-    ...overrides,
-  };
-}
-
 function makeMockPlan(): Plan {
-  return {
-    id: "plan-001",
-    created_at: "2026-04-04T10:00:00Z",
-    trigger: "Periodic",
-    slots: [makeSlot()],
-    summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
-    envelopes: [],
-    warnings: [],
-    objective_eur: 0,
-    friction_eur: 0,
-    solve_status: "OPTIMAL",
-  };
+  return makePlan();
 }
 
 function makeMockRequest(): UserRequestWithSession {
@@ -102,7 +73,7 @@ function makeMockRequest(): UserRequestWithSession {
 const mockPlanCycle: TraceEntry = {
   type: "PlanCycle",
   ts: "2026-04-04T10:00:00Z",
-  trigger_reason: "Periodic",
+  trigger_reason: "PERIODIC",
   total_slots: 48,
 };
 
@@ -254,7 +225,7 @@ describe("PlannerPage", () => {
         friction_eur: 0,
         solve_status: "OPTIMAL",
         slot_count: 288,
-        trigger: "Periodic",
+        trigger: "PERIODIC",
       });
     });
     expect(screen.getByTestId("planner-status-updated")).toBeInTheDocument();
@@ -336,8 +307,8 @@ describe("PlannerPage", () => {
       makeSlot({ slot_index: 1, start: "2026-04-04T10:05:00Z", end: "2026-04-04T10:10:00Z" }),
     ];
     vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
-    const inSlot0: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:02:00Z", trigger_reason: "Periodic", total_slots: 2 };
-    const inSlot1: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:07:00Z", trigger_reason: "Periodic", total_slots: 2 };
+    const inSlot0: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:02:00Z", trigger_reason: "PERIODIC", total_slots: 2 };
+    const inSlot1: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:07:00Z", trigger_reason: "PERIODIC", total_slots: 2 };
     vi.mocked(useTrace).mockReturnValue({ data: [inSlot0, inSlot1] } as unknown as ReturnType<typeof useTrace>);
 
     const user = userEvent.setup();

@@ -1,6 +1,10 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Serialized by hand (`as_str`); the UI type is derived from the variants in the same spelling,
+/// pinned by `planner_objective_ts_spelling_is_the_wire_spelling`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, TS)]
+#[ts(rename_all = "snake_case")]
 pub enum PlannerObjective {
     #[default]
     MinCost,
@@ -15,8 +19,7 @@ pub enum PlannerObjective {
 /// `measurement_window_s` window's peak grid import at or below
 /// `threshold_kw` via a soft penalty of `penalty_eur_per_kw` per kW over.
 /// Deliberately lightweight — not the stateful, persisted billing-period
-/// tracker sketched in `entities::design_vocabulary::PenaltyRule`; see
-/// `openspec/changes/penalty-threshold-check/design.md` (Decision D4).
+/// tracker (rolling averages, a breach flag surviving restarts).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PenaltyRuleParams {
     pub rule_id: String,
@@ -211,6 +214,17 @@ impl<'de> Deserialize<'de> for PlannerObjective {
 
 #[cfg(test)]
 mod tests {
+    /// R-133: the generated `PlannerObjective.ts` union is the wire's own spelling.
+    #[test]
+    fn planner_objective_ts_spelling_is_the_wire_spelling() {
+        use super::PlannerObjective::{self, *};
+        let ts = <PlannerObjective as ts_rs::TS>::inline(&ts_rs::Config::default());
+        for objective in [MinCost, MinGhg, MinGrid, MinImport, MaxRevenue, Custom] {
+            let wire = serde_json::to_string(&objective).unwrap();
+            assert!(ts.contains(&wire), "{wire} missing from the TS union {ts}");
+        }
+    }
+
     use super::*;
 
     #[test]

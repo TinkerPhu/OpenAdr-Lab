@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import type { Plan, PlanTimeSlot, SimSnapshot, UserRequestWithSession } from "../api/types";
+import { makePlan as basePlan, makeSlot } from "./fixtures/plan";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -84,39 +85,24 @@ function makeSim(assets: SimSnapshot["assets"]): SimSnapshot {
 
 /** Plan with hourly slots starting at the next hour boundary, planned_kw_by_asset per slot. */
 function makePlan(plannedKwByAsset: Record<string, number>, numSlots = 4, overrides: Partial<Plan> = {}): Plan {
-  const slots: PlanTimeSlot[] = [];
   const base = Date.now() + 60_000; // first slot starts in the future
-  for (let i = 0; i < numSlots; i++) {
-    slots.push({
+  const slots: PlanTimeSlot[] = Array.from({ length: numSlots }, (_, i) =>
+    makeSlot({
       slot_index: i,
       start: new Date(base + i * HOUR_MS).toISOString(),
       end: new Date(base + (i + 1) * HOUR_MS).toISOString(),
       import_tariff_eur_kwh: 0.3,
       export_tariff_eur_kwh: 0.08,
-      co2_g_kwh: 200,
-      import_cap_kw: 10,
-      export_cap_kw: 10,
-      allocations: [],
-      net_import_kw: 0,
-      net_export_kw: 0,
-      pv_forecast_kw: 0,
       baseline_kw: 0.5,
       planned_kw_by_asset: plannedKwByAsset,
-    });
-  }
-  return {
-    id: "plan-001",
+    }),
+  );
+  return basePlan({
     created_at: new Date().toISOString(),
-    trigger: "Periodic",
     slots,
     summary: { total_cost_eur: 1, total_co2_g: 500, total_import_kwh: 3, total_export_kwh: 0 },
-    envelopes: [],
-    warnings: [],
-    objective_eur: 0,
-    friction_eur: 0,
-    solve_status: "OPTIMAL",
     ...overrides,
-  };
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

@@ -1,27 +1,74 @@
 // Generated from the Rust types (R-133): `VEN/src/ui_types.rs` lists them and
 // `UPDATE_UI_TYPES=1 cargo test ui_types` regenerates them. Do not edit `./generated/`.
+import type { ActivePenaltyRule } from "./generated/ActivePenaltyRule";
+import type { AssetAllocation } from "./generated/AssetAllocation";
 import type { ComfortRate } from "./generated/ComfortRate";
+import type { CostBreakdown } from "./generated/CostBreakdown";
 import type { EvSession } from "./generated/EvSession";
+import type { EvSessionOrigin } from "./generated/EvSessionOrigin";
+import type { FlexibilityEnvelope } from "./generated/FlexibilityEnvelope";
 import type { HeaterTarget } from "./generated/HeaterTarget";
+import type { Plan } from "./generated/Plan";
+import type { PlanHistorySample } from "./generated/PlanHistorySample";
+import type { PlanPhaseReport } from "./generated/PlanPhaseReport";
+import type { PlanSummary } from "./generated/PlanSummary";
+import type { PlanTimeSlot } from "./generated/PlanTimeSlot";
+import type { PlanTrigger } from "./generated/PlanTrigger";
+import type { PlanWarning } from "./generated/PlanWarning";
+import type { PlanZone } from "./generated/PlanZone";
+import type { PlannerEvent } from "./generated/PlannerEvent";
+import type { PlannerObjective } from "./generated/PlannerObjective";
+import type { PlanningHorizon } from "./generated/PlanningHorizon";
+import type { RequestDeadline } from "./generated/RequestDeadline";
 import type { SessionDetail } from "./generated/SessionDetail";
 import type { SessionType } from "./generated/SessionType";
 import type { ShiftableLoad } from "./generated/ShiftableLoad";
+import type { SolveStatus } from "./generated/SolveStatus";
 import type { UserRequest } from "./generated/UserRequest";
 import type { UserRequestMode } from "./generated/UserRequestMode";
 import type { UserRequestStatus } from "./generated/UserRequestStatus";
 import type { UserRequestWithSession } from "./generated/UserRequestWithSession";
+import type { WarningKind } from "./generated/WarningKind";
+import type { WarningSeverity } from "./generated/WarningSeverity";
 export type {
+  ActivePenaltyRule,
+  AssetAllocation,
   ComfortRate,
+  CostBreakdown,
   EvSession,
+  EvSessionOrigin,
+  FlexibilityEnvelope,
   HeaterTarget,
+  Plan,
+  PlanHistorySample,
+  PlanPhaseReport,
+  PlanSummary,
+  PlanTimeSlot,
+  PlanTrigger,
+  PlanWarning,
+  PlanZone,
+  PlannerEvent,
+  PlannerObjective,
+  PlanningHorizon,
+  RequestDeadline,
   SessionDetail,
   SessionType,
   ShiftableLoad,
+  SolveStatus,
   UserRequest,
   UserRequestMode,
   UserRequestStatus,
   UserRequestWithSession,
+  WarningKind,
+  WarningSeverity,
 };
+
+// ─── UI-side models derived from a wire type ──────────────────────────────────
+// The client converts a few wire fields on arrival (ISO timestamps to epoch ms). Each model is
+// stated as its wire type with those fields replaced, so the rest cannot drift.
+
+/** `PlanHistorySample` with `created_at` in epoch ms (`api.historyPlans`). */
+export type PlanHistoryRow = Omit<PlanHistorySample, "created_at"> & { created_at: number };
 
 // WP-T1 (docs/history/project_journal.md, search "WP-T"): componentised health, replacing the
 // previous plain "ok" string GET /health used to return.
@@ -282,129 +329,6 @@ export type OadrCapacityState = {
   import_limit_event_id: string | null;
   export_limit_event_id: string | null;
   last_updated: string | null;
-};
-
-export type AssetAllocation = {
-  asset_id: string;
-  power_kw: number;
-  surplus_power_kw: number;
-  grid_power_kw: number;
-  marginal_value: number;
-  cost_eur: number;
-  co2_g: number;
-};
-
-export type PlanTimeSlot = {
-  slot_index: number;
-  start: string;
-  end: string;
-  import_tariff_eur_kwh: number;
-  /** WP4.4: true when the rate was filled by the StaleRatePolicy (beyond tariff coverage). */
-  rate_estimated?: boolean;
-  export_tariff_eur_kwh: number;
-  co2_g_kwh: number;
-  /** Shadow price on this slot's power-balance constraint (see docs/architecture/VEN_ARCHITECTURE.md). */
-  marginal_cost_import_eur_per_kwh?: number;
-  marginal_cost_export_eur_per_kwh?: number;
-  import_cap_kw: number;
-  export_cap_kw: number;
-  allocations: AssetAllocation[];
-  net_import_kw: number;
-  net_export_kw: number;
-  pv_forecast_kw: number;
-  /** Planned PV export after curtailment (<= pv_forecast_kw); equal when uncurtailed. */
-  pv_used_kw?: number;
-  baseline_kw: number;
-  planned_kw_by_asset?: Record<string, number>;
-};
-
-export type PlanSummary = {
-  total_cost_eur: number;
-  total_co2_g: number;
-  total_import_kwh: number;
-  total_export_kwh: number;
-};
-
-export type PlannerObjective =
-  | "min_cost"
-  | "min_ghg"
-  | "min_grid"
-  | "min_import"
-  | "max_revenue";
-
-/** GB-31 — TIME_LIMIT/GAP_LIMIT mean a feasible plan was found but the solver
- * was cut off before certifying optimality (timeout or within-gap-tolerance
- * cutoff); distinct from INFEASIBLE, where no plan was found at all. */
-export type SolveStatus = "OPTIMAL" | "TIME_LIMIT" | "GAP_LIMIT" | "INFEASIBLE";
-
-/** GB-25 — stable, machine-readable classification of a `PlanWarning`. */
-export type WarningKind =
-  | "SOLVER_INFEASIBLE"
-  | "STALE_RATE_ESTIMATE"
-  | "BUDGET_SHORTFALL"
-  | "CAPACITY_VIOLATION"
-  | "PEAK_PENALTY_EXCEEDED"
-  // A **firm** EV deadline whose guaranteed energy the plan cannot deliver in
-  // the window it has. The wire string is persisted in plan history, so it keeps
-  // the older "core" wording; a soft request charging less than its target is
-  // the comfort curve working as asked and raises nothing.
-  | "EV_CORE_ENERGY_UNMET"
-  | "OTHER";
-
-export type Plan = {
-  id: string;
-  created_at: string;
-  trigger: string;
-  objective?: PlannerObjective;
-  slots: PlanTimeSlot[];
-  summary: PlanSummary;
-  envelopes: FlexibilityEnvelope[];
-  warnings: Array<{ severity: string; kind?: WarningKind; message: string; suggested_action: string | null }>;
-  objective_eur: number;
-  friction_eur: number;
-  solve_status: SolveStatus;
-  /** WP6.3 (BL-09) — active peak-demand penalty rules; empty when the feature is not configured. */
-  penalty_rules_active?: Array<{ rule_id: string; threshold_kw: number }>;
-  /** GB-25 — wall-clock milliseconds the MILP solve took for this plan cycle. */
-  solver_ms?: number | null;
-  /** GB-25 — the solver's configured MIP-gap tolerance at solve time (proxy, not the
-   * achieved gap — see docs/reference/TECHNICAL_DEBTS.md). */
-  mip_gap_target?: number | null;
-  /** R-97 — per-phase outcome, because `solve_status` above collapses two solves that
-   * behave nothing alike. Phase 2 reports TIME_LIMIT on nearly every heater cycle by
-   * design and is capped so it can never be costlier than phase 1, while a phase-1
-   * TIME_LIMIT means an incumbent at an unknown gap. Absent on plans not produced by
-   * the two-phase solver. */
-  phase_report?: PlanPhaseReport | null;
-};
-
-/** R-97 — see `Plan.phase_report`. Mirrors `entities::plan::PlanPhaseReport`. */
-export type PlanPhaseReport = {
-  phase1_ms: number;
-  phase1_status: SolveStatus;
-  phase2_ms: number;
-  /** Null when phase 2 did not run (epsilon 0.0) or fell back to phase 1. */
-  phase2_status: SolveStatus | null;
-};
-
-/** GB-25 — one row of persisted plan-quality history (`GET /history/plans`). See
- * `entities::history::PlanHistorySample` and docs/architecture/VEN_ARCHITECTURE.md §4.9a. */
-export type PlanHistorySample = {
-  plan_id: string;
-  created_at: number;
-  trigger: string;
-  solver_ms: number | null;
-  solve_status: SolveStatus;
-  objective_eur: number;
-  friction_eur: number;
-  mip_gap_target: number | null;
-  warning_count: number;
-  warning_kinds: WarningKind[];
-  c_energy_eur: number | null;
-  c_grid_eur: number | null;
-  c_wear_eur: number | null;
-  c_violations_eur: number | null;
-  c_peak_penalty_eur: number | null;
 };
 
 export type AssetLedger = {
@@ -692,22 +616,6 @@ export type CapacityCurvesResponse = {
 
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 
-/** Per-device schedulability metadata emitted at plan time (VEN/src/entities/plan.rs FlexibilityEnvelope). */
-export type FlexibilityEnvelope = {
-  asset_id: string;
-  energy_needed_kwh: number;
-  power_min_kw: number;
-  power_max_kw: number;
-  window_start: string;
-  window_end: string;
-  slots_available: number;
-  max_acceptable_rate: number;
-  min_acceptable_rate: number;
-  budget_remaining_eur: number;
-  estimated_cost_eur: number;
-  estimated_co2_g: number;
-};
-
 // ─── Timeline zones ───────────────────────────────────────────────────────────
 
 /** A planning zone returned by GET /timeline/all. */
@@ -716,15 +624,6 @@ export type FlexibilityEnvelope = {
 export type { ZoneDef } from "@lab/charts/types";
 
 // ─── Planner SSE events (Plan E) ──────────────────────────────────────────────
-
-export type PlannerEvent =
-  | { type: "solving_started"; objective: PlannerObjective; num_slots: number; triggered_at: string }
-  | { type: "solving_progress"; elapsed_ms: number; iteration: number }
-  | { type: "plan_ready"; plan_id: string; objective: PlannerObjective; solver_ms: number; objective_eur: number; friction_eur: number; solve_status: SolveStatus; slot_count: number; trigger: string }
-  | { type: "correction_active"; ts: string; asset_id: string; reason: string;
-      planned_net_kw: number; actual_net_kw: number; deviation_kw: number;
-      correction_kw: number; objective: PlannerObjective }
-  | { type: "correction_cleared"; ts: string; reason: string };
 
 // ─── Persistent history (Phase 1, WP1.4/WP1.5) ────────────────────────────────
 // Field names pass through the VEN's own snake_case wire format verbatim

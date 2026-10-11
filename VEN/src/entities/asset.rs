@@ -404,7 +404,7 @@ pub enum CompletionPolicy {
 }
 
 /// What triggered a plan recomputation (§1.5).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PlanTrigger {
     Periodic,         // regular planning cycle (every PlanTimeStep)

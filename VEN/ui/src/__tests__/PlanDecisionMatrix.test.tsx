@@ -3,66 +3,31 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
 import type { AssetAllocation, Plan } from "../api/types";
+import { makeAlloc, makePlan as basePlan, makeSlot } from "./fixtures/plan";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeAlloc(overrides: Partial<AssetAllocation> = {}): AssetAllocation {
-  return {
-    asset_id: "battery",
-    power_kw: 3.5,
-    surplus_power_kw: 0,
-    grid_power_kw: 3.5,
-    marginal_value: 0.12,
-    cost_eur: 0.029,
-    co2_g: 58.3,
-    ...overrides,
-  };
-}
-
 function makePlan(slot0Allocs: AssetAllocation[] = [makeAlloc()]): Plan {
-  return {
-    id: "plan-001",
-    created_at: "2026-04-04T10:00:00Z",
-    trigger: "Periodic",
+  return basePlan({
     slots: [
-      {
-        slot_index: 0,
-        start: "2026-04-04T10:00:00Z",
-        end: "2026-04-04T10:05:00Z",
-        import_tariff_eur_kwh: 0.12,
-        export_tariff_eur_kwh: 0.05,
-        co2_g_kwh: 200,
-        import_cap_kw: 10,
-        export_cap_kw: 10,
+      makeSlot({
         allocations: slot0Allocs,
         net_import_kw: 3.5,
-        net_export_kw: 0,
         pv_forecast_kw: 2.5,
         baseline_kw: 1.2,
-      },
-      {
+      }),
+      makeSlot({
         slot_index: 1,
         start: "2026-04-04T10:05:00Z",
         end: "2026-04-04T10:10:00Z",
         import_tariff_eur_kwh: 0.15,
-        export_tariff_eur_kwh: 0.05,
         co2_g_kwh: 220,
-        import_cap_kw: 10,
-        export_cap_kw: 10,
-        allocations: [],
-        net_import_kw: 0,
-        net_export_kw: 0,
         pv_forecast_kw: 1.8,
         baseline_kw: 1.2,
-      },
+      }),
     ],
     summary: { total_cost_eur: 0.50, total_co2_g: 800, total_import_kwh: 3.0, total_export_kwh: 0 },
-    envelopes: [],
-    warnings: [],
-    objective_eur: 0,
-    friction_eur: 0,
-    solve_status: "OPTIMAL",
-  };
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

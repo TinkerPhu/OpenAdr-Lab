@@ -3,13 +3,14 @@ use crate::entities::PlannerObjective;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::sync::Arc;
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// Events pushed to SSE clients during a planning cycle.
 ///
 /// `iteration` in `SolvingProgress` is a wall-clock tick count (1 per second),
 /// **not** HiGHS internal iterations — `good_lp` does not expose solver callbacks.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlannerEvent {
     SolvingStarted {
