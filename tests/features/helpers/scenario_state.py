@@ -114,6 +114,9 @@ def _expect(r, what, ok=(200, 201, 204)):
 
 def _cancel_user_requests(base_url, _paths):
     for req in _get(base_url, "/user-requests") or []:
+        # The list keeps finished requests too (R-137); only an active one can be cancelled.
+        if req.get("status") != "ACTIVE":
+            continue
         r = requests.delete(f"{base_url}/user-requests/{req['id']}", timeout=HTTP_TIMEOUT)
         if r.status_code == 409:
             # A started shiftable load runs to the end of its duration (`Asset::is_cancellable`).
