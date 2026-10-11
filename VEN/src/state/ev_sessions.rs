@@ -68,6 +68,7 @@ impl AppState {
         &self,
         replace_ids: &[uuid::Uuid],
         session: EvSession,
+        now: DateTime<Utc>,
     ) -> Result<Vec<EvSession>, EvReplaceRefusal> {
         let mut hems = self.hems.write().await;
         let clashing = hems.ev_sessions.conflicts(&session);
@@ -81,11 +82,14 @@ impl AppState {
                 // `cancel_request` makes from the other direction.
                 for s in &removed {
                     if let Some(req) = hems
-                        .active_requests
+                        .user_requests
                         .iter_mut()
                         .find(|r| r.session_id == Some(s.id))
                     {
-                        req.status = crate::entities::user_request::UserRequestStatus::Cancelled;
+                        req.finish(
+                            crate::entities::user_request::UserRequestStatus::Cancelled,
+                            now,
+                        );
                     }
                 }
                 Ok(removed)
@@ -100,10 +104,5 @@ impl AppState {
                     .collect(),
             }),
         }
-    }
-
-    /// Drop every session whose departure has passed; returns how many went.
-    pub async fn expire_ev_sessions(&self, now: DateTime<Utc>) -> usize {
-        self.hems.write().await.ev_sessions.expire(now)
     }
 }

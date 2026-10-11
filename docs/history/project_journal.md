@@ -15249,3 +15249,25 @@ scenario updates a submitted report (`PUT /reports/{id}` had no BDD coverage).
 (422) instead of forwarded for the VTN to refuse. The audit script held two literal backspace bytes
 where `\b` was meant, so rule 13 (R-131) and half of rule 12 (GB-50) matched nothing since they
 were written; both are repaired and both still pass. Lesson in KEY_LEARNINGS.
+## R-137: a user request ends, and finished ones do not pile up (fix/r137-prune-finished-requests)
+
+**What.** `state/user_requests.rs` owns how a request ends. `settle_requests`, once per tick, drops
+an EV session past its departure and a heater target past its ready-by, completes the requests that
+owned them, and prunes finished requests (`entities::user_request::prune_finished`: always kept 7
+days, beyond that only the newest 20). A second heater request cancels the first
+(`replace_heater_target`). Every ending goes through `UserRequest::finish`, which stamps
+`updated_at`, and is announced (trace event and replan), including the EV requests a replacement
+displaces. The tick's ledger accounting runs in place under one lock (`account_tick`); the
+whole-list setter is gone. `active_requests` is `user_requests`. One test builder
+(`UserRequest::for_test`) replaces six hand-written request literals.
+
+**Why.** The register row said finished requests were never pruned. Reading the code showed the
+list was unbounded for a second reason: an EV or heater request never finished at all. The session
+was dropped (EV) or held forever (heater), the request stayed active and overdue, and an EV request
+kept collecting cost from every later charge. The user decided the retention rule.
+
+**Issues.** The first prune compared timestamps, so requests finished in the same instant all
+counted as "the newest" and none were dropped; it ranks now. The tick read the list, changed a copy
+and wrote it back, losing any request submitted in between. The row's claim that requests are
+persisted was wrong: they are not, a restart empties the list.
+

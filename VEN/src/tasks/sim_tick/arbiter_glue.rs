@@ -119,20 +119,14 @@ pub(crate) async fn record_arbiter_outcome(
     state.set_arbiter_active_lever(active_lever).await;
 }
 
-/// PHASE 0: user toggle AND no active (non-expired) EvSession. Also updates
+/// PHASE 0: user toggle AND no EvSession whose window is open now. Also updates
 /// the derived `paused_by_active_session` flag on `EvSettings` when it goes
-/// stale, and clears an EvSession once its `departure_time` has passed —
-/// nothing else ever expires a session (only explicit cancel or the VTN
-/// signal disappearing), so a finished/missed session would otherwise pause
-/// opportunistic charging and hide the EV from the headroom forecast forever.
+/// stale. A session past its `departure_time` is not current, so it cannot pause
+/// opportunistic charging; removing it is `AppState::settle_requests`'s job.
 pub(crate) async fn resolve_overlay_enabled(
     state: &crate::state::AppState,
     now: DateTime<Utc>,
 ) -> bool {
-    // Every session whose departure has passed goes, not just the head: a queue can
-    // have several behind a tick that was late or a VEN that was asleep.
-    state.expire_ev_sessions(now).await;
-
     // "Active" means a session's window is open *now* - deliberately not "the queue
     // is non-empty". Under the rolling simulated schedule the queue is almost never
     // empty, so the old emptiness test would pause opportunistic charging forever,
@@ -329,7 +323,7 @@ mod tests {
     /// must be cleared here so it stops permanently pausing opportunistic
     /// charging and stops hiding the EV from the headroom forecast.
     #[tokio::test]
-    async fn resolve_overlay_enabled_clears_an_expired_session() {
+    async fn resolve_overlay_enabled_is_not_paused_by_an_expired_session() {
         let state = AppState::new();
         state
             .insert_ev_session(make_ev_session(ts(-1)))
@@ -347,10 +341,6 @@ mod tests {
         assert!(
             enabled,
             "an expired session must no longer suppress the overlay"
-        );
-        assert!(
-            state.ev_sessions().await.is_empty(),
-            "expired session must be cleared from state"
         );
         assert!(!state.ev_settings().await.paused_by_active_session);
     }

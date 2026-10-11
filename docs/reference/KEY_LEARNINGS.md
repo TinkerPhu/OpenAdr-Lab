@@ -3287,3 +3287,17 @@ Rules:
   directory, see FAIL, delete the file. "OK" on the first run is the result a broken rule gives too.
 - The byte came from writing a regex through a shell or a script that interprets `\b`. After
   editing a regex by script, `grep -c $'\x08' <file>` must print 0.
+
+## A list is unbounded when nothing ends its entries, not only when nothing prunes them (2026-10-11)
+
+- R-137 was filed as "finished requests are never pruned". Pruning alone would not have bounded
+  the list: EV and heater requests never reached a finished status. Before writing a prune, list
+  every way an entry is supposed to end and check that each one exists.
+- When two objects are paired (a request and its session), every place that removes one must say
+  what happens to the other, in the same critical section. Three places removed a session; one
+  updated the request.
+- Read, modify a copy, write the whole collection back is a lost update as soon as another task
+  can write between the two awaits. Give the state a method that changes it in place under one
+  lock, and delete the whole-collection setter so the pattern cannot return.
+- "Keep the newest N" must rank, not compare timestamps: entries finished in the same instant all
+  pass a timestamp threshold.

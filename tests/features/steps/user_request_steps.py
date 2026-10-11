@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from behave import given, when, then
 from features.helpers.api_client import ven_get, ven_post, ven_delete
+from features.helpers.wait import poll_until
 
 
 # ---------------------------------------------------------------------------
@@ -582,3 +583,43 @@ def step_trace_request_created(context, to_status):
 def step_trace_request_transition(context, from_status, to_status):
     transitions = _saved_request_transitions(context)
     assert (from_status, to_status) in transitions, f"Expected ({from_status} -> {to_status}) in {transitions}"
+
+
+# ---------------------------------------------------------------------------
+# A request ends (R-137)
+# ---------------------------------------------------------------------------
+
+@when("I POST an EV user request departing in {seconds:d} seconds")
+def step_post_ev_request_departing_soon(context, seconds):
+    departure = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    payload = {
+        "asset_id": "ev",
+        "target_soc": 0.8,
+        "deadlines": [{"latest_end": departure.strftime("%Y-%m-%dT%H:%M:%S.%fZ")}],
+    }
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@then('the saved user request is listed as "{status}" within {seconds:d} seconds')
+def step_saved_request_listed_as(context, status, seconds):
+    def fetch():
+        r = ven_get("/user-requests")
+        r.raise_for_status()
+        return next((q for q in r.json() if q.get("id") == context.saved_request_id), None)
+
+    req = poll_until(
+        fetch,
+        lambda q: q is not None and q.get("status") == status,
+        timeout=seconds,
+        interval=1,
+        description=f"request {context.saved_request_id} listed as {status}",
+    )
+    # A finished request stays listed as history, stamped when it ended.
+    assert req.get("updated_at") >= req.get("created_at"), req
