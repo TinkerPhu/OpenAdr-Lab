@@ -3301,3 +3301,9 @@ Rules:
   lock, and delete the whole-collection setter so the pattern cannot return.
 - "Keep the newest N" must rank, not compare timestamps: entries finished in the same instant all
   pass a timestamp threshold.
+- A request helper written per HTTP method drifts per HTTP method: of the VEN's three, two retried
+  after a 401 and one did not. Write one `send(method, path, body)` and let the methods be
+  one-liners over it, so a rule about every request has one place to live.
+- An optional cargo feature around a module also makes its tests optional: plain `cargo test`
+  skips them without a word. Gate a module only when a consumer really cannot afford its
+  dependencies.

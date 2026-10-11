@@ -8,8 +8,9 @@
 //! bugs.
 //!
 //! So the rules live here once, and both services call them. The crate is
-//! deliberately thin — `chrono` and the OpenADR wire types — because a shared
-//! crate only prevents divergence if depending on it stays cheaper than
+//! deliberately thin — `chrono` and the OpenADR wire types, plus `reqwest`
+//! without TLS for `vtn_auth`, which both services carry anyway — because a
+//! shared crate only prevents divergence if depending on it stays cheaper than
 //! re-implementing.
 //!
 //! What belongs here: rules that are *the same question* on both sides.
@@ -21,6 +22,7 @@ pub mod event_timing;
 pub mod test_fixtures;
 pub mod time_series;
 pub mod time_window;
+pub mod vtn_auth;
 pub mod wire_contract;
 
 pub use time_window::TimeWindow;

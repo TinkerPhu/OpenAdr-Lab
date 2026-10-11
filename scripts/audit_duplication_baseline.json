@@ -21,8 +21,6 @@
   "VEN/src/simulator/tests.rs": 1,
   "VEN/src/tasks/poll_programs.rs|VEN/src/tasks/poll_reports.rs": 5,
   "VEN/src/tasks/sim_tick/mod.rs|VEN/src/tasks/sim_tick/tick.rs": 1,
-  "VEN/src/vtn.rs": 3,
-  "VEN/src/vtn.rs|VTN/bff/src/vtn_client.rs": 13,
   "VEN/ui/src/App.tsx|VTN/ui/src/App.tsx": 5,
   "VEN/ui/src/components/NotificationsBell.tsx|VEN/ui/src/pages/Notifications.tsx": 2,
   "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx": 1,
@@ -48,7 +46,6 @@
   "VEN/ui/src/pages/Programs.tsx|VTN/ui/src/pages/Vens.tsx": 3,
   "VEN/ui/src/pages/Reports.tsx|VTN/ui/src/pages/Reports.tsx": 17,
   "VTN/bff/src/routes/events.rs|VTN/bff/src/routes/programs.rs": 1,
-  "VTN/bff/src/vtn_client.rs": 5,
   "VTN/ui/src/components/FleetPowerChart.tsx|VTN/ui/src/components/FleetTariffChart.tsx": 8,
   "VTN/ui/src/pages/Fleet.tsx|VTN/ui/src/pages/Signals.tsx": 1
  },
