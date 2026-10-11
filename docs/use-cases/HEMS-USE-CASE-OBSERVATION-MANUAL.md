@@ -123,6 +123,12 @@ Replace `TOMORROW_07:00:00Z` with tomorrow's 07:00 in ISO 8601 (e.g. `2026-03-14
 
 Click **Submit**. The new row appears in the User Requests table with status **ACTIVE**.
 
+A request ends on its own when its time has passed: an EV request turns **COMPLETED** at its
+departure, a heater request at its ready-by time (the heater then goes back to running only when
+it pays). A second heater request replaces the first, which turns **CANCELLED**. Finished requests
+stay listed under **Done** for at least 7 days; older ones stay while they are among the 20 most
+recently finished.
+
 ### What to observe
 
 **Controller → Packets table:**

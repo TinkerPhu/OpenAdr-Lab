@@ -216,3 +216,26 @@ Feature: VEN User Request Manager — Stage 5
     Then the heater session of the saved user request aims for 21 °C
     When I DELETE the saved user request
     Then the response status is 204
+
+  # --- A request ends (R-137) ---
+
+  # The heater has one target. A second heater request used to overwrite it and leave the
+  # first request listed as active, pointing at a target that was gone.
+  Scenario: A second heater request replaces the first, which is listed as cancelled
+    When I POST a heater user request for 3 kWh with target_temp_c 22.5
+    Then the response status is 201
+    When I save the request ID
+    And I POST a heater user request for 3 kWh with target_temp_c 22
+    Then the response status is 201
+    And the saved user request is listed as "CANCELLED" within 5 seconds
+    And the trace shows the saved request going from "ACTIVE" to "CANCELLED"
+
+  # An EV request used to stay active, and overdue, for the life of the VEN once its
+  # departure had passed; only its session was dropped.
+  Scenario: An EV request is completed once its departure has passed
+    When I POST an EV user request departing in 5 seconds
+    Then the response status is 201
+    When I save the request ID
+    Then the saved user request is listed as "COMPLETED" within 30 seconds
+    And the trace shows the saved request going from "ACTIVE" to "COMPLETED"
+    And the EV session queue holds 0 sessions

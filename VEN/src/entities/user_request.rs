@@ -78,3 +78,152 @@ pub struct UserRequest {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+/// A finished request stays listed this long, whatever the list's size.
+pub const FINISHED_REQUEST_RETENTION_DAYS: i64 = 7;
+/// Past that, the newest this many finished requests stay listed as history.
+pub const FINISHED_REQUESTS_KEPT: usize = 20;
+
+impl UserRequest {
+    /// Completed, cancelled or failed: nothing will change it again.
+    pub fn is_finished(&self) -> bool {
+        self.status != UserRequestStatus::Active
+    }
+
+    /// The one way a request ends: `updated_at` is when it did, which is what
+    /// `prune_finished` counts its retention from.
+    pub fn finish(&mut self, status: UserRequestStatus, now: DateTime<Utc>) {
+        self.status = status;
+        self.updated_at = now;
+    }
+}
+
+/// Drop the finished requests nobody needs listed any more (R-137): one finished more than
+/// `FINISHED_REQUEST_RETENTION_DAYS` ago goes once more than `FINISHED_REQUESTS_KEPT` finished
+/// requests are newer than it. An active request and a recently finished one always stay.
+pub fn prune_finished(requests: &mut Vec<UserRequest>, now: DateTime<Utc>) {
+    let cutoff = now - chrono::Duration::days(FINISHED_REQUEST_RETENTION_DAYS);
+    let mut finished: Vec<(DateTime<Utc>, Uuid)> = requests
+        .iter()
+        .filter(|r| r.is_finished())
+        .map(|r| (r.updated_at, r.id))
+        .collect();
+    // Newest first; by rank, not by timestamp, so requests finished in the same instant
+    // (a displaced queue, a restart) do not all count as "the newest".
+    finished.sort_unstable_by(|a, b| b.cmp(a));
+    let dropped: std::collections::HashSet<Uuid> = finished
+        .into_iter()
+        .skip(FINISHED_REQUESTS_KEPT)
+        .filter(|(finished_at, _)| *finished_at < cutoff)
+        .map(|(_, id)| id)
+        .collect();
+    requests.retain(|r| !dropped.contains(&r.id));
+}
+
+#[cfg(test)]
+impl UserRequest {
+    /// The one test builder: an active request on `asset_id`, created at `at`, owning no
+    /// session. A test states what it is about with struct-update syntax.
+    pub(crate) fn for_test(asset_id: &str, at: DateTime<Utc>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            asset_id: asset_id.to_string(),
+            target_soc_frac: None,
+            target_energy_kwh: 0.0,
+            desired_power_kw: 0.0,
+            deadlines: vec![],
+            mode: Default::default(),
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: None,
+            session_type: None,
+            comfort_rates: vec![],
+            status: UserRequestStatus::Active,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            accumulated_cost_eur: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: at,
+            updated_at: at,
+        }
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use chrono::Duration;
+
+    fn request(status: UserRequestStatus, finished_at: DateTime<Utc>) -> UserRequest {
+        UserRequest {
+            status,
+            ..UserRequest::for_test("ev", finished_at)
+        }
+    }
+
+    #[test]
+    fn finish_stamps_when_the_request_ended() {
+        let now = Utc::now();
+        let mut req = request(UserRequestStatus::Active, now - Duration::days(30));
+        req.finish(UserRequestStatus::Completed, now);
+        assert_eq!(req.status, UserRequestStatus::Completed);
+        assert_eq!(req.updated_at, now);
+        assert!(req.is_finished());
+    }
+
+    #[test]
+    fn prune_finished_keeps_every_request_of_the_last_week_however_many() {
+        let now = Utc::now();
+        let mut requests: Vec<_> = (0..FINISHED_REQUESTS_KEPT + 30)
+            .map(|_| request(UserRequestStatus::Completed, now - Duration::days(6)))
+            .collect();
+        prune_finished(&mut requests, now);
+        assert_eq!(requests.len(), FINISHED_REQUESTS_KEPT + 30);
+    }
+
+    #[test]
+    fn prune_finished_keeps_old_requests_while_the_list_is_short() {
+        let now = Utc::now();
+        let mut requests: Vec<_> = (0..FINISHED_REQUESTS_KEPT)
+            .map(|_| request(UserRequestStatus::Cancelled, now - Duration::days(400)))
+            .collect();
+        prune_finished(&mut requests, now);
+        assert_eq!(requests.len(), FINISHED_REQUESTS_KEPT);
+    }
+
+    #[test]
+    fn prune_finished_drops_the_oldest_past_the_week_once_the_list_is_long() {
+        let now = Utc::now();
+        // 5 of this week, 30 older ones a day apart: the newest 20 finished are the 5 and the
+        // 15 youngest old ones.
+        let mut requests: Vec<_> = (0..5)
+            .map(|_| request(UserRequestStatus::Completed, now - Duration::days(1)))
+            .collect();
+        requests.extend(
+            (0..30).map(|i| request(UserRequestStatus::Failed, now - Duration::days(10 + i))),
+        );
+        prune_finished(&mut requests, now);
+        assert_eq!(requests.len(), FINISHED_REQUESTS_KEPT);
+        let oldest = requests.iter().map(|r| r.updated_at).min().unwrap();
+        assert_eq!(oldest, now - Duration::days(24));
+    }
+
+    #[test]
+    fn prune_finished_never_drops_an_active_request() {
+        let now = Utc::now();
+        let mut requests: Vec<_> = (0..FINISHED_REQUESTS_KEPT + 5)
+            .map(|_| request(UserRequestStatus::Completed, now - Duration::days(1)))
+            .collect();
+        let active = request(UserRequestStatus::Active, now - Duration::days(400));
+        let active_id = active.id;
+        requests.push(active);
+        requests.extend(
+            (0..3).map(|_| request(UserRequestStatus::Completed, now - Duration::days(90))),
+        );
+        prune_finished(&mut requests, now);
+        assert!(requests.iter().any(|r| r.id == active_id));
+        assert_eq!(requests.len(), FINISHED_REQUESTS_KEPT + 5 + 1);
+    }
+}

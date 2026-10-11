@@ -83,7 +83,17 @@ pub async fn submit(
         Some(RequestKind::TemperatureTarget) => {
             let (user_req, target) = UserRequestService::create_heater(body, &slices, now)
                 .map_err(SubmitError::Request)?;
-            state.set_heater_target(Some(target)).await;
+            // The heater has one target: the request that owned the previous one ends with it.
+            if let Some(displaced) = state.replace_heater_target(target, now).await {
+                announce_request_transition(
+                    state,
+                    trigger_tx,
+                    &displaced,
+                    Some(UserRequestStatus::Active),
+                    now,
+                )
+                .await;
+            }
             state.upsert_request(user_req.clone()).await;
             announce_request_transition(state, trigger_tx, &user_req, None, now).await;
             Ok(user_req)
@@ -104,22 +114,36 @@ async fn submit_charge_session(
     let replace_ids = body.replace_session_ids.clone();
     let (user_req, session) =
         UserRequestService::create_ev(body, slices, now).map_err(SubmitError::Request)?;
-    match &replace_ids {
+    let displaced = match &replace_ids {
         Some(ids) => state
-            .replace_ev_sessions(ids, session)
+            .replace_ev_sessions(ids, session, now)
             .await
-            .map(|_| ())
             .map_err(|refusal| RequestError::EvReplaceRejected {
                 rejection: refusal.rejection,
                 conflicts: refusal.conflicts.iter().map(ClashingSession::of).collect(),
             }),
-        None => state.insert_ev_session(session).await.map_err(|clash| {
-            RequestError::EvSessionsConflict {
+        None => state
+            .insert_ev_session(session)
+            .await
+            .map(|()| Vec::new())
+            .map_err(|clash| RequestError::EvSessionsConflict {
                 conflicts: clash.conflicts.iter().map(ClashingSession::of).collect(),
-            }
-        }),
+            }),
     }
     .map_err(SubmitError::Request)?;
+    // A displaced session's request was cancelled with it (`replace_ev_sessions`).
+    for req in state.user_requests().await {
+        if displaced.iter().any(|s| req.session_id == Some(s.id)) {
+            announce_request_transition(
+                state,
+                trigger_tx,
+                &req,
+                Some(UserRequestStatus::Active),
+                now,
+            )
+            .await;
+        }
+    }
     state.upsert_request(user_req.clone()).await;
     announce_request_transition(state, trigger_tx, &user_req, None, now).await;
     Ok(user_req)
@@ -133,7 +157,7 @@ pub async fn cancel_and_announce(
     roster: &dyn SimRosterPort,
     trigger_tx: &watch::Sender<PlanTriggerSignal>,
 ) -> Result<UserRequest, DomainError> {
-    let (was, req) = UserRequestService::cancel(id, state, roster).await?;
+    let (was, req) = UserRequestService::cancel(id, now, state, roster).await?;
     announce_request_transition(state, trigger_tx, &req, Some(was), now).await;
     info!(request_id = %id, "user request cancelled");
     Ok(req)
@@ -161,6 +185,26 @@ pub async fn complete_shiftable_and_announce(
         None => {
             let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
         }
+    }
+}
+
+/// End the requests whose session's time has passed (`AppState::settle_requests`) and announce
+/// each completion.
+pub async fn settle_requests_and_announce(
+    now: DateTime<Utc>,
+    state: &AppState,
+    trigger_tx: &watch::Sender<PlanTriggerSignal>,
+) {
+    for req in state.settle_requests(now).await {
+        info!(request_id = %req.id, asset_id = %req.asset_id, "user request completed: its session's time has passed");
+        announce_request_transition(
+            state,
+            trigger_tx,
+            &req,
+            Some(UserRequestStatus::Active),
+            now,
+        )
+        .await;
     }
 }
 
@@ -292,12 +336,7 @@ mod tests {
         let loads = f.state.shiftable_loads().await;
         assert_eq!(loads.len(), 1);
         assert_eq!(loads[0].asset_id, req.asset_id);
-        assert!(f
-            .state
-            .active_requests()
-            .await
-            .iter()
-            .any(|r| r.id == req.id));
+        assert!(f.state.user_requests().await.iter().any(|r| r.id == req.id));
         assert_eq!(
             f.transitions(req.id).await,
             [(None, UserRequestStatus::Active)]
@@ -479,6 +518,58 @@ mod tests {
             f.trigger_rx.has_changed().unwrap(),
             "a replan was asked for"
         );
+    }
+
+    /// R-137: the heater has one target, so a second heater request ends the first, announced.
+    #[tokio::test]
+    async fn submit_a_second_heater_request_cancels_and_announces_the_first() {
+        let f = fixture();
+        let first = f.submit(heater_body(f.now, Some(45.0))).await.unwrap();
+        let second = f.submit(heater_body(f.now, Some(50.0))).await.unwrap();
+        assert_eq!(
+            f.transitions(first.id).await.last().cloned(),
+            Some((
+                Some(UserRequestStatus::Active),
+                UserRequestStatus::Cancelled
+            ))
+        );
+        assert_eq!(
+            f.state.heater_target().await.map(|t| t.id),
+            second.session_id
+        );
+    }
+
+    /// R-137: a request whose session's time has passed completes, announced, and asks for a
+    /// replan. An EV request used to stay active and overdue for the life of the VEN.
+    #[tokio::test]
+    async fn settle_requests_and_announce_completes_the_requests_whose_time_has_passed() {
+        let mut f = fixture();
+        let ev = f.submit(ev_body(f.now, Some(0.9))).await.unwrap();
+        let heater = f.submit(heater_body(f.now, Some(45.0))).await.unwrap();
+        f.trigger_rx.mark_unchanged();
+
+        settle_requests_and_announce(f.now + chrono::Duration::hours(1), &f.state, &f.trigger_tx)
+            .await;
+        assert!(
+            !f.trigger_rx.has_changed().unwrap(),
+            "nothing has ended yet"
+        );
+
+        // The heater's ready-by is 4 h out, the EV's departure 6 h.
+        settle_requests_and_announce(f.now + chrono::Duration::hours(7), &f.state, &f.trigger_tx)
+            .await;
+        for id in [ev.id, heater.id] {
+            assert_eq!(
+                f.transitions(id).await.last().cloned(),
+                Some((
+                    Some(UserRequestStatus::Active),
+                    UserRequestStatus::Completed
+                ))
+            );
+        }
+        assert!(f.trigger_rx.has_changed().unwrap());
+        assert!(f.state.ev_sessions().await.is_empty());
+        assert!(f.state.heater_target().await.is_none());
     }
 
     /// R-130: a request's status crosses the wire in the one spelling `/user-requests` uses.

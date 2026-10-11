@@ -216,11 +216,12 @@ impl UserRequestService {
     ///   desyncing the request from the asset still actually drawing power.
     pub async fn cancel(
         id: Uuid,
+        now: DateTime<Utc>,
         state: &AppState,
         roster: &dyn crate::controller::SimRosterPort,
     ) -> Result<(UserRequestStatus, UserRequest), DomainError> {
         // Check existence and terminal state before calling the state method.
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         let req = requests
             .iter()
             .find(|r| r.id == id)
@@ -249,11 +250,11 @@ impl UserRequestService {
         }
 
         // Delegate to AppState which handles session clearing atomically.
-        state.cancel_request(id).await;
+        state.cancel_request(id, now).await;
 
         // Return the now-cancelled request.
         let updated = state
-            .active_requests()
+            .user_requests()
             .await
             .into_iter()
             .find(|r| r.id == id)
@@ -386,7 +387,7 @@ pub(crate) mod tests {
         let unknown = Uuid::new_v4();
         let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
         let roster = SimHandle::new(sim.clone());
-        let result = UserRequestService::cancel(unknown, &state, &roster).await;
+        let result = UserRequestService::cancel(unknown, Utc::now(), &state, &roster).await;
         assert!(matches!(result, Err(DomainError::NotFound { .. })));
     }
 
@@ -396,35 +397,15 @@ pub(crate) mod tests {
         let state = AppState::new();
         // Insert a pre-cancelled request.
         let req = UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: "ev".to_string(),
             status: UserRequestStatus::Cancelled,
-            target_soc_frac: None,
-            target_energy_kwh: 10.0,
-            desired_power_kw: 3.0,
-            deadlines: vec![],
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
-            session_id: None,
-            session_type: None,
-            comfort_rates: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..UserRequest::for_test("ev", Utc::now())
         };
         let id = req.id;
         state.upsert_request(req).await;
 
         let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
         let roster = SimHandle::new(sim.clone());
-        let result = UserRequestService::cancel(id, &state, &roster).await;
+        let result = UserRequestService::cancel(id, Utc::now(), &state, &roster).await;
         assert!(matches!(result, Err(DomainError::SessionConflict(_))));
     }
 
@@ -451,35 +432,16 @@ pub(crate) mod tests {
         state.insert_ev_session(ev_session).await.unwrap();
 
         let req = UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: "ev".to_string(),
-            status: UserRequestStatus::Active,
-            target_soc_frac: Some(0.8),
-            target_energy_kwh: 10.0,
-            desired_power_kw: 3.0,
-            deadlines: vec![],
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
             session_id: Some(session_id),
             session_type: Some(crate::entities::user_request::SessionType::Ev),
-            comfort_rates: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..UserRequest::for_test("ev", Utc::now())
         };
         let id = req.id;
         state.upsert_request(req).await;
 
         let sim = Arc::new(Mutex::new(SimState::from_params(&[], Utc::now())));
         let roster = SimHandle::new(sim.clone());
-        let (_, cancelled) = UserRequestService::cancel(id, &state, &roster)
+        let (_, cancelled) = UserRequestService::cancel(id, Utc::now(), &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
@@ -490,28 +452,9 @@ pub(crate) mod tests {
     /// A shiftable-load request as `create_shiftable` builds it, for the asset `asset_id`.
     fn shiftable_request(asset_id: &str) -> UserRequest {
         UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: asset_id.to_string(),
-            status: UserRequestStatus::Active,
-            target_soc_frac: None,
-            target_energy_kwh: 2.0,
-            desired_power_kw: 2.0,
-            deadlines: vec![],
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
             session_id: Some(Uuid::new_v4()),
             session_type: Some(SessionType::ShiftableLoad),
-            comfort_rates: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..UserRequest::for_test(asset_id, Utc::now())
         }
     }
 
@@ -547,7 +490,7 @@ pub(crate) mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let result = UserRequestService::cancel(id, &state, &roster).await;
+        let result = UserRequestService::cancel(id, Utc::now(), &state, &roster).await;
         assert!(
             matches!(result, Err(DomainError::SessionConflict(_))),
             "cancelling a started shiftable load must be rejected"
@@ -591,7 +534,7 @@ pub(crate) mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let result = UserRequestService::cancel(id, &state, &roster).await;
+        let result = UserRequestService::cancel(id, Utc::now(), &state, &roster).await;
         assert!(
             matches!(result, Err(DomainError::SessionConflict(_))),
             "a running load cannot be cancelled, got {result:?}"
@@ -622,7 +565,7 @@ pub(crate) mod tests {
         let id = req.id;
         state.upsert_request(req).await;
 
-        let (_, cancelled) = UserRequestService::cancel(id, &state, &roster)
+        let (_, cancelled) = UserRequestService::cancel(id, Utc::now(), &state, &roster)
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);

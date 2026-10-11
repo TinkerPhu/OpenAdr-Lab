@@ -137,7 +137,7 @@ impl From<CreateUserRequestBody> for CreateUserRequestParams {
 
 /// GET /user-requests — list all user requests with embedded session details.
 pub async fn get_requests(State(state): State<AppState>) -> impl IntoResponse {
-    let requests = state.active_requests().await;
+    let requests = state.user_requests().await;
     // The whole queue: each request resolves to the session it owns, by id. Matching
     // against one global session meant that with several queued, only whichever
     // happened to be stored could ever be shown - the rest reported no session at all.

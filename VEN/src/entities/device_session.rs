@@ -384,14 +384,16 @@ impl EvSessionQueue {
         self.0.iter().find(|s| s.departure_time > now)
     }
 
-    /// Drop every session whose departure has passed; returns how many went.
+    /// Drop every session whose departure has passed; returns the ones that went.
     ///
     /// Nothing else expires a session, so a finished or missed one would
     /// otherwise keep acting as an obligation forever.
-    pub fn expire(&mut self, now: DateTime<Utc>) -> usize {
-        let before = self.0.len();
-        self.0.retain(|s| s.departure_time > now);
-        before - self.0.len()
+    pub fn expire(&mut self, now: DateTime<Utc>) -> Vec<EvSession> {
+        let (live, passed) = std::mem::take(&mut self.0)
+            .into_iter()
+            .partition(|s| s.departure_time > now);
+        self.0 = live;
+        passed
     }
 
     /// The queued sessions in window order, for callers that take a slice.
@@ -662,7 +664,7 @@ mod tests {
         let live_id = live.id;
         q.insert(live).unwrap();
 
-        assert_eq!(q.expire(ts(10)), 2, "both passed sessions go at once");
+        assert_eq!(q.expire(ts(10)).len(), 2, "both passed sessions go at once");
         assert_eq!(q.len(), 1);
         assert_eq!(q.iter().next().unwrap().id, live_id);
     }

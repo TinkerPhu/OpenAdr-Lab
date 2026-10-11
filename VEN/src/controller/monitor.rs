@@ -192,30 +192,9 @@ mod tests {
     // ── BL-39: per-session accumulated cost ─────────────────────────────────
 
     fn make_request(asset_id: &str, status: UserRequestStatus) -> UserRequest {
-        let now = Utc::now();
         UserRequest {
-            id: uuid::Uuid::new_v4(),
-            asset_id: asset_id.to_string(),
-            target_soc_frac: None,
-            target_energy_kwh: 0.0,
-            desired_power_kw: 0.0,
-            deadlines: vec![],
-            mode: Default::default(),
-            completion_policy: "STOP".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
-            session_id: None,
-            session_type: None,
-            comfort_rates: vec![],
             status,
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: now,
-            updated_at: now,
+            ..UserRequest::for_test(asset_id, Utc::now())
         }
     }
 

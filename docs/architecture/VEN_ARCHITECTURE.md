@@ -207,6 +207,21 @@ to the Planner watch channel.
 - Applies default `CompletionPolicy` per asset type
 - Calculates energy requirements from SoC delta × capacity for battery-like assets
 
+**How a request ends** (`state/user_requests.rs`; every ending goes through `UserRequest::finish`,
+which stamps `updated_at`, and is announced by `services::request_submission`):
+
+| Ending | Status | Where |
+|--------|--------|-------|
+| The user cancels it | `CANCELLED` | `AppState::cancel_request` |
+| A newer request displaces its session (EV: the named sessions; heater: its one target) | `CANCELLED` | `replace_ev_sessions`, `replace_heater_target` |
+| Its shiftable load finished running | `COMPLETED` | `complete_shiftable` |
+| Its session's time passed (EV departure, heater ready-by); the session is dropped with it | `COMPLETED` | `settle_requests`, once per tick |
+
+A finished request stays in `GET /user-requests` as history: always for
+`FINISHED_REQUEST_RETENTION_DAYS` (7), and beyond that while it is among the newest
+`FINISHED_REQUESTS_KEPT` (20) finished ones (`entities::user_request::prune_finished`, run by
+`settle_requests`). Requests are not persisted; a restart starts with an empty list.
+
 #### Monitor (Ledger)
 
 Runs every 1 s via `controller::monitor::record_tick()`, called from `tasks/sim_tick/publish.rs`.

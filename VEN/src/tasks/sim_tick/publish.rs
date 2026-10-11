@@ -59,11 +59,13 @@ pub(crate) async fn publish_sim_tick_result(
 
     // Post-tick: consolidated ledger accounting, plus (BL-39) per-session
     // accumulated cost for any active UserRequest sharing the ledger's tick.
-    let mut ledger = state.asset_ledger().await;
-    let mut requests = state.active_requests().await;
-    controller::monitor::record_tick(&mut ledger, &mut requests, &sim_snap, rates_snap, dt_s, now);
-    state.set_asset_ledger(ledger).await;
-    state.set_active_requests(requests).await;
+    // A session whose time has passed ends first, so its request collects no further cost.
+    crate::services::request_submission::settle_requests_and_announce(now, state, trigger_tx).await;
+    state
+        .account_tick(|ledger, requests| {
+            controller::monitor::record_tick(ledger, requests, &sim_snap, rates_snap, dt_s, now)
+        })
+        .await;
 
     // Refresh site envelope (computed in-lock from final sim state).
     state.set_site_envelope(envelope).await;

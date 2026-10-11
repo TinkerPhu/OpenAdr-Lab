@@ -13,7 +13,7 @@ use crate::entities::device_session::{
 };
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample, SolveStatus};
 use crate::entities::sensor::SensorSnapshot;
-use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
+use crate::entities::user_request::UserRequest;
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,7 @@ mod report_submissions;
 mod report_windows;
 mod site_headroom_forecast;
 mod task_status;
+mod user_requests;
 mod wire_health;
 
 pub use arbiter::ArbiterDiagnostics;
@@ -103,7 +104,7 @@ pub struct HemsState {
     pub asset_heuristics: HashMap<String, AssetHeuristics>,
     pub report_obligations: Vec<OadrReportObligation>,
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
-    pub active_requests: Vec<UserRequest>,
+    pub user_requests: Vec<UserRequest>,
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
     pub site_headroom_forecast: Vec<crate::entities::plan::SiteFlexibilityForecastSlot>, // state/site_headroom_forecast.rs
     pub capacity_curves: Option<(CapacityCurve, CapacityCurve)>, // (import, export) — state/capacity_curves.rs
@@ -379,59 +380,6 @@ impl AppState {
         self.hems.write().await.asset_forecasts = forecasts;
     }
 
-    pub async fn active_requests(&self) -> Vec<UserRequest> {
-        self.hems.read().await.active_requests.clone()
-    }
-
-    pub async fn set_active_requests(&self, requests: Vec<UserRequest>) {
-        self.hems.write().await.active_requests = requests;
-    }
-
-    /// Add a user request; replace if same id already exists.
-    pub async fn upsert_request(&self, req: UserRequest) {
-        let mut hems = self.hems.write().await;
-        if let Some(pos) = hems.active_requests.iter().position(|r| r.id == req.id) {
-            hems.active_requests[pos] = req;
-        } else {
-            hems.active_requests.push(req);
-        }
-    }
-
-    /// Cancel a user request by id: marks it Cancelled and clears any linked device session.
-    pub async fn cancel_request(&self, id: uuid::Uuid) -> bool {
-        let mut hems = self.hems.write().await;
-        if let Some(req) = hems.active_requests.iter_mut().find(|r| r.id == id) {
-            req.status = UserRequestStatus::Cancelled;
-            let session_type = req.session_type.clone();
-            let session_id = req.session_id;
-            match session_type {
-                Some(SessionType::Ev) => {
-                    // By id, like the shiftable-load branch below: cancelling one
-                    // request must not clear a session another request owns. The
-                    // single slot made that impossible to express, so this is a
-                    // correctness fix, not just a migration.
-                    if let Some(sid) = session_id {
-                        hems.ev_sessions.remove(sid);
-                    }
-                }
-                Some(SessionType::Heater) => {
-                    hems.heater_target = None;
-                }
-                Some(SessionType::ShiftableLoad) => {
-                    if let Some(sid) = session_id {
-                        hems.shiftable_loads.retain(|l| l.id != sid);
-                    }
-                }
-                _ => {
-                    tracing::warn!(request_id = %id, "cancel_request: unexpected session_type {:?} for request {}", session_type, id);
-                }
-            }
-            true
-        } else {
-            false
-        }
-    }
-
     pub async fn asset_ledger(&self) -> HashMap<String, AssetLedgerEntry> {
         self.hems.read().await.asset_ledger.clone()
     }
@@ -451,10 +399,6 @@ impl AppState {
 
     pub async fn heater_target(&self) -> Option<HeaterTarget> {
         self.hems.read().await.heater_target.clone()
-    }
-
-    pub async fn set_heater_target(&self, target: Option<HeaterTarget>) {
-        self.hems.write().await.heater_target = target;
     }
 
     pub async fn shiftable_loads(&self) -> Vec<ShiftableLoad> {
@@ -480,28 +424,6 @@ impl AppState {
         w.shiftable_loads.len() < before
     }
 
-    /// Close out a shiftable-load request once its asset has finished running
-    /// (detected by `tasks::sim_tick::publish` as its asset_id disappearing
-    /// from the live `SimSnapshot` — see `SimState::tick()`'s `is_removable`
-    /// pass, design.md D3a of `shiftable-load-as-asset`).
-    /// Returns the request it completed, if one was still active.
-    pub async fn complete_shiftable(
-        &self,
-        load_id: uuid::Uuid,
-        now: DateTime<Utc>,
-    ) -> Option<UserRequest> {
-        let mut w = self.hems.write().await;
-        w.shiftable_loads.retain(|l| l.id != load_id);
-        // Also mark linked UserRequest as Completed.
-        let req = w
-            .active_requests
-            .iter_mut()
-            .find(|r| r.session_id == Some(load_id) && r.status == UserRequestStatus::Active)?;
-        req.status = UserRequestStatus::Completed;
-        req.updated_at = now;
-        Some(req.clone())
-    }
-
     pub async fn baseline_override(&self) -> Option<BaselineOverride> {
         self.hems.read().await.baseline_override.clone()
     }
@@ -523,6 +445,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::entities::device_session::ShiftableLoad;
+    use crate::entities::user_request::{SessionType, UserRequestStatus};
     use chrono::{Duration, Utc};
     use uuid::Uuid;
 
@@ -575,7 +498,7 @@ mod tests {
             "returns what it completed"
         );
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         let done = requests.iter().find(|r| r.id == req_id).unwrap();
         assert_eq!(done.status, UserRequestStatus::Completed);
         assert_eq!(done.updated_at, now, "stamped with the caller's clock");
@@ -598,30 +521,10 @@ mod tests {
         session_type: Option<SessionType>,
         session_id: Option<uuid::Uuid>,
     ) -> UserRequest {
-        let now = Utc::now();
         UserRequest {
-            mode: Default::default(),
-            id: Uuid::new_v4(),
-            asset_id: "test".to_string(),
-            target_soc_frac: None,
-            target_energy_kwh: 0.0,
-            desired_power_kw: 0.0,
-            deadlines: vec![],
-            completion_policy: "best_effort".to_string(),
-            max_total_cost_eur: None,
-            tier_count: 0,
             session_id,
             session_type,
-            comfort_rates: vec![],
-            status: UserRequestStatus::Active,
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            accumulated_cost_eur: 0.0,
-            interruptible: false,
-            tolerance_min: None,
-            budget_eur: None,
-            created_at: now,
-            updated_at: now,
+            ..UserRequest::for_test("test", Utc::now())
         }
     }
 
@@ -668,12 +571,12 @@ mod tests {
 
         let spontaneous = Uuid::new_v4();
         let removed = state
-            .replace_ev_sessions(&[standing], ev_sess(spontaneous, 3, 9))
+            .replace_ev_sessions(&[standing], ev_sess(spontaneous, 3, 9), Utc::now())
             .await
             .expect("naming exactly the conflict set is accepted");
         assert_eq!(removed.len(), 1);
 
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         let status = |id: Uuid| {
             requests
                 .iter()
@@ -701,14 +604,14 @@ mod tests {
 
         // Spans both, names only one: a partial instruction.
         let refusal = state
-            .replace_ev_sessions(&[a], ev_sess(Uuid::new_v4(), 3, 9))
+            .replace_ev_sessions(&[a], ev_sess(Uuid::new_v4(), 3, 9), Utc::now())
             .await
             .expect_err("a partial instruction must be refused");
         // The refusal carries the current conflict set so a re-prompt is truthful.
         assert_eq!(refusal.conflicts.len(), 2);
 
         assert_eq!(state.ev_sessions().await.len(), 2, "queue untouched");
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         assert_eq!(
             requests.iter().find(|r| r.id == req_id).unwrap().status,
             UserRequestStatus::Active,
@@ -732,7 +635,10 @@ mod tests {
         let req_id = req.id;
         state.upsert_request(req).await;
 
-        assert!(state.cancel_request(req_id).await, "cancel returns true");
+        assert!(
+            state.cancel_request(req_id, Utc::now()).await,
+            "cancel returns true"
+        );
 
         let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
         assert_eq!(
@@ -740,7 +646,7 @@ mod tests {
             vec![a, c],
             "only the cancelled request's session goes"
         );
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }
 
@@ -791,7 +697,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expire_ev_sessions_drops_several_passed_sessions() {
+    async fn settle_requests_drops_several_passed_ev_sessions() {
         let state = AppState::new();
         let live = Uuid::new_v4();
         for (sid, from, to) in [
@@ -805,7 +711,10 @@ mod tests {
                 .unwrap();
         }
 
-        assert_eq!(state.expire_ev_sessions(Utc::now()).await, 2);
+        assert!(
+            state.settle_requests(Utc::now()).await.is_empty(),
+            "no request owned them"
+        );
         let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
         assert_eq!(left, vec![live]);
     }
@@ -824,33 +733,170 @@ mod tests {
         );
     }
 
+    fn heater_target(id: Uuid, ready_in_h: i64) -> HeaterTarget {
+        HeaterTarget {
+            mode: Default::default(),
+            id,
+            target_temp_c: 21.0,
+            ready_by: Utc::now() + Duration::hours(ready_in_h),
+            comfort_rates: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    /// R-137: an EV request ends when its session's departure passes. It used to stay active,
+    /// and overdue, for the life of the VEN.
+    #[tokio::test]
+    async fn settle_requests_completes_the_request_of_a_passed_ev_session() {
+        let state = AppState::new();
+        let (passed, live) = (Uuid::new_v4(), Uuid::new_v4());
+        state
+            .insert_ev_session(ev_sess(passed, -3, -1))
+            .await
+            .unwrap();
+        state.insert_ev_session(ev_sess(live, 2, 4)).await.unwrap();
+        let passed_req = make_request(Some(SessionType::Ev), Some(passed));
+        let live_req = make_request(Some(SessionType::Ev), Some(live));
+        state.upsert_request(passed_req.clone()).await;
+        state.upsert_request(live_req.clone()).await;
+
+        let now = Utc::now();
+        let completed = state.settle_requests(now).await;
+
+        assert_eq!(
+            completed.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![passed_req.id]
+        );
+        let requests = state.user_requests().await;
+        assert_eq!(requests[0].status, UserRequestStatus::Completed);
+        assert_eq!(requests[0].updated_at, now, "stamped when it ended");
+        assert_eq!(requests[1].status, UserRequestStatus::Active);
+        assert!(
+            state.settle_requests(now).await.is_empty(),
+            "a request completes once"
+        );
+    }
+
+    /// R-137: a heater target ends at its ready-by, like an EV session at its departure.
+    #[tokio::test]
+    async fn settle_requests_clears_a_heater_target_past_its_ready_by_and_completes_its_request() {
+        let state = AppState::new();
+        let session_id = Uuid::new_v4();
+        let req = make_request(Some(SessionType::Heater), Some(session_id));
+        state.upsert_request(req).await;
+        state
+            .replace_heater_target(heater_target(session_id, -1), Utc::now())
+            .await;
+
+        let completed = state.settle_requests(Utc::now()).await;
+
+        assert_eq!(completed.len(), 1);
+        assert!(state.heater_target().await.is_none());
+        assert_eq!(
+            state.user_requests().await[0].status,
+            UserRequestStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn settle_requests_keeps_a_heater_target_still_ahead() {
+        let state = AppState::new();
+        let session_id = Uuid::new_v4();
+        state
+            .upsert_request(make_request(Some(SessionType::Heater), Some(session_id)))
+            .await;
+        state
+            .replace_heater_target(heater_target(session_id, 1), Utc::now())
+            .await;
+
+        assert!(state.settle_requests(Utc::now()).await.is_empty());
+        assert!(state.heater_target().await.is_some());
+    }
+
+    /// R-137: finished requests do not pile up for the life of the VEN.
+    #[tokio::test]
+    async fn settle_requests_prunes_finished_requests_past_their_retention() {
+        use crate::entities::user_request::FINISHED_REQUESTS_KEPT;
+        let state = AppState::new();
+        let long_ago = Utc::now() - Duration::days(30);
+        for _ in 0..FINISHED_REQUESTS_KEPT + 7 {
+            let mut req = make_request(None, None);
+            req.finish(UserRequestStatus::Cancelled, long_ago);
+            state.upsert_request(req).await;
+        }
+        let active = make_request(None, None);
+        state.upsert_request(active.clone()).await;
+
+        state.settle_requests(Utc::now()).await;
+
+        let requests = state.user_requests().await;
+        assert_eq!(requests.len(), FINISHED_REQUESTS_KEPT + 1);
+        assert!(requests.iter().any(|r| r.id == active.id));
+    }
+
+    /// R-137: the heater has one target, so a second heater request ends the first. The first
+    /// used to stay active, pointing at a target that was gone.
+    #[tokio::test]
+    async fn replace_heater_target_cancels_the_request_that_owned_the_previous_target() {
+        let state = AppState::new();
+        let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
+        let first_req = make_request(Some(SessionType::Heater), Some(first));
+        state.upsert_request(first_req.clone()).await;
+        assert!(state
+            .replace_heater_target(heater_target(first, 1), Utc::now())
+            .await
+            .is_none());
+
+        let displaced = state
+            .replace_heater_target(heater_target(second, 2), Utc::now())
+            .await;
+
+        assert_eq!(displaced.map(|r| r.id), Some(first_req.id));
+        assert_eq!(
+            state.user_requests().await[0].status,
+            UserRequestStatus::Cancelled
+        );
+        assert_eq!(state.heater_target().await.map(|t| t.id), Some(second));
+        // Cancelling the displaced request again must not clear the newer request's target.
+        state.cancel_request(first_req.id, Utc::now()).await;
+        assert_eq!(state.heater_target().await.map(|t| t.id), Some(second));
+    }
+
+    /// The tick's accounting changes the list in place: a request submitted while the tick
+    /// held a copy used to be overwritten when the copy was written back.
+    #[tokio::test]
+    async fn account_tick_changes_requests_in_place() {
+        let state = AppState::new();
+        state.upsert_request(make_request(None, None)).await;
+        state
+            .account_tick(|ledger, requests| {
+                requests[0].accumulated_cost_eur = 1.5;
+                ledger.insert("ev".into(), Default::default());
+            })
+            .await;
+        assert_eq!(state.user_requests().await[0].accumulated_cost_eur, 1.5);
+        assert!(state.asset_ledger().await.contains_key("ev"));
+    }
+
     #[tokio::test]
     async fn cancel_request_heater_clears_target() {
-        use crate::entities::device_session::HeaterTarget;
         let state = AppState::new();
         let session_id = Uuid::new_v4();
         let req = make_request(Some(SessionType::Heater), Some(session_id));
         let req_id = req.id;
         state.upsert_request(req).await;
         state
-            .set_heater_target(Some(HeaterTarget {
-                mode: Default::default(),
-                id: session_id,
-                target_temp_c: 21.0,
-                ready_by: Utc::now() + chrono::Duration::hours(1),
-                comfort_rates: vec![],
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
+            .replace_heater_target(heater_target(session_id, 1), Utc::now())
             .await;
 
-        let found = state.cancel_request(req_id).await;
+        let found = state.cancel_request(req_id, Utc::now()).await;
         assert!(found, "cancel should return true");
         assert!(
             state.heater_target().await.is_none(),
             "heater_target cleared"
         );
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }
 
@@ -865,10 +911,10 @@ mod tests {
         let req_id = req.id;
         state.upsert_request(req).await;
 
-        let found = state.cancel_request(req_id).await;
+        let found = state.cancel_request(req_id, Utc::now()).await;
         assert!(found, "cancel should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        let requests = state.active_requests().await;
+        let requests = state.user_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }
 
