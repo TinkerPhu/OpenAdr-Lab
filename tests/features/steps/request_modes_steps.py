@@ -42,6 +42,16 @@ def step_pin_pv_forecast_zero(context):
     r.raise_for_status()
 
 
+@given("the PV inverter output is capped at 0 kW")
+def step_cap_pv_output_zero(context):
+    # A manual generation ceiling holds for as long as it is set (Behaviour C), unlike a
+    # pv_irradiance inject, which forces one tick and then decays back toward the live model
+    # (tau ~47 min): in the morning that drift held a 0.27-1.5 kW gap against a plan pinned to
+    # 0 kW (GB-35, 2026-10-11 07:30Z and 08:50Z). The scenario cleanup resets every inject.
+    r = ven_post("/sim/inject", json={"pv_generation_limit_kw": 0.0})
+    r.raise_for_status()
+
+
 @when('I wait for a user notification containing "{text}"')
 def step_wait_for_notification(context, text):
     """Waits up to 300 s — see `wait_for_new_notification` for why that much."""
