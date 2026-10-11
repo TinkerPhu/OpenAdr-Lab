@@ -1,5 +1,5 @@
 pub mod assets;
-mod error;
+pub(crate) mod error;
 pub mod event_log;
 pub mod events;
 pub mod hems;

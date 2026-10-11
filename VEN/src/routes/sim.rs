@@ -168,7 +168,10 @@ fn no_content_or_error(
     match result {
         Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
-            let (status, body): (axum::http::StatusCode, Json<serde_json::Value>) = e.into();
+            let (status, body): (
+                axum::http::StatusCode,
+                Json<crate::routes::error::ErrorBody>,
+            ) = e.into();
             (status, body).into_response()
         }
     }
@@ -177,11 +180,10 @@ fn no_content_or_error(
 pub async fn get_sim(State(state): State<AppState>) -> impl IntoResponse {
     match state.sim().await {
         Some(sim) => Json(sim).into_response(),
-        None => (
+        None => crate::routes::error::error_response(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"error": "simulator not yet initialized"})),
-        )
-            .into_response(),
+            "simulator not yet initialized",
+        ),
     }
 }
 

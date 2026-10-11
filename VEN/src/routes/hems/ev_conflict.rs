@@ -11,59 +11,100 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Serialize;
+use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::controller::user_request::{ClashingSession, RequestError};
 use crate::entities::device_session::EvSessionReplaceRejection;
 
-/// Render one clashing session for the prompt.
-fn clash_json(c: &ClashingSession) -> serde_json::Value {
-    serde_json::json!({
-        "id": c.id,
-        "window_start": c.window_start,
-        "departure_time": c.departure_time,
-        "target_soc": c.target_soc_frac,
-    })
+/// Which refusal this is: a clash nobody confirmed, or a confirmation that was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum EvConflictKind {
+    EvSessionConflict,
+    EvReplaceRejected,
 }
 
-/// The refusal body for an EV submission that clashes with queued sessions.
+/// Why a stated replace instruction was refused, so the client can tell "your confirmation went
+/// stale" from "you never confirmed anything".
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum ReplaceRejection {
+    NotQueued {
+        ids: Vec<Uuid>,
+    },
+    NotTheConflictSet {
+        missing: Vec<Uuid>,
+        extra: Vec<Uuid>,
+    },
+    StillConflicts {
+        ids: Vec<Uuid>,
+    },
+}
+
+impl From<&EvSessionReplaceRejection> for ReplaceRejection {
+    fn from(r: &EvSessionReplaceRejection) -> Self {
+        match r {
+            EvSessionReplaceRejection::NotQueued { ids } => Self::NotQueued { ids: ids.clone() },
+            EvSessionReplaceRejection::NotTheConflictSet { missing, extra } => {
+                Self::NotTheConflictSet {
+                    missing: missing.clone(),
+                    extra: extra.clone(),
+                }
+            }
+            EvSessionReplaceRejection::StillConflicts(c) => Self::StillConflicts {
+                ids: c.conflicts.clone(),
+            },
+        }
+    }
+}
+
+/// The 409 body of an EV submission that clashes with queued sessions.
 ///
-/// `replaceable_session_ids` is what a confirmation must echo back as
-/// `replace_session_ids`, so the client never has to derive that list itself — the
-/// one place the set is decided is the server, and the round trip quotes it.
-pub fn conflict_response(error: &RequestError) -> Option<Response> {
+/// `replaceable_session_ids` is what a confirmation must echo back as `replace_session_ids`, so
+/// the client never has to derive that list itself — the one place the set is decided is the
+/// server, and the round trip quotes it.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub struct EvConflictBody {
+    pub kind: EvConflictKind,
+    pub error: String,
+    pub conflicts: Vec<ClashingSession>,
+    pub replaceable_session_ids: Vec<Uuid>,
+    /// Present only when an instruction was stated and refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rejection: Option<ReplaceRejection>,
+}
+
+/// The conflict body for `error`, or `None` when the error is not an EV clash.
+pub fn conflict_body(error: &RequestError) -> Option<EvConflictBody> {
     let (kind, rejection, conflicts) = match error {
-        RequestError::EvSessionsConflict { conflicts } => ("ev_session_conflict", None, conflicts),
+        RequestError::EvSessionsConflict { conflicts } => {
+            (EvConflictKind::EvSessionConflict, None, conflicts)
+        }
         RequestError::EvReplaceRejected {
             rejection,
             conflicts,
-        } => ("ev_replace_rejected", Some(rejection), conflicts),
+        } => (
+            EvConflictKind::EvReplaceRejected,
+            Some(rejection),
+            conflicts,
+        ),
         _ => return None,
     };
-    let mut body = serde_json::json!({
-        "kind": kind,
-        "error": error.to_string(),
-        "conflicts": conflicts.iter().map(clash_json).collect::<Vec<_>>(),
-        "replaceable_session_ids": conflicts.iter().map(|c| c.id).collect::<Vec<_>>(),
-    });
-    // Why a stated instruction was refused, so the client can tell "your
-    // confirmation went stale" from "you never confirmed anything".
-    if let Some(r) = rejection {
-        body["rejection"] = match r {
-            EvSessionReplaceRejection::NotQueued { ids } => {
-                serde_json::json!({ "reason": "not_queued", "ids": ids })
-            }
-            EvSessionReplaceRejection::NotTheConflictSet { missing, extra } => serde_json::json!({
-                "reason": "not_the_conflict_set",
-                "missing": missing,
-                "extra": extra,
-            }),
-            EvSessionReplaceRejection::StillConflicts(c) => serde_json::json!({
-                "reason": "still_conflicts",
-                "ids": c.conflicts,
-            }),
-        };
-    }
-    Some((StatusCode::CONFLICT, Json(body)).into_response())
+    Some(EvConflictBody {
+        kind,
+        error: error.to_string(),
+        conflicts: conflicts.clone(),
+        replaceable_session_ids: conflicts.iter().map(|c| c.id).collect(),
+        rejection: rejection.map(ReplaceRejection::from),
+    })
+}
+
+/// The 409 response for an EV clash, or `None` when the error is something else.
+pub fn conflict_response(error: &RequestError) -> Option<Response> {
+    conflict_body(error).map(|body| (StatusCode::CONFLICT, Json(body)).into_response())
 }
 
 #[cfg(test)]
@@ -110,5 +151,46 @@ mod tests {
         };
         assert!(conflict_response(&e).is_some());
         assert!(e.to_string().contains("replace instruction"));
+    }
+
+    /// R-133: the typed body is the `json!()` it replaced, key for key, for both kinds.
+    #[test]
+    fn conflict_body_keeps_the_wire_it_replaced() {
+        let c = clash();
+        let clash_json = serde_json::json!({
+            "id": c.id,
+            "window_start": c.window_start,
+            "departure_time": c.departure_time,
+            "target_soc": c.target_soc_frac,
+        });
+        let plain = RequestError::EvSessionsConflict {
+            conflicts: vec![c.clone()],
+        };
+        assert_eq!(
+            serde_json::to_value(conflict_body(&plain).unwrap()).unwrap(),
+            serde_json::json!({
+                "kind": "ev_session_conflict",
+                "error": plain.to_string(),
+                "conflicts": [clash_json.clone()],
+                "replaceable_session_ids": [c.id],
+            })
+        );
+        let refused = RequestError::EvReplaceRejected {
+            rejection: EvSessionReplaceRejection::NotTheConflictSet {
+                missing: vec![uuid::Uuid::nil()],
+                extra: vec![],
+            },
+            conflicts: vec![c.clone()],
+        };
+        assert_eq!(
+            serde_json::to_value(conflict_body(&refused).unwrap()).unwrap(),
+            serde_json::json!({
+                "kind": "ev_replace_rejected",
+                "error": refused.to_string(),
+                "conflicts": [clash_json],
+                "replaceable_session_ids": [c.id],
+                "rejection": { "reason": "not_the_conflict_set", "missing": [uuid::Uuid::nil()], "extra": [] },
+            })
+        );
     }
 }

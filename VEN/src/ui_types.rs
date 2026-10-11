@@ -70,6 +70,13 @@ ui_types![
     crate::entities::history::ForecastAccuracySample,
     crate::entities::history::EventReceived,
     crate::entities::history::ReportSent,
+    // Request bodies the UI sends (increment 5)
+    crate::routes::hems::CreateUserRequestBody,
+    crate::routes::hems::UpdateEvSettingsBody,
+    crate::routes::hems::UpdateArbiterSettingsBody,
+    crate::routes::hems::CreateBaselineOverrideBody,
+    crate::routes::hems::ev_conflict::EvConflictBody,
+    crate::routes::error::ErrorBody,
 ];
 
 /// Where the UI imports the generated files from.

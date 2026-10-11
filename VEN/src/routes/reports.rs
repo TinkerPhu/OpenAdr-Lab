@@ -115,11 +115,10 @@ pub async fn post_reports(
         }
         Err(e) => {
             error!("report submission failed: {e:#}");
-            (
+            crate::routes::error::error_response(
                 axum::http::StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": format!("{e:#}")})),
+                format!("{e:#}"),
             )
-                .into_response()
         }
     }
 }
@@ -177,11 +176,10 @@ pub async fn put_report(
         }
         Err(e) => {
             error!("report update failed: {e:#}");
-            (
+            crate::routes::error::error_response(
                 axum::http::StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": format!("{e:#}")})),
+                format!("{e:#}"),
             )
-                .into_response()
         }
     }
 }

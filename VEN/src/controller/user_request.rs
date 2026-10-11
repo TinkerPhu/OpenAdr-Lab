@@ -123,11 +123,13 @@ pub enum RequestError {
 /// Deliberately not the whole `EvSession`: this crosses a boundary to be rendered,
 /// and the comfort curve, mode and budget of someone else's plan are not the user's
 /// business when all they are being asked is which of two plans to keep.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct ClashingSession {
     pub id: uuid::Uuid,
     pub window_start: DateTime<Utc>,
     pub departure_time: DateTime<Utc>,
+    #[serde(rename = "target_soc")]
+    #[ts(rename = "target_soc")]
     pub target_soc_frac: f64,
 }
 

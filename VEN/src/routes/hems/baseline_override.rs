@@ -2,6 +2,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use chrono::Utc;
 use serde::Deserialize;
 use tracing::info;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::app_ctx::PlanTriggerTx;
@@ -10,12 +11,14 @@ use crate::entities::device_session::{BaselineOverride, BaselineSlot};
 use crate::state::AppState;
 
 /// POST /baseline-override body.
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct CreateBaselineOverrideBody {
     pub slots: Vec<BaselineSlotBody>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct BaselineSlotBody {
     pub slot_start: chrono::DateTime<Utc>,
     pub add_kw: f64,

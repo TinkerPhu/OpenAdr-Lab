@@ -126,7 +126,6 @@ pub async fn get_timeline(
     Query(params): Query<TimelineParams>,
 ) -> impl IntoResponse {
     use crate::controller::timeline::compute_uniform_grid;
-    use axum::http::StatusCode;
 
     let now = Utc::now();
     let hours_back = params.hours_back.unwrap_or(1.0);
@@ -155,11 +154,7 @@ pub async fn get_timeline(
         &history_grid,
         resolution_s,
     ) {
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
-        )
-            .into_response(),
+        None => crate::routes::error::unknown_asset(&asset_id),
         Some(arr) => Json(serde_json::Value::Array(arr)).into_response(),
     }
 }

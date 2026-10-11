@@ -1,5 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
+use ts_rs::TS;
 
 use crate::app_ctx::SimRead;
 use crate::state::AppState;
@@ -26,7 +27,8 @@ pub async fn get_ev_settings(State(state): State<AppState>) -> impl IntoResponse
 }
 
 /// PUT /ev-settings body.
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(optional_fields = nullable)]
 pub struct UpdateEvSettingsBody {
     pub opportunistic_charging_enabled: bool,
 }
