@@ -6,7 +6,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
-import type { Report, ReportSubmission } from "../api/types";
+import type { Report, ReportSubmissionRecord } from "../api/types";
 import { buildExampleResources } from "../utils/exampleResources";
 import {
   useReports, useReportSubmissions, useReportWindows, useSubmitReport, useUpdateReport, useEvents, usePrograms,
@@ -21,8 +21,8 @@ import { JsonDialog } from "@lab/charts/JsonDialog";
  * whichever single field is available. */
 function latestSubmissionFor(
   report: Report,
-  submissions: ReportSubmission[],
-): ReportSubmission | null {
+  submissions: ReportSubmissionRecord[],
+): ReportSubmissionRecord | null {
   const matches = submissions.filter((s) => {
     if (report.reportName && report.eventID) {
       return s.report_name === report.reportName && s.event_id === report.eventID;
@@ -40,7 +40,7 @@ function latestSubmissionFor(
   );
 }
 
-export function ReportStatusChip({ submission }: { submission: ReportSubmission | null }) {
+export function ReportStatusChip({ submission }: { submission: ReportSubmissionRecord | null }) {
   if (!submission) return null;
   return submission.vtn_accepted ? (
     <Chip size="small" color="success" label="Accepted" data-testid="report-status-accepted" />

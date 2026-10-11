@@ -1,5 +1,5 @@
 import type { AssetTimelinePoint } from "../types";
-import type { ZoneDef, ForecastAccuracySample } from "../../../api/types";
+import type { ZoneDef, ForecastAccuracyRow } from "../../../api/types";
 import {
   minSpanDomain,
   MIN_COST_RATE_SPAN_EUR_H,
@@ -44,9 +44,9 @@ interface AssetTimelineChartProps {
   /** forecast-accuracy-tracking: the plan's near-lead (`slots[1]`) forecast sample for this
    * asset from each plan cycle, overlaid on the power axis alongside the actual line. History
    * page only — pass for the PV and base_load cells. */
-  nearForecast?: ForecastAccuracySample[];
+  nearForecast?: ForecastAccuracyRow[];
   /** Same as `nearForecast`, but the far-lead (`slots.last()`) sample. */
-  farForecast?: ForecastAccuracySample[];
+  farForecast?: ForecastAccuracyRow[];
   /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:30, ...) instead of
    * recharts' default "nice" ticks. History page only — Controller's real-time cells keep the
    * default behavior. */
@@ -95,7 +95,7 @@ export function AssetTimelineChart({
   // one index space — see mergeSeries.ts's doc comment for the bug this structurally
   // prevents (recharts resolves tooltip hover by array index, not by re-matching
   // timestamps across a series' own overridden `data`).
-  const foldSamples = (samples: ForecastAccuracySample[] | undefined, key: string) =>
+  const foldSamples = (samples: ForecastAccuracyRow[] | undefined, key: string) =>
     (samples ?? []).map((s) => ({ ts: s.target_ts, key, value: s.predicted_kw }));
   const merged: TimestampedRow[] = mergeTimestampedSeries(rawData, [
     ...foldSamples(nearForecast, "predicted_kw_near"),

@@ -5,7 +5,7 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
-import type { Plan, TaskStatusEntry, VtnStatus } from "../../api/types";
+import type { Plan, TaskStatusEntry, VtnStatusResponse } from "../../api/types";
 
 // WP-T8 (docs/history/project_journal.md, search "WP-T" §3.3): shared traffic-light row —
 // a single-line healthy state, or a degraded state whose detail only shows
@@ -67,7 +67,7 @@ function formatAge(iso: string): string {
   return `${Math.floor(diffMin / 60)}h ago`;
 }
 
-export function VtnConnectionRow({ vtnStatus }: { vtnStatus: VtnStatus | undefined }) {
+export function VtnConnectionRow({ vtnStatus }: { vtnStatus: VtnStatusResponse | undefined }) {
   if (!vtnStatus) {
     return <StatusRow testId="dash-vtn" severity="neutral" summary="VTN Connection: unknown" />;
   }
@@ -178,7 +178,7 @@ export function DashboardStatusPanel({
   plan,
   tasks,
 }: {
-  vtnStatus: VtnStatus | undefined;
+  vtnStatus: VtnStatusResponse | undefined;
   plan: Plan | null | undefined;
   tasks: TaskStatusEntry[];
 }) {

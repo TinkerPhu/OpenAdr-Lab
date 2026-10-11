@@ -5,7 +5,7 @@ import {
   PlanStatusRow,
   TaskSummaryRow,
 } from "../components/dashboard/StatusRows";
-import type { Plan, TaskStatusEntry, VtnStatus } from "../api/types";
+import type { Plan, TaskStatusEntry, VtnStatusResponse } from "../api/types";
 import { makePlan as basePlan } from "./fixtures/plan";
 
 function makePlan(overrides: Partial<Plan> = {}): Plan {
@@ -20,12 +20,13 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
 
 describe("VtnConnectionRow", () => {
   it("shows a single healthy line when connected, no expand control", () => {
-    const vtn: VtnStatus = {
+    const vtn: VtnStatusResponse = {
       connected: true,
       last_success_ts: new Date().toISOString(),
       last_error: null,
       current_backoff_s: 0,
       token_expires_at: null,
+      comms_loss_active: false,
     };
     render(<VtnConnectionRow vtnStatus={vtn} />);
     expect(screen.getByTestId("dash-vtn-status")).toHaveTextContent(/connected/i);
@@ -33,12 +34,13 @@ describe("VtnConnectionRow", () => {
   });
 
   it("shows degraded state and expands with backoff/error detail when disconnected", () => {
-    const vtn: VtnStatus = {
+    const vtn: VtnStatusResponse = {
       connected: false,
       last_success_ts: null,
       last_error: "connection refused",
       current_backoff_s: 30.5,
       token_expires_at: null,
+      comms_loss_active: false,
     };
     render(<VtnConnectionRow vtnStatus={vtn} />);
     expect(screen.getByTestId("dash-vtn-status")).toHaveTextContent(/disconnected/i);

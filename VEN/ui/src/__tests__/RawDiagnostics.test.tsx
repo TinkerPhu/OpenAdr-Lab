@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RawDiagnosticsPage } from "../pages/RawDiagnostics";
 import type { SimSnapshot, PlannedRates } from "../api/types";
 import { makeGrid, makeAssets } from "./fixtures/sim";
+import { makeTariff } from "./fixtures/tariff";
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -18,12 +19,12 @@ const baseSim: SimSnapshot = {
 };
 
 const baseTariffs: PlannedRates = [
-  {
+  makeTariff({
     interval_start: "2026-03-18T09:00:00Z",
     import_tariff_eur_kwh: 0.25,
     export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 350,
-  },
+  }),
 ];
 
 const baseTimeline = {

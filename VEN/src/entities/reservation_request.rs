@@ -40,6 +40,7 @@
 //! deliberate non-goal — it needs a second solve per direction per report.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::SiteFlexibilityEnvelope;
@@ -50,7 +51,7 @@ use crate::entities::plan::SiteFlexibilityEnvelope;
 /// the site can do, or no allowance was ever declared so nothing binds. Both
 /// are honest zeros, and they are the normal case in this lab, where no VTN
 /// program issues subscription or reservation events.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, TS)]
 pub struct ReservationRequest {
     /// Import capacity requested beyond the contracted import allowance (kW).
     pub import_kw: f64,

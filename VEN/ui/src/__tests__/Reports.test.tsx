@@ -28,14 +28,14 @@ const mockObligations = [
     id: "ob-1", event_id: "e1", program_id: "p1", payload_type: "USAGE",
     reading_type: "DIRECT_READ", resource_name: null,
     due_at: new Date(Date.now() + 3_600_000).toISOString(),
-    interval_duration_s: 900, fulfilled: false,
+    interval_width_s: 900, submit_every_s: 900, fulfilled: false,
     created_at: new Date().toISOString(), historical: true,
   },
   {
     id: "ob-2", event_id: "e2", program_id: "p1", payload_type: "USAGE",
     reading_type: "DIRECT_READ", resource_name: null,
     due_at: new Date(Date.now() - 3_600_000).toISOString(),
-    interval_duration_s: 900, fulfilled: false,
+    interval_width_s: 900, submit_every_s: 900, fulfilled: false,
     created_at: new Date().toISOString(), historical: true,
   },
 ];

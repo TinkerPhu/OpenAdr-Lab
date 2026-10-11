@@ -134,7 +134,7 @@ export type AssetTimelinePoint = {
 // ─── Tariff (grid tariff cell) ───────────────────────────────────────────────
 
 /** Current tariff conditions snapshot for the Tariff Cell left section. */
-export type TariffSnapshot = {
+export type TariffConditions = {
   importPriceEurKwh: number | null;
   exportPriceEurKwh: number | null;
   /** CO₂eq tariff [g CO₂eq/kWh] — NOT a rate */

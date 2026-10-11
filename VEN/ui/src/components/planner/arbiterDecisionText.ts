@@ -1,7 +1,7 @@
-import type { TraceEntry } from "../../api/types";
+import type { ControllerEvent } from "../../api/types";
 import { formatKwOrDash } from "@lab/charts/unitFormat";
 
-type ArbiterDecision = Extract<TraceEntry, { type: "ArbiterDecision" }>;
+type ArbiterDecision = Extract<ControllerEvent, { type: "ArbiterDecision" }>;
 
 /** Mirrors the backend's `DEAD_BAND_KW`: a smaller residual is not reported
  * as unresolved (`controller::arbiter::decision_event`). */

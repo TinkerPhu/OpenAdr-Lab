@@ -77,7 +77,7 @@ pub enum ForecastSource {
 }
 
 /// Severity of a user notification (used in Stage 5).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserNotificationSeverity {
     Info,  // informational — plan changed, schedule updated

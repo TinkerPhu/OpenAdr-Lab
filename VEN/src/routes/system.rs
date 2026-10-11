@@ -3,6 +3,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::app_ctx::{CommsLoss, MetricsHandle, Telemetry};
 use crate::entities::plan::SolveStatus;
@@ -22,14 +23,15 @@ fn comms_loss_active(
     comms_loss_debounce_s.is_some_and(|debounce_s| vtn.comms_lost_for(now, debounce_s))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct HealthComponent {
     status: &'static str,
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct HealthComponents {
     ven_process: HealthComponent,
     vtn_connection: HealthComponent,
@@ -47,11 +49,12 @@ pub struct HealthComponents {
     /// nothing else would show it, since telemetry is fire-and-forget and a
     /// dropped publish is deliberately not an error anywhere else
     /// (`ui-transparency`).
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     fleet_telemetry: Option<HealthComponent>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct HealthResponse {
     status: &'static str,
     components: HealthComponents,
@@ -172,7 +175,7 @@ pub async fn health(
     Json(response)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct VtnStatusResponse {
     connected: bool,
     last_success_ts: Option<DateTime<Utc>>,
@@ -217,7 +220,7 @@ pub async fn vtn_status(
     ))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct TaskStatusEntry {
     name: String,
     last_run_ts: Option<DateTime<Utc>>,

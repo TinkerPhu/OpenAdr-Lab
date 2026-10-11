@@ -11,6 +11,7 @@
 use axum::{extract::State, Json};
 use chrono::Duration;
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::app_ctx::{Weather, WeatherPvParams};
 use crate::entities::asset_params::PvForecastParams;
@@ -25,7 +26,7 @@ use crate::state::AppState;
 /// policy discussion).
 const STALENESS_THRESHOLD: Duration = Duration::hours(2);
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum WeatherStatus {
     Ok,
@@ -33,7 +34,7 @@ pub enum WeatherStatus {
     NoForecast,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct WeatherResponse {
     status: WeatherStatus,
     is_fresh: bool,

@@ -68,7 +68,6 @@ pub struct ControlDescriptor {
     /// UI display multiplier: raw value × display_scale for display; divide by scale on send.
     /// E.g. display_scale=100.0 renders SoC fraction 0.8 as "80 %".
     #[ts(optional)]
-    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_scale: Option<f64>,
     /// Marks this slider as representing an optional override where `max` is

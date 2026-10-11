@@ -6,9 +6,10 @@
 // defined by what must survive a restart, which is a persistence concern.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// User-controllable settings for the opportunistic EV charging overlay.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct EvSettings {
     /// When true (default), the dispatcher routes live PV surplus to the EV when
     /// no EvSession is active. Automatically paused while an EvSession exists.

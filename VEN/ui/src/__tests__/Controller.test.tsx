@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ControllerPage } from "../pages/Controller";
 import type { SimSnapshot, SimInjectState, TariffSnapshot } from "../api/types";
 import { makeAssets, makeGrid, makeInject } from "./fixtures/sim";
+import { makeTariff } from "./fixtures/tariff";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -22,12 +23,12 @@ const baseSim: SimSnapshot = {
 };
 
 const baseRates: TariffSnapshot[] = [
-  {
+  makeTariff({
     interval_start: "2026-03-14T00:00:00Z",
     import_tariff_eur_kwh: 0.25,
     export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 300,
-  },
+  }),
 ];
 
 const baseInject: SimInjectState = makeInject();

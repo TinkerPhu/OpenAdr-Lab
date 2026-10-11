@@ -8,13 +8,14 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use super::AppState;
 
 pub const EVENT_LOG_RING_CAP: usize = 200;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EventLogEntry {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,

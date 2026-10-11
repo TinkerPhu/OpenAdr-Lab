@@ -25,6 +25,15 @@ pub async fn get_report_submissions(State(state): State<AppState>) -> impl IntoR
     Json(state.report_submissions().await)
 }
 
+/// One row of `GET /reports/windows`: how many intervals a report carries and its cap (D-3).
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportWindowSize {
+    pub report_name: String,
+    pub intervals: usize,
+    pub max_intervals: usize,
+}
+
 /// GET /reports/windows — how many intervals each report currently carries
 /// (D-3), newest-named first.
 ///
@@ -33,19 +42,17 @@ pub async fn get_report_submissions(State(state): State<AppState>) -> impl IntoR
 /// themselves (`ui-transparency`). A window stuck at one interval means
 /// accumulation is not happening; one pinned at the cap means it is trimming.
 pub async fn get_report_windows(State(state): State<AppState>) -> impl IntoResponse {
-    let mut windows: Vec<_> = state
+    let mut windows: Vec<ReportWindowSize> = state
         .report_window_sizes()
         .await
         .into_iter()
-        .map(|(report_name, intervals)| {
-            serde_json::json!({
-                "reportName": report_name,
-                "intervals": intervals,
-                "maxIntervals": crate::controller::report_accumulator::MAX_REPORT_INTERVALS,
-            })
+        .map(|(report_name, intervals)| ReportWindowSize {
+            report_name,
+            intervals,
+            max_intervals: crate::controller::report_accumulator::MAX_REPORT_INTERVALS,
         })
         .collect();
-    windows.sort_by(|a, b| a["reportName"].as_str().cmp(&b["reportName"].as_str()));
+    windows.sort_by(|a, b| a.report_name.cmp(&b.report_name));
     Json(windows)
 }
 
@@ -285,5 +292,24 @@ mod tests {
         assert!(subs
             .iter()
             .any(|s| !s.vtn_accepted && s.report_name.as_deref() == Some("r-fail")));
+    }
+}
+
+#[cfg(test)]
+mod report_window_wire_tests {
+    use super::ReportWindowSize;
+
+    /// R-133: the typed row is the `json!()` it replaced, key for key.
+    #[test]
+    fn report_window_size_keeps_the_wire_it_replaced() {
+        let row = ReportWindowSize {
+            report_name: "TELEMETRY".into(),
+            intervals: 7,
+            max_intervals: 120,
+        };
+        assert_eq!(
+            serde_json::to_value(&row).unwrap(),
+            serde_json::json!({ "reportName": "TELEMETRY", "intervals": 7, "maxIntervals": 120 })
+        );
     }
 }

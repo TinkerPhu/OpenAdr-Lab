@@ -1,8 +1,8 @@
 import { Alert, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
 import { useMeasurement } from "../api/hooks";
-import { MeasurementSignal } from "../api/types";
+import { SignalResponse } from "../api/types";
 
-function SignalCard({ title, testId, signal }: { title: string; testId: string; signal: MeasurementSignal }) {
+function SignalCard({ title, testId, signal }: { title: string; testId: string; signal: SignalResponse }) {
   return (
     <Card data-testid={testId} variant="outlined">
       <CardContent>

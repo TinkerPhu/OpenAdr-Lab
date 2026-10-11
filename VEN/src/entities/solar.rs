@@ -11,6 +11,7 @@
 //! output.
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
+use ts_rs::TS;
 
 use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams};
 use crate::entities::pv_snow::{snow_coverage_trajectory, PvSnowState};
@@ -198,7 +199,7 @@ pub fn forecast_ac_kw(
 /// One hour of the weather-sourced PV forecast — `forecast_ac_kw`'s output
 /// plus the snow-cover flag that produced it, tied to the forecast sample's
 /// own timestamp.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, TS)]
 pub struct WeatherPvForecastSlot {
     pub valid_at: DateTime<Utc>,
     pub forecast_ac_kw: f64,

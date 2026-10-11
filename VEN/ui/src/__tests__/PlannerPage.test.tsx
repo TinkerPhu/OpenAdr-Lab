@@ -2,7 +2,7 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PlannerPage } from "../pages/Planner";
-import type { Plan, TraceEntry, PlannerEvent, UserRequestWithSession } from "../api/types";
+import type { Plan, ControllerEvent, PlannerEvent, UserRequestWithSession } from "../api/types";
 
 // ─── Mock hooks ───────────────────────────────────────────────────────────────
 
@@ -70,14 +70,15 @@ function makeMockRequest(): UserRequestWithSession {
   };
 }
 
-const mockPlanCycle: TraceEntry = {
+const mockPlanCycle: ControllerEvent = {
   type: "PlanCycle",
   ts: "2026-04-04T10:00:00Z",
   trigger_reason: "PERIODIC",
+  event_ids: [],
   total_slots: 48,
 };
 
-const mockTraceEntries: TraceEntry[] = [
+const mockTraceEntries: ControllerEvent[] = [
   mockPlanCycle,
   {
     type: "RateChange",
@@ -307,8 +308,8 @@ describe("PlannerPage", () => {
       makeSlot({ slot_index: 1, start: "2026-04-04T10:05:00Z", end: "2026-04-04T10:10:00Z" }),
     ];
     vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
-    const inSlot0: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:02:00Z", trigger_reason: "PERIODIC", total_slots: 2 };
-    const inSlot1: TraceEntry = { type: "PlanCycle", ts: "2026-04-04T10:07:00Z", trigger_reason: "PERIODIC", total_slots: 2 };
+    const inSlot0: ControllerEvent = { type: "PlanCycle", ts: "2026-04-04T10:02:00Z", trigger_reason: "PERIODIC", event_ids: [], total_slots: 2 };
+    const inSlot1: ControllerEvent = { type: "PlanCycle", ts: "2026-04-04T10:07:00Z", trigger_reason: "PERIODIC", event_ids: [], total_slots: 2 };
     vi.mocked(useTrace).mockReturnValue({ data: [inSlot0, inSlot1] } as unknown as ReturnType<typeof useTrace>);
 
     const user = userEvent.setup();

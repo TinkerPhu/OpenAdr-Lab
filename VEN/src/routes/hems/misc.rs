@@ -67,6 +67,16 @@ pub async fn get_capacity_schedule(State(state): State<AppState>) -> impl IntoRe
     Json(state.planned_capacity_limits().await)
 }
 
+/// `GET /signals`: every live grid signal in one round trip (WP4.6).
+#[derive(Debug, Serialize, ts_rs::TS)]
+pub struct SignalsState {
+    pub alerts: Vec<crate::entities::capacity::AlertWindow>,
+    pub simple: Vec<crate::entities::capacity::SimpleWindow>,
+    pub dispatch: Vec<crate::entities::capacity::DispatchWindow>,
+    pub capacity: crate::entities::capacity::OadrCapacityState,
+    pub reservation_request: Option<ReservationRequest>,
+}
+
 /// GET /signals — WP4.6: one-round-trip aggregate of the active grid signals
 /// (alert / SIMPLE / dispatch windows + capacity state) for the UI status
 /// strip. Read-only view over state the poll loop already maintains.
@@ -104,13 +114,13 @@ pub async fn get_signals(State(state): State<AppState>) -> impl IntoResponse {
         .site_envelope()
         .await
         .map(|env| ReservationRequest::from_headroom(&env, &capacity));
-    Json(serde_json::json!({
-        "alerts": alerts,
-        "simple": simple,
-        "dispatch": dispatch,
-        "capacity": capacity,
-        "reservation_request": reservation_request,
-    }))
+    Json(SignalsState {
+        alerts,
+        simple,
+        dispatch,
+        capacity,
+        reservation_request,
+    })
 }
 
 /// GET /obligations — returns pending report obligations (Stage 2).
@@ -189,4 +199,32 @@ pub async fn get_plan_events(
     });
     let stream = ReceiverStream::new(fwd_rx).map(Ok::<_, std::convert::Infallible>);
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+#[cfg(test)]
+mod signals_wire_tests {
+    use super::*;
+
+    /// R-133: the typed body is the `json!()` it replaced, key for key.
+    #[test]
+    fn signals_state_keeps_the_wire_it_replaced() {
+        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let body = SignalsState {
+            alerts: vec![],
+            simple: vec![],
+            dispatch: vec![],
+            capacity: capacity.clone(),
+            reservation_request: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            serde_json::json!({
+                "alerts": [],
+                "simple": [],
+                "dispatch": [],
+                "capacity": capacity,
+                "reservation_request": null,
+            })
+        );
+    }
 }

@@ -5,14 +5,14 @@
  *
  * Nomenclature: tariff = X/kWh (unit price); rate = X/h (instantaneous flow).
  * The API type `TariffSnapshot` (aliased ApiTariffSnapshot here) holds per-kWh
- * tariff interval data. The component-level `TariffSnapshot` (from ./types)
+ * tariff interval data. The component-level `TariffConditions` (from ./types)
  * is the derived current-tariff snapshot for GridTariffCell.
  */
 
 import type {
   AssetId,
   AssetSummary,
-  TariffSnapshot,
+  TariffConditions,
 } from "./types";
 import { ASSET_COLORS, ASSET_LABELS, COLOR_ASSET_FALLBACK } from "./types";
 import type {
@@ -282,16 +282,16 @@ function findActiveRequest(
   };
 }
 
-// ─── deriveTariffSnapshot ─────────────────────────────────────────────────────
+// ─── deriveTariffConditions ───────────────────────────────────────────────────
 
 /**
- * Build the current TariffSnapshot for the GridTariffCell left section.
+ * Build the current TariffConditions for the GridTariffCell left section.
  */
-export function deriveTariffSnapshot(
+export function deriveTariffConditions(
   sim: SimSnapshot,
   tariffs: ApiTariffSnapshot[],
   nowMs: number
-): TariffSnapshot {
+): TariffConditions {
   const t = findCurrentTariff(tariffs, nowMs);
   const gridPowerKw = sim.grid.net_power_w / 1000;
   const importP = t?.import_tariff_eur_kwh ?? null;

@@ -14,6 +14,7 @@
 //! is restored only once it fits with room to spare.
 
 use std::collections::HashMap;
+use ts_rs::TS;
 
 use super::arbiter_levers::{current_setpoint_kw, LEVER_EV, LEVER_HEATER_PAUSE};
 pub use super::SetpointBoundsKw;
@@ -67,7 +68,7 @@ pub fn limit_target_kw(hard_limit_kw: Option<f64>, incumbent_lever: Option<&str>
 }
 
 /// What the limit pass saw and did this tick (diagnostics + residual feed).
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, TS)]
 pub struct LimitPassOutcome {
     /// The import ceiling steered to (kW).
     pub target_kw: f64,

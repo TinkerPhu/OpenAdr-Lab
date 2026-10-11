@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
+use ts_rs::TS;
 
 use super::AppState;
 
@@ -14,7 +15,7 @@ use super::AppState;
 /// startup window or before the arbiter has run at all this process.
 /// `net_kw`/`dev_kw`/`active_lever`/`unresolved_kw` are the deviation pass's;
 /// `limit` is the limit-enforcement pass's (GB-47).
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, TS)]
 pub struct ArbiterDiagnostics {
     pub net_kw: Option<f64>,
     pub dev_kw: Option<f64>,
