@@ -3,6 +3,8 @@
 import os
 import requests
 
+from features.helpers import scenario_state
+
 # Generous default for Node1 ARM64 under full-suite load.
 HTTP_TIMEOUT = int(os.environ.get("TEST_HTTP_TIMEOUT", "60"))
 
@@ -104,6 +106,7 @@ def ven_get(path, params=None):
 
 def ven_post(path, json=None):
     """POST against the VEN (no auth required)."""
+    scenario_state.before_mutation(VEN_BASE_URL, "POST", path)
     return requests.post(
         f"{VEN_BASE_URL}{path}",
         json=json,
@@ -113,6 +116,7 @@ def ven_post(path, json=None):
 
 def ven_put(path, json=None):
     """PUT against the VEN (no auth required)."""
+    scenario_state.before_mutation(VEN_BASE_URL, "PUT", path)
     return requests.put(
         f"{VEN_BASE_URL}{path}",
         json=json,
@@ -122,6 +126,7 @@ def ven_put(path, json=None):
 
 def ven_delete(path):
     """DELETE against the VEN (no auth required)."""
+    scenario_state.before_mutation(VEN_BASE_URL, "DELETE", path)
     return requests.delete(
         f"{VEN_BASE_URL}{path}",
         timeout=HTTP_TIMEOUT,
@@ -141,6 +146,7 @@ def ven2_get(path, params=None):
 
 def ven2_post(path, json=None):
     """POST against VEN-2 (no auth required)."""
+    scenario_state.before_mutation(VEN2_BASE_URL, "POST", path)
     return requests.post(
         f"{VEN2_BASE_URL}{path}",
         json=json,
