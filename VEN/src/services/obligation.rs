@@ -1,6 +1,5 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use reqwest::StatusCode;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -8,8 +7,8 @@ use tracing::{debug, error, info};
 use crate::controller::history_port::record_report_sent;
 use crate::controller::reporter::AssetReportSample;
 use crate::controller::{HistoryPort, VtnPort};
+use crate::entities::DomainError;
 use crate::state::AppState;
-use crate::vtn::VtnHttpError;
 
 pub struct ObligationService;
 
@@ -100,9 +99,10 @@ impl ObligationService {
                         .await;
                     }
                     Err(e) => {
-                        let is_not_found = e
-                            .downcast_ref::<VtnHttpError>()
-                            .is_some_and(|v| v.status == StatusCode::NOT_FOUND);
+                        let is_not_found = matches!(
+                            e.downcast_ref::<DomainError>(),
+                            Some(DomainError::VtnRejected { status: 404, .. })
+                        );
                         if is_not_found {
                             // GB-23: source event/program confirmed gone — drop
                             // this obligation rather than retrying forever.
@@ -180,6 +180,7 @@ mod tests {
     use super::*;
     use crate::services::test_support::mock_vtn::MockVtn;
     use crate::state::AppState;
+    use reqwest::StatusCode;
 
     #[tokio::test]
     async fn test_check_skips_when_none_due() {

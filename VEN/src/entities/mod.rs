@@ -21,6 +21,7 @@ pub mod report_submission;
 pub mod request_slice;
 pub mod reservation_request;
 pub mod ring_buffer;
+pub mod sensor;
 pub mod sim_inject;
 pub mod solar;
 pub mod tariff_snapshot;

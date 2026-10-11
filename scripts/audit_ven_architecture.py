@@ -80,6 +80,13 @@ The rules, and why each exists:
      program declare and reports an assumed default or a refused unit (GB-50: five readers each
      assumed kW, EUR/kWh or a level from the payload type's name alone).
 
+  13. No `crate::vtn` or `crate::simulator` in entities/, services/ or state/ (R-131). The VTN
+     client and the simulator are infrastructure: a type they define is not something the domain,
+     the application ring or the state store may hold. `SensorSnapshot` lived in `simulator/`
+     while `state/` stored it, and `services/obligation.rs` downcast the client's
+     `VtnHttpError`; the sensor types are in `entities/sensor.rs` and a non-2xx VTN answer is
+     `DomainError::VtnRejected`, translated in `vtn.rs`.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -239,6 +246,9 @@ CHECKS = [
          r"(Utc|chrono::Utc)::now\(\)")),
     ("a handler taking the whole AppCtx",
      lambda: forbid("appctx", [VEN_SRC / "routes"], r"State<AppCtx>")),
+    ("infrastructure types held below the adapters",
+     lambda: forbid("infra-types", [VEN_SRC / d for d in ("entities", "services", "state")],
+                    r"crate::(vtn|simulator)")),
     ("an incoming event value read without its declared unit",
      lambda: forbid("payload-value", [VEN_SRC],
                     r"\.numeric\(\)|numeric_value\(|PayloadValue::(Number|Integer)")),

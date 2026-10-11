@@ -12,9 +12,9 @@ use crate::entities::device_session::{
     BaselineOverride, EvSessionQueue, HeaterTarget, ShiftableLoad,
 };
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample, SolveStatus};
+use crate::entities::sensor::SensorSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
-use crate::simulator::SensorSnapshot;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};

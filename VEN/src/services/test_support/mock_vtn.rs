@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
 use crate::controller::wire_reject::FetchOutcome;
-use crate::vtn::VtnHttpError;
+use crate::entities::DomainError;
 
 /// Test double for VtnPort. Configurable responses; records upsert calls for assertions.
 pub struct MockVtn {
@@ -17,7 +17,7 @@ pub struct MockVtn {
     /// When Some(msg), upsert_report returns Err with this message.
     pub upsert_error: Option<String>,
     /// GB-23: when Some((status, msg)), upsert_report returns an
-    /// `anyhow::Error` downcastable to `VtnHttpError` carrying that status —
+    /// `anyhow::Error` downcastable to `DomainError::VtnRejected` carrying that status —
     /// lets obligation-service tests simulate a specific VTN HTTP status
     /// (e.g. 404) without a real HTTP round-trip. Takes precedence over
     /// `upsert_error` when both are set.
@@ -53,7 +53,7 @@ impl MockVtn {
     }
 
     /// GB-23: inject an upsert failure that carries a specific HTTP status,
-    /// downcastable to `VtnHttpError` — distinct from `with_upsert_error`'s
+    /// downcastable to `DomainError::VtnRejected` — distinct from `with_upsert_error`'s
     /// opaque string, so callers can simulate e.g. a 404 specifically.
     pub fn with_upsert_error_status(mut self, status: StatusCode, msg: &str) -> Self {
         self.upsert_error_status = Some((status, msg.to_string()));
@@ -88,6 +88,14 @@ fn all_valid<T>(items: Vec<T>) -> FetchOutcome<T> {
     }
 }
 
+/// What the real client's `vtn::http_error` returns for a non-2xx answer.
+fn rejected(status: StatusCode, msg: &str) -> anyhow::Error {
+    anyhow::Error::new(DomainError::VtnRejected {
+        status: status.as_u16(),
+        message: msg.to_string(),
+    })
+}
+
 #[async_trait]
 impl VtnPort for MockVtn {
     async fn fetch_programs(&self) -> Result<FetchOutcome<OadrProgram>> {
@@ -105,13 +113,13 @@ impl VtnPort for MockVtn {
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
         if let Some((ref name, status, ref msg)) = self.upsert_error_status_for {
             if body.reportName.as_deref() == Some(name.as_str()) {
-                return Err(anyhow::Error::new(VtnHttpError::new(status, msg.clone())));
+                return Err(rejected(status, msg));
             }
             self.submitted_reports.lock().unwrap().push(body);
             return Ok(());
         }
         if let Some((status, ref msg)) = self.upsert_error_status {
-            return Err(anyhow::Error::new(VtnHttpError::new(status, msg.clone())));
+            return Err(rejected(status, msg));
         }
         if let Some(ref msg) = self.upsert_error {
             anyhow::bail!("{}", msg);
@@ -169,10 +177,10 @@ mod tests {
             payloadDescriptors: Vec::new(),
         };
         let err = mock.upsert_report(body).await.unwrap_err();
-        let vtn_err = err
-            .downcast_ref::<VtnHttpError>()
-            .expect("must downcast to VtnHttpError");
-        assert_eq!(vtn_err.status, StatusCode::NOT_FOUND);
+        assert!(matches!(
+            err.downcast_ref::<DomainError>(),
+            Some(DomainError::VtnRejected { status: 404, .. })
+        ));
     }
 
     #[tokio::test]

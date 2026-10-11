@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
-use crate::simulator::SensorSnapshot;
+use crate::entities::sensor::SensorSnapshot;
 
 use super::AppState;
 

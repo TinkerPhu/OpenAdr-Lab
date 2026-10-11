@@ -402,6 +402,8 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     no `.val("...")` string-key read of an asset's `state_values()` outside assets/ (declare a
     typed `Asset` method, carried on `AssetSnapshot`)
     no `crate::services` in assets/ or simulator/ (infra implements what the domain defines)
+    no `crate::vtn` or `crate::simulator` in entities/, services/ or state/ (infra types stay out;
+    a non-2xx VTN answer is `DomainError::VtnRejected`, sensor types live in `entities/sensor.rs`)
     no inline unit conversion (W<->kW, seconds/Duration -> hours, kW x step -> kWh, frac -> %)
     outside `entities/units.rs`
     no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
