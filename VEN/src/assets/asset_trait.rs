@@ -21,7 +21,6 @@ pub use super::max_power::{Trajectory, TrajectoryPoint};
 /// Physics types (`Battery`, `EvCharger`, etc.) implement only `step()` and `capability()`.
 /// They inherit the three identity/history methods with panicking defaults — those methods
 /// must only be called via `AssetHandle`, which properly implements them.
-#[allow(dead_code)]
 pub trait Asset: Send + Sync {
     // ── Identity / observability (Phase B/C) ──────────────────────────────────
 

@@ -24,29 +24,17 @@ type PvConfig = PvParams;
 type BaseLoadConfig = BaseLoadParams;
 type PlannerConfig = PlannerParams;
 
-#[derive(Debug, Clone, Default)]
-struct SimulatorConfig;
-
 #[derive(Debug, Clone)]
 struct GridConfig {
     max_import_kw: f64,
     max_export_kw: f64,
 }
 
-// `simulator`/`packets` and battery_config/base_load_kw are kept unread/unused by any
-// single test file, but every test-fixture `Profile { .. }` literal across mod.rs/
-// heater.rs/planner.rs sets them to mirror the real (pre-refactor) profile shape —
-// removing the fields would mean touching every fixture literal for a lint, not a
-// behaviour change.
 #[derive(Debug, Clone)]
 struct Profile {
     assets: Vec<AssetProfile>,
-    #[allow(dead_code)]
-    simulator: SimulatorConfig,
     planner: PlannerConfig,
     grid: GridConfig,
-    #[allow(dead_code)]
-    packets: Vec<()>,
 }
 
 impl Profile {
@@ -69,25 +57,6 @@ impl Profile {
             AssetProfile::Pv(v) => Some(v),
             _ => None,
         })
-    }
-
-    #[allow(dead_code)] // mirrors the real Profile API; no test currently needs it
-    fn battery_config(&self) -> Option<&BatteryParams> {
-        self.assets.iter().find_map(|a| match a {
-            AssetProfile::Battery(v) => Some(v),
-            _ => None,
-        })
-    }
-
-    #[allow(dead_code)] // mirrors the real Profile API; no test currently needs it
-    fn base_load_kw(&self) -> f64 {
-        self.assets
-            .iter()
-            .find_map(|a| match a {
-                AssetProfile::BaseLoad(v) => Some(v.baseline_kw),
-                _ => None,
-            })
-            .unwrap_or(0.0)
     }
 }
 
@@ -209,7 +178,6 @@ fn make_profile() -> Profile {
                 spikes: vec![],
             }),
         ],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
@@ -226,7 +194,6 @@ fn make_profile() -> Profile {
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 
@@ -378,7 +345,6 @@ fn make_heater_only_profile(
             switching_penalty_eur: 0.01,
             c_terminal_eur_kwh: None,
         })],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
@@ -395,7 +361,6 @@ fn make_heater_only_profile(
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 
@@ -407,7 +372,6 @@ fn base_load_only_profile() -> Profile {
             baseline_kw: 1.0,
             spikes: vec![],
         })],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 2,
@@ -421,7 +385,6 @@ fn base_load_only_profile() -> Profile {
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 

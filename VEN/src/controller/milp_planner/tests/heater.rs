@@ -647,7 +647,6 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 spikes: vec![],
             }),
         ],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 48,
@@ -673,7 +672,6 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     };
     let mut sim = make_snap_from_profile(&profile);
     // Production state: emergency thermostat running at 6 kW because temp < 48°C.

@@ -6,9 +6,8 @@
 //! penalized in the objective at `penalty_eur_per_kw`. Mirrors the existing
 //! `s_imp_viol` soft-constraint idiom in `solver_phase1.rs`.
 //!
-//! Deliberately *not* the stateful, persisted billing-period tracker sketched
-//! in `entities::design_vocabulary::PenaltyRule` (rolling averages,
-//! `breached_this_period` surviving restarts) — each solve re-evaluates its
+//! Deliberately *not* a stateful, persisted billing-period tracker (rolling
+//! averages, a breach flag surviving restarts) — each solve re-evaluates its
 //! own horizon fresh. See `openspec/changes/penalty-threshold-check/design.md`
 //! (Decisions D1-D4) for the rejected alternatives.
 

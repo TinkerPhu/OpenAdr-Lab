@@ -110,17 +110,8 @@ impl ModelSkeleton {
         let global = GlobalMilpInputs {
             n,
             dt_h: inputs.dt_h.clone(),
-            c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
-            c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
-            g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
             p_pv_kw: inputs.p_pv_kw.clone(),
             p_base_kw: inputs.p_base_kw.clone(),
-            p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
-            p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
-            p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
-            p_exp_max_cont_kw: inputs.p_exp_max_cont_kw.clone(),
-            pen_imp_eur_kwh: inputs.pen_imp_eur_kwh,
-            pen_exp_eur_kwh: inputs.pen_exp_eur_kwh,
         };
 
         let mut vars = variables!();

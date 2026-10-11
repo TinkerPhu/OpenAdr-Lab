@@ -6,10 +6,7 @@
 //! `std::sync::Mutex<Connection>` — rusqlite is blocking; callers in async
 //! contexts must use `tokio::task::spawn_blocking`.
 //!
-//! Not yet constructed from `main.rs` — wiring it into the app (behind a
-//! `history.enabled` profile flag) is WP1.2's history-sampler task. Landing
-//! the schema/adapter as its own reviewable commit first.
-#![allow(dead_code)]
+//! Opened at boot by `boot/ports.rs`.
 
 mod events;
 mod forecast_accuracy;
@@ -70,13 +67,6 @@ impl SqliteHistoryStore {
     pub fn open(path: &str) -> Result<Self, DomainError> {
         let conn = Connection::open(path)
             .map_err(|e| DomainError::StorageError(format!("open {path}: {e}")))?;
-        Self::from_connection(conn)
-    }
-
-    /// In-memory database for tests — no filesystem I/O.
-    pub fn in_memory() -> Result<Self, DomainError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| DomainError::StorageError(format!("open in-memory db: {e}")))?;
         Self::from_connection(conn)
     }
 
@@ -463,6 +453,16 @@ impl HistoryPort for SqliteHistoryStore {
         conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
             .map_err(|e| DomainError::StorageError(format!("wal_checkpoint: {e}")))?;
         Ok(total)
+    }
+}
+
+#[cfg(test)]
+impl SqliteHistoryStore {
+    /// In-memory database for tests — no filesystem I/O.
+    pub fn in_memory() -> Result<Self, DomainError> {
+        let conn = Connection::open_in_memory()
+            .map_err(|e| DomainError::StorageError(format!("open in-memory db: {e}")))?;
+        Self::from_connection(conn)
     }
 }
 

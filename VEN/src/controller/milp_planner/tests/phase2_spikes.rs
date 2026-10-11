@@ -93,7 +93,6 @@ fn ven1_profile() -> Profile {
                 spikes: vec![],
             }),
         ],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 48,
@@ -117,7 +116,6 @@ fn ven1_profile() -> Profile {
             max_import_kw: 12.5,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 
@@ -319,13 +317,11 @@ fn fleet_profile(name: &str) -> Profile {
     let (_, planner, assets) = crate::domain_params::build_domain_params(&real);
     Profile {
         assets,
-        simulator: SimulatorConfig,
         planner,
         grid: GridConfig {
             max_import_kw: real.grid.max_import_kw,
             max_export_kw: real.grid.max_export_kw,
         },
-        packets: vec![],
     }
 }
 

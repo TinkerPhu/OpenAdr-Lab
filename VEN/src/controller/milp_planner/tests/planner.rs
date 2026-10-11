@@ -493,7 +493,6 @@ fn make_profile_n48() -> Profile {
                 spikes: vec![],
             }),
         ],
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 24,
@@ -507,7 +506,6 @@ fn make_profile_n48() -> Profile {
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 

@@ -280,12 +280,6 @@ pub struct HeaterSolOutput {
     pub z_heat_ready: f64,
     /// Tank energy above T_min [kWh] per slot. len = n.
     pub e_tank_kwh: Vec<f64>,
-    #[allow(dead_code)] // solve diagnostic: below-min slack, not consumed by any caller yet
-    /// Below-min slack [kWh] per slot. len = n.
-    pub s_low_kwh: Vec<f64>,
-    #[allow(dead_code)] // solve diagnostic: per-step switching cost, not consumed by any caller yet
-    /// Switching cost contribution per step. len = n.
-    pub sw: Vec<f64>,
 }
 
 /// Below-minimum tank violation penalty [€/kWh]. Used by heater objective (Phase 1).

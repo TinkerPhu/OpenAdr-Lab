@@ -21,7 +21,8 @@
   "VEN/src/simulator/tests.rs": 1,
   "VEN/src/tasks/poll_programs.rs|VEN/src/tasks/poll_reports.rs": 5,
   "VEN/src/tasks/sim_tick/mod.rs|VEN/src/tasks/sim_tick/tick.rs": 1,
-  "VEN/src/vtn.rs|VTN/bff/src/vtn_client.rs": 1,
+  "VEN/src/vtn.rs": 3,
+  "VEN/src/vtn.rs|VTN/bff/src/vtn_client.rs": 13,
   "VEN/ui/src/App.tsx|VTN/ui/src/App.tsx": 5,
   "VEN/ui/src/components/NotificationsBell.tsx|VEN/ui/src/pages/Notifications.tsx": 2,
   "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx": 1,
@@ -66,7 +67,7 @@
   "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 175,
   "VEN/src/profile/validate.rs::validate": 354,
   "VEN/src/routes/mod.rs::build_router": 119,
-  "VEN/src/services/obligation.rs::check_and_report": 109,
+  "VEN/src/services/obligation.rs::check_and_report": 106,
   "VEN/src/tasks/planning/cycle.rs::run_plan_cycle": 128,
   "VEN/src/tasks/planning/mod.rs::spawn_planning": 110,
   "VEN/src/tasks/poll_events/detect.rs::detect_event_changes": 107,
@@ -76,6 +77,6 @@
   "VTN/bff/src/main.rs::main": 134
  },
  "test_duplicated_windows": {
-  "VEN/src/controller/milp_planner/tests": 218
+  "VEN/src/controller/milp_planner/tests": 214
  }
 }

@@ -174,7 +174,6 @@ fn realistic_weights() -> Phase1Weights {
         c_bat_wear_eur_kwh: 0.03,
         c_bat_ev_coexist_eur_kwh: 0.5,
         c_ctrl_imp_malus_eur_kwh: 0.22,
-        w_services: 1.0,
     }
 }
 

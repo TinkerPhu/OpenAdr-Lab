@@ -1,4 +1,3 @@
-#![allow(dead_code)] // infrastructure types used by milp_planner submodules via use super::*
 //! Cross-asset MILP interaction infrastructure.
 //!
 //! Defines [`AssetInteraction`], a trait that encapsulates LP variables,
@@ -28,26 +27,10 @@ use crate::controller::milp_planner::asset_port::{BatteryMilpVars, EvMilpVars, H
 pub struct GlobalMilpInputs {
     pub n: usize,
     pub dt_h: Vec<f64>,
-    /// Import tariff [€/kWh]
-    pub c_imp_eur_kwh: Vec<f64>,
-    /// Export tariff [€/kWh]
-    pub c_exp_eur_kwh: Vec<f64>,
-    /// Grid CO₂ intensity [kgCO₂/kWh]
-    pub g_imp_kgco2_kwh: Vec<f64>,
     /// PV generation forecast [kW]
     pub p_pv_kw: Vec<f64>,
     /// Non-controllable baseline load [kW]
     pub p_base_kw: Vec<f64>,
-    /// Physical import limit [kW]
-    pub p_imp_max_phys_kw: Vec<f64>,
-    /// Physical export limit [kW]
-    pub p_exp_max_phys_kw: Vec<f64>,
-    /// Contractual import limit [kW]
-    pub p_imp_max_cont_kw: Vec<f64>,
-    /// Contractual export limit [kW]
-    pub p_exp_max_cont_kw: Vec<f64>,
-    pub pen_imp_eur_kwh: f64,
-    pub pen_exp_eur_kwh: f64,
 }
 
 // ── Typed LP variable pool ───────────────────────────────────────────────────

@@ -45,7 +45,7 @@ impl MockSimulatorPort {
     }
 
     /// Build a single-asset `SimSnapshot` for tests needing one asset.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // goes with SimulatorPort, decided for deletion (architectural_smells.md #8)
     pub fn snapshot_with_asset(id: &str, snap: AssetSnapshot) -> SimSnapshot {
         use chrono::Utc;
         use std::collections::HashMap;

@@ -287,8 +287,6 @@ impl HeaterMilpContext {
             y_heat: (0..n).map(|t| sol.value(v.y_heat[t])).collect(),
             z_heat_ready: sol.value(v.z_heat_ready),
             e_tank_kwh: (0..n).map(|t| sol.value(v.e_tank[t])).collect(),
-            s_low_kwh: (0..n).map(|t| sol.value(v.s_low[t])).collect(),
-            sw: (0..n).map(|t| sol.value(v.sw[t])).collect(),
         }
     }
 
