@@ -66,6 +66,7 @@ def step_submit_report_ven1(context):
     context.submitted_report = payload
 
 
+@when("the report appears in VEN-1 report list")
 @then("the report appears in VEN-1 report list")
 def step_report_in_ven1(context):
     def fetch():
@@ -102,28 +103,50 @@ def step_report_in_bff(context):
     assert len(reports) > 0
 
 
-@when("I POST to VEN-1 reports with a valid OadrReportBody")
-def step_post_valid_report_body(context):
-    payload = {
-        "programID": "test-prog",
-        "eventID": "test-evt",
-        "clientName": "ven-1",
-        "reportName": _unique_report_name("ven-1"),
-        "resources": [],
-    }
-    context.report_response = requests.post(
-        f"{VEN_BASE_URL}/reports", json=payload, timeout=HTTP_TIMEOUT
-    )
-    context.submitted_report = payload
-
-
 @then("the response body echoes back the submitted report fields")
 def step_response_echoes_report(context):
+    """`eventID`, not `programID`: 3.1 removed the latter from a report."""
     body = context.report_response.json()
     submitted = context.submitted_report
-    assert body.get("programID") == submitted["programID"], f"programID mismatch: {body}"
-    assert body.get("clientName") == submitted["clientName"], f"clientName mismatch: {body}"
-    assert body.get("reportName") == submitted["reportName"], f"reportName mismatch: {body}"
+    for field in ("eventID", "clientName", "reportName"):
+        assert body.get(field) == submitted[field], f"{field} mismatch: {body}"
+
+
+def _submitted_report_in(reports, context):
+    name = context.submitted_report["reportName"]
+    return next((r for r in reports if r.get("reportName") == name), None)
+
+
+@when('I update the submitted report via VEN-1 with a resource named "{resource_name}"')
+def step_update_report_ven1(context, resource_name):
+    """PUT the whole report under the id the VTN gave it, as the Reports page's edit form does."""
+    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
+    report = _submitted_report_in(reports, context)
+    assert report is not None, f"VEN-1 does not list {context.submitted_report['reportName']}"
+    payload = {
+        key: context.submitted_report[key] for key in ("eventID", "clientName", "reportName")
+    }
+    payload["resources"] = [{"resourceName": resource_name, "intervals": []}]
+    context.report_response = requests.put(
+        f"{VEN_BASE_URL}/reports/{report['id']}", json=payload, timeout=HTTP_TIMEOUT
+    )
+
+
+@then('the BFF report list shows the submitted report with a resource named "{resource_name}"')
+def step_bff_report_has_resource(context, resource_name):
+    def fetch():
+        r = bff_get("/api/reports")
+        r.raise_for_status()
+        return _submitted_report_in(r.json(), context)
+
+    poll_until(
+        fetch,
+        lambda report: report is not None and any(
+            res.get("resourceName") == resource_name for res in report.get("resources", [])
+        ),
+        timeout=60,
+        description=f"BFF shows the report with resource {resource_name}",
+    )
 
 
 @when("I POST to VEN-1 reports with a body missing eventID")

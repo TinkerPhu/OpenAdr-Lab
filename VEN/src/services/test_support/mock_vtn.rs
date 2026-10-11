@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +28,12 @@ pub struct MockVtn {
     /// Lets a single `MockVtn` simulate "this one obligation's report 404s,
     /// its sibling doesn't" within one `check_and_report` call.
     pub upsert_error_status_for: Option<(String, StatusCode, String)>,
+    /// Captures every `(id, body)` passed to update_report.
+    pub updated_reports: Arc<Mutex<Vec<(String, OadrReportBody)>>>,
+    /// When Some(msg), update_report returns Err with this message.
+    pub update_error: Option<String>,
+    /// What `token_expires_at` answers.
+    pub token_expires_at: Option<DateTime<Utc>>,
 }
 
 impl MockVtn {
@@ -39,7 +46,25 @@ impl MockVtn {
             upsert_error: None,
             upsert_error_status: None,
             upsert_error_status_for: None,
+            updated_reports: Arc::new(Mutex::new(vec![])),
+            update_error: None,
+            token_expires_at: None,
         }
+    }
+
+    pub fn with_update_error(mut self, msg: &str) -> Self {
+        self.update_error = Some(msg.to_string());
+        self
+    }
+
+    pub fn with_token_expires_at(mut self, at: DateTime<Utc>) -> Self {
+        self.token_expires_at = Some(at);
+        self
+    }
+
+    /// Return a clone of every `(id, body)` update_report received.
+    pub fn updated(&self) -> Vec<(String, OadrReportBody)> {
+        self.updated_reports.lock().unwrap().clone()
     }
 
     pub fn with_events(mut self, events: Vec<OadrEvent>) -> Self {
@@ -126,6 +151,32 @@ impl VtnPort for MockVtn {
         }
         self.submitted_reports.lock().unwrap().push(body);
         Ok(())
+    }
+
+    /// Answers like the VTN does: the body it was sent, under the id it was sent to.
+    async fn update_report(&self, id: &str, body: OadrReportBody) -> Result<OadrReport> {
+        if let Some(ref msg) = self.update_error {
+            anyhow::bail!("{}", msg);
+        }
+        let mut extra = match serde_json::to_value(&body)? {
+            serde_json::Value::Object(fields) => fields,
+            _ => unreachable!("a report body serialises to an object"),
+        };
+        extra.remove("reportName");
+        let report = OadrReport {
+            id: id.to_string(),
+            reportName: body.reportName.clone(),
+            extra,
+        };
+        self.updated_reports
+            .lock()
+            .unwrap()
+            .push((id.to_string(), body));
+        Ok(report)
+    }
+
+    async fn token_expires_at(&self, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        self.token_expires_at
     }
 }
 

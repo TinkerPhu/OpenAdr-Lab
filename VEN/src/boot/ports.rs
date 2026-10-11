@@ -20,9 +20,6 @@ use crate::vtn::VtnClient;
 use crate::{controller, fleet_telemetry, history_store, measurement, measurement_translation};
 
 pub struct Ports {
-    /// The concrete client as well as the port: `AppCtx` hands the concrete
-    /// type to routes that drive a VTN interaction directly.
-    pub vtn: VtnClient,
     pub vtn_port: Arc<dyn VtnPort>,
     pub solver: Arc<dyn SolverPort>,
     pub weather: Arc<dyn WeatherForecastPort>,
@@ -46,8 +43,7 @@ impl Ports {
         );
         let store = open_history_store(profile, data_dir);
         Self {
-            vtn_port: Arc::new(vtn.clone()),
-            vtn,
+            vtn_port: Arc::new(vtn),
             solver: Arc::new(controller::milp_planner::MilpSolver),
             weather: weather_port(),
             pv_measurement: measurement_port(

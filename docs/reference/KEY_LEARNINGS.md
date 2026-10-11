@@ -251,11 +251,11 @@ outes/sim.rs causes a T1+T2 double-solve race:
   the Background step fires T1 (replan), the subsequent absorber step fires T2, and
   the second plan is adopted during the 8 s assertion window.  Overrides that only
   affect future planning (not current device state) must be excluded from
-  should_replan — same rationale as ase_load_kw.
+  should_replan — same rationale as \base_load_kw.
 
 - **Read inject snapshot before spawn_blocking**: pv_plan_kw (like all inject
   fields) must be captured from inject_snap BEFORE the spawn_blocking call in
-  planning.rs.  The one-shot fields (pv_irradiance, ase_load_kw) are cleared
+  planning.rs.  The one-shot fields (pv_irradiance, \base_load_kw) are cleared
   by the sim tick; reading them inside the closure risks a stale zero value.
 
 - **Architecture ring naming at domain boundary**: The infra ring calls the field
@@ -265,7 +265,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   self-documenting in the function signature.
 
 - **Clamp planning overrides at the point of use**: pv_forecast_override.max(0.0)
-  in uild_milp_inputs prevents a BDD test injecting a negative value (e.g., by
+  in \build_milp_inputs prevents a BDD test injecting a negative value (e.g., by
   mistake) from producing unphysical negative PV generation in the MILP model.
   Validate at the boundary, not in the route handler.
 
@@ -3276,3 +3276,14 @@ Rules:
 - A cleanup that prints instead of passing silently pays off at once: its first run found that
   finished user requests are never pruned (R-137). Read the printed lines before trusting them;
   most of the first ones were the cleanup misreading a finished request as a running one.
+
+## An audit rule that has never failed has not been tested (2026-10-11)
+
+- `scripts/audit_ven_architecture.py` carried a backspace byte (0x08) in two regexes where the
+  two characters `\b` were meant. A raw string does not help: the byte was in the file. The
+  patterns matched nothing, so rule 13 and half of rule 12 reported OK from the day they were
+  added, whatever the code did.
+- When adding a rule, prove it fires: put one violating line in a scratch file under the scanned
+  directory, see FAIL, delete the file. "OK" on the first run is the result a broken rule gives too.
+- The byte came from writing a regex through a shell or a script that interprets `\b`. After
+  editing a regex by script, `grep -c $'\x08' <file>` must print 0.
