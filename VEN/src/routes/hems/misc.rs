@@ -134,17 +134,19 @@ pub struct LedgerQuery {
 }
 
 /// `GET /ledger?asset_id=`: one asset's open period and its archived monthly ones.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub struct AssetLedgerHistory {
     pub current: Option<crate::entities::asset_ledger::AssetLedgerEntry>,
-    pub closed_periods: Vec<LedgerPeriod>,
+    /// Oldest first. `None` when the VEN runs without a history store: the closed periods are
+    /// then unknown, which is not the same as there being none.
+    pub closed_periods: Option<Vec<LedgerPeriod>>,
 }
 
 /// GET /ledger — returns per-asset cumulative energy/cost/CO₂ for the current
-/// open billing period (Stage 4). Unchanged shape when `asset_id` is absent
-/// (existing Dashboard consumer). With `?asset_id=`, returns
+/// open billing period (Stage 4), keyed by asset id. With `?asset_id=`, returns
 /// `{ current, closed_periods }` for that one asset — `closed_periods` comes
-/// from WP1.6's monthly `AssetLedger` rollover archive.
+/// from WP1.6's monthly `AssetLedger` rollover archive, and the Dashboard's
+/// ledger card lists them.
 pub async fn get_ledger(
     State(state): State<AppState>,
     State(history): State<History>,
@@ -155,15 +157,15 @@ pub async fn get_ledger(
         return Json(current).into_response();
     };
 
-    let closed_periods: Vec<LedgerPeriod> = match history {
+    let closed_periods = match history {
         Some(history) => {
-            let aid = asset_id.clone();
-            tokio::task::spawn_blocking(move || history.query_ledger_periods(&aid))
-                .await
-                .unwrap_or_else(|_| Ok(Vec::new()))
-                .unwrap_or_default()
+            let asset_id = asset_id.clone();
+            match super::history::run_query(move || history.query_ledger_periods(&asset_id)).await {
+                Ok(periods) => Some(periods),
+                Err(response) => return response,
+            }
         }
-        None => Vec::new(),
+        None => None,
     };
     Json(AssetLedgerHistory {
         current: current.get(&asset_id).cloned(),
@@ -226,5 +228,92 @@ mod signals_wire_tests {
                 "reservation_request": null,
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod ledger_tests {
+    use super::*;
+    use crate::controller::HistoryPort;
+    use crate::services::test_support::mock_history_port::MockHistoryPort;
+    use chrono::{TimeZone, Utc};
+    use std::sync::Arc;
+
+    fn september(asset_id: &str) -> LedgerPeriod {
+        LedgerPeriod {
+            asset_id: asset_id.into(),
+            period_start: Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap(),
+            period_end: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            energy_kwh: 42.5,
+            cost_eur: 9.75,
+            co2_kg: 3.2,
+        }
+    }
+
+    async fn state_with_open_ev_period() -> AppState {
+        let state = AppState::new();
+        state
+            .account_tick(|ledger, _| {
+                ledger.insert("ev".into(), Default::default());
+            })
+            .await;
+        state
+    }
+
+    async fn ledger_of(history: History, asset_id: &str) -> (StatusCode, serde_json::Value) {
+        let resp = get_ledger(
+            State(state_with_open_ev_period().await),
+            State(history),
+            Query(LedgerQuery {
+                asset_id: Some(asset_id.into()),
+            }),
+        )
+        .await
+        .into_response();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn get_ledger_with_asset_id_returns_the_open_period_and_the_closed_ones() {
+        let store = Arc::new(MockHistoryPort::new());
+        store.append_ledger_period(&september("ev")).unwrap();
+        store.append_ledger_period(&september("battery")).unwrap();
+
+        let (status, body) = ledger_of(Some(store), "ev").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["current"]["asset_id"], "");
+        assert_eq!(
+            body["closed_periods"],
+            serde_json::json!([september("ev")]),
+            "only the asked asset's periods"
+        );
+    }
+
+    /// R-136: a store that cannot be read is an error, not "no closed periods".
+    #[tokio::test]
+    async fn get_ledger_reports_a_store_that_cannot_be_read() {
+        let store = Arc::new(MockHistoryPort::new());
+        store.set_fail_storage(true);
+
+        let (status, body) = ledger_of(Some(store), "ev").await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body["error"].is_string(), "{body}");
+    }
+
+    /// Without a history store the closed periods are unknown (`null`), which is not the same
+    /// as there being none (`[]`).
+    #[tokio::test]
+    async fn get_ledger_without_a_history_store_says_closed_periods_are_unknown() {
+        let (status, body) = ledger_of(None, "ev").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["current"].is_object());
+        assert!(body["closed_periods"].is_null(), "{body}");
     }
 }

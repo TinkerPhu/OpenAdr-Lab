@@ -222,6 +222,7 @@ impl HistoryPort for MockHistoryPort {
     }
 
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError> {
+        self.storage_result("query ledger periods")?;
         Ok(self
             .ledger_periods
             .lock()

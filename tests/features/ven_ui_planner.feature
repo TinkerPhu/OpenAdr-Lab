@@ -92,3 +92,12 @@ Feature: Planner Visualization Page
   # strip on the Dashboard (dash-session-strip, dash-objective-chip, session-chip-<id>).
   # Covered by UI unit tests (SessionProgressBoard.test.tsx); add browser scenarios here
   # when a BDD flow needs deadline-progress assertions.
+
+  # ── Dashboard ledger card: closed periods (R-136) ───────────────────────────
+  # The card lists each asset's closed (archived monthly) ledger periods, read from
+  # GET /ledger?asset_id=. A period closes at a month boundary, which a test run does not
+  # cross, so this proves the section, the per-asset query and its "none yet" answer; the
+  # populated table is covered by Dashboard.test.tsx.
+  Scenario: Dashboard ledger card answers that no ledger period has closed yet
+    Then I see an element with testid "dash-ledger-closed"
+    And I see the text "No closed periods yet"

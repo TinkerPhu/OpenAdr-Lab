@@ -3307,3 +3307,6 @@ Rules:
 - An optional cargo feature around a module also makes its tests optional: plain `cargo test`
   skips them without a word. Gate a module only when a consumer really cannot afford its
   dependencies.
+- An empty list is an answer ("there are none"). A route that also returns it for "I could not
+  look" or "I have nowhere to look" makes three states indistinguishable to the UI. Give each its
+  own wire shape (`[]`, an error status, `null`) before building the surface that shows them.

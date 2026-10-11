@@ -1464,7 +1464,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/plan` | 3 | Active Plan or `null` |
 | PUT | `/plan/objective` | 3 | Override the active `PlannerObjective` |
 | GET | `/plan/events` | 3 | SSE stream of `PlannerEvent`s (`SolvingStarted`/`SolvingProgress`/`PlanReady`) |
-| GET | `/ledger` | 4 | Per-asset cumulative energy / cost / CO₂ ledger |
+| GET | `/ledger` | 4 | Per-asset cumulative energy / cost / CO₂ ledger; with `?asset_id=`, that asset's open period and its closed monthly ones (`closed_periods`, `null` without a history store), listed on the Dashboard's ledger card |
 | GET | `/user-requests` | 5 | All active user energy task requests |
 | POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 | DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
@@ -1854,7 +1854,11 @@ See `docs/architecture/ven_milp_planner.md` for full design rationale.
 **Decision:** The per-asset ledger (`state::AssetLedgerEntry`) is in-memory only; resets on restart.
 **Rationale:** The ledger is a running total for the current session. Persistent billing-period
 data is stored at the VTN as reports. Local persistence adds complexity for little benefit in
-a lab context.
+a lab context. What survives is the monthly close: at a month boundary `tasks/history_sampler`
+archives each asset's totals as a `LedgerPeriod` in the history store. `GET /ledger?asset_id=`
+returns them and the Dashboard's ledger card lists them under "Closed periods". A store that
+cannot be read answers 500 (`routes/hems/history.rs::run_query`, the one way every route over the
+store runs a query), never an empty list.
 
 ### D-03: Reactor Removed (spec kit 001)
 

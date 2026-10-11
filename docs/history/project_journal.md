@@ -15310,3 +15310,17 @@ until the next poll replaced it. It goes through the same `send` now. `lab-core`
 rejected because `cargo test` in `lab-core` would then skip the module's tests silently. A stub
 written to see the tests fail first crashed rustc's diagnostic renderer on its dead-code warning,
 so the red step for the new module was a failed compile.
+## R-136: the Dashboard lists an asset's closed ledger periods (fix/r136-ledger-closed-periods)
+
+**What.** The Energy Ledger card has a "Closed periods" table: every asset's archived monthly
+totals, newest first, read per asset from `GET /ledger?asset_id=` (`useLedgerHistories`,
+`AssetLedgerHistory` now a generated UI type). `routes/hems/history.rs::run_query` is the one way a
+route runs a query on the history store; the five history routes and the ledger route use it.
+
+**Why.** `ui-transparency`: the rollover archive had a route and no UI surface.
+
+**Issues.** The route answered `closed_periods: []` in three different situations: none closed
+yet, no history store configured, and a store that failed to answer. It now answers `[]`, `null`
+and a 500, and the card words each one differently. A browser scenario cannot produce a closed
+period (it needs a month boundary), so it asserts the "none yet" answer and the populated table is
+a UI unit test.

@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, ReportSubmissionRecord, ReportWindowSize, SensorSnapshot, SimSnapshot, ControllerEvent,
-  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry,
+  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry, AssetLedgerHistory,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
   CapacityCurves,
@@ -297,6 +297,13 @@ export class VenApi {
     // API returns {assetId: AssetLedgerEntry, ...} — convert to array
     if (Array.isArray(data)) return data;
     return Object.values(data) as AssetLedgerEntry[];
+  }
+
+  /** One asset's open ledger period and its closed (archived monthly) ones. */
+  async ledgerHistory(assetId: string): Promise<AssetLedgerHistory> {
+    const r = await this.getReq(`/ledger?asset_id=${encodeURIComponent(assetId)}`);
+    if (!r.ok) throw new Error(`ledger ${assetId} ${r.status}`);
+    return r.json();
   }
 
   async userRequests(): Promise<UserRequestWithSession[]> {

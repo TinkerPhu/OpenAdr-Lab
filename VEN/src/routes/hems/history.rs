@@ -26,6 +26,32 @@ pub struct HistoryRangeParams {
 
 use crate::routes::error::error_response as error;
 
+/// Run one blocking store query off the async runtime. A query that fails, or whose task
+/// panics, is the 500 response to answer with: every route over the store reports it the same
+/// way, and none may show it as an empty result.
+pub(super) async fn run_query<T: Send + 'static>(
+    query: impl FnOnce() -> Result<T, crate::entities::DomainError> + Send + 'static,
+) -> Result<T, axum::response::Response> {
+    match tokio::task::spawn_blocking(query).await {
+        Ok(Ok(rows)) => Ok(rows),
+        Ok(Err(e)) => Err(error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("task panicked: {e}"),
+        )),
+    }
+}
+
+/// `run_query`, with the rows answered as the JSON body.
+async fn json_rows<T: serde::Serialize + Send + 'static>(
+    query: impl FnOnce() -> Result<T, crate::entities::DomainError> + Send + 'static,
+) -> axum::response::Response {
+    match run_query(query).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(response) => response,
+    }
+}
+
 /// Resolve and validate the `[from, to)` window: `to` defaults to now, `from`
 /// defaults to `to - MAX_RANGE_DAYS`; any explicit range over the cap, or with
 /// `from >= to`, is rejected with 400. Error side is a cheap `(StatusCode,
@@ -75,14 +101,7 @@ macro_rules! history_range_route {
                 Ok(r) => r,
                 Err((status, msg)) => return error(status, msg),
             };
-            match tokio::task::spawn_blocking(move || history.$query(from, to)).await {
-                Ok(Ok(rows)) => Json(rows).into_response(),
-                Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-                Err(e) => error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("task panicked: {e}"),
-                ),
-            }
+            json_rows(move || history.$query(from, to)).await
         }
     };
 }
@@ -132,15 +151,7 @@ macro_rules! history_page_route {
                 Err((status, msg)) => return error(status, msg),
             };
             let (limit, offset) = resolve_page(&params);
-            match tokio::task::spawn_blocking(move || history.$query(from, to, limit, offset)).await
-            {
-                Ok(Ok(page)) => Json(page).into_response(),
-                Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-                Err(e) => error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("task panicked: {e}"),
-                ),
-            }
+            json_rows(move || history.$query(from, to, limit, offset)).await
         }
     };
 }
@@ -166,17 +177,7 @@ pub async fn get_history_ticks(
         Err((status, msg)) => return error(status, msg),
     };
     let asset_id = params.asset_id.clone();
-    let result =
-        tokio::task::spawn_blocking(move || history.query_ticks(from, to, asset_id.as_deref()))
-            .await;
-    match result {
-        Ok(Ok(rows)) => Json(rows).into_response(),
-        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("task panicked: {e}"),
-        ),
-    }
+    json_rows(move || history.query_ticks(from, to, asset_id.as_deref())).await
 }
 
 #[derive(Deserialize)]
@@ -212,18 +213,8 @@ pub async fn get_history_forecast_accuracy(
         None => None,
     };
     let asset_id = params.asset_id.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        history.query_forecast_accuracy(from, to, asset_id.as_deref(), lead_kind)
-    })
-    .await;
-    match result {
-        Ok(Ok(rows)) => Json(rows).into_response(),
-        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("task panicked: {e}"),
-        ),
-    }
+    json_rows(move || history.query_forecast_accuracy(from, to, asset_id.as_deref(), lead_kind))
+        .await
 }
 
 /// GET /history/plans?from=&to= — one row per plan cycle (solve time, solver outcome, MIP-gap
@@ -240,15 +231,7 @@ pub async fn get_history_plans(
         Ok(r) => r,
         Err((status, msg)) => return error(status, msg),
     };
-    let result = tokio::task::spawn_blocking(move || history.query_plan_history(from, to)).await;
-    match result {
-        Ok(Ok(rows)) => Json(rows).into_response(),
-        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("task panicked: {e}"),
-        ),
-    }
+    json_rows(move || history.query_plan_history(from, to)).await
 }
 
 #[cfg(test)]

@@ -39,6 +39,7 @@ ui_types![
     crate::entities::asset::AssetCapabilityView,
     crate::entities::design_vocabulary::AssetForecast,
     crate::entities::asset_ledger::AssetLedgerEntry,
+    crate::routes::hems::AssetLedgerHistory,
     crate::routes::hems::ComfortCurveResponse,
     // System, signals, history, weather, measurement, notifications, arbiter, EV, flexibility
     // (increment 4)

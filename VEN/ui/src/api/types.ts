@@ -10,6 +10,7 @@ import type { AssetAllocation } from "./generated/AssetAllocation";
 import type { AssetCapabilityView } from "./generated/AssetCapabilityView";
 import type { AssetForecast } from "./generated/AssetForecast";
 import type { AssetLedgerEntry } from "./generated/AssetLedgerEntry";
+import type { AssetLedgerHistory } from "./generated/AssetLedgerHistory";
 import type { AssetSnapshot } from "./generated/AssetSnapshot";
 import type { BaselineOverride } from "./generated/BaselineOverride";
 import type { BaselineSlot } from "./generated/BaselineSlot";
@@ -54,6 +55,7 @@ import type { HealthResponse } from "./generated/HealthResponse";
 import type { HeaterTarget } from "./generated/HeaterTarget";
 import type { HistoryPage } from "./generated/HistoryPage";
 import type { KeyFeature } from "./generated/KeyFeature";
+import type { LedgerPeriod } from "./generated/LedgerPeriod";
 import type { LimitPassOutcome } from "./generated/LimitPassOutcome";
 import type { MeasurementResponse } from "./generated/MeasurementResponse";
 import type { MeasurementStatus } from "./generated/MeasurementStatus";
@@ -124,6 +126,7 @@ export type {
   AssetCapabilityView,
   AssetForecast,
   AssetLedgerEntry,
+  AssetLedgerHistory,
   AssetSnapshot,
   BaselineOverride,
   BaselineSlot,
@@ -168,6 +171,7 @@ export type {
   HeaterTarget,
   HistoryPage,
   KeyFeature,
+  LedgerPeriod,
   LimitPassOutcome,
   MeasurementResponse,
   MeasurementStatus,

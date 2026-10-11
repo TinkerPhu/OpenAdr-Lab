@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { DashboardPage } from "../pages/Dashboard";
-import { useHealth, useVtnStatus, useTasksStatus } from "../api/hooks";
+import { useHealth, useVtnStatus, useTasksStatus, useLedgerHistories } from "../api/hooks";
 
 const mockPrograms = [
   { id: "p1", programName: "Program Alpha" },
@@ -38,6 +38,13 @@ const mockLedger = [
   { asset_id: "ev", energy_kwh: 1.234, cost_eur: 0.2468, co2_g: 123.4, updated_at: "2024-01-01T11:00:00Z", started_at: "2024-01-01T10:00:00Z" },
   { asset_id: "battery", energy_kwh: 0.5, cost_eur: 0.1, co2_g: 50.0, updated_at: "2024-01-01T11:00:00Z", started_at: "2024-01-01T10:00:00Z" },
 ];
+
+const septemberEv = { asset_id: "ev", period_start: "2026-09-01T00:00:00Z", period_end: "2026-10-01T00:00:00Z", energy_kwh: 42.5, cost_eur: 9.75, co2_kg: 3.2 };
+const augustEv = { ...septemberEv, period_start: "2026-08-01T00:00:00Z", period_end: "2026-09-01T00:00:00Z", energy_kwh: 30.25 };
+/** What `useLedgerHistories` answers for the two ledger assets: one query result per asset. */
+function ledgerHistories(ev: object, battery: object = { data: { current: null, closed_periods: [] }, isError: false }) {
+  return [ev, battery] as ReturnType<typeof useLedgerHistories>;
+}
 
 const mockActiveRequest = {
   id: "req-ev-01",
@@ -92,6 +99,7 @@ vi.mock("../api/hooks", () => ({
   useSim: vi.fn(() => ({ data: null, isError: false })),
   useCapacity: vi.fn(() => ({ data: mockCapacity })),
   useLedger: vi.fn(() => ({ data: mockLedger })),
+  useLedgerHistories: vi.fn(() => []),
   usePlan: vi.fn(() => ({
     data: {
       id: "plan-1",
@@ -318,5 +326,49 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("dash-ledger-card")).toHaveTextContent("ev");
     expect(screen.getByTestId("dash-ledger-card")).toHaveTextContent("battery");
     expect(screen.getByTestId("dash-ledger-card")).toHaveTextContent("1.234");
+  });
+
+  // R-136: an asset's archived monthly ledger periods.
+  it("lists every asset's closed ledger periods, newest first", () => {
+    vi.mocked(useLedgerHistories).mockReturnValue(
+      ledgerHistories({ data: { current: null, closed_periods: [augustEv, septemberEv] }, isError: false }),
+    );
+    renderDashboard();
+    expect(vi.mocked(useLedgerHistories)).toHaveBeenCalledWith(["ev", "battery"]);
+    const rows = screen.getAllByTestId("dash-ledger-closed-period");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("2026-09-01");
+    expect(rows[0]).toHaveTextContent("2026-10-01");
+    expect(rows[0]).toHaveTextContent("ev");
+    expect(rows[0]).toHaveTextContent("42.500");
+    expect(rows[0]).toHaveTextContent("€9.7500");
+    expect(rows[0]).toHaveTextContent("3.200");
+    expect(rows[1]).toHaveTextContent("2026-08-01");
+  });
+
+  it("says so when no ledger period has closed yet", () => {
+    vi.mocked(useLedgerHistories).mockReturnValue(
+      ledgerHistories({ data: { current: null, closed_periods: [] }, isError: false }),
+    );
+    renderDashboard();
+    expect(screen.getByTestId("dash-ledger-closed")).toHaveTextContent("No closed periods yet");
+  });
+
+  it("says the closed periods are unknown when the VEN has no history store", () => {
+    vi.mocked(useLedgerHistories).mockReturnValue(
+      ledgerHistories({ data: { current: null, closed_periods: null }, isError: false }),
+    );
+    renderDashboard();
+    expect(screen.getByTestId("dash-ledger-closed")).toHaveTextContent("history store is disabled");
+    expect(screen.getByTestId("dash-ledger-closed")).not.toHaveTextContent("No closed periods yet");
+  });
+
+  it("says so when the closed periods could not be loaded", () => {
+    vi.mocked(useLedgerHistories).mockReturnValue(
+      ledgerHistories({ data: undefined, isError: true }),
+    );
+    renderDashboard();
+    expect(screen.getByTestId("dash-ledger-closed")).toHaveTextContent("could not be loaded");
+    expect(screen.getByTestId("dash-ledger-closed")).not.toHaveTextContent("No closed periods yet");
   });
 });
