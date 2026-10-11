@@ -55,7 +55,7 @@
   "VEN/src/assets/ev_trip_series.rs::plan_inputs": 104,
   "VEN/src/assets/heater_milp.rs::from_state": 114,
   "VEN/src/controller/arbiter.rs::apply_ranked_levers": 101,
-  "VEN/src/controller/milp_planner/envelopes.rs::build_plan_envelopes": 163,
+  "VEN/src/controller/milp_planner/envelopes.rs::build_plan_envelopes": 152,
   "VEN/src/controller/milp_planner/model_skeleton.rs::read_output": 107,
   "VEN/src/controller/milp_planner/results.rs::fallback_plan": 106,
   "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 366,
@@ -74,6 +74,6 @@
   "VTN/bff/src/main.rs::main": 134
  },
  "test_duplicated_windows": {
-  "VEN/src/controller/milp_planner/tests": 214
+  "VEN/src/controller/milp_planner/tests": 210
  }
 }

@@ -3310,3 +3310,11 @@ Rules:
 - An empty list is an answer ("there are none"). A route that also returns it for "I could not
   look" or "I have nowhere to look" makes three states indistinguishable to the UI. Give each its
   own wire shape (`[]`, an error status, `null`) before building the surface that shows them.
+- A test fixture should be built in the direction production builds it. The planner derives its
+  inputs from the asset contexts; its tests derived contexts from the inputs, which forced the
+  inputs to carry every asset parameter and needed mock contexts to receive them. Reversing the
+  fixture deleted both.
+- To find which fields of a struct are test-only, delete the `#[allow(dead_code)]` and compile
+  without tests. The compiler's list is exact; the hand-made one was off by one.
+- A mock that wraps a real type and re-implements its trait is a second implementation. Before
+  writing one, check whether the real type can be constructed directly with test values.

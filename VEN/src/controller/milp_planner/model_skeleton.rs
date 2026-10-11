@@ -357,7 +357,7 @@ impl ModelSkeleton {
                     vec![0.0; n],
                     // No EV in the model: a flat curve at the live reading, so a
                     // consumer never has to special-case a missing series.
-                    vec![inputs.soc_ev_init.unwrap_or(0.0); n + 1],
+                    vec![inputs.assets.soc_ev_init.unwrap_or(0.0); n + 1],
                     Vec::new(),
                     vec![0.0; n],
                     0.0,
@@ -372,7 +372,7 @@ impl ModelSkeleton {
             (vec![0.0; n], 0.0, vec![])
         };
 
-        let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.shiftable_loads.len()];
+        let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.assets.shiftable_loads.len()];
         for (row, sv) in p_shiftable_kw.iter_mut().zip(pool.shiftable.iter()) {
             for (t, slot_kw) in row.iter_mut().enumerate() {
                 for (ji, &j) in sv.valid_start_slots.iter().enumerate() {

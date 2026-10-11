@@ -30,10 +30,10 @@ fn battery_eff_is_sqrt_rte() {
         None,
     );
     let expected = 0.9_f64.sqrt();
-    assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
-    assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
+    assert!((inp.battery().eff_ch - expected).abs() < 1e-9);
+    assert!((inp.battery().eff_dis - expected).abs() < 1e-9);
     // Symmetry: both directions use the same value
-    assert!((inp.eff_bat_ch.unwrap() - inp.eff_bat_dis.unwrap()).abs() < 1e-9);
+    assert!((inp.battery().eff_ch - inp.battery().eff_dis).abs() < 1e-9);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn battery_init_soc_uses_live_state() {
         None,
         None,
     );
-    assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
+    assert!((inp.battery().e_init_kwh - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn battery_init_soc_falls_back_to_profile() {
         None,
         None,
     );
-    assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
+    assert!((inp.battery().e_init_kwh - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
 }
 
 #[test]
@@ -91,9 +91,9 @@ fn ev_mask_plugged_no_session_all_true() {
         None,
         None,
     );
-    assert!(inp.a_ev.iter().all(|&v| v));
-    assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
-    assert!(inp.ev_obligations.is_empty());
+    assert!(inp.assets.a_ev.iter().all(|&v| v));
+    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
+    assert!(inp.assets.ev_obligations.is_empty());
 }
 
 #[test]
@@ -117,11 +117,11 @@ fn ev_mask_plugged_with_session_deadline() {
     // the last chargeable slot is 11: slot 12 runs [3600, 3900), entirely after the
     // car has left. (This expectation was 12, which allowed one slot of charging
     // after departure — see the commit message.)
-    let d = inp.ev_obligations[0].deadline_step;
+    let d = inp.assets.ev_obligations[0].deadline_step;
     assert_eq!(d, 11);
     // Slots 0..=11 true, 12..23 false
     for t in 0..inp.n {
-        assert_eq!(inp.a_ev[t], t <= d, "slot {t} mask mismatch");
+        assert_eq!(inp.assets.a_ev[t], t <= d, "slot {t} mask mismatch");
     }
 }
 
@@ -142,8 +142,8 @@ fn ev_mask_unplugged_all_false() {
         Some(&session),
         None,
     );
-    assert!(inp.a_ev.iter().all(|&v| !v));
-    assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
+    assert!(inp.assets.a_ev.iter().all(|&v| !v));
+    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun);
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
+    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustRun);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn ev_mode_may_run_for_soft_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MayRun);
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn ev_mode_must_not_run_for_no_session() {
         None,
         None,
     );
-    assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
+    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun);
 }
 
 #[test]
@@ -243,8 +243,8 @@ fn heater_mid_kw_defaults_to_half_max() {
         None,
         None,
     );
-    assert!((inp.p_heat_step_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
-    assert!(((inp.p_heat_step_kw * inp.heat_n_stages as f64) - 3.0).abs() < 1e-9);
+    assert!((inp.assets.p_heat_step_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
+    assert!(((inp.assets.p_heat_step_kw * inp.assets.heat_n_stages as f64) - 3.0).abs() < 1e-9);
 }
 
 #[test]
@@ -276,8 +276,8 @@ fn heater_single_stage_step_is_full_power() {
         None,
     );
     // make_profile()'s heater is max_kw = 3.0.
-    assert_eq!(inp.heat_n_stages, 1);
-    assert!((inp.p_heat_step_kw - 3.0).abs() < 1e-9);
+    assert_eq!(inp.assets.heat_n_stages, 1);
+    assert!((inp.assets.p_heat_step_kw - 3.0).abs() < 1e-9);
 }
 
 #[test]

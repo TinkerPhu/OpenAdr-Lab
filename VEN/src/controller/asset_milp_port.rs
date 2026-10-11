@@ -55,7 +55,7 @@ pub struct EvScalars {
     /// `EvMilpContext::soc_drops`). `None` when no usage forecast is configured.
     pub soc_drops: Option<crate::controller::milp_planner::asset_port::ExogenousSocDrops>,
     /// Every charging obligation inside the horizon (R-92). Same type as
-    /// `EvMilpContext::obligations` and `MilpInputs::ev_obligations` — the
+    /// `EvMilpContext::obligations` and `AssetScalars::ev_obligations` — the
     /// concept has one definition, carried across these layers unchanged.
     pub obligations: Vec<crate::controller::milp_planner::asset_port::EvObligation>,
     pub p_max_kw: f64,

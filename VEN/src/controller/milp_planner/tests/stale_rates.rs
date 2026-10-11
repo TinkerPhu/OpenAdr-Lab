@@ -48,6 +48,7 @@ fn stale_inputs(policy: StaleRatePolicy, pctl: f64) -> MilpInputs {
         None,
         None,
     )
+    .inputs
 }
 
 #[test]

@@ -1086,8 +1086,7 @@ mod milp_context_trait_tests {
         );
     }
 
-    /// The drops must survive the hop the planner actually uses:
-    /// context -> `milp_params` (EvScalars) -> MilpInputs -> `results.rs`.
+    /// What the context declares through `milp_params` (EvScalars) carries the drops.
     #[test]
     fn milp_params_carries_soc_drops_through_to_the_scalars() {
         use crate::controller::milp_planner::AssetMilpParams;

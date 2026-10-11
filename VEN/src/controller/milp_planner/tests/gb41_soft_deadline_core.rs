@@ -75,7 +75,7 @@ fn bands(bid: f64, bid_beyond: f64) -> Vec<EvEnergySegment> {
 }
 
 /// A 24-slot hourly horizon with a realistic tariff shape and the site's assets.
-fn inputs_for(site: &Site) -> MilpInputs {
+fn inputs_for(site: &Site) -> SyntheticSite {
     let n = 24;
     let c_imp: Vec<f64> = (0..n)
         .map(|t| if (0..6).contains(&t) { 0.06 } else { 0.25 })
@@ -87,43 +87,37 @@ fn inputs_for(site: &Site) -> MilpInputs {
         })
         .collect();
 
-    let mut inputs = make_solver_inputs(n, 0.5);
-    inputs.c_imp_eur_kwh = c_imp;
-    inputs.p_pv_kw = p_pv;
+    let mut syn = make_solver_site(n, 0.5);
+    syn.grid.c_imp_eur_kwh = c_imp;
+    syn.grid.p_pv_kw = p_pv;
     if site.battery {
-        inputs.e_bat_nom_kwh = Some(10.0);
-        inputs.e_bat_init_kwh = Some(5.0);
-        inputs.e_bat_min_kwh = Some(1.0);
-        inputs.e_bat_max_kwh = Some(9.0);
-        inputs.p_bat_ch_max_kw = Some(5.0);
-        inputs.p_bat_dis_max_kw = Some(5.0);
-        inputs.eff_bat_ch = Some(0.96);
-        inputs.eff_bat_dis = Some(0.96);
+        syn.battery = Some(battery_ctx(10.0, 5.0, 1.0, 5.0, 0.96));
     }
-    inputs.a_ev = vec![true; n];
+    syn.ev.a_ev = vec![true; n];
     // Soft deadline: nothing guaranteed and no obligation stated. The window is already in
     // `a_ev`, and the bids decide how far to charge inside it.
-    inputs.ev_mode = MilpLoadMode::MayRun;
-    inputs.ev_battery_kwh = BATTERY_KWH;
-    inputs.p_ev_max_kw = P_EV_MAX_KW;
-    inputs.p_ev_min_kw = 1.4;
-    inputs.ev_segments = bands(DEFAULT_CORE_BID, 0.10);
-    inputs.soc_ev_init = Some(SOC_START);
-    inputs
+    syn.ev.mode = EvMilpMode::MayRun;
+    syn.ev.battery_kwh = BATTERY_KWH;
+    syn.ev.p_max_kw = P_EV_MAX_KW;
+    syn.ev.p_min_kw = 1.4;
+    syn.ev.segments = bands(DEFAULT_CORE_BID, 0.10);
+    syn.ev.soc_init_frac = SOC_START;
+    syn
 }
 
-fn delivered_kwh(inputs: &MilpInputs, out: &SolveOutput) -> f64 {
+fn delivered_kwh(syn: &SyntheticSite, out: &SolveOutput) -> f64 {
     out.p_ev_kw
         .iter()
-        .zip(inputs.dt_h.iter())
+        .zip(syn.grid.dt_h.iter())
         .map(|(p, d)| p * d)
         .sum()
 }
 
 /// Everything needed to diagnose a failure without re-running anything.
-fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
-    let ev_energy = delivered_kwh(inputs, out);
-    let cheapest = inputs
+fn dump(site: &Site, syn: &SyntheticSite, out: &SolveOutput) -> String {
+    let ev_energy = delivered_kwh(syn, out);
+    let cheapest = syn
+        .grid
         .c_imp_eur_kwh
         .iter()
         .cloned()
@@ -135,10 +129,10 @@ fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
     s.push_str(&format!("delivered     {ev_energy:.2} kWh EV\n"));
     s.push_str(&format!(
         "required      {:.2} kWh (0 = soft, the bids decide)\n",
-        firm_kwh(inputs)
+        syn.firm_kwh()
     ));
     s.push_str("bands         ");
-    for b in &inputs.ev_segments {
+    for b in &syn.ev.segments {
         s.push_str(&format!(
             "[{:.1} kWh @ {:.2} EUR/kWh] ",
             b.kwh, b.eur_per_kwh
@@ -148,17 +142,17 @@ fn dump(site: &Site, inputs: &MilpInputs, out: &SolveOutput) -> String {
         "\ncheapest rate {cheapest:.3} EUR/kWh (+0.22 ctrl-import malus when priced)\n"
     ));
     s.push_str("slot  rate   pv    p_ev   p_imp\n");
-    for t in 0..inputs.n {
+    for t in 0..syn.grid.n {
         s.push_str(&format!(
             "{t:>4}  {:.2}  {:4.1}  {:5.2}  {:5.2}\n",
-            inputs.c_imp_eur_kwh[t], inputs.p_pv_kw[t], out.p_ev_kw[t], out.p_imp_kw[t],
+            syn.grid.c_imp_eur_kwh[t], syn.grid.p_pv_kw[t], out.p_ev_kw[t], out.p_imp_kw[t],
         ));
     }
     s
 }
 
-fn solve(inputs: &MilpInputs, weights: &Phase1Weights, site: &Site) -> SolveOutput {
-    solve_phase1(inputs, weights, &contexts_from_inputs(inputs), 60.0)
+fn solve(syn: &SyntheticSite, weights: &Phase1Weights, site: &Site) -> SolveOutput {
+    solve_phase1(&syn.inputs(), weights, &syn.contexts(), 60.0)
         .unwrap_or_else(|e| panic!("{} failed to solve: {e:?}", site.name))
 }
 
@@ -184,13 +178,13 @@ fn realistic_weights() -> Phase1Weights {
 #[test]
 fn a_worthwhile_bid_charges_on_a_bare_site() {
     let site = &SITES[0];
-    let inputs = inputs_for(site);
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
+    let syn = inputs_for(site);
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         kwh >= TO_TARGET_KWH - 0.5,
         "a 1.00 EUR/kWh bid must buy the 25 kWh to target even at tariff + malus{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 }
 
@@ -200,18 +194,18 @@ fn a_worthwhile_bid_charges_on_a_bare_site() {
 #[test]
 fn a_bid_that_covers_only_part_of_the_energy_buys_that_part() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
+    let mut syn = inputs_for(site);
     // Only two cheap hours, so the charger can draw at most 2 x 7.4 = 14.8 kWh
     // of the 25 kWh at a price this bid covers; the rest would have to come from
     // 0.25-rate slots costing 0.47 with the malus.
-    inputs.c_imp_eur_kwh = (0..inputs.n)
+    syn.grid.c_imp_eur_kwh = (0..syn.grid.n)
         .map(|t| if t < 2 { 0.06 } else { 0.25 })
         .collect();
     // 0.284 clears a cheap slot (0.06 + 0.22 malus = 0.28) but not a dear one.
-    inputs.ev_segments = bands(0.284, 0.0);
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
-    let report = dump(site, &inputs, &out);
+    syn.ev.segments = bands(0.284, 0.0);
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
+    let report = dump(site, &syn, &out);
     assert!(
         kwh > 0.5,
         "the covered part must be bought, not refused wholesale{report}"
@@ -234,9 +228,9 @@ fn surplus_buys_more_of_the_same_low_bid_than_a_bare_site_does() {
         battery: false,
     };
     let mut a = inputs_for(bare);
-    a.ev_segments = bands(0.10, 0.0);
+    a.ev.segments = bands(0.10, 0.0);
     let mut b = inputs_for(&sunny);
-    b.ev_segments = bands(0.10, 0.0);
+    b.ev.segments = bands(0.10, 0.0);
     let out_a = solve(&a, &realistic_weights(), bare);
     let out_b = solve(&b, &realistic_weights(), &sunny);
     let (kwh_a, kwh_b) = (delivered_kwh(&a, &out_a), delivered_kwh(&b, &out_b));
@@ -254,17 +248,17 @@ fn surplus_buys_more_of_the_same_low_bid_than_a_bare_site_does() {
 #[test]
 fn a_firm_deadline_delivers_its_floor_however_low_the_bid() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
-    inputs.ev_mode = MilpLoadMode::MustRun;
-    let last = inputs.n - 1;
-    set_ev_firm(&mut inputs, TO_TARGET_KWH, last);
-    inputs.ev_segments = bands(0.0, 0.0); // no comfort value at all
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
+    let mut syn = inputs_for(site);
+    syn.ev.mode = EvMilpMode::MustRun;
+    let last = syn.grid.n - 1;
+    syn.set_ev_firm(TO_TARGET_KWH, last);
+    syn.ev.segments = bands(0.0, 0.0); // no comfort value at all
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         kwh >= TO_TARGET_KWH - 0.5,
         "a firm requirement must be met regardless of the bid{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 }
 
@@ -275,31 +269,31 @@ fn a_firm_deadline_delivers_its_floor_however_low_the_bid() {
 #[test]
 fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut syn = inputs_for(site);
+    syn.ev.mode = EvMilpMode::MustRun;
     // Only the first two slots are available, so the window holds at most
     // 2 x 0.5 h x P_EV_MAX_KW — far less than the full requirement.
-    inputs.a_ev = (0..inputs.n).map(|t| t < 2).collect();
-    set_ev_firm(&mut inputs, TO_TARGET_KWH, 1);
-    inputs.ev_segments = bands(0.0, 0.0); // the guarantee, not a bid, is on trial
+    syn.ev.a_ev = (0..syn.grid.n).map(|t| t < 2).collect();
+    syn.set_ev_firm(TO_TARGET_KWH, 1);
+    syn.ev.segments = bands(0.0, 0.0); // the guarantee, not a bid, is on trial
 
-    let out = solve(&inputs, &realistic_weights(), site);
-    let reachable_kwh = 2.0 * inputs.dt_h[0] * P_EV_MAX_KW;
-    let kwh = delivered_kwh(&inputs, &out);
+    let out = solve(&syn, &realistic_weights(), site);
+    let reachable_kwh = 2.0 * syn.grid.dt_h[0] * P_EV_MAX_KW;
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         (kwh - reachable_kwh).abs() < 0.5,
         "must charge everything the window allows ({reachable_kwh:.2} kWh){}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 
-    let warnings = super::super::ev_diagnostics::ev_warnings(&inputs, &out);
+    let warnings = super::super::ev_diagnostics::ev_warnings(&syn.inputs(), &out);
     let w = warnings
         .iter()
         .find(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet)
         .unwrap_or_else(|| {
             panic!(
                 "an unmet guarantee must be reported, got {warnings:?}{}",
-                dump(site, &inputs, &out)
+                dump(site, &syn, &out)
             )
         });
     assert!(
@@ -315,24 +309,24 @@ fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap()
 #[test]
 fn a_soft_request_that_charges_partially_reports_no_unmet_obligation() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
+    let mut syn = inputs_for(site);
     // Same construction as `a_bid_that_covers_only_part_of_the_energy_buys_that
     // _part`: two cheap hours the bid clears, the rest dear enough that it does not.
-    inputs.c_imp_eur_kwh = (0..inputs.n)
+    syn.grid.c_imp_eur_kwh = (0..syn.grid.n)
         .map(|t| if t < 2 { 0.06 } else { 0.25 })
         .collect();
-    inputs.ev_segments = bands(0.284, 0.0);
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
+    syn.ev.segments = bands(0.284, 0.0);
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         kwh > 0.5 && kwh < TO_TARGET_KWH - 0.5,
         "this probe needs a genuinely partial charge, got {kwh:.2} kWh{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
     assert!(
-        super::super::ev_diagnostics::ev_warnings(&inputs, &out).is_empty(),
+        super::super::ev_diagnostics::ev_warnings(&syn.inputs(), &out).is_empty(),
         "a soft request owes nothing, so a partial charge is not a shortfall{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 }
 
@@ -341,14 +335,14 @@ fn a_soft_request_that_charges_partially_reports_no_unmet_obligation() {
 #[test]
 fn a_bid_below_every_cost_buys_nothing() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
-    inputs.ev_segments = bands(0.01, 0.0);
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
+    let mut syn = inputs_for(site);
+    syn.ev.segments = bands(0.01, 0.0);
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         kwh < 0.5,
         "0.01 EUR/kWh cannot justify energy costing at least 0.28{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 }
 
@@ -357,14 +351,14 @@ fn a_bid_below_every_cost_buys_nothing() {
 #[test]
 fn the_valuable_band_is_bought_before_the_cheap_one() {
     let site = &SITES[0];
-    let mut inputs = inputs_for(site);
-    inputs.ev_segments = bands(1.00, 0.29);
-    let out = solve(&inputs, &realistic_weights(), site);
-    let kwh = delivered_kwh(&inputs, &out);
+    let mut syn = inputs_for(site);
+    syn.ev.segments = bands(1.00, 0.29);
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
     assert!(
         kwh >= TO_TARGET_KWH - 0.5,
         "the high-value band must be filled first{}",
-        dump(site, &inputs, &out)
+        dump(site, &syn, &out)
     );
 }
 
@@ -402,18 +396,18 @@ fn sweep_sites_against_pricing_and_limits() {
     for variant in variants.iter() {
         table.push_str(&format!("\n{}\n", variant.name));
         for site in SITES.iter() {
-            let mut inputs = inputs_for(site);
-            inputs.p_imp_max_cont_kw = vec![variant.import_cap_kw; inputs.n];
-            inputs.p_imp_max_phys_kw = vec![variant.import_cap_kw; inputs.n];
-            let out = solve(&inputs, &(variant.weights)(), site);
-            let kwh = delivered_kwh(&inputs, &out);
+            let mut syn = inputs_for(site);
+            syn.grid.p_imp_max_cont_kw = vec![variant.import_cap_kw; syn.grid.n];
+            syn.grid.p_imp_max_phys_kw = vec![variant.import_cap_kw; syn.grid.n];
+            let out = solve(&syn, &(variant.weights)(), site);
+            let kwh = delivered_kwh(&syn, &out);
             table.push_str(&format!(
                 "  {:<34} delivered={kwh:6.2} kWh  obj={:8.3}\n",
                 site.name, out.objective_eur
             ));
             if kwh < 0.5 {
                 starved.push(format!("{} / {}", variant.name, site.name));
-                detail.push_str(&dump(site, &inputs, &out));
+                detail.push_str(&dump(site, &syn, &out));
             }
         }
     }
@@ -438,37 +432,33 @@ fn sweep_sites_against_pricing_and_limits() {
 
 /// The ven-11 shape on the production 288-slot grid: EV + base load only.
 #[cfg(test)]
-fn ev_inputs_288(segments: Vec<EvEnergySegment>, required_kwh: f64) -> MilpInputs {
+fn ev_inputs_288(segments: Vec<EvEnergySegment>, required_kwh: f64) -> SyntheticSite {
     let n = 288;
     // The bare site's EV (`inputs_for(&SITES[0])`) on the production grid of 5-minute slots.
-    let mut inputs = synthetic_inputs(n, 300, 0.5);
+    let mut syn = synthetic_site(n, 300, 0.5);
     // Same diurnal shape as the 24-slot probe, at 5-minute resolution.
-    inputs.c_imp_eur_kwh = (0..n).map(|t| if t < 72 { 0.06 } else { 0.25 }).collect();
-    inputs.ev_battery_kwh = BATTERY_KWH;
-    inputs.p_ev_max_kw = P_EV_MAX_KW;
-    inputs.p_ev_min_kw = 1.4;
-    inputs.soc_ev_init = Some(SOC_START);
-    inputs.a_ev = vec![true; n];
-    inputs.ev_mode = MilpLoadMode::MustRun; // the fleet's mode
-    set_ev_firm(&mut inputs, required_kwh, n - 1);
-    inputs.ev_segments = segments;
-    inputs
+    syn.grid.c_imp_eur_kwh = (0..n).map(|t| if t < 72 { 0.06 } else { 0.25 }).collect();
+    syn.ev.battery_kwh = BATTERY_KWH;
+    syn.ev.p_max_kw = P_EV_MAX_KW;
+    syn.ev.p_min_kw = 1.4;
+    syn.ev.soc_init_frac = SOC_START;
+    syn.ev.a_ev = vec![true; n];
+    syn.ev.mode = EvMilpMode::MustRun; // the fleet's mode
+    syn.set_ev_firm(required_kwh, n - 1);
+    syn.ev.segments = segments;
+    syn
 }
 
 #[cfg(test)]
 fn time_ev_solve(label: &str, segments: Vec<EvEnergySegment>, required_kwh: f64) {
-    let inputs = ev_inputs_288(segments, required_kwh);
-    let n_bands = inputs.ev_segments.len();
+    let syn = ev_inputs_288(segments, required_kwh);
+    let n_bands = syn.ev.segments.len();
     let started = std::time::Instant::now();
-    let out = solve_phase1(
-        &inputs,
-        &realistic_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    )
-    .unwrap_or_else(|e| panic!("{label} failed to solve: {e:?}"));
+    let out = syn
+        .solve_phase1(&realistic_weights())
+        .unwrap_or_else(|e| panic!("{label} failed to solve: {e:?}"));
     let secs = started.elapsed().as_secs_f64();
-    let kwh = delivered_kwh(&inputs, &out);
+    let kwh = delivered_kwh(&syn, &out);
     println!(
         "  {label:52} {n_bands:2} bands  {secs:8.2} s  {:?}  {kwh:6.2} kWh",
         out.status

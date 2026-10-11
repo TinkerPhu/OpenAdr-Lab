@@ -20,20 +20,15 @@ fn penalty_rule_disabled_by_default_adds_no_slack_and_matches_unmodified_plan() 
     // Same EV demand as the split test below, but with no penalty rules —
     // must be free to front-load into a single slot with zero penalty cost,
     // and s_penalty_kw must be empty (no rules -> no windows).
-    let mut inputs = make_solver_inputs(2, 0.0);
-    inputs.a_ev = vec![true; 2];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(2, 0.0);
+    site.ev.a_ev = vec![true; 2];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 12.0;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 12.0, 1);
+    site.ev.p_max_kw = 12.0;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(12.0, 1);
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
     assert!(
@@ -48,21 +43,16 @@ fn add_penalty_constraints_splits_load_below_threshold() {
     // 12 kWh EV demand over 2 one-hour slots (MustRun, deadline at slot 1),
     // 10 kW threshold with a 1-slot window and a penalty rate high enough
     // that paying it is never cheaper than the (cost-neutral) even split.
-    let mut inputs = make_solver_inputs(2, 0.0);
-    inputs.a_ev = vec![true; 2];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(2, 0.0);
+    site.ev.a_ev = vec![true; 2];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 12.0;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 12.0, 1);
-    inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
+    site.ev.p_max_kw = 12.0;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(12.0, 1);
+    site.grid.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -90,21 +80,16 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
     // Single one-hour slot, EV MustRun deadline at slot 0 -> no alternative
     // slot exists. 12 kWh in 1 hour forces 12 kW import against a 10 kW
     // threshold; the penalty must be accepted, not silently ignored.
-    let mut inputs = make_solver_inputs(1, 0.0);
-    inputs.a_ev = vec![true; 1];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(1, 0.0);
+    site.ev.a_ev = vec![true; 1];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 12.0;
-    inputs.p_ev_min_kw = 0.0;
-    set_ev_firm(&mut inputs, 12.0, 0);
-    inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
+    site.ev.p_max_kw = 12.0;
+    site.ev.p_min_kw = 0.0;
+    site.set_ev_firm(12.0, 0);
+    site.grid.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
-    let result = solve_phase1(
-        &inputs,
-        &make_phase1_weights(),
-        &contexts_from_inputs(&inputs),
-        60.0,
-    );
+    let result = site.solve_phase1(&make_phase1_weights());
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
@@ -123,27 +108,27 @@ fn add_penalty_constraints_accepts_penalty_when_reallocation_impossible() {
 
 #[test]
 fn translate_to_plan_emits_warning_and_cost_when_penalty_accepted() {
-    let mut inputs = make_solver_inputs(1, 0.0);
-    inputs.a_ev = vec![true; 1];
-    inputs.ev_mode = MilpLoadMode::MustRun;
+    let mut site = make_solver_site(1, 0.0);
+    site.ev.a_ev = vec![true; 1];
+    site.ev.mode = EvMilpMode::MustRun;
 
-    inputs.p_ev_max_kw = 12.0;
-    set_ev_firm(&mut inputs, 12.0, 0);
-    inputs.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
+    site.ev.p_max_kw = 12.0;
+    site.set_ev_firm(12.0, 0);
+    site.grid.penalty_rules = vec![penalty_rule(10.0, 3600, 5.0)];
 
     let weights = make_phase1_weights();
-    let contexts = contexts_from_inputs(&inputs);
-    let sol = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("solve must succeed");
+    let contexts = site.contexts();
+    let sol = solve_phase1(&site.inputs(), &weights, &contexts, 60.0).expect("solve must succeed");
 
     let now = chrono::Utc::now();
     let planner = crate::entities::planner_params::PlannerParams {
-        penalty_rules: inputs.penalty_rules.clone(),
+        penalty_rules: site.grid.penalty_rules.clone(),
         ..crate::entities::planner_params::PlannerParams::default()
     };
-    let marginal = inputs.c_imp_eur_kwh.clone();
+    let marginal = site.grid.c_imp_eur_kwh.clone();
     let plan = translate_to_plan(
         &sol,
-        &inputs,
+        &site.inputs(),
         &weights,
         &planner,
         now,

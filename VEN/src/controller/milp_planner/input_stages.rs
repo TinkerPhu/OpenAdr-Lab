@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::asset_port::{AssetMilpParams, EvEnergySegment, EvObligation, ExogenousSocDrops};
+use super::asset_port::{AssetMilpParams, EvEnergySegment, EvObligation};
 use super::inputs::{SiteInputs, StaleRateRefs};
 use super::stale_rates::apply_stale_rate_policy;
 use super::types::{MilpLoadMode, ShiftableLoadMilpContext};
@@ -235,82 +235,83 @@ pub(super) fn capacity_limits(
     }
 }
 
-/// What the asset contexts declare for the model: one battery, EV and heater at most (a later
-/// context of a kind replaces an earlier one), and every shiftable load in context order.
-pub(super) struct AssetScalars {
-    pub e_bat_nom_kwh: Option<f64>,
-    pub e_bat_init_kwh: Option<f64>,
-    pub e_bat_min_kwh: Option<f64>,
-    pub e_bat_max_kwh: Option<f64>,
-    pub p_bat_ch_max_kw: Option<f64>,
-    pub p_bat_dis_max_kw: Option<f64>,
-    pub eff_bat_ch: Option<f64>,
-    pub eff_bat_dis: Option<f64>,
+/// What the asset contexts declare that the planner reads outside the solve: one EV and one
+/// heater at most (a later context of a kind replaces an earlier one), and every shiftable load
+/// in context order. Deliberately not a copy of the contexts: a parameter only the solve needs
+/// (a power limit, an efficiency, a tank size) stays in the asset's own context, which is what
+/// the solve reads.
+#[derive(Debug, Clone)]
+pub(crate) struct AssetScalars {
+    /// Per-step plugged-in availability mask. False forces p_ev[t] = 0.
     pub a_ev: Vec<bool>,
     pub ev_mode: MilpLoadMode,
+    /// Every charging obligation this EV must meet inside the horizon (R-92).
+    /// Empty = open horizon (plugged, no departure to charge for).
     pub ev_obligations: Vec<EvObligation>,
+    /// Usable pack size [kWh]; 0.0 when EV absent. Turns an obligation's target
+    /// SoC into the energy the diagnostics and envelopes report.
     pub ev_battery_kwh: f64,
-    pub p_ev_max_kw: f64,
-    pub p_ev_min_kw: f64,
+    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
     pub ev_segments: Vec<EvEnergySegment>,
+    /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
     pub e_ev_extra_max_kwh: f64,
-    pub v_ev_extra_eur_kwh: f64,
     pub ev_budget_eur: Option<f64>,
+    /// Live SoC of the EV at plan-build time [0.0..1.0]; None when no EV is present.
     pub soc_ev_init: Option<f64>,
-    pub ev_soc_drops: Option<ExogenousSocDrops>,
+    /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
     pub shiftable_loads: Vec<ShiftableLoadMilpContext>,
     pub heater_mode: MilpLoadMode,
-    pub t_heat_dead_step: Option<usize>,
+    /// Power per heater stage [kW] = max_kw / n_stages.
     pub p_heat_step_kw: f64,
+    /// Number of heater stages (1 or 2).
     pub heat_n_stages: u8,
-    pub e_heat_init_kwh: f64,
-    pub e_heat_max_kwh: f64,
-    pub q_heat_dem_kw: f64,
+    /// Target tank energy at deadline [kWh above T_min].
     pub e_heat_target_kwh: f64,
-    pub lambda_heat_sw_eur: f64,
+    /// Stage index the heater was at on the last real tick.
     pub heat_initial_y: f64,
 }
 
 impl AssetScalars {
     /// A site with no battery, EV, heater or shiftable load.
-    fn none(n: usize) -> Self {
+    pub(crate) fn none(n: usize) -> Self {
         Self {
-            e_bat_nom_kwh: None,
-            e_bat_init_kwh: None,
-            e_bat_min_kwh: None,
-            e_bat_max_kwh: None,
-            p_bat_ch_max_kw: None,
-            p_bat_dis_max_kw: None,
-            eff_bat_ch: None,
-            eff_bat_dis: None,
             a_ev: vec![false; n],
             ev_mode: MilpLoadMode::MustNotRun,
             ev_obligations: Vec::new(),
             ev_battery_kwh: 0.0,
-            p_ev_max_kw: 0.0,
-            p_ev_min_kw: 0.0,
             ev_segments: Vec::new(),
             e_ev_extra_max_kwh: 0.0,
-            v_ev_extra_eur_kwh: 0.0,
             ev_budget_eur: None,
             soc_ev_init: None,
-            ev_soc_drops: None,
             shiftable_loads: Vec::new(),
             heater_mode: MilpLoadMode::MustNotRun,
-            t_heat_dead_step: None,
             p_heat_step_kw: 0.0,
             heat_n_stages: 0,
-            e_heat_init_kwh: 0.0,
-            e_heat_max_kwh: 0.0,
-            q_heat_dem_kw: 0.0,
             e_heat_target_kwh: 0.0,
-            lambda_heat_sw_eur: 0.0,
             heat_initial_y: 0.0,
         }
     }
 }
 
-pub(super) fn asset_scalars(
+impl AssetScalars {
+    /// The energy one obligation demands above the EV's live SoC [kWh]: an obligation states
+    /// a target SoC (R-92). Never negative.
+    pub(crate) fn ev_obligation_kwh(&self, obligation: &EvObligation) -> f64 {
+        ((obligation.target_soc_frac - self.soc_ev_init.unwrap_or(0.0)) * self.ev_battery_kwh)
+            .max(0.0)
+    }
+
+    /// The firm energy the EV must receive [kWh]: the largest demand among its obligations
+    /// when more than one departure is queued, 0 without any.
+    pub(crate) fn ev_firm_kwh(&self) -> f64 {
+        self.ev_obligations
+            .iter()
+            .map(|o| self.ev_obligation_kwh(o))
+            .fold(0.0_f64, f64::max)
+    }
+}
+
+pub(crate) fn asset_scalars(
     asset_contexts: &[Box<dyn AssetMilpContext>],
     n: usize,
     now: DateTime<Utc>,
@@ -318,40 +319,23 @@ pub(super) fn asset_scalars(
     let mut s = AssetScalars::none(n);
     for ctx in asset_contexts {
         match ctx.milp_params(n, now) {
-            AssetMilpParams::Battery(b) => {
-                s.e_bat_nom_kwh = Some(b.e_nom_kwh);
-                s.e_bat_init_kwh = Some(b.e_init_kwh);
-                s.e_bat_min_kwh = Some(b.e_min_kwh);
-                s.e_bat_max_kwh = Some(b.e_max_kwh);
-                s.p_bat_ch_max_kw = Some(b.p_ch_max_kw);
-                s.p_bat_dis_max_kw = Some(b.p_dis_max_kw);
-                s.eff_bat_ch = Some(b.eff_ch);
-                s.eff_bat_dis = Some(b.eff_dis);
-            }
+            // A battery declares nothing the planner reads outside the solve.
+            AssetMilpParams::Battery(_) => {}
             AssetMilpParams::Ev(e) => {
                 s.a_ev = e.a_ev;
                 s.ev_mode = e.mode;
                 s.ev_obligations = e.obligations;
                 s.ev_battery_kwh = e.battery_kwh;
-                s.p_ev_max_kw = e.p_max_kw;
-                s.p_ev_min_kw = e.p_min_kw;
                 s.ev_segments = e.segments;
                 s.e_ev_extra_max_kwh = e.e_extra_max_kwh;
-                s.v_ev_extra_eur_kwh = e.v_extra_eur_kwh;
                 s.ev_budget_eur = e.budget_eur;
                 s.soc_ev_init = Some(e.soc_init_frac);
-                s.ev_soc_drops = e.soc_drops;
             }
             AssetMilpParams::Heater(h) => {
                 s.heater_mode = h.mode;
-                s.t_heat_dead_step = h.t_dead_step;
                 s.p_heat_step_kw = h.p_step_kw;
                 s.heat_n_stages = h.n_stages;
-                s.e_heat_init_kwh = h.e_init_kwh;
-                s.e_heat_max_kwh = h.e_max_kwh;
-                s.q_heat_dem_kw = h.q_dem_kw;
                 s.e_heat_target_kwh = h.e_target_kwh;
-                s.lambda_heat_sw_eur = h.lambda_sw_eur;
                 s.heat_initial_y = h.initial_y;
             }
             // Each shiftable load declares itself through its own context

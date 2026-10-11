@@ -1,4 +1,7 @@
 use super::*;
+use crate::controller::milp_planner::asset_port::{
+    BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode,
+};
 
 use crate::assets::{
     battery::{Battery, BatteryState},
@@ -592,107 +595,6 @@ fn ev_firm_kwh(
     }]
 }
 
-/// State one firm EV obligation of `kwh` by `deadline_step` on a fixture, derived
-/// from that fixture's own pack size and live SoC. The sites that used to set
-/// `t_ev_dead_step` and `e_ev_required_kwh` as a pair call this instead, so the
-/// kWh→SoC conversion lives in one place.
-fn set_ev_firm(inputs: &mut MilpInputs, kwh: f64, deadline_step: usize) {
-    let soc_init_frac = inputs.soc_ev_init.unwrap_or(0.0);
-    inputs.ev_obligations = ev_firm_kwh(inputs.ev_battery_kwh, soc_init_frac, kwh, deadline_step);
-}
-
-/// The firm energy a fixture's obligations demand above its live SoC [kWh] — the
-/// quantity the old scalar `e_ev_required_kwh` held directly.
-fn firm_kwh(inputs: &MilpInputs) -> f64 {
-    let soc_init_frac = inputs.soc_ev_init.unwrap_or(0.0);
-    inputs
-        .ev_obligations
-        .iter()
-        .map(|o| ((o.target_soc_frac - soc_init_frac) * inputs.ev_battery_kwh).max(0.0))
-        .fold(0.0_f64, f64::max)
-}
-
-fn contexts_from_inputs(
-    inputs: &MilpInputs,
-) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-    use crate::controller::milp_planner::asset_port::{
-        EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode,
-    };
-    use crate::services::test_support::milp_mocks::{MockBatteryCtx, MockEvCtx, MockHeaterCtx};
-    let mut v: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
-    if let Some(e_nom) = inputs.e_bat_nom_kwh {
-        v.push(Box::new(MockBatteryCtx::new(
-            e_nom,
-            inputs.e_bat_init_kwh.unwrap_or(0.0),
-            inputs.e_bat_min_kwh.unwrap_or(0.0),
-            inputs
-                .p_bat_ch_max_kw
-                .unwrap_or(0.0)
-                .max(inputs.p_bat_dis_max_kw.unwrap_or(0.0)),
-            inputs.eff_bat_ch.unwrap_or(1.0),
-        )));
-    }
-    if inputs.p_ev_max_kw > 0.0 {
-        let mode = match inputs.ev_mode {
-            MilpLoadMode::MustRun => EvMilpMode::MustRun,
-            MilpLoadMode::MayRun => EvMilpMode::MayRun,
-            MilpLoadMode::MustNotRun => EvMilpMode::MustNotRun,
-        };
-        v.push(Box::new(MockEvCtx {
-            ctx: EvMilpContext {
-                mode,
-                soc_init_frac: inputs.soc_ev_init.unwrap_or(0.0),
-                soc_max_frac: 1.0,
-                a_ev: inputs.a_ev.clone(),
-                // Forwarded, not dropped: R-93 put the trip drops inside the SoC
-                // balance, so a fixture that declares them must see them in the model.
-                soc_drops: inputs.ev_soc_drops.clone(),
-                obligations: inputs.ev_obligations.clone(),
-                battery_kwh: inputs.ev_battery_kwh,
-                p_max_kw: inputs.p_ev_max_kw,
-                p_min_kw: inputs.p_ev_min_kw,
-                segments: inputs.ev_segments.clone(),
-                e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
-                v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
-                asap_lateness_eur_kwh_h: 0.0,
-                free_only: false,
-                p_free_cap_kw: None,
-                reward_per_slot: false,
-                free_early_bias: false,
-                budget_eur: None,
-                c_imp_eur_kwh: None,
-                v_extra_co2_eur_kwh: 0.0,
-            },
-        }));
-    }
-    if (inputs.p_heat_step_kw * inputs.heat_n_stages as f64) > 0.0 {
-        let mode = match inputs.heater_mode {
-            MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
-            MilpLoadMode::MayRun => HeaterMilpMode::MayRun,
-            MilpLoadMode::MustNotRun => HeaterMilpMode::MustNotRun,
-        };
-        v.push(Box::new(MockHeaterCtx {
-            ctx: HeaterMilpContext {
-                mode,
-                t_dead_step: inputs.t_heat_dead_step,
-                p_step_kw: inputs.p_heat_step_kw,
-                n_stages: inputs.heat_n_stages,
-                e_init_kwh: inputs.e_heat_init_kwh,
-                e_max_kwh: inputs.e_heat_max_kwh,
-                q_dem_kw: inputs.q_heat_dem_kw,
-                e_target_kwh: inputs.e_heat_target_kwh,
-                lambda_sw_eur: inputs.lambda_heat_sw_eur,
-                initial_y: inputs.heat_initial_y,
-                c_terminal_eur_kwh: 0.0,
-                anchored_kw: vec![],
-                comfort_full_reward_eur_kwh: 0.0,
-                comfort_full_co2_reward_eur_kwh: 0.0,
-            },
-        }));
-    }
-    v
-}
-
 /// Test-only equivalent of `plan_context.rs::build_asset_contexts`'s generic
 /// `sim_snap.iter_assets().filter_map(...)` pass, for shiftable loads only —
 /// this test module's own `build_asset_contexts` above builds contexts from
@@ -841,9 +743,53 @@ fn bmi(
     now: DateTime<Utc>,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-) -> MilpInputs {
+) -> Built {
     let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
-    build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None)
+    Built {
+        inputs: build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None),
+        ctxs,
+        now,
+    }
+}
+
+/// What `bmi` built: the planner's inputs, and the asset contexts they were built from. A test
+/// about an asset's own parameters reads them where the solve does, from the asset's context
+/// (`battery()`, `heater()`), not from the inputs.
+struct Built {
+    inputs: MilpInputs,
+    ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    now: DateTime<Utc>,
+}
+
+impl std::ops::Deref for Built {
+    type Target = MilpInputs;
+    fn deref(&self) -> &MilpInputs {
+        &self.inputs
+    }
+}
+
+impl Built {
+    fn declared(&self, kind: AssetKind) -> AssetMilpParams {
+        self.ctxs
+            .iter()
+            .find(|c| c.asset_kind() == kind)
+            .unwrap_or_else(|| panic!("no {kind:?} context was built"))
+            .milp_params(self.inputs.n, self.now)
+    }
+
+    fn battery(&self) -> BatteryScalars {
+        match self.declared(AssetKind::Battery) {
+            AssetMilpParams::Battery(b) => b,
+            other => panic!("expected battery scalars, got {other:?}"),
+        }
+    }
+
+    fn heater(&self) -> HeaterScalars {
+        match self.declared(AssetKind::Heater) {
+            AssetMilpParams::Heater(h) => h,
+            other => panic!("expected heater scalars, got {other:?}"),
+        }
+    }
 }
 
 mod fixtures;
