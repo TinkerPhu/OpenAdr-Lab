@@ -92,7 +92,7 @@ pub struct HistoryPage<T> {
 }
 
 /// A closed accounting period for one asset (BL-16 AssetLedger rollup).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct LedgerPeriod {
     pub asset_id: String,
     pub period_start: DateTime<Utc>,

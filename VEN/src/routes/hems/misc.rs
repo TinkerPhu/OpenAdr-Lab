@@ -7,7 +7,7 @@ use axum::{
     },
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
@@ -123,6 +123,13 @@ pub struct LedgerQuery {
     pub asset_id: Option<String>,
 }
 
+/// `GET /ledger?asset_id=`: one asset's open period and its archived monthly ones.
+#[derive(Debug, Serialize)]
+pub struct AssetLedgerHistory {
+    pub current: Option<crate::entities::asset_ledger::AssetLedgerEntry>,
+    pub closed_periods: Vec<LedgerPeriod>,
+}
+
 /// GET /ledger — returns per-asset cumulative energy/cost/CO₂ for the current
 /// open billing period (Stage 4). Unchanged shape when `asset_id` is absent
 /// (existing Dashboard consumer). With `?asset_id=`, returns
@@ -148,10 +155,10 @@ pub async fn get_ledger(
         }
         None => Vec::new(),
     };
-    Json(serde_json::json!({
-        "current": current.get(&asset_id),
-        "closed_periods": closed_periods,
-    }))
+    Json(AssetLedgerHistory {
+        current: current.get(&asset_id).cloned(),
+        closed_periods,
+    })
     .into_response()
 }
 

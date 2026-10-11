@@ -7,8 +7,9 @@ import { DevicesPage } from "../pages/Devices";
 import { EvSessionConflictError } from "../api/evSessionConflict";
 import type {
   UserRequestWithSession, EvSettings, EvUsageSimState, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
-  AssetCapability,
+  AssetCapabilityView,
 } from "../api/types";
+import { makeGrid, makeAssets } from "./fixtures/sim";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -164,7 +165,7 @@ const emptyArbiterDiagnostics: ArbiterDiagnostics = {
 };
 const mockArbiterDiagnosticsData = vi.fn((): ArbiterDiagnostics => emptyArbiterDiagnostics);
 /** What GET /capability/:id declares per asset (R-123): the targets the request forms open on. */
-const declaredTargets = (): Record<string, Partial<AssetCapability>> => ({
+const declaredTargets = (): Record<string, Partial<AssetCapabilityView>> => ({
   heater: { default_target_temp_c: 21 },
   ev: { default_target_soc_frac: 0.9 },
 });
@@ -271,10 +272,10 @@ describe("DevicesPage", () => {
   it("shows the device specs table with nameplate values once sim data arrives", () => {
     mockSimData.mockReturnValue({
       ts: "2026-01-01T10:00:00Z",
-      grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-      assets: {
+      grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
         ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
-      },
+      }),
     });
     renderPage();
     expect(screen.getByTestId("asset-specs-table")).toBeInTheDocument();

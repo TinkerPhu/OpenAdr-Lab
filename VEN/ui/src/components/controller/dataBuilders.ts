@@ -21,6 +21,7 @@ import type {
   UserRequest,
 } from "../../api/types";
 import type { AssetTimelinePoint } from "./types";
+import { assetValue } from "../../api/assetValue";
 
 // ─── computeCostRateEurH ─────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ export function deriveAssetSummaries(
 
     const activeRequest = findActiveRequest(userRequests, assetId, nowMs);
 
-    const forced = sim.assets[assetId]?.["forced_power_kw"];
+    const forced = sim.assets[assetId]?.forced_power_kw;
     const forcedPowerKw = typeof forced === "number" ? forced : null;
 
     return {
@@ -149,20 +150,20 @@ export function deriveAssetSummaries(
         "ev",
         "EV",
         evAsset.power_kw,
-        (evAsset.soc ?? 0) * 100,
+        (assetValue(evAsset, "soc") ?? 0) * 100,
         null,
-        numeric(evAsset["max_charge_kw"]),
+        numeric(assetValue(evAsset, "max_charge_kw")),
         null,
-        numeric(evAsset["battery_kwh"])
+        numeric(assetValue(evAsset, "battery_kwh"))
       )
     );
   }
   const heaterAsset = sim.assets["heater"];
   if (heaterAsset) {
-    const tempC = numeric(heaterAsset["temp_c"]);
-    const tempMinC = numeric(heaterAsset["temp_min_c"]);
-    const tempMaxC = numeric(heaterAsset["temp_max_c"]);
-    const thermalMassKwhPerC = numeric(heaterAsset["thermal_mass_kwh_per_c"]);
+    const tempC = numeric(assetValue(heaterAsset, "temp_c"));
+    const tempMinC = numeric(assetValue(heaterAsset, "temp_min_c"));
+    const tempMaxC = numeric(assetValue(heaterAsset, "temp_max_c"));
+    const thermalMassKwhPerC = numeric(assetValue(heaterAsset, "thermal_mass_kwh_per_c"));
     const capacityKwh =
       tempMinC !== null && tempMaxC !== null && thermalMassKwhPerC !== null
         ? (tempMaxC - tempMinC) * thermalMassKwhPerC
@@ -174,7 +175,7 @@ export function deriveAssetSummaries(
         heaterAsset.power_kw,
         null,
         tempC,
-        numeric(heaterAsset["max_kw"]),
+        numeric(assetValue(heaterAsset, "max_kw")),
         null,
         capacityKwh
       )
@@ -190,7 +191,7 @@ export function deriveAssetSummaries(
         null,
         null,
         null,
-        numeric(pvAsset["rated_kw"])
+        numeric(assetValue(pvAsset, "rated_kw"))
       )
     );
   }
@@ -201,11 +202,11 @@ export function deriveAssetSummaries(
         "battery",
         "Battery",
         batteryAsset.power_kw,
-        (batteryAsset.soc ?? 0) * 100,
+        (assetValue(batteryAsset, "soc") ?? 0) * 100,
         null,
-        numeric(batteryAsset["max_charge_kw"]),
-        numeric(batteryAsset["max_discharge_kw"]),
-        numeric(batteryAsset["capacity_kwh"])
+        numeric(assetValue(batteryAsset, "max_charge_kw")),
+        numeric(assetValue(batteryAsset, "max_discharge_kw")),
+        numeric(assetValue(batteryAsset, "capacity_kwh"))
       )
     );
   }

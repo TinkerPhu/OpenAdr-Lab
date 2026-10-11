@@ -2,23 +2,27 @@ import { Grid, Stack, Typography } from "@mui/material";
 import type { AssetSnapshot, SimSnapshot } from "../../api/types";
 import { ASSET_LABELS } from "../controller/types";
 import { formatFixedOrDash } from "@lab/charts/unitFormat";
+import { assetValue } from "../../api/assetValue";
 
 type Field = (a: AssetSnapshot) => string;
 
 const power: Field = (a) => `Power: ${formatFixedOrDash(a.power_kw, 1)} kW`;
-const soc: Field = (a) => `SOC: ${formatFixedOrDash((a.soc ?? 0) * 100, 1)}%`;
+const soc: Field = (a) => `SOC: ${formatFixedOrDash((assetValue(a, "soc") ?? 0) * 100, 1)}%`;
 
 /**
  * What each asset kind shows beyond its label. A kind absent from this table still gets a
  * tile (label + power), so a new asset type is visible here without editing this file.
  */
 const EXTRA_FIELDS: Record<string, Field[]> = {
-  ev: [soc, power, (a) => `Plugged: ${(a.plugged ?? 0) !== 0 ? "Yes" : "No"}`],
-  heater: [(a) => `Temp: ${formatFixedOrDash(a.temp_c, 1)}°C`, power],
+  ev: [soc, power, (a) => `Plugged: ${(assetValue(a, "plugged") ?? 0) !== 0 ? "Yes" : "No"}`],
+  heater: [(a) => `Temp: ${formatFixedOrDash(assetValue(a, "temp_c"), 1)}°C`, power],
   pv: [
     (a) => `Output: ${formatFixedOrDash(a.power_kw, 1)} kW`,
-    (a) => `Irradiance: ${formatFixedOrDash((a.irradiance ?? 0) * 100, 0)}%`,
-    (a) => `Generation limit: ${"generation_limit_kw" in a ? `${formatFixedOrDash(a.generation_limit_kw ?? 0, 1)} kW` : "none"}`,
+    (a) => `Irradiance: ${formatFixedOrDash((assetValue(a, "irradiance") ?? 0) * 100, 0)}%`,
+    (a) => {
+      const limitKw = assetValue(a, "generation_limit_kw");
+      return `Generation limit: ${limitKw !== undefined ? `${formatFixedOrDash(limitKw, 1)} kW` : "none"}`;
+    },
   ],
   battery: [soc, power],
 };

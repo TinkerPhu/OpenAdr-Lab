@@ -5,19 +5,20 @@ import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ControllerPage } from "../pages/Controller";
 import type { SimSnapshot, SimInjectState, TariffSnapshot } from "../api/types";
+import { makeAssets, makeGrid, makeInject } from "./fixtures/sim";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
 const baseSim: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 },
-  assets: {
+  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  assets: makeAssets({
     ev: { power_kw: 7, soc: 0.5, plugged: 1, max_charge_kw: 11, soc_target: 0.9, battery_kwh: 60 },
     heater: { power_kw: 2, temp_c: 20, max_kw: 4, temp_min_c: 18, temp_max_c: 24 },
     pv: { power_kw: -5, irradiance: 0.8, rated_kw: 8 },
     battery: { power_kw: 1, soc: 0.6, capacity_kwh: 10, max_charge_kw: 5, max_discharge_kw: 5, min_soc: 0.1 },
     base_load: { power_kw: 0.5 },
-  },
+  }),
 };
 
 const baseRates: TariffSnapshot[] = [
@@ -29,7 +30,7 @@ const baseRates: TariffSnapshot[] = [
   },
 ];
 
-const baseInject: SimInjectState = {};
+const baseInject: SimInjectState = makeInject();
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 

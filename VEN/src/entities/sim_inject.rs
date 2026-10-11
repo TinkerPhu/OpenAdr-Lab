@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Default manual-override decay time constant (seconds) — reproduces the
 /// pre-`pv-competence-consolidation` default exactly (old encoding: `pv_alpha=0.1`,
@@ -14,7 +15,7 @@ pub(crate) const DEFAULT_PV_TAU_S: f64 = 2847.37;
 /// - A (one-shot): applied once to physics state, then cleared automatically.
 /// - B (frozen + EMA return): held while active; EMA-blended back to natural model on release.
 /// - C (frozen + snap): held while active; snaps to profile default on release.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct SimInjectState {
     // Behaviour A — one-shot (cleared after application to physics state)
     pub battery_soc: Option<f64>,

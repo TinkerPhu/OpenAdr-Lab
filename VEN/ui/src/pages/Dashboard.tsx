@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useVtnStatus, useTasksStatus } from "../api/hooks";
-import type { OadrCapacityState, AssetLedger } from "../api/types";
+import type { OadrCapacityState, AssetLedgerEntry } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
@@ -72,7 +72,7 @@ function ledgerDuration(startedAt: string): string {
   return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 }
 
-function LedgerCard({ entries }: { entries: AssetLedger[] }) {
+function LedgerCard({ entries }: { entries: AssetLedgerEntry[] }) {
   const earliest = useMemo(() => {
     return entries.reduce<string | null>((min, e) => {
       if (!e.started_at) return min;

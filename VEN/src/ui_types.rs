@@ -31,6 +31,15 @@ ui_types![
     crate::entities::plan::Plan,
     crate::entities::history::PlanHistorySample,
     crate::planner_events::PlannerEvent,
+    // Simulator and assets (increment 3)
+    crate::controller::simulator_port::SimSnapshot,
+    crate::entities::sensor::SensorSnapshot,
+    crate::entities::sim_inject::SimInjectState,
+    crate::assets::ControlDescriptor,
+    crate::entities::asset::AssetCapabilityView,
+    crate::entities::design_vocabulary::AssetForecast,
+    crate::entities::asset_ledger::AssetLedgerEntry,
+    crate::routes::hems::ComfortCurveResponse,
 ];
 
 /// Where the UI imports the generated files from.
@@ -43,20 +52,29 @@ fn config(out_dir: &Path) -> Config {
     Config::new().with_large_int("number").with_out_dir(out_dir)
 }
 
-/// File name -> content of every `.ts` file in `dir` (empty when the directory does not exist).
+/// Relative path -> content of every `.ts` file under `dir`, subdirectories included (ts-rs puts
+/// a foreign type such as `serde_json::Value` in its own folder). Empty when `dir` does not exist.
 fn ts_files(dir: &Path) -> BTreeMap<String, String> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return BTreeMap::new();
-    };
-    entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "ts"))
-        .map(|p| {
-            let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, std::fs::read_to_string(&p).unwrap())
-        })
-        .collect()
+    let mut out = BTreeMap::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|x| x == "ts") {
+                let name = path
+                    .strip_prefix(dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                out.insert(name, std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    out
 }
 
 #[test]
@@ -74,7 +92,9 @@ fn generated_ui_types_are_current() {
         }
         std::fs::create_dir_all(&dir).unwrap();
         for (name, content) in &fresh {
-            std::fs::write(dir.join(name), content).unwrap();
+            let path = dir.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
         }
         return;
     }

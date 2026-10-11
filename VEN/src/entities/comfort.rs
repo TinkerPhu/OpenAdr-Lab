@@ -8,6 +8,7 @@
 //! into the application ring (R-108).
 
 use std::collections::HashMap;
+use ts_rs::TS;
 
 use super::asset::ComfortRate;
 
@@ -79,7 +80,7 @@ pub fn effective_comfort_rates(
 
 /// Where the curve in force for an asset comes from. Serialised lowercase: it is the `source`
 /// field of `GET /assets/:id/comfort_curve`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ComfortCurveSource {
     /// The user replaced the asset's built-in curve.

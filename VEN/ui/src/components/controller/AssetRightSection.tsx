@@ -8,6 +8,7 @@ import type { AssetId } from "./types";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
 import { useSimSchema } from "../../api/hooks";
 import { DynamicControl } from "./DynamicControl";
+import { assetValue } from "../../api/assetValue";
 
 /**
  * Controls that follow Behaviour B (one-shot inject + EMA decay):
@@ -18,17 +19,17 @@ import { DynamicControl } from "./DynamicControl";
  */
 const DECAY_CONTROLS: Record<string, (sim: SimSnapshot | undefined) => number | null> = {
   pv_irradiance: (sim) => {
-    const v = sim?.assets?.["pv"]?.["irradiance"];
+    const v = assetValue(sim?.assets?.["pv"], "irradiance");
     return typeof v === "number" ? v : null;
   },
   base_load_kw: (sim) => {
-    const v = sim?.assets?.["base_load"]?.["baseline_kw"];
+    const v = assetValue(sim?.assets?.["base_load"], "baseline_kw");
     return typeof v === "number" ? v : null;
   },
   // One-shot temperature reset: backend clears it after one tick so the slider
   // must track the live sim temperature after posting (Behaviour B).
   heater_temp_c: (sim) => {
-    const v = sim?.assets?.["heater"]?.["temp_c"];
+    const v = assetValue(sim?.assets?.["heater"], "temp_c");
     return typeof v === "number" ? v : null;
   },
 };
@@ -55,7 +56,7 @@ export function AssetRightSection({
     (d) => !(assetId === "heater" && d.key === "heater_temp_c")
   );
 
-  const socRaw = sim?.assets?.[assetId]?.["soc"] ?? null;
+  const socRaw = assetValue(sim?.assets?.[assetId], "soc") ?? null;
   const liveSocPct = socRaw !== null && socRaw !== undefined ? socRaw * 100 : null;
 
   // SoC drag: hold a local pending value while the user is dragging so the
@@ -115,20 +116,20 @@ export function AssetRightSection({
     // Fall back to the sim's actual current value so controls reflect reality
     // when no override is active (null override means "use sim default").
     if (key === "ev_plugged") {
-      const p = sim?.assets?.["ev"]?.["plugged"];
+      const p = assetValue(sim?.assets?.["ev"], "plugged");
       return p !== undefined ? p !== 0 : null;
     }
     if (key === "ev_soc_target") {
-      const t = sim?.assets?.["ev"]?.["soc_target"];
+      const t = assetValue(sim?.assets?.["ev"], "soc_target");
       return typeof t === "number" ? t : null;
     }
     // Persistent heater comfort-band overrides: fall back to live sim values.
     if (key === "heater_temp_min_c") {
-      const v = sim?.assets?.["heater"]?.["temp_min_c"];
+      const v = assetValue(sim?.assets?.["heater"], "temp_min_c");
       return typeof v === "number" ? v : null;
     }
     if (key === "heater_temp_max_c") {
-      const v = sim?.assets?.["heater"]?.["temp_max_c"];
+      const v = assetValue(sim?.assets?.["heater"], "temp_max_c");
       return typeof v === "number" ? v : null;
     }
     return null;

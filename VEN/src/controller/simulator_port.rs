@@ -8,6 +8,7 @@
 /// `&SimState`/`Asset::max_effort_setpoint` directly — the flattened snapshot's
 /// `capability()`-based fields can't answer PV's achievable range correctly.)
 use std::collections::HashMap;
+use ts_rs::TS;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ pub trait SimulatorPort: Send + Sync {
 }
 
 /// Point-in-time snapshot of all simulator state needed by controller logic.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct SimSnapshot {
     pub ts: DateTime<Utc>,
     pub grid: GridSnapshot,
@@ -30,7 +31,7 @@ pub struct SimSnapshot {
 }
 
 /// Grid meter snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GridSnapshot {
     pub net_power_w: f64,
     pub voltage_v: f64,
@@ -54,7 +55,7 @@ pub struct GridSnapshot {
 ///
 /// When serialized, `values` keys are flattened into the same JSON object as the typed fields,
 /// preserving backward-compatibility with the `/sim` API response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct AssetSnapshot {
     /// Actual power from last tick (kW). Positive = import, negative = export.
     pub power_kw: f64,
@@ -66,13 +67,19 @@ pub struct AssetSnapshot {
     /// Physical capability: maximum export rate (kW, magnitude) from config + state.
     pub cap_max_export_kw: f64,
     /// Available energy for discharge (kWh), if applicable (battery/EV only).
+    #[ts(optional)]
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_discharge_kwh: Option<f64>,
     /// Available energy for charge (kWh), if applicable (battery/EV only).
+    #[ts(optional)]
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_charge_kwh: Option<f64>,
     /// Power the asset will draw/produce regardless of its setpoint this tick
     /// (`Asset::forced_power_kw`, e.g. a heater's thermostat override).
+    #[ts(optional)]
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forced_power_kw: Option<f64>,
     /// How this asset's power follows a commanded setpoint, as the asset
@@ -86,8 +93,12 @@ pub struct AssetSnapshot {
     /// Last setpoint applied by the VEN controller (kW).
     pub setpoint_kw: f64,
     /// Asset-specific state values from `cfg.state_values()` (soc, temp_c, etc.).
-    /// Flattened into the top-level JSON object for backward-compatibility.
+    /// Flattened into the top-level JSON object for backward-compatibility. Left out of the
+    /// TypeScript type: a numeric index signature beside the typed fields would make
+    /// `asset_type: string` unusable, so the VEN UI reads these through one helper
+    /// (`assetValue` in `api/assetValue.ts`) that narrows each value it takes by key.
     #[serde(flatten)]
+    #[ts(skip)]
     pub values: HashMap<String, f64>,
     /// What the asset itself reports to the history recorder (`Asset::history_view`) —
     /// typed, so the recorder never reads `values` keys. Not serialized: `values` carries
