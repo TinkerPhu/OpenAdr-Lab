@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_URL, VEN_NO_PV_BASE_URL, BFF_BASE_URL
 from features.helpers.wait import wait_for_url
+from features.helpers import scenario_state
 from behave.contrib.scenario_autoretry import patch_scenario_with_autoretry
 
 # Timing instrumentation
@@ -203,6 +204,7 @@ def before_scenario(context, scenario):
     """Record scenario start time and launch browser page for @ui and @ven-ui scenarios."""
     context._scenario_start_time = time.time()
     context._scenario_start_iso = datetime.utcnow().isoformat() + "Z"
+    scenario_state.begin()
 
     if _is_ui(scenario):
         if context._pw is None:
@@ -296,60 +298,6 @@ def _cleanup_vtn_resources(context):
         print(f"Warning: event cleanup failed: {exc}")
 
 
-def _reset_ven_sim_overrides():
-    """Reset all sim injects on VEN-1 to clear any override bleed.
-
-    Prevents overrides set in one scenario (e.g. ev_plugged=false) from
-    leaking into subsequent scenarios that don't belong to the same feature.
-    """
-    try:
-        from features.helpers.api_client import ven_post
-        ven_post("/sim/inject/reset", json={})
-    except Exception:
-        pass
-
-
-def _reset_arbiter_settings():
-    """Restore both arbiter passes to their defaults on VEN-1 (deviation
-    correction off, limit enforcement on) so a scenario that flips one
-    cannot leak it into the next, even when it fails midway."""
-    try:
-        from features.helpers.api_client import ven_put
-        ven_put(
-            "/arbiter-settings",
-            json={"deviation_arbiter_enabled": False, "limit_enforcement_enabled": True},
-        )
-    except Exception:
-        pass
-
-
-def _reset_device_sessions():
-    """Clear all device sessions on VEN-1 between scenarios.
-
-    Prevents ev-sessions, heater-targets, shiftable-loads, and user-requests
-    posted in one scenario from leaking into subsequent scenarios.
-    """
-    try:
-        from features.helpers.api_client import ven_get, ven_delete
-        ven_delete("/ev-session")
-        ven_delete("/heater-target")
-        r = ven_get("/shiftable-loads")
-        if r.ok:
-            for load in (r.json() or []):
-                ven_delete(f"/shiftable-loads/{load['id']}")
-        r = ven_get("/user-requests")
-        if r.ok:
-            for req in (r.json() or []):
-                ven_delete(f"/user-requests/{req['id']}")
-        # An EV session that outlives every request blocks the next overlapping EV request
-        # with a 409; say so where it happens, not three scenarios later.
-        r = ven_get("/ev-session")
-        if r.ok and r.json():
-            print(f"[cleanup] EV sessions left after deleting all user requests: {r.json()}")
-    except Exception:
-        pass
-
-
 def after_scenario(context, scenario):
     """Record scenario timing, close browser page, and clean up."""
     # Capture scenario-steps time (before cleanup)
@@ -364,9 +312,7 @@ def after_scenario(context, scenario):
     import features.helpers.api_client as api_client
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
-    _reset_ven_sim_overrides()
-    _reset_arbiter_settings()
-    _reset_device_sessions()
+    scenario_state.undo(api_client._DEFAULT_VEN_BASE_URL)
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()

@@ -141,6 +141,20 @@ docker compose -f tests/docker-compose.test.yml run --rm test-runner features/en
 docker compose -f tests/docker-compose.test.yml run --rm test-runner --tags=@upstream_pending
 ```
 
+**Every scenario leaves the VENs as it found them.** `tests/features/helpers/scenario_state.py`
+is the one place that knows how to undo a scenario: `api_client`'s mutating VEN helpers report
+each call to it, and `after_scenario` puts back what was changed (user requests cancelled, injects
+reset, arbiter settings, baseline and comfort overrides cleared, battery SoC and config restored
+to their value before the scenario). The default VEN always gets the UI-reachable resets, since
+browser scenarios bypass `api_client`. A step that mutates a new VEN route needs an entry in its
+`RESETS` table (how to undo) or `NO_RESET` table (why nothing needs undoing); otherwise the log
+says `[cleanup] no reset for ...`. What cannot be undone is printed as `[cleanup] LEAK: ...` —
+chiefly a started shiftable load, which runs to the end of its duration. So a scenario whose load
+must start keeps it short and uses a window only the current slot can satisfy (`... that can only
+start in the current slot`), otherwise cost moves the start to a later slot. Physical state a
+scenario merely caused (heater temperature, EV SoC) is not forced back: writing a temperature under
+a running heater would latch it. `scenario_cleanup.feature` pins the restore.
+
 **Excluded by default** (via `tests/behave.ini`):
 - `@upstream_pending` — VEN report isolation tests awaiting upstream fix
 - `@resilience` — requires Docker socket access, run separately
