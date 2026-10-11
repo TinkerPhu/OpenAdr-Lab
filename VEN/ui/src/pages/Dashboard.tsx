@@ -2,19 +2,12 @@ import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useVtnStatus, useTasksStatus } from "../api/hooks";
-import type { OadrCapacityState, AssetLedger, PlannerObjective } from "../api/types";
+import type { OadrCapacityState, AssetLedger } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
 import { formatFixedOrDash, formatKwOrDash } from "@lab/charts/unitFormat";
-
-const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
-  min_cost: "Cost",
-  min_ghg: "GHG",
-  min_grid: "Grid",
-  min_import: "Autarky",
-  max_revenue: "Revenue",
-};
+import { OBJECTIVE_LABELS } from "../components/planner/objectiveLabels";
 
 function ModeBadge({ mode }: { mode?: string }) {
   if (!mode || mode === "IDLE") return <Chip label="IDLE" size="small" />;

@@ -2,50 +2,24 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
-import type { Plan, PlanTimeSlot } from "../api/types";
+import type { Plan } from "../api/types";
+import { makePlan as basePlan } from "./fixtures/plan";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const now = new Date("2026-04-04T10:00:00Z");
 
-function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
-  return {
-    slot_index: 0,
-    start: "2026-04-04T10:00:00Z",
-    end: "2026-04-04T10:05:00Z",
-    import_tariff_eur_kwh: 0.12,
-    export_tariff_eur_kwh: 0.05,
-    co2_g_kwh: 200,
-    import_cap_kw: 10,
-    export_cap_kw: 10,
-    allocations: [],
-    net_import_kw: 0,
-    net_export_kw: 0,
-    pv_forecast_kw: 0,
-    baseline_kw: 1.0,
-    ...overrides,
-  };
-}
-
 function makePlan(overrides: Partial<Plan> = {}): Plan {
-  return {
-    id: "plan-001",
+  return basePlan({
     created_at: new Date(now.getTime() - 45 * 1000).toISOString(), // 45s ago
-    trigger: "Periodic",
-    slots: [makeSlot()],
     summary: {
       total_cost_eur: 1.84,
       total_co2_g: 2100,
       total_import_kwh: 8.2,
       total_export_kwh: 0,
     },
-    envelopes: [],
-    warnings: [],
-    objective_eur: 0,
-    friction_eur: 0,
-    solve_status: "OPTIMAL",
     ...overrides,
-  };
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -73,14 +47,14 @@ describe("PlanHeaderBar", () => {
   });
 
   it("renders trigger badge with plan trigger", () => {
-    render(<PlanHeaderBar plan={makePlan({ trigger: "RateChange" })} />);
+    render(<PlanHeaderBar plan={makePlan({ trigger: "RATE_CHANGE" })} />);
     const badge = screen.getByTestId("plan-trigger-badge");
     expect(badge).toBeInTheDocument();
-    expect(badge.textContent).toContain("RateChange");
+    expect(badge.textContent).toContain("RATE_CHANGE");
   });
 
   it("Periodic trigger badge has default color class", () => {
-    render(<PlanHeaderBar plan={makePlan({ trigger: "Periodic" })} />);
+    render(<PlanHeaderBar plan={makePlan({ trigger: "PERIODIC" })} />);
     const badge = screen.getByTestId("plan-trigger-badge");
     // MUI Chip with color="default" — check data-color or class
     const dataColor = badge.getAttribute("data-color") ?? badge.className;
@@ -122,8 +96,8 @@ describe("PlanHeaderBar", () => {
   it("renders warnings badge showing count when warnings exist", () => {
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "Session infeasible", suggested_action: null },
-        { severity: "CRITICAL", message: "Grid limit exceeded", suggested_action: "Reduce load" },
+        { severity: "WARNING", kind: "OTHER", message: "Session infeasible", suggested_action: null },
+        { severity: "CRITICAL", kind: "CAPACITY_VIOLATION", message: "Grid limit exceeded", suggested_action: "Reduce load" },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -135,7 +109,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "Something wrong", suggested_action: null },
+        { severity: "WARNING", kind: "OTHER", message: "Something wrong", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -149,7 +123,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "A warning", suggested_action: null },
+        { severity: "WARNING", kind: "OTHER", message: "A warning", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -163,7 +137,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "CRITICAL", message: "Overload", suggested_action: "Curtail load immediately" },
+        { severity: "CRITICAL", kind: "CAPACITY_VIOLATION", message: "Overload", suggested_action: "Curtail load immediately" },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -178,7 +152,7 @@ describe("PlanHeaderBar", () => {
     const plan = makePlan({
       solve_status: "INFEASIBLE",
       warnings: [
-        { severity: "CRITICAL", message: "MILP solver failed: infeasible", suggested_action: null },
+        { severity: "CRITICAL", kind: "SOLVER_INFEASIBLE", message: "MILP solver failed: infeasible", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -246,7 +220,7 @@ describe("PlanHeaderBar", () => {
     const plan = makePlan({
       solve_status: "INFEASIBLE",
       warnings: [
-        { severity: "CRITICAL", message: "MILP solver failed: infeasible", suggested_action: null },
+        { severity: "CRITICAL", kind: "SOLVER_INFEASIBLE", message: "MILP solver failed: infeasible", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use ts_rs::TS;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use lab_core::time_window::{covering, TimeWindow};
 /// One zone of a variable-step planning horizon.
 /// Defined here (domain layer) so `PlanningHorizon` can carry zone metadata without
 /// importing `profile.rs` (infra). `profile::PlannerConfig` imports this type for YAML parsing.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct PlanZone {
     /// Slot width for this zone in seconds. Must be a multiple of the first zone's step_s.
     pub step_s: u64,
@@ -20,7 +21,7 @@ pub struct PlanZone {
 }
 
 /// Defines the temporal scope of a planning cycle (§6.1).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PlanningHorizon {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
@@ -35,7 +36,7 @@ pub struct PlanningHorizon {
 }
 
 /// Assignment of energy to a specific asset within a time slot (§6.3).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AssetAllocation {
     pub asset_id: String,
     /// Total power allocated to this asset in this slot (kW)
@@ -53,7 +54,7 @@ pub struct AssetAllocation {
 }
 
 /// A single time slot in the plan (§6.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PlanTimeSlot {
     pub slot_index: usize,
     pub start: DateTime<Utc>,
@@ -145,7 +146,7 @@ pub struct PlanTimeSlot {
 /// Note: this is *not* the same as `SiteFlexibilityEnvelope`, which is the
 /// live site-level headroom served by `GET /flexibility`. Per-device envelopes
 /// only refresh at plan time; site headroom refreshes every dispatcher tick.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct FlexibilityEnvelope {
     pub asset_id: String,
     /// Energy still needed in the horizon (kWh)
@@ -273,7 +274,7 @@ pub struct SiteFlexibilityForecastSlot {
 /// hardcoded. See that profile field's doc comment for what's still not
 /// exposed (the achieved gap as a number, as opposed to this coarser
 /// within-target/not classification).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SolveStatus {
     Optimal,
@@ -283,7 +284,7 @@ pub enum SolveStatus {
 }
 
 /// Severity of a plan warning.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum WarningSeverity {
     Info,
@@ -298,7 +299,7 @@ pub enum WarningSeverity {
 /// any future warning that hasn't earned its own variant yet. `services::notify`
 /// dedups new-vs-carried-over warnings on `kind` (not `message`, which can
 /// carry per-cycle interpolated numbers).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum WarningKind {
     /// `results::fallback_plan` — the MILP solver failed and this is the infeasibility fallback.
@@ -323,7 +324,7 @@ pub enum WarningKind {
 }
 
 /// A warning generated during planning (§6.5).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PlanWarning {
     pub severity: WarningSeverity,
     #[serde(default = "WarningKind::default_other")]
@@ -339,7 +340,7 @@ impl WarningKind {
 }
 
 /// Decomposed MILP objective cost components for diagnostics.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct CostBreakdown {
     pub c_energy_eur: f64,
     pub c_ghg_eur: f64,
@@ -354,14 +355,14 @@ pub struct CostBreakdown {
 }
 
 /// A penalty rule active on the current plan, for UI consumption (WP6.3, BL-09).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct ActivePenaltyRule {
     pub rule_id: String,
     pub threshold_kw: f64,
 }
 
 /// Summary of the full plan horizon.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct PlanSummary {
     pub total_cost_eur: f64,
     pub total_co2_g: f64,
@@ -370,7 +371,7 @@ pub struct PlanSummary {
 }
 
 /// A complete plan covering the planning horizon (§6.10).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Plan {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -477,7 +478,7 @@ impl Plan {
 /// R-97 — per-phase outcome of a two-phase MILP solve, so operators and the UI can
 /// see which half spent the time and which half stopped early. See
 /// `Plan::phase_report` for why one `solve_status` is not enough.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct PlanPhaseReport {
     /// Wall-clock milliseconds phase 1 (cost minimisation) took.
     pub phase1_ms: u64,

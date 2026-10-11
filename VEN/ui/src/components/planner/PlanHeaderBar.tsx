@@ -230,15 +230,13 @@ export function PlanHeaderBar({ plan }: Props) {
                 sx={{ mb: 0.5 }}
               >
                 <Chip label={w.severity} color={severityColor(w.severity)} size="small" sx={{ mt: 0.25 }} />
-                {w.kind && (
-                  <Chip
-                    data-testid={`plan-warning-${i}-kind`}
-                    label={w.kind}
-                    variant="outlined"
-                    size="small"
-                    sx={{ mt: 0.25 }}
-                  />
-                )}
+                <Chip
+                  data-testid={`plan-warning-${i}-kind`}
+                  label={w.kind}
+                  variant="outlined"
+                  size="small"
+                  sx={{ mt: 0.25 }}
+                />
                 <Box>
                   <Typography variant="caption" display="block">{w.message}</Typography>
                   {w.suggested_action && (

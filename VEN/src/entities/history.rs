@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::entities::plan::{SolveStatus, WarningKind};
@@ -158,7 +159,7 @@ pub struct ForecastAccuracySample {
 /// per-cycle summary, not per-warning queries. See
 /// `docs/architecture/VEN_ARCHITECTURE.md` §4.9a for the pattern this follows
 /// (`forecast_accuracy_samples`) and why `plan_snapshots` (R-63) was not reused.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct PlanHistorySample {
     pub plan_id: Uuid,
     pub created_at: DateTime<Utc>,

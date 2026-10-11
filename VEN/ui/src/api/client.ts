@@ -9,7 +9,7 @@ import type {
   BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
-  ForecastAccuracySample, PlanHistorySample,
+  ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
   ReportObligation, AssetCapability, AssetForecast,
@@ -418,11 +418,11 @@ export class VenApi {
     }));
   }
 
-  async historyPlans(params: { from: string; to: string }): Promise<PlanHistorySample[]> {
+  async historyPlans(params: { from: string; to: string }): Promise<PlanHistoryRow[]> {
     const qs = new URLSearchParams({ from: params.from, to: params.to });
     const r = await this.getReq(`/history/plans?${qs}`);
     if (!r.ok) throw new Error(`history/plans ${r.status}`);
-    const raw: (Omit<PlanHistorySample, "created_at"> & { created_at: string })[] = await r.json();
+    const raw: PlanHistorySample[] = await r.json();
     return raw.map((row) => ({ ...row, created_at: new Date(row.created_at).getTime() }));
   }
 

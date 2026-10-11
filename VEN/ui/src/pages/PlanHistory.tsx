@@ -10,7 +10,7 @@ import { useHistoryPlans } from "../api/hooks";
 import { dayRangeIso, last24hRangeIso } from "../utils/dayRange";
 import { useFrozenServerNowMs } from "../utils/useFrozenServerNowMs";
 import { niceAxis, tickFormatterForStep } from "@lab/charts/axisDomain";
-import type { PlanHistorySample, WarningKind } from "../api/types";
+import type { PlanHistoryRow, WarningKind } from "../api/types";
 
 const WARNING_KIND_LABELS: Record<WarningKind, string> = {
   SOLVER_INFEASIBLE: "Solver infeasible",
@@ -53,7 +53,7 @@ export function PlanHistoryPage() {
   const solverMsSeries = useMemo(
     () =>
       plans
-        .filter((p): p is PlanHistorySample & { solver_ms: number } => p.solver_ms !== null)
+        .filter((p): p is PlanHistoryRow & { solver_ms: number } => p.solver_ms !== null)
         .map((p) => ({ ts: p.created_at, solver_ms: p.solver_ms })),
     [plans]
   );

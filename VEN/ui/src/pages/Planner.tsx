@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary,
-  Alert, Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
-  LinearProgress, MenuItem, Select, Snackbar, Stack, Tooltip, Typography,
+  Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
+  LinearProgress, MenuItem, Select, Stack, Tooltip, Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import BoltIcon from "@mui/icons-material/Bolt";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePlan, usePlannerEvents, useRequests, useSetObjective, useSim, useTrace } from "../api/hooks";
 import type { PlannerEvent, PlannerObjective } from "../api/types";
+import { OBJECTIVE_LABELS } from "../components/planner/objectiveLabels";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
@@ -25,7 +25,7 @@ const OBJECTIVE_OPTIONS: {
 }[] = [
   {
     value: "min_cost",
-    label: "Cost",
+    label: OBJECTIVE_LABELS.min_cost,
     tooltip: "Minimize energy cost",
     detail: "Shift flexible loads to the cheapest tariff windows. A light CO₂ penalty acts as a tiebreaker; a tiny grid-exchange penalty discourages unnecessary round-trips.",
     weights: [
@@ -37,7 +37,7 @@ const OBJECTIVE_OPTIONS: {
   },
   {
     value: "min_ghg",
-    label: "GHG",
+    label: OBJECTIVE_LABELS.min_ghg,
     tooltip: "Minimize CO₂ emissions",
     detail: "Carbon reduction takes absolute priority. Energy cost and grid flows are ignored — the planner will charge from renewable surplus even if it is financially suboptimal.",
     weights: [
@@ -48,7 +48,7 @@ const OBJECTIVE_OPTIONS: {
   },
   {
     value: "min_grid",
-    label: "Grid",
+    label: OBJECTIVE_LABELS.min_grid,
     tooltip: "Minimize total grid exchange (import + export)",
     detail: "Maximise local self-consumption by penalising every kWh that crosses the meter — in either direction. Good for grid-congestion zones or flat-rate tariffs.",
     weights: [
@@ -59,7 +59,7 @@ const OBJECTIVE_OPTIONS: {
   },
   {
     value: "min_import",
-    label: "Autarky",
+    label: OBJECTIVE_LABELS.min_import,
     tooltip: "Minimize grid import only (export OK)",
     detail: "Reduce how much you draw from the grid. Exporting surplus PV or battery power is not penalised and can happen freely — ideal when export is revenue-neutral.",
     weights: [
@@ -70,7 +70,7 @@ const OBJECTIVE_OPTIONS: {
   },
   {
     value: "max_revenue",
-    label: "Revenue",
+    label: OBJECTIVE_LABELS.max_revenue,
     tooltip: "Maximize export revenue",
     detail: "Discharge battery and curtail loads to maximise export income at peak export prices and shifts flexible loads to the cheapest tariff windows. Battery wear cost is included so the planner avoids excessive cycling.",
     weights: [
@@ -125,12 +125,6 @@ type PlannerStatus =
   | { phase: "solving"; elapsed_ms: number; iteration: number; objective: PlannerObjective }
   | { phase: "updated"; solver_ms: number; trigger: string };
 
-type CorrectionStatus =
-  | { active: false }
-  | { active: true; asset_id: string; reason: string;
-      planned_net_kw: number; actual_net_kw: number;
-      deviation_kw: number; correction_kw: number; objective: PlannerObjective };
-
 function PlannerStatusBar({ status }: { status: PlannerStatus }) {
   // Always render a fixed-height wrapper so that showing/hiding the status
   // bar doesn't cause layout shifts (which break Playwright click stability).
@@ -158,40 +152,6 @@ function PlannerStatusBar({ status }: { status: PlannerStatus }) {
   );
 }
 
-// ─── Correction Banner (Plan F: Layer 1 reactive correction) ──────────────────
-
-function CorrectionBanner({ status }: { status: CorrectionStatus }) {
-  // Rendered as a Snackbar overlay so it never causes layout shifts that
-  // destabilise Playwright element-stability checks on elements below.
-  const directionLabel = status.active && status.deviation_kw > 0 ? "import excess" : "export excess";
-  const corrLabel = status.active
-    ? status.correction_kw < 0
-      ? `discharge +${Math.abs(status.correction_kw).toFixed(1)} kW`
-      : `charge reduced ${status.correction_kw.toFixed(1)} kW`
-    : "";
-  return (
-    <Snackbar
-      open={status.active}
-      anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-    >
-      <Alert
-        data-testid="correction-banner"
-        severity="info"
-        icon={<BoltIcon fontSize="small" />}
-      >
-        {status.active && (
-          <>
-            <strong>Reactive correction active — {status.asset_id}</strong>
-            {" "}Grid {directionLabel}: {Math.abs(status.deviation_kw).toFixed(1)} kW above plan
-            (planned {status.planned_net_kw.toFixed(1)} kW, actual {status.actual_net_kw.toFixed(1)} kW).
-            Battery {corrLabel}. Objective: {status.objective}.
-          </>
-        )}
-      </Alert>
-    </Snackbar>
-  );
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function PlannerPage() {
@@ -204,7 +164,6 @@ export function PlannerPage() {
 
   const [objective, setObjective] = useState<PlannerObjective>("min_cost");
   const [plannerStatus, setPlannerStatus] = useState<PlannerStatus>({ phase: "idle" });
-  const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatus>({ active: false });
   // BL-38: matrix-slot → trace filter. null = no filter (TraceTable shows everything).
   const [selectedSlotWindow, setSelectedSlotWindow] = useState<{ start: string; end: string } | null>(null);
 
@@ -244,19 +203,6 @@ export function PlannerPage() {
           queryClient.invalidateQueries({ queryKey: ["plan"] });
           // Fade back to idle after 3 s
           setTimeout(() => setPlannerStatus({ phase: "idle" }), 3000);
-        } else if (event.type === "correction_active") {
-          setCorrectionStatus({
-            active: true,
-            asset_id: event.asset_id,
-            reason: event.reason,
-            planned_net_kw: event.planned_net_kw,
-            actual_net_kw: event.actual_net_kw,
-            deviation_kw: event.deviation_kw,
-            correction_kw: event.correction_kw,
-            objective: event.objective,
-          });
-        } else if (event.type === "correction_cleared") {
-          setCorrectionStatus({ active: false });
         }
       },
       [queryClient],
@@ -369,8 +315,6 @@ export function PlannerPage() {
         </AccordionDetails>
       </Accordion>
 
-      {/* Correction Banner (Plan F: Layer 1) — Snackbar overlay, no layout shift */}
-      <CorrectionBanner status={correctionStatus} />
     </Box>
   );
 }
