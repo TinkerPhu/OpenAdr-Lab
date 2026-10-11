@@ -15271,3 +15271,23 @@ counted as "the newest" and none were dropped; it ranks now. The tick read the l
 and wrote it back, losing any request submitted in between. The row's claim that requests are
 persisted was wrong: they are not, a restart empties the list.
 
+
+## Certification backlog re-audited; phase 6 reduced to what is open (docs/cert-backlog-reaudit)
+
+**What.** `docs/BACKLOG_OpenADR_Cert.md` checked row by row against the source on `main`
+(`670750a7`) and rewritten as current state. `docs/plans/roadmap/phase-6-fidelity-and-cert.md` now
+holds only the transport work packages (WP6.5 to WP6.7); the planner-fidelity track and the hygiene
+queue were finished long ago and are gone from it.
+
+**Why.** The audit dated from 2026-03-22, before the 3.1 migration, and the phase plan still listed
+about a dozen resolved items. Both were being read as the list of open work.
+
+**Issues.** What the old audit had wrong, in both directions. Reported missing but done: the
+"0001-01-01 = now" start sentinel, `USAGE` as energy with declared units (GB-50), `frequency` as
+"intervals between reports", `BASELINE` reports. Reported done but not so: `CHARGE_STATE_SETPOINT`
+is received and deliberately not applied, not turned into an EV session. Reported impossible but
+only undecided: VEN self-registration, which the 3.1 VTN gates by scope and no longer by a
+hard-coded role (GB-51 stays closed by decision). The percentages now follow a stated rule (mean
+over rows, Full 1, Partial 0.5, Missing 0), so they can be recomputed. Four MUSTs are open: TLS,
+`/auth/server` discovery, the webhook callback with echo challenge, `DELETE /reports/{id}`; the
+last one was in no plan and is now named in WP6.5's bookkeeping.
