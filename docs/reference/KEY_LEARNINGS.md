@@ -3261,3 +3261,18 @@ Rules:
   `history_store/mod.rs` hid the rest of that file and made three clusters elsewhere look new. Put
   test-only items in a `#[cfg(test)] impl` block at the end of the file.
 
+## A test's "pin" must hold for the whole scenario, and its window must admit one start (2026-10-11)
+
+- A `pv_irradiance` inject forces PV for one tick and then decays back toward the live model with
+  `pv_tau_s` (~47 min). Used as "PV = 0" it held at night and drifted 0.3-1.5 kW in the morning, while
+  the plan stayed pinned to 0 kW. To hold a value, use an override that lasts while set (here
+  `pv_generation_limit_kw: 0`), and read the inject's behaviour class in `SimInjectState` first.
+- A shiftable load whose window admits two start slots starts where it is cheaper, which depends on
+  the time of day and on what else runs. A test that waits for "has started" must make the current
+  slot the only valid one: derive the window from the plan's own slot grid.
+- Make a failing precondition name its cause per asset (live vs plan) on the spot: the containers
+  are gone by the time anyone reads the log. The site total said "1.54 kW off"; the per-asset line
+  said "PV".
+- A cleanup that prints instead of passing silently pays off at once: its first run found that
+  finished user requests are never pruned (R-137). Read the printed lines before trusting them;
+  most of the first ones were the cleanup misreading a finished request as a running one.
