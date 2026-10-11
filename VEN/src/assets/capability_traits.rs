@@ -15,7 +15,6 @@ use crate::entities::timeline::HeaterPlanTrajectory;
 /// `default_post_deadline_comfort_bid` are NOT here despite sounding
 /// MILP-specific — all 5 asset kinds already implement them for real, so
 /// they're universal `Asset` methods instead.
-#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
 pub trait MilpParticipant {
     /// Build the MILP context for this asset. Signature carries the full
     /// per-planning-cycle context every implementor needs (session/target
@@ -53,7 +52,6 @@ pub trait MilpParticipant {
 /// Capability: a user can issue a direct request against this asset (a target
 /// SoC/power, or opportunistic surplus absorption). Implemented by the two
 /// storage-shaped assets, Battery and EV.
-#[allow(dead_code)] // implemented starting Spec A Phase 2a (asset-dispatch-trait-objects tasks.md sec. 4); no implementor yet
 pub trait RequestResolvable {
     /// The asset's own answer to "what would a user request resolve against": its current
     /// SoC, default target, capacity and charge rate. `AssetRequestSlice::resolve_request_target`

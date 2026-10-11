@@ -42,8 +42,6 @@ pub struct VtnClient {
 #[derive(Clone, Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
-    #[allow(dead_code)]
-    token_type: Option<String>,
     expires_in: Option<u64>,
 }
 

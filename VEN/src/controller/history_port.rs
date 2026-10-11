@@ -11,7 +11,6 @@
 // Not yet consumed as `dyn HistoryPort` from `main.rs` — that wiring is
 // WP1.2's history-sampler task; landing the port + adapter as their own
 // reviewable commit first.
-#![allow(dead_code)]
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};

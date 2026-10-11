@@ -19,7 +19,6 @@ pub struct Trajectory {
 // start. `insert_simulated_points`, the sole production consumer, relies on
 // exactly that alignment while reading only `state`, so the fields document and
 // guard an invariant it depends on rather than being unused scaffolding.
-#[allow(dead_code)]
 pub struct TrajectoryPoint {
     pub ts: DateTime<Utc>,
     /// Signed: positive = import, negative = export.

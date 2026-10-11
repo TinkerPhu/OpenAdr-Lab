@@ -15168,3 +15168,23 @@ own error, against the ring rule and `ERROR_HANDLING.md` (translate at the bound
 stays `anyhow::Result`; retyping all of `VtnPort` would be a larger change with no caller that
 needs more than the status.
 
+## R-132: dead code is visible to the compiler again (refactor/r131-r133-sweep)
+
+**What.** Every `#[allow(dead_code)]` (40) was removed and the compiler asked what is really
+unused. Many were stale: the capability traits (`MilpParticipant`, `RequestResolvable`),
+`AssetHandle`, the `Asset` trait, `controller/settings_port.rs`, `controller/history_port.rs`,
+`history_store` and both whole-module allows in the planner had real users. Deleted as unused: the
+ten design sketches in `entities/design_vocabulary.rs` (decision: delete, git keeps them), most of
+`GlobalMilpInputs` (nine fields written, never read), `HeaterSolOutput.s_low_kwh` / `sw`,
+`Phase1Weights.w_services`, `Phase2Weights.lambda_heat_sw_eur`, `deadline_to_step`, the OAuth
+`token_type` field, and unused test helpers (`must_run`, `may_run`, four `appended_*` getters, the
+planner test `Profile`'s `simulator` / `packets` / `battery_config` / `base_load_kw`);
+`SqliteHistoryStore::in_memory` is `#[cfg(test)]`. Four justified allows remain: `MilpInputs`
+(R-134, below), `SolveOutput.e_seg_kwh` (read by the fingerprint golden; removing it would change
+the golden's digest for no solver change), and `SnapshotError` / `snapshot_with_asset`, which go
+with `SimulatorPort` (smell #8, decided for deletion).
+
+**Issues.** The 17 per-asset fields on `MilpInputs` are written by `build_milp_inputs` and read by
+about a hundred test sites, never by the solve: a second copy of the asset parameters that the
+tests use to hand-build asset contexts. Medium work, filed as R-134.
+

@@ -28,9 +28,6 @@ mod pv_schedule;
 mod pv_snow_cover;
 pub mod shiftable_load;
 
-// AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
-// bin-crate "pub items have no external consumer" situation AssetHandle was already
-// #[allow(dead_code)]'d for before this file split.
 pub use asset_handle::AssetHandle;
 pub use asset_trait::{Asset, Trajectory, TrajectoryPoint};
 pub use base_load::{BaseLoad, BaseLoadState};

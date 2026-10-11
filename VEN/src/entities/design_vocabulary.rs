@@ -1,18 +1,8 @@
-//! Design vocabulary — shared domain enums and types, plus type-level sketches of
-//! features not yet implemented.
-//!
-//! Two kinds of item live here. The live ones (`UserRequestMode`, `StaleRatePolicy`,
-//! `ForecastSource`, `UserNotificationSeverity`, `AssetHeuristics`, `AssetForecast`,
-//! `TimeRange`) are used by running code. The sketches are unreferenced on purpose and
-//! each carries its own `#[allow(dead_code)]`: none of them describes current VEN
-//! behaviour, so do not cite one as shipped behaviour in docs or elsewhere. Each has a
-//! tracked implementation plan in `docs/BACKLOG.md` (see the BL-14 through BL-3x range).
-//!
-//! `PowerAdjustability` moved to `entities::asset` (BL-27) once it became live,
-//! referenced code — `AssetProfile` below still uses it via that import, but the
-//! enum itself is no longer a sketch.
+//! Design vocabulary — shared domain enums and types used by running code
+//! (`UserRequestMode`, `StaleRatePolicy`, `ForecastSource`, `UserNotificationSeverity`,
+//! `AssetHeuristics`, `AssetForecast`, `TimeRange`). The type-level sketches of unbuilt
+//! features that used to sit here were deleted (R-132); git keeps them.
 
-use crate::entities::asset::{ComfortRate, PowerAdjustability};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -86,16 +76,6 @@ pub enum ForecastSource {
     None,          // no forecast available (fully controllable assets like battery)
 }
 
-/// Type of external data source (§1.12).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum ExternalDataSourceType {
-    Weather,         // temperature, cloud cover, wind
-    Irradiation,     // solar irradiation forecast
-    GridCo2Forecast, // CO2 intensity forecast (if not from VTN)
-}
-
 /// Severity of a user notification (used in Stage 5).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -103,58 +83,6 @@ pub enum UserNotificationSeverity {
     Info,  // informational — plan changed, schedule updated
     Warn,  // tier fallback, budget warning, deadline approaching
     Alert, // packet abandoned, device failed, grid emergency
-}
-
-/// Condition that triggers a penalty rule check (§6.7).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum PenaltyCondition {
-    PeakDemandExceeded,   // any timestep power > threshold_kW during period
-    EnergyBudgetExceeded, // total consumption > threshold_kWh during period
-    EventNoncompliance,   // didn't follow DR/emergency event within tolerance
-    ExportLimitExceeded,  // exported more than allowed at any timestep
-}
-
-/// Power range for an asset: minimum and maximum controllable power (§2.3).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct PowerRange {
-    pub min_kw: f64,
-    pub max_kw: f64,
-    /// For Stepped adjustability: explicit discrete levels in kW (ascending).
-    /// Empty = treat as OnOff with levels [0, max_kw].
-    #[serde(default)]
-    pub power_steps_kw: Vec<f64>,
-}
-
-/// Static configuration of a device — set at installation/configuration time (§3.1).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct AssetProfile {
-    pub asset_id: String,
-    pub asset_type: crate::entities::asset::AssetType,
-    pub name: String, // human-readable, e.g. "Rooftop PV"
-    pub power_range: PowerRange,
-    pub adjustability: PowerAdjustability,
-    pub auto_follow: bool,             // can device auto-adjust to fill gaps?
-    pub bidirectional: bool,           // can both consume and produce? (battery, V2G)
-    pub has_storage: bool,             // does it have an energy buffer?
-    pub max_capacity_kwh: Option<f64>, // storage capacity if has_storage
-    #[serde(rename = "min_soc")]
-    pub min_soc_frac: Option<f64>, // minimum SoC for discharge (e.g. 0.10)
-    pub efficiency: f64,               // round-trip or conversion efficiency (0.0–1.0)
-    pub response_delay_s: f64,         // expected time to confirm setpoint change
-    pub deviation_threshold_kw: f64,   // |actual - planned| above this triggers replan
-    pub default_value_curve: Option<DefaultValueCurve>,
-    pub oadr_resource_name: String, // maps to OpenADR resource.resourceName
-}
-
-/// Default value curve for an asset (used when no user-provided bid is given).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct DefaultValueCurve {
-    pub rates: Vec<ComfortRate>,
 }
 
 /// Learned behavioral patterns for uncontrollable/implicit assets (§3.3).
@@ -226,85 +154,6 @@ pub struct AssetForecast {
 pub struct TimeRange {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
-}
-
-/// Per-asset accumulated ledger for the current billing period (§3.7).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct AssetLedger {
-    pub asset_id: String,
-    pub period_start: Option<DateTime<Utc>>,
-    pub period_end: Option<DateTime<Utc>>, // None = ongoing
-
-    pub total_consumption_kwh: f64, // all energy consumed (packets + untracked)
-    pub total_production_kwh: f64,  // all energy produced
-    pub total_import_cost_eur: f64, // cost of imported energy attributed to this asset
-    pub total_export_revenue_eur: f64,
-    pub total_co2_g: f64,
-
-    pub untracked_energy_kwh: f64, // = total_consumption - tracked (standby, uncontrolled)
-}
-
-/// External data source for weather, irradiation, or CO2 forecasts (§2.11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct ExternalDataSource {
-    pub source_id: String,
-    pub source_type: ExternalDataSourceType,
-    pub url: String,
-    pub poll_interval_s: u64,
-    pub last_fetch: Option<DateTime<Utc>>,
-    pub fetch_status: ExternalDataFetchStatus,
-    pub cached_data: Option<serde_json::Value>,
-}
-
-/// Status of an ExternalDataSource's last fetch.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub enum ExternalDataFetchStatus {
-    Ok,
-    Stale,
-    Failed,
-    NeverFetched,
-}
-
-/// Trigger condition thresholds for a PenaltyRule (§6.8).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct PenaltyThreshold {
-    /// kW threshold for PEAK_DEMAND_EXCEEDED and EXPORT_LIMIT_EXCEEDED
-    pub threshold_kw: Option<f64>,
-    /// kWh threshold for ENERGY_BUDGET_EXCEEDED
-    pub threshold_kwh: Option<f64>,
-    /// Event reference for EVENT_NONCOMPLIANCE
-    pub event_id: Option<String>,
-    /// Tolerance for EVENT_NONCOMPLIANCE (e.g. 0.10 = 10% deviation allowed)
-    pub tolerance_percent: Option<f64>,
-}
-
-/// Models a periodic/conditional charge triggered by threshold breach (§6.6).
-/// Treated as binary barriers by the Planner: if allocation would cross threshold → add full penalty cost.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // design sketch, unreferenced on purpose: see the module header
-pub struct PenaltyRule {
-    pub rule_id: String,
-    pub description: String,
-    pub condition: PenaltyCondition,
-    pub threshold: PenaltyThreshold,
-    /// Total cost in local currency if triggered (e.g. €100)
-    pub cost: f64,
-    /// Billing period (seconds), e.g. 2592000 = 30 days
-    pub period_s: u64,
-    /// Rolling average window for threshold evaluation (seconds), e.g. 900 = 15 min
-    pub measurement_window_s: u64,
-    pub active: bool,
-    pub breached_this_period: bool,
-    pub breach_timestamp: Option<DateTime<Utc>>,
-    /// Current peak measured value (kW or kWh depending on condition)
-    pub current_peak_value: f64,
-    /// Rolling average power over measurement window (kW)
-    pub rolling_average_kw: f64,
 }
 
 #[cfg(test)]

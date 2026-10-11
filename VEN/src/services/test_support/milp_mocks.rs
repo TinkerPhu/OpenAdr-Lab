@@ -7,7 +7,7 @@ use good_lp::{Constraint, Expression, ProblemVariables};
 
 use crate::controller::milp_interactions::MilpVarPool;
 use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, EvMilpContext, EvMilpMode, EvObligation, HeaterMilpContext, HeaterMilpMode,
+    BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode,
 };
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
@@ -148,38 +148,6 @@ impl MockEvCtx {
             },
         }
     }
-
-    #[allow(dead_code)] // full EvMilpMode mock coverage; no current test exercises MustRun
-    pub fn must_run(n: usize, p_max_kw: f64, required_kwh: f64) -> Self {
-        Self {
-            ctx: EvMilpContext {
-                mode: EvMilpMode::MustRun,
-                soc_init_frac: 0.0,
-                soc_max_frac: 1.0,
-                a_ev: vec![true; n],
-                soc_drops: None,
-                obligations: vec![EvObligation {
-                    deadline_step: n - 1,
-                    target_soc_frac: required_kwh / MOCK_EV_BATTERY_KWH,
-                    session_id: None,
-                }],
-                battery_kwh: MOCK_EV_BATTERY_KWH,
-                p_max_kw,
-                p_min_kw: 0.0,
-                segments: vec![],
-                e_extra_max_kwh: 0.0,
-                v_extra_eur_kwh: 0.05,
-                asap_lateness_eur_kwh_h: 0.0,
-                free_only: false,
-                p_free_cap_kw: None,
-                reward_per_slot: false,
-                free_early_bias: false,
-                budget_eur: None,
-                c_imp_eur_kwh: None,
-                v_extra_co2_eur_kwh: 0.0,
-            },
-        }
-    }
 }
 
 impl AssetMilpContext for MockEvCtx {
@@ -272,29 +240,7 @@ pub struct MockHeaterCtx {
     pub ctx: HeaterMilpContext,
 }
 
-impl MockHeaterCtx {
-    #[allow(dead_code)] // full HeaterMilpMode mock coverage; no current test exercises MayRun
-    pub fn may_run(p_step_kw: f64, n_stages: u8, e_init_kwh: f64, e_max_kwh: f64) -> Self {
-        Self {
-            ctx: HeaterMilpContext {
-                mode: HeaterMilpMode::MayRun,
-                t_dead_step: None,
-                p_step_kw,
-                n_stages,
-                e_init_kwh,
-                e_max_kwh,
-                q_dem_kw: 0.3,
-                e_target_kwh: e_max_kwh,
-                lambda_sw_eur: 0.0,
-                initial_y: 0.0,
-                c_terminal_eur_kwh: 0.0,
-                anchored_kw: vec![],
-                comfort_full_reward_eur_kwh: 0.0,
-                comfort_full_co2_reward_eur_kwh: 0.0,
-            },
-        }
-    }
-}
+impl MockHeaterCtx {}
 
 impl AssetMilpContext for MockHeaterCtx {
     fn asset_id(&self) -> &str {

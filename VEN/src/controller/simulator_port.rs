@@ -155,7 +155,7 @@ impl AssetSnapshot {
 
 /// Error returned by `SimulatorPort::snapshot()`.
 #[derive(Debug, Clone, thiserror::Error)]
-#[allow(dead_code)] // Transient/Fatal reserved for future SimulatorPort implementations
+#[allow(dead_code)] // never constructed (SimState::snapshot is infallible); goes with SimulatorPort, decided for deletion (architectural_smells.md #8)
 pub enum SnapshotError {
     #[error("simulator not yet initialized")]
     Uninitialized,

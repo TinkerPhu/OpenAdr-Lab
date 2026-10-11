@@ -1,6 +1,3 @@
-#![allow(dead_code)] // types used by milp_planner submodules via use super::*
-use chrono::{DateTime, Utc};
-
 use crate::entities::planner_params::{PenaltyRuleParams, PlannerObjective, PlannerParams};
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
@@ -61,8 +58,6 @@ pub(crate) struct Phase1Weights {
     /// Penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
     /// Covers all assets as a group. 0.0 = disabled.
     pub(crate) c_ctrl_imp_malus_eur_kwh: f64,
-    /// Scales service reward terms; always 1.0 until grid-services are modelled
-    pub(crate) w_services: f64,
 }
 
 /// Phase 2 objective coefficients (operational friction). Used only when
@@ -78,8 +73,6 @@ pub(crate) struct Phase2Weights {
     pub(crate) c_ev_startup_eur: f64,
     /// Penalty per kW of EV power change between consecutive slots [€/kW]
     pub(crate) c_ev_ramp_eur_kw: f64,
-    /// Heater relay switching penalty [EUR/switch event]
-    pub(crate) lambda_heat_sw_eur: f64,
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot]
     pub(crate) w_tier_penalty_eur: f64,
 }
@@ -88,6 +81,7 @@ pub(crate) struct Phase2Weights {
 /// Created by `build_milp_inputs()`; consumed by `solve_milp_two_phase()` (Phase 3).
 /// All per-step `Vec<f64>` fields have length `n`.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // R-134: 17 per-asset fields (battery, EV, heater) only tests read; each asset's MILP context is what the solve uses
 pub(crate) struct MilpInputs {
     /// Number of planning steps.
     pub(crate) n: usize,
@@ -260,7 +254,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
         PlannerObjective::MinGhg => Phase1Weights {
             w_energy: 0.0,
@@ -271,7 +264,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
         PlannerObjective::MinGrid => Phase1Weights {
             w_energy: 0.0,
@@ -282,7 +274,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
         PlannerObjective::MinImport => Phase1Weights {
             w_energy: 0.0,
@@ -293,7 +284,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
         PlannerObjective::MaxRevenue => Phase1Weights {
             w_energy: 1.0,
@@ -304,7 +294,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
         PlannerObjective::Custom => Phase1Weights {
             w_energy: p.w_energy,
@@ -315,7 +304,6 @@ pub(crate) fn build_phase1_weights(
             c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
-            w_services: 1.0,
         },
     }
 }
@@ -327,20 +315,8 @@ pub(crate) fn build_phase2_weights(inputs: &MilpInputs, planner: &PlannerParams)
         c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
         c_ev_startup_eur: p.c_ev_startup_eur,
         c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-        lambda_heat_sw_eur: inputs.lambda_heat_sw_eur,
         w_tier_penalty_eur: inputs.w_tier_penalty_eur,
     }
-}
-
-/// Convert a packet deadline to a planning step index, clamped to [0, n−1].
-pub(crate) fn deadline_to_step(
-    deadline: DateTime<Utc>,
-    now: DateTime<Utc>,
-    step_s: u64,
-    n: usize,
-) -> usize {
-    let secs = (deadline - now).num_seconds();
-    (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize
 }
 
 /// Output from the MILP solver for one planning cycle.
@@ -382,7 +358,9 @@ pub(crate) struct SolveOutput {
     /// Total extra EV energy above core requirement [kWh]
     pub(crate) e_ev_extra: f64,
     /// 1.0 when EV core target is met (MayRun only); 0.0 otherwise
-    /// Energy bought from the priced bands [kWh].
+    /// Energy bought from the priced bands [kWh]. Read only by the model-fingerprint golden
+    /// (`tests/model_fingerprint.rs`), which records the whole solution.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) e_seg_kwh: f64,
     /// 1.0 when heater energy deadline is met (MayRun only); 0.0 otherwise
     pub(crate) z_heat_ready: f64,

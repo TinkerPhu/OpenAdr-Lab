@@ -26,7 +26,6 @@ use super::{
 /// };
 /// ```
 // AssetHandle is used in tests and serves as the intended path for dyn Asset dispatch.
-#[allow(dead_code)]
 pub struct AssetHandle<'a> {
     pub config: &'a dyn Asset,
     pub id: &'a str,

@@ -75,7 +75,6 @@ fn bench_profile(with_heater: bool) -> Profile {
 
     Profile {
         assets,
-        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 48,
@@ -101,7 +100,6 @@ fn bench_profile(with_heater: bool) -> Profile {
             max_import_kw: 25.0,
             max_export_kw: 10.0,
         },
-        packets: vec![],
     }
 }
 

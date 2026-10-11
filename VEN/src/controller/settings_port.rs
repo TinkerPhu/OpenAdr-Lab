@@ -6,7 +6,6 @@
 //
 // Blocking by design, like HistoryPort: call through
 // `tokio::task::spawn_blocking` from async contexts.
-#![allow(dead_code)]
 use chrono::{DateTime, Utc};
 
 use crate::entities::DomainError;

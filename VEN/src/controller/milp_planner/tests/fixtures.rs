@@ -80,7 +80,6 @@ pub(super) fn make_phase1_weights() -> Phase1Weights {
         c_bat_wear_eur_kwh: 0.0,
         c_bat_ev_coexist_eur_kwh: 0.0,
         c_ctrl_imp_malus_eur_kwh: 0.0,
-        w_services: 1.0,
     }
 }
 
@@ -90,7 +89,6 @@ pub(super) fn make_phase2_weights() -> Phase2Weights {
         c_bat_ramp_eur_kw: 0.0,
         c_ev_startup_eur: 0.0,
         c_ev_ramp_eur_kw: 0.0,
-        lambda_heat_sw_eur: 0.0,
         w_tier_penalty_eur: 0.0,
     }
 }

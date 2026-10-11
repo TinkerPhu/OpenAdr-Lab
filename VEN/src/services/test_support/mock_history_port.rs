@@ -76,34 +76,9 @@ impl MockHistoryPort {
         self.notifications.lock().unwrap().clone()
     }
 
-    /// All grid samples appended so far, in insertion order.
-    #[allow(dead_code)] // used by WP1.2 sampler tests, not yet by any WP1.1 test
-    pub fn appended_grid(&self) -> Vec<GridSample> {
-        self.grid.lock().unwrap().clone()
-    }
-
-    /// All event-received rows appended so far, in insertion order.
-    #[allow(dead_code)] // used by WP1.2 sampler tests, not yet by any WP1.1 test
-    pub fn appended_events(&self) -> Vec<EventReceived> {
-        self.events.lock().unwrap().clone()
-    }
-
     /// All report-sent rows appended so far, in insertion order.
-    #[allow(dead_code)] // used by WP1.2 sampler tests, not yet by any WP1.1 test
     pub fn appended_reports(&self) -> Vec<ReportSent> {
         self.reports.lock().unwrap().clone()
-    }
-
-    /// All forecast-accuracy samples appended so far, in insertion order (forecast-accuracy-tracking).
-    #[allow(dead_code)] // available for future sampler-level tests, mirroring appended_grid/appended_events
-    pub fn appended_forecast_samples(&self) -> Vec<ForecastAccuracySample> {
-        self.forecast_samples.lock().unwrap().clone()
-    }
-
-    /// All plan-history rows appended so far, in insertion order (GB-25).
-    #[allow(dead_code)] // available for future route/service-level tests, mirroring appended_grid
-    pub fn appended_plan_history(&self) -> Vec<PlanHistorySample> {
-        self.plan_history.lock().unwrap().clone()
     }
 }
 

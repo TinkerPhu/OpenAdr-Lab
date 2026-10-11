@@ -10,6 +10,14 @@ use crate::controller::{HistoryPort, VtnPort};
 use crate::entities::DomainError;
 use crate::state::AppState;
 
+/// GB-23: the VTN answered 404 — the obligation's source event or program is gone.
+fn vtn_says_source_is_gone(e: &anyhow::Error) -> bool {
+    matches!(
+        e.downcast_ref::<DomainError>(),
+        Some(DomainError::VtnRejected { status: 404, .. })
+    )
+}
+
 pub struct ObligationService;
 
 impl ObligationService {
@@ -99,11 +107,7 @@ impl ObligationService {
                         .await;
                     }
                     Err(e) => {
-                        let is_not_found = matches!(
-                            e.downcast_ref::<DomainError>(),
-                            Some(DomainError::VtnRejected { status: 404, .. })
-                        );
-                        if is_not_found {
+                        if vtn_says_source_is_gone(&e) {
                             // GB-23: source event/program confirmed gone — drop
                             // this obligation rather than retrying forever.
                             // Only this obligation is removed (design.md D2):
