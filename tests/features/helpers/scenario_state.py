@@ -14,10 +14,13 @@ values a scenario set through an endpoint are restored.
 """
 
 import re
+import time
 
 import requests
 
 HTTP_TIMEOUT = 60
+# A sim reset or config change shows in GET /sim after the next tick (test profile: 1 s ticks).
+SIM_SETTLE_S = 10
 
 # Path pattern -> the reset family that undoes it.
 RESETS = [
@@ -161,6 +164,7 @@ def _restore_battery_config(base_url, _paths):
     body = {"capacity_kwh": battery["capacity_kwh"], "min_soc": battery.get("min_soc")}
     _expect(requests.put(f"{base_url}/sim/config/battery", json=body, timeout=HTTP_TIMEOUT),
             f"battery config restore on {base_url}")
+    _wait_for_sim(base_url, "battery", "capacity_kwh", battery["capacity_kwh"])
 
 
 def _restore_soc(base_url, paths):
@@ -172,6 +176,20 @@ def _restore_soc(base_url, paths):
             continue
         _expect(requests.post(f"{base_url}/sim/reset/{aid}", json={"soc": soc}, timeout=HTTP_TIMEOUT),
                 f"SoC restore for {aid} on {base_url}")
+        _wait_for_sim(base_url, aid, "soc", soc)
+
+
+def _wait_for_sim(base_url, asset_id, key, value):
+    """A sim reset lands on the next tick; until then GET /sim still shows the scenario's value,
+    and so would the next scenario if it started at once (GB-35 run 2: SoC read 0.93, 0.6 s after
+    restoring 0.50). Hold the cleanup until the restored value is what the VEN reports."""
+    deadline = time.monotonic() + SIM_SETTLE_S
+    while time.monotonic() < deadline:
+        now = (_get(base_url, "/sim").get("assets", {}).get(asset_id) or {}).get(key)
+        if now is not None and abs(now - value) < 0.01:
+            return
+        time.sleep(0.25)
+    print(f"[cleanup] LEAK: {base_url} {asset_id} {key} still {now} {SIM_SETTLE_S} s after restoring {value}")
 
 
 # Family -> how to undo it, in the order undone: requests before injects (a cancelled request
