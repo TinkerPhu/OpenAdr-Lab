@@ -15291,3 +15291,22 @@ hard-coded role (GB-51 stays closed by decision). The percentages now follow a s
 over rows, Full 1, Partial 0.5, Missing 0), so they can be recomputed. Four MUSTs are open: TLS,
 `/auth/server` discovery, the webhook callback with echo challenge, `DELETE /reports/{id}`; the
 last one was in no plan and is now named in WP6.5's bookkeeping.
+## R-135: one client-credentials token for both VTN clients (refactor/r135-vtn-token-cache)
+
+**What.** `lab_core::vtn_auth::ClientCredentials` fetches the OAuth client-credentials token,
+caches it until 60 s before expiry, and its `send` re-authenticates once on 401 or 403. The VEN's
+`VtnClient` and the BFF's both hold one and route every request through a private `send(method,
+path, body)`; their two token fetches, two caches and six re-authenticate-and-retry blocks are
+deleted (`vtn.rs` 1053 to about 870 lines, `vtn_client.rs` 580 to about 390). The VEN's scope check
+(GB-49) is an `on_new_token` hook. Errors are a typed `VtnAuthError`, from which the VEN still
+tells an unreachable VTN from a refusing one.
+
+**Why.** The same function existed line for line in two services, and the retry block six times.
+
+**Issues.** The copies had already drifted: the VEN's report POST (`post_json_raw`) did not
+re-authenticate, so after a VTN restart a report failed with 401 and the dead token stayed cached
+until the next poll replaced it. It goes through the same `send` now. `lab-core` gained `reqwest`
+(no TLS, no default features) and `tokio` (sync only); a cargo feature to keep them optional was
+rejected because `cargo test` in `lab-core` would then skip the module's tests silently. A stub
+written to see the tests fail first crashed rustc's diagnostic renderer on its dead-code warning,
+so the red step for the new module was a failed compile.

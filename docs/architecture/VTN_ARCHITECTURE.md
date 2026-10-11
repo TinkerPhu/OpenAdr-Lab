@@ -107,8 +107,9 @@ holder bypasses target filtering entirely, which is correct for the BFF and wron
 
 ### Token management
 
-The BFF holds one `VtnClient` with its own OAuth token, refreshed on 401. The UI communicates
-with the BFF using session-scoped API keys (not OAuth credentials).
+The BFF holds one `VtnClient` with its own OAuth token. The token itself is
+`lab_core::vtn_auth::ClientCredentials`, the same code the VEN authenticates with (see 4.5). The UI
+communicates with the BFF using session-scoped API keys (not OAuth credentials).
 
 ### Reports
 
@@ -172,10 +173,18 @@ OpenADR 3 has **no cancel status field**. Cancellation is always a DELETE.
 
 ```
 POST /auth/token  →  access_token (TTL 30 days)
-  → VEN stores token
-  → On 401 Unauthorized  →  re-POST /auth/token
+  → client caches the token until 60 s before it expires
+  → On 401 or 403  →  re-POST /auth/token, send the request once more
   → On VTN down  →  exponential backoff: 1 min → 2 min → 4 min → 8 min → max 15 min
 ```
+
+The first three lines are one implementation for both clients of the VTN, the VEN (`VEN/src/vtn.rs`)
+and the BFF (`VTN/bff/src/vtn_client.rs`): `lab_core::vtn_auth::ClientCredentials`. It fetches the
+token (client-credentials form), caches it, and its `send` re-authenticates once when the VTN
+refuses the token (revoked, or the VTN restarted with a new signing key) for every method, GET to
+DELETE. Whatever the second attempt answers goes back to the caller, which maps a non-2xx status
+into its own error type. The VEN hooks `on_new_token` to read its granted scopes (GB-49). Tests:
+`lab-core/src/vtn_auth.rs`.
 
 ### 4.6 Report Submission
 
@@ -415,8 +424,8 @@ separate crate — to be extracted when a second consumer appeared.
 **Extracted 2026-09-22**, and the trigger was not a VTN controller but the fleet monitor:
 the BFF had to resample twenty VENs onto one grid, and resolve events into per-VEN bands
 using the same interval-timing rule the VEN plans against. `lab-core/` now holds
-`time_series`, `time_window` and `event_timing`, and both the VEN and the BFF depend on it
-by path. The prediction held: no API changed at extraction time. What it cost instead was
+`time_series`, `time_window`, `event_timing`, `wire_contract` and `vtn_auth`, and both the VEN and
+the BFF depend on it by path. The prediction held: no API changed at extraction time. What it cost instead was
 deployment — both Docker build contexts moved to the repo root for the path dependency, and
 the new top-level directory did not arrive on the docker hosts' sparse checkouts, which
 `run_all_tests.sh` now pre-flights for.

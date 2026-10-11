@@ -1161,8 +1161,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "openleadr-wire",
+ "reqwest",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

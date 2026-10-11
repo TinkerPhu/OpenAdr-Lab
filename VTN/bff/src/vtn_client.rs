@@ -1,161 +1,79 @@
+//! The BFF's HTTP client for the VTN.
+//!
+//! Owns how the BFF speaks the VTN's API: paths, pagination, the request id it forwards, and
+//! turning a non-2xx answer into `UpstreamStatusError`. The token it authenticates with is
+//! `lab_core::vtn_auth`'s; this file must never fetch, cache or retry one itself (R-135).
+
 use crate::error::UpstreamStatusError;
 use anyhow::{Context, Result};
-use reqwest::StatusCode;
-use serde::Deserialize;
-use std::sync::Arc;
-use std::time::Instant;
+use lab_core::vtn_auth::ClientCredentials;
+use reqwest::Method;
 
 /// openleadr-rs caps every list endpoint at 50 rows per page, so this is the
 /// page size for `get_all_pages` — asking for more is rejected by the VTN.
 pub(crate) const PAGE_LIMIT: i64 = 50;
 
-fn upstream_status_err(path: &str, status: StatusCode, body: String) -> anyhow::Error {
-    UpstreamStatusError {
-        status,
-        message: format!("{path} returned {status}: {body}"),
-    }
-    .into()
-}
-
 #[derive(Clone)]
 pub struct VtnClient {
     http: reqwest::Client,
     base_url: String,
-    client_id: String,
-    client_secret: String,
-    token: Arc<tokio::sync::RwLock<Option<Token>>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    #[allow(dead_code)]
-    token_type: Option<String>,
-    expires_in: Option<u64>,
-}
-
-#[derive(Clone, Debug)]
-struct Token {
-    access_token: String,
-    acquired_at: Instant,
-    expires_in_secs: u64,
+    /// The token, and when it is fetched again.
+    credentials: ClientCredentials,
 }
 
 impl VtnClient {
     pub fn new(base_url: String, client_id: String, client_secret: String) -> Self {
+        let http = reqwest::Client::new();
+        let credentials = ClientCredentials::new(http.clone(), &base_url, client_id, client_secret);
         Self {
-            http: reqwest::Client::new(),
+            http,
             base_url,
-            client_id,
-            client_secret,
-            token: Arc::new(tokio::sync::RwLock::new(None)),
+            credentials,
         }
     }
 
-    async fn ensure_token(&self) -> Result<String> {
-        if let Some(t) = self.token.read().await.as_ref() {
-            let elapsed = t.acquired_at.elapsed().as_secs();
-            if elapsed + 60 < t.expires_in_secs {
-                return Ok(t.access_token.clone());
-            }
-        }
-        self.fetch_new_token().await
-    }
-
-    async fn invalidate_token(&self) {
-        *self.token.write().await = None;
-    }
-
-    async fn fetch_new_token(&self) -> Result<String> {
-        let token_url = format!("{}/auth/token", self.base_url.trim_end_matches('/'));
-
-        #[derive(serde::Serialize)]
-        struct Form<'a> {
-            grant_type: &'a str,
-            client_id: &'a str,
-            client_secret: &'a str,
-        }
-
+    /// Send one authorized request to `path` and return the VTN's answer if it is 2xx. The
+    /// token, and the one retry after a 401 or 403, are `ClientCredentials::send`'s.
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        request_id: Option<&str>,
+    ) -> Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
         let resp = self
-            .http
-            .post(token_url)
-            .form(&Form {
-                grant_type: "client_credentials",
-                client_id: &self.client_id,
-                client_secret: &self.client_secret,
+            .credentials
+            .send(|| {
+                let mut request = self.http.request(method.clone(), &url);
+                if let Some(rid) = request_id {
+                    request = request.header("x-request-id", rid);
+                }
+                match body {
+                    Some(body) => request.json(body),
+                    None => request,
+                }
             })
-            .send()
             .await
-            .context("token request failed")?;
-
-        if resp.status() != StatusCode::OK {
+            .with_context(|| format!("{method} {path} failed"))?;
+        if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("token endpoint returned {status}: {body}");
+            return Err(UpstreamStatusError {
+                status,
+                message: format!("{path} returned {status}: {body}"),
+            }
+            .into());
         }
-
-        let tr: TokenResponse = resp.json().await.context("parse token response")?;
-        let expires_in_secs = tr.expires_in.unwrap_or(3600);
-        let token = Token {
-            access_token: tr.access_token,
-            acquired_at: Instant::now(),
-            expires_in_secs,
-        };
-        let access = token.access_token.clone();
-        *self.token.write().await = Some(token);
-        Ok(access)
+        Ok(resp)
     }
 
-    fn apply_request_id(
-        &self,
-        builder: reqwest::RequestBuilder,
-        request_id: Option<&str>,
-    ) -> reqwest::RequestBuilder {
-        if let Some(rid) = request_id {
-            builder.header("x-request-id", rid)
-        } else {
-            builder
-        }
-    }
-
-    /// GET a VTN endpoint with automatic 401-retry.
     pub async fn get_json(
         &self,
         path: &str,
         request_id: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .apply_request_id(self.http.get(&url).bearer_auth(&token), request_id)
-            .send()
-            .await
-            .context(format!("GET {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .apply_request_id(self.http.get(&url).bearer_auth(&new_token), request_id)
-                .send()
-                .await
-                .context(format!("GET {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(upstream_status_err(path, status, body));
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(upstream_status_err(path, status, body));
-        }
-
+        let resp = self.send(Method::GET, path, None, request_id).await?;
         Ok(resp.json().await?)
     }
 
@@ -189,136 +107,32 @@ impl VtnClient {
         Ok(all)
     }
 
-    /// POST JSON to a VTN endpoint with automatic 401-retry.
     pub async fn post_json(
         &self,
         path: &str,
         body: serde_json::Value,
         request_id: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
         let resp = self
-            .apply_request_id(
-                self.http.post(&url).bearer_auth(&token).json(&body),
-                request_id,
-            )
-            .send()
-            .await
-            .context(format!("POST {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .apply_request_id(
-                    self.http.post(&url).bearer_auth(&new_token).json(&body),
-                    request_id,
-                )
-                .send()
-                .await
-                .context(format!("POST {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(upstream_status_err(path, status, body));
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(upstream_status_err(path, status, body));
-        }
-
+            .send(Method::POST, path, Some(&body), request_id)
+            .await?;
         Ok(resp.json().await?)
     }
 
-    /// PUT JSON to a VTN endpoint with automatic 401-retry.
     pub async fn put_json(
         &self,
         path: &str,
         body: serde_json::Value,
         request_id: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
         let resp = self
-            .apply_request_id(
-                self.http.put(&url).bearer_auth(&token).json(&body),
-                request_id,
-            )
-            .send()
-            .await
-            .context(format!("PUT {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .apply_request_id(
-                    self.http.put(&url).bearer_auth(&new_token).json(&body),
-                    request_id,
-                )
-                .send()
-                .await
-                .context(format!("PUT {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(upstream_status_err(path, status, body));
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(upstream_status_err(path, status, body));
-        }
-
+            .send(Method::PUT, path, Some(&body), request_id)
+            .await?;
         Ok(resp.json().await?)
     }
 
-    /// DELETE a VTN endpoint with automatic 401-retry.
     pub async fn delete_json(&self, path: &str, request_id: Option<&str>) -> Result<()> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .apply_request_id(self.http.delete(&url).bearer_auth(&token), request_id)
-            .send()
-            .await
-            .context(format!("DELETE {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .apply_request_id(self.http.delete(&url).bearer_auth(&new_token), request_id)
-                .send()
-                .await
-                .context(format!("DELETE {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(upstream_status_err(path, status, body));
-            }
-            return Ok(());
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(upstream_status_err(path, status, body));
-        }
-
+        self.send(Method::DELETE, path, None, request_id).await?;
         Ok(())
     }
 
@@ -333,7 +147,7 @@ impl VtnClient {
             .unwrap_or(false);
 
         let auth_ok = if reachable {
-            self.ensure_token().await.is_ok()
+            self.credentials.token().await.is_ok()
         } else {
             false
         };

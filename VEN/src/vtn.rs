@@ -1,9 +1,15 @@
+//! The VEN's HTTP client for the VTN, behind `VtnPort`.
+//!
+//! Owns how the VTN's API is spoken: paths, pagination, and translating a non-2xx answer into
+//! `DomainError::VtnRejected`. Reads the VTN only. The token it authenticates with is
+//! `lab_core::vtn_auth`'s; this file must never fetch, cache or retry one itself (R-135).
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use reqwest::StatusCode;
+use lab_core::vtn_auth::{ClientCredentials, VtnAuthError};
+use reqwest::{Method, StatusCode};
 use tracing::warn;
 
-const TOKEN_EXPIRY_MARGIN_S: u64 = 60;
 // WP2.2 (Phase 2): openleadr-rs collection GETs cap at 50/page regardless of
 // a larger requested `limit` — match that cap so every page is full until
 // the last one.
@@ -12,9 +18,8 @@ const PAGE_LIMIT: usize = 50;
 // for programs/events/reports on a single VEN; log if it does rather than
 // looping forever on a misbehaving or huge-collection VTN.
 const MAX_PAGES_WARNING: u32 = 20;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Instant;
+use serde::Deserialize;
+use std::sync::{Arc, PoisonError};
 
 use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
 use crate::controller::wire_reject::{partition_valid, FetchOutcome};
@@ -24,32 +29,18 @@ use crate::entities::DomainError;
 pub struct VtnClient {
     http: reqwest::Client,
     base_url: String,
-    client_id: String,
-    client_secret: String,
     ven_name: String,
-    token: Arc<tokio::sync::RwLock<Option<Token>>>,
+    /// The token, and when it is fetched again.
+    credentials: ClientCredentials,
     /// GB-49: set when the last token lacked VEN scopes. Read through
     /// `VtnPort::scope_warning` so the health route can surface it.
-    scope_warning: Arc<tokio::sync::RwLock<Option<String>>>,
+    scope_warning: Arc<std::sync::RwLock<Option<String>>>,
     /// F-6: `reportName` -> the VTN's id for it, learned from the first
     /// create. Steady-state submission is a PUT straight to that id instead of
     /// POST -> 409 -> paginated name lookup -> PUT. Purely an optimisation:
     /// every entry is re-derivable, and a wrong one self-heals (see
     /// `upsert_report`).
     pub(crate) report_ids: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    expires_in: Option<u64>,
-}
-
-#[derive(Clone, Debug)]
-struct Token {
-    access_token: String,
-    acquired_at: Instant,
-    expires_in_secs: u64,
 }
 
 /// RFC 7807 "Problem Details for HTTP APIs" — openleadr-rs's error response
@@ -82,10 +73,26 @@ fn classify_reqwest_error(e: &reqwest::Error) -> Option<crate::entities::DomainE
 /// Log a structured `DomainError::VtnUnreachable` line if `e` classifies as
 /// one; a no-op for any other `send()` failure (DNS, TLS, etc. still surface
 /// via the caller's `.context(...)` message as before).
-fn log_if_vtn_unreachable(path: &str, e: &reqwest::Error) {
-    if let Some(domain_err) = classify_reqwest_error(e) {
+fn log_if_vtn_unreachable(path: &str, e: &VtnAuthError) {
+    // The request that failed is the token request when no token could be had for `path`.
+    let path = if e.is_token_failure() {
+        "/auth/token"
+    } else {
+        path
+    };
+    if let Some(domain_err) = e.transport().and_then(classify_reqwest_error) {
         tracing::error!(path, error = %domain_err, "VTN unreachable");
     }
+}
+
+/// The JSON body of a VTN answer, or the rejection it is when the status is not 2xx.
+async fn json_or_rejection(path: &str, resp: reqwest::Response) -> Result<serde_json::Value> {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(http_error(path, status, &body));
+    }
+    Ok(resp.json().await?)
 }
 
 /// Parse a non-2xx VTN response body into a human-readable problem message,
@@ -158,150 +165,57 @@ impl VtnClient {
         client_secret: String,
         ven_name: String,
     ) -> Self {
+        let http = reqwest::Client::new();
+        let scope_warning = Arc::new(std::sync::RwLock::new(None));
+        let warning_sink = scope_warning.clone();
+        // GB-49: a VEN granted no scopes authenticates fine and then polls an
+        // empty world -- every request 200, every list empty, nothing saying
+        // why. Read our own grant rather than infer it from silence.
+        let credentials = ClientCredentials::new(http.clone(), &base_url, client_id, client_secret)
+            .on_new_token(move |access_token| {
+                let missing = crate::controller::token_scopes::missing_ven_scopes(access_token);
+                let warning = (!missing.is_empty())
+                    .then(|| crate::controller::token_scopes::describe_missing(&missing));
+                if let Some(warning) = &warning {
+                    warn!(missing = ?missing, "{warning}");
+                }
+                *warning_sink.write().unwrap_or_else(PoisonError::into_inner) = warning;
+            });
         Self {
-            http: reqwest::Client::new(),
+            http,
             base_url,
-            client_id,
-            client_secret,
             ven_name,
-            token: Arc::new(tokio::sync::RwLock::new(None)),
-            scope_warning: Arc::new(tokio::sync::RwLock::new(None)),
+            credentials,
+            scope_warning,
             report_ids: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
-    async fn ensure_token(&self) -> Result<String> {
-        // Return cached token if still valid (with 60s safety margin)
-        if let Some(t) = self.token.read().await.as_ref() {
-            let elapsed = t.acquired_at.elapsed().as_secs();
-            if elapsed + TOKEN_EXPIRY_MARGIN_S < t.expires_in_secs {
-                return Ok(t.access_token.clone());
-            }
-        }
-
-        self.fetch_new_token().await
-    }
-
-    async fn invalidate_token(&self) {
-        *self.token.write().await = None;
-    }
-
-    /// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): wall-clock expiry of the
-    /// currently cached token, for `GET /vtn/status`. `Instant` is monotonic, so
-    /// this derives an approximate `DateTime<Utc>` from elapsed time since
-    /// acquisition — read-only observability, not used by `ensure_token`'s own
-    /// (monotonic) refresh check. `now` is injected per the determinism rule.
-    /// Deliberately unclamped: an already-expired token returns a timestamp in
-    /// the past (how long ago it expired), not "now" — clamping would make an
-    /// expired token indistinguishable from one that's healthy but about to
-    /// expire, on every call after the first.
-    pub async fn token_expires_at(
+    /// Send one authorized request to `path` and return whatever the VTN answers. The token,
+    /// and the one retry after a 401 or 403, are `ClientCredentials::send`'s.
+    async fn send(
         &self,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Option<chrono::DateTime<chrono::Utc>> {
-        let guard = self.token.read().await;
-        let t = guard.as_ref()?;
-        let elapsed = chrono::Duration::from_std(t.acquired_at.elapsed()).unwrap_or_default();
-        let total = chrono::Duration::seconds(t.expires_in_secs as i64);
-        Some(now - elapsed + total)
-    }
-
-    async fn fetch_new_token(&self) -> Result<String> {
-        let token_url = format!("{}/auth/token", self.base_url.trim_end_matches('/'));
-
-        #[derive(Serialize)]
-        struct Form<'a> {
-            grant_type: &'a str,
-            client_id: &'a str,
-            client_secret: &'a str,
-        }
-
-        let resp = self
-            .http
-            .post(token_url)
-            .form(&Form {
-                grant_type: "client_credentials",
-                client_id: &self.client_id,
-                client_secret: &self.client_secret,
-            })
-            .send()
-            .await
-            .inspect_err(|e| log_if_vtn_unreachable("/auth/token", e))
-            .context("token request failed")?;
-
-        if resp.status() != StatusCode::OK {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("token endpoint returned {status}: {body}");
-        }
-
-        let tr: TokenResponse = resp.json().await.context("parse token response")?;
-        let expires_in_secs = tr.expires_in.unwrap_or(3600);
-        let token = Token {
-            access_token: tr.access_token,
-            acquired_at: Instant::now(),
-            expires_in_secs,
-        };
-        let access = token.access_token.clone();
-        // GB-49: a VEN granted no scopes authenticates fine and then polls an
-        // empty world -- every request 200, every list empty, nothing saying
-        // why. Read our own grant rather than infer it from silence.
-        let missing = crate::controller::token_scopes::missing_ven_scopes(&access);
-        if !missing.is_empty() {
-            warn!(
-                missing = ?missing,
-                "{}",
-                crate::controller::token_scopes::describe_missing(&missing)
-            );
-        }
-        *self.scope_warning.write().await = (!missing.is_empty())
-            .then(|| crate::controller::token_scopes::describe_missing(&missing));
-        *self.token.write().await = Some(token);
-        Ok(access)
-    }
-
-    /// GET a VTN endpoint with automatic 401-retry (re-fetch token once).
-    async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<reqwest::Response> {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .http
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
+        self.credentials
+            .send(|| {
+                let request = self.http.request(method.clone(), &url);
+                match body {
+                    Some(body) => request.json(body),
+                    None => request,
+                }
+            })
             .await
             .inspect_err(|e| log_if_vtn_unreachable(path, e))
-            .context(format!("GET {path} failed"))?;
+            .with_context(|| format!("{method} {path} failed"))
+    }
 
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            // Token invalid or VTN restarted with new signing key; refresh once and retry
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .http
-                .get(&url)
-                .bearer_auth(&new_token)
-                .send()
-                .await
-                .inspect_err(|e| log_if_vtn_unreachable(path, e))
-                .context(format!("GET {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(http_error(path, status, &body));
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(http_error(path, status, &body));
-        }
-
-        Ok(resp.json().await?)
+    async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
+        let resp = self.send(Method::GET, path, None).await?;
+        json_or_rejection(path, resp).await
     }
 
     /// GET every page of a collection endpoint via `skip`/`limit`, stopping
@@ -334,53 +248,13 @@ impl VtnClient {
         Ok(all)
     }
 
-    /// PUT JSON to a VTN endpoint with automatic 401-retry.
     pub(crate) async fn put_json(
         &self,
         path: &str,
         body: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .http
-            .put(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-            .inspect_err(|e| log_if_vtn_unreachable(path, e))
-            .context(format!("PUT {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .http
-                .put(&url)
-                .bearer_auth(&new_token)
-                .json(&body)
-                .send()
-                .await
-                .inspect_err(|e| log_if_vtn_unreachable(path, e))
-                .context(format!("PUT {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(http_error(path, status, &body));
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(http_error(path, status, &body));
-        }
-
-        Ok(resp.json().await?)
+        let resp = self.send(Method::PUT, path, Some(&body)).await?;
+        json_or_rejection(path, resp).await
     }
 
     /// POST JSON, returning the raw response (status + body) without error-mapping.
@@ -389,19 +263,7 @@ impl VtnClient {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<(StatusCode, String)> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&token)
-            .json(body)
-            .send()
-            .await
-            .inspect_err(|e| log_if_vtn_unreachable(path, e))
-            .context(format!("POST {path} failed"))?;
-
+        let resp = self.send(Method::POST, path, Some(body)).await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         Ok((status, text))
@@ -445,11 +307,14 @@ impl VtnPort for VtnClient {
         &self,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Option<chrono::DateTime<chrono::Utc>> {
-        VtnClient::token_expires_at(self, now).await
+        self.credentials.expires_at(now).await
     }
 
     async fn scope_warning(&self) -> Option<String> {
-        self.scope_warning.read().await.clone()
+        self.scope_warning
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -940,75 +805,84 @@ mod tests {
         );
     }
 
+    // The token itself (cache, expiry, re-authentication) is `lab_core::vtn_auth`'s and is
+    // tested there. These pin what this client adds around it.
+
+    /// POST `/reports` on a VTN that refuses the first token it issued, as after a restart with
+    /// a new signing key. Returns the base URL; `posts` counts the POSTs it saw.
+    async fn spawn_vtn_refusing_its_first_token(
+        posts: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let issued = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route(
+                "/auth/token",
+                post(move || {
+                    let n = issued.fetch_add(1, Ordering::SeqCst) + 1;
+                    async move {
+                        Json(json!({"access_token": format!("token-{n}"), "expires_in": 3600}))
+                    }
+                }),
+            )
+            .route(
+                "/reports",
+                post(move |headers: axum::http::HeaderMap| {
+                    posts.fetch_add(1, Ordering::SeqCst);
+                    let first = headers["authorization"] == "Bearer token-1";
+                    async move {
+                        if first {
+                            StatusCode::UNAUTHORIZED
+                        } else {
+                            StatusCode::CREATED
+                        }
+                    }
+                }),
+            );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// R-135: a report POST re-authenticates like every other request. It used to hand the 401
+    /// back and leave the dead token cached for the next poll to find.
+    #[tokio::test]
+    async fn post_json_raw_retries_once_with_a_new_token_after_401() {
+        let posts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let client = make_client(spawn_vtn_refusing_its_first_token(posts.clone()).await);
+
+        let (status, _) = client.post_json_raw("/reports", &json!({})).await.unwrap();
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(posts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// GB-49: the scope warning is read from the token the VTN issued, when it is issued.
+    #[tokio::test]
+    async fn scope_warning_names_what_an_issued_token_lacks() {
+        let client = make_client(spawn_test_vtn(vec![]).await);
+        assert_eq!(VtnPort::scope_warning(&client).await, None, "no token yet");
+
+        client.fetch_programs().await.unwrap();
+
+        let warning = VtnPort::scope_warning(&client).await.expect("opaque token");
+        assert!(warning.contains("read_ven_objects"), "{warning}");
+    }
+
     // WP-T1 (docs/history/project_journal.md, search "WP-T"): token expiry observability.
-
     #[tokio::test]
-    async fn token_expires_at_reflects_expires_in_from_acquisition() {
-        let client = VtnClient::new(
-            "http://example.invalid".to_string(),
-            "id".to_string(),
-            "secret".to_string(),
-            "ven".to_string(),
-        );
-        *client.token.write().await = Some(Token {
-            access_token: "t".to_string(),
-            acquired_at: std::time::Instant::now(),
-            expires_in_secs: 3600,
-        });
-
-        // `Instant::elapsed()` still measures real time even with an injected
-        // `now`, so a small tolerance is unavoidable — but the result is exact
-        // to the millisecond rather than the old ±100s inequality bounds.
+    async fn token_expires_at_is_none_until_a_token_was_issued() {
+        let client = make_client(spawn_test_vtn(vec![]).await);
         let now = chrono::Utc::now();
-        let expires_at = client
-            .token_expires_at(now)
-            .await
-            .expect("token was just set");
-        let expected = now + chrono::Duration::seconds(3600);
-        let drift = (expires_at - expected).num_milliseconds().abs();
-        assert!(
-            drift < 1000,
-            "expiry should be ~3600s from `now`, got {expires_at} vs expected {expected} (drift {drift}ms)"
-        );
-    }
+        assert_eq!(VtnPort::token_expires_at(&client, now).await, None);
 
-    #[tokio::test]
-    async fn token_expires_at_unclamped_for_an_already_expired_token() {
-        // Regression test: this used to `saturating_sub` the remaining time to
-        // zero, so an expired token always reported "expires right now"
-        // instead of the actual past timestamp it expired at.
-        let client = VtnClient::new(
-            "http://example.invalid".to_string(),
-            "id".to_string(),
-            "secret".to_string(),
-            "ven".to_string(),
-        );
-        *client.token.write().await = Some(Token {
-            access_token: "t".to_string(),
-            acquired_at: std::time::Instant::now() - std::time::Duration::from_secs(7200),
-            expires_in_secs: 3600,
-        });
+        client.fetch_programs().await.unwrap();
 
-        let now = chrono::Utc::now();
-        let expires_at = client
-            .token_expires_at(now)
-            .await
-            .expect("token was just set");
-        assert!(
-            expires_at < now - chrono::Duration::seconds(3500),
-            "expiry must be reported in the past (expired ~3600s ago), got {expires_at} vs now {now}"
-        );
-    }
-
-    #[tokio::test]
-    async fn token_expires_at_none_when_no_token_cached() {
-        let client = VtnClient::new(
-            "http://example.invalid".to_string(),
-            "id".to_string(),
-            "secret".to_string(),
-            "ven".to_string(),
-        );
-        assert_eq!(client.token_expires_at(chrono::Utc::now()).await, None);
+        let expires_at = VtnPort::token_expires_at(&client, now).await.unwrap();
+        assert!((3600 - (expires_at - now).num_seconds()).abs() <= 2);
     }
 
     /// R-129: the port's `update_report` is one PUT of the typed body to `/reports/{id}`, and

@@ -9,7 +9,17 @@ description = "Rules the VEN and the VTN's BFF must agree on: when an interval r
 # Deliberately thin. This crate exists so two services cannot disagree about
 # the same rule, which only holds if depending on it is cheap enough that
 # nobody is tempted to re-implement instead.
+# `reqwest` and `tokio` are here for `vtn_auth` only, and cost its two users
+# nothing: the VEN and the BFF both carry them already, with TLS; this crate
+# asks for neither TLS nor a runtime.
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 openleadr-wire = { git = "https://github.com/TinkerPhu/openleadr-rs.git", rev = "da565b445cab8eb0e04e8476c756e2a3e009d312" }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+# The stub VTN the `vtn_auth` tests talk to.
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
