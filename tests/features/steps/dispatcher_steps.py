@@ -164,9 +164,19 @@ def _assets_off_plan():
 
     plan = ven_get("/plan").json() or {}
     sim = ven_get("/sim").json() or {}
-    now = datetime.now(timezone.utc).isoformat()
-    slot = next((s for s in plan.get("slots", []) if s["start"] <= now < s["end"]), None)
-    planned = {a["asset_id"]: a["power_kw"] for a in (slot or {}).get("allocations", [])}
+    now = datetime.now(timezone.utc)
+
+    def at(raw):
+        return datetime.fromisoformat(raw[:19] + "+00:00")
+
+    slot = next((s for s in plan.get("slots", []) if at(s["start"]) <= now < at(s["end"])), None)
+    if slot is None:
+        starts = [s["start"] for s in plan.get("slots", [])[:2]]
+        return f"no plan slot covers {now.isoformat()} (first slots start {starts})"
+    planned = {a["asset_id"]: a["power_kw"] for a in slot.get("allocations", [])}
+    # Base load and PV are slot fields, not allocations (PV generation-negative like /sim).
+    planned.setdefault("base_load", slot.get("baseline_kw", 0.0))
+    planned.setdefault("pv", -slot.get("pv_used_kw", 0.0))
     live = {aid: a.get("power_kw", 0.0) for aid, a in sim.get("assets", {}).items()}
     return {
         aid: {"live_kw": round(live.get(aid, 0.0), 3), "plan_kw": round(planned.get(aid, 0.0), 3)}
