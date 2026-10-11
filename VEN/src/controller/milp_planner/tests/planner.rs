@@ -5,16 +5,6 @@ use super::*;
 // through any internal refactor. Use 1800s steps (4 slots, 2h horizon) for
 // fast solver runs (~<100ms each).
 
-fn make_profile_1800s() -> Profile {
-    let mut p = make_profile();
-    p.planner.plan_step_s = 1800;
-    p.planner.plan_zones = vec![crate::entities::plan::PlanZone {
-        step_s: 1800,
-        slots: 4,
-    }];
-    p
-}
-
 #[test]
 fn run_planner_no_assets_covers_base_load() {
     let now = fixed_now();
