@@ -11,9 +11,10 @@ change. GET /ev-session (read-only) was kept — see routes/hems/ev.rs — since
 simulated-usage session has no linked UserRequest and is otherwise unobservable.
 """
 
+import time
 from datetime import datetime, timedelta, timezone
 from behave import given, when
-from features.helpers.api_client import ven_post, ven_delete
+from features.helpers.api_client import ven_get, ven_post, ven_delete
 
 
 # ── EV Session (now via /user-requests) ────────────────────────────────────────
@@ -74,6 +75,37 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
 @given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')
 def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, window_min):
     _post_shiftable_load(context, asset_id, kw, minutes, timedelta(0), timedelta(minutes=window_min), True)
+
+
+# Planning-delay margin: a load posted closer than this to the next slot boundary waits for the
+# boundary first, so the plan that places it is made inside the slot it must start in.
+_SLOT_MARGIN_S = 300
+
+
+def _seconds_to_next_slot_boundary():
+    """Seconds until the plan's next slot starts, read from the plan in force (its first slot
+    anchors the grid, `horizon.step_size_s` is the slot length), not from a copy of the profile."""
+    plan = ven_get("/plan").json()
+    assert plan, "GET /plan returned no plan; a slot boundary cannot be derived"
+    step_s = plan["horizon"]["step_size_s"]
+    anchor = datetime.fromisoformat(plan["slots"][0]["start"][:19] + "+00:00")
+    elapsed_s = (datetime.now(timezone.utc) - anchor).total_seconds()
+    return step_s - (elapsed_s % step_s)
+
+
+# A window only the current slot can start in: it ends one minute before a start in the next
+# slot could finish. The planner cannot move the load to a cheaper later slot (GB-35: posted at
+# 07:32 beside a running 2 kW load, wm-3 and wm-5 were planned into the 08:00 slot and the
+# 420 s start poll timed out), so "has started" no longer depends on the time of day or on what
+# else is running.
+@given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes that can only start in the current slot')
+def step_given_post_shiftable_load_current_slot(context, asset_id, kw, minutes):
+    to_boundary_s = _seconds_to_next_slot_boundary()
+    if to_boundary_s < _SLOT_MARGIN_S:
+        time.sleep(to_boundary_s + 5)
+        to_boundary_s = _seconds_to_next_slot_boundary()
+    window = timedelta(seconds=to_boundary_s) + timedelta(minutes=minutes) - timedelta(minutes=1)
+    _post_shiftable_load(context, asset_id, kw, minutes, timedelta(0), window, True)
 
 
 # A window that opens later: the load is planned but does not start during the scenario, so it
