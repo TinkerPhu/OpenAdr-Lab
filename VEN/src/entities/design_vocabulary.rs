@@ -64,7 +64,7 @@ pub enum StaleRatePolicy {
 }
 
 /// How an asset forecast was generated (§1.11).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ForecastSource {
     WeatherModel,  // derived from external weather/irradiation data (PV)
@@ -133,7 +133,7 @@ impl AssetHeuristics {
 }
 
 /// Predicted power profile for an asset over the planning horizon (§3.6).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AssetForecast {
     pub asset_id: String,
     pub updated_at: DateTime<Utc>,
@@ -150,7 +150,7 @@ pub struct AssetForecast {
 }
 
 /// A time window with start and end (used for availability forecasts).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TimeRange {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,

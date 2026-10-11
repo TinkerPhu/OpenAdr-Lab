@@ -15,9 +15,20 @@ use axum::{
 use chrono::Utc;
 use tracing::info;
 
+use serde::Serialize;
+use ts_rs::TS;
+
 use crate::app_ctx::{Settings, SimRead};
 use crate::entities::asset::ComfortRate;
+use crate::entities::comfort::ComfortCurveSource;
 use crate::state::AppState;
+
+/// `GET` / `POST /assets/:id/comfort_curve`: the effective curve and where it comes from.
+#[derive(Debug, Clone, Serialize, TS)]
+pub struct ComfortCurveResponse {
+    pub source: ComfortCurveSource,
+    pub rates: Vec<ComfortRate>,
+}
 
 /// Default curve for an asset, `None` when the asset id is unknown.
 async fn default_rates(
@@ -43,7 +54,7 @@ pub async fn get_comfort_curve(
     let overrides = state.comfort_overrides_map().await;
     let source = crate::entities::comfort::comfort_curve_source(&overrides, &asset_id);
     let rates = crate::entities::comfort::effective_comfort_rates(&overrides, &asset_id, default);
-    Json(serde_json::json!({ "source": source, "rates": rates })).into_response()
+    Json(ComfortCurveResponse { source, rates }).into_response()
 }
 
 /// POST /assets/:id/comfort_curve
@@ -74,7 +85,10 @@ pub async fn post_comfort_curve(
             info!(asset_id, points = rates.len(), "comfort curve override set");
             (
                 StatusCode::CREATED,
-                Json(serde_json::json!({ "source": "override", "rates": rates })),
+                Json(ComfortCurveResponse {
+                    source: ComfortCurveSource::Override,
+                    rates,
+                }),
             )
                 .into_response()
         }
@@ -99,5 +113,24 @@ pub async fn delete_comfort_curve(
         StatusCode::NO_CONTENT.into_response()
     } else {
         StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// R-133: the typed body is the `json!()` it replaced, key for key.
+    #[test]
+    fn comfort_curve_response_keeps_the_wire_it_replaced() {
+        let rates = vec![crate::entities::comfort::curve_point(0.5, 0.2)];
+        let body = ComfortCurveResponse {
+            source: ComfortCurveSource::Override,
+            rates: rates.clone(),
+        };
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            serde_json::json!({ "source": "override", "rates": rates })
+        );
     }
 }

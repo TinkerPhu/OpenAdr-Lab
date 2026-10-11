@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Per-asset cumulative energy/cost/CO₂ since VEN startup.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct AssetLedgerEntry {
     pub asset_id: String,
     pub energy_kwh: f64,

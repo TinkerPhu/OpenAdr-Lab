@@ -2,12 +2,23 @@
 // `UPDATE_UI_TYPES=1 cargo test ui_types` regenerates them. Do not edit `./generated/`.
 import type { ActivePenaltyRule } from "./generated/ActivePenaltyRule";
 import type { AssetAllocation } from "./generated/AssetAllocation";
+import type { AssetCapabilityView } from "./generated/AssetCapabilityView";
+import type { AssetForecast } from "./generated/AssetForecast";
+import type { AssetLedgerEntry } from "./generated/AssetLedgerEntry";
+import type { AssetSnapshot } from "./generated/AssetSnapshot";
+import type { ComfortCurveResponse } from "./generated/ComfortCurveResponse";
+import type { ComfortCurveSource } from "./generated/ComfortCurveSource";
 import type { ComfortRate } from "./generated/ComfortRate";
+import type { ControlDescriptor } from "./generated/ControlDescriptor";
+import type { ControlKind } from "./generated/ControlKind";
 import type { CostBreakdown } from "./generated/CostBreakdown";
 import type { EvSession } from "./generated/EvSession";
 import type { EvSessionOrigin } from "./generated/EvSessionOrigin";
 import type { FlexibilityEnvelope } from "./generated/FlexibilityEnvelope";
+import type { ForecastSource } from "./generated/ForecastSource";
+import type { GridSnapshot } from "./generated/GridSnapshot";
 import type { HeaterTarget } from "./generated/HeaterTarget";
+import type { KeyFeature } from "./generated/KeyFeature";
 import type { Plan } from "./generated/Plan";
 import type { PlanHistorySample } from "./generated/PlanHistorySample";
 import type { PlanPhaseReport } from "./generated/PlanPhaseReport";
@@ -19,11 +30,18 @@ import type { PlanZone } from "./generated/PlanZone";
 import type { PlannerEvent } from "./generated/PlannerEvent";
 import type { PlannerObjective } from "./generated/PlannerObjective";
 import type { PlanningHorizon } from "./generated/PlanningHorizon";
+import type { PowerAdjustability } from "./generated/PowerAdjustability";
 import type { RequestDeadline } from "./generated/RequestDeadline";
+import type { SensorRaw } from "./generated/SensorRaw";
+import type { SensorSnapshot } from "./generated/SensorSnapshot";
 import type { SessionDetail } from "./generated/SessionDetail";
 import type { SessionType } from "./generated/SessionType";
 import type { ShiftableLoad } from "./generated/ShiftableLoad";
+import type { SimInjectState } from "./generated/SimInjectState";
+import type { SimSnapshot } from "./generated/SimSnapshot";
 import type { SolveStatus } from "./generated/SolveStatus";
+import type { StepRule } from "./generated/StepRule";
+import type { TimeRange } from "./generated/TimeRange";
 import type { UserRequest } from "./generated/UserRequest";
 import type { UserRequestMode } from "./generated/UserRequestMode";
 import type { UserRequestStatus } from "./generated/UserRequestStatus";
@@ -33,12 +51,23 @@ import type { WarningSeverity } from "./generated/WarningSeverity";
 export type {
   ActivePenaltyRule,
   AssetAllocation,
+  AssetCapabilityView,
+  AssetForecast,
+  AssetLedgerEntry,
+  AssetSnapshot,
+  ComfortCurveResponse,
+  ComfortCurveSource,
   ComfortRate,
+  ControlDescriptor,
+  ControlKind,
   CostBreakdown,
   EvSession,
   EvSessionOrigin,
   FlexibilityEnvelope,
+  ForecastSource,
+  GridSnapshot,
   HeaterTarget,
+  KeyFeature,
   Plan,
   PlanHistorySample,
   PlanPhaseReport,
@@ -50,11 +79,18 @@ export type {
   PlannerEvent,
   PlannerObjective,
   PlanningHorizon,
+  PowerAdjustability,
   RequestDeadline,
+  SensorRaw,
+  SensorSnapshot,
   SessionDetail,
   SessionType,
   ShiftableLoad,
+  SimInjectState,
+  SimSnapshot,
   SolveStatus,
+  StepRule,
+  TimeRange,
   UserRequest,
   UserRequestMode,
   UserRequestStatus,
@@ -202,58 +238,6 @@ export type ReportWindow = {
   maxIntervals: number;
 };
 
-export type SensorSnapshot = {
-  id: string;
-  ts: string;
-  temperature_c?: number | null;
-  power_w?: number | null;
-  voltage_v?: number | null;
-  raw: unknown;
-};
-
-export type AssetSnapshot = {
-  power_kw: number;
-  [key: string]: number | null;
-};
-
-export type GridSnapshot = {
-  net_power_w: number;
-  voltage_v: number;
-  import_kwh: number;
-  export_kwh: number;
-};
-
-export type SimSnapshot = {
-  ts: string;
-  grid: GridSnapshot;
-  assets: Record<string, AssetSnapshot>;
-};
-
-/** Simulation injection state — maps to /sim/inject backend endpoint. */
-export type SimInjectState = {
-  // Behaviour A: one-shot jumps (auto-cleared after application)
-  battery_soc?: number | null;
-  ev_soc?: number | null;
-  heater_temp_c?: number | null;
-  // Behaviour B: frozen + EMA blend-back on release
-  pv_irradiance?: number | null;
-  pv_tau_s?: number;
-  base_load_kw?: number | null;
-  base_load_alpha?: number;
-  // Behaviour C: frozen while active, snap to profile on release
-  ev_plugged?: boolean | null;
-  ev_soc_target?: number | null;
-  heater_setpoint_c?: number | null;
-  heater_temp_min_c?: number | null;
-  heater_temp_max_c?: number | null;
-  heater_emergency_curtail?: boolean | null;
-  heater_emergency_absorb?: boolean | null;
-  ambient_temp_c?: number | null;
-  grid_import_limit_kw?: number | null;
-  grid_export_limit_kw?: number | null;
-  pv_generation_limit_kw?: number | null;
-};
-
 export type TraceEntry =
   // `event_id` and `modification_date_time` identify the event *version* the
   // VEN acted on: names are not unique and an edited event keeps its name.
@@ -273,28 +257,6 @@ export type TraceEntry =
   | { type: "ArbiterDecision";   ts: string; pass: string; active_lever: string | null; target_kw: number | null; excess_kw: number | null; unresolved_kw: number };
 
 // ─── Sim schema types ─────────────────────────────────────────────────────────
-
-export type ControlKind = "slider" | "switch" | "number_input";
-
-/** Descriptor for one controllable parameter from GET /sim/schema. */
-export type ControlDescriptor = {
-  key: string;
-  label: string;
-  kind: ControlKind;
-  min: number | null;
-  max: number | null;
-  unit: string;
-  /** Multiply raw value by this for display; divide on send. e.g. 100 renders 0.8 as "80 %" */
-  display_scale?: number;
-  /**
-   * True when `max` is physically equivalent to "no limit" (e.g. a
-   * generation cap at rated power curtails nothing). The slider renders the
-   * top of the range as an explicit "Off" state, both when no override is
-   * active and when the user drags/releases into that zone, which sends
-   * `null` to clear the override instead of the numeric max.
-   */
-  nullable?: boolean;
-};
 
 // ─── HEMS Controller types ────────────────────────────────────────────────────
 
@@ -329,21 +291,6 @@ export type OadrCapacityState = {
   import_limit_event_id: string | null;
   export_limit_event_id: string | null;
   last_updated: string | null;
-};
-
-export type AssetLedger = {
-  asset_id: string;
-  energy_kwh: number;
-  cost_eur: number;
-  co2_g: number;
-  updated_at: string | null;
-  started_at: string | null;
-};
-
-/** WP4.2: GET /assets/:id/comfort_curve response. */
-export type ComfortCurveResponse = {
-  source: "default" | "override";
-  rates: ComfortRate[];
 };
 
 /** WP3.1: an active grid-alert window (parsed from ALERT_* events). */
@@ -707,71 +654,6 @@ export type ReportObligation = {
   fulfilled: boolean;
   created_at: string;
   historical: boolean;
-};
-
-/** BL-27: device control-mode classification — static, independent of the live
- * max/min_*_kw feasible range above. */
-export type PowerAdjustability =
-  | "NONE"
-  | "RECOMMENDATION"
-  | "ON_OFF"
-  | "STEPPED"
-  | "STEPLESS"
-  | "CROPPABLE";
-
-export type AssetCapability = {
-  max_import_kw: number;
-  max_export_kw: number;
-  min_import_kw: number;
-  min_export_kw: number;
-  is_fixed: boolean;
-  adjustability: PowerAdjustability;
-  /** Explicit discrete import levels in kW (ascending, including 0.0) — only
-   * meaningful for `adjustability === "STEPPED"`, empty otherwise. */
-  power_steps_kw: number[];
-  /** Which of `power_steps_kw` a commanded setpoint selects (R-81). */
-  step_rule?: StepRule;
-  /** A commanded import above 0 but below this falls back to 0 (the EV
-   * charger's minimum sustained charge rate). Absent/0 = no such floor. */
-  snap_to_zero_below_kw?: number;
-  /** Present when the asset's next-tick power does not follow the setpoint
-   * commanded now: a charger still applying its previous command, a running
-   * batch load, an uncontrollable load. */
-  power_next_tick_kw?: number;
-  /** The asset's own display facts (peak power, capacity, typical load...), generated by the
-   * asset (`Asset::key_features`); empty when it declares none. `value` carries its unit, or
-   * "-" when there is nothing to show yet. */
-  key_features: KeyFeature[];
-  /** The target a user request aims for when it states none, as the asset declares it
-   * (R-123): a thermostat's temperature, a storage asset's SoC fraction. Null when the
-   * asset declares none. The request forms open on these. */
-  default_target_temp_c?: number | null;
-  default_target_soc_frac?: number | null;
-};
-
-export type KeyFeature = { label: string; value: string };
-
-/** How an asset's actual power follows a commanded setpoint — declared by the
- * asset itself (`SetpointResponse`, R-81). */
-export type StepRule = "CONTINUOUS" | "NEAREST" | "LATCH_ON_FULL";
-
-export type ForecastSource =
-  | "WEATHER_MODEL"
-  | "DEVICE_CLOUD"
-  | "PHYSICAL_MODEL"
-  | "HEURISTIC"
-  | "MANUAL"
-  | "OPTIMIZATION"
-  | "NONE";
-
-export type AssetForecast = {
-  asset_id: string;
-  updated_at: string;
-  source: ForecastSource;
-  confidence: number;
-  power_kw: number[];
-  soc: number[] | null;
-  availability_windows: Array<{ start: string; end: string }> | null;
 };
 
 // ── Weather forecast plugin (weather-forecast-visibility) ────────────────────

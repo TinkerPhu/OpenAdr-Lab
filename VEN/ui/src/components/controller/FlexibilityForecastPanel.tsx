@@ -3,7 +3,7 @@ import {
 } from "@mui/material";
 import { useAssetCapabilities, useAssetForecasts } from "../../api/hooks";
 import { ASSET_LABELS } from "./types";
-import type { AssetCapability } from "../../api/types";
+import type { AssetCapabilityView } from "../../api/types";
 
 // WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
 // and GET /forecast, both previously unused. Shows "how much can this device
@@ -27,19 +27,21 @@ function formatSource(source: string): string {
 /** BL-27: "Stepped (0/1.5/3 kW)" for Stepped assets (the levels are the whole
  * point — a bare "Stepped" chip wouldn't tell the operator what the tiers
  * are); plain title-case label for every other classification. */
-function formatAdjustability(cap: AssetCapability): string {
+function formatAdjustability(cap: AssetCapabilityView): string {
   const label = formatSource(cap.adjustability);
-  if (cap.adjustability !== "STEPPED" || cap.power_steps_kw.length === 0) {
+  // Omitted on the wire for a continuously adjustable asset.
+  const steps = cap.power_steps_kw ?? [];
+  if (cap.adjustability !== "STEPPED" || steps.length === 0) {
     return label;
   }
-  const levels = cap.power_steps_kw.map((kw) => kw.toString()).join("/");
+  const levels = steps.map((kw) => kw.toString()).join("/");
   return `${label} (${levels} kW)`;
 }
 
 /** R-81: how the asset says it answers a setpoint — what the controller
  * projects it will draw. Only the parts that differ from "follows the
  * setpoint immediately" are worth a line. */
-function formatSetpointResponse(cap: AssetCapability): string {
+function formatSetpointResponse(cap: AssetCapabilityView): string {
   const notes: string[] = [];
   if (cap.step_rule === "LATCH_ON_FULL") {
     notes.push("starts at full power");

@@ -2,12 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
 import { FlexibilityForecastPanel } from "../components/controller/FlexibilityForecastPanel";
-import type { AssetCapability, AssetForecast } from "../api/types";
+import type { AssetCapabilityView, AssetForecast } from "../api/types";
+import { makeCapability } from "./fixtures/capability";
 
 // WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
 // and GET /forecast.
 
-const mockCapabilities = vi.fn((): Array<{ data?: AssetCapability }> => []);
+const mockCapabilities = vi.fn((): Array<{ data?: AssetCapabilityView }> => []);
 const mockForecasts = vi.fn((): AssetForecast[] => []);
 
 vi.mock("../api/hooks", () => ({
@@ -42,7 +43,7 @@ describe("FlexibilityForecastPanel", () => {
   it("renders capability min/max and forecast source when present", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 7.4,
           min_import_kw: 1.4,
           max_export_kw: 0,
@@ -51,7 +52,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPLESS",
           power_steps_kw: [],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([
@@ -78,7 +79,7 @@ describe("FlexibilityForecastPanel", () => {
   it("marks a fixed-capability asset", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 2.0,
           min_import_kw: 2.0,
           max_export_kw: 0,
@@ -87,7 +88,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPPED",
           power_steps_kw: [0, 1.25, 2.5],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -101,7 +102,7 @@ describe("FlexibilityForecastPanel", () => {
     // an operator has to be able to see what that declaration says.
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 7.4,
           min_import_kw: 1.4,
           max_export_kw: 0,
@@ -113,7 +114,7 @@ describe("FlexibilityForecastPanel", () => {
           step_rule: "CONTINUOUS",
           snap_to_zero_below_kw: 1.4,
           power_next_tick_kw: 7.4,
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -127,7 +128,7 @@ describe("FlexibilityForecastPanel", () => {
   it("rounds the power the asset draws until the command lands to one decimal", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 7.4,
           min_import_kw: 1.4,
           max_export_kw: 0,
@@ -138,7 +139,7 @@ describe("FlexibilityForecastPanel", () => {
           key_features: [],
           snap_to_zero_below_kw: 1.4,
           power_next_tick_kw: 4.472824277831694,
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -152,7 +153,7 @@ describe("FlexibilityForecastPanel", () => {
   it("shows the heater's Min import distinct from Max import (tiered asset)", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 6.0,
           min_import_kw: 3.0,
           max_export_kw: 0,
@@ -161,7 +162,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPPED",
           power_steps_kw: [0, 3, 6],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -177,7 +178,7 @@ describe("FlexibilityForecastPanel", () => {
   it("shows the discrete levels for a Stepped asset", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 2.5,
           min_import_kw: 1.25,
           max_export_kw: 0,
@@ -186,7 +187,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPPED",
           power_steps_kw: [0, 1.25, 2.5],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -200,7 +201,7 @@ describe("FlexibilityForecastPanel", () => {
   it("shows a plain classification label with no levels for a Stepless asset", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 7.4,
           min_import_kw: 1.4,
           max_export_kw: 0,
@@ -209,7 +210,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPLESS",
           power_steps_kw: [],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -224,7 +225,7 @@ describe("FlexibilityForecastPanel", () => {
   it("shows each asset's own key features in small print under its name", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 0,
           min_import_kw: 0,
           max_export_kw: -5,
@@ -233,10 +234,10 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "CROPPABLE",
           power_steps_kw: [],
           key_features: [{ label: "peak power", value: "5.00 kW" }],
-        },
+        }),
       },
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 2,
           min_import_kw: 0,
           max_export_kw: 0,
@@ -248,7 +249,7 @@ describe("FlexibilityForecastPanel", () => {
             { label: "avg", value: "-" },
             { label: "max", value: "-" },
           ],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);
@@ -262,7 +263,7 @@ describe("FlexibilityForecastPanel", () => {
   it("renders no key-feature lines for an asset that declares none", () => {
     mockCapabilities.mockReturnValue([
       {
-        data: {
+        data: makeCapability({
           max_import_kw: 6.0,
           min_import_kw: 3.0,
           max_export_kw: 0,
@@ -271,7 +272,7 @@ describe("FlexibilityForecastPanel", () => {
           adjustability: "STEPPED",
           power_steps_kw: [0, 3, 6],
           key_features: [],
-        },
+        }),
       },
     ]);
     mockForecasts.mockReturnValue([]);

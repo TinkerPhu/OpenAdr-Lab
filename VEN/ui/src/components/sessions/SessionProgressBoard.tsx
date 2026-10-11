@@ -9,6 +9,7 @@ import type {
   Plan, SimSnapshot, UserRequestStatus, UserRequestWithSession,
 } from "../../api/types";
 import { deviceIcon, sessionDeadline, sessionSummary } from "./sessionSummary";
+import { assetValue } from "../../api/assetValue";
 
 // ─── Derivation helpers ───────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ function fillColor(pct: number): "success" | "warning" | "error" {
 /** EV fill fraction from the live sim snapshot: soc / target_soc, clamped to [0, 1]. */
 function evFill(req: UserRequestWithSession, sim?: SimSnapshot): number | null {
   if (req.session?.type !== "ev" || !sim || !(req.asset_id in sim.assets)) return null;
-  const soc = sim.assets[req.asset_id].soc;
+  const soc = assetValue(sim.assets[req.asset_id], "soc");
   const target = req.session.target_soc;
   if (soc == null || !(target > 0)) return null;
   return Math.min(soc / target, 1);
@@ -148,7 +149,7 @@ function SessionCard({ req, plan, sim }: { req: UserRequestWithSession; plan?: P
   const fill = evFill(req, sim);
   const track = onTrack(req, plan);
   const heaterTemp = req.session?.type === "heater" && sim && req.asset_id in sim.assets
-    ? sim.assets[req.asset_id].temp_c
+    ? assetValue(sim.assets[req.asset_id], "temp_c")
     : null;
   const envelope = plan?.envelopes?.find((e) => e.asset_id === req.asset_id);
 
@@ -304,8 +305,8 @@ function CondensedChips({ requests, plan, sim }: { requests: UserRequestWithSess
         const overdue = deadline != null && deadline.getTime() < nowMs;
         const progress = fill != null
           ? `${(fill * 100).toFixed(0)}%`
-          : req.session?.type === "heater" && sim && req.asset_id in sim.assets && sim.assets[req.asset_id].temp_c != null
-            ? `${sim.assets[req.asset_id].temp_c!.toFixed(1)}°C→${req.session.target_temp_c}°C`
+          : req.session?.type === "heater" && sim && req.asset_id in sim.assets && assetValue(sim.assets[req.asset_id], "temp_c") != null
+            ? `${assetValue(sim.assets[req.asset_id], "temp_c")!.toFixed(1)}°C→${req.session.target_temp_c}°C`
             : `${req.target_energy_kwh} kWh`;
         const countdown = deadline == null
           ? ""

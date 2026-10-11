@@ -1,3 +1,4 @@
+use ts_rs::TS;
 mod asset_handle;
 mod asset_trait;
 pub mod base_load;
@@ -47,7 +48,7 @@ pub use shiftable_load::{ShiftableLoadAsset, ShiftableLoadState};
 // ─── Input type for a runtime-controllable parameter ─────────────────────────
 
 /// Input type for a runtime-controllable parameter.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlKind {
     Slider,
@@ -56,7 +57,7 @@ pub enum ControlKind {
 }
 
 /// Descriptor for one controllable parameter exposed via GET /sim/schema.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
 pub struct ControlDescriptor {
     pub key: String,
     pub label: String,
@@ -66,6 +67,8 @@ pub struct ControlDescriptor {
     pub unit: String,
     /// UI display multiplier: raw value × display_scale for display; divide by scale on send.
     /// E.g. display_scale=100.0 renders SoC fraction 0.8 as "80 %".
+    #[ts(optional)]
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_scale: Option<f64>,
     /// Marks this slider as representing an optional override where `max` is

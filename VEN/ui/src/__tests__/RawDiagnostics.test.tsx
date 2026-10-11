@@ -4,16 +4,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RawDiagnosticsPage } from "../pages/RawDiagnostics";
 import type { SimSnapshot, PlannedRates } from "../api/types";
+import { makeGrid, makeAssets } from "./fixtures/sim";
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
 const baseSim: SimSnapshot = {
   ts: "2026-03-18T10:00:00Z",
-  grid: { net_power_w: 1200, voltage_v: 230, import_kwh: 5, export_kwh: 0 },
-  assets: {
+  grid: makeGrid({ net_power_w: 1200, voltage_v: 230, import_kwh: 5, export_kwh: 0 }),
+  assets: makeAssets({
     ev: { power_kw: 7 },
     battery: { power_kw: -2 },
-  },
+  }),
 };
 
 const baseTariffs: PlannedRates = [

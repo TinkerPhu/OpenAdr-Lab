@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { deriveAssetSummaries, computeCostRateEurH, computeCo2RateGH } from "../components/controller/dataBuilders";
 import type { SimSnapshot, TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
+import { makeGrid, makeAssets } from "./fixtures/sim";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,8 @@ const TARIFF: ApiTariffSnapshot = {
 /** Minimal SimSnapshot with just an ev asset */
 const sim: SimSnapshot = {
   ts: "2026-01-01T10:00:00Z",
-  grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-  assets: { ev: { power_kw: 0, soc: 0.5 } },
+  grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+  assets: makeAssets({ ev: { power_kw: 0, soc: 0.5 } }),
 };
 
 function makePoint(ts: number, power_kw?: number): AssetTimelinePoint {
@@ -104,12 +105,12 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // PV 4 kW, battery charging 3 kW, base_load 1 kW → grid net = 0
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-      assets: {
+      grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
         pv:        { power_kw: -4.0, soc: null },
         battery:   { power_kw: 3.0,  soc: 0.5  },
         base_load: { power_kw: 1.0,  soc: null },
-      },
+      }),
     };
     const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
     const battery = summaries.find((s) => s.assetId === "battery")!;
@@ -123,12 +124,12 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // gridFraction = 2 / (3+1) = 0.5
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: { net_power_w: 2000, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-      assets: {
+      grid: makeGrid({ net_power_w: 2000, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
         pv:        { power_kw: -2.0, soc: null },
         battery:   { power_kw: 3.0,  soc: 0.5  },
         base_load: { power_kw: 1.0,  soc: null },
-      },
+      }),
     };
     const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
     const battery = summaries.find((s) => s.assetId === "battery")!;
@@ -139,11 +140,11 @@ describe("deriveAssetSummaries — gridFraction", () => {
   it("no PV: full grid import charges at import tariff", () => {
     const gridSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: { net_power_w: 4000, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-      assets: {
+      grid: makeGrid({ net_power_w: 4000, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
         battery:   { power_kw: 3.0, soc: 0.5  },
         base_load: { power_kw: 1.0, soc: null },
-      },
+      }),
     };
     const summaries = deriveAssetSummaries(gridSim, [TARIFF], [], {}, NOW);
     const battery = summaries.find((s) => s.assetId === "battery")!;
@@ -155,12 +156,12 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // Any scenario: sum of consuming asset cost rates must equal grid cost rate
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-      assets: {
+      grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
         pv:        { power_kw: -2.5, soc: null },
         battery:   { power_kw: 2.0,  soc: 0.5  },
         base_load: { power_kw: 2.0,  soc: null },
-      },
+      }),
     };
     const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
     const consuming = summaries.filter((s) => s.costRateEurH >= 0 && s.assetId !== "pv");
@@ -274,13 +275,13 @@ describe("computeForecastEnergy via deriveAssetSummaries", () => {
 describe("deriveAssetSummaries — forced power", () => {
   const forcedSim: SimSnapshot = {
     ts: new Date(NOW).toISOString(),
-    grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-    assets: {
+    grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+    assets: makeAssets({
       heater: { power_kw: 3.5, temp_c: 19.9, forced_power_kw: 3.5 },
       ev: { power_kw: 0, soc: 0.5 },
       base_load: { power_kw: 0.4 },
       wm: { power_kw: 0, forced_power_kw: 2.0 },
-    },
+    }),
   };
   const summaries = deriveAssetSummaries(forcedSim, [], [], {}, NOW);
   const find = (id: string) => summaries.find((s) => s.assetId === id)!;
@@ -304,8 +305,8 @@ describe("deriveAssetSummaries — forced power", () => {
 describe("deriveAssetSummaries — static specs", () => {
   const specsSim: SimSnapshot = {
     ts: new Date(NOW).toISOString(),
-    grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-    assets: {
+    grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+    assets: makeAssets({
       ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
       battery: {
         power_kw: 0,
@@ -324,7 +325,7 @@ describe("deriveAssetSummaries — static specs", () => {
         max_kw: 2.5,
       },
       base_load: { power_kw: 1.0 },
-    },
+    }),
   };
   const summaries = deriveAssetSummaries(specsSim, [], [], {}, NOW);
   const find = (id: string) => summaries.find((s) => s.assetId === id)!;

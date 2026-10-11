@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import type { Plan, PlanTimeSlot, SimSnapshot, UserRequestWithSession } from "../api/types";
 import { makePlan as basePlan, makeSlot } from "./fixtures/plan";
+import { makeSim as sharedSim } from "./fixtures/sim";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -75,12 +76,8 @@ function makeShiftableRequest(overrides: Partial<UserRequestWithSession> = {}): 
   };
 }
 
-function makeSim(assets: SimSnapshot["assets"]): SimSnapshot {
-  return {
-    ts: new Date().toISOString(),
-    grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
-    assets,
-  };
+function makeSim(assets: Parameters<typeof sharedSim>[0]): SimSnapshot {
+  return sharedSim(assets, {}, new Date().toISOString());
 }
 
 /** Plan with hourly slots starting at the next hour boundary, planned_kw_by_asset per slot. */

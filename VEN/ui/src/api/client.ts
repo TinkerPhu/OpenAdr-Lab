@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, ReportSubmission, ReportWindow, SensorSnapshot, SimSnapshot, TraceEntry,
-  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
+  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
   CapacityCurvesResponse,
@@ -12,7 +12,7 @@ import type {
   ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
-  ReportObligation, AssetCapability, AssetForecast,
+  ReportObligation, AssetCapabilityView, AssetForecast,
   MeasurementResponse,
   WeatherResponse,
 } from "./types";
@@ -289,13 +289,13 @@ export class VenApi {
     return r.json();
   }
 
-  async ledger(): Promise<AssetLedger[]> {
+  async ledger(): Promise<AssetLedgerEntry[]> {
     const r = await this.getReq("/ledger");
     if (!r.ok) throw new Error(`ledger ${r.status}`);
     const data = await r.json();
-    // API returns {assetId: AssetLedger, ...} — convert to array
+    // API returns {assetId: AssetLedgerEntry, ...} — convert to array
     if (Array.isArray(data)) return data;
-    return Object.values(data) as AssetLedger[];
+    return Object.values(data) as AssetLedgerEntry[];
   }
 
   async userRequests(): Promise<UserRequestWithSession[]> {
@@ -467,7 +467,7 @@ export class VenApi {
     return r.json();
   }
 
-  async assetCapability(assetId: string): Promise<AssetCapability> {
+  async assetCapability(assetId: string): Promise<AssetCapabilityView> {
     const r = await this.getReq(`/capability/${encodeURIComponent(assetId)}`);
     if (!r.ok) throw new Error(`capability/${assetId} ${r.status}`);
     return r.json();

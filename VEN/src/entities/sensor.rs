@@ -4,9 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct SensorSnapshot {
     pub id: Uuid,
     pub ts: DateTime<Utc>,
@@ -19,12 +20,15 @@ pub struct SensorSnapshot {
 /// What a sensor reading carries beyond its typed values: where it came from and, from the
 /// simulator, the meter's import and export. Any other key a `POST /sensors` client sends is kept
 /// as it came (`extra`) and echoed back; the VEN never reads it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 pub struct SensorRaw {
+    #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_w: Option<f64>,
+    #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_w: Option<f64>,
     #[serde(flatten)]
