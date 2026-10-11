@@ -15209,3 +15209,24 @@ literals in a dozen files) are shared builders under `VEN/ui/src/__tests__/fixtu
 KEY_LEARNINGS (ts-rs and serde attributes; what a hand copy gets wrong). The closed ledger periods
 have no UI surface (R-136, filed).
 
+## GB-35: every scenario leaves the VENs as it found them (refactor/r131-r133-sweep)
+
+**What.** `tests/features/helpers/scenario_state.py` is the one place that knows how to undo a
+scenario. The mutating VEN helpers in `api_client` report each call before sending it; every mutated
+route is declared there with its reset family or with why it needs none, and an undeclared route
+prints `[cleanup] no reset for ...`. `after_scenario` undoes what was touched (user requests,
+injects, arbiter settings, baseline override, comfort curves, battery config and SoC restored from a
+snapshot, waiting until `/sim` shows the restored value). The three ad-hoc resets in
+`environment.py` are gone. `scenario_cleanup.feature` pins the property with a two-scenario pair.
+The isolated shiftable-load scenarios post loads that can only start in the current slot, and the
+reactive-correction scenario holds live PV at 0 kW with a generation cap instead of an irradiance
+inject that drifts back. The reactive precondition names the assets off plan when it fails.
+
+**Why.** GB-35: isolated scenarios failed depending on the time of day and on what the previous
+scenario left running.
+
+**Issues.** A started shiftable load cannot be cancelled, so cleanup reports it as a LEAK instead of
+hiding it; the single-slot windows bound such a leak to its 5-minute duration. Finished user
+requests are never pruned from the VEN's state (R-137, filed). Lessons in KEY_LEARNINGS. Two full
+Node2 runs on the branch were green (331 + 16 scenarios) before the merge.
+
