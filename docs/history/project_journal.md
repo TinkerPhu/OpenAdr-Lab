@@ -15153,3 +15153,18 @@ fingerprint looked like enough of a safety net for the split and was not: its sc
 the schedule, alert, SIMPLE, stale-fill, override or budget branches. (3) Not done from the plan:
 setters for the EV and heater field groups. Those are four to seven named assignments, several with
 their own comment, and a positional call would read worse.
+
+## R-131: infrastructure types stay out of the inner rings (refactor/r131-r133-sweep)
+
+**What.** `SensorSnapshot` / `SensorRaw` / `SensorInput` moved from `simulator/snapshot.rs` to
+`entities/sensor.rs` (no behaviour change; `state/`, `routes/events.rs` and the tick tasks import
+them from there). `vtn.rs`'s `VtnHttpError` is gone: `http_error()` builds
+`DomainError::VtnRejected { status, message }`, and `services/obligation.rs` decides "source gone"
+on `VtnRejected { status: 404 }` without importing anything from `vtn`. Audit rule 13 refuses
+`crate::vtn` / `crate::simulator` in entities/, services/ and state/.
+
+**Why.** Sweep #5: the state store held a simulator type and a service downcast the VTN client's
+own error, against the ring rule and `ERROR_HANDLING.md` (translate at the boundary). The port
+stays `anyhow::Result`; retyping all of `VtnPort` would be a larger change with no caller that
+needs more than the status.
+

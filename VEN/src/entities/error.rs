@@ -35,6 +35,13 @@ pub enum DomainError {
     #[error("VTN unreachable: {0}")]
     VtnUnreachable(String),
 
+    /// The VTN answered a request with a non-2xx status (`vtn::http_error`, R-131). Callers
+    /// above the HTTP boundary decide by `status` (e.g. `services/obligation.rs` drops an
+    /// obligation whose source is gone on 404) without knowing the VTN client's own types.
+    /// `message` names the path, the status and the VTN's problem detail.
+    #[error("{message}")]
+    VtnRejected { status: u16, message: String },
+
     /// Reserved — not yet constructed at a real error boundary. Intended for profile
     /// hot-reload validation, if that feature is ever built. See docs/BACKLOG.md BL-25.
     #[error("profile invalid: {0}")]
@@ -65,6 +72,10 @@ mod tests {
             },
             DomainError::PlanInfeasible("infeasible".into()),
             DomainError::VtnUnreachable("timeout".into()),
+            DomainError::VtnRejected {
+                status: 404,
+                message: "/reports returned 404 Not Found: gone".into(),
+            },
             DomainError::ProfileInvalid("bad value".into()),
             DomainError::StorageError("disk full".into()),
         ];

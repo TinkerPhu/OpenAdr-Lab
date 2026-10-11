@@ -5,63 +5,14 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::assets::AssetState;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
+use crate::entities::sensor::{SensorRaw, SensorSnapshot};
 use crate::entities::timeline::{TimelineAssetData, TimelinePoint, TimelineSnapshot};
 
 use super::SimState;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SensorSnapshot {
-    pub id: Uuid,
-    pub ts: DateTime<Utc>,
-    pub temperature_c: Option<f64>,
-    pub power_w: Option<f64>,
-    pub voltage_v: Option<f64>,
-    pub raw: SensorRaw,
-}
-
-/// What a sensor reading carries beyond its typed values: where it came from and, from the
-/// simulator, the meter's import and export. Any other key a `POST /sensors` client sends is kept
-/// as it came (`extra`) and echoed back; the VEN never reads it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct SensorRaw {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub import_w: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub export_w: Option<f64>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
-}
-
-impl SensorSnapshot {
-    /// A sensor snapshot nobody has written yet. Stamped at the epoch rather
-    /// than "now": the value has no reading time, and a fresh-looking `ts`
-    /// would be a made-up one (and a hidden wall-clock read).
-    pub fn never_sampled() -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            ts: DateTime::<Utc>::UNIX_EPOCH,
-            temperature_c: None,
-            power_w: None,
-            voltage_v: None,
-            raw: SensorRaw::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct SensorInput {
-    pub temperature_c: Option<f64>,
-    pub power_w: Option<f64>,
-    pub voltage_v: Option<f64>,
-    pub raw: Option<SensorRaw>,
-}
 
 impl SimState {
     /// Build a SensorSnapshot for backward compatibility with /sensors endpoint.
@@ -230,8 +181,8 @@ impl SimState {
 
 #[cfg(test)]
 mod tests {
-    use super::SensorRaw;
     use crate::entities::asset_params::{AssetParams, HeaterParams};
+    use crate::entities::sensor::SensorRaw;
     use crate::simulator::SimState;
 
     /// R-114: the typed `raw` keeps the JSON it replaced - the simulator's three keys, a

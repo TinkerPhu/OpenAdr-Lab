@@ -31,7 +31,6 @@ use crate::entities::units::w_from_kw;
 use energy::EnergyCounter;
 pub use handle::SimHandle;
 pub use pv_smoothing::PvSmoothingState;
-pub use snapshot::{SensorInput, SensorSnapshot};
 pub use tick_inputs::TickInputs;
 
 /// Tracks the user-induced base load perturbation between ticks.

@@ -10,8 +10,8 @@ use crate::controller::SimSnapshot;
 use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::sensor::SensorSnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::simulator::SensorSnapshot;
 use crate::simulator::SimState;
 use crate::state::AppState;
 

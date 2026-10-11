@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::simulator::{SensorInput, SensorSnapshot};
+use crate::entities::sensor::{SensorInput, SensorSnapshot};
 use crate::state::AppState;
 
 #[derive(Deserialize)]

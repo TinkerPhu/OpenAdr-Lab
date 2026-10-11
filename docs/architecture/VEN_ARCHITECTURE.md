@@ -1094,7 +1094,8 @@ had for a cancel (R-130); the VEN UI renders it through `requestTransitionText` 
 `simulator/handle.rs` `the_battery_refuses_*`. No `serde_json::Value` crosses a domain port: the
 `TelemetryPort` takes `TelemetryBody`/`TraceBody` (the snapshot or the event, flattened, plus `venName`)
 and the MQTT adapter serialises them (`telemetry_port::to_wire`); `SensorSnapshot.raw` is a typed
-`SensorRaw` whose unknown client keys ride in `extra`. Lever ids are the named
+`SensorRaw` whose unknown client keys ride in `extra` (both in `entities/sensor.rs`; a non-2xx VTN
+answer reaches services as `DomainError::VtnRejected { status }`, translated in `vtn.rs`, R-131). Lever ids are the named
 `LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`

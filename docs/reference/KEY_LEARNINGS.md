@@ -1133,25 +1133,21 @@ outes/sim.rs causes a T1+T2 double-solve race:
   string identity — trace each occurrence back to which direction (inbound event vs. outbound
   report) and which spec enum it actually belongs to, especially when OpenADR 3 reuses near-
   identical names for genuinely different payload-type enums.
-- **The `VtnHttpError` downcast pattern** (GB-23, same change): to let one call site
-  (`services/obligation.rs`) distinguish "VTN returned 404" from other failures without
-  retyping the whole `VtnPort` trait to `Result<_, DomainError>`, `vtn.rs`'s `http_error()` now
-  constructs `anyhow::Error::new(VtnHttpError { status, message })` — a small `std::error::Error`
-  newtype carrying the numeric `StatusCode` — instead of `anyhow::anyhow!(...)`. Callers that
-  need the status downcast via `err.downcast_ref::<VtnHttpError>()`; callers that don't care
-  keep working exactly as before (`Display` output is byte-identical to the old message format,
-  so no existing string-matching test broke). This is the pragmatic middle ground between "every
-  error is an opaque string" and "every port returns a typed domain error" — reusable any time a
-  single call site needs one structured fact out of an otherwise-opaque `anyhow` chain. Risk:
-  this only works if every non-2xx path in `vtn.rs` constructs its error via `http_error()` —
-  a future branch that calls `anyhow::bail!`/`anyhow::anyhow!` directly bypasses the downcast
-  silently (falls through to default retry behavior, not a crash) — worth a regression test per
-  call site that depends on the downcast, not just trusting the invariant holds.
+- **One structured fact out of an `anyhow` chain: downcast to a `DomainError` variant** (GB-23,
+  reworked by R-131): to let `services/obligation.rs` tell "VTN returned 404" from other failures
+  without retyping the whole `VtnPort` trait to `Result<_, DomainError>`, `vtn.rs`'s `http_error()`
+  builds `anyhow::Error::new(DomainError::VtnRejected { status, message })`; the caller matches
+  `err.downcast_ref::<DomainError>()`. GB-23 first used a client-owned `VtnHttpError` newtype,
+  which made the service import an infrastructure type (R-131); carrying a domain variant keeps
+  the translation at the boundary and the caller in the domain's vocabulary. `Display` is the old
+  message byte for byte, so callers that only log keep working. Risk: it only works if every
+  non-2xx path builds its error via `http_error()` — a direct `anyhow::bail!` falls through to the
+  default retry silently, so keep a regression test per call site that depends on the downcast.
 - **`cargo clippy --all-targets` doesn't compile `#[cfg(test)]`-gated modules for every
   target** (same change, verification pass): `services/test_support` (including `mock_vtn.rs`)
   is gated `#[cfg(test)] pub mod test_support;` in `services/mod.rs`, so it's absent from the
   plain `ven-app` bin-target compilation clippy also runs under `--all-targets`. A `pub(crate)`
-  associated fn in non-test code (`VtnHttpError::new` in `vtn.rs`) whose *only* caller lives
+  associated fn in non-test code (the former `VtnHttpError::new` in `vtn.rs`) whose *only* caller lives
   inside that gated module reads as dead code in that bin-target pass, even though it's clearly
   used from the crate's own test-support code and from real tests. Fix: gate the fn itself
   `#[cfg(test)]` to match its only caller's gate, not `#[allow(dead_code)]` (which would hide a
