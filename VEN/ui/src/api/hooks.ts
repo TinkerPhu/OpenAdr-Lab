@@ -509,6 +509,19 @@ export function useLedger() {
   });
 }
 
+/** Each asset's closed ledger periods, fetched in parallel for every `assetIds` entry via
+ * `useQueries` (the route answers one asset). A period closes once a month, so this is slow. */
+export function useLedgerHistories(assetIds: string[]) {
+  const { api } = useVenContext();
+  return useQueries({
+    queries: assetIds.map((assetId) => ({
+      queryKey: ["ledger-history", api.baseUrl, assetId],
+      queryFn: () => api.ledgerHistory(assetId),
+      refetchInterval: 300_000,
+    })),
+  });
+}
+
 export function useRequests(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({

@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
-import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useVtnStatus, useTasksStatus } from "../api/hooks";
-import type { OadrCapacityState, AssetLedgerEntry } from "../api/types";
+import { Box, Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useLedgerHistories, useVtnStatus, useTasksStatus } from "../api/hooks";
+import type { OadrCapacityState, AssetLedgerEntry, AssetLedgerHistory } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
@@ -72,7 +72,65 @@ function ledgerDuration(startedAt: string): string {
   return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 }
 
-function LedgerCard({ entries }: { entries: AssetLedgerEntry[] }) {
+/** One asset's answer to `GET /ledger?asset_id=`, as `useLedgerHistories` holds it. */
+type LedgerHistoryResult = { data?: AssetLedgerHistory; isError: boolean };
+
+/** The closed (archived monthly) ledger periods of every asset, newest first. */
+function ClosedLedgerPeriods({ histories }: { histories: LedgerHistoryResult[] }) {
+  const periods = histories
+    .flatMap((h) => h.data?.closed_periods ?? [])
+    .sort((a, b) => b.period_start.localeCompare(a.period_start) || a.asset_id.localeCompare(b.asset_id));
+  // A failed or unanswerable query is not "none": say which, and never show the empty state for it.
+  const failed = histories.some((h) => h.isError);
+  const unknown = histories.some((h) => h.data?.closed_periods === null);
+  const loaded = histories.length > 0 && histories.every((h) => h.data !== undefined);
+
+  return (
+    <Box mt={2} data-testid="dash-ledger-closed">
+      <Typography variant="subtitle2" color="text.secondary" mb={0.5}>
+        Closed periods
+      </Typography>
+      {failed && (
+        <Typography variant="body2" color="error">Closed periods could not be loaded</Typography>
+      )}
+      {unknown && (
+        <Typography variant="body2" color="text.secondary">
+          Unknown: the history store is disabled on this VEN
+        </Typography>
+      )}
+      {periods.length > 0 ? (
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Period</TableCell>
+              <TableCell>Asset</TableCell>
+              <TableCell align="right">Energy kWh</TableCell>
+              <TableCell align="right">Cost €</TableCell>
+              <TableCell align="right">CO₂ kg</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {periods.map((p) => (
+              <TableRow key={`${p.asset_id}-${p.period_start}`} data-testid="dash-ledger-closed-period">
+                <TableCell>{p.period_start.slice(0, 10)} → {p.period_end.slice(0, 10)}</TableCell>
+                <TableCell>{p.asset_id}</TableCell>
+                <TableCell align="right">{p.energy_kwh.toFixed(3)}</TableCell>
+                <TableCell align="right">€{p.cost_eur.toFixed(4)}</TableCell>
+                <TableCell align="right">{p.co2_kg.toFixed(3)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        loaded && !failed && !unknown && (
+          <Typography variant="body2" color="text.secondary">No closed periods yet</Typography>
+        )
+      )}
+    </Box>
+  );
+}
+
+function LedgerCard({ entries, histories }: { entries: AssetLedgerEntry[]; histories: LedgerHistoryResult[] }) {
   const earliest = useMemo(() => {
     return entries.reduce<string | null>((min, e) => {
       if (!e.started_at) return min;
@@ -120,6 +178,7 @@ function LedgerCard({ entries }: { entries: AssetLedgerEntry[] }) {
           </TableBody>
         </Table>
       )}
+      <ClosedLedgerPeriods histories={histories} />
     </Paper>
   );
 }
@@ -133,6 +192,8 @@ export function DashboardPage() {
   const sim = useSim();
   const capacity = useCapacity();
   const ledger = useLedger();
+  const ledgerAssetIds = useMemo(() => (ledger.data ?? []).map((l) => l.asset_id), [ledger.data]);
+  const ledgerHistories = useLedgerHistories(ledgerAssetIds);
   const plan = usePlan();
   const requests = useRequests();
   const vtnStatus = useVtnStatus();
@@ -331,7 +392,7 @@ export function DashboardPage() {
 
       {/* Energy Ledger */}
       <Grid item xs={12} md={6}>
-        <LedgerCard entries={ledger.data ?? []} />
+        <LedgerCard entries={ledger.data ?? []} histories={ledgerHistories} />
       </Grid>
     </Grid>
   );
