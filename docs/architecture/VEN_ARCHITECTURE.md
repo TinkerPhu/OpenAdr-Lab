@@ -1343,12 +1343,26 @@ holds `AppCtx`, but no handler takes the whole of it: each extracts only the par
 having its own type and `impl FromRef<AppCtx>` in `app_ctx.rs` (R-110), so a signature says what the
 route can reach. `audit_ven_architecture.py` rule 11 refuses `State<AppCtx>` in `routes/`.
 
-The VEN UI's API types are generated from these Rust types, not written by hand (R-133, migrating by
-area): `#[derive(TS)]` (ts-rs) sits beside `Serialize`, `VEN/src/ui_types.rs` lists the root types once,
-and ts-rs writes each with its dependencies to `VEN/ui/src/api/generated/`, which `api/types.ts`
-re-exports. The test `generated_ui_types_are_current` fails when a Rust change is not regenerated
-(`UPDATE_UI_TYPES=1 cargo test ui_types`), so a field added on the wire cannot be missing in the UI.
-A 64-bit integer is generated as `number`, an `Option` as `T | null`.
+The VEN UI's API types are generated from these Rust types, not written by hand (R-133):
+`#[derive(TS)]` (ts-rs) sits beside `Serialize`, `VEN/src/ui_types.rs` lists the root types once
+(responses and the request bodies the UI sends), and ts-rs writes each with its dependencies to
+`VEN/ui/src/api/generated/` (a foreign type such as `serde_json::Value` in a subfolder), which
+`api/types.ts` re-exports. The test `generated_ui_types_are_current` fails when a Rust change is not
+regenerated (`UPDATE_UI_TYPES=1 cargo test ui_types`), so a field added on the wire cannot be missing in
+the UI. Spelling rules: a 64-bit integer is `number`; an `Option` is `T | null`, or `field?: T` where
+serde omits it (`#[ts(optional)]` beside `skip_serializing_if`); a request body's `Option` fields are
+`field?: T | null` (`#[ts(optional_fields = nullable)]`), as serde accepts both. A route body is a named
+`Serialize` struct, never a `json!()` the UI has to copy (`AssetCapabilityView`, `SignalsState`,
+`ComfortCurveResponse`, `ReportWindowSize`, `EvConflictBody`); every error body is `ErrorBody` from
+`routes/error.rs` (`error_response`, `unknown_asset`). `AssetSnapshot`'s flattened state values cannot be
+typed beside its fields, so they are `#[ts(skip)]` and the UI reads them through one helper,
+`api/assetValue.ts`.
+
+What `api/types.ts` still writes by hand, and why: the OpenADR objects (`Program`, `VtnEvent`, `Report`,
+`Interval`, ...) are aliases of openleadr-rs types ts-rs cannot derive on; `ZoneDef` comes from the shared
+`@lab/charts` package; and the UI-side models stated over a wire type for fields the client converts
+on arrival (`PlanHistoryRow`, `HistoryTickSample`, `ForecastAccuracyRow`, ... — epoch ms for an ISO
+string). The timeline / trace / asset-history value maps are still `json!()` (R-133).
 
 ### 4.1 Infrastructure
 

@@ -1,5 +1,7 @@
-// Generated from the Rust types (R-133): `VEN/src/ui_types.rs` lists them and
-// `UPDATE_UI_TYPES=1 cargo test ui_types` regenerates them. Do not edit `./generated/`.
+// The VEN UI's API types. Generated from the Rust types (R-133): `VEN/src/ui_types.rs` lists them
+// and `UPDATE_UI_TYPES=1 cargo test ui_types` regenerates them; do not edit `./generated/`. Written
+// here by hand, and only these: UI-side models over a wire type (fields the client converts), the
+// OpenADR objects (aliases of openleadr-rs types ts-rs cannot derive on), and two array aliases.
 import type { ActivePenaltyRule } from "./generated/ActivePenaltyRule";
 import type { AlertWindow } from "./generated/AlertWindow";
 import type { ArbiterDiagnostics } from "./generated/ArbiterDiagnostics";

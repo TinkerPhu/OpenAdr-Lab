@@ -3237,3 +3237,27 @@ Rules:
   plans silently. Make such an edge a parameter with a comment, not an accident of statement order.
 - Check a debt row's premise before planning its fix: R-120 named eight files hand-building a
   struct; three did. The measure (duplicated windows per directory) found what actually repeated.
+- **ts-rs: what it does with serde attributes, learned generating the VEN UI's types** (R-133).
+  (1) `skip_serializing_if` alone does not make a field optional in TypeScript; add
+  `#[ts(optional)]` beside it, or the UI is told a value is always present (`T | null`) that the wire
+  leaves out. A request body wants `#[ts(optional_fields = nullable)]` (`field?: T | null`), which is
+  what serde accepts for an `Option`. (2) `#[ts(type = "...")]` cannot be combined with
+  `#[serde(flatten)]`; a flattened struct is inlined into its parent (no file of its own), and a
+  flattened `HashMap` becomes an index signature that intersects with the typed fields — next to
+  `asset_type: string` it makes that field unusable, so the map was `#[ts(skip)]` and read through
+  one helper. (3) A foreign type (`serde_json::Value`) is written to a subfolder; a guard that lists
+  only the top level never writes or checks it. (4) A hand-written serializer (`PlannerObjective`)
+  has no serde attributes to read: derive the TS spelling from the variants
+  (`#[ts(rename_all = "snake_case")]`) and pin it with a test against the serde output.
+- **A hand-written copy of a wire type is wrong in ways tests do not notice** (R-133). Generating the
+  VEN UI's types found, in one pass: a field the wire never had (`interval_duration_s`; the wire says
+  `interval_width_s`), a UI feature listening for events the backend never sends (the Planner's
+  correction banner), a variant the UI could not label (`custom`), always-sent fields marked optional,
+  test fixtures using spellings the wire never uses (`"Periodic"` for `PERIODIC`), and the same word
+  naming two different shapes (`TariffSnapshot`). Every one compiled and passed its tests.
+- **The duplication ratchet stops reading a Rust file at its first inline `#[cfg(test)]`** (R-131,
+  R-132). A `#[cfg(test)]` method near the top of `vtn.rs` hid the rest of the file, so deleting it
+  "added" duplication that had been there all along; adding `#[cfg(test)]` to a method in
+  `history_store/mod.rs` hid the rest of that file and made three clusters elsewhere look new. Put
+  test-only items in a `#[cfg(test)] impl` block at the end of the file.
+
