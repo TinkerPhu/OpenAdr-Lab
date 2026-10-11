@@ -7,32 +7,21 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
     Given the VEN is running with profile "test"
 
   # ── AC#2: Running load appears in GET /sim ──────────────────────────────
-  # Window must exceed duration to survive planner delay (window=80m > duration=60m).
-  # NOTE: the window does NOT guarantee a single valid start slot — window offsets
-  # are measured from the ALIGNED grid start (now truncated to the slot boundary),
-  # so a mid-slot POST can make slot 1 valid too. The planner's earliest-start
-  # tie-break (SHIFT_TIEBREAK_EUR_PER_SLOT) guarantees the load still starts in
-  # the current slot when both are cost-equal, which is what these polls rely on.
+  # "can only start in the current slot": the window ends a minute before a start in the next
+  # slot could finish, so cost can never move the load later (GB-35). Loads that start here
+  # are kept short: a started load cannot be cancelled and would run on into later scenarios.
 
   @isolated
   Scenario: Running shiftable load appears in GET /sim
-    Given I POST a shiftable load for asset "wm-2" at 2.0 kW for 60 minutes within 80 minutes
+    Given I POST a shiftable load for asset "wm-2" at 2.0 kW for 5 minutes that can only start in the current slot
     When I poll the VEN /sim until asset "wm-2" has started
     Then the polled sim has asset "wm-2" with power_kw > 0
 
   # ── AC#3: Load auto-completes after duration ────────────────────────────
-  # 1-minute load in 30-minute window. Slot 1 can also be valid when the POST
-  # lands mid-slot (aligned-now offset, see note above); the earliest-start
-  # tie-break keeps the start in slot 0.
-  #
-  # Timing note: appearance in /sim takes ~125–150s on Node1 (plan cycle → MILP
-  # solve → adopt → dispatch tick), then a 1-min run + auto-complete detection.
-  # The poll_until timeouts were raised (appears 240s, disappears 150s) so this
-  # is no longer marginal against the inherent Node1 latency. Not a code bug.
 
   @slow @isolated
   Scenario: Shiftable load auto-completes and disappears from GET /sim
-    Given I POST a shiftable load for asset "wm-3" at 2.0 kW for 1 minutes within 30 minutes
+    Given I POST a shiftable load for asset "wm-3" at 2.0 kW for 1 minutes that can only start in the current slot
     And I poll the VEN /sim until asset "wm-3" has started
     And the polled sim has asset "wm-3" with power_kw > 0
     When I poll the VEN /sim until asset "wm-3" disappears
@@ -55,7 +44,7 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
 
   @isolated
   Scenario: Cancelling a shiftable load that is already running is refused
-    Given I POST a shiftable load for asset "wm-5" at 2.0 kW for 60 minutes within 80 minutes
+    Given I POST a shiftable load for asset "wm-5" at 2.0 kW for 5 minutes that can only start in the current slot
     And I poll the VEN /sim until asset "wm-5" has started
     When I DELETE shiftable load with saved id
     Then the response status is 409

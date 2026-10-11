@@ -152,6 +152,25 @@ def step_arbiter_has_no_held_deviation(context):
         diag = fetch()
         raise AssertionError(
             "the site already differs from plan without any disturbance from this scenario, "
-            f"so a release cannot be observed: {diag}"
+            f"so a release cannot be observed: {diag}; assets off plan: {_assets_off_plan()}"
         )
+
+
+def _assets_off_plan():
+    """Which asset holds the gap: live power against the plan slot in force, per asset, for
+    every asset more than the 0.1 kW dead band off. The arbiter's diagnostics give only the
+    site total, and by the time a failed run is read the containers are gone (GB-35)."""
+    from datetime import datetime, timezone
+
+    plan = ven_get("/plan").json() or {}
+    sim = ven_get("/sim").json() or {}
+    now = datetime.now(timezone.utc).isoformat()
+    slot = next((s for s in plan.get("slots", []) if s["start"] <= now < s["end"]), None)
+    planned = {a["asset_id"]: a["power_kw"] for a in (slot or {}).get("allocations", [])}
+    live = {aid: a.get("power_kw", 0.0) for aid, a in sim.get("assets", {}).items()}
+    return {
+        aid: {"live_kw": round(live.get(aid, 0.0), 3), "plan_kw": round(planned.get(aid, 0.0), 3)}
+        for aid in sorted(set(live) | set(planned))
+        if abs(live.get(aid, 0.0) - planned.get(aid, 0.0)) > 0.1
+    }
 
