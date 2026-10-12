@@ -1348,7 +1348,7 @@ User requests ──────────────────────
 
 **Tracing:** `GET /trace/events` serves an in-memory ring buffer of `ControllerEvent`s
 (capacity 500) with controller-level decisions — rate/capacity changes, plan cycles,
-request transitions. `GET /trace/history` serves per-asset recent history.
+request transitions.
 
 ---
 
@@ -1379,7 +1379,10 @@ What `api/types.ts` still writes by hand, and why: the OpenADR objects (`Program
 `Interval`, ...) are aliases of openleadr-rs types ts-rs cannot derive on; `ZoneDef` comes from the shared
 `@lab/charts` package; and the UI-side models stated over a wire type for fields the client converts
 on arrival (`PlanHistoryRow`, `HistoryTickSample`, `ForecastAccuracyRow`, ... — epoch ms for an ISO
-string). The timeline / trace / asset-history value maps are still `json!()` (R-133).
+string). The `/timeline/*` bodies are generated too (`TimelinePointBody`, `TimelineZone`,
+`AllTimelinesResponse` in `routes/timeline.rs`, pinned by `all_timelines_body_wire_shape_is_pinned`):
+the UI states `AssetTimelinePoint` over `TimelinePointBody`, and passes the generated zones to the chart
+kit's own `ZoneDef`, so `tsc` fails if the two shapes part.
 
 ### 4.1 Infrastructure
 
@@ -1543,7 +1546,6 @@ it re-resolves against the live weather feed every tick.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/trace/events` | `ControllerEvent` log (ring buffer, capacity 500), newest first; optional `?limit=N` |
-| GET | `/trace/history` | Per-asset recent history slice |
 
 ### 4.9 Recorded History — Storage Model Summary
 

@@ -117,19 +117,9 @@ export type AssetSummary = {
 
 // ─── Timeline (mid section of each asset cell) ───────────────────────────────
 
-/**
- * Backend-sourced timeline point from GET /timeline/{asset_id}.
- * ts is epoch ms (parsed from the ISO string the API returns).
- * values is a sparse map: keys present depend on the asset and data availability.
- * Common keys: "power_kw", "cost_rate_eur_h", "co2_rate_g_h"
- * Grid keys also include: "import_tariff_eur_kwh", "export_tariff_eur_kwh", etc.
- */
-export type AssetTimelinePoint = {
-  /** Epoch ms — X-axis value */
-  ts: number;
-  /** Sparse values map — NaN values filtered out by the backend. null for empty grid buckets. */
-  values: Record<string, number> | null;
-};
+/** A `/timeline/*` point with `ts` in epoch ms; stated over the generated wire type in
+ *  `api/types.ts`, re-exported here for the controller components that import it. */
+export type { AssetTimelinePoint } from "../../api/types";
 
 // ─── Tariff (grid tariff cell) ───────────────────────────────────────────────
 
