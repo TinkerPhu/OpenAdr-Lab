@@ -3,7 +3,7 @@
 //! so a fixture can never disagree with the asset about its own state.
 
 use crate::assets::{Asset, AssetState};
-use crate::controller::simulator_port::AssetSnapshot;
+use crate::controller::sim_snapshot::AssetSnapshot;
 
 pub fn snapshot_from_asset(
     asset: &dyn Asset,

@@ -20,7 +20,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 
-use crate::controller::simulator_port::SimSnapshot;
+use crate::controller::sim_snapshot::SimSnapshot;
 use crate::controller::trace::ControllerEvent;
 
 /// What a VEN publishes about itself, and where.
@@ -151,7 +151,7 @@ pub fn to_wire<T: Serialize>(body: &T) -> Result<String, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::simulator_port::GridSnapshot;
+    use crate::controller::sim_snapshot::GridSnapshot;
 
     fn snapshot(net_power_kw: f64) -> SimSnapshot {
         SimSnapshot {

@@ -160,16 +160,9 @@ mod port_tests {
     }
 
     #[test]
-    fn snapshot_returns_ok_for_empty_state() {
+    fn to_sim_snapshot_of_an_empty_state_has_a_zero_grid() {
         let sim = SimState::from_params(&[], Utc::now());
-        let result = SimulatorPort::snapshot(&sim);
-        assert!(
-            result.is_ok(),
-            "snapshot() must succeed for a valid SimState"
-        );
-        let snap = result.unwrap();
-        // Grid defaults are zero
-        assert_eq!(snap.grid.net_power_kw, 0.0);
+        assert_eq!(sim.to_sim_snapshot().grid.net_power_kw, 0.0);
     }
 }
 

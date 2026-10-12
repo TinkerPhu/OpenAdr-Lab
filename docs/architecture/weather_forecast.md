@@ -61,7 +61,7 @@ release cadence:
 
 Whatever arrives over MQTT lands behind a single Rust port, so `services/`
 and `controller/` never touch MQTT, JSON, or any supplier detail directly —
-the same seam pattern used for `SimulatorPort`, `SolverPort`, and `VtnPort`
+the same seam pattern used for `SolverPort` and `VtnPort`
 (trait in `controller/`, concrete adapter in infra, wired at the composition
 root):
 

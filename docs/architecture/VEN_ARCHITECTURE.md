@@ -1167,7 +1167,7 @@ all implemented by `simulator::SimHandle` (`simulator/handle.rs`), one handle on
 **Lock discipline:** each handle method takes the simulator lock for the length of that one call and
 releases it before returning; nothing hands out a guard, so no adapter can hold it across an `.await`.
 The tick loop and the other tasks keep the concrete `Arc<Mutex<SimState>>` (they own the simulator);
-the sampler and planner still read it through `SimulatorPort::snapshot`. Tests of the handle build a real
+the tick and the history sampler read it under the lock with `SimState::to_sim_snapshot`. Tests of the handle build a real
 `SimState` (`simulator/handle.rs`), and each answer is compared with the direct computation.
 `audit_ven_architecture.py` rule 6 forbids `SimState`, `ctx.sim` and the roster-reading computations in
 `services/` and `routes/`, with no exceptions.

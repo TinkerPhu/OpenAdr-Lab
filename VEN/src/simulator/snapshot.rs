@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::assets::AssetState;
-use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
+use crate::controller::sim_snapshot::{AssetSnapshot, GridSnapshot, SimSnapshot};
 use crate::entities::sensor::{SensorRaw, SensorSnapshot};
 use crate::entities::timeline::{TimelineAssetData, TimelinePoint, TimelineSnapshot};
 

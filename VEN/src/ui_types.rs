@@ -32,7 +32,7 @@ ui_types![
     crate::entities::history::PlanHistorySample,
     crate::planner_events::PlannerEvent,
     // Simulator and assets (increment 3)
-    crate::controller::simulator_port::SimSnapshot,
+    crate::controller::sim_snapshot::SimSnapshot,
     crate::entities::sensor::SensorSnapshot,
     crate::entities::sim_inject::SimInjectState,
     crate::assets::ControlDescriptor,

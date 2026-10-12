@@ -107,7 +107,7 @@ pub(crate) fn comms_loss_setpoint_bounds_kw(
 #[cfg(test)]
 mod dispatch_override_tests {
     use super::*;
-    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+    use crate::controller::sim_snapshot::{AssetSnapshot, GridSnapshot};
     use crate::entities::asset::SetpointResponse;
     use crate::entities::capacity::{AlertWindow, DispatchWindow};
     use chrono::TimeZone;

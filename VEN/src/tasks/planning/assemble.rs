@@ -10,7 +10,7 @@
 //! Assembly needs concrete `SimState` (`build_asset_contexts`,
 //! `resolve_pv_forecast_kw`, `resolve_base_load_forecast_kw`), and both
 //! `.claude/CLAUDE.md`'s ring map and `simulator/plan_context.rs`'s own module
-//! doc say `services/` reaches the simulator only through `SimulatorPort`.
+//! doc say `services/` reaches the simulator only through its ports.
 //! The adapter ring may touch infra; the application ring may not. So this
 //! separates two jobs inside the correct ring — it is not a layering fix,
 //! because under that rule the layering here was already right.

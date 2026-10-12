@@ -15413,3 +15413,20 @@ the model moves about 0.001 in 10 s against an expected decay of about 0.035. Th
 is other writers to the same VEN's `/sim/inject` during the test, unverified. The new tick test
 was seen red first by disabling the clear in `post_lock.rs`.
 
+## `SimulatorPort` deleted (refactor/delete-simulator-port)
+
+**What.** The trait (one method, `snapshot()`), its never-constructed `SnapshotError`, its one
+implementation on `SimState`, `MockSimulatorPort` (used only by its own tests) and the trait's own
+test are gone. The tick and the history sampler call `SimState::to_sim_snapshot()` under the lock
+they already held, without the `.expect("infallible")` the `Result` forced on them. The snapshot
+types stay, in `controller/sim_snapshot.rs` (was `simulator_port.rs`): the name now says what the
+file holds. `.claude/CLAUDE.md`'s port list names the ports services and routes really use
+(`SimRosterPort`, `SimReadPort`, `HeadroomPort` via `SimHandle`).
+
+**Why.** Two ways to reach the simulator (`architectural_smells.md` #8): the old port was
+implemented on the locked state itself, so it abstracted nothing, and only `tasks/`, which own the
+simulator, used it. It was decided for deletion on 2026-10-09.
+
+**Issues.** `architectural_smells.md` reported the deletion as done by `docs/register-cleanup`; it
+was not, and the two `#[allow(dead_code)]` lines that cited it stayed. A register entry that says
+"done by branch X" needs the code checked, not the branch name.

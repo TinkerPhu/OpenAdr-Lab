@@ -2,7 +2,7 @@
 //!
 //! Lives in `simulator/` rather than `controller/` because it reads a
 //! `&SimState` and calls `Asset::max_effort_setpoint` directly — see
-//! `controller/simulator_port.rs`'s note on why the flattened `SimSnapshot`
+//! `controller/sim_snapshot.rs`'s note on why the flattened `SimSnapshot`
 //! cannot answer PV's achievable range. In `controller/` that made the domain
 //! ring import infra; here it is infra computing over infra, and what leaves
 //! the module is an entity (`SiteFlexibilityEnvelope`).

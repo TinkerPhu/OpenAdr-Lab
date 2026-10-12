@@ -46,7 +46,7 @@
               E_PARAMS["PlannerParams\nPlannerObjective\nSimulatorParams"]
           end
           subgraph CTRL["controller/"]
-              C_PORT_SIM["≪trait≫\nSimulatorPort\nsnapshot() → SimSnapshot"]
+              C_PORT_SIM["sim_snapshot.rs\nSimSnapshot\n(SimState::to_sim_snapshot)"]
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()\nupdate_report()"]
               C_PORT_MILP["≪trait≫\nAssetMilpContext\nbuild_variables()\nextract_solution()"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
@@ -93,7 +93,7 @@
       end
 
       %% Port implementations
-      SIM_STATE -. "impl SimulatorPort" .-> C_PORT_SIM
+      SIM_STATE -. "to_sim_snapshot()" .-> C_PORT_SIM
       VTN_CLIENT -. "impl VtnPort" .-> C_PORT_VTN
       A_BAT -. "impl AssetMilpContext" .-> C_PORT_MILP
       A_EV -. "impl AssetMilpContext" .-> C_PORT_MILP
@@ -141,7 +141,7 @@
       %% ⚠️  Architectural Violations — all resolved as of 2026-07-03
       %% T_PLANNING: uses VtnPort trait (not VtnClient directly) ✓
       %% T_SIMTICK:  uses VtnPort trait (not VtnClient directly) ✓
-      %% C_REPORTER: uses SimSnapshot from SimulatorPort (not SimState directly) ✓
+      %% C_REPORTER: uses SimSnapshot (not SimState directly) ✓
       %% C_TIMELINE: uses only entities/ and trace types ✓
       %% SVC_UREQ:   uses only entities/ and state ✓
 

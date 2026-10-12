@@ -3,7 +3,7 @@
 //! tests, plus the lever-switching-chatter and zero-capacity-exclusion invariants.
 
 use super::*;
-use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+use crate::controller::sim_snapshot::{AssetSnapshot, GridSnapshot};
 use std::collections::HashMap as StdHashMap;
 
 fn battery_snap(setpoint_kw: f64, soc_frac: f64) -> AssetSnapshot {

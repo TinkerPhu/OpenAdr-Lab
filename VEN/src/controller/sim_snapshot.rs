@@ -1,9 +1,10 @@
-/// SimulatorPort trait — the boundary between controller logic and the physics simulator.
+/// The simulator's state at one instant, flattened for controller logic, the history
+/// sampler and the UI (`GET /sim`).
 ///
-/// All 4 named controller functions (build_setpoints, apply_surplus_ev_overlay,
-/// apply_battery_correction_overlay, record_tick) accept
-/// `&SimSnapshot` or `&dyn SimulatorPort` rather than `&SimState`.
-/// This allows unit testing without a running simulator.
+/// The tick tasks take it under the simulator lock with `SimState::to_sim_snapshot`; services
+/// and routes reach the simulator through `SimRosterPort` / `SimReadPort` / `HeadroomPort`
+/// (`simulator::SimHandle`), never through this type's producer. Taking `&SimSnapshot` rather
+/// than `&SimState` keeps controller functions testable without a running simulator.
 /// (`simulator::site_headroom::compute_site_headroom` is an exception: it needs
 /// `&SimState`/`Asset::max_effort_setpoint` directly — the flattened snapshot's
 /// `capability()`-based fields can't answer PV's achievable range correctly.)
@@ -12,14 +13,6 @@ use ts_rs::TS;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-/// Abstraction over the physics simulator for controller logic.
-///
-/// Snapshot-only: production injection flows through the tick loop, not this port.
-pub trait SimulatorPort: Send + Sync {
-    /// Take a point-in-time snapshot of simulator state.
-    fn snapshot(&self) -> Result<SimSnapshot, SnapshotError>;
-}
 
 /// Point-in-time snapshot of all simulator state needed by controller logic.
 #[derive(Debug, Clone, Serialize, TS)]
@@ -155,29 +148,10 @@ impl AssetSnapshot {
     }
 }
 
-/// Error returned by `SimulatorPort::snapshot()`.
-#[derive(Debug, Clone, thiserror::Error)]
-#[allow(dead_code)] // never constructed (SimState::snapshot is infallible); goes with SimulatorPort, decided for deletion (architectural_smells.md #8)
-pub enum SnapshotError {
-    #[error("simulator not yet initialized")]
-    Uninitialized,
-    #[error("transient error; retry on next poll")]
-    Transient,
-    #[error("fatal simulator error")]
-    Fatal,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::entities::asset::SetpointResponse;
-
-    fn _assert_send_sync<T: Send + Sync>() {}
-
-    #[test]
-    fn snapshot_error_is_send_sync() {
-        _assert_send_sync::<SnapshotError>();
-    }
 
     #[test]
     fn asset_snapshot_val_helper() {

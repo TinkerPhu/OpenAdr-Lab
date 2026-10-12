@@ -9,7 +9,7 @@ use crate::assets::{
     heater::{Heater, HeaterState},
     AssetState, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
 };
-use crate::controller::simulator_port::{AssetSnapshot, SimSnapshot};
+use crate::controller::sim_snapshot::{AssetSnapshot, SimSnapshot};
 use crate::entities::asset_params::AssetParams;
 use crate::entities::asset_params::{
     BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,

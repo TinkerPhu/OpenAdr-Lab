@@ -1,19 +1,19 @@
-// ── SimulatorPort trait and snapshot types ────────────────────────────────────
-pub mod simulator_port;
-pub use simulator_port::{SimSnapshot, SimulatorPort};
+// ── Simulator snapshot types ──────────────────────────────────────────────────
+pub mod sim_snapshot;
+pub use sim_snapshot::SimSnapshot;
 // AssetSnapshot: only test code re-imports it via this path now that
 // tasks/sim_tick/publish.rs's manual shiftable-runtime augmentation (its only
 // non-test consumer) was deleted (shiftable-load-as-asset). Gated like
 // `GridSnapshot` below rather than allow-listed.
 #[cfg(test)]
-pub use simulator_port::AssetSnapshot;
+pub use sim_snapshot::AssetSnapshot;
 
 // ── VtnPort trait and typed OpenADR structs ───────────────────────────────────
 pub mod vtn_port;
 /// One rule for refusing a malformed object off the wire (see the module docs).
 pub mod wire_reject;
 #[cfg(test)]
-pub use simulator_port::GridSnapshot;
+pub use sim_snapshot::GridSnapshot;
 pub use vtn_port::VtnPort;
 
 // ── SolverPort trait and request type ─────────────────────────────────────────
@@ -58,7 +58,7 @@ pub mod milp_interactions;
 pub mod milp_planner;
 pub mod timeline;
 // `capacity_headroom`/`site_headroom` used to live here. They take `&SimState`
-// and call `Asset::max_effort_setpoint` directly — see `simulator_port.rs`'s
+// and call `Asset::max_effort_setpoint` directly — see `sim_snapshot.rs`'s
 // own note on why the flattened snapshot cannot answer PV's achievable range —
 // so they were the domain ring importing infra. They now live in `simulator/`,
 // beside the `forecast.rs` they already shared, and `controller/` imports

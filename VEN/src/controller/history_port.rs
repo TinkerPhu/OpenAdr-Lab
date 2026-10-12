@@ -1,5 +1,5 @@
 // HistoryPort trait — the boundary between application/service code and the
-// persistent history store. Mirrors SolverPort/SimulatorPort/VtnPort: the
+// persistent history store. Mirrors SolverPort/VtnPort: the
 // trait is domain-level; the implementation (a SQLite-backed adapter) lives
 // in `history_store` (infra ring), reachable only through this port.
 //

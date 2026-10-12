@@ -25,7 +25,6 @@ use crate::assets::{
     Asset, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater, PvInverter,
     ShiftableLoadAsset, TickOverrides,
 };
-use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
 use energy::EnergyCounter;
 pub use handle::SimHandle;
@@ -497,12 +496,6 @@ pub fn schema_from_params(
 
 fn default_history_buffer() -> AssetHistoryBuffer {
     AssetHistoryBuffer::new(3600)
-}
-
-impl SimulatorPort for SimState {
-    fn snapshot(&self) -> Result<SimSnapshot, SnapshotError> {
-        Ok(self.to_sim_snapshot())
-    }
 }
 
 #[cfg(test)]
