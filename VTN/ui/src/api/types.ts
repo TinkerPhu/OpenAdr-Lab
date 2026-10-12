@@ -30,13 +30,13 @@ export type FleetStatus = {
 /**
  * One VEN's latest telemetry, as the BFF last received it.
  *
- * `netPowerW` is signed — import positive, export negative — and is `null`
+ * `netPowerKw` is signed — import positive, export negative — and is `null`
  * when that VEN has not said. Null is not zero: a fleet total that treated
  * silence as "drawing nothing" would be wrong in the way hardest to notice.
  */
 export type FleetVenLive = {
   venName: string;
-  netPowerW: number | null;
+  netPowerKw: number | null;
   state: string | null;
   receivedAt: string;
 };
@@ -45,13 +45,13 @@ export type FleetLive = {
   source: "live";
   vens: FleetVenLive[];
   fleet: {
-    netPowerW: number;
+    netPowerKw: number;
     contributingVens: number;
     knownVens: number;
   };
 };
 
-export type FleetSample = { ts: string; netPowerW: number };
+export type FleetSample = { ts: string; netPowerKw: number };
 
 /**
  * A window of stored telemetry. `source` says which table answered: `raw` is
@@ -85,9 +85,9 @@ export type VenReaction = {
    *  window inferred it. An operator judging whether an event worked needs to
    *  know which of the two they are looking at. */
   replanAttributed: boolean;
-  powerBeforeW: number | null;
-  powerAfterW: number | null;
-  deltaW: number | null;
+  powerBeforeKw: number | null;
+  powerAfterKw: number | null;
+  deltaKw: number | null;
 };
 
 export type FleetReactions = {

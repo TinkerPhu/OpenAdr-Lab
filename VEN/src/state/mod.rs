@@ -957,7 +957,7 @@ mod tests {
                 "id": "00000000-0000-0000-0000-000000000001",
                 "ts": "2026-01-01T00:00:00Z",
                 "temperature_c": 21.5,
-                "power_w": null,
+                "power_kw": null,
                 "voltage_v": null,
                 "raw": {}
             }

@@ -243,7 +243,7 @@ Fields:
 
 Fields:
 - timestamp
-- power_w
+- power_kw
 - temperature_c
 - voltage_v
 - raw

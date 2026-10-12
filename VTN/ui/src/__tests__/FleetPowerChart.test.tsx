@@ -26,21 +26,21 @@ function history(over: Partial<FleetHistory> = {}): FleetHistory {
       {
         venName: "ven-2",
         samples: [
-          { ts: "2026-09-22T09:00:00Z", netPowerW: -1500 },
-          { ts: "2026-09-22T09:01:00Z", netPowerW: -1000 },
+          { ts: "2026-09-22T09:00:00Z", netPowerKw: -1.5 },
+          { ts: "2026-09-22T09:01:00Z", netPowerKw: -1 },
         ],
       },
       {
         venName: "ven-1",
         samples: [
-          { ts: "2026-09-22T09:00:00Z", netPowerW: 4000 },
-          { ts: "2026-09-22T09:01:00Z", netPowerW: 3000 },
+          { ts: "2026-09-22T09:00:00Z", netPowerKw: 4 },
+          { ts: "2026-09-22T09:01:00Z", netPowerKw: 3 },
         ],
       },
     ],
     fleet: [
-      { ts: "2026-09-22T09:00:00Z", netPowerW: 2500, contributingVens: 2 },
-      { ts: "2026-09-22T09:01:00Z", netPowerW: 2000, contributingVens: 2 },
+      { ts: "2026-09-22T09:00:00Z", netPowerKw: 2.5, contributingVens: 2 },
+      { ts: "2026-09-22T09:01:00Z", netPowerKw: 2, contributingVens: 2 },
     ],
     ...over,
   };
@@ -68,7 +68,7 @@ describe("FleetPowerChart", () => {
     expect(Object.keys(rows[0].values ?? {}).sort()).toEqual([FLEET_KEY, "ven-1", "ven-2"]);
   });
 
-  it("converts the API's watts to kW", () => {
+  it("plots the API's kW as they are", () => {
     const props = renderChart();
     const rows = props.data as Row[];
     expect(rows[0].values?.["ven-1"]).toBe(4);
@@ -116,7 +116,7 @@ describe("FleetPowerChart", () => {
     const many = history({
       vens: ["ven-10", "ven-2", "ven-1", "ven-20", "ven-3"].map((venName) => ({
         venName,
-        samples: [{ ts: "2026-09-22T09:00:00Z", netPowerW: 1000 }],
+        samples: [{ ts: "2026-09-22T09:00:00Z", netPowerKw: 1 }],
       })),
     });
     render(<FleetPowerChart history={many} windowMinutes={60} tickMinutes={10} nowMs={0} reportingVens={0} />);

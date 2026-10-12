@@ -3,7 +3,7 @@ import {
   Alert, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { useFleetReactions } from "../api/hooks";
-import { formatKw } from "../utils/power";
+import { formatKwOrDash } from "@lab/charts/unitFormat";
 
 /**
  * "Who saw this event, and what changed?" for one event id.
@@ -85,9 +85,9 @@ export function FleetReactions() {
                           "never"
                         )}
                       </TableCell>
-                      <TableCell align="right">{formatKw(v.powerBeforeW)}</TableCell>
-                      <TableCell align="right">{formatKw(v.powerAfterW)}</TableCell>
-                      <TableCell align="right">{formatKw(v.deltaW)}</TableCell>
+                      <TableCell align="right">{formatKwOrDash(v.powerBeforeKw)}</TableCell>
+                      <TableCell align="right">{formatKwOrDash(v.powerAfterKw)}</TableCell>
+                      <TableCell align="right">{formatKwOrDash(v.deltaKw)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

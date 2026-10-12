@@ -195,6 +195,48 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// A file written before the meter stored kW names its three readings `net_power_w`,
+    /// `import_w` and `export_w`. It must still load: a parse failure here starts the VEN
+    /// fresh and drops every asset's state and the energy counters with it. The readings
+    /// themselves are not converted; the next tick overwrites them.
+    #[tokio::test]
+    async fn load_reads_a_file_written_with_the_meter_in_watts() {
+        let dir = temp_data_dir();
+        let data_dir = dir.to_str().unwrap();
+
+        let mut state = SimState::from_params(&[battery_params("battery")], now());
+        let (entry, _) = state.find_asset_mut("battery").unwrap();
+        entry.state = crate::assets::AssetState::Battery(crate::assets::BatteryState {
+            soc_frac: 0.73,
+            actual_power_kw: 1.5,
+        });
+        state.grid.import_kwh = 12.5;
+        state.grid.export_kwh = 3.25;
+        let mut old_format = serde_json::to_value(&state).unwrap();
+        let grid = old_format["grid"].as_object_mut().unwrap();
+        for (new_key, old_key) in [
+            ("net_power_kw", "net_power_w"),
+            ("import_kw", "import_w"),
+            ("export_kw", "export_w"),
+        ] {
+            grid.remove(new_key).expect("the meter writes this key");
+            grid.insert(old_key.to_string(), serde_json::json!(1500.0));
+        }
+        tokio::fs::write(dir.join(SIM_STATE_FILE), old_format.to_string())
+            .await
+            .unwrap();
+
+        let loaded = load(data_dir).await.expect("an old-format file must load");
+
+        assert_eq!(loaded.grid.import_kwh, 12.5);
+        assert_eq!(loaded.grid.export_kwh, 3.25);
+        match &loaded.assets[0].state {
+            crate::assets::AssetState::Battery(s) => assert!((s.soc_frac - 0.73).abs() < 1e-9),
+            other => panic!("expected Battery state, got {other:?}"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[tokio::test]
     async fn load_missing_file_returns_none() {
         let dir = temp_data_dir();

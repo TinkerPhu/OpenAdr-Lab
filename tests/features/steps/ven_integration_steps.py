@@ -47,9 +47,9 @@ def step_wait_ven_sensor_power(context):
 
     context.ven_sensor = poll_until(
         fetch,
-        lambda s: s.get("power_w") is not None,
+        lambda s: s.get("power_kw") is not None,
         timeout=60,
-        description="VEN sensor has power_w",
+        description="VEN sensor has power_kw",
     )
 
 

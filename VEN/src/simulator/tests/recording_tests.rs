@@ -35,12 +35,12 @@ fn record_history_pushes_one_point_per_asset_with_its_power_and_state() {
 #[test]
 fn record_history_updates_the_grid_asset_in_kw_with_the_signed_limits() {
     let mut sim = sim();
-    sim.grid.net_power_w = 3_000.0;
+    sim.grid.net_power_kw = 3.0;
 
     sim.record_history(Utc::now(), 10.0, -5.0);
 
     let grid = &sim.grid_asset.state;
-    assert_eq!(grid.net_power_kw, 3.0, "watts converted once, by the meter");
+    assert_eq!(grid.net_power_kw, 3.0, "the meter reading, as it is");
     assert_eq!((grid.import_limit_kw, grid.export_limit_kw), (10.0, -5.0));
 }
 

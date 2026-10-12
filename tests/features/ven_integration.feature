@@ -16,6 +16,6 @@ Feature: VEN-VTN Integration
 
   Scenario: VEN generates sensor data automatically
     When I wait for the VEN sensor to have power data
-    Then the VEN sensor snapshot has a "power_w" value
+    Then the VEN sensor snapshot has a "power_kw" value
 
 # TODO: test sensor data entered over UI to reach the VTN by reports

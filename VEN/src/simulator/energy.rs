@@ -22,12 +22,11 @@ impl EnergyCounter {
     }
 
     /// Integrate power over a time step.
-    /// `net_w`: positive = import, negative = export
+    /// `net_kw`: positive = import, negative = export
     /// `dt_s`: time step in seconds
-    pub fn integrate(&mut self, net_w: f64, dt_s: f64) {
+    pub fn integrate(&mut self, net_kw: f64, dt_s: f64) {
         let dt_h = crate::entities::units::dt_h_from_s(dt_s);
-        let energy_kwh =
-            crate::entities::units::energy_kwh(crate::entities::units::kw_from_w(net_w), dt_h);
+        let energy_kwh = crate::entities::units::energy_kwh(net_kw, dt_h);
 
         if energy_kwh > 0.0 {
             self.import_kwh += energy_kwh;

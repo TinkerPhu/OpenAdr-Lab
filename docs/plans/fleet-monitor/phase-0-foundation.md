@@ -32,7 +32,7 @@ these, never adds a parallel copy.
 
 | Concept | Lives in | Phase 0 use |
 |---|---|---|
-| Net site power from asset history | `controller/report_intervals.rs::build_net_site_power_ts` (obligation path) **and** `tasks/sim_tick/publish.rs` via `sim_snap.grid.net_power_w` (timer path) | two derivations — consolidate (F-9) |
+| Net site power from asset history | `controller/report_intervals.rs::build_net_site_power_ts` (obligation path) **and** `tasks/sim_tick/publish.rs` via `sim_snap.grid.net_power_kw` (timer path) | two derivations — consolidate (F-9) |
 | Measurement report assembly | `controller/reporter.rs::build_measurement_report` (timer) **and** `build_measurement_report_for_obligation` (obligation) | two builders — consolidate (F-9) |
 | Report obligation extraction from `reportDescriptors` | `controller/openadr_interface.rs::extract_report_obligations` | fix descriptor semantics (F-4) |
 | Report submission / upsert | `vtn.rs::upsert_report` (POST → 409 → find by name → PUT) | cache report id (F-6) |
@@ -149,9 +149,9 @@ Carried by the standing `fleet-telemetry` event. All values signed where the phy
 | `OPERATING_STATE` | — | freshness-derived state (companion payload, as today) | — | with each | §2 health |
 | `USAGE_FORECAST` | `FORECAST` | planned net power per plan slot (`historical: false`) | kW | on replan / 15 min | later views (§4 flexibility, portfolio) — not required for 1/2/5 |
 
-`DEMAND` in kW is the one conversion point: the VEN's own field stays `net_power_w` (W)
-everywhere inside, MQTT telemetry publishes that field unchanged, and kW appears only at the
-OpenADR boundary, declared in the program's `payloadDescriptors`.
+`DEMAND` is in kW with no conversion: the VEN's own field is `net_power_kw`, MQTT telemetry
+publishes that field unchanged, and the OpenADR boundary declares the unit in the program's
+`payloadDescriptors`.
 
 The per-event report requests experiments already use (`USAGE` + `BASELINE` on `exp-*`) keep
 working **unchanged**, including `USAGE`-as-mean-power-in-W (D-4): `experiments/kpi.py` and the
@@ -241,7 +241,7 @@ already serves the same data (DTO passthrough — no new vocabulary).
 | Topic | Retained | QoS | Cadence | Body = shape of |
 |---|---|---|---|---|
 | `status` | yes | 1 | on connect; LWT `{"state":"offline"}` | `/health` subset + `venName`, version |
-| `telemetry` | yes | 0 | every 5 s (configurable) | `ts`, `grid.net_power_w` (signed), per asset `power_kw`/`soc` — as `/sim` snapshot |
+| `telemetry` | yes | 0 | every 5 s (configurable) | `ts`, `grid.net_power_kw` (signed), per asset `power_kw`/`soc` — as `/sim` snapshot |
 | `signals` | yes | 1 | on change | `GET /signals` |
 | `trace` | no | 1 | on every `ControllerEvent` | one `/trace/events` entry |
 | `plan` | yes | 1 | on adoption | `GET /plan` (later views; cheap to add now) |
@@ -280,7 +280,7 @@ receive time) so sub-minute latencies can be judged against it.
 | **Paginated VTN client** | one `get_all_pages` used by the list routes **and** the recorder (F-1, R-84) |
 | **Fleet MQTT ingest** | subscribe `openadr-lab/fleet/+/#`; update in-memory latest state per VEN; persist telemetry and trace rows |
 | **Recorder (existing)** | unchanged role; stores reports/events; after F-5, stores appended intervals rather than full snapshots |
-| **Fleet store** | Existing Postgres, schema `lab_recorder` (D-7): `fleet_telemetry(ven_name, ts, net_power_w, payload_json)`, `fleet_trace(ven_name, ts, type, event_id, payload_json)`; batched inserts; retention job (raw 7 days, 1-min rollup 90 days) |
+| **Fleet store** | Existing Postgres, schema `lab_recorder` (D-7): `fleet_telemetry(ven_name, ts, net_power_kw, payload_json)`, `fleet_trace(ven_name, ts, type, event_id, payload_json)`; batched inserts; retention job (raw 7 days, 1-min rollup 90 days) |
 | **Fleet query API** | `GET /api/fleet/power?from&to&step&source=live\|report` — per-VEN series and fleet sum, aligned with the shared `resample_uniform`; `GET /api/fleet/signals?from&to` — events resolved to per-VEN bands with the shared interval-timing rule; `GET /api/fleet/reactions?eventID=` — the §6.3 chain |
 | **Fleet stream** | `GET /api/fleet/stream` (SSE): telemetry, status, trace and VTN-object changes as they arrive |
 

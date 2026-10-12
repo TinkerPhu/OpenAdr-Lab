@@ -41,7 +41,7 @@ def step_wait_for_fleet_vens(context, count):
 @then("every listed VEN either reports a power value or none at all")
 def step_ven_power_is_value_or_absent(context):
     for ven in context.fleet["vens"]:
-        value = ven.get("netPowerW")
+        value = ven.get("netPowerKw")
         assert value is None or isinstance(value, (int, float)), (
             f"{ven.get('venName')} reports a non-numeric power {value!r} — a VEN "
             "that has not spoken must be null, never a stand-in number"
@@ -51,7 +51,7 @@ def step_ven_power_is_value_or_absent(context):
 @then("the fleet sum equals the sum of the reporting VENs")
 def step_fleet_sum_is_consistent(context):
     reporting = [
-        v["netPowerW"] for v in context.fleet["vens"] if v.get("netPowerW") is not None
+        v["netPowerKw"] for v in context.fleet["vens"] if v.get("netPowerKw") is not None
     ]
     fleet = context.fleet["fleet"]
     assert fleet["contributingVens"] == len(reporting), (
@@ -59,8 +59,8 @@ def step_fleet_sum_is_consistent(context):
         f"{len(reporting)} VENs reported a value"
     )
     expected = sum(reporting)
-    assert abs(fleet["netPowerW"] - expected) < 1e-6, (
-        f"fleet sum {fleet['netPowerW']} != {expected} from its own VEN list"
+    assert abs(fleet["netPowerKw"] - expected) < 1e-6, (
+        f"fleet sum {fleet['netPowerKw']} != {expected} from its own VEN list"
     )
 
 
@@ -247,7 +247,7 @@ def step_fleet_chart_has_a_line_per_ven(context):
     reporting = [
         v["venName"]
         for v in bff_get("/api/fleet/power").json()["vens"]
-        if v.get("netPowerW") is not None
+        if v.get("netPowerKw") is not None
     ]
     assert reporting, "no VEN is reporting, so this scenario would assert nothing"
 

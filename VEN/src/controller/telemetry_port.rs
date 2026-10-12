@@ -106,7 +106,7 @@ impl TelemetryPort for NoTelemetry {
 /// VEN UI, so a fleet consumer and a single-VEN consumer read the same
 /// vocabulary (`dto` -- one word per concept, across every layer).
 ///
-/// `grid.net_power_w` is the site meter reading and the value a fleet view
+/// `grid.net_power_kw` is the site meter reading and the value a fleet view
 /// sums. It is published, not recomputed: the report path derives its own
 /// series from the same snapshot's assets, and a second derivation here is
 /// exactly the divergence F-9 records.
@@ -153,11 +153,11 @@ mod tests {
     use super::*;
     use crate::controller::simulator_port::GridSnapshot;
 
-    fn snapshot(net_power_w: f64) -> SimSnapshot {
+    fn snapshot(net_power_kw: f64) -> SimSnapshot {
         SimSnapshot {
             ts: chrono::Utc::now(),
             grid: GridSnapshot {
-                net_power_w,
+                net_power_kw,
                 voltage_v: 230.0,
                 import_kwh: 1.0,
                 export_kwh: 0.5,
@@ -170,9 +170,9 @@ mod tests {
 
     #[test]
     fn telemetry_body_carries_the_sender_and_the_snapshot() {
-        let body = serde_json::to_value(telemetry_body("ven-7", &snapshot(2500.0))).unwrap();
+        let body = serde_json::to_value(telemetry_body("ven-7", &snapshot(2.5))).unwrap();
         assert_eq!(body["venName"], "ven-7");
-        assert_eq!(body["grid"]["net_power_w"], 2500.0);
+        assert_eq!(body["grid"]["net_power_kw"], 2.5);
     }
 
     /// The `type` tag and the event id are what a reaction chain is assembled
@@ -233,7 +233,7 @@ mod tests {
     /// F-3 fixed on the report side.
     #[test]
     fn telemetry_body_keeps_the_sign_of_exported_power() {
-        let body = serde_json::to_value(telemetry_body("ven-1", &snapshot(-3100.0))).unwrap();
-        assert_eq!(body["grid"]["net_power_w"], -3100.0);
+        let body = serde_json::to_value(telemetry_body("ven-1", &snapshot(-3.1))).unwrap();
+        assert_eq!(body["grid"]["net_power_kw"], -3.1);
     }
 }

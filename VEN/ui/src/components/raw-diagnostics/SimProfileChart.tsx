@@ -11,7 +11,7 @@ interface SimProfileChartProps {
 
 export function SimProfileChart({ data }: SimProfileChartProps) {
   const points: { name: string; power_kw: number }[] = [
-    { name: "grid", power_kw: data.grid.net_power_w / 1000 },
+    { name: "grid", power_kw: data.grid.net_power_kw },
     ...Object.entries(data.assets).map(([id, snap]) => ({
       name: id,
       power_kw: snap.power_kw,

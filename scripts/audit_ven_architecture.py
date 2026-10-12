@@ -61,14 +61,16 @@ The rules, and why each exists:
      function that belongs to `entities/comfort.rs`). Test-only uses of `services::test_support`
      are in test blocks and are not flagged.
 
-  10. No inline unit conversions outside `entities/units.rs`: watts to kilowatts, a duration or a
+  10. No inline unit conversions outside `entities/units.rs`: a duration or a
      step in seconds to hours, and the `kw * dt_h` multiplication that follows (R-111: about 22
      copies in two spellings, `num_milliseconds() / 3_600_000.0` and `seconds / 3600.0`). Use
-     `kw_from_w`, `w_from_kw`, `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`, and
+     `dt_h_from_s`, `dt_h_from_duration`, `energy_kwh`, and
      `pct_from_frac` for a `_frac` quantity as a percentage (R-115). A power held for a step,
      `power_kw * dt_h` (also `.abs()`), is `energy_kwh` (2026-10-09 sweep). The patterns are
-     specific on purpose (a quantity ending `_s`, `dt_s`, `net_power_w`, a `Duration`'s seconds), so
+     specific on purpose (a quantity ending `_s`, `dt_s`, a `Duration`'s seconds), so
      hour-of-day arithmetic and physical constants such as `4.186 / 3600` do not match.
+     Power is kW everywhere, the simulated site meter included, so there is no watt helper: an
+     identifier ending `_w` is a quantity in watts and is itself the finding.
 
   11. No handler takes the whole `AppCtx` (`State<AppCtx>`) in routes/. Each extracts the parts it
      uses (`State<AppState>`, `State<Roster>`, ...), each of which has its own
@@ -219,7 +221,7 @@ def simstate_in_services() -> "list[str]":
 
 # The inline spellings of the unit conversions `entities/units.rs` owns.
 UNIT_CONVERSION = (
-    r"net_power_w / 1000\.0"
+    r"\b[a-z][a-z0-9_]*_w\b"
     r"|dt_s / 3600\.0"
     r"|num_(milli)?seconds\(\) as f64 / 3[_]?6[0_]*\.?0*"
     r"|(\b[A-Z][A-Z_]*_S|_s)\)? as f64 / 3600\.0"

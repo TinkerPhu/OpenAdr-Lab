@@ -8,7 +8,7 @@ def step_post_sensor(context, temp, power):
         "/sensors",
         json={
             "temperature_c": temp,
-            "power_w": power,
+            "power_kw": power,
             "raw": {"source": "test"},
         },
     )
@@ -25,7 +25,7 @@ def step_post_partial_temp(context, temp):
 
 @given("I post partial sensor data with only power {power:g}")
 def step_post_partial_power(context, power):
-    r = ven_post("/sensors", json={"power_w": power})
+    r = ven_post("/sensors", json={"power_kw": power})
     r.raise_for_status()
     context.post_response = r.json()
 
@@ -49,12 +49,12 @@ def step_sensor_temp(context, temp):
 
 @then("the sensor power is {power:g}")
 def step_sensor_power(context, power):
-    actual = context.ven_sensor.get("power_w")
+    actual = context.ven_sensor.get("power_kw")
     if actual is None or abs(actual - power) >= 0.001:
         # GET may race with the VEN sim tick overwriting the sensor state.
         # The POST response is the authoritative value at the moment of write.
         post = getattr(context, "post_response", None) or {}
-        actual = post.get("power_w", actual)
+        actual = post.get("power_kw", actual)
     assert actual is not None and abs(actual - power) < 0.001, (
         f"Expected power {power}, got {actual}"
     )

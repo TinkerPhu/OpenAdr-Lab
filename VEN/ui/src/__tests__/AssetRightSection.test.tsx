@@ -45,7 +45,7 @@ vi.mock("../api/hooks", () => ({
 
 const simWithBattery: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
   assets: makeAssets({
     battery: { power_kw: 1, soc: 0.6, capacity_kwh: 10, max_charge_kw: 5, max_discharge_kw: 5, min_soc: 0.1 },
   }),
@@ -53,7 +53,7 @@ const simWithBattery: SimSnapshot = {
 
 const simWithEv: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
   assets: makeAssets({
     ev: { power_kw: 7, soc: 0.5, plugged: 1, max_charge_kw: 11, soc_target: 0.9, battery_kwh: 60 },
   }),
@@ -61,7 +61,7 @@ const simWithEv: SimSnapshot = {
 
 const simWithPv: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
   assets: makeAssets({
     pv: { power_kw: -5, irradiance: 0.8, rated_kw: 8 },
   }),
@@ -69,7 +69,7 @@ const simWithPv: SimSnapshot = {
 
 const simWithHeater: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
   assets: makeAssets({
     heater: { power_kw: 1.3, temp_c: 22.5, temp_min_c: 20.0, temp_max_c: 23.0, max_kw: 2.5 },
   }),

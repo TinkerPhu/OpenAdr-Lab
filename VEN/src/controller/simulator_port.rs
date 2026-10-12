@@ -33,7 +33,8 @@ pub struct SimSnapshot {
 /// Grid meter snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GridSnapshot {
-    pub net_power_w: f64,
+    /// Net site power [kW], positive = import.
+    pub net_power_kw: f64,
     pub voltage_v: f64,
     pub import_kwh: f64,
     pub export_kwh: f64,
@@ -113,13 +114,6 @@ pub struct AssetSnapshot {
     /// The asset's AC output ceiling [kW] (`Asset::ac_ceiling_kw`) - PV inverter only.
     #[serde(skip)]
     pub ac_ceiling_kw: Option<f64>,
-}
-
-impl GridSnapshot {
-    /// Net site power [kW], positive = import. The snapshot carries the meter's raw watts.
-    pub fn net_power_kw(&self) -> f64 {
-        crate::entities::units::kw_from_w(self.net_power_w)
-    }
 }
 
 impl AssetSnapshot {

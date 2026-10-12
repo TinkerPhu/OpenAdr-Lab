@@ -35,9 +35,6 @@ const CHART_HEIGHT = CELL_CHART_HEIGHT * 3;
  *  read as sitting still, not as amplified rounding noise. */
 const MIN_SPAN_KW = 1;
 
-/** kW, like everything else in this lab. The API speaks watts. */
-const toKw = (watts: number) => watts / 1000;
-
 /**
  * Every VEN's power on one time axis, plus the fleet total.
  *
@@ -89,11 +86,11 @@ export function FleetPowerChart({
 
     for (const ven of history.vens) {
       for (const s of ven.samples) {
-        samples.push({ ts: Date.parse(s.ts), key: ven.venName, value: toKw(s.netPowerW) });
+        samples.push({ ts: Date.parse(s.ts), key: ven.venName, value: s.netPowerKw });
       }
     }
     for (const point of history.fleet) {
-      samples.push({ ts: Date.parse(point.ts), key: FLEET_KEY, value: toKw(point.netPowerW) });
+      samples.push({ ts: Date.parse(point.ts), key: FLEET_KEY, value: point.netPowerKw });
     }
 
     const rows = mergeTimestampedSeries([], samples);

@@ -60,18 +60,18 @@ async fn live(ctx: AppCtx) -> Json<serde_json::Value> {
     let state = ctx.fleet.read().await;
 
     let mut vens = Vec::with_capacity(state.len());
-    let mut sum_w = 0.0_f64;
+    let mut sum_kw = 0.0_f64;
     let mut contributing = 0usize;
 
     for (name, live) in state.iter() {
-        let net_power_w = live.telemetry.as_ref().and_then(crate::fleet::net_power_w);
-        if let Some(w) = net_power_w {
-            sum_w += w;
+        let net_power_kw = live.telemetry.as_ref().and_then(crate::fleet::net_power_kw);
+        if let Some(kw) = net_power_kw {
+            sum_kw += kw;
             contributing += 1;
         }
         vens.push(json!({
             "venName": name,
-            "netPowerW": net_power_w,
+            "netPowerKw": net_power_kw,
             "state": live.state,
             "receivedAt": live.received_at,
         }));
@@ -81,7 +81,7 @@ async fn live(ctx: AppCtx) -> Json<serde_json::Value> {
         "source": "live",
         "vens": vens,
         "fleet": {
-            "netPowerW": sum_w,
+            "netPowerKw": sum_kw,
             // The sum is only as complete as the VENs behind it. Saying how
             // many contributed lets a reader judge it rather than trust it.
             "contributingVens": contributing,
@@ -130,7 +130,7 @@ async fn history(
             json!({
                 "venName": name,
                 "samples": s.samples.iter()
-                    .map(|(ts, v)| json!({"ts": ts, "netPowerW": v}))
+                    .map(|(ts, v)| json!({"ts": ts, "netPowerKw": v}))
                     .collect::<Vec<_>>(),
             })
         })
@@ -138,7 +138,7 @@ async fn history(
 
     let fleet: Vec<_> = fleet_store::sum_over_grid(&series)
         .into_iter()
-        .map(|(ts, sum, n)| json!({"ts": ts, "netPowerW": sum, "contributingVens": n}))
+        .map(|(ts, sum, n)| json!({"ts": ts, "netPowerKw": sum, "contributingVens": n}))
         .collect();
 
     Ok(Json(json!({
@@ -195,7 +195,7 @@ pub async fn fleet_reactions(
         .map(|r| {
             let mut v = serde_json::to_value(r).unwrap_or_else(|_| json!({}));
             if let Some(obj) = v.as_object_mut() {
-                obj.insert("deltaW".into(), json!(r.delta_w()));
+                obj.insert("deltaKw".into(), json!(r.delta_kw()));
             }
             v
         })

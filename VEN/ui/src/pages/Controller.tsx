@@ -188,7 +188,7 @@ export function ControllerPage() {
           nowMs={nowMs}
           extended={expanded}
           pinned
-          gridPowerKw={sim.grid.net_power_w / 1000}
+          gridPowerKw={sim.grid.net_power_kw}
           zones={zones}
           onTogglePin={() => handleTogglePin("grid:accumulated")}
         />
@@ -290,7 +290,7 @@ export function ControllerPage() {
             nowMs={nowMs}
             extended={expanded}
             pinned={false}
-            gridPowerKw={sim.grid.net_power_w / 1000}
+            gridPowerKw={sim.grid.net_power_kw}
             zones={zones}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
           />

@@ -272,7 +272,7 @@ describe("DevicesPage", () => {
   it("shows the device specs table with nameplate values once sim data arrives", () => {
     mockSimData.mockReturnValue({
       ts: "2026-01-01T10:00:00Z",
-      grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
       assets: makeAssets({
         ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
       }),

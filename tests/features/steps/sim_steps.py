@@ -71,6 +71,17 @@ def step_sim_grid_does_not_have_field(context, field):
     )
 
 
+@then("the sim grid net power equals the sum of the asset powers within {tol_kw:g} kW")
+def step_sim_grid_net_power_is_asset_sum(context, tol_kw):
+    assets = context.sim_response.get("assets", {})
+    asset_sum_kw = sum(a["power_kw"] for a in assets.values())
+    net_power_kw = context.sim_response["grid"]["net_power_kw"]
+    assert abs(net_power_kw - asset_sum_kw) <= tol_kw, (
+        f"grid.net_power_kw is {net_power_kw}, the assets' power_kw sum to "
+        f"{asset_sum_kw} ({ {k: a['power_kw'] for k, a in assets.items()} })"
+    )
+
+
 @then('the sim device "{device}" has field "{field}"')
 def step_sim_device_has_field(context, device, field):
     assets = context.sim_response.get("assets", {})

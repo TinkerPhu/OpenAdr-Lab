@@ -109,7 +109,7 @@ def step_delete_capacity_event(context):
 @then("the VEN net site power reaches {target_kw:f} kW within {seconds:d} seconds with tolerance {tol:f}")
 def step_net_power_reaches(context, target_kw, seconds, tol):
     # WP3.4: DISPATCH_SETPOINT steers the battery so net site power hits the
-    # commanded value. /sim grid.net_power_w is in W, positive = import.
+    # commanded value. /sim grid.net_power_kw is in kW, positive = import.
     def fetch():
         resp = ven_get("/sim")
         if not resp.ok:
@@ -119,7 +119,7 @@ def step_net_power_reaches(context, target_kw, seconds, tol):
     def at_target(sim):
         if sim is None:
             return False
-        net_kw = sim.get("grid", {}).get("net_power_w", 0.0) / 1000.0
+        net_kw = sim.get("grid", {}).get("net_power_kw", 0.0)
         return abs(net_kw - target_kw) <= tol
 
     poll_until(

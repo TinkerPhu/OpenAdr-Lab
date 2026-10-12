@@ -139,9 +139,9 @@ describe("the two Fleet charts line up", () => {
     to: new Date(NOW).toISOString(),
     stepSeconds: 60,
     vens: [
-      { venName: "ven-1", samples: [{ ts: new Date(T0).toISOString(), netPowerW: 1000 }] },
+      { venName: "ven-1", samples: [{ ts: new Date(T0).toISOString(), netPowerKw: 1 }] },
     ],
-    fleet: [{ ts: new Date(T0).toISOString(), netPowerW: 1000, contributingVens: 1 }],
+    fleet: [{ ts: new Date(T0).toISOString(), netPowerKw: 1, contributingVens: 1 }],
   };
 
   it("share tMin, tMax and the y-axis width", () => {

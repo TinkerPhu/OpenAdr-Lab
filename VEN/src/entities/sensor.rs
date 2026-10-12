@@ -12,7 +12,7 @@ pub struct SensorSnapshot {
     pub id: Uuid,
     pub ts: DateTime<Utc>,
     pub temperature_c: Option<f64>,
-    pub power_w: Option<f64>,
+    pub power_kw: Option<f64>,
     pub voltage_v: Option<f64>,
     pub raw: SensorRaw,
 }
@@ -27,10 +27,10 @@ pub struct SensorRaw {
     pub source: Option<String>,
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub import_w: Option<f64>,
+    pub import_kw: Option<f64>,
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub export_w: Option<f64>,
+    pub export_kw: Option<f64>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -44,7 +44,7 @@ impl SensorSnapshot {
             id: Uuid::new_v4(),
             ts: DateTime::<Utc>::UNIX_EPOCH,
             temperature_c: None,
-            power_w: None,
+            power_kw: None,
             voltage_v: None,
             raw: SensorRaw::default(),
         }
@@ -54,7 +54,7 @@ impl SensorSnapshot {
 #[derive(Clone, Debug, Deserialize)]
 pub struct SensorInput {
     pub temperature_c: Option<f64>,
-    pub power_w: Option<f64>,
+    pub power_kw: Option<f64>,
     pub voltage_v: Option<f64>,
     pub raw: Option<SensorRaw>,
 }

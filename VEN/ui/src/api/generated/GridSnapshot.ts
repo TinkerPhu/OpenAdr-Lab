@@ -3,7 +3,11 @@
 /**
  * Grid meter snapshot.
  */
-export type GridSnapshot = { net_power_w: number, voltage_v: number, import_kwh: number, export_kwh: number, 
+export type GridSnapshot = { 
+/**
+ * Net site power [kW], positive = import.
+ */
+net_power_kw: number, voltage_v: number, import_kwh: number, export_kwh: number, 
 /**
  * Maximum site import power currently allowed by an active VTN capacity
  * event (`assets::GridState::import_limit_kw`) — NOT a fixed hardware/

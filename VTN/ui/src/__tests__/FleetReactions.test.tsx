@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
 import { FleetReactions } from "../components/FleetReactions";
-import { formatKw } from "../utils/power";
 
 const mockReactions = {
   eventID: "ev-9f3",
@@ -16,9 +15,9 @@ const mockReactions = {
       modificationDateTime: "2026-09-22T09:59:00+00:00",
       replannedAt: "2026-09-22T10:00:20Z",
       replanAttributed: true,
-      powerBeforeW: 4000,
-      powerAfterW: 1500,
-      deltaW: -2500,
+      powerBeforeKw: 4,
+      powerAfterKw: 1.5,
+      deltaKw: -2.5,
     },
     {
       venName: "ven-2",
@@ -27,9 +26,9 @@ const mockReactions = {
       modificationDateTime: null,
       replannedAt: null,
       replanAttributed: false,
-      powerBeforeW: null,
-      powerAfterW: null,
-      deltaW: null,
+      powerBeforeKw: null,
+      powerAfterKw: null,
+      deltaKw: null,
     },
   ],
 };
@@ -46,18 +45,6 @@ function renderReactions() {
     </QueryClientProvider>,
   );
 }
-
-describe("formatKw", () => {
-  it("shows a missing reading as a dash, never as zero", () => {
-    expect(formatKw(null)).toBe("—");
-    expect(formatKw(undefined)).toBe("—");
-    expect(formatKw(0)).toBe("0.00 kW");
-  });
-
-  it("keeps export negative", () => {
-    expect(formatKw(-2500)).toBe("-2.50 kW");
-  });
-});
 
 describe("FleetReactions", () => {
   it("asks for an event before claiming anything about one", async () => {

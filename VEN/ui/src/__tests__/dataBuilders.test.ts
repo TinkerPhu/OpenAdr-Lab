@@ -26,7 +26,7 @@ const TARIFF: ApiTariffSnapshot = makeTariff({
 /** Minimal SimSnapshot with just an ev asset */
 const sim: SimSnapshot = {
   ts: "2026-01-01T10:00:00Z",
-  grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
   assets: makeAssets({ ev: { power_kw: 0, soc: 0.5 } }),
 };
 
@@ -106,7 +106,7 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // PV 4 kW, battery charging 3 kW, base_load 1 kW → grid net = 0
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
       assets: makeAssets({
         pv:        { power_kw: -4.0, soc: null },
         battery:   { power_kw: 3.0,  soc: 0.5  },
@@ -125,7 +125,7 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // gridFraction = 2 / (3+1) = 0.5
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: makeGrid({ net_power_w: 2000, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      grid: makeGrid({ net_power_kw: 2, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
       assets: makeAssets({
         pv:        { power_kw: -2.0, soc: null },
         battery:   { power_kw: 3.0,  soc: 0.5  },
@@ -141,7 +141,7 @@ describe("deriveAssetSummaries — gridFraction", () => {
   it("no PV: full grid import charges at import tariff", () => {
     const gridSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: makeGrid({ net_power_w: 4000, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      grid: makeGrid({ net_power_kw: 4, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
       assets: makeAssets({
         battery:   { power_kw: 3.0, soc: 0.5  },
         base_load: { power_kw: 1.0, soc: null },
@@ -157,7 +157,7 @@ describe("deriveAssetSummaries — gridFraction", () => {
     // Any scenario: sum of consuming asset cost rates must equal grid cost rate
     const pvSim: SimSnapshot = {
       ts: new Date(NOW).toISOString(),
-      grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
       assets: makeAssets({
         pv:        { power_kw: -2.5, soc: null },
         battery:   { power_kw: 2.0,  soc: 0.5  },
@@ -276,7 +276,7 @@ describe("computeForecastEnergy via deriveAssetSummaries", () => {
 describe("deriveAssetSummaries — forced power", () => {
   const forcedSim: SimSnapshot = {
     ts: new Date(NOW).toISOString(),
-    grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+    grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
     assets: makeAssets({
       heater: { power_kw: 3.5, temp_c: 19.9, forced_power_kw: 3.5 },
       ev: { power_kw: 0, soc: 0.5 },
@@ -306,7 +306,7 @@ describe("deriveAssetSummaries — forced power", () => {
 describe("deriveAssetSummaries — static specs", () => {
   const specsSim: SimSnapshot = {
     ts: new Date(NOW).toISOString(),
-    grid: makeGrid({ net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+    grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
     assets: makeAssets({
       ev: { power_kw: 0, soc: 0.5, max_charge_kw: 7.4, battery_kwh: 60 },
       battery: {

@@ -58,7 +58,7 @@ def _net_kw():
     r = ven_get("/sim")
     if not r.ok:
         return None
-    return r.json().get("grid", {}).get("net_power_w", 0.0) / 1000.0
+    return r.json().get("grid", {}).get("net_power_kw", 0.0)
 
 
 @then("the VEN net site power stays at or below {limit_kw:f} kW for {hold_s:d} seconds within {seconds:d} seconds")

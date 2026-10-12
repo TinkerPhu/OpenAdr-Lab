@@ -8,7 +8,7 @@ import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
-import { formatKw } from "../utils/power";
+import { formatKwOrDash } from "@lab/charts/unitFormat";
 import { byVenName } from "../utils/venOrder";
 
 /**
@@ -44,7 +44,7 @@ export function FleetPage() {
         {live.data && (
           <>
             <Typography variant="h4" data-testid="fleet-total">
-              {formatKw(live.data.fleet.netPowerW)}
+              {formatKwOrDash(live.data.fleet.netPowerKw)}
             </Typography>
             {/* The sum is only as complete as the VENs behind it, and saying
                 so is what lets a reader judge it rather than trust it. */}
@@ -129,7 +129,7 @@ export function FleetPage() {
             {byVenName(live.data?.vens ?? [], (v) => v.venName).map((v) => (
               <TableRow key={v.venName} data-testid={`fleet-ven-${v.venName}`}>
                 <TableCell>{v.venName}</TableCell>
-                <TableCell align="right">{formatKw(v.netPowerW)}</TableCell>
+                <TableCell align="right">{formatKwOrDash(v.netPowerKw)}</TableCell>
                 {/* `offline` is the broker's last will, published on a VEN's
                     behalf when it died without saying goodbye — the only way
                     to tell "gone" from "quiet". */}

@@ -23,7 +23,7 @@ vi.mock("../api/client", () => ({
     submitReport: vi.fn().mockResolvedValue({}),
     sensors: vi.fn().mockResolvedValue({
       id: "s1", ts: "2024-01-01T00:00:00Z",
-      temperature_c: 22, power_w: 100, voltage_v: 230, raw: {},
+      temperature_c: 22, power_kw: 0.1, voltage_v: 230, raw: {},
     }),
     postSensors: vi.fn().mockResolvedValue({}),
     };

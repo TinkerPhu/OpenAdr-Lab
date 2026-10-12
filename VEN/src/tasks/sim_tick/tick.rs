@@ -151,7 +151,7 @@ pub(crate) async fn tick_once(
         )
     };
 
-    let measured_net_kw = Some(tick_sim_snap.grid.net_power_kw());
+    let measured_net_kw = Some(tick_sim_snap.grid.net_power_kw);
     super::arbiter_glue::record_arbiter_outcome(
         &state,
         &notifier,

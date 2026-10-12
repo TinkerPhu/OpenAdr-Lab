@@ -5,9 +5,9 @@ Feature: VEN Simulator
   Scenario: Sim endpoint top-level shape is ts + grid + assets
     When I query VEN-1 simulator state
     Then the sim response top-level keys are "ts,grid,assets"
-    And the sim response does not have field "net_power_w"
-    And the sim response does not have field "import_w"
-    And the sim response does not have field "export_w"
+    And the sim response does not have field "net_power_kw"
+    And the sim response does not have field "import_kw"
+    And the sim response does not have field "export_kw"
     And the sim response does not have field "ev"
     And the sim response does not have field "heater"
     And the sim response does not have field "pv"
@@ -16,12 +16,19 @@ Feature: VEN Simulator
 
   Scenario: Sim grid object has expected fields
     When I query VEN-1 simulator state
-    Then the sim grid has field "net_power_w"
+    Then the sim grid has field "net_power_kw"
+    And the sim grid does not have field "net_power_w"
     And the sim grid has field "voltage_v"
     And the sim grid has field "import_kwh"
     And the sim grid has field "export_kwh"
-    And the sim grid does not have field "import_w"
-    And the sim grid does not have field "export_w"
+    And the sim grid does not have field "import_kw"
+    And the sim grid does not have field "export_kw"
+
+  # The meter is in kW like every asset beside it: a reading in another unit
+  # would miss the sum of the asset powers by orders of magnitude.
+  Scenario: Sim grid net power is the sum of the asset powers, in kW
+    When I query VEN-1 simulator state
+    Then the sim grid net power equals the sum of the asset powers within 0.01 kW
 
   Scenario: Sim endpoint shows configured devices
     When I query VEN-1 simulator state
