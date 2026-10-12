@@ -145,6 +145,14 @@ def step_wait_sim_tick(context, seconds):
     time.sleep(seconds)
 
 
+@then("the VEN-1 sim inject no longer holds {field}")
+def step_sim_inject_field_cleared(context, field):
+    r = ven_get("/sim/inject")
+    r.raise_for_status()
+    value = r.json().get(field)
+    assert value is None, f"one-shot inject field {field} still set to {value!r} after a tick"
+
+
 # ── Then: no-replan assertion ─────────────────────────────────────────────────
 
 @then("no plan cycle is triggered within {sec:d} seconds")

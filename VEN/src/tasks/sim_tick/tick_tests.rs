@@ -23,21 +23,20 @@ mod tests {
         Arc::new(Mutex::new(s))
     }
 
-    #[tokio::test]
-    async fn tick_once_runs_without_profile() {
-        let sim = minimal_sim();
+    /// One production tick against `state` and `sim`, with every external port a no-op. A tick
+    /// test is about what the tick computes, not about who is watching: the no-op ports are the
+    /// ones a VEN outside a monitored fleet runs with.
+    async fn run_one_tick(state: AppState, sim: Arc<Mutex<SimState>>) {
         let (trigger_tx, _trigger_rx) =
             watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
-        let trigger_tx = Arc::new(trigger_tx);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
-        let event_tx = Arc::new(event_bcast_tx);
         let _pc = tick_once(
-            AppState::new(),
+            state,
             sim,
             "test-ven".to_string(),
-            trigger_tx,
+            Arc::new(trigger_tx),
             "/tmp".to_string(),
-            event_tx,
+            Arc::new(event_bcast_tx),
             0,   // persist_counter
             100, // persist_every_ticks — no persist this tick
             1,   // tick_s
@@ -51,13 +50,33 @@ mod tests {
             None,  // comms_loss_config
             100.0, // grid_max_import_kw
             100.0, // grid_max_export_kw
-            // A tick test is about what the tick computes, not about who is
-            // watching: the no-op port is the same one a VEN outside a
-            // monitored fleet runs with.
-            std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
+            Arc::new(crate::controller::telemetry_port::NoTelemetry),
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn tick_once_runs_without_profile() {
+        run_one_tick(AppState::new(), minimal_sim()).await;
         // passes if no panic
+    }
+
+    /// A `pv_irradiance` inject is one-shot: the tick that applies it also clears it, so the
+    /// offset decays from that tick on (the decay itself is pinned in `simulator::pv_smoothing`).
+    #[tokio::test]
+    async fn tick_once_clears_pv_irradiance_inject_after_one_tick() {
+        let state = AppState::new();
+        let mut inject = state.inject_state().await;
+        inject.pv_irradiance = Some(0.8);
+        state.set_inject_state(inject).await;
+
+        run_one_tick(state.clone(), battery_pv_sim()).await;
+
+        assert_eq!(
+            state.inject_state().await.pv_irradiance,
+            None,
+            "the tick that applies a pv_irradiance inject must consume it"
+        );
     }
 
     // ── deviation arbiter: §5.1/§5.3 regression safeguard, tick_once-level ──
@@ -168,11 +187,6 @@ mod tests {
     #[tokio::test]
     async fn deviation_arbiter_absorbs_unplanned_pv_surplus_end_to_end() {
         let sim = battery_pv_sim();
-        let (trigger_tx, _trigger_rx) =
-            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
-        let trigger_tx = Arc::new(trigger_tx);
-        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
-        let event_tx = Arc::new(event_bcast_tx);
         let state = AppState::new();
 
         let now = chrono::Utc::now();
@@ -186,32 +200,7 @@ mod tests {
         inject.pv_irradiance = Some(1.0);
         state.set_inject_state(inject).await;
 
-        let _pc = tick_once(
-            state.clone(),
-            sim,
-            "test-ven".to_string(),
-            trigger_tx,
-            "/tmp".to_string(),
-            event_tx,
-            0,
-            100,
-            1,
-            Arc::new(crate::controller::NoopWeatherPort),
-            None,
-            Arc::new(crate::controller::NoopMeasurementPort),
-            false,
-            Arc::new(crate::controller::NoopMeasurementPort),
-            false,
-            crate::services::notify::Notifier::new(None),
-            None,  // comms_loss_config
-            100.0, // grid_max_import_kw
-            100.0, // grid_max_export_kw
-            // A tick test is about what the tick computes, not about who is
-            // watching: the no-op port is the same one a VEN outside a
-            // monitored fleet runs with.
-            std::sync::Arc::new(crate::controller::telemetry_port::NoTelemetry),
-        )
-        .await;
+        run_one_tick(state.clone(), sim).await;
 
         let sim_snap = state.sim().await.expect("sim snapshot must be published");
         let battery = sim_snap

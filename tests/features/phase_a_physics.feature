@@ -54,6 +54,13 @@ Feature: Phase A — Asset physics and capability coverage
     Then the response status is 200
     And the capability max_import_kw is less than 0.0
 
+  # A pv_irradiance override is one-shot: the tick that applies it clears it, and the offset
+  # decays from there (the decay is pinned in VEN/src/simulator/pv_smoothing.rs).
+  Scenario: a pv_irradiance override is consumed after one tick
+    When I POST a sim override setting pv_irradiance to 0.8
+    And I wait 5 seconds for the sim to tick
+    Then the VEN-1 sim inject no longer holds pv_irradiance
+
   Scenario: grid_export_limit_kw sim override actually curtails PV output
     When I POST a sim override with full PV irradiance
     And I POST a sim override setting grid_export_limit_kw to 1.0
