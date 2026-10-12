@@ -91,6 +91,13 @@ The rules, and why each exists:
      `VtnPort` (`app_ctx::Vtn`), so a handler can be driven with `MockVtn`. The report routes
      and `/vtn/status` held the concrete `VtnClient` and could not be unit-tested.
 
+  15. No request authenticates itself to the VTN outside `lab-core/src/vtn_auth.rs`: no
+     `bearer_auth(`, `basic_auth(`, `AUTHORIZATION` header or `"Bearer ` string in the VEN, the
+     BFF or the rest of `lab-core` (R-135). `ClientCredentials::send` is the one place that
+     attaches the token and the one place that re-authenticates and retries after a 401 or 403;
+     a request that attaches a token by hand has neither. Before R-135 the VEN's report POST was
+     such a request, and it was the one that did not re-authenticate.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -105,6 +112,8 @@ from audit_file_sizes import strip_test_blocks, is_test_only_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VEN_SRC = REPO_ROOT / "VEN" / "src"
+BFF_SRC = REPO_ROOT / "VTN" / "bff" / "src"
+LAB_CORE_SRC = REPO_ROOT / "lab-core" / "src"
 
 # Doc comments (///, //!) and ordinary ones. Enough for Rust source: this is a
 # dependency check, not a parser, and an import never hides inside a string.
@@ -220,6 +229,11 @@ UNIT_CONVERSION = (
 )
 
 
+# How a request authenticates itself by hand, instead of through `ClientCredentials::send`.
+HAND_ATTACHED_TOKEN = (
+    r"\bbearer_auth\(|\bbasic_auth\(|\bAUTHORIZATION\b|(?i:\"authorization\")|\"Bearer "
+)
+
 CHECKS = [
     ("profile in inner rings",
      lambda: forbid("profile", [VEN_SRC / "entities", VEN_SRC / "controller",
@@ -259,6 +273,10 @@ CHECKS = [
     ("an incoming event value read without its declared unit",
      lambda: forbid("payload-value", [VEN_SRC],
                     r"\.numeric\(\)|\bnumeric_value\(|PayloadValue::(Number|Integer)")),
+    ("a VTN request authenticated outside lab-core's vtn_auth",
+     lambda: [h for h in forbid("vtn-auth", [VEN_SRC, BFF_SRC, LAB_CORE_SRC],
+                                HAND_ATTACHED_TOKEN)
+              if "lab-core/src/vtn_auth.rs" not in h.replace(os.sep, "/")]),
 ]
 
 
