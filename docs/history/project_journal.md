@@ -15350,3 +15350,18 @@ field by field over all 18 scenarios and found every kept field identical. The d
 tripped twice (one function a line longer, five more duplicated test windows); both were fixed by
 consolidating, not by raising the baseline. Left as is: `BatteryScalars` (the port's
 `milp_params`) is now read only by tests, which is the asset answering for itself, not a copy.
+
+## Audit rule 15: no VTN request authenticated outside `vtn_auth` (refactor/vtn-auth-audit-rule)
+
+**What.** `scripts/audit_ven_architecture.py` gained rule 15: `bearer_auth(`, `basic_auth(`, an
+`AUTHORIZATION` header or a `"Bearer ` string in production code of the VEN, the BFF or `lab-core`
+fails the audit unless it is in `lab-core/src/vtn_auth.rs`. The audit now reads `VTN/bff/src` and
+`lab-core/src` for this one rule; its other rules stay VEN-only.
+
+**Why.** R-135 made `ClientCredentials::send` the one place that attaches the token and
+re-authenticates after a 401 or 403, but only by how the two clients happened to be written. The
+request that lacked the retry before R-135 (the VEN's report POST) was a hand-built one; the rule
+makes the next one fail on the day it is written.
+
+**Issues.** None. Checked by planting a `bearer_auth` in the BFF client and an `AUTHORIZATION`
+header in the VEN client: both reported, exit 1; clean again once removed.

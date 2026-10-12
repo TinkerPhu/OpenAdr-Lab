@@ -406,6 +406,9 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     a non-2xx VTN answer is `DomainError::VtnRejected`, sensor types live in `entities/sensor.rs`)
     no `crate::vtn` in routes/ or tasks/ (the adapters reach the VTN through `VtnPort`, held as
     `app_ctx::Vtn`, so a handler can be driven with `MockVtn`)
+    no request authenticated by hand (`bearer_auth(`, `basic_auth(`, `AUTHORIZATION`, `"Bearer `)
+    in the VEN, the BFF or `lab-core` outside `lab-core/src/vtn_auth.rs` — every VTN request goes
+    through `ClientCredentials::send`, which attaches the token and re-authenticates once
     no inline unit conversion (W<->kW, seconds/Duration -> hours, kW x step -> kWh, frac -> %)
     outside `entities/units.rs`
     no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
