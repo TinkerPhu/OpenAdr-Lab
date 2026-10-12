@@ -15391,3 +15391,25 @@ old column exists. The compiler does not follow the untyped readers (the BFF's k
 meter equals the sum of the asset powers, which a watt value misses by a factor of 1000. Roll-out
 order is BFF before VENs: the BFF reads the meter by key, so a VEN on the old image is absent from
 the fleet view for that hour, never wrong by 1000.
+
+## R-62: the PV one-shot inject is tested in the tick, not against a live VEN (fix/r62-pv-one-shot-test)
+
+**What.** `VEN/ui/src/__tests__/pv_irradiance_one_shot.test.ts` is deleted. Its one assertion
+nothing else made, that the tick applying a `pv_irradiance` inject also clears it, is now
+`tick_once_clears_pv_irradiance_inject_after_one_tick` (`tasks/sim_tick/tick_tests.rs`) and the
+scenario "a pv_irradiance override is consumed after one tick" (`phase_a_physics.feature`). Its
+other two were covered already: the override taking effect by the two `pv_irradiance override`
+scenarios, the decay by `simulator/pv_smoothing.rs` and `pv.rs`'s blend tests. The three
+`tick_once` tests share one `run_one_tick` helper instead of each spelling out its 17 arguments.
+
+**Why.** The file tested backend tick behaviour from the UI unit suite, against a live VEN, with
+10 s of sleeps; it skipped itself unless `VITE_VEN_URL` was set, so it guarded nothing in a normal
+run, and its old fallback URL was the cause of the ven-1 PV-inject incidents.
+
+**Issues.** The register row blamed the flaky decay assertion on live weather moving the natural
+irradiance, and proposed mocking the weather. The asserted value, `pv.irradiance`, is the
+time-of-day model plus the offset and never reads the weather (that feeds `weather_power_kw`), and
+the model moves about 0.001 in 10 s against an expected decay of about 0.035. The likelier cause
+is other writers to the same VEN's `/sim/inject` during the test, unverified. The new tick test
+was seen red first by disabling the clear in `post_lock.rs`.
+

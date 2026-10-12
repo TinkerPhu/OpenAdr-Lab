@@ -976,7 +976,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `docker compose logs <service> > file` before any redeploy while actively investigating a
   live incident**, even if the redeploy itself is the fix.
 - **Round 4 — actual root cause: a "skip if unreachable" integration test
-  (`pv_irradiance_one_shot.test.ts`) had a fallback default that pointed straight at
+  (`pv_irradiance_one_shot.test.ts`, deleted 2026-10-12, R-62) had a fallback default that pointed straight at
   production hardware.** The intent ("skip cleanly in CI, run for real when a dev points
   it at a live VEN") was sound; the mistake was making the *unset* case default to
   Node1's real `ven-1` instead of failing safe (skip). On a LAN where every dev/AI
