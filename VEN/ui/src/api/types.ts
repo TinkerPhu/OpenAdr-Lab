@@ -4,6 +4,7 @@
 // OpenADR objects (aliases of openleadr-rs types ts-rs cannot derive on), and two array aliases.
 import type { ActivePenaltyRule } from "./generated/ActivePenaltyRule";
 import type { AlertWindow } from "./generated/AlertWindow";
+import type { AllTimelinesResponse } from "./generated/AllTimelinesResponse";
 import type { ArbiterDiagnostics } from "./generated/ArbiterDiagnostics";
 import type { ArbiterSettings } from "./generated/ArbiterSettings";
 import type { AssetAllocation } from "./generated/AssetAllocation";
@@ -101,6 +102,8 @@ import type { TariffSnapshot } from "./generated/TariffSnapshot";
 import type { TaskStatusEntry } from "./generated/TaskStatusEntry";
 import type { TickSample } from "./generated/TickSample";
 import type { TimeRange } from "./generated/TimeRange";
+import type { TimelinePointBody } from "./generated/TimelinePointBody";
+import type { TimelineZone } from "./generated/TimelineZone";
 import type { UpdateArbiterSettingsBody } from "./generated/UpdateArbiterSettingsBody";
 import type { UpdateEvSettingsBody } from "./generated/UpdateEvSettingsBody";
 import type { UserNotification } from "./generated/UserNotification";
@@ -120,6 +123,7 @@ import type { WeatherStatus } from "./generated/WeatherStatus";
 export type {
   ActivePenaltyRule,
   AlertWindow,
+  AllTimelinesResponse,
   ArbiterDiagnostics,
   ArbiterSettings,
   AssetAllocation,
@@ -217,6 +221,8 @@ export type {
   TaskStatusEntry,
   TickSample,
   TimeRange,
+  TimelinePointBody,
+  TimelineZone,
   UpdateArbiterSettingsBody,
   UpdateEvSettingsBody,
   UserNotification,
@@ -239,6 +245,8 @@ export type {
 // The client converts a few wire fields on arrival (ISO timestamps to epoch ms). Each model is
 // stated as its wire type with those fields replaced, so the rest cannot drift.
 
+/** `TimelinePointBody` with `ts` in epoch ms (`api.timeline`, `api.allTimelines`). */
+export type AssetTimelinePoint = Omit<TimelinePointBody, "ts"> & { ts: number };
 /** `PlanHistorySample` with `created_at` in epoch ms (`api.historyPlans`). */
 export type PlanHistoryRow = Omit<PlanHistorySample, "created_at"> & { created_at: number };
 /** `TickSample` with `ts` in epoch ms (`api.historyTicks`). */

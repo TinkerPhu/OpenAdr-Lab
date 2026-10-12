@@ -18,7 +18,6 @@ No authentication. CORS: any origin.
 | GET | `/health` | Liveness check |
 | GET | `/metrics` | Prometheus metrics |
 | GET | `/trace/events` | Recent OpenADR event trace |
-| GET | `/trace/history` | Historical event trace |
 
 ### OpenADR data (polled from VTN)
 

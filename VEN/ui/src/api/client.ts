@@ -7,7 +7,7 @@ import type {
   EvSettings, UpdateEvSettingsBody, EvUsageSimState,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   BaselineOverride, CreateBaselineOverrideBody,
-  ZoneDef,
+  ZoneDef, AllTimelinesResponse, TimelinePointBody, AssetTimelinePoint,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
   ForecastAccuracyRow, ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
   TickSample, GridSample, EventReceived, ReportSent,
@@ -17,9 +17,13 @@ import type {
   MeasurementResponse,
   WeatherResponse,
 } from "./types";
-import type { AssetTimelinePoint } from "../components/controller/types";
 import { debugLog } from "@lab/charts/debugLog";
 import { parseEvSessionConflict } from "./evSessionConflict";
+
+/** A wire timeline point with its ISO `ts` as epoch ms, the one conversion both timeline calls share. */
+function toAssetTimelinePoint(pt: TimelinePointBody): AssetTimelinePoint {
+  return { ts: new Date(pt.ts).getTime(), values: pt.values };
+}
 
 let reqCounter = 0;
 function requestId(): string {
@@ -213,12 +217,6 @@ export class VenApi {
     return r.json();
   }
 
-  async assetHistory(assetId: string, limit = 100): Promise<Record<string, unknown>[]> {
-    const r = await this.getReq(`/trace/history?asset=${assetId}&limit=${limit}`);
-    if (!r.ok) throw new Error(`trace/history ${r.status}`);
-    return r.json();
-  }
-
   async simSchema(): Promise<Record<string, ControlDescriptor[]>> {
     const r = await this.getReq("/sim/schema");
     if (!r.ok) throw new Error(`sim/schema ${r.status}`);
@@ -323,8 +321,8 @@ export class VenApi {
     const path = `/timeline/${encodeURIComponent(assetId)}${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/${assetId} ${r.status}`);
-    const raw: { ts: string; values: Record<string, number> | null }[] = await r.json();
-    return raw.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values }));
+    const raw: TimelinePointBody[] = await r.json();
+    return raw.map(toAssetTimelinePoint);
   }
 
   async allTimelines(
@@ -338,16 +336,9 @@ export class VenApi {
     const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/all ${r.status}`);
-    const envelope: {
-      zones: ZoneDef[];
-      timelines: Record<string, { ts: string; values: Record<string, number> | null }[]>;
-      now: string;
-    } = await r.json();
+    const envelope: AllTimelinesResponse = await r.json();
     const timelines = Object.fromEntries(
-      Object.entries(envelope.timelines).map(([id, pts]) => [
-        id,
-        pts.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values })),
-      ])
+      Object.entries(envelope.timelines).map(([id, pts]) => [id, pts.map(toAssetTimelinePoint)])
     );
     return { zones: envelope.zones, timelines, now: new Date(envelope.now).getTime() };
   }

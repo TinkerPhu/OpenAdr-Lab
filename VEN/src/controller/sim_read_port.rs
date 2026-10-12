@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use lab_core::time_series::TimeSeries;
 
-use crate::entities::asset::{AssetCapabilityView, AssetTraceRow, ComfortRate};
+use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::timeline::TimelineSnapshot;
@@ -38,15 +38,6 @@ pub trait SimReadPort: Send + Sync {
         timespan: Duration,
         now: DateTime<Utc>,
     ) -> Option<TimeSeries>;
-
-    /// The asset's recorded states over the last `window`, oldest first, each as its
-    /// `state_values()` plus `power_kw`. Empty for an unknown asset.
-    async fn asset_trace(
-        &self,
-        asset_id: &str,
-        window: Duration,
-        now: DateTime<Utc>,
-    ) -> Vec<AssetTraceRow>;
 
     /// The asset's built-in comfort curve; `None` = unknown asset.
     async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>>;

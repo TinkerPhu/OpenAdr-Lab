@@ -16,7 +16,7 @@ use crate::assets::ShiftableLoadAsset;
 use crate::controller::headroom_port::HeadroomPort;
 use crate::controller::sim_read_port::SimReadPort;
 use crate::controller::sim_roster_port::{CancelOutcome, SimRosterPort};
-use crate::entities::asset::{AssetCapabilityView, AssetTraceRow, ComfortRate};
+use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::capacity_curve::CapacityCurves;
 use crate::entities::device_session::ShiftableLoad;
@@ -27,7 +27,6 @@ use crate::entities::DomainError;
 use chrono::Duration;
 use chrono::{DateTime, Utc};
 use lab_core::time_series::{Interpolation, TimeSeries};
-use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct SimHandle {
@@ -156,39 +155,6 @@ impl SimReadPort for SimHandle {
             samples,
             interpolation: Interpolation::Linear,
         })
-    }
-
-    async fn asset_trace(
-        &self,
-        asset_id: &str,
-        window: Duration,
-        now: DateTime<Utc>,
-    ) -> Vec<AssetTraceRow> {
-        let lock_start = std::time::Instant::now();
-        let sim = self.sim.lock().await;
-        let lock_wait_ms = lock_start.elapsed().as_millis();
-        if lock_wait_ms > 100 {
-            warn!(
-                lock_wait_ms,
-                asset = %asset_id,
-                "asset trace: sim mutex wait was long (planner may be running)"
-            );
-        } else {
-            debug!(lock_wait_ms, asset = %asset_id, "asset trace: sim mutex acquired");
-        }
-        let Some((entry, cfg)) = sim.find_asset(asset_id) else {
-            return Vec::new();
-        };
-        entry
-            .history
-            .slice(window, now)
-            .into_iter()
-            .map(|p| {
-                let mut values = cfg.state_values(&p.state);
-                values.insert("power_kw".into(), p.power_kw);
-                AssetTraceRow { ts: p.ts, values }
-            })
-            .collect()
     }
 
     async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>> {
@@ -376,28 +342,6 @@ mod tests {
             .asset_history("nope", Duration::seconds(60), now)
             .await
             .is_none());
-    }
-
-    #[tokio::test]
-    async fn asset_trace_rows_are_state_values_plus_power_and_empty_for_an_unknown_asset() {
-        let (handle, sim) = handle_with(&all_kinds());
-        let now = Utc::now();
-        sim.lock()
-            .await
-            .record_history(now - Duration::seconds(5), 10.0, -5.0);
-        let rows = handle
-            .asset_trace(crate::ids::ASSET_BATTERY, Duration::hours(24), now)
-            .await;
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].values.contains_key("power_kw"));
-        assert!(
-            rows[0].values.contains_key("soc"),
-            "the battery's own state values"
-        );
-        assert!(handle
-            .asset_trace("nope", Duration::hours(24), now)
-            .await
-            .is_empty());
     }
 
     #[tokio::test]

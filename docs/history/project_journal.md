@@ -15430,3 +15430,23 @@ simulator, used it. It was decided for deletion on 2026-10-09.
 **Issues.** `architectural_smells.md` reported the deletion as done by `docs/register-cleanup`; it
 was not, and the two `#[allow(dead_code)]` lines that cited it stayed. A register entry that says
 "done by branch X" needs the code checked, not the branch name.
+
+## R-133: the timeline bodies are generated (refactor/r133-timeline-types)
+
+**What.** `/timeline/:asset_id` and `/timeline/all` answer typed bodies, `TimelinePointBody`,
+`TimelineZone` and `AllTimelinesResponse` (`routes/timeline.rs`), instead of `json!()`; one
+constructor drops NaN values, replacing `serialize_values` and three `serialize_*` functions. The
+VEN UI's `client.ts` parses into the generated types, and `AssetTimelinePoint` is stated over
+`TimelinePointBody` like the other epoch-ms models. `ZoneDef` stays the chart kit's own type:
+`allTimelines` hands the generated `TimelineZone[]` to it, so `tsc` fails if they part. Deleted:
+`GET /trace/history`, `SimReadPort::asset_trace`, `AssetTraceRow` and the UI's `api.assetHistory`,
+which nothing called. Filed: R-139, `/history/:asset_id` and `/forecast/:asset_id` have no UI reader.
+
+**Why.** These were the last bodies the UI copied by hand (R-133), and a wire change in them
+showed up only in E2E.
+
+**Issues.** The row listed three bodies; only the timeline pair had a UI copy. The wire contract
+was pinned before the refactor by `all_timelines_body_wire_shape_is_pinned` (green on the old
+`json!` code, unchanged after), so the switch to typed bodies is shown not to change a byte the UI
+reads, key order aside. The name `TimelinePoint` was taken by `entities::timeline::TimelinePoint`,
+so the wire type follows the route-body naming (`...Body`, `...Response`).

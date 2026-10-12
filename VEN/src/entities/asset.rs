@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -362,14 +361,6 @@ pub struct AssetCapabilityView {
     /// forms open on these instead of keeping their own (R-123).
     pub default_target_temp_c: Option<f64>,
     pub default_target_soc_frac: Option<f64>,
-}
-
-/// One row of an asset's recent state history: its timestamp and its `state_values()` (plus
-/// `power_kw`) at that moment.
-#[derive(Debug, Clone)]
-pub struct AssetTraceRow {
-    pub ts: DateTime<Utc>,
-    pub values: std::collections::HashMap<String, f64>,
 }
 
 /// What an asset reports to the history recorder about itself at one tick — the asset's

@@ -78,6 +78,8 @@ ui_types![
     crate::routes::hems::CreateBaselineOverrideBody,
     crate::routes::hems::ev_conflict::EvConflictBody,
     crate::routes::error::ErrorBody,
+    // Timeline bodies (increment 6)
+    crate::routes::timeline::AllTimelinesResponse,
 ];
 
 /// Where the UI imports the generated files from.

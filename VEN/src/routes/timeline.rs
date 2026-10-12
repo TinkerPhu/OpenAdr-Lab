@@ -4,8 +4,9 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use ts_rs::TS;
 
 use crate::entities::timeline::TimelineSnapshot;
 
@@ -74,48 +75,48 @@ pub fn resolve_resolution_s(params: &TimelineParams, total_window_s: f64) -> u64
     snap_up_to_nice(raw.max(1))
 }
 
-/// Drop NaN entries and serialize a values map to JSON.
-fn serialize_values(values: &HashMap<String, f64>) -> serde_json::Map<String, serde_json::Value> {
-    values
-        .iter()
-        .filter(|(_, v)| !v.is_nan())
-        .map(|(k, v)| (k.clone(), serde_json::json!(v)))
-        .collect()
+/// One point of a `/timeline/*` body: `values` is the sparse map of what is known at `ts` (NaN
+/// dropped), `null` for a history bucket that holds no sample.
+#[derive(Debug, Clone, Serialize, TS)]
+pub struct TimelinePointBody {
+    pub ts: DateTime<Utc>,
+    pub values: Option<BTreeMap<String, f64>>,
 }
 
-/// Serialize a grid-aligned timeline: each entry is either a real point or null-valued.
-/// Grid timestamps + resampled Option<HashMap> values → JSON array.
-/// A `None` values entry serializes as `{"ts": "...", "values": null}`.
-pub fn serialize_grid_timeline(
-    timestamps: &[DateTime<Utc>],
-    values: &[Option<HashMap<String, f64>>],
-) -> Vec<serde_json::Value> {
-    timestamps
-        .iter()
-        .zip(values.iter())
-        .map(|(ts, opt_vals)| match opt_vals {
-            Some(vals) => serde_json::json!({ "ts": ts, "values": serialize_values(vals) }),
-            None => serde_json::json!({ "ts": ts, "values": null }),
-        })
-        .collect()
+impl TimelinePointBody {
+    fn new(ts: DateTime<Utc>, values: Option<&HashMap<String, f64>>) -> Self {
+        let values = values.map(|v| {
+            v.iter()
+                .filter(|(_, x)| !x.is_nan())
+                .map(|(k, x)| (k.clone(), *x))
+                .collect()
+        });
+        Self { ts, values }
+    }
 }
 
-/// Serialize a single AssetTimelinePoint (the now-point) to JSON.
-pub fn serialize_now_point(
-    point: &crate::controller::trace::AssetTimelinePoint,
-) -> serde_json::Value {
-    serde_json::json!({ "ts": point.ts, "values": serialize_values(&point.values) })
+impl From<&crate::controller::trace::AssetTimelinePoint> for TimelinePointBody {
+    fn from(p: &crate::controller::trace::AssetTimelinePoint) -> Self {
+        Self::new(p.ts, Some(&p.values))
+    }
 }
 
-/// Serialize real (un-resampled) future timeline points verbatim: one entry per
-/// actual plan slot at its native per-zone step size, no averaging/blending.
-pub fn serialize_future_points(
-    points: &[crate::controller::trace::AssetTimelinePoint],
-) -> Vec<serde_json::Value> {
-    points
-        .iter()
-        .map(|p| serde_json::json!({ "ts": p.ts, "values": serialize_values(&p.values) }))
-        .collect()
+/// One planning zone of the active plan, as a window on the time axis (the chart kit's `ZoneDef`).
+#[derive(Debug, Clone, Serialize, TS)]
+pub struct TimelineZone {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    pub step_s: u64,
+}
+
+/// `GET /timeline/all`: every asset's timeline plus `"grid"`, the plan's zones, and the server
+/// clock the timestamps were built against (the UI positions its charts by this `now`, not by its
+/// own clock).
+#[derive(Debug, Clone, Serialize, TS)]
+pub struct AllTimelinesResponse {
+    pub zones: Vec<TimelineZone>,
+    pub timelines: BTreeMap<String, Vec<TimelinePointBody>>,
+    pub now: DateTime<Utc>,
 }
 
 /// GET /timeline/:asset_id — grid-aligned past+future timeline for one asset.
@@ -155,7 +156,7 @@ pub async fn get_timeline(
         resolution_s,
     ) {
         None => crate::routes::error::unknown_asset(&asset_id),
-        Some(arr) => Json(serde_json::Value::Array(arr)).into_response(),
+        Some(points) => Json(points).into_response(),
     }
 }
 
@@ -177,7 +178,7 @@ pub fn build_grid_aligned_array(
     hours_forward: f64,
     history_grid: &[DateTime<Utc>],
     resolution_s: u64,
-) -> Option<Vec<serde_json::Value>> {
+) -> Option<Vec<TimelinePointBody>> {
     use crate::controller::timeline::{build_asset_timeline, build_now_point, resample_to_grid};
     use crate::entities::timeline::TimeWindow;
 
@@ -201,9 +202,13 @@ pub fn build_grid_aligned_array(
     let hist_resampled = resample_to_grid(&raw_history, history_grid, resolution_s);
 
     // Concatenate: history_grid (resampled) + now_point + future (real plan slots).
-    let mut out = serialize_grid_timeline(history_grid, &hist_resampled);
-    out.push(serialize_now_point(&now_point));
-    out.extend(serialize_future_points(&raw_future));
+    let mut out: Vec<TimelinePointBody> = history_grid
+        .iter()
+        .zip(&hist_resampled)
+        .map(|(ts, values)| TimelinePointBody::new(*ts, values.as_ref()))
+        .collect();
+    out.push((&now_point).into());
+    out.extend(raw_future.iter().map(TimelinePointBody::from));
 
     Some(out)
 }
@@ -214,7 +219,7 @@ pub fn build_grid_aligned_array(
 fn zones_from_plan(
     plan: Option<&crate::entities::plan::Plan>,
     now: DateTime<Utc>,
-) -> Vec<serde_json::Value> {
+) -> Vec<TimelineZone> {
     let Some(plan) = plan else { return vec![] };
     if plan.horizon.zones.is_empty() {
         return vec![];
@@ -224,11 +229,11 @@ fn zones_from_plan(
     for zone in &plan.horizon.zones {
         let zone_end = cursor + chrono::Duration::seconds((zone.step_s * zone.slots as u64) as i64);
         if zone_end > now {
-            result.push(serde_json::json!({
-                "from": cursor,
-                "to": zone_end,
-                "step_s": zone.step_s,
-            }));
+            result.push(TimelineZone {
+                from: cursor,
+                to: zone_end,
+                step_s: zone.step_s,
+            });
         }
         cursor = zone_end;
     }
@@ -259,7 +264,7 @@ pub async fn get_timeline_all(
     let snap = sim_read.timeline_snapshot(now).await;
     let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
-    let mut timelines: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    let mut timelines = BTreeMap::new();
 
     // All sim assets
     for asset_id in &known_assets {
@@ -274,7 +279,7 @@ pub async fn get_timeline_all(
             &history_grid,
             resolution_s,
         ) {
-            timelines.insert(asset_id.clone(), serde_json::Value::Array(arr));
+            timelines.insert(asset_id.clone(), arr);
         }
     }
 
@@ -290,24 +295,15 @@ pub async fn get_timeline_all(
         &history_grid,
         resolution_s,
     ) {
-        timelines.insert("grid".to_string(), serde_json::Value::Array(arr));
+        timelines.insert("grid".to_string(), arr);
     }
 
     let zones = zones_from_plan(plan.as_ref(), now);
-    Json(build_all_timelines_response(zones, timelines, now))
-}
-
-/// Pure assembly of the `/timeline/all` response body — split out from the handler so
-/// the `now` field (the server clock this response's timestamps are built against) is
-/// unit-testable without an `AppCtx`. The client uses this `now` instead of its own
-/// `Date.now()` to position chart data, so a skewed client clock can't stretch a
-/// chart's time axis to swallow the whole dataset.
-fn build_all_timelines_response(
-    zones: Vec<serde_json::Value>,
-    timelines: serde_json::Map<String, serde_json::Value>,
-    now: DateTime<Utc>,
-) -> serde_json::Value {
-    serde_json::json!({ "zones": zones, "timelines": timelines, "now": now })
+    Json(AllTimelinesResponse {
+        zones,
+        timelines,
+        now,
+    })
 }
 
 #[cfg(test)]
@@ -324,13 +320,63 @@ mod tests {
         }
     }
 
+    /// The `/timeline/all` body as the VEN UI reads it, pinned field for field: a resampled
+    /// history point, an empty history bucket (`values: null`), the now-point with a NaN value
+    /// dropped, the real plan slots, and the zones. This JSON is the wire contract of
+    /// `api/client.ts`'s `allTimelines`; a refactor of how it is built must leave it unchanged.
     #[test]
-    fn test_build_all_timelines_response_carries_the_injected_now() {
-        let now = chrono::Utc::now();
-        let body = build_all_timelines_response(vec![], serde_json::Map::new(), now);
-        let parsed_now: DateTime<Utc> = serde_json::from_value(body["now"].clone())
-            .expect("`now` must deserialize back into a DateTime<Utc>");
-        assert_eq!(parsed_now, now);
+    fn all_timelines_body_wire_shape_is_pinned() {
+        use crate::entities::timeline::TimelinePoint;
+        let now: DateTime<Utc> = "2026-10-12T12:00:00Z".parse().unwrap();
+        let plan = make_plan_with_net_import(300, now, &[1.0, 2.0]);
+        let snap = TimelineSnapshot {
+            assets: std::collections::HashMap::new(),
+            grid_history: vec![TimelinePoint {
+                ts: now - Duration::seconds(60),
+                power_kw: 5.0,
+                state_values: std::collections::HashMap::new(),
+            }],
+            grid_current_kw: f64::NAN,
+        };
+        let history_grid = vec![now - Duration::seconds(120), now - Duration::seconds(60)];
+        let arr = build_grid_aligned_array(
+            "grid",
+            &std::collections::HashSet::new(),
+            &snap,
+            Some(&plan),
+            now,
+            120.0 / 3600.0,
+            600.0 / 3600.0,
+            &history_grid,
+            60,
+        )
+        .expect("grid asset always resolves");
+        let body = serde_json::to_value(AllTimelinesResponse {
+            zones: zones_from_plan(Some(&plan), now),
+            timelines: BTreeMap::from([("grid".to_string(), arr)]),
+            now,
+        })
+        .unwrap();
+        let expected = serde_json::json!({
+            "now": "2026-10-12T12:00:00Z",
+            "timelines": {
+                "grid": [
+                    { "ts": "2026-10-12T11:58:00Z", "values": null },
+                    { "ts": "2026-10-12T11:59:00Z", "values": { "power_kw": 5.0 } },
+                    { "ts": "2026-10-12T12:00:00Z", "values": {} },
+                    { "ts": "2026-10-12T12:00:00Z", "values": {
+                        "co2_rate_g_h": 300.0, "cost_rate_eur_h": 0.25,
+                        "export_limit_kw": 10.0, "import_limit_kw": 25.0, "power_kw": 1.0 } },
+                    { "ts": "2026-10-12T12:05:00Z", "values": {
+                        "co2_rate_g_h": 600.0, "cost_rate_eur_h": 0.5,
+                        "export_limit_kw": 10.0, "import_limit_kw": 25.0, "power_kw": 2.0 } }
+                ]
+            },
+            "zones": [
+                { "from": "2026-10-12T12:00:00Z", "to": "2026-10-12T12:10:00Z", "step_s": 300 }
+            ]
+        });
+        assert_eq!(body, expected);
     }
 
     #[test]
@@ -486,16 +532,10 @@ mod tests {
         let plan = make_plan_with_step(600, 288, now);
         let zones = zones_from_plan(Some(&plan), now);
         assert_eq!(zones.len(), 1, "single-zone plan produces one zone entry");
-        assert_eq!(zones[0]["step_s"], 600);
+        assert_eq!(zones[0].step_s, 600);
         // from must be the plan's grid origin (horizon.start_time), not the request time.
-        // Parse both sides to DateTime to avoid Z vs +00:00 format differences.
-        let zone_from: chrono::DateTime<chrono::Utc> = zones[0]["from"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .expect("zone from must be a valid RFC 3339 timestamp");
         assert_eq!(
-            zone_from, plan.horizon.start_time,
+            zones[0].from, plan.horizon.start_time,
             "zone from must equal plan.horizon.start_time"
         );
     }
@@ -551,26 +591,15 @@ mod tests {
         };
         let result = zones_from_plan(Some(&plan), now);
         assert_eq!(result.len(), 3, "3-zone plan must produce 3 zone entries");
-        assert_eq!(result[0]["step_s"], 300);
-        assert_eq!(result[1]["step_s"], 600);
-        assert_eq!(result[2]["step_s"], 900);
+        assert_eq!(result[0].step_s, 300);
+        assert_eq!(result[1].step_s, 600);
+        assert_eq!(result[2].step_s, 900);
         // Zone A: [now, now+28800s)
-        let z0_from: chrono::DateTime<chrono::Utc> =
-            result[0]["from"].as_str().unwrap().parse().unwrap();
-        let z0_to: chrono::DateTime<chrono::Utc> =
-            result[0]["to"].as_str().unwrap().parse().unwrap();
-        assert_eq!(z0_from, now);
-        assert_eq!(z0_to, now + Duration::seconds(300 * 96));
-        // Zone B starts where A ends
-        let z1_from: chrono::DateTime<chrono::Utc> =
-            result[1]["from"].as_str().unwrap().parse().unwrap();
-        assert_eq!(z1_from, z0_to);
-        // Zone C starts where B ends
-        let z1_to: chrono::DateTime<chrono::Utc> =
-            result[1]["to"].as_str().unwrap().parse().unwrap();
-        let z2_from: chrono::DateTime<chrono::Utc> =
-            result[2]["from"].as_str().unwrap().parse().unwrap();
-        assert_eq!(z2_from, z1_to);
+        assert_eq!(result[0].from, now);
+        assert_eq!(result[0].to, now + Duration::seconds(300 * 96));
+        // Zone B starts where A ends, zone C where B ends
+        assert_eq!(result[1].from, result[0].to);
+        assert_eq!(result[2].from, result[1].to);
     }
 
     #[test]
@@ -699,9 +728,8 @@ mod tests {
             "one point per real plan slot, not resampled onto 600s buckets"
         );
         for (i, slot) in plan.slots.iter().enumerate() {
-            let ts: DateTime<Utc> = future[i]["ts"].as_str().unwrap().parse().unwrap();
             assert_eq!(
-                ts, slot.start,
+                future[i].ts, slot.start,
                 "future point {i} must be the real slot start, not a grid tick"
             );
         }
@@ -732,8 +760,9 @@ mod tests {
 
         let future = &arr[1..];
         assert_eq!(future.len(), 2);
-        assert_eq!(future[0]["values"]["power_kw"], 1.0);
-        assert_eq!(future[1]["values"]["power_kw"], 9.0);
+        let power_kw = |p: &TimelinePointBody| p.values.as_ref().unwrap()["power_kw"];
+        assert_eq!(power_kw(&future[0]), 1.0);
+        assert_eq!(power_kw(&future[1]), 9.0);
     }
 
     #[test]
@@ -803,11 +832,10 @@ mod tests {
         .expect("grid asset always resolves");
 
         // History side unchanged: still one grid-resampled entry per history_grid tick.
-        let arr0_ts: DateTime<Utc> = arr[0]["ts"].as_str().unwrap().parse().unwrap();
-        let arr1_ts: DateTime<Utc> = arr[1]["ts"].as_str().unwrap().parse().unwrap();
-        assert_eq!(arr0_ts, history_grid[0]);
-        assert_eq!(arr1_ts, history_grid[1]);
-        assert!(arr[0]["values"]["power_kw"].is_number());
-        assert!(arr[1]["values"]["power_kw"].is_number());
+        assert_eq!(arr[0].ts, history_grid[0]);
+        assert_eq!(arr[1].ts, history_grid[1]);
+        for point in &arr[..2] {
+            assert!(point.values.as_ref().unwrap().contains_key("power_kw"));
+        }
     }
 }
