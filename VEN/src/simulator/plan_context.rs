@@ -198,7 +198,7 @@ mod tests {
             "asset_configs": [],
             "assets": [],
             "grid": {
-                "net_power_w": 0.0, "import_w": 0.0, "export_w": 0.0,
+                "net_power_kw": 0.0, "import_kw": 0.0, "export_kw": 0.0,
                 "voltage_v": 0.0, "import_kwh": 0.0, "export_kwh": 0.0
             },
             "last_tick": Utc::now().to_rfc3339()

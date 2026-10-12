@@ -340,7 +340,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
 - **A "derived" simulator quantity can't be used to test for the deviation it
   was derived from** (Phase 5 WP5.1): SITE_RESIDUAL is defined as
   `grid_meter_kw − Σ modelled_asset_kw`, but the simulator's own
-  `grid.net_power_w` is computed *as* the sum of its modelled assets each
+  `grid.net_power_kw` is computed *as* the sum of its modelled assets each
   tick — so in simulation the two terms can never disagree, and residual is
   mathematically guaranteed to read 0. Caught only by tracing the physics
   engine's "derive grid meter" step, not by the unit tests (which correctly
@@ -3318,3 +3318,20 @@ Rules:
   without tests. The compiler's list is exact; the hand-made one was off by one.
 - A mock that wraps a real type and re-implements its trait is a second implementation. Before
   writing one, check whether the real type can be constructed directly with test values.
+
+## A unit that differs in one place is paid for at every reader (2026-10-12)
+
+The simulated site meter stored watts while every other power in the lab was kW. The cost
+was not the one multiplication at the write site but a division at each of about a dozen readers,
+in four languages, plus helpers, an audit pattern and comments explaining the exception.
+- Convert at the edge where a foreign unit enters, never store it. A stored exception makes every
+  reader a place that can forget.
+- Rename and rescale together. A field renamed `_kw` that still holds watts is worse than the old
+  name; one whose name changed cannot be read by an old reader at all, which turns "off by 1000"
+  into "absent", and absent is visible.
+- The compiler follows a renamed field only through typed code. List the untyped readers (a JSON
+  key lookup, a `json!` body, SQL text, test steps in another language) before starting, and pin
+  them with one end-to-end assertion that a wrong unit fails by orders of magnitude: here, the
+  meter equals the sum of the asset powers.
+- A column rename is a usable migration guard where no schema version exists: once renamed, the
+  old column is gone and the rescale cannot run twice.

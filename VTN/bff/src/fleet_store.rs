@@ -55,7 +55,7 @@ pub struct TelemetryRow {
     pub ven_name: String,
     pub ts: DateTime<Utc>,
     pub received_at: DateTime<Utc>,
-    pub net_power_w: Option<f64>,
+    pub net_power_kw: Option<f64>,
     pub payload: Value,
 }
 
@@ -77,7 +77,7 @@ impl TelemetryRow {
             ven_name: ven_name.to_string(),
             ts,
             received_at,
-            net_power_w: crate::fleet::net_power_w(payload),
+            net_power_kw: crate::fleet::net_power_kw(payload),
             payload: payload.clone(),
         }
     }
@@ -180,10 +180,62 @@ impl TelemetryWriter {
     }
 }
 
+/// The power columns as a database from before the site meter was kW has them: a `_w` name
+/// holding watts. `(table, old column, column today)`.
+const WATT_COLUMNS: [(&str, &str, &str); 2] = [
+    ("fleet_telemetry", "net_power_w", "net_power_kw"),
+    (
+        "fleet_telemetry_1m",
+        "net_power_w_mean",
+        "net_power_kw_mean",
+    ),
+];
+
+/// Bring a database that still has the watt columns to kW: rename the column and divide what
+/// it holds by 1000, in one transaction per table.
+///
+/// The rename is its own guard. Once a table is converted the old column is gone, so a second
+/// start finds nothing to do and cannot divide twice; a database created today never had it.
+/// `payload_json` is left as received: nothing reads it back, and it ages out with the table.
+async fn migrate_watt_columns_to_kw(pool: &PgPool) -> Result<()> {
+    for (table, old_column, column) in WATT_COLUMNS {
+        let mut tx = pool.begin().await?;
+        let has_old_column: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'lab_recorder' AND table_name = $1 AND column_name = $2)",
+        )
+        .bind(table)
+        .bind(old_column)
+        .fetch_one(&mut *tx)
+        .await?;
+        if has_old_column {
+            sqlx::query(&format!(
+                "ALTER TABLE lab_recorder.{table} RENAME COLUMN {old_column} TO {column}"
+            ))
+            .execute(&mut *tx)
+            .await?;
+            let rescaled = sqlx::query(&format!(
+                "UPDATE lab_recorder.{table} SET {column} = {column} / 1000"
+            ))
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            info!(
+                table,
+                rows = rescaled,
+                "fleet store: watt column converted to kW"
+            );
+        }
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
 pub async fn init_schema(pool: &PgPool) -> Result<()> {
     sqlx::query("CREATE SCHEMA IF NOT EXISTS lab_recorder")
         .execute(pool)
         .await?;
+    migrate_watt_columns_to_kw(pool).await?;
     // (ven_name, ts) as the key makes a re-published retained message
     // idempotent: a subscriber reconnecting receives the last value again, and
     // it is the same reading, not a new one.
@@ -192,7 +244,7 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
             ven_name TEXT NOT NULL,
             ts TIMESTAMPTZ NOT NULL,
             received_at TIMESTAMPTZ NOT NULL,
-            net_power_w DOUBLE PRECISION,
+            net_power_kw DOUBLE PRECISION,
             payload_json JSONB NOT NULL,
             PRIMARY KEY (ven_name, ts)
         )",
@@ -212,7 +264,7 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS lab_recorder.fleet_telemetry_1m (
             ven_name TEXT NOT NULL,
             bucket TIMESTAMPTZ NOT NULL,
-            net_power_w_mean DOUBLE PRECISION,
+            net_power_kw_mean DOUBLE PRECISION,
             samples INTEGER NOT NULL,
             PRIMARY KEY (ven_name, bucket)
         )",
@@ -361,12 +413,12 @@ async fn insert_batch(pool: &PgPool, rows: &[TelemetryRow]) -> Result<()> {
     let names: Vec<&str> = rows.iter().map(|r| r.ven_name.as_str()).collect();
     let ts: Vec<DateTime<Utc>> = rows.iter().map(|r| r.ts).collect();
     let received: Vec<DateTime<Utc>> = rows.iter().map(|r| r.received_at).collect();
-    let power: Vec<Option<f64>> = rows.iter().map(|r| r.net_power_w).collect();
+    let power: Vec<Option<f64>> = rows.iter().map(|r| r.net_power_kw).collect();
     let payloads: Vec<Value> = rows.iter().map(|r| r.payload.clone()).collect();
 
     sqlx::query(
         "INSERT INTO lab_recorder.fleet_telemetry
-            (ven_name, ts, received_at, net_power_w, payload_json)
+            (ven_name, ts, received_at, net_power_kw, payload_json)
          SELECT * FROM UNNEST($1::text[], $2::timestamptz[], $3::timestamptz[],
                               $4::double precision[], $5::jsonb[])
          ON CONFLICT (ven_name, ts) DO NOTHING",
@@ -400,14 +452,14 @@ async fn retention_loop(pool: PgPool) {
 /// when it was first written.
 pub async fn run_retention(pool: &PgPool) -> Result<()> {
     let rolled = sqlx::query(
-        "INSERT INTO lab_recorder.fleet_telemetry_1m (ven_name, bucket, net_power_w_mean, samples)
-         SELECT ven_name, date_trunc('minute', ts), avg(net_power_w), count(*)::int
+        "INSERT INTO lab_recorder.fleet_telemetry_1m (ven_name, bucket, net_power_kw_mean, samples)
+         SELECT ven_name, date_trunc('minute', ts), avg(net_power_kw), count(*)::int
          FROM lab_recorder.fleet_telemetry
          WHERE ts >= COALESCE((SELECT max(bucket) FROM lab_recorder.fleet_telemetry_1m),
                               '-infinity'::timestamptz)
          GROUP BY 1, 2
          ON CONFLICT (ven_name, bucket) DO UPDATE
-           SET net_power_w_mean = EXCLUDED.net_power_w_mean,
+           SET net_power_kw_mean = EXCLUDED.net_power_kw_mean,
                samples = EXCLUDED.samples",
     )
     .execute(pool)
@@ -473,14 +525,14 @@ pub async fn power_series(
     let source = source_for(from, now);
     let rows: Vec<(String, DateTime<Utc>, Option<f64>)> = if source == "raw" {
         sqlx::query_as(
-            "SELECT ven_name, ts, net_power_w
+            "SELECT ven_name, ts, net_power_kw
              FROM lab_recorder.fleet_telemetry
              WHERE ts >= $1 AND ts < $2
              ORDER BY ven_name, ts",
         )
     } else {
         sqlx::query_as(
-            "SELECT ven_name, bucket, net_power_w_mean
+            "SELECT ven_name, bucket, net_power_kw_mean
              FROM lab_recorder.fleet_telemetry_1m
              WHERE bucket >= $1 AND bucket < $2
              ORDER BY ven_name, bucket",
@@ -565,19 +617,22 @@ mod tests {
     fn from_message_takes_the_vens_own_timestamp() {
         let row = TelemetryRow::from_message(
             "ven-3",
-            &json!({"ts": "2026-09-22T10:00:00Z", "grid": {"net_power_w": 1200.0}}),
+            &json!({"ts": "2026-09-22T10:00:00Z", "grid": {"net_power_kw": 1.2}}),
             t("2026-09-22T10:00:02Z"),
         );
         assert_eq!(row.ts, t("2026-09-22T10:00:00Z"));
         assert_eq!(row.received_at, t("2026-09-22T10:00:02Z"));
-        assert_eq!(row.net_power_w, Some(1200.0));
+        assert_eq!(row.net_power_kw, Some(1.2));
     }
 
     /// A reading with a slightly wrong timestamp beats no reading, and
     /// `received_at` still records what we actually know.
     #[test]
     fn from_message_falls_back_to_our_clock_when_the_vens_is_unreadable() {
-        for body in [json!({"grid": {"net_power_w": 1.0}}), json!({"ts": "soon"})] {
+        for body in [
+            json!({"grid": {"net_power_kw": 1.0}}),
+            json!({"ts": "soon"}),
+        ] {
             let row = TelemetryRow::from_message("ven-3", &body, t("2026-09-22T10:00:02Z"));
             assert_eq!(row.ts, t("2026-09-22T10:00:02Z"));
         }
@@ -589,7 +644,7 @@ mod tests {
     fn from_message_keeps_a_body_it_cannot_read_a_meter_out_of() {
         let row =
             TelemetryRow::from_message("ven-3", &json!({"assets": {}}), t("2026-09-22T10:00:00Z"));
-        assert!(row.net_power_w.is_none());
+        assert!(row.net_power_kw.is_none());
         assert_eq!(row.payload, json!({"assets": {}}));
     }
 

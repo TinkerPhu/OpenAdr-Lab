@@ -92,7 +92,7 @@ export function deriveAssetSummaries(
   // Grid fraction: share of total consumption that is grid-sourced.
   // Consuming assets multiply their power by this before computing cost so that
   // PV-covered (or battery-discharge-covered) load is correctly costed at zero.
-  const gridImportKw = Math.max(0, sim.grid.net_power_w / 1000);
+  const gridImportKw = Math.max(0, sim.grid.net_power_kw);
   const totalConsumeKw = Object.values(sim.assets).reduce(
     (sum, a) => sum + Math.max(0, a.power_kw),
     0
@@ -293,7 +293,7 @@ export function deriveTariffConditions(
   nowMs: number
 ): TariffConditions {
   const t = findCurrentTariff(tariffs, nowMs);
-  const gridPowerKw = sim.grid.net_power_w / 1000;
+  const gridPowerKw = sim.grid.net_power_kw;
   const importP = t?.import_tariff_eur_kwh ?? null;
   const exportP = t?.export_tariff_eur_kwh ?? null;
   const totalCostRateEurH = computeCostRateEurH(gridPowerKw, t);

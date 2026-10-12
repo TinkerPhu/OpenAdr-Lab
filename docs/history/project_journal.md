@@ -15365,3 +15365,29 @@ makes the next one fail on the day it is written.
 
 **Issues.** None. Checked by planting a `bearer_auth` in the BFF client and an `AUTHORIZATION`
 header in the VEN client: both reported, exit 1; clean again once removed.
+
+## R-138: the site meter is in kW, like every other power (refactor/grid-meter-kw)
+
+**What.** `GridMeter` stores `net_power_kw`, `import_kw` and `export_kw`, written directly in
+`simulator/grid_meter.rs`; `GridSnapshot.net_power_kw` is a field, read as it is. The sensor
+reading follows (`SensorSnapshot.power_kw`, `SensorRaw.import_kw` / `export_kw`, `POST /sensors`
+takes `power_kw`). Deleted: `kw_from_w`, `w_from_kw`, both `net_power_kw()` accessors, the
+division at each reader in the VEN UI, and the VTN UI's `formatKw(watts)` and `toKw` (their call
+sites use `formatKwOrDash`). The BFF reads `grid.net_power_kw` and answers `netPowerKw`,
+`powerBeforeKw`, `powerAfterKw`, `deltaKw`; its recorder columns are `net_power_kw` and
+`net_power_kw_mean`. Audit rule 10 now fails on any identifier ending `_w` in the VEN.
+
+**Why.** One quantity in a second unit cost a conversion at each of about a dozen readers in Rust,
+TypeScript, SQL and Python, and the VEN Dashboard printed watts beside kW everywhere else.
+
+**Issues.** A renamed field in a persisted struct breaks loading: `sim_state.json` written by the
+old build has no `net_power_kw`, the parse fails, and the VEN would start fresh and drop every
+asset's state. `GridMeter` got `#[serde(default)]`; the three readings need no conversion because
+the next tick overwrites them (test: `load_reads_a_file_written_with_the_meter_in_watts`, seen red
+first). The recorder has no schema version, so `fleet_store::migrate_watt_columns_to_kw` uses the
+rename as its guard: it renames and divides by 1000 in one transaction per table only while the
+old column exists. The compiler does not follow the untyped readers (the BFF's key lookup and
+`json!` bodies, SQL text, the BDD steps); a new scenario in `ven_simulator.feature` asserts the
+meter equals the sum of the asset powers, which a watt value misses by a factor of 1000. Roll-out
+order is BFF before VENs: the BFF reads the meter by key, so a VEN on the old image is absent from
+the fleet view for that hour, never wrong by 1000.

@@ -27,7 +27,6 @@ use crate::assets::{
 };
 use crate::controller::simulator_port::{SimSnapshot, SimulatorPort, SnapshotError};
 use crate::entities::asset_params::AssetParams;
-use crate::entities::units::w_from_kw;
 use energy::EnergyCounter;
 pub use handle::SimHandle;
 pub use pv_smoothing::PvSmoothingState;
@@ -130,12 +129,16 @@ pub struct AssetEntry {
     pub history: AssetHistoryBuffer,
 }
 
-/// Grid-level totals derived by summing all asset powers.
+/// Grid-level totals derived by summing all asset powers. Power in kW, positive = import.
+///
+/// `serde(default)`: a persisted file that lacks a field (one written before the meter stored
+/// kW names the three readings differently) still loads, and the next tick writes them.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct GridMeter {
-    pub net_power_w: f64,
-    pub import_w: f64,
-    pub export_w: f64,
+    pub net_power_kw: f64,
+    pub import_kw: f64,
+    pub export_kw: f64,
     pub voltage_v: f64,
     pub import_kwh: f64,
     pub export_kwh: f64,
@@ -419,7 +422,7 @@ impl SimState {
             entry.state = new_state;
             entry.last_power_kw = actual_kw;
             entry.setpoint_kw = sp;
-            entry.energy.integrate(w_from_kw(actual_kw), dt_s);
+            entry.energy.integrate(actual_kw, dt_s);
             total_kw += actual_kw;
         }
 

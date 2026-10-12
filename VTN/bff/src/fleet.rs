@@ -116,8 +116,8 @@ pub fn apply_message(
 /// until the day the VEN renames the field, and then disagree silently.
 ///
 /// `None` means the VEN has not said, which is never the same as zero.
-pub fn net_power_w(telemetry: &serde_json::Value) -> Option<f64> {
-    telemetry.get("grid")?.get("net_power_w")?.as_f64()
+pub fn net_power_kw(telemetry: &serde_json::Value) -> Option<f64> {
+    telemetry.get("grid")?.get("net_power_kw")?.as_f64()
 }
 
 /// Where the BFF subscribes, and as whom.
@@ -296,14 +296,11 @@ mod tests {
             &mut state,
             "ven-1",
             "telemetry",
-            br#"{"venName":"ven-1","grid":{"net_power_w":-2500.0}}"#,
+            br#"{"venName":"ven-1","grid":{"net_power_kw":-2.5}}"#,
             now(),
         );
         let v = &state["ven-1"];
-        assert_eq!(
-            v.telemetry.as_ref().unwrap()["grid"]["net_power_w"],
-            -2500.0
-        );
+        assert_eq!(v.telemetry.as_ref().unwrap()["grid"]["net_power_kw"], -2.5);
         assert_eq!(v.received_at, now());
     }
 
@@ -333,23 +330,23 @@ mod tests {
     }
 
     #[test]
-    fn net_power_w_reads_the_meter_out_of_a_telemetry_body() {
-        let body = serde_json::json!({"grid": {"net_power_w": -2500.0}});
-        assert_eq!(net_power_w(&body), Some(-2500.0));
+    fn net_power_kw_reads_the_meter_out_of_a_telemetry_body() {
+        let body = serde_json::json!({"grid": {"net_power_kw": -2.5}});
+        assert_eq!(net_power_kw(&body), Some(-2.5));
     }
 
     /// Absent, non-numeric or differently shaped bodies all mean "this VEN has
     /// not said", which a sum must skip rather than read as zero.
     #[test]
-    fn net_power_w_is_absent_rather_than_zero_when_the_body_does_not_say() {
+    fn net_power_kw_is_absent_rather_than_zero_when_the_body_does_not_say() {
         for body in [
             serde_json::json!({}),
             serde_json::json!({"grid": {}}),
-            serde_json::json!({"grid": {"net_power_w": null}}),
-            serde_json::json!({"grid": {"net_power_w": "2500"}}),
+            serde_json::json!({"grid": {"net_power_kw": null}}),
+            serde_json::json!({"grid": {"net_power_kw": "2.5"}}),
             serde_json::json!({"grid": 5}),
         ] {
-            assert_eq!(net_power_w(&body), None, "{body} should not yield a value");
+            assert_eq!(net_power_kw(&body), None, "{body} should not yield a value");
         }
     }
 

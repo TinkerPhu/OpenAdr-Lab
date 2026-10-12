@@ -32,13 +32,13 @@ function complianceChip(current_kw: number, limit_kw: number | null, label: stri
 
 function CapacityCard({
   capacity,
-  netPowerW,
+  netPowerKw,
 }: {
   capacity: OadrCapacityState | undefined;
-  netPowerW: number | null;
+  netPowerKw: number | null;
 }) {
-  const importKw = netPowerW != null && netPowerW > 0 ? netPowerW / 1000 : 0;
-  const exportKw = netPowerW != null && netPowerW < 0 ? -netPowerW / 1000 : 0;
+  const importKw = netPowerKw != null && netPowerKw > 0 ? netPowerKw : 0;
+  const exportKw = netPowerKw != null && netPowerKw < 0 ? -netPowerKw : 0;
 
   const fmtTs = (v: string | null | undefined) => {
     if (!v) return "—";
@@ -203,7 +203,7 @@ export function DashboardPage() {
   // {status, components} — read the real status instead of assuming "ok"
   // whenever a response merely arrived (same bug App.tsx's HealthChip had).
   const healthStatus = health.isError ? "offline" : health.data ? health.data.status : "unknown";
-  const netPowerW = sim.data?.grid.net_power_w ?? null;
+  const netPowerKw = sim.data?.grid.net_power_kw ?? null;
 
   return (
     <Grid container spacing={2}>
@@ -330,7 +330,7 @@ export function DashboardPage() {
           </Typography>
           <Stack spacing={0.5} mt={1}>
             <Typography data-testid="dash-sensor-power">
-              Power (W): {sensor.data?.power_w ?? "—"}
+              Power (kW): {sensor.data?.power_kw ?? "—"}
             </Typography>
             <Typography data-testid="dash-sensor-temp">
               Temp (C): {sensor.data?.temperature_c ?? "—"}
@@ -343,7 +343,7 @@ export function DashboardPage() {
       </Grid>
 
       <Grid item xs={12} md={3}>
-        <CapacityCard capacity={capacity.data} netPowerW={netPowerW} />
+        <CapacityCard capacity={capacity.data} netPowerKw={netPowerKw} />
       </Grid>
 
       {/* Simulation card */}
@@ -361,13 +361,13 @@ export function DashboardPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">Power</Typography>
                   <Typography data-testid="sim-net-power">
-                    Net: {formatFixedOrDash(sim.data.grid.net_power_w, 0)} W
+                    Net: {formatKwOrDash(sim.data.grid.net_power_kw)}
                   </Typography>
                   <Typography data-testid="sim-import">
-                    Import: {formatFixedOrDash(sim.data.grid.net_power_w > 0 ? sim.data.grid.net_power_w : 0, 0)} W
+                    Import: {formatKwOrDash(Math.max(0, sim.data.grid.net_power_kw))}
                   </Typography>
                   <Typography data-testid="sim-export">
-                    Export: {formatFixedOrDash(sim.data.grid.net_power_w < 0 ? -sim.data.grid.net_power_w : 0, 0)} W
+                    Export: {formatKwOrDash(Math.max(0, -sim.data.grid.net_power_kw))}
                   </Typography>
                 </Stack>
               </Grid>

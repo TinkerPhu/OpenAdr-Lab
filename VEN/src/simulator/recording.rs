@@ -6,17 +6,9 @@
 
 use chrono::{DateTime, Utc};
 
-use super::{GridMeter, SimState};
+use super::SimState;
 use crate::assets::{HistoryPoint, LoadWindowStats};
 use crate::ids::ASSET_BASE_LOAD;
-
-impl GridMeter {
-    /// Net site power in kW (positive = import). The meter stores watts; this is the one
-    /// conversion for the sim's own tail (the other readers are tracked in R-111).
-    pub fn net_power_kw(&self) -> f64 {
-        crate::entities::units::kw_from_w(self.net_power_w)
-    }
-}
 
 impl SimState {
     /// Record this tick: one `HistoryPoint` per asset into its ring buffer, and the grid
@@ -36,9 +28,12 @@ impl SimState {
                 state: entry.state.clone(),
             });
         }
-        let net_power_kw = self.grid.net_power_kw();
-        self.grid_asset
-            .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
+        self.grid_asset.update(
+            self.grid.net_power_kw,
+            import_limit_kw,
+            export_limit_kw_signed,
+            now,
+        );
     }
 
     /// Hand the base-load asset the summary of its trailing window of recorded power (`None`

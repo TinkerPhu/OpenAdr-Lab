@@ -43,7 +43,7 @@ pub async fn post_sensors(
         id: Uuid::new_v4(),
         ts: Utc::now(),
         temperature_c: input.temperature_c,
-        power_w: input.power_w,
+        power_kw: input.power_kw,
         voltage_v: input.voltage_v,
         raw: input.raw.unwrap_or_default(),
     };

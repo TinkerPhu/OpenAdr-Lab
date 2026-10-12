@@ -197,7 +197,7 @@ mod dispatch_override_tests {
         SimSnapshot {
             ts: ts(0),
             grid: GridSnapshot {
-                net_power_w: 500.0,
+                net_power_kw: 0.5,
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,

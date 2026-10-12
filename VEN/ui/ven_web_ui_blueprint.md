@@ -162,7 +162,7 @@ Features:
 ## 5.5 Sensor Injection (Optional)
 
 Allows manual POST:
-- power_w
+- power_kw
 - temperature_c
 - voltage_v
 - raw JSON
@@ -275,7 +275,7 @@ App
 {
   id: string
   ts: string
-  power_w?: number
+  power_kw?: number
   temperature_c?: number
   voltage_v?: number
   raw: any

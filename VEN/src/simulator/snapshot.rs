@@ -28,12 +28,12 @@ impl SimState {
             id: Uuid::new_v4(),
             ts: self.last_tick,
             temperature_c: temp_c,
-            power_w: Some(self.grid.net_power_w),
+            power_kw: Some(self.grid.net_power_kw),
             voltage_v: Some(self.grid.voltage_v),
             raw: SensorRaw {
                 source: Some("simulator".into()),
-                import_w: Some(self.grid.import_w),
-                export_w: Some(self.grid.export_w),
+                import_kw: Some(self.grid.import_kw),
+                export_kw: Some(self.grid.export_kw),
                 extra: Default::default(),
             },
         }
@@ -80,7 +80,7 @@ impl SimState {
         SimSnapshot {
             ts: self.last_tick,
             grid: GridSnapshot {
-                net_power_w: self.grid.net_power_w,
+                net_power_kw: self.grid.net_power_kw,
                 voltage_v: self.grid.voltage_v,
                 import_kwh: self.grid.import_kwh,
                 export_kwh: self.grid.export_kwh,
@@ -197,7 +197,7 @@ mod tests {
         let sim = SimState::from_params(&[], chrono::Utc::now()).to_sensor_snapshot();
         let wire = serde_json::to_value(&sim.raw).unwrap();
         assert_eq!(wire["source"], "simulator");
-        assert!(wire["import_w"].is_number() && wire["export_w"].is_number());
+        assert!(wire["import_kw"].is_number() && wire["export_kw"].is_number());
         assert_eq!(wire.as_object().unwrap().len(), 3);
 
         assert_eq!(

@@ -27,7 +27,7 @@ export function makeAssets(assets: Record<string, AssetFields>): Record<string, 
 
 export function makeGrid(fields: Partial<GridSnapshot> = {}): GridSnapshot {
   return {
-    net_power_w: 0,
+    net_power_kw: 0,
     voltage_v: 230,
     import_kwh: 0,
     export_kwh: 0,

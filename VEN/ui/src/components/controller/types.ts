@@ -143,7 +143,7 @@ export type TariffConditions = {
   totalCostRateEurH: number;
   /** Derived: net_power_kw × co2GKwh → CO₂ rate [g/h] */
   totalCo2RateGH: number;
-  /** Grid power [kW] = net_power_w / 1000 */
+  /** Grid power [kW], the site meter reading (`grid.net_power_kw`) */
   gridPowerKw: number;
 };
 

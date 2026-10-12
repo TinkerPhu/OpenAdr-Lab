@@ -9,24 +9,24 @@ const mockLive = {
   vens: [
     {
       venName: "ven-1",
-      netPowerW: 4000,
+      netPowerKw: 4,
       state: "online",
       receivedAt: new Date().toISOString(),
     },
     {
       venName: "ven-2",
-      netPowerW: -1500,
+      netPowerKw: -1.5,
       state: "online",
       receivedAt: new Date().toISOString(),
     },
     {
       venName: "ven-3",
-      netPowerW: null,
+      netPowerKw: null,
       state: "offline",
       receivedAt: new Date().toISOString(),
     },
   ],
-  fleet: { netPowerW: 2500, contributingVens: 2, knownVens: 3 },
+  fleet: { netPowerKw: 2.5, contributingVens: 2, knownVens: 3 },
 };
 
 const mockHistory = {
@@ -36,8 +36,8 @@ const mockHistory = {
   stepSeconds: 60,
   vens: [],
   fleet: [
-    { ts: "2026-09-22T09:00:00Z", netPowerW: 1000, contributingVens: 2 },
-    { ts: "2026-09-22T09:01:00Z", netPowerW: 2000, contributingVens: 2 },
+    { ts: "2026-09-22T09:00:00Z", netPowerKw: 1, contributingVens: 2 },
+    { ts: "2026-09-22T09:01:00Z", netPowerKw: 2, contributingVens: 2 },
   ],
 };
 

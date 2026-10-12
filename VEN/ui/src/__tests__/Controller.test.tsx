@@ -12,7 +12,7 @@ import { makeTariff } from "./fixtures/tariff";
 
 const baseSim: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
-  grid: makeGrid({ net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
+  grid: makeGrid({ net_power_kw: 1.5, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 }),
   assets: makeAssets({
     ev: { power_kw: 7, soc: 0.5, plugged: 1, max_charge_kw: 11, soc_target: 0.9, battery_kwh: 60 },
     heater: { power_kw: 2, temp_c: 20, max_kw: 4, temp_min_c: 18, temp_max_c: 24 },

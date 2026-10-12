@@ -1084,9 +1084,11 @@ so `simulator::plan_context` resolves a user override without importing `service
 The planning time grid is written once in `entities/time_grid.rs`: `TimeGrid::from_zones` turns the
 profile's plan zones into slots, and `slot_at` answers which slot holds an instant; the planner's
 input builder, `PlanCycleInputs` and the shiftable-load and heater MILP contexts all call it.
-Unit arithmetic is written once in `entities/units.rs` (`kw_from_w`, `w_from_kw`, `dt_h_from_s`,
-`dt_h_from_duration`, `energy_kwh`, `energy_kwh_from_min`); `GridSnapshot::net_power_kw` and
-`GridMeter::net_power_kw` are the two meter views over it (rule 10 keeps the inline spellings out).
+Unit arithmetic is written once in `entities/units.rs` (`dt_h_from_s`, `dt_h_from_duration`,
+`energy_kwh`, `energy_kwh_from_min`, `pct_from_frac`). Power is kW and energy is kWh everywhere,
+the simulated site meter included (`GridMeter.net_power_kw`, read as `GridSnapshot.net_power_kw`
+and published as `grid.net_power_kw`), so there is no watt quantity and no watt helper; rule 10
+keeps the inline spellings and any identifier ending `_w` out.
 A request that states no target is answered by the asset, not by a literal in `services/`: the EV's
 `default_soc_target` and the heater's `default_target_temp_c` (through `Thermostat::default_request_target_c`)
 ride on `AssetRequestSlice`, and `AssetRequestSlice::target_soc_frac`/`target_temp_c` are the one

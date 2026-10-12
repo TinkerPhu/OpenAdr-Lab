@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { DashboardPage } from "../pages/Dashboard";
-import { useHealth, useVtnStatus, useTasksStatus, useLedgerHistories } from "../api/hooks";
+import { useHealth, useVtnStatus, useTasksStatus, useLedgerHistories, useSim } from "../api/hooks";
+import { makeSim } from "./fixtures/sim";
 
 const mockPrograms = [
   { id: "p1", programName: "Program Alpha" },
@@ -19,7 +20,7 @@ const mockSensor = {
   id: "s1",
   ts: "2024-01-01T00:00:00Z",
   temperature_c: 22.5,
-  power_w: 150,
+  power_kw: 0.15,
   voltage_v: 230,
   raw: {},
 };
@@ -271,10 +272,24 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("dash-events-count")).toHaveTextContent("2");
   });
 
+  /* The meter is kW like every other power on this page: an exporting site reads as a
+   * positive export and no import, in the shared kW format. */
+  it("shows the site meter in kW, split into import and export", () => {
+    vi.mocked(useSim).mockReturnValue({
+      data: makeSim({}, { net_power_kw: -1.5 }),
+      isError: false,
+    } as unknown as ReturnType<typeof useSim>);
+    renderDashboard();
+    expect(screen.getByTestId("sim-net-power")).toHaveTextContent("Net: -1.50 kW");
+    expect(screen.getByTestId("sim-import")).toHaveTextContent("Import: 0.00 kW");
+    expect(screen.getByTestId("sim-export")).toHaveTextContent("Export: 1.50 kW");
+    vi.mocked(useSim).mockReturnValue({ data: null, isError: false } as unknown as ReturnType<typeof useSim>);
+  });
+
   it("renders sensor card with values", () => {
     renderDashboard();
     expect(screen.getByTestId("dash-sensor-card")).toBeVisible();
-    expect(screen.getByTestId("dash-sensor-power")).toHaveTextContent("150");
+    expect(screen.getByTestId("dash-sensor-power")).toHaveTextContent("0.15");
     expect(screen.getByTestId("dash-sensor-temp")).toHaveTextContent("22.5");
     expect(screen.getByTestId("dash-sensor-voltage")).toHaveTextContent("230");
   });

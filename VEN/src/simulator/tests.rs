@@ -169,7 +169,7 @@ mod port_tests {
         );
         let snap = result.unwrap();
         // Grid defaults are zero
-        assert_eq!(snap.grid.net_power_w, 0.0);
+        assert_eq!(snap.grid.net_power_kw, 0.0);
     }
 }
 
@@ -350,7 +350,7 @@ mod grid_meter_tests {
         let mut sim = base_only(0.5);
         run_tick(&mut sim, at(18, 0));
         let asset_sum_kw: f64 = sim.assets.iter().map(|e| e.last_power_kw).sum();
-        let meter_kw = sim.grid.net_power_w / 1000.0;
+        let meter_kw = sim.grid.net_power_kw;
         assert!(
             (meter_kw - asset_sum_kw).abs() < 1e-9,
             "the derived meter must be exactly the modelled-asset sum"

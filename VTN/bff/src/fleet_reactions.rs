@@ -52,8 +52,8 @@ pub struct VenReaction {
     /// Mean site power over the minute before and the minute after. `None`
     /// where the VEN published nothing in that window — which is a real
     /// answer, and not the same as no change.
-    pub power_before_w: Option<f64>,
-    pub power_after_w: Option<f64>,
+    pub power_before_kw: Option<f64>,
+    pub power_after_kw: Option<f64>,
 }
 
 impl VenReaction {
@@ -61,8 +61,8 @@ impl VenReaction {
     ///
     /// A named accessor rather than a stored field so it cannot drift from the
     /// two numbers it is derived from.
-    pub fn delta_w(&self) -> Option<f64> {
-        Some(self.power_after_w? - self.power_before_w?)
+    pub fn delta_kw(&self) -> Option<f64> {
+        Some(self.power_after_kw? - self.power_before_kw?)
     }
 }
 
@@ -117,8 +117,8 @@ pub async fn reactions(pool: &PgPool, event_id: &str) -> Result<Vec<VenReaction>
         };
         let replan_attributed = attributed.is_some();
 
-        let power_before_w = mean_power(pool, &ven_name, ts - WINDOW, ts).await?;
-        let power_after_w = mean_power(pool, &ven_name, ts, ts + WINDOW).await?;
+        let power_before_kw = mean_power(pool, &ven_name, ts - WINDOW, ts).await?;
+        let power_after_kw = mean_power(pool, &ven_name, ts, ts + WINDOW).await?;
 
         out.push(VenReaction {
             ven_name,
@@ -130,8 +130,8 @@ pub async fn reactions(pool: &PgPool, event_id: &str) -> Result<Vec<VenReaction>
                 .map(str::to_string),
             replanned_at,
             replan_attributed,
-            power_before_w,
-            power_after_w,
+            power_before_kw,
+            power_after_kw,
         });
     }
     Ok(out)
@@ -146,7 +146,7 @@ async fn mean_power(
     to: DateTime<Utc>,
 ) -> Result<Option<f64>> {
     let mean: Option<f64> = sqlx::query_scalar(
-        "SELECT avg(net_power_w) FROM lab_recorder.fleet_telemetry
+        "SELECT avg(net_power_kw) FROM lab_recorder.fleet_telemetry
          WHERE ven_name = $1 AND ts >= $2 AND ts < $3",
     )
     .bind(ven_name)
@@ -173,21 +173,15 @@ mod tests {
             modification_date_time: None,
             replanned_at: None,
             replan_attributed: false,
-            power_before_w: before,
-            power_after_w: after,
+            power_before_kw: before,
+            power_after_kw: after,
         }
     }
 
     #[test]
     fn delta_is_the_change_across_the_event_keeping_its_sign() {
-        assert_eq!(
-            reaction(Some(4000.0), Some(1500.0)).delta_w(),
-            Some(-2500.0)
-        );
-        assert_eq!(
-            reaction(Some(-500.0), Some(-2000.0)).delta_w(),
-            Some(-1500.0)
-        );
+        assert_eq!(reaction(Some(4.0), Some(1.5)).delta_kw(), Some(-2.5));
+        assert_eq!(reaction(Some(-0.5), Some(-2.0)).delta_kw(), Some(-1.5));
     }
 
     /// A VEN that published nothing on one side of the event has no change to
@@ -195,7 +189,7 @@ mod tests {
     /// into "it stopped drawing power", which is the opposite of a silence.
     #[test]
     fn delta_is_absent_when_either_side_is_unknown() {
-        assert_eq!(reaction(None, Some(1500.0)).delta_w(), None);
-        assert_eq!(reaction(Some(4000.0), None).delta_w(), None);
+        assert_eq!(reaction(None, Some(1.5)).delta_kw(), None);
+        assert_eq!(reaction(Some(4.0), None).delta_kw(), None);
     }
 }

@@ -1,22 +1,12 @@
 //! Unit conversions, written once.
 //!
-//! Power is kW everywhere in the VEN except the simulated meter's raw watts; an energy is the
+//! Power is kW everywhere in the VEN, the simulated site meter included; an energy is the
 //! power times a step in hours. The same arithmetic used to be spelled inline in about 22
 //! places in two styles (`num_milliseconds() / 3_600_000.0` and `seconds / 3600.0`), so a
 //! changed convention or a slip had to be found everywhere (R-111). Names carry the units.
 //! `audit_ven_architecture.py` rule 10 keeps the inline spellings out.
 
 use chrono::Duration;
-
-/// Watts to kilowatts.
-pub fn kw_from_w(w: f64) -> f64 {
-    w / 1000.0
-}
-
-/// Kilowatts to watts.
-pub fn w_from_kw(kw: f64) -> f64 {
-    kw * 1000.0
-}
 
 /// A step in seconds as hours - the `dt_h` a power is integrated over.
 pub fn dt_h_from_s(s: f64) -> f64 {
@@ -53,15 +43,6 @@ pub const ZONE_A_STEP_S: f64 = 300.0;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn watts_and_kilowatts_are_exact_inverses() {
-        for kw in [0.0, 1.5, -3.25, 7.4, 123.456] {
-            assert_eq!(kw_from_w(w_from_kw(kw)), kw);
-        }
-        assert_eq!(kw_from_w(1500.0), 1.5);
-        assert_eq!(w_from_kw(-2.5), -2500.0);
-    }
 
     #[test]
     fn a_fraction_becomes_a_percentage() {

@@ -80,7 +80,7 @@ mod tests {
         SimSnapshot {
             ts: Utc::now(),
             grid: crate::controller::simulator_port::GridSnapshot {
-                net_power_w: 0.0,
+                net_power_kw: 0.0,
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,

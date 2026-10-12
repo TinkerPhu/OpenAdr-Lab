@@ -58,7 +58,7 @@ This aligns with the pattern stated in CLAUDE.md: avoid DTO normalization and pa
 
 ### Step-by-step flow:
 
-1. **Fill form** — Enter Temperature (C), Power (W), Voltage (V), and optional Raw JSON
+1. **Fill form** — Enter Temperature (C), Power (kW), Voltage (V), and optional Raw JSON
 2. **Click Submit** — Makes a `POST /sensors` request to the VEN application
 3. **VEN stores locally** — The VEN stores it in-memory with a UUID and timestamp
 4. **UI refreshes** — Success message appears, data shows on Sensors page

@@ -409,8 +409,9 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     no request authenticated by hand (`bearer_auth(`, `basic_auth(`, `AUTHORIZATION`, `"Bearer `)
     in the VEN, the BFF or `lab-core` outside `lab-core/src/vtn_auth.rs` — every VTN request goes
     through `ClientCredentials::send`, which attaches the token and re-authenticates once
-    no inline unit conversion (W<->kW, seconds/Duration -> hours, kW x step -> kWh, frac -> %)
-    outside `entities/units.rs`
+    no inline unit conversion (seconds/Duration -> hours, kW x step -> kWh, frac -> %)
+    outside `entities/units.rs`, and no identifier ending `_w`: power is kW everywhere, the
+    simulated site meter included, so there is no watt quantity to name or convert
     no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
     each has an `impl FromRef<AppCtx>` in `app_ctx.rs`
     no raw read of an incoming event value's number (`.numeric()`, `numeric_value(`,

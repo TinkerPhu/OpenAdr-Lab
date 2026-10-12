@@ -135,7 +135,7 @@ impl HistorySampler {
             }
         }
 
-        let net_kw = sim.grid.net_power_kw();
+        let net_kw = sim.grid.net_power_kw;
         self.grid.import_kw_sum += net_kw.max(0.0);
         self.grid.export_kw_sum += (-net_kw).max(0.0);
         self.grid.n += 1;
@@ -262,7 +262,7 @@ mod tests {
         SimSnapshot {
             ts: now,
             grid: GridSnapshot {
-                net_power_w: power_kw * 1000.0,
+                net_power_kw: power_kw,
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
@@ -535,7 +535,7 @@ mod tests {
         SimSnapshot {
             ts: now,
             grid: GridSnapshot {
-                net_power_w: power_kw * 1000.0,
+                net_power_kw: power_kw,
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
