@@ -27,7 +27,7 @@ Cards (MUI Card):
 
     Sensor snapshot:
 
-        power_w, temperature_c, voltage_v
+        power_kw, temperature_c, voltage_v
 
         timestamp
 
@@ -73,6 +73,6 @@ Optional (nice to have):
 
     If you keep POST /sensors, add a simple form for manual injection (useful for testing):
 
-        power_w, temperature_c, voltage_v, raw JSON field
+        power_kw, temperature_c, voltage_v, raw JSON field
 
         POST to /sensors
