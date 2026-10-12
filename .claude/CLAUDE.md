@@ -369,7 +369,8 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     Infra      : assets/, simulator/, vtn.rs, controller/milp_planner/
 
   Port obligations — use traits, never bypass with concrete types:
-    SimulatorPort    : domain/services → simulator (snapshot)
+    SimRosterPort / SimReadPort / HeadroomPort : services/routes → simulator, via simulator::SimHandle
+                       (only tasks/ hold the SimState lock; the tick and history sampler read SimState::to_sim_snapshot)
     SolverPort       : services → controller/milp_planner (solve)
     VtnPort          : services → vtn.rs (fetch programs/events/obligations)
     AssetMilpContext : milp_planner accepts Vec<Box<dyn AssetMilpContext>> — NEVER import A_BAT/A_EV/A_HTR directly

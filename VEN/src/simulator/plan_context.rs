@@ -2,7 +2,8 @@
 //!
 //! These functions operate on `SimState` (and asset physics types) directly, so they
 //! live in the infra ring next to the simulator instead of the application layer —
-//! `services/` must only touch the simulator through `SimulatorPort`.
+//! `services/` must only touch the simulator through its ports (`SimRosterPort`, `SimReadPort`,
+//! `HeadroomPort`, via `SimHandle`).
 
 use std::sync::Arc;
 

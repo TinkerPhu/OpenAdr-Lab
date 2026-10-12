@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::controller::{MeasurementPort, SimulatorPort, WeatherForecastPort};
+use crate::controller::{MeasurementPort, WeatherForecastPort};
 use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::PvForecastParams;
 use crate::planner_events::PlannerEventTx;
@@ -71,9 +71,7 @@ pub(crate) async fn tick_once(
         let cleared_fields =
             crate::simulator::inject::apply_state_injections(&ctx.inject, &mut sim_guard);
 
-        let pre_snap = sim_guard
-            .snapshot() // SAFETY: SimState::snapshot() (simulator/mod.rs) always returns Ok.
-            .expect("SimState::snapshot is infallible");
+        let pre_snap = sim_guard.to_sim_snapshot();
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
         let (live_pv_kw, live_pv_released_kw) =

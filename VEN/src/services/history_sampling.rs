@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::simulator_port::SimSnapshot;
+use crate::controller::sim_snapshot::SimSnapshot;
 use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity::{tightest_capacity_limit, CapacitySnapshot};
 use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
@@ -225,7 +225,7 @@ impl HistorySampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+    use crate::controller::sim_snapshot::{AssetSnapshot, GridSnapshot};
     use crate::entities::asset::{AssetHistoryView, SetpointResponse};
     use chrono::TimeZone;
 

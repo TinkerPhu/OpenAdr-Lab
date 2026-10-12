@@ -1,5 +1,5 @@
 // SolverPort trait — the boundary between the planning task/service and the
-// MILP solver. Mirrors SimulatorPort/VtnPort: the trait and its request type
+// MILP solver. Mirrors VtnPort: the trait and its request type
 // are domain-level; the implementation (`MilpSolver`) lives in
 // `controller::milp_planner`, which remains reachable only through this port.
 use chrono::{DateTime, Utc};

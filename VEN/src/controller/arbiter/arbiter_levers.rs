@@ -48,7 +48,7 @@ pub(super) fn current_setpoint_kw(
 /// a direction it can't sustain near full/empty — no SoC re-interpretation
 /// here), narrowed by a pass's `bounds_kw` (the comms-loss clamp).
 fn battery_setpoint_range_kw(
-    snap: &crate::controller::simulator_port::AssetSnapshot,
+    snap: &crate::controller::sim_snapshot::AssetSnapshot,
     bounds_kw: Option<(f64, f64)>,
 ) -> (f64, f64) {
     let (min_kw, max_kw) = (-snap.cap_max_export_kw.abs(), snap.cap_max_import_kw);

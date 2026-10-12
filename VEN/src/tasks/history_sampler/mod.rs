@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::services::history_sampling::HistorySampler;
 
-use crate::controller::{HistoryPort, SimulatorPort};
+use crate::controller::HistoryPort;
 use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::history::{GridSample, LedgerPeriod, TickSample};
 use crate::entities::DomainError;
@@ -162,12 +162,7 @@ pub(crate) fn spawn_history_sampler(
         loop {
             interval.tick().await;
             let now = Utc::now();
-            let snap = {
-                let sim_guard = sim.lock().await;
-                sim_guard
-                    .snapshot()
-                    .expect("SimState::snapshot is infallible")
-            };
+            let snap = sim.lock().await.to_sim_snapshot();
             let tariffs_snap = state.planned_tariffs().await;
             let caps_snap = state.planned_capacity_limits().await;
             let envelope_snap = state.site_envelope().await;

@@ -1,6 +1,6 @@
 //! The site headroom and capacity-curve computations as the application and adapter rings see
 //! them. They read the whole live asset roster (each asset's own maximum-effort answer), which
-//! the flattened `SimSnapshot` cannot carry correctly for PV - see `simulator_port.rs` - so they
+//! the flattened `SimSnapshot` cannot carry correctly for PV - see `sim_snapshot.rs` - so they
 //! stay on the simulator and are reached through this port; `simulator::SimHandle` implements it.
 
 use async_trait::async_trait;
