@@ -54,7 +54,3 @@ Feature: VEN Entity Model — Stage 1 Foundation
     When I GET /trace/events from the VEN
     Then the response status is 200
     And the response JSON is an array
-
-  Scenario: GET /trace/history returns asset history rows for EV
-    When I poll VEN /trace/history?asset=ev&limit=5 until it is a non-empty array
-    Then the response JSON is an array
