@@ -13,7 +13,6 @@ use crate::controller::milp_planner::{
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::{EvSession, HeaterTarget};
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// Shiftable-load config: fixed power, non-interruptible once started, hard
 /// `[earliest_start, latest_end]` window. See design.md D1/D2 of the
@@ -160,37 +159,6 @@ impl ShiftableLoadAsset {
         // No sim-inject-editable fields: power/duration/window are fixed at
         // request time, and elapsed/started are physics-driven, not user-set.
     }
-
-    /// Holds the current physics forward: if pending, stays at 0 (this
-    /// method has no plan-awareness, so it can't predict a future start —
-    /// see `simulator::forecast` for the plan-driven equivalent). If
-    /// running, projects the fixed-power tail until `duration_min` elapses.
-    pub fn forecast(
-        &self,
-        state: &ShiftableLoadState,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Linear);
-        }
-        let end = now + timespan;
-        let mut samples = Vec::new();
-        let mut t = now;
-        let mut s = state.clone();
-        while t < end {
-            let (next, kw) = self.step_inner(&s, 0.0, Duration::seconds(60));
-            samples.push((t, kw));
-            s = next;
-            t += Duration::seconds(60);
-        }
-        let (_, end_kw) = self.step_inner(&s, 0.0, Duration::zero());
-        samples.push((end, end_kw));
-        TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
-        }
-    }
 }
 
 impl Asset for ShiftableLoadAsset {
@@ -242,11 +210,6 @@ impl Asset for ShiftableLoadAsset {
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut ShiftableLoadState = own_mut(state);
         Self::reset(self, s, values)
-    }
-
-    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let s: &ShiftableLoadState = own(state);
-        Self::forecast(self, s, timespan, now)
     }
 
     fn asset_type(&self) -> crate::entities::asset::AssetType {

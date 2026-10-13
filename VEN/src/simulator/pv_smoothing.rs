@@ -67,7 +67,7 @@ impl PvSmoothingState {
 
     /// The one function computing this decay, used both by the live per-tick
     /// update above (`elapsed_s = dt_s`, one tick) and by
-    /// `assets::pv::PvInverter::max_effort_schedule`/`forecast()` (`elapsed_s`
+    /// `assets::pv::PvInverter::max_effort_schedule` (`elapsed_s`
     /// = an arbitrary future offset) — so a forward projection can never use a
     /// different reference time base than the live tick that produces the
     /// offset being projected. Standard single-pole exponential decay,

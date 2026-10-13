@@ -15450,3 +15450,23 @@ was pinned before the refactor by `all_timelines_body_wire_shape_is_pinned` (gre
 `json!` code, unchanged after), so the switch to typed bodies is shown not to change a byte the UI
 reads, key order aside. The name `TimelinePoint` was taken by `entities::timeline::TimelinePoint`,
 so the wire type follows the route-body naming (`...Body`, `...Response`).
+
+## R-139: the per-asset series routes and `Asset::forecast` deleted (refactor/delete-asset-series-routes)
+
+**What.** Deleted `GET /history/:asset_id` and `GET /forecast/:asset_id` with their handlers,
+`SimReadPort::asset_history`/`asset_forecast` and their `SimHandle` bodies, the `Asset::forecast`
+trait method and its seven implementations, `AssetHistoryBuffer::power_at`, and their tests
+(`asset_history.feature`, `asset_forecast.feature`, `asset_forecast_steps.py`, one `ven_history`
+scenario, 27 Rust tests).
+
+**Why.** The history route read the same per-asset buffer, over the same hour, that the Controller
+timeline already draws, with less in it (power only, no state values). `forecast()` was an asset's
+plan-unaware extrapolation (the battery held its current power, the heater ran its thermostat
+uncontrolled) that nothing but the route read; the planner takes its inputs from
+`max_effort_schedule`, `forecast_kw_at` and `uncurtailed_power_kw_at`. A second, unread answer to
+"what will this asset do" is the kind of copy `one-concept-one-function` removes, so the user chose
+deletion over a UI surface.
+
+**Issues.** The R-133 branch's first E2E run failed on a BDD scenario still reading the deleted
+`/trace/history`: deleting a route needs a grep of `tests/features/` for its path, not only of the
+Rust and UI callers.

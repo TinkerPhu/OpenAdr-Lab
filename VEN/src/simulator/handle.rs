@@ -24,9 +24,7 @@ use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::timeline::TimelineSnapshot;
 use crate::entities::DomainError;
-use chrono::Duration;
 use chrono::{DateTime, Utc};
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 #[derive(Clone)]
 pub struct SimHandle {
@@ -106,17 +104,6 @@ impl SimReadPort for SimHandle {
         self.sim.lock().await.to_timeline_snapshot(now)
     }
 
-    async fn asset_forecast(
-        &self,
-        asset_id: &str,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> Option<TimeSeries> {
-        let sim = self.sim.lock().await;
-        let (entry, cfg) = sim.find_asset(asset_id)?;
-        Some(cfg.forecast(&entry.state, timespan, now))
-    }
-
     async fn asset_capability(&self, asset_id: &str) -> Option<AssetCapabilityView> {
         let sim = self.sim.lock().await;
         let (entry, cfg) = sim.find_asset(asset_id)?;
@@ -133,27 +120,6 @@ impl SimReadPort for SimHandle {
                 .map(|r| r.request_defaults(&entry.state).default_soc_target),
             capability,
             floor,
-        })
-    }
-
-    async fn asset_history(
-        &self,
-        asset_id: &str,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> Option<TimeSeries> {
-        let sim = self.sim.lock().await;
-        let entry = sim.asset(asset_id)?;
-        let points = entry.history.slice(timespan, now);
-        // A LOCF boundary point at now-timespan, so consumers always get a sample anchored at
-        // the start of the requested window.
-        let boundary_ts = now - timespan;
-        let boundary_power_kw = entry.history.power_at(boundary_ts).unwrap_or(0.0);
-        let mut samples = vec![(boundary_ts, boundary_power_kw)];
-        samples.extend(points.iter().map(|p| (p.ts, p.power_kw)));
-        Some(TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
         })
     }
 
@@ -282,24 +248,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn asset_forecast_is_the_assets_own_series_and_none_for_an_unknown_asset() {
-        let (handle, _sim) = handle_with(&all_kinds());
-        let series = handle
-            .asset_forecast(
-                crate::ids::ASSET_BATTERY,
-                Duration::seconds(300),
-                Utc::now(),
-            )
-            .await
-            .expect("the battery forecasts");
-        assert!(!series.samples.is_empty());
-        assert!(handle
-            .asset_forecast("nope", Duration::seconds(300), Utc::now())
-            .await
-            .is_none());
-    }
-
-    #[tokio::test]
     async fn asset_capability_carries_the_assets_range_floor_and_key_features() {
         let (handle, sim) = handle_with(&all_kinds());
         let view = handle
@@ -316,32 +264,6 @@ mod tests {
         assert_eq!(view.is_fixed, view.capability.is_fixed(&view.floor));
         drop(guard);
         assert!(handle.asset_capability("nope").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn asset_history_is_anchored_at_the_window_start_and_follows_the_records() {
-        let (handle, sim) = handle_with(&all_kinds());
-        let now = Utc::now();
-        sim.lock()
-            .await
-            .record_history(now - Duration::seconds(10), 10.0, -5.0);
-        sim.lock()
-            .await
-            .record_history(now - Duration::seconds(5), 10.0, -5.0);
-        let series = handle
-            .asset_history(crate::ids::ASSET_BATTERY, Duration::seconds(60), now)
-            .await
-            .expect("the battery has a history");
-        assert_eq!(
-            series.samples.len(),
-            3,
-            "boundary point plus the two records"
-        );
-        assert_eq!(series.samples[0].0, now - Duration::seconds(60));
-        assert!(handle
-            .asset_history("nope", Duration::seconds(60), now)
-            .await
-            .is_none());
     }
 
     #[tokio::test]

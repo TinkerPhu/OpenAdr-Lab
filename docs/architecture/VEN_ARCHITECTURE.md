@@ -701,8 +701,7 @@ for `Asset::simulate_forward` to run. Its default body steps at 60-second resolu
 rather than emitting a flat two-point `[(t1, s), (t_end, s)]` schedule, because
 `step()` only checks exhaustion/ceiling conditions at the *start* of a `dt` window —
 a single coarse step silently over-reports both power and energy once the asset would
-have hit its ceiling partway through (the same convention `Battery::forecast()`/
-`ShiftableLoadAsset::forecast()` already used). `ShiftableLoadAsset` overrides this
+have hit its ceiling partway through. `ShiftableLoadAsset` overrides this
 method instead of `max_effort_setpoint`, since its "extreme" is a placement decision,
 not a constant: Import places the run at `earliest_start` (maximize remaining
 budget), Export places it at `latest_end - duration` (minimum forced import for as
@@ -1298,7 +1297,7 @@ Power levels: discrete `[0, 3, 6]` kW (STEPPED adjustability).
 band or under `Curtail` (GB-44). It used to be inferred from `actual_power_kw >= max_kw`, which
 could not tell an emergency from the planner commanding the top stage: a space heater
 (`temp_min_c` 18 °C) the planner ran at full power anywhere in 18–21 °C then ignored every
-later setpoint, including capacity limits and alerts. `forecast()` steps through the same rule.
+later setpoint, including capacity limits and alerts.
 Whenever the thermostat forces a value, `/sim` carries it as `forced_power_kw` and the Controller
 page marks that asset's power "· forced" (tooltip shows the forced kW). Tests: `heater.rs`
 `step_inner_*latch*`, `forced_power_kw_reports_what_the_thermostat_forces`; BDD
@@ -1452,8 +1451,6 @@ behaviour classes (`state.rs::SimInjectState`):
 |---|---|---|
 | GET | `/timeline/all` | Merged past+future timeline for all known assets + grid (registered before `/timeline/:asset_id` — more specific route first) |
 | GET | `/timeline/:asset_id` | Merged past+future timeline for one asset |
-| GET | `/forecast/:asset_id` | Physics-projected future power for one asset |
-| GET | `/history/:asset_id` | Raw per-asset history slice |
 | GET | `/capability/:asset_id` | Point-in-time feasible power range (`AssetCapability`) plus `key_features`: the asset's own `[{label, value}]` display facts (see below) |
 
 **Asset key features.** `Asset::key_features(&self, state) -> Vec<KeyFeature>` (`assets/mod.rs`) is the one place an asset states what is worth showing about it, label and value with the unit already in it (`-` when there is nothing yet). PV declares `peak power` (`rated_kw`), Battery and EV declare `capacity` (`capacity_kwh`, `battery_kwh`), all straight from the profile. Base load declares `avg` / `max` (of the last 14 days, `LOAD_WINDOW_DAYS`) from `BaseLoad.observed_window` (`assets/load_window.rs`): the `tasks/base_load_window.rs` job reads the last 14 days of 1-minute `TickSample` rows through `HistoryPort` at boot and then hourly (every minute while the history is still empty) and injects the result; the asset owns what it means, so a restart reproduces the same numbers from the same history and a fresh install shows `-` until the first record. Assets with nothing to declare return an empty list. The route serialises the list as is, and the VEN UI's Flexibility & Forecast panel prints it under the asset name with no per-kind branch. Test: `assets/*::key_features_*`, `tasks/base_load_window.rs`, `FlexibilityForecastPanel.test.tsx`, `tests/features/asset_key_features.feature`.
@@ -1516,7 +1513,7 @@ forward-looking PV value — the planner's `p_pv_kw` solver input
 `controller::milp_planner::inputs::build_milp_inputs` as `pv_live_forecast_kw`)
 and the site-headroom/capacity forecasts above (`asset_max_power_series`/
 `simulated_trajectory`) — resolves through `PvInverter::uncurtailed_power_kw_at`,
-the one method `max_effort_schedule`/`forecast()`/`simulate_forward` all build
+the one method `max_effort_schedule`/`simulate_forward` both build
 on. Precedence: deterministic pin (`pv_forecast_override`, always wins) →
 `PvInverter`'s own weather-aware projection (its `weather_forecast` field,
 populated each tick from the same weather feed R-50 always used) → sin-model

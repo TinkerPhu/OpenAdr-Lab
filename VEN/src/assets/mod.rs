@@ -148,7 +148,7 @@ mod phase2a_battery_tests {
     use super::*;
     use crate::controller::milp_planner::{AssetKind, AssetMilpParams};
     use crate::entities::asset_params::BatteryParams;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use std::collections::HashMap;
 
     fn boxed_and_state(initial_soc_frac: f64) -> (Box<dyn Asset>, AssetState) {
@@ -183,13 +183,6 @@ mod phase2a_battery_tests {
         });
         boxed.reset(&mut state, HashMap::from([("soc".to_string(), 0.8)]));
         assert_eq!(state.soc_frac(), Some(0.8));
-    }
-
-    #[test]
-    fn forecast_produces_samples() {
-        let (boxed, state) = boxed_and_state(0.5);
-        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
-        assert!(!series.samples.is_empty());
     }
 
     #[test]
@@ -307,7 +300,7 @@ mod phase2a_ev_tests {
     use super::*;
     use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::EvParams;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     fn ev_params() -> EvParams {
         EvParams {
@@ -338,13 +331,6 @@ mod phase2a_ev_tests {
     fn state_values_exposes_soc() {
         let (boxed, state) = boxed_and_state();
         assert_eq!(boxed.state_values(&state).get("soc"), Some(&0.4));
-    }
-
-    #[test]
-    fn forecast_produces_samples() {
-        let (boxed, state) = boxed_and_state();
-        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
-        assert!(!series.samples.is_empty());
     }
 
     #[test]
@@ -468,7 +454,7 @@ mod phase2a_heater_tests {
     use super::*;
     use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::HeaterParams;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     fn heater_params() -> HeaterParams {
         HeaterParams {
@@ -501,13 +487,6 @@ mod phase2a_heater_tests {
     fn state_values_exposes_temp_c() {
         let (boxed, state) = boxed_and_state();
         assert_eq!(boxed.state_values(&state).get("temp_c"), Some(&20.0));
-    }
-
-    #[test]
-    fn forecast_produces_samples() {
-        let (boxed, state) = boxed_and_state();
-        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
-        assert!(!series.samples.is_empty());
     }
 
     #[test]
@@ -616,7 +595,6 @@ mod phase2a_pv_tests {
 
     use super::*;
     use crate::entities::asset_params::PvParams;
-    use chrono::{Duration, Utc};
 
     fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = PvParams {
@@ -635,13 +613,6 @@ mod phase2a_pv_tests {
     fn state_values_exposes_rated_kw() {
         let (boxed, state) = boxed_and_state();
         assert_eq!(boxed.state_values(&state).get("rated_kw"), Some(&10.0));
-    }
-
-    #[test]
-    fn forecast_produces_samples() {
-        let (boxed, state) = boxed_and_state();
-        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
-        assert!(!series.samples.is_empty());
     }
 
     #[test]
@@ -694,7 +665,6 @@ mod phase2a_base_load_tests {
 
     use super::*;
     use crate::entities::asset_params::BaseLoadParams;
-    use chrono::{Duration, Utc};
 
     fn boxed_and_state() -> (Box<dyn Asset>, AssetState) {
         let params = BaseLoadParams {
@@ -712,13 +682,6 @@ mod phase2a_base_load_tests {
     fn state_values_exposes_baseline_kw() {
         let (boxed, state) = boxed_and_state();
         assert_eq!(boxed.state_values(&state).get("baseline_kw"), Some(&0.6));
-    }
-
-    #[test]
-    fn forecast_produces_samples() {
-        let (boxed, state) = boxed_and_state();
-        let series = boxed.forecast(&state, Duration::seconds(300), Utc::now());
-        assert!(!series.samples.is_empty());
     }
 
     #[test]

@@ -54,16 +54,6 @@ impl AssetHistoryBuffer {
         self.points.back()
     }
 
-    /// Last-observation-carried-forward power at or before `t`.
-    /// Returns `None` if no point exists at or before `t`.
-    pub fn power_at(&self, t: DateTime<Utc>) -> Option<f64> {
-        self.points
-            .iter()
-            .rev()
-            .find(|p| p.ts <= t)
-            .map(|p| p.power_kw)
-    }
-
     /// Number of recorded points. Test-only: nothing in production needs it.
     #[cfg(test)]
     pub fn len(&self) -> usize {

@@ -57,7 +57,7 @@ pub fn apply_pending_pv_inject(
 
 /// `pv-competence-consolidation` section 4: resolve one live, `PvInverter`-authoritative
 /// export-ceiling value per plan slot, using the same `uncurtailed_power_kw_at` path
-/// `max_effort_schedule`/`forecast()` already use — replacing the raw-snapshot
+/// `max_effort_schedule` already uses — replacing the raw-snapshot
 /// `pv_ceiling_kw` reconstruction `build_milp_inputs` used to do on its own. `None` when
 /// no live `"pv"` asset exists in this snapshot (the caller falls back to the existing
 /// static-curve path unchanged); `Some(vec)` of one value per `cum_s` entry otherwise,
@@ -81,7 +81,7 @@ pub fn resolve_pv_forecast_kw(
 }
 
 /// `base-load-competence-consolidation`: resolve one live, `BaseLoad`-authoritative forecast
-/// value per plan slot, using the same `forecast_kw_at` path `forecast()` uses — replacing
+/// value per plan slot, using the asset's own `forecast_kw_at` — replacing
 /// `build_milp_inputs`'s own direct `asset_heuristics.get(ASSET_BASE_LOAD)` read. `None` when
 /// no live `"base_load"` asset exists in this snapshot (the caller falls back to the existing
 /// static-baseline path unchanged).

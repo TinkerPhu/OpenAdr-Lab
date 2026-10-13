@@ -1,7 +1,7 @@
 Feature: Weather Forecast Plugin — MQTT-sourced PV forecast
   A weather forecast published over MQTT (docs/architecture/weather_forecast.md)
-  replaces the sin-model PV forecast in both the planner's own input and the
-  API-visible /forecast/pv response, falling back to the sin model when no
+  replaces the sin-model PV forecast in the planner's input, falling back to
+  the sin model when no
   forecast is available or the cached one has gone stale.
 
   Background:

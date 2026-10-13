@@ -14,7 +14,6 @@ use crate::entities::asset::{
 use crate::entities::asset_params::{EvParams, EvUsageSimParams, RequestDefaults};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::ev_usage::EvUsageSimState;
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,21 +236,6 @@ impl EvCharger {
             state.soc_frac = soc_frac.clamp(0.0, 1.0);
         }
     }
-
-    pub fn forecast(&self, state: &EvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Step);
-        }
-        let power = if state.plugged {
-            state.actual_power_kw
-        } else {
-            0.0
-        };
-        TimeSeries {
-            samples: vec![(now, power), (now + timespan, power)],
-            interpolation: Interpolation::Step,
-        }
-    }
 }
 
 impl Asset for EvCharger {
@@ -375,11 +359,6 @@ impl Asset for EvCharger {
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut EvState = own_mut(state);
         Self::reset(self, s, values)
-    }
-
-    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let s: &EvState = own(state);
-        Self::forecast(self, s, timespan, now)
     }
 
     fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
@@ -699,41 +678,6 @@ mod tests {
         let floor = ev.flexibility_floor_inner(&state);
         assert_eq!(floor.min_import_kw, 0.0);
         assert_eq!(floor.min_export_kw, 0.0);
-    }
-
-    #[test]
-    fn forecast_not_plugged_returns_zero() {
-        let (ev, state) = make_ev(false, 0.5, 7.4);
-        let series = ev.forecast(&state, Duration::seconds(3600), Utc::now());
-        for (_, v) in &series.samples {
-            assert_eq!(*v, 0.0, "Unplugged EV must return zero power");
-        }
-    }
-
-    #[test]
-    fn forecast_zero_timespan_returns_empty() {
-        let (ev, state) = make_ev(true, 0.5, 7.4);
-        let series = ev.forecast(&state, Duration::zero(), Utc::now());
-        assert!(series.samples.is_empty());
-    }
-
-    #[test]
-    fn forecast_has_two_samples_with_boundary() {
-        let (ev, state) = make_ev(true, 0.5, 7.4);
-        let timespan = Duration::seconds(600);
-        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
-        let series = ev.forecast(&state, timespan, now);
-        assert_eq!(
-            series.samples.len(),
-            2,
-            "Step forecast must have exactly 2 samples"
-        );
-        let last_ts = series.samples.last().unwrap().0;
-        assert_eq!(
-            last_ts,
-            now + timespan,
-            "boundary must be exactly now+timespan"
-        );
     }
 
     #[test]

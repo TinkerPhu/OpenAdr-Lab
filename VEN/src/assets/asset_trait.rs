@@ -11,7 +11,6 @@ use crate::entities::asset::{
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::EvSession;
 use crate::entities::ev_usage::EvUsageSimState;
-use lab_core::time_series::TimeSeries;
 
 pub use super::max_power::{Trajectory, TrajectoryPoint};
 
@@ -122,12 +121,10 @@ pub trait Asset: Send + Sync {
     /// pre-clamp rate as "actual" for the whole window, only the resulting
     /// SoC clamps). A single coarse step across a window that exhausts
     /// partway through would silently over-report both power and energy.
-    /// So this builds a fine-grained schedule (60 s resolution, matching
-    /// `Battery::forecast()`/`ShiftableLoadAsset::forecast()`'s existing
-    /// per-tick convention) holding the same constant setpoint throughout —
-    /// small enough steps for `step()`'s own per-tick clamping to correctly
-    /// detect exhaustion and drop to `0` partway through, the same way
-    /// those `forecast()` methods already do.
+    /// So this builds a fine-grained schedule (60 s resolution, one live tick
+    /// per step) holding the same constant setpoint throughout — small enough
+    /// steps for `step()`'s own per-tick clamping to correctly detect
+    /// exhaustion and drop to `0` partway through.
     fn max_effort_schedule(
         &self,
         state: &AssetState,
@@ -283,18 +280,6 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::reset() only applies to AssetConfig-backed asset kinds")
     }
 
-    /// Forecast this asset's own power over `timespan` from `now`, holding its
-    /// current setpoint (no plan-awareness — see `simulator::forecast` for
-    /// the plan-driven equivalent).
-    fn forecast(
-        &self,
-        _state: &AssetState,
-        _timespan: Duration,
-        _now: DateTime<Utc>,
-    ) -> TimeSeries {
-        unimplemented!("Asset::forecast() only applies to AssetConfig-backed asset kinds")
-    }
-
     /// Domain-level type classification, for the API/timeline snapshots.
     /// **Not** 1:1 with the 5 `AssetConfig` variants — `BaseLoad` maps to
     /// `AssetType::GenericConsumer`, not its own variant (see `AssetType`'s
@@ -320,7 +305,7 @@ pub trait Asset: Send + Sync {
     /// False for an asset whose state is driven from outside — PV's output
     /// tracks irradiance, so walking it forward through a dispatch schedule
     /// produces a number that means nothing. Such an asset's "state later" is
-    /// its state now; the forecast comes from its own `forecast()` instead.
+    /// its state now; its future comes from `max_effort_schedule` instead.
     ///
     /// A trait question rather than `cfg.asset_type_str() == "pv"` at the one
     /// call site that cares: whether simulating an asset forward is

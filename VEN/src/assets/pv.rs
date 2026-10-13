@@ -12,7 +12,6 @@ use crate::entities::asset::{
 };
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
-use lab_core::time_series::TimeSeries;
 
 fn f64_infinity() -> f64 {
     f64::INFINITY
@@ -94,7 +93,7 @@ pub struct PvInverter {
     /// from YAML.
     pub weather_power_kw: Option<f64>,
     /// The full weather-forecast series (`entities::solar::weather_pv_forecast_series`'s
-    /// output) — what `max_effort_schedule`/`forecast()`/`simulate_forward` sample for a
+    /// output) — what `max_effort_schedule`/`simulate_forward` sample for a
     /// point beyond `t1` that `weather_power_kw` (a single "now" value) can't answer. Same
     /// source/resolution as `weather_power_kw`; `None` under the same conditions. Set each
     /// tick by the sim loop, NOT from YAML, not persisted (`#[serde(skip)]`) — refreshed
@@ -401,11 +400,6 @@ impl Asset for PvInverter {
         Self::reset(self, s, values)
     }
 
-    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let s: &PvState = own(state);
-        Self::forecast(self, s, timespan, now)
-    }
-
     // No as_milp_participant/as_request_resolvable/as_thermostat override —
     // PV implements none of D4's three capability traits; the trait's own
     // None defaults apply, matching AssetConfig's existing `_ => None`
@@ -427,7 +421,7 @@ impl Asset for PvInverter {
 
     /// PV output tracks irradiance, not dispatch: walking it forward through
     /// a schedule produces a number that means nothing. Its future comes from
-    /// `forecast()`.
+    /// `max_effort_schedule`.
     fn state_follows_dispatch(&self) -> bool {
         false
     }
@@ -874,56 +868,6 @@ mod tests {
             (power_kw + 10.0).abs() < 1e-9,
             "forced override must ignore measured_power_kw entirely, got {power_kw}"
         );
-    }
-
-    #[test]
-    fn forecast_zero_timespan_returns_empty() {
-        let (pv, state) = make_pv(5.0);
-        let series = pv.forecast(&state, Duration::zero(), Utc::now());
-        assert!(
-            series.samples.is_empty(),
-            "Zero timespan must return empty series"
-        );
-    }
-
-    #[test]
-    fn forecast_has_boundary_point_at_end() {
-        let (pv, state) = make_pv(5.0);
-        let timespan = Duration::seconds(300);
-        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
-        let series = pv.forecast(&state, timespan, now);
-        assert!(
-            !series.samples.is_empty(),
-            "Non-zero timespan must produce samples"
-        );
-        let last_ts = series.samples.last().unwrap().0;
-        assert_eq!(
-            last_ts,
-            now + timespan,
-            "Boundary point must be at now+timespan"
-        );
-    }
-
-    #[test]
-    fn forecast_samples_ascending() {
-        let (pv, state) = make_pv(5.0);
-        let series = pv.forecast(&state, Duration::seconds(120), Utc::now());
-        let timestamps: Vec<_> = series.samples.iter().map(|(t, _)| t).collect();
-        for i in 1..timestamps.len() {
-            assert!(
-                timestamps[i] > timestamps[i - 1],
-                "Timestamps must be strictly ascending"
-            );
-        }
-    }
-
-    #[test]
-    fn forecast_rated_zero_returns_all_zero() {
-        let (pv, state) = make_pv(0.0);
-        let series = pv.forecast(&state, Duration::seconds(300), Utc::now());
-        for (_, v) in &series.samples {
-            assert_eq!(*v, 0.0, "Zero-rated PV must produce all-zero series");
-        }
     }
 
     // ── uncurtailed_power_kw_at: [0,1] fraction clamp (4.0a) ─────────────────
