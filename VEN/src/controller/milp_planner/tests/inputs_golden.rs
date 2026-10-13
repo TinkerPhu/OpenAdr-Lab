@@ -49,7 +49,6 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
         build_asset_contexts(profile, &sim, now, case.ev_session.as_ref(), None, &tariffs);
     push_shiftable_load_contexts(&mut ctxs, &case.shiftables, profile, now);
     super::super::inputs::build_milp_inputs(
-        &ctxs,
         &GridSignals {
             capacity_schedule: case.schedule.clone(),
             alert_windows: case.alerts.clone(),
@@ -509,15 +508,6 @@ fn scenarios_take_their_branches() {
     assert_eq!(
         over.p_imp_max_cont_kw[3], plain.p_base_kw[3],
         "SIMPLE 2 caps at the base load before the override"
-    );
-    assert!(s["ev_budget_too_low"].budget_warning.is_some());
-    assert!(s["ev_budget_ample"].budget_warning.is_none());
-    assert_eq!(
-        s["ev_deadline_and_two_shiftables"]
-            .assets
-            .shiftable_loads
-            .len(),
-        2
     );
     assert_eq!(s["two_zones"].n, 9);
     assert_eq!(s["two_zones"].cum_s[9], 6 * 300 + 3 * 1800);

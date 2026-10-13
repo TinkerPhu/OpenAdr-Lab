@@ -10,11 +10,9 @@
 use chrono::{DateTime, Utc};
 
 use super::input_stages::{
-    apply_baseline_override, asset_scalars, capacity_limits, ev_budget_warning, forecast_series,
-    slot_bounds, tariff_series,
+    apply_baseline_override, capacity_limits, forecast_series, slot_bounds, tariff_series,
 };
 use super::types::*;
-use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
@@ -59,12 +57,10 @@ pub(crate) struct StaleRateRefs<'a> {
     pub co2: Option<&'a TimeSeries>,
 }
 
-/// Build the full MILP input parameter set from asset contexts and current runtime state.
-///
-/// Asset-specific parameters (battery, EV, heater, shiftable loads) come through the
-/// `AssetMilpContext` trait; prices and limits from `grid`; PV and base load from `site`.
+/// Build the planner's site- and grid-level inputs from the current runtime state: prices and
+/// limits from `grid`, PV and base load from `site`. Everything about a schedulable asset stays
+/// in that asset's own context, which the solve reads directly.
 pub(crate) fn build_milp_inputs(
-    asset_contexts: &[Box<dyn AssetMilpContext>],
     grid: &GridSignals,
     planner: &PlannerParams,
     site: &SiteInputs,
@@ -78,12 +74,6 @@ pub(crate) fn build_milp_inputs(
     // Before the override: SIMPLE level 2 caps import at the forecast base load.
     let limits = capacity_limits(grid, planner, site, &bounds, &p_base_kw);
     apply_baseline_override(&mut p_base_kw, &time, now, site.baseline_override);
-    let assets = asset_scalars(asset_contexts, time.n, now);
-    let budget_warning = ev_budget_warning(
-        &tariffs.c_imp_eur_kwh,
-        assets.ev_budget_eur,
-        assets.e_ev_extra_max_kwh,
-    );
 
     MilpInputs {
         n: time.n,
@@ -93,7 +83,6 @@ pub(crate) fn build_milp_inputs(
         rate_stale: tariffs.rate_stale,
         stale_rate_warning: tariffs.stale_rate_warning,
         co2_stale_rate_warning: tariffs.co2_stale_rate_warning,
-        budget_warning,
         c_exp_eur_kwh: tariffs.c_exp_eur_kwh,
         g_imp_kgco2_kwh: tariffs.g_imp_kgco2_kwh,
         p_pv_kw,
@@ -106,7 +95,5 @@ pub(crate) fn build_milp_inputs(
         pen_exp_eur_kwh: planner.pen_exp_eur_kwh,
         mip_gap_target: planner.mip_gap_target,
         penalty_rules: planner.penalty_rules.clone(),
-        w_tier_penalty_eur: planner.w_tier_penalty_eur,
-        assets,
     }
 }

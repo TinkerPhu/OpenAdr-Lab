@@ -55,9 +55,6 @@ fn solve_with_session(
         profile,
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
-        Some(session),
-        None,
-        &[],
         None,
         None,
     )
@@ -272,9 +269,6 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
         &profile.assets,
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
-        Some(&opp),
-        None,
-        &[],
         None,
         None,
         Some(2.5), // pv_forecast_override: 2.5 kW PV, 0.5 kW base → 2.0 kW surplus cap
@@ -313,16 +307,16 @@ fn test_mode_opportunistic_has_no_deadline_constraint() {
 
     let tariffs = make_tariffs(0.30, 0.08, 300.0);
     let ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);
-    let inp = build_milp_inputs(&ctxs, &tariffs, &no_capacity(), &profile, now, &[], None);
+    let ev = context::<EvMilpContext>(&ctxs);
     assert!(
-        inp.assets.a_ev.iter().all(|&v| v),
+        ev.a_ev.iter().all(|&v| v),
         "OPPORTUNISTIC ignores the departure deadline, mask {:?}",
-        inp.assets.a_ev
+        ev.a_ev
     );
     assert!(
-        inp.assets.ev_obligations.is_empty(),
+        ev.obligations.is_empty(),
         "OPPORTUNISTIC has no core obligation, got {:?}",
-        inp.assets.ev_obligations
+        ev.obligations
     );
 }
 

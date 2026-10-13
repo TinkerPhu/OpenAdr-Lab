@@ -124,9 +124,6 @@ fn time_one_solve(with_heater: bool) -> (f64, usize) {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     (started.elapsed().as_secs_f64(), plan.slots.len())
 }
@@ -226,7 +223,6 @@ fn solve_at(
     let cap = no_capacity();
 
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
     let t = Instant::now();
@@ -237,7 +233,6 @@ fn solve_at(
     let p2 = solve_phase2(
         &inputs,
         &p1w,
-        &p2w,
         p1.objective_eur,
         profile.planner.phase2_epsilon_eur,
         &p1,
@@ -430,9 +425,6 @@ fn time_ev_solve_at(
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        sess,
-        None,
-        &[],
         None,
         None,
     );
@@ -554,7 +546,6 @@ fn ev_phase_split_cfg(
     let cap = no_capacity();
 
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
     let t = Instant::now();
@@ -566,7 +557,6 @@ fn ev_phase_split_cfg(
     let p2 = solve_phase2(
         &inputs,
         &p1w,
-        &p2w,
         p1.objective_eur,
         profile.planner.phase2_epsilon_eur,
         &p1,
@@ -689,7 +679,6 @@ fn phase2_at_timeout_for(
     let cap = no_capacity();
 
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1_timeout = profile.planner.solver_timeout_s as f64;
 
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, p1_timeout).expect("phase 1 must be feasible");
@@ -698,7 +687,6 @@ fn phase2_at_timeout_for(
     let p2 = solve_phase2(
         &inputs,
         &p1w,
-        &p2w,
         p1.objective_eur,
         profile.planner.phase2_epsilon_eur,
         &p1,
@@ -787,14 +775,12 @@ fn phase2_schedule_diff(heater: bool) {
     let cap = no_capacity();
 
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let timeout = profile.planner.solver_timeout_s as f64;
 
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 must be feasible");
     let (p2, _friction) = solve_phase2(
         &inputs,
         &p1w,
-        &p2w,
         p1.objective_eur,
         profile.planner.phase2_epsilon_eur,
         &p1,
@@ -868,14 +854,12 @@ fn bench_phase2_changes_across_instances() {
         let tariffs = make_tariffs(import_eur_kwh, 0.08, 300.0);
         let cap = no_capacity();
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
         let timeout = profile.planner.solver_timeout_s as f64;
 
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, timeout).expect("phase 1 feasible");
         let (p2, friction) = match solve_phase2(
             &inputs,
             &p1w,
-            &p2w,
             p1.objective_eur,
             profile.planner.phase2_epsilon_eur,
             &p1,
@@ -956,7 +940,6 @@ fn bench_phase2_epsilon_sweep() {
             let tariffs = make_diurnal_tariffs(50);
             let cap = no_capacity();
             let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-            let p2w = build_phase2_weights(&inputs, &profile.planner);
 
             let t = Instant::now();
             let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
@@ -965,16 +948,7 @@ fn bench_phase2_epsilon_sweep() {
             // Deliberately a full 60 s: this asks whether an improvement EXISTS
             // within the cap, not how fast it is found.
             let t = Instant::now();
-            let r = solve_phase2(
-                &inputs,
-                &p1w,
-                &p2w,
-                p1.objective_eur,
-                epsilon,
-                &p1,
-                &ctxs,
-                60.0,
-            );
+            let r = solve_phase2(&inputs, &p1w, p1.objective_eur, epsilon, &p1, &ctxs, 60.0);
             let p2_s = t.elapsed().as_secs_f64();
             match r {
                 Ok((p2, friction)) => {
@@ -1122,7 +1096,7 @@ fn phase1_setup(
     Phase1Weights,
 ) {
     let ctxs = build_asset_contexts(profile, sim, now, None, None, tariffs);
-    let inputs = build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None);
+    let inputs = build_milp_inputs(tariffs, cap, profile, now, &[], None);
     let p1w = build_phase1_weights(profile, PlannerObjective::MinCost);
     (ctxs, inputs, p1w)
 }
@@ -1407,7 +1381,6 @@ fn bench_phase2_budget_with_real_prices() {
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
     println!(
@@ -1425,16 +1398,7 @@ fn bench_phase2_budget_with_real_prices() {
     );
     for budget in [1.0, 2.0, 5.0, 10.0, 20.0, 60.0] {
         let t = Instant::now();
-        let r = solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            1.00,
-            &p1,
-            &ctxs,
-            budget,
-        );
+        let r = solve_phase2(&inputs, &p1w, p1.objective_eur, 1.00, &p1, &ctxs, budget);
         let secs = t.elapsed().as_secs_f64();
         match r {
             Ok((p2, friction)) => {
@@ -1485,7 +1449,6 @@ fn bench_phase2_budget_executed_window() {
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
     // Switches inside the first `hours` of a solution.
@@ -1526,17 +1489,9 @@ fn bench_phase2_budget_executed_window() {
         switches_within(&p1.heater().stage, 48.0),
     );
     for budget in [5.0, 60.0] {
-        let (p2, friction) = solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            1.00,
-            &p1,
-            &ctxs,
-            budget,
-        )
-        .expect("phase 2 feasible");
+        let (p2, friction) =
+            solve_phase2(&inputs, &p1w, p1.objective_eur, 1.00, &p1, &ctxs, budget)
+                .expect("phase 2 feasible");
         println!(
             "  {:>11.0}s {friction:>11.4} {:>12} {:>12} {:>12} {:>12}",
             budget,
@@ -1583,7 +1538,6 @@ fn bench_what_is_in_phase2_friction() {
     let tariffs = make_diurnal_tariffs(50);
     let cap = no_capacity();
     let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
     let decompose = |sol: &SolveOutput| -> (usize, f64, f64, f64) {
@@ -1622,17 +1576,9 @@ fn bench_what_is_in_phase2_friction() {
         "phase 1", "-"
     );
     for budget in [5.0, 60.0] {
-        let (p2, friction) = solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            1.00,
-            &p1,
-            &ctxs,
-            budget,
-        )
-        .expect("phase 2 feasible");
+        let (p2, friction) =
+            solve_phase2(&inputs, &p1w, p1.objective_eur, 1.00, &p1, &ctxs, budget)
+                .expect("phase 2 feasible");
         let (s, sc, pv, tb) = decompose(&p2);
         println!(
             "  {:>15}s {friction:>11.4} {s:>9} {sc:>13.4} {pv:>11.2} {tb:>13.4}",
@@ -2001,14 +1947,12 @@ fn bench_phase2_startup_binaries() {
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
         let t = Instant::now();
         let r = solve_phase2(
             &inputs,
             &p1w,
-            &p2w,
             p1.objective_eur,
             profile.planner.phase2_epsilon_eur,
             &p1,
@@ -2107,22 +2051,12 @@ fn bench_asset_mix_solve_cost() {
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
 
         let t = Instant::now();
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_s = t.elapsed().as_secs_f64();
         let t = Instant::now();
-        let r = solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            1.00,
-            &p1,
-            &ctxs,
-            60.0,
-        );
+        let r = solve_phase2(&inputs, &p1w, p1.objective_eur, 1.00, &p1, &ctxs, 60.0);
         let p2_s = t.elapsed().as_secs_f64();
         let p2_status = match &r {
             Ok((sol, _)) => format!("{:?}", sol.status),
@@ -2197,12 +2131,10 @@ fn bench_min_epsilon_by_class() {
         for epsilon in [0.02, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0] {
             let mut pr = profile.clone();
             pr.planner.phase2_epsilon_eur = epsilon;
-            let p2w = build_phase2_weights(&inputs, &pr.planner);
             let t = Instant::now();
             let r = solve_phase2(
                 &inputs,
                 &p1w,
-                &p2w,
                 p1.objective_eur,
                 epsilon,
                 &p1,
@@ -2255,97 +2187,6 @@ fn bench_min_epsilon_by_class() {
     );
 }
 
-/// R-97 **bug**: the phase-2 warm start is infeasible whenever the battery discharges.
-///
-/// `u_bat` is the battery's *direction selector*, not an activity flag
-/// (`battery_milp.rs`):
-///
-/// ```text
-/// p_ch[t]  <= ch_max  * u_bat[t]          u_bat = 1 -> charging allowed
-/// p_dis[t] <= dis_max * (1 - u_bat[t])    u_bat = 1 -> discharging forced to 0
-/// ```
-///
-/// but `build_phase2_warm_start` sets it from an *activity* test:
-///
-/// ```text
-/// let active = if p_ch > 0 || p_dis > 0 { 1.0 } else { 0.0 };
-/// iv.push((v.u_bat[t], active));
-/// ```
-///
-/// So in every slot where phase 1 discharges the battery, the warm start asserts
-/// `u_bat = 1` alongside `p_dis > 0`, violating `p_dis <= dis_max * (1 - u_bat) = 0`.
-/// The start phase 2 is handed is therefore infeasible, and it must find a solution
-/// from scratch — which it manages on an easy instance (battery-only converges) and
-/// fails on a hard one. That is exactly the production symptom: ven-5, ven-14 and
-/// ven-17 (the three heater+battery VENs) log `NoSolutionFound` on essentially every
-/// cycle, 29-33 times per 3 h, while ven-11 never does.
-///
-/// `z_active` is a genuine activity flag (`p_ch + p_dis <= big_m * z_active`), so its
-/// warm-start value is correct and must stay as it is.
-#[test]
-fn phase2_warm_start_respects_the_battery_direction_selector() {
-    let now = fixed_now();
-    let mut profile = ev_bench_profile_with_heater(true, 20.0, false);
-    // Small grid: this is a correctness test, not a benchmark.
-    profile.planner.plan_zones = vec![crate::entities::plan::PlanZone {
-        step_s: 900,
-        slots: 16,
-    }];
-    profile
-        .assets
-        .push(crate::entities::asset_params::AssetParams::Battery(
-            BatteryParams {
-                id: "battery".into(),
-                capacity_kwh: 11.0,
-                max_charge_kw: 5.5,
-                max_discharge_kw: 5.5,
-                initial_soc_frac: 0.90, // nearly full, so discharging is attractive
-                round_trip_efficiency: 0.92,
-                min_soc_frac: 0.10,
-                c_terminal_eur_kwh: Some(0.0), // no terminal reward, so it will discharge
-            },
-        ));
-    let sim = make_snap_from_profile(&profile);
-    // Expensive import makes discharging the cheap option.
-    let tariffs = make_tariffs(0.60, 0.08, 300.0);
-    let cap = no_capacity();
-    let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
-
-    let discharging: Vec<usize> = (0..inputs.n)
-        .filter(|&t| p1.battery().discharge_kw[t] > 1e-6)
-        .collect();
-    assert!(
-        !discharging.is_empty(),
-        "this test needs phase 1 to discharge the battery; it did not, so the fixture \
-         no longer exercises the bug. p_bat_dis_kw = {:?}",
-        p1.battery().discharge_kw
-    );
-
-    // Rebuild phase 2's variable pool exactly as solve_phase2 does, then inspect the
-    // warm start it would be given.
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
-    let (iv, u_bat) = crate::controller::milp_planner::solver_phase2::warm_start_for_test(
-        &inputs, &p1w, &p2w, &p1, &ctxs,
-    );
-    let lookup: std::collections::HashMap<_, _> = iv.into_iter().collect();
-    for t in discharging {
-        let v = lookup
-            .get(&u_bat[t])
-            .copied()
-            .unwrap_or_else(|| panic!("u_bat[{t}] missing from the warm start"));
-        assert!(
-            v < 0.5,
-            "slot {t}: phase 1 discharges at {:.3} kW, so the warm start must set the \
-             direction selector u_bat to 0 (discharge). It is {v}, which asserts \
-             'charging' and makes p_dis <= dis_max * (1 - 1) = 0 infeasible — the start \
-             phase 2 is handed cannot be used, and on a heater+battery instance it then \
-             reports NoSolutionFound (R-97).",
-            p1.battery().discharge_kw[t]
-        );
-    }
-}
-
 /// R-97: is a "working" epsilon repeatable, or did it get lucky once?
 ///
 /// `bench_min_epsilon_by_class` found exactly one epsilon in eight producing a large
@@ -2389,7 +2230,6 @@ fn bench_epsilon_repeatability() {
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_sw = (1..inputs.n)
             .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
@@ -2402,7 +2242,6 @@ fn bench_epsilon_repeatability() {
             let res = solve_phase2(
                 &inputs,
                 &p1w,
-                &p2w,
                 p1.objective_eur,
                 epsilon,
                 &p1,
@@ -2502,11 +2341,9 @@ fn bench_epsilon_across_instances() {
         for epsilon in [0.3, 0.5, 0.75, 1.0, 1.5, 2.0] {
             let mut pr = profile.clone();
             pr.planner.phase2_epsilon_eur = epsilon;
-            let p2w = build_phase2_weights(&inputs, &pr.planner);
             let r = solve_phase2(
                 &inputs,
                 &p1w,
-                &p2w,
                 p1.objective_eur,
                 epsilon,
                 &p1,
@@ -2619,12 +2456,10 @@ fn bench_phase2_smoothing_reaches_relay() {
         let tariffs = make_diurnal_tariffs(50);
         let cap = no_capacity();
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let (p2, _friction) = solve_phase2(
             &inputs,
             &p1w,
-            &p2w,
             p1.objective_eur,
             epsilon,
             &p1,
@@ -2920,7 +2755,6 @@ fn bench_battery_ev_phase2_executed_window() {
 
         let sim = make_snap_from_profile(&profile);
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
-        let p2w = build_phase2_weights(&inputs, &profile.planner);
 
         let t0 = std::time::Instant::now();
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
@@ -2930,7 +2764,6 @@ fn bench_battery_ev_phase2_executed_window() {
         let (p2, friction) = solve_phase2(
             &inputs,
             &p1w,
-            &p2w,
             p1.objective_eur,
             profile.planner.phase2_epsilon_eur,
             &p1,

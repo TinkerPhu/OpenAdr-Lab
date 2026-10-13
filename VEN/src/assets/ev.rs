@@ -441,6 +441,11 @@ impl MilpParticipant for EvCharger {
         // ev-usage-forecast: the asset's own predicted availability, ANDed into
         // the mask above. No-op unless this EV declared `usage_forecast`.
         ctx.apply_usage_forecast(self, inputs.n, inputs.cum_s, inputs.now, inputs.ev_sessions);
+        ctx.friction = crate::controller::milp_planner::FrictionCosts {
+            startup_eur: planner.c_ev_startup_eur,
+            ramp_eur_kw: planner.c_ev_ramp_eur_kw,
+            tier_penalty_eur: 0.0,
+        };
         Box::new(ctx)
     }
 }

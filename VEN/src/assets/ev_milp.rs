@@ -12,7 +12,7 @@ use {
 };
 
 use crate::controller::milp_planner::asset_port::{
-    pinned_binary, EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput, ModeDecisions,
+    pinned_binary, EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
 };
 
 /// Penalty for letting the floor absorb part of a predicted trip's SoC drop
@@ -48,23 +48,24 @@ impl EvMilpContext {
         c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
     ) -> EvMilpVars {
-        self.declare_vars_with(n, c_startup_eur, c_ramp_eur_kw, vars, ModeDecisions::Free)
+        self.declare_vars_with(n, c_startup_eur, c_ramp_eur_kw, vars, None)
     }
 
     /// The one EV variable declaration (R-98): the plan and the marginal-cost pass differ
     /// only in how `z_ev_on` is declared, so the SoC ceiling, the guarantee band and the
-    /// `MustNotRun` shape exist once. A pinned pass carries no startup/ramp auxiliaries.
+    /// `MustNotRun` shape exist once. `pinned_on` is the winning solution's on/off flag per
+    /// slot; a pinned pass carries no startup/ramp auxiliaries.
     pub fn declare_vars_with(
         &self,
         n: usize,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
-        modes: ModeDecisions,
+        pinned_on: Option<&[f64]>,
     ) -> EvMilpVars {
-        let (c_startup_eur, c_ramp_eur_kw) = match modes {
-            ModeDecisions::Free => (c_startup_eur, c_ramp_eur_kw),
-            ModeDecisions::Pinned(_) => (0.0, 0.0),
+        let (c_startup_eur, c_ramp_eur_kw) = match pinned_on {
+            None => (c_startup_eur, c_ramp_eur_kw),
+            Some(_) => (0.0, 0.0),
         };
         let p_ev = (0..n)
             .map(|_| {
@@ -108,13 +109,13 @@ impl EvMilpContext {
                 if self.mode == EvMilpMode::MustNotRun {
                     return vars.add(variable().min(0.0).max(0.0));
                 }
-                match modes {
-                    ModeDecisions::Free => {
+                match pinned_on {
+                    None => {
                         let ub = if self.a_ev[t] { 1.0 } else { 0.0 };
                         vars.add(variable().max(ub).binary())
                     }
-                    ModeDecisions::Pinned(w) => {
-                        let v = pinned_binary(w.z_ev_on.get(t).copied());
+                    Some(on) => {
+                        let v = pinned_binary(on.get(t).copied());
                         vars.add(variable().min(v).max(v))
                     }
                 }
@@ -360,7 +361,7 @@ impl EvMilpContext {
     ///
     /// The per-obligation SoC shortfall is converted back into the kWh the
     /// diagnostic reports, using the pack size cached on the vars.
-    pub fn read_solution(sol: &impl Solution, v: &EvMilpVars, n: usize) -> EvSolOutput {
+    pub fn read_solution(sol: &(impl Solution + ?Sized), v: &EvMilpVars, n: usize) -> EvSolOutput {
         EvSolOutput {
             p_ev_kw: (0..n).map(|t| sol.value(v.p_ev[t])).collect(),
             // R-93: the plan's SoC curve, straight off the solved variables —
@@ -378,138 +379,13 @@ impl EvMilpContext {
     }
 }
 
-impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
-    fn asset_id(&self) -> &str {
-        &self.asset_id
-    }
-
-    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
-        crate::controller::milp_planner::AssetKind::Ev
-    }
-
-    fn milp_params(
-        &self,
-        _n: usize,
-        _now: chrono::DateTime<chrono::Utc>,
-    ) -> crate::controller::milp_planner::AssetMilpParams {
-        use crate::controller::milp_planner::MilpLoadMode;
-        let mode = match self.mode {
-            EvMilpMode::MustRun => MilpLoadMode::MustRun,
-            EvMilpMode::MayRun => MilpLoadMode::MayRun,
-            EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        crate::controller::milp_planner::AssetMilpParams::Ev(
-            crate::controller::milp_planner::EvScalars {
-                mode,
-                soc_init_frac: self.soc_init_frac,
-                a_ev: self.a_ev.clone(),
-                soc_drops: self.soc_drops.clone(),
-                obligations: self.obligations.clone(),
-                p_max_kw: self.p_max_kw,
-                p_min_kw: self.p_min_kw,
-                battery_kwh: self.battery_kwh,
-                segments: self.segments.clone(),
-                e_extra_max_kwh: self.e_extra_max_kwh,
-                v_extra_eur_kwh: self.v_extra_eur_kwh,
-                budget_eur: self.budget_eur,
-            },
-        )
-    }
-
-    fn declare_vars_into_pool(
-        &self,
-        n: usize,
-        c_startup_eur: f64,
-        c_ramp_eur_kw: f64,
-        vars: &mut ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        pool.ev = Some(self.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
-    }
-
-    fn declare_pinned_vars_into_pool(
-        &self,
-        n: usize,
-        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
-        vars: &mut ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        pool.ev = Some(self.declare_vars_with(n, 0.0, 0.0, vars, ModeDecisions::Pinned(winning)));
-    }
-
-    fn constraints(
-        &self,
-        pool: &crate::controller::milp_interactions::MilpVarPool,
-        n: usize,
-        dt_h: &[f64],
-    ) -> Vec<Constraint> {
-        // SAFETY: declare_vars_into_pool() (above) always runs before constraints()
-        // for this context — see the AssetMilpContext trait's call-order invariant.
-        EvMilpContext::constraints(self, pool.ev.as_ref().unwrap(), n, dt_h)
-    }
-
-    fn objective(
-        &self,
-        pool: &crate::controller::milp_interactions::MilpVarPool,
-        n: usize,
-        dt_h: &[f64],
-        _c_wear_eur_kwh: f64,
-        c_startup_eur: f64,
-        c_ramp_eur_kw: f64,
-    ) -> Expression {
-        // Phase 1 (c_startup=0): no friction, service reward active (w_services=1.0).
-        // Phase 2 friction (c_startup>0): startup+ramp active, service reward off.
-        let (startup, ramp, w_services) = if c_startup_eur == 0.0 {
-            (0.0_f64, 0.0_f64, 1.0_f64)
-        } else {
-            (c_startup_eur, c_ramp_eur_kw, 0.0_f64)
-        };
-        // SAFETY: declare_vars_into_pool() always runs before objective() for this
-        // context — see the AssetMilpContext trait's call-order invariant.
-        EvMilpContext::objective(
-            self,
-            pool.ev.as_ref().unwrap(),
-            startup,
-            ramp,
-            w_services,
-            n,
-            dt_h,
-        )
-    }
-
-    fn inject_grid_slots(&mut self, c_imp_eur_kwh: &[f64], p_pv_kw: &[f64], p_base_kw: &[f64]) {
-        // WP4.1-c MAX_COST: keep the per-slot import rates for the budget constraint.
-        if self.budget_eur.is_some() {
-            self.c_imp_eur_kwh = Some(c_imp_eur_kwh.to_vec());
-        }
-        if !self.free_only {
-            return;
-        }
-        // Free energy per slot: forecast PV surplus over the baseline load,
-        // opened fully when the grid pays (or charges nothing) for import.
-        let cap: Vec<f64> = c_imp_eur_kwh
-            .iter()
-            .zip(p_pv_kw)
-            .zip(p_base_kw)
-            .map(|((&c_imp, &pv), &base)| {
-                if c_imp <= 0.0 {
-                    self.p_max_kw
-                } else {
-                    (pv - base).max(0.0).min(self.p_max_kw)
-                }
-            })
-            .collect();
-        self.p_free_cap_kw = Some(cap);
-    }
-}
-
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
     use crate::controller::milp_planner::{
         AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
     };
-    use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+    use crate::services::test_support::milp_pool::bound_range;
     use good_lp::variables;
 
     // ── ev-usage-forecast: apply_usage_forecast ──────────────────────
@@ -1141,6 +1017,8 @@ mod milp_context_trait_tests {
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
             asset_id: "ev".into(),
+            friction: Default::default(),
+            session_departure: None,
             mode: EvMilpMode::MustRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1420,6 +1298,8 @@ mod milp_context_trait_tests {
     fn milp_params_may_run_mode() {
         let ctx = EvMilpContext {
             asset_id: "ev".into(),
+            friction: Default::default(),
+            session_departure: None,
             mode: EvMilpMode::MayRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1451,6 +1331,8 @@ mod milp_context_trait_tests {
     fn milp_params_must_not_run_mode() {
         let ctx = EvMilpContext {
             asset_id: "ev".into(),
+            friction: Default::default(),
+            session_departure: None,
             mode: EvMilpMode::MustNotRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1484,6 +1366,8 @@ mod milp_context_trait_tests {
         let a_ev = vec![true, false, true, false];
         let ctx = EvMilpContext {
             asset_id: "ev".into(),
+            friction: Default::default(),
+            session_departure: None,
             mode: EvMilpMode::MayRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1512,16 +1396,11 @@ mod milp_context_trait_tests {
     }
 
     #[test]
-    fn declare_vars_fills_pool_ev_slot() {
+    fn declare_vars_without_friction_declares_no_startup_vars() {
         let n = 4;
         let ctx = make_must_run(n);
         let mut vars = variables!();
-        let mut pool = empty_pool(&mut vars, n);
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool
-            .ev
-            .as_ref()
-            .expect("pool.ev should be Some after declare");
+        let v = ctx.declare_vars(n, 0.0, 0.0, &mut vars);
         assert_eq!(v.p_ev.len(), n);
         assert_eq!(v.z_ev_on.len(), n);
         assert!(v.delta_ev.is_empty()); // no startup vars when c_startup=0
@@ -1531,22 +1410,12 @@ mod milp_context_trait_tests {
     /// the guarantee band and the SoC ceiling included — with `z_ev_on` fixed.
     #[test]
     fn declare_pinned_vars_is_the_free_declaration_with_z_ev_on_fixed() {
-        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
         let n = 4;
         let ctx = make_must_run(n);
-        let winning = WinningModeDecisions {
-            z_ev_on: vec![0.0, 1.0, 0.8, 0.1],
-            ..Default::default()
-        };
+        let on = vec![0.0, 1.0, 0.8, 0.1];
         let shape = |pinned: bool| {
             let mut vars = variables!();
-            let mut pool = empty_pool(&mut vars, n);
-            if pinned {
-                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
-            } else {
-                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-            }
-            let v = pool.ev.expect("EV declared");
+            let v = ctx.declare_vars_with(n, 0.0, 0.0, &mut vars, pinned.then_some(&on[..]));
             (
                 v.p_ev.len(),
                 v.soc_ev.len(),
@@ -1558,11 +1427,7 @@ mod milp_context_trait_tests {
         };
         assert_eq!(shape(true), shape(false));
 
-        let range = bound_range(|vars| {
-            let mut pool = empty_pool(vars, n);
-            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
-            pool.ev.expect("EV declared").z_ev_on
-        });
+        let range = bound_range(|vars| ctx.declare_vars_with(n, 0.0, 0.0, vars, Some(&on)).z_ev_on);
         assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (1.0, 1.0), (0.0, 0.0)]);
     }
 }

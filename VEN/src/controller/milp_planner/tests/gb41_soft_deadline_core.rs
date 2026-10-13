@@ -169,7 +169,7 @@ fn realistic_weights() -> Phase1Weights {
         w_grid: 0.0,
         w_import: 0.0,
         w_viol: 1.0,
-        c_bat_wear_eur_kwh: 0.03,
+        c_storage_wear_eur_kwh: 0.03,
         c_bat_ev_coexist_eur_kwh: 0.5,
         c_ctrl_imp_malus_eur_kwh: 0.22,
     }
@@ -290,7 +290,7 @@ fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap()
         dump(site, &syn, &out)
     );
 
-    let warnings = super::super::ev_diagnostics::ev_warnings(&syn.inputs(), &out);
+    let warnings = out.warnings();
     let w = warnings
         .iter()
         .find(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet)
@@ -328,7 +328,7 @@ fn a_soft_request_that_charges_partially_reports_no_unmet_obligation() {
         dump(site, &syn, &out)
     );
     assert!(
-        super::super::ev_diagnostics::ev_warnings(&syn.inputs(), &out).is_empty(),
+        out.warnings().is_empty(),
         "a soft request owes nothing, so a partial charge is not a shortfall{}",
         dump(site, &syn, &out)
     );

@@ -91,9 +91,9 @@ fn ev_mask_plugged_no_session_all_true() {
         None,
         None,
     );
-    assert!(inp.assets.a_ev.iter().all(|&v| v));
-    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
-    assert!(inp.assets.ev_obligations.is_empty());
+    assert!(inp.ev().a_ev.iter().all(|&v| v));
+    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
+    assert!(inp.ev().obligations.is_empty());
 }
 
 #[test]
@@ -117,11 +117,11 @@ fn ev_mask_plugged_with_session_deadline() {
     // the last chargeable slot is 11: slot 12 runs [3600, 3900), entirely after the
     // car has left. (This expectation was 12, which allowed one slot of charging
     // after departure — see the commit message.)
-    let d = inp.assets.ev_obligations[0].deadline_step;
+    let d = inp.ev().obligations[0].deadline_step;
     assert_eq!(d, 11);
     // Slots 0..=11 true, 12..23 false
     for t in 0..inp.n {
-        assert_eq!(inp.assets.a_ev[t], t <= d, "slot {t} mask mismatch");
+        assert_eq!(inp.ev().a_ev[t], t <= d, "slot {t} mask mismatch");
     }
 }
 
@@ -142,8 +142,8 @@ fn ev_mask_unplugged_all_false() {
         Some(&session),
         None,
     );
-    assert!(inp.assets.a_ev.iter().all(|&v| !v));
-    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun);
+    assert!(inp.ev().a_ev.iter().all(|&v| !v));
+    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun);
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustRun);
+    assert_eq!(inp.ev().mode, MilpLoadMode::MustRun);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn ev_mode_may_run_for_soft_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.ev().mode, MilpLoadMode::MayRun);
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn ev_mode_must_not_run_for_no_session() {
         None,
         None,
     );
-    assert_eq!(inp.assets.ev_mode, MilpLoadMode::MustNotRun);
+    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun);
 }
 
 #[test]
@@ -243,8 +243,8 @@ fn heater_mid_kw_defaults_to_half_max() {
         None,
         None,
     );
-    assert!((inp.assets.p_heat_step_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
-    assert!(((inp.assets.p_heat_step_kw * inp.assets.heat_n_stages as f64) - 3.0).abs() < 1e-9);
+    assert!((inp.heater().p_step_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
+    assert!(((inp.heater().p_step_kw * inp.heater().n_stages as f64) - 3.0).abs() < 1e-9);
 }
 
 #[test]
@@ -276,8 +276,8 @@ fn heater_single_stage_step_is_full_power() {
         None,
     );
     // make_profile()'s heater is max_kw = 3.0.
-    assert_eq!(inp.assets.heat_n_stages, 1);
-    assert!((inp.assets.p_heat_step_kw - 3.0).abs() < 1e-9);
+    assert_eq!(inp.heater().n_stages, 1);
+    assert!((inp.heater().p_step_kw - 3.0).abs() < 1e-9);
 }
 
 #[test]
@@ -289,7 +289,7 @@ fn weights_preset_min_cost() {
     assert!((w.w_energy - 1.0).abs() < 1e-9);
     assert!((w.w_ghg - 0.20).abs() < 1e-9);
     assert!((w.w_grid - 0.02).abs() < 1e-9);
-    assert!((w.c_bat_wear_eur_kwh - 0.03).abs() < 1e-9);
+    assert!((w.c_storage_wear_eur_kwh - 0.03).abs() < 1e-9);
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn weights_preset_min_ghg() {
     let w = build_phase1_weights(&profile, PlannerObjective::MinGhg);
     assert!((w.w_energy - 0.0).abs() < 1e-9);
     assert!((w.w_ghg - 10.0).abs() < 1e-9);
-    assert!((w.c_bat_wear_eur_kwh - 0.0).abs() < 1e-9);
+    assert!((w.c_storage_wear_eur_kwh - 0.0).abs() < 1e-9);
 }
 
 #[test]
@@ -312,5 +312,5 @@ fn weights_preset_custom_uses_fields() {
     assert!((w.w_energy - 0.5).abs() < 1e-9);
     assert!((w.w_ghg - 0.001).abs() < 1e-9);
     assert!((w.w_grid - 0.1).abs() < 1e-9);
-    assert!((w.c_bat_wear_eur_kwh - 0.02).abs() < 1e-9);
+    assert!((w.c_storage_wear_eur_kwh - 0.02).abs() < 1e-9);
 }

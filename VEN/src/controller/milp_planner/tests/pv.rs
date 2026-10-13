@@ -42,9 +42,7 @@ fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f
     } = crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
     let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_state, n_slots, &cum_s, now);
 
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
     super::super::inputs::build_milp_inputs(
-        &ctxs,
         &test_grid(&TariffTimeSeries::from_snapshots(&[]), &no_capacity()),
         &profile.planner,
         &SiteInputs {
@@ -177,10 +175,7 @@ fn pv_forecast_override_zeros_all_slots() {
     let mut sim = make_snap_from_profile(&profile);
     set_pv_inject(&mut sim, 0.5, 0.1); // non-zero offset to ensure override wins
 
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
-
     let inp1 = build_milp_inputs_with_override(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -200,7 +195,6 @@ fn pv_forecast_override_zeros_all_slots() {
 
     // Second call with same inputs must produce identical p_pv values (US1-AC-2)
     let inp2 = build_milp_inputs_with_override(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -226,10 +220,8 @@ fn pv_forecast_override_none_is_non_zero_during_day() {
     use chrono::TimeZone;
     let noon = Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap();
     let profile = make_profile(); // rated_kw=5.0
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
 
     let inp = build_milp_inputs_with_override(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -252,7 +244,6 @@ fn pv_forecast_override_none_is_non_zero_during_day() {
 /// `weather_pv_kw: None`) — needed to exercise the weather precedence branch.
 #[allow(clippy::too_many_arguments)]
 fn bmi_with_weather(
-    ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     profile: &Profile,
@@ -261,7 +252,6 @@ fn bmi_with_weather(
     weather_pv_kw: Option<&[f64]>,
 ) -> MilpInputs {
     super::super::inputs::build_milp_inputs(
-        ctxs,
         &test_grid(tariffs, cap),
         &profile.planner,
         &SiteInputs {
@@ -279,11 +269,9 @@ fn bmi_with_weather(
 fn weather_pv_kw_overrides_sin_model_fallback() {
     let now = fixed_midnight(); // natural sin-model irradiance = 0 at midnight
     let profile = make_profile(); // rated_kw=5.0
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
 
     let weather_kw = vec![3.5; 100]; // clearly non-zero, distinct from the midnight sin model
     let inp = bmi_with_weather(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -305,10 +293,8 @@ fn weather_pv_kw_none_falls_back_to_sin_model() {
         Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap()
     };
     let profile = make_profile();
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
 
     let inp = bmi_with_weather(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -326,11 +312,9 @@ fn weather_pv_kw_none_falls_back_to_sin_model() {
 fn pv_forecast_override_wins_over_weather_pv_kw() {
     let now = fixed_midnight();
     let profile = make_profile();
-    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
 
     let weather_kw = vec![3.5; 100];
     let inp = bmi_with_weather(
-        &ctxs,
         &TariffTimeSeries::from_snapshots(&[]),
         &no_capacity(),
         &profile,
@@ -390,9 +374,6 @@ fn pv_used_equals_forecast_when_no_export_constraint_binds() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     for slot in &plan.slots {
         assert!(
@@ -426,9 +407,6 @@ fn export_cap_forces_pv_curtailment_without_soft_violation() {
         &profile.assets,
         noon,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
         None,
@@ -469,9 +447,6 @@ fn run_planner_pv_and_base_load_only_declares_pv_used_without_panic() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );

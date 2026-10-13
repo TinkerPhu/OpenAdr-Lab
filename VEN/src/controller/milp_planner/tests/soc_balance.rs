@@ -368,7 +368,7 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
 #[test]
 fn ev_firm_kwh_is_the_largest_demand_above_the_live_soc() {
     let mut site = ev_inputs(4, 50.0, 0.40);
-    assert_eq!(site.inputs().assets.ev_firm_kwh(), 0.0, "no obligation");
+    assert_eq!(site.ev.firm_obligation_kwh(), 0.0, "no obligation");
 
     site.ev.obligations = [0.30, 0.60, 0.80]
         .iter()
@@ -379,14 +379,13 @@ fn ev_firm_kwh_is_the_largest_demand_above_the_live_soc() {
             session_id: None,
         })
         .collect();
-    let assets = site.inputs().assets;
-
-    let per_obligation: Vec<f64> = assets
-        .ev_obligations
+    let per_obligation: Vec<f64> = site
+        .ev
+        .obligations
         .iter()
-        .map(|o| assets.ev_obligation_kwh(o))
+        .map(|o| site.ev.obligation_kwh(o))
         .collect();
     assert_eq!(per_obligation[0], 0.0, "already above 30 %");
     assert!((per_obligation[1] - 10.0).abs() < 1e-9);
-    assert!((assets.ev_firm_kwh() - 20.0).abs() < 1e-9);
+    assert!((site.ev.firm_obligation_kwh() - 20.0).abs() < 1e-9);
 }

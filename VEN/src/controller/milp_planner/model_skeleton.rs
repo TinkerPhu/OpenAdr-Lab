@@ -7,6 +7,10 @@
 //! (R-98). It is built here once, so a new grid variable or objective term is added in one place and
 //! reaches every solve.
 //!
+//! Nothing here knows an asset's kind: each asset declares its own variables (`DeclaredAsset`),
+//! adds its own net power to the balance, contributes its own cost and friction, and reads back
+//! its own solution.
+//!
 //! The order in which variables, expressions and constraints are created is part of the contract:
 //! `good_lp` keeps coefficients in a hash map, so what HiGHS receives is a function of that order.
 //! `tests/model_fingerprint.rs` records the model each solve sends and compares it with a golden.
@@ -16,28 +20,28 @@ use good_lp::{
     SolverModel, Variable,
 };
 
-use super::asset_port::{
-    pinned_binary, BatteryMilpContext, EvMilpContext, HeaterMilpContext, WinningModeDecisions,
-};
+use super::asset_port::pinned_binary;
 use super::penalty::{self, PenaltyRuleVars};
 use super::types::*;
 use crate::controller::milp_interactions::{
-    build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, AssetInteraction,
+    build_interactions, pv_use_tiebreak_expr, site_net_power_expr, AssetInteraction,
     GlobalMilpInputs, GridMilpVars, InteractionVars, MilpVarPool,
 };
-use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
+use crate::controller::milp_planner::{
+    AssetMilpContext, CostWeights, DeclareMode, DeclaredAsset, ObjectivePart,
+};
 
 /// How a solve declares its decisions. The one place the three solves differ in what they build.
 pub(super) enum Declaration<'a> {
-    /// Phase 1: every decision is free (the grid direction a binary) and each asset is declared
-    /// without startup/ramp auxiliaries, i.e. with both costs `0.0`.
+    /// Phase 1: every decision free (the grid direction a binary), and no asset declares the
+    /// auxiliaries only friction prices.
     Phase1,
-    /// Phase 2: every decision is free, and battery and EV carry their startup/ramp auxiliaries
-    /// with the real costs from the weights, because phase 2 minimises that friction.
-    Phase2(&'a Phase2Weights),
-    /// The marginal-cost pass: every mode decision (grid direction, battery direction, EV on/off,
-    /// heater stage, shiftable start) is fixed to the winning solution's value as a *continuous*
-    /// variable, because HiGHS returns no duals for a model with any integer column.
+    /// Phase 2: every decision free, and each asset declares its friction auxiliaries, priced
+    /// by its own friction costs, because phase 2 minimises that friction.
+    Phase2,
+    /// The marginal-cost pass: every mode decision (grid direction, and each asset's own) is
+    /// fixed to the winning solution's value as a *continuous* variable, because HiGHS returns
+    /// no duals for a model with any integer column.
     Pinned(&'a SolveOutput),
 }
 
@@ -45,7 +49,7 @@ impl Declaration<'_> {
     /// One slot's grid import/export exclusion variable.
     fn declare_u_grid(&self, t: usize, vars: &mut ProblemVariables) -> Variable {
         match self {
-            Declaration::Phase1 | Declaration::Phase2(_) => vars.add(variable().binary()),
+            Declaration::Phase1 | Declaration::Phase2 => vars.add(variable().binary()),
             Declaration::Pinned(winning) => {
                 // u_grid is a mode decision like the asset binaries: fixed continuous, not
                 // `.binary()`, for the reason given on `Declaration::Pinned`.
@@ -55,29 +59,24 @@ impl Declaration<'_> {
         }
     }
 
-    fn declare_asset(
+    fn declare_asset<'c>(
         &self,
-        ctx: &dyn AssetMilpContext,
+        ctx: &'c dyn AssetMilpContext,
         n: usize,
         vars: &mut ProblemVariables,
-        pool: &mut MilpVarPool,
-    ) {
-        match self {
-            Declaration::Phase1 => ctx.declare_vars_into_pool(n, 0.0, 0.0, vars, pool),
-            Declaration::Phase2(p2w) => {
-                let (c_startup_eur, c_ramp_eur_kw) = match ctx.asset_kind() {
-                    AssetKind::Battery => (p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw),
-                    AssetKind::Ev => (p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw),
-                    AssetKind::Heater | AssetKind::ShiftableLoad => (0.0, 0.0),
-                };
-                ctx.declare_vars_into_pool(n, c_startup_eur, c_ramp_eur_kw, vars, pool)
-            }
-            // R-98: through the same function the plan used, with the winning mode decisions
-            // pinned, so the priced model is the planned one.
-            Declaration::Pinned(winning) => {
-                ctx.declare_pinned_vars_into_pool(n, &winning.mode_decisions, vars, pool)
-            }
-        }
+    ) -> Box<dyn DeclaredAsset + 'c> {
+        let mode = match self {
+            Declaration::Phase1 => DeclareMode::Plan { friction: false },
+            Declaration::Phase2 => DeclareMode::Plan { friction: true },
+            // R-98: through the same function the plan used, with the asset's own winning
+            // decisions pinned, so the priced model is the planned one.
+            Declaration::Pinned(winning) => DeclareMode::Pinned(
+                winning
+                    .asset(ctx.asset_id())
+                    .expect("the winning solution holds every asset it was solved with"),
+            ),
+        };
+        ctx.declare(n, mode, vars)
     }
 }
 
@@ -88,21 +87,21 @@ struct ActiveInteraction {
 
 /// Everything declared before a solve adds its own objective: handles for every variable, the
 /// grid-level inputs, the penalty slacks and the interactions that apply to this set of assets.
-pub(super) struct ModelSkeleton {
+pub(super) struct ModelSkeleton<'c> {
     pub(super) global: GlobalMilpInputs,
-    pub(super) pool: MilpVarPool,
+    pub(super) pool: MilpVarPool<'c>,
     pub(super) penalty_vars: Vec<PenaltyRuleVars>,
     interactions: Vec<ActiveInteraction>,
 }
 
-impl ModelSkeleton {
+impl<'c> ModelSkeleton<'c> {
     /// Declare the skeleton's variables, in this order: grid variables, penalty slacks, each
     /// asset's variables, then the variables of every interaction that applies. Returns
     /// `ProblemVariables` apart from the handles so the caller can `minimise` it.
     pub(super) fn declare(
         inputs: &MilpInputs,
         p1w: &Phase1Weights,
-        asset_contexts: &[Box<dyn AssetMilpContext>],
+        asset_contexts: &'c [Box<dyn AssetMilpContext>],
         declaration: Declaration<'_>,
     ) -> (ProblemVariables, Self) {
         let n = inputs.n;
@@ -134,12 +133,7 @@ impl ModelSkeleton {
                 s_exp_viol,
                 p_pv_used,
             },
-            bat: None,
-            ev: None,
-            heater: None,
-            // Populated generically below by each ShiftableLoadMilpContext's own declaration,
-            // the same loop that declares Battery/EV/Heater's variables.
-            shiftable: Vec::new(),
+            assets: Vec::with_capacity(asset_contexts.len()),
         };
 
         // WP6.3 (BL-09): one slack per window per active penalty rule, a free continuous slack
@@ -149,7 +143,8 @@ impl ModelSkeleton {
             penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
 
         for ctx in asset_contexts {
-            declaration.declare_asset(ctx.as_ref(), n, &mut vars, &mut pool);
+            let declared = declaration.declare_asset(ctx.as_ref(), n, &mut vars);
+            pool.assets.push(declared);
         }
 
         let mut interactions = Vec::new();
@@ -177,18 +172,13 @@ impl ModelSkeleton {
     }
 
     /// Phase 1's economic cost: energy, emissions, grid and violation terms, the penalty slacks,
-    /// each asset's own cost, the interactions, and the two deterministic tie-breaks.
+    /// each asset's own cost part, the interactions, and the PV-use tie-break.
     ///
     /// This single expression is phase 1's objective, phase 2's cost cap and the marginal-cost
     /// pass's objective. They must be one expression: `c_star` (phase 1's optimum) has to equal the
     /// cap term for term, or phase 2 becomes infeasible outright, and the shadow price has to
     /// reflect the objective that was actually optimised.
-    pub(super) fn cost_expr(
-        &self,
-        inputs: &MilpInputs,
-        p1w: &Phase1Weights,
-        asset_contexts: &[Box<dyn AssetMilpContext>],
-    ) -> Expression {
+    pub(super) fn cost_expr(&self, inputs: &MilpInputs, p1w: &Phase1Weights) -> Expression {
         let n = inputs.n;
         let grid = &self.pool.grid;
         let mut objective = Expression::from(0.0);
@@ -206,25 +196,32 @@ impl ModelSkeleton {
         }
         // WP6.3 (BL-09): peak-demand penalty slack cost, once per window (not per slot).
         objective += penalty::penalty_objective(&self.penalty_vars);
-        // Each asset's contribution in phase 1 convention: a zero startup cost selects the
-        // "phase 1" branch inside an asset's `objective` (battery: wear only; EV: service reward
-        // only; heater: below-minimum penalty only; shiftable load: no economic term).
-        for ctx in asset_contexts {
-            let wear_eur_kwh = match ctx.asset_kind() {
-                AssetKind::Battery => p1w.c_bat_wear_eur_kwh,
-                AssetKind::Ev | AssetKind::Heater | AssetKind::ShiftableLoad => 0.0,
-            };
-            objective += ctx.objective(&self.pool, n, &inputs.dt_h, wear_eur_kwh, 0.0, 0.0);
+        let weights = CostWeights {
+            c_storage_wear_eur_kwh: p1w.c_storage_wear_eur_kwh,
+        };
+        for asset in &self.pool.assets {
+            objective += asset.objective(ObjectivePart::Cost(&weights), n, &inputs.dt_h);
         }
         for active in &self.interactions {
             objective += active.interaction.objective(&active.vars, &inputs.dt_h);
         }
-        // Deterministic earliest-start tie-break for shiftable loads (see
-        // SHIFT_TIEBREAK_EUR_PER_SLOT for the rationale).
-        objective += shiftable_tiebreak_expr(&self.pool.shiftable);
         // Full-PV-utilization tie-break (see PV_USE_TIEBREAK_EUR_PER_KWH for the rationale).
         objective += pv_use_tiebreak_expr(&self.pool.grid, &inputs.dt_h);
         objective
+    }
+
+    /// Phase 2's friction: each asset's friction part and the PV-use tie-break. No economic
+    /// terms; those are capped by `cost_expr` instead.
+    pub(super) fn friction_expr(&self, inputs: &MilpInputs) -> Expression {
+        let mut friction = Expression::from(0.0);
+        for asset in &self.pool.assets {
+            friction += asset.objective(ObjectivePart::Friction, inputs.n, &inputs.dt_h);
+        }
+        // Phase 2's objective is friction-only and otherwise has no opinion on p_pv_used at
+        // all; without this, the epsilon cost budget could let friction smoothing curtail PV
+        // arbitrarily.
+        friction += pv_use_tiebreak_expr(&self.pool.grid, &inputs.dt_h);
+        friction
     }
 
     /// Add the power balance and grid bounds per slot, then every asset's, interaction's and
@@ -234,47 +231,16 @@ impl ModelSkeleton {
         &self,
         mut model: S,
         inputs: &MilpInputs,
-        asset_contexts: &[Box<dyn AssetMilpContext>],
     ) -> (S, Vec<good_lp::constraint::ConstraintReference>) {
         let n = inputs.n;
         let pool = &self.pool;
         let grid = &pool.grid;
         let mut power_balance_refs = Vec::with_capacity(n);
         for t in 0..n {
-            let mut shift_kw = Expression::from(0.0);
-            for sv in &pool.shiftable {
-                for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
-                    if t >= j && t < j + sv.duration_slots {
-                        shift_kw += sv.power_kw * sv.y_shift[ji];
-                    }
-                }
-            }
-
-            let bat_dis: Expression = pool
-                .bat
-                .as_ref()
-                .map(|v| Expression::from(v.p_dis[t]))
-                .unwrap_or_else(|| Expression::from(0.0));
-            let bat_ch: Expression = pool
-                .bat
-                .as_ref()
-                .map(|v| Expression::from(v.p_ch[t]))
-                .unwrap_or_else(|| Expression::from(0.0));
-            let ev_kw: Expression = pool
-                .ev
-                .as_ref()
-                .map(|v| Expression::from(v.p_ev[t]))
-                .unwrap_or_else(|| Expression::from(0.0));
-            // Heater power balance from the cached per-stage power in HeaterMilpVars.
-            let heat_kw: Expression = pool
-                .heater
-                .as_ref()
-                .map(|v| v.p_step_kw * v.y_heat[t])
-                .unwrap_or_else(|| Expression::from(0.0));
-
+            // Import plus the PV used covers the base load, every asset's net power and export.
             let power_balance = constraint!(
-                grid.p_imp[t] + grid.p_pv_used[t] + bat_dis
-                    == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + grid.p_exp[t]
+                grid.p_imp[t] + grid.p_pv_used[t] - site_net_power_expr(pool, t) - grid.p_exp[t]
+                    == inputs.p_base_kw[t]
             );
             probe!(constraint, &power_balance);
             power_balance_refs.push(model.add_constraint(power_balance));
@@ -297,8 +263,8 @@ impl ModelSkeleton {
             );
         }
 
-        for ctx in asset_contexts {
-            for c in ctx.constraints(pool, n, &self.global.dt_h) {
+        for asset in &pool.assets {
+            for c in asset.constraints(n, &self.global.dt_h) {
                 model = with_constraint(model, c);
             }
         }
@@ -319,7 +285,8 @@ impl ModelSkeleton {
         (model, power_balance_refs)
     }
 
-    /// Extract a `SolveOutput` from a solved `good_lp::Solution`.
+    /// Extract a `SolveOutput` from a solved `good_lp::Solution`: the grid series here, each
+    /// asset's part by the asset itself.
     pub(super) fn read_output<S: Solution>(
         &self,
         solution: &S,
@@ -327,105 +294,50 @@ impl ModelSkeleton {
         inputs: &MilpInputs,
     ) -> SolveOutput {
         let n = inputs.n;
-        let pool = &self.pool;
-        let p_imp_ref = &pool.grid.p_imp;
-        let p_exp_ref = &pool.grid.p_exp;
-        let s_imp_ref = &pool.grid.s_imp_viol;
-        let s_exp_ref = &pool.grid.s_exp_viol;
-        let p_pv_used_ref = &pool.grid.p_pv_used;
-
-        let (bat_ch_kw, bat_dis_kw, e_bat_kwh) = if let Some(v) = &pool.bat {
-            let sol = BatteryMilpContext::read_solution(solution, v, n);
-            (sol.p_ch_kw, sol.p_dis_kw, sol.e_kwh)
-        } else {
-            (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
-        };
-
-        let (ev_kw_out, soc_ev_out, ev_shortfall_out, z_ev_on_out, e_ev_extra_out, e_seg_out) =
-            if let Some(v) = &pool.ev {
-                let sol = EvMilpContext::read_solution(solution, v, n);
-                (
-                    sol.p_ev_kw,
-                    sol.soc_ev,
-                    sol.shortfall_kwh,
-                    sol.z_ev_on,
-                    sol.e_ev_extra_kwh,
-                    sol.e_seg_kwh,
-                )
-            } else {
-                (
-                    vec![0.0; n],
-                    // No EV in the model: a flat curve at the live reading, so a
-                    // consumer never has to special-case a missing series.
-                    vec![inputs.assets.soc_ev_init.unwrap_or(0.0); n + 1],
-                    Vec::new(),
-                    vec![0.0; n],
-                    0.0,
-                    0.0,
-                )
-            };
-
-        let (y_heat_out, z_heat_ready_out, e_heat_tank_out) = if let Some(v) = &pool.heater {
-            let sol = HeaterMilpContext::read_solution(solution, v, n);
-            (sol.y_heat, sol.z_heat_ready, sol.e_tank_kwh)
-        } else {
-            (vec![0.0; n], 0.0, vec![])
-        };
-
-        let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.assets.shiftable_loads.len()];
-        for (row, sv) in p_shiftable_kw.iter_mut().zip(pool.shiftable.iter()) {
-            for (t, slot_kw) in row.iter_mut().enumerate() {
-                for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
-                    if t >= j && t < j + sv.duration_slots {
-                        *slot_kw += sv.power_kw * solution.value(sv.y_shift[ji]);
-                    }
-                }
-            }
-        }
-
-        let mode_decisions = WinningModeDecisions {
-            u_bat: pool
-                .bat
-                .as_ref()
-                .map(|v| v.u_bat.iter().map(|&u| solution.value(u)).collect())
-                .unwrap_or_default(),
-            z_ev_on: z_ev_on_out.clone(),
-            y_heat: y_heat_out.clone(),
-            z_heat_ready: z_heat_ready_out,
-            y_shift: pool
-                .shiftable
-                .iter()
-                .map(|sv| {
-                    let row = sv.y_shift.iter().map(|&y| solution.value(y)).collect();
-                    (sv.asset_id.clone(), row)
-                })
-                .collect(),
-        };
-
+        let grid = &self.pool.grid;
+        let series =
+            |vs: &[Variable]| -> Vec<f64> { (0..n).map(|t| solution.value(vs[t])).collect() };
         SolveOutput {
             status: solution.status(),
             objective_eur: solution.eval(objective),
-            p_imp_kw: (0..n).map(|t| solution.value(p_imp_ref[t])).collect(),
-            p_exp_kw: (0..n).map(|t| solution.value(p_exp_ref[t])).collect(),
-            p_pv_used_kw: (0..n).map(|t| solution.value(p_pv_used_ref[t])).collect(),
-            p_bat_ch_kw: bat_ch_kw,
-            p_bat_dis_kw: bat_dis_kw,
-            p_ev_kw: ev_kw_out,
-            soc_ev: soc_ev_out,
-            ev_shortfall_kwh: ev_shortfall_out,
-            y_heat: y_heat_out,
-            e_bat_kwh,
-            s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_ref[t])).collect(),
-            s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_ref[t])).collect(),
-            z_ev_on: z_ev_on_out,
-            e_ev_extra: e_ev_extra_out,
-            e_seg_kwh: e_seg_out,
-            z_heat_ready: z_heat_ready_out,
-            e_heat_tank_kwh: e_heat_tank_out,
-            p_shiftable_kw,
-            mode_decisions,
+            p_imp_kw: series(&grid.p_imp),
+            p_exp_kw: series(&grid.p_exp),
+            p_pv_used_kw: series(&grid.p_pv_used),
+            s_imp_viol_kw: series(&grid.s_imp_viol),
+            s_exp_viol_kw: series(&grid.s_exp_viol),
             s_penalty_kw: penalty::read_penalty_solution(solution, &self.penalty_vars),
+            assets: self
+                .pool
+                .assets
+                .iter()
+                .map(|asset| asset.read(solution, n))
+                .collect(),
         }
+    }
+
+    /// Phase 2's warm start from phase 1's solution: the grid's own values, then each asset's,
+    /// read from its own phase-1 solution.
+    pub(super) fn warm_start(&self, p1: &SolveOutput) -> Vec<(Variable, f64)> {
+        let n = self.global.n;
+        let grid = &self.pool.grid;
+        let mut iv: Vec<(Variable, f64)> = Vec::with_capacity(n * 12);
+        for t in 0..n {
+            iv.push((grid.p_imp[t], p1.p_imp_kw[t].max(0.0)));
+            iv.push((grid.p_exp[t], p1.p_exp_kw[t].max(0.0)));
+            iv.push((
+                grid.u_grid[t],
+                if p1.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 },
+            ));
+            iv.push((grid.s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
+            iv.push((grid.s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
+            iv.push((grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
+        }
+        for asset in &self.pool.assets {
+            if let Some(own) = p1.asset(asset.asset_id()) {
+                iv.extend(asset.warm_start(own, n));
+            }
+        }
+        iv
     }
 }
 

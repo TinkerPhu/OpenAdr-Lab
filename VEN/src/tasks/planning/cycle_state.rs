@@ -7,9 +7,7 @@
 //! which is itself load-bearing, since the one-shot `pv_irradiance` inject is
 //! cleared by the tick and reading it after the clone can lose it.
 
-use crate::entities::device_session::{
-    BaselineOverride, EvSessionQueue, HeaterTarget, ShiftableLoad,
-};
+use crate::entities::device_session::{BaselineOverride, EvSessionQueue, HeaterTarget};
 use crate::entities::planner_params::PlannerObjective;
 use crate::entities::sim_inject::SimInjectState;
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -23,7 +21,6 @@ pub(crate) struct CycleState {
     /// deliberately has none - `cycle.rs` has `now` and derives it there.
     pub ev_sessions: EvSessionQueue,
     pub heat_tgt: Option<HeaterTarget>,
-    pub shift_loads: Vec<ShiftableLoad>,
     pub bl_override: Option<BaselineOverride>,
     pub obj: PlannerObjective,
     pub inject_snap: SimInjectState,
@@ -46,7 +43,6 @@ pub(crate) async fn read_cycle_state(
         rates: state.planned_tariffs().await,
         ev_sessions: state.ev_sessions().await,
         heat_tgt: state.heater_target().await,
-        shift_loads: state.shiftable_loads().await,
         bl_override: state.baseline_override().await,
         obj: *active_objective.read().await,
         pv_forecast_override: inject_snap.pv_plan_kw,

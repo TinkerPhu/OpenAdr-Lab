@@ -388,9 +388,6 @@ fn test_rate_estimated_flag_lands_in_plan_slots() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     assert!(!plan.slots[0].rate_estimated, "covered slot not estimated");
     assert!(

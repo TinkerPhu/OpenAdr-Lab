@@ -4,8 +4,7 @@
 //! or through struct-update syntax; nothing here may encode a scenario of its own.
 //!
 //! An asset is stated as its own MILP context, the thing the solve reads (R-134). `MilpInputs`
-//! is never the place to describe an asset: what it carries about them is derived from the
-//! contexts by the production `asset_scalars`, here as in `build_milp_inputs`.
+//! is never the place to describe an asset: it carries the site and the grid only.
 
 use super::*;
 
@@ -20,7 +19,6 @@ pub(super) fn synthetic_inputs(n: usize, step_s: i64, base_kw: f64) -> MilpInput
         rate_stale: vec![false; n],
         stale_rate_warning: None,
         co2_stale_rate_warning: None,
-        budget_warning: None,
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
         p_pv_kw: vec![0.0; n],
@@ -33,8 +31,6 @@ pub(super) fn synthetic_inputs(n: usize, step_s: i64, base_kw: f64) -> MilpInput
         pen_exp_eur_kwh: 0.0,
         mip_gap_target: 0.02,
         penalty_rules: vec![],
-        w_tier_penalty_eur: 0.0,
-        assets: crate::controller::milp_planner::input_stages::AssetScalars::none(n),
     }
 }
 
@@ -45,19 +41,9 @@ pub(super) fn make_phase1_weights() -> Phase1Weights {
         w_grid: 0.0,
         w_import: 0.0,
         w_viol: 1.0,
-        c_bat_wear_eur_kwh: 0.0,
+        c_storage_wear_eur_kwh: 0.0,
         c_bat_ev_coexist_eur_kwh: 0.0,
         c_ctrl_imp_malus_eur_kwh: 0.0,
-    }
-}
-
-pub(super) fn make_phase2_weights() -> Phase2Weights {
-    Phase2Weights {
-        c_bat_startup_eur: 0.0,
-        c_bat_ramp_eur_kw: 0.0,
-        c_ev_startup_eur: 0.0,
-        c_ev_ramp_eur_kw: 0.0,
-        w_tier_penalty_eur: 0.0,
     }
 }
 
@@ -112,16 +98,9 @@ impl SyntheticSite {
         v
     }
 
-    /// The inputs of this site: the grid side, with what the contexts declare.
+    /// The inputs of this site: the grid side.
     pub fn inputs(&self) -> MilpInputs {
-        MilpInputs {
-            assets: crate::controller::milp_planner::input_stages::asset_scalars(
-                &self.contexts(),
-                self.grid.n,
-                fixed_now(),
-            ),
-            ..self.grid.clone()
-        }
+        self.grid.clone()
     }
 
     /// Phase 1 on this site, with the solver's test time limit.
@@ -134,7 +113,7 @@ impl SyntheticSite {
 
     /// The firm energy this EV's obligations demand above its live SoC [kWh].
     pub fn firm_kwh(&self) -> f64 {
-        self.inputs().assets.ev_firm_kwh()
+        self.ev.firm_obligation_kwh()
     }
 
     /// State one firm EV obligation of `kwh` by `deadline_step`, from this EV's own pack size
@@ -157,6 +136,10 @@ pub(super) fn synthetic_site(n: usize, step_s: i64, base_kw: f64) -> SyntheticSi
         ev: absent_ev(n),
         heater: HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MustNotRun,
             t_dead_step: None,
             p_step_kw: 0.0,
@@ -180,6 +163,8 @@ pub(super) fn synthetic_site(n: usize, step_s: i64, base_kw: f64) -> SyntheticSi
 pub(super) fn absent_ev(n: usize) -> EvMilpContext {
     EvMilpContext {
         asset_id: "ev".into(),
+        friction: Default::default(),
+        session_departure: None,
         mode: EvMilpMode::MustNotRun,
         soc_init_frac: 0.0,
         soc_max_frac: 1.0,

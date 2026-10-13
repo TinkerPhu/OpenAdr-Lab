@@ -152,6 +152,19 @@ struct Instance {
     inputs: MilpInputs,
     ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     profile: Profile,
+    now: DateTime<Utc>,
+    slots: Vec<Slot>,
+}
+
+impl Instance {
+    /// This instance's asset contexts rebuilt from `profile` (e.g. other friction costs, which
+    /// each context carries from the planner parameters it was built with).
+    fn contexts_with(
+        &self,
+        profile: &Profile,
+    ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        instance_from(profile.clone(), self.now, &self.slots).ctxs
+    }
 }
 
 fn ven1_instance() -> Instance {
@@ -165,7 +178,7 @@ fn instance_from(profile: Profile, now: DateTime<Utc>, slots: &[Slot]) -> Instan
     let tariffs = tariffs_from(&profile, now, slots);
     let cap = no_capacity();
     let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let mut inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+    let mut inputs = build_milp_inputs(&tariffs, &cap, &profile, now, &[], None);
     assert_eq!(inputs.n, 288);
     for (i, &(pv, base, _, _, _)) in slots.iter().enumerate() {
         inputs.p_pv_kw[i] = pv;
@@ -178,6 +191,8 @@ fn instance_from(profile: Profile, now: DateTime<Utc>, slots: &[Slot]) -> Instan
         inputs,
         ctxs,
         profile,
+        now,
+        slots: slots.to_vec(),
     }
 }
 
@@ -248,17 +263,18 @@ fn report(label: &str, s: &SolveOutput, n: usize, secs: f64, extra: &str) {
 #[test]
 #[ignore = "ven-1 spike reproduction: ~10 full solves, run with --ignored --nocapture"]
 fn bench_ven1_spikes() {
+    let instance = ven1_instance();
     let Instance {
         inputs,
         ctxs,
         profile,
-    } = ven1_instance();
-    let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
+        ..
+    } = &instance;
+    let p1w = build_phase1_weights(profile, PlannerObjective::MinCost);
     println!("\n-- ven-1 2026-10-03T10:40Z: battery spikes at 14:10 / 16:55 local --\n");
 
     let t = Instant::now();
-    let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+    let p1 = solve_phase1(inputs, &p1w, ctxs, 60.0).expect("phase 1 feasible");
     report(
         "phase 1 (gap 0.02)",
         &p1,
@@ -267,9 +283,10 @@ fn bench_ven1_spikes() {
         &format!("obj {:.4}", p1.objective_eur),
     );
 
-    let run_p2 = |label: &str, inp: &MilpInputs, w: &Phase2Weights, eps: f64, budget: f64| {
+    type Ctxs = [Box<dyn crate::controller::milp_planner::AssetMilpContext>];
+    let run_p2 = |label: &str, inp: &MilpInputs, ctxs: &Ctxs, eps: f64, budget: f64| {
         let t = Instant::now();
-        match solve_phase2(inp, &p1w, w, p1.objective_eur, eps, &p1, &ctxs, budget) {
+        match solve_phase2(inp, &p1w, p1.objective_eur, eps, &p1, ctxs, budget) {
             Ok((s, fr)) => report(
                 label,
                 &s,
@@ -281,27 +298,29 @@ fn bench_ven1_spikes() {
         }
     };
 
-    run_p2("p2 prod (eps .02, 15 s)", &inputs, &p2w, 0.02, 15.0);
-    run_p2("p2 budget 60 s", &inputs, &p2w, 0.02, 60.0);
-    run_p2("p2 budget 180 s", &inputs, &p2w, 0.02, 180.0);
-    let mut w = p2w.clone();
-    w.c_bat_startup_eur *= 10.0;
-    w.c_ev_startup_eur *= 10.0;
-    run_p2("p2 startup x10, 15 s", &inputs, &w, 0.02, 15.0);
-    let mut w = p2w.clone();
-    w.c_bat_ramp_eur_kw *= 10.0;
-    w.c_ev_ramp_eur_kw *= 10.0;
-    run_p2("p2 ramp x10, 15 s", &inputs, &w, 0.02, 15.0);
+    run_p2("p2 prod (eps .02, 15 s)", inputs, ctxs, 0.02, 15.0);
+    run_p2("p2 budget 60 s", inputs, ctxs, 0.02, 60.0);
+    run_p2("p2 budget 180 s", inputs, ctxs, 0.02, 180.0);
+    let mut startup_x10 = profile.clone();
+    startup_x10.planner.c_bat_startup_eur *= 10.0;
+    startup_x10.planner.c_ev_startup_eur *= 10.0;
+    let ctxs_x10 = instance.contexts_with(&startup_x10);
+    run_p2("p2 startup x10, 15 s", inputs, &ctxs_x10, 0.02, 15.0);
+    let mut ramp_x10 = profile.clone();
+    ramp_x10.planner.c_bat_ramp_eur_kw *= 10.0;
+    ramp_x10.planner.c_ev_ramp_eur_kw *= 10.0;
+    let ctxs_x10 = instance.contexts_with(&ramp_x10);
+    run_p2("p2 ramp x10, 15 s", inputs, &ctxs_x10, 0.02, 15.0);
     let mut loose = inputs.clone();
     loose.mip_gap_target = 0.20;
-    run_p2("p2 own gap 0.20, 15 s", &loose, &p2w, 0.02, 15.0);
+    run_p2("p2 own gap 0.20, 15 s", &loose, ctxs, 0.02, 15.0);
 
     // Does a tighter phase 1 leave nothing for phase 2 to clean up?
     for gap in [0.005, 0.001] {
         let mut tight = inputs.clone();
         tight.mip_gap_target = gap;
         let t = Instant::now();
-        let p1t = solve_phase1(&tight, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
+        let p1t = solve_phase1(&tight, &p1w, ctxs, 60.0).expect("phase 1 feasible");
         report(
             &format!("phase 1 (gap {gap})"),
             &p1t,
@@ -365,7 +384,7 @@ fn bench_fleet_startup_penalty() {
         let tariffs = ven1_tariffs(&profile);
         let cap = no_capacity();
         let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-        let inputs = build_milp_inputs(&ctxs, &tariffs, &cap, &profile, now, &[], None);
+        let inputs = build_milp_inputs(&tariffs, &cap, &profile, now, &[], None);
         for ctx in ctxs.iter_mut() {
             ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
         }
@@ -388,12 +407,23 @@ fn bench_fleet_startup_penalty() {
         println!("      {:<10}{}", "p1", fmt_shape(shape(&p1, inputs.n)));
         let mut rec = vec![];
         for startup in [0.01, 0.10] {
-            let mut planner = profile.planner.clone();
-            planner.c_bat_startup_eur = startup;
-            planner.c_ev_startup_eur = startup;
-            let p2w = build_phase2_weights(&inputs, &planner);
+            let mut priced = profile.clone();
+            priced.planner.c_bat_startup_eur = startup;
+            priced.planner.c_ev_startup_eur = startup;
+            let mut priced_ctxs = build_asset_contexts(&priced, &sim, now, None, None, &tariffs);
+            for ctx in priced_ctxs.iter_mut() {
+                ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+            }
             let t = Instant::now();
-            let r = solve_phase2(&inputs, &p1w, &p2w, p1.objective_eur, eps, &p1, &ctxs, 15.0);
+            let r = solve_phase2(
+                &inputs,
+                &p1w,
+                p1.objective_eur,
+                eps,
+                &p1,
+                &priced_ctxs,
+                15.0,
+            );
             let secs = t.elapsed().as_secs_f64();
             let (s, fr) = match r {
                 Ok(v) => v,
@@ -567,9 +597,11 @@ fn bench_ven5_heater_fragmentation() {
         inputs,
         ctxs,
         profile,
+        ..
     } = ven5_frag_instance();
+    let ev = context::<EvMilpContext>(&ctxs);
     let mismatched = (0..inputs.n)
-        .filter(|&t| inputs.assets.a_ev[t] != frag5::PLUGGED[t])
+        .filter(|&t| ev.a_ev[t] != frag5::PLUGGED[t])
         .count();
     println!(
         "
@@ -586,7 +618,6 @@ fn bench_ven5_heater_fragmentation() {
             inp.mip_gap_target = g;
         }
         let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
-        let p2w = build_phase2_weights(&inp, &profile.planner);
         let t = Instant::now();
         let p1 = match solve_phase1(&inp, &p1w, &ctxs, 60.0) {
             Ok(p) => p,
@@ -606,7 +637,7 @@ fn bench_ven5_heater_fragmentation() {
             .ok()
             .and_then(|e| e.parse().ok())
             .unwrap_or(profile.planner.phase2_epsilon_eur);
-        match solve_phase2(&inp, &p1w, &p2w, p1.objective_eur, eps, &p1, &ctxs, budget) {
+        match solve_phase2(&inp, &p1w, p1.objective_eur, eps, &p1, &ctxs, budget) {
             Ok((s, fr)) => println!(
                 "  {:<22} p2 eps {eps} {:>5.1}s {:<10} {}  friction {fr:.3}",
                 "",
@@ -669,6 +700,7 @@ fn ven1_live_instance_charges_the_ev_in_runs_not_single_slots() {
         inputs,
         ctxs,
         profile,
+        ..
     } = ven1_frag_instance();
     let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
@@ -737,18 +769,18 @@ fn bench_ven1_ev_fragmentation() {
         },
     ];
     let only = std::env::var("BENCH_ONLY").ok();
+    let instance = ven1_frag_instance();
     let Instance {
-        inputs,
-        ctxs,
-        profile,
-    } = ven1_frag_instance();
+        inputs, profile, ..
+    } = &instance;
+    let ev = context::<EvMilpContext>(&instance.ctxs);
     let mismatched = (0..inputs.n)
-        .filter(|&t| inputs.assets.a_ev[t] != frag::PLUGGED[t])
+        .filter(|&t| ev.a_ev[t] != frag::PLUGGED[t])
         .count();
     println!(
         "
 -- ven-1 2026-10-05T19:40Z | obligations {} | plugged mask differs from live in {mismatched} slots",
-        inputs.assets.ev_obligations.len()
+        ev.obligations.len()
     );
     println!(
         "   runs/one-slot blips over 48 h; grid = import - export at the tariffs
@@ -768,10 +800,10 @@ fn bench_ven1_ev_fragmentation() {
             prof.planner.c_bat_startup_eur = c;
             prof.planner.c_ev_startup_eur = c;
         }
+        let ctxs = instance.contexts_with(&prof);
         let p1w = build_phase1_weights(&prof, PlannerObjective::MinCost);
-        let p2w = build_phase2_weights(&inputs, &prof.planner);
         let t = Instant::now();
-        let p1 = match solve_phase1(&inputs, &p1w, &ctxs, 60.0) {
+        let p1 = match solve_phase1(inputs, &p1w, &ctxs, 60.0) {
             Ok(p) => p,
             Err(e) => {
                 println!("  {:<14} phase 1 ERR {e}", v.name);
@@ -783,27 +815,18 @@ fn bench_ven1_ev_fragmentation() {
             v.name,
             t.elapsed().as_secs_f64(),
             format!("{:?}", p1.status),
-            variant_row(&inputs, &p1)
+            variant_row(inputs, &p1)
         );
         let t = Instant::now();
         let eps = prof.planner.phase2_epsilon_eur;
-        match solve_phase2(
-            &inputs,
-            &p1w,
-            &p2w,
-            p1.objective_eur,
-            eps,
-            &p1,
-            &ctxs,
-            v.budget_s,
-        ) {
+        match solve_phase2(inputs, &p1w, p1.objective_eur, eps, &p1, &ctxs, v.budget_s) {
             Ok((s, fr)) => {
                 println!(
                     "  {:<14} p2 {:>5.1}s {:<10} {}  friction {fr:.3}",
                     "",
                     t.elapsed().as_secs_f64(),
                     format!("{:?}", s.status),
-                    variant_row(&inputs, &s)
+                    variant_row(inputs, &s)
                 );
                 println!("  {:<14}    runs {}", "", ev_run_list(&s, inputs.n));
             }

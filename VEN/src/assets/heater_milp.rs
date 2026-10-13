@@ -8,7 +8,6 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 use super::Heater;
 use crate::controller::milp_planner::asset_port::{
     pinned_binary, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
-    ModeDecisions,
 };
 use crate::entities::units::dt_h_from_s;
 
@@ -65,17 +64,18 @@ impl HeaterMilpContext {
 
     /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
-        self.declare_vars_with(n, vars, ModeDecisions::Free)
+        self.declare_vars_with(n, vars, None)
     }
 
     /// The one heater variable declaration (R-98): the plan and the marginal-cost pass
-    /// differ only in how the stage index and the ready flag are declared. Pinned, the
-    /// winning stage already respects any anchor and `MustNotRun`, so it is used as is.
+    /// differ only in how the stage index and the ready flag are declared. `pinned` is the
+    /// winning solution's readback; its stage already respects any anchor and `MustNotRun`,
+    /// so it is used as is.
     pub fn declare_vars_with(
         &self,
         n: usize,
         vars: &mut ProblemVariables,
-        modes: ModeDecisions,
+        pinned: Option<&HeaterSolOutput>,
     ) -> HeaterMilpVars {
         let must_not = self.mode == HeaterMilpMode::MustNotRun;
         let n_stages = self.n_stages as f64;
@@ -89,7 +89,7 @@ impl HeaterMilpContext {
         // exclusion rows.
         let y_heat = (0..n)
             .map(|t| {
-                if let ModeDecisions::Pinned(w) = modes {
+                if let Some(w) = pinned {
                     // Nearest reachable stage, not 0/1: y is a general integer.
                     let v = w
                         .y_heat
@@ -123,9 +123,9 @@ impl HeaterMilpContext {
 
         // z_heat_ready: binary reward flag for MayRun with deadline; fixed 0 otherwise.
         let z_heat_ready = if self.mode == HeaterMilpMode::MayRun && self.t_dead_step.is_some() {
-            match modes {
-                ModeDecisions::Free => vars.add(variable().binary()),
-                ModeDecisions::Pinned(w) => {
+            match pinned {
+                None => vars.add(variable().binary()),
+                Some(w) => {
                     let v = pinned_binary(Some(w.z_heat_ready));
                     vars.add(variable().min(v).max(v))
                 }
@@ -155,7 +155,6 @@ impl HeaterMilpContext {
             s_low,
             sw,
             p_step_kw: self.p_step_kw,
-            n_stages: self.n_stages,
         }
     }
 
@@ -282,7 +281,11 @@ impl HeaterMilpContext {
     }
 
     /// Read back the heater solution from the solved model.
-    pub fn read_solution(sol: &impl Solution, v: &HeaterMilpVars, n: usize) -> HeaterSolOutput {
+    pub fn read_solution(
+        sol: &(impl Solution + ?Sized),
+        v: &HeaterMilpVars,
+        n: usize,
+    ) -> HeaterSolOutput {
         HeaterSolOutput {
             y_heat: (0..n).map(|t| sol.value(v.y_heat[t])).collect(),
             z_heat_ready: sol.value(v.z_heat_ready),
@@ -374,6 +377,10 @@ impl HeaterMilpContext {
             };
             Self {
                 asset_id: asset_id.to_string(),
+                friction: Default::default(),
+                temp_min_c: cfg.temp_min_c,
+                thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
+                target_ready_by: Some(target.ready_by),
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
                 p_step_kw,
@@ -392,6 +399,10 @@ impl HeaterMilpContext {
         } else {
             Self {
                 asset_id: asset_id.to_string(),
+                friction: Default::default(),
+                temp_min_c: cfg.temp_min_c,
+                thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
+                target_ready_by: None,
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw,
@@ -411,121 +422,6 @@ impl HeaterMilpContext {
     }
 }
 
-impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
-    fn asset_id(&self) -> &str {
-        &self.asset_id
-    }
-
-    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
-        crate::controller::milp_planner::AssetKind::Heater
-    }
-
-    fn milp_params(
-        &self,
-        _n: usize,
-        _now: chrono::DateTime<chrono::Utc>,
-    ) -> crate::controller::milp_planner::AssetMilpParams {
-        use crate::controller::milp_planner::MilpLoadMode;
-        let mode = match self.mode {
-            HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
-            HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
-            HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        crate::controller::milp_planner::AssetMilpParams::Heater(
-            crate::controller::milp_planner::HeaterScalars {
-                mode,
-                t_dead_step: self.t_dead_step,
-                p_step_kw: self.p_step_kw,
-                n_stages: self.n_stages,
-                e_init_kwh: self.e_init_kwh,
-                e_max_kwh: self.e_max_kwh,
-                q_dem_kw: self.q_dem_kw,
-                e_target_kwh: self.e_target_kwh,
-                lambda_sw_eur: self.lambda_sw_eur,
-                initial_y: self.initial_y,
-                c_terminal_eur_kwh: self.c_terminal_eur_kwh,
-            },
-        )
-    }
-
-    fn declare_vars_into_pool(
-        &self,
-        n: usize,
-        _c_startup_eur: f64,
-        _c_ramp_eur_kw: f64,
-        vars: &mut ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        pool.heater = Some(self.declare_vars(n, vars));
-    }
-
-    fn declare_pinned_vars_into_pool(
-        &self,
-        n: usize,
-        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
-        vars: &mut ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        pool.heater = Some(self.declare_vars_with(n, vars, ModeDecisions::Pinned(winning)));
-    }
-
-    fn constraints(
-        &self,
-        pool: &crate::controller::milp_interactions::MilpVarPool,
-        n: usize,
-        dt_h: &[f64],
-    ) -> Vec<Constraint> {
-        // SAFETY: declare_vars_into_pool() (above) always runs before constraints()
-        // for this context — see the AssetMilpContext trait's call-order invariant.
-        HeaterMilpContext::constraints(self, pool.heater.as_ref().unwrap(), n, dt_h)
-    }
-
-    fn objective(
-        &self,
-        pool: &crate::controller::milp_interactions::MilpVarPool,
-        n: usize,
-        dt_h: &[f64],
-        _c_wear_eur_kwh: f64,
-        c_startup_eur: f64,
-        c_ramp_eur_kw: f64,
-    ) -> Expression {
-        // SAFETY: declare_vars_into_pool() always runs before objective() for this
-        // context — see the AssetMilpContext trait's call-order invariant.
-        let v = pool.heater.as_ref().unwrap();
-        if c_startup_eur == 0.0 {
-            // Phase 1: below-min penalty only; tier=0, lambda_sw=0 (switching handled by Phase 2).
-            // comfort_full_reward_eur_kwh=0.0 here too — Phase 1 has no counterbalancing tier
-            // penalty (w_tier_penalty_eur=0.0), so an unconditional reward on z_heat_full would
-            // be a free, uncounterbalanced bias toward full-tier in Phase 1's coarse allocation.
-            HeaterMilpContext::objective(
-                self,
-                v,
-                0.0,
-                crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH,
-                0.0,
-                0.0,
-                0.0,
-                n,
-                dt_h,
-            )
-        } else {
-            // Phase 2 friction: tier penalty + relay switching penalty + comfort-curve reward
-            // (price and CO2 both).
-            HeaterMilpContext::objective(
-                self,
-                v,
-                c_ramp_eur_kw,
-                0.0,
-                self.lambda_sw_eur,
-                self.comfort_full_reward_eur_kwh,
-                self.comfort_full_co2_reward_eur_kwh,
-                n,
-                dt_h,
-            )
-        }
-    }
-}
-
 #[cfg(test)]
 mod milp_tests {
     use super::*;
@@ -533,6 +429,10 @@ mod milp_tests {
     fn make_may_run_ctx(_n: usize) -> HeaterMilpContext {
         HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.0,
@@ -550,40 +450,16 @@ mod milp_tests {
         }
     }
 
-    fn heater_pool_and_vars(
-        n: usize,
-    ) -> (
-        good_lp::ProblemVariables,
-        HeaterMilpVars,
-        crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
-        use good_lp::{variable, variables};
-        let mut vars = variables!();
-        let ctx = make_may_run_ctx(n);
-        let hv = ctx.declare_vars(n, &mut vars);
-        let grid = GridMilpVars {
-            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
-            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-            p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        };
-        let pool = MilpVarPool {
-            grid,
-            bat: None,
-            ev: None,
-            heater: Some(hv.clone()),
-            shiftable: vec![],
-        };
-        (vars, hv, pool)
+    fn heater_vars(n: usize) -> (good_lp::ProblemVariables, HeaterMilpVars) {
+        let mut vars = good_lp::variables!();
+        let hv = make_may_run_ctx(n).declare_vars(n, &mut vars);
+        (vars, hv)
     }
 
     #[test]
     fn heater_milp_context_declares_e_tank_s_low_sw() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         assert_eq!(hv.e_tank.len(), n);
         assert_eq!(hv.s_low.len(), n);
         assert_eq!(hv.sw.len(), n);
@@ -592,7 +468,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_sw_all_slots_present() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         // sw has one entry per slot including t=0 (measures switch from initial hardware state)
         assert_eq!(hv.sw.len(), n);
     }
@@ -604,6 +480,10 @@ mod milp_tests {
         let mut vars = variables!();
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MustNotRun,
             ..make_may_run_ctx(n)
         };
@@ -623,7 +503,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_constraints_initial_energy_pin() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C0: n, C1: 2, C2: 2×(n-1), C3: n, C4: n, C5: 4×n (4 at t=0, 4 per subsequent slot)
@@ -638,7 +518,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_constraints_dynamics_count() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // n=4, MayRun, no deadline: C1 2 + C2 6 + C3 4 + C4 4 + C5 8 = 24.
@@ -655,7 +535,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_constraints_upper_bound() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C3 contributes n constraints; total >= n (at minimum C0 alone)
@@ -668,7 +548,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_constraints_soft_low() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C4 contributes n soft-lower constraints; verified by total count
@@ -678,7 +558,7 @@ mod milp_tests {
     #[test]
     fn heater_milp_constraints_two_switching_rows_per_step() {
         let n = 4;
-        let (_, hv, _) = heater_pool_and_vars(n);
+        let (_, hv) = heater_vars(n);
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C5: 2 at t=0 + 2×(n-1) for t=1..n-1 = 2n switching rows — half the old
@@ -694,12 +574,22 @@ mod milp_context_trait_tests {
     use crate::controller::milp_planner::{
         AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
     };
-    use crate::services::test_support::milp_pool::{bound_range, empty_pool};
+    use crate::controller::milp_planner::{CostWeights, DeclareMode, ObjectivePart};
+    use crate::services::test_support::milp_pool::bound_range;
+
+    /// Phase 1's cost part with no storage wear (a heater stores no energy for the site).
+    const NO_WEAR: CostWeights = CostWeights {
+        c_storage_wear_eur_kwh: 0.0,
+    };
     use good_lp::variables;
 
     fn make_ctx() -> HeaterMilpContext {
         HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.0,
@@ -747,6 +637,10 @@ mod milp_context_trait_tests {
     fn milp_params_must_run_mode() {
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MustRun,
             ..make_ctx()
         };
@@ -757,19 +651,16 @@ mod milp_context_trait_tests {
     }
 
     #[test]
-    fn declare_vars_fills_pool_heater_slot() {
+    fn declare_vars_declares_one_stage_index_per_slot() {
         let n = 4;
         let ctx = make_ctx();
         let mut vars = variables!();
-        let mut pool = empty_pool(&mut vars, n);
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool.heater.as_ref().expect("pool.heater should be Some");
+        let v = &ctx.declare_vars(n, &mut vars);
         assert_eq!(v.y_heat.len(), n);
         assert_eq!(v.e_tank.len(), n);
         assert_eq!(v.s_low.len(), n);
         assert_eq!(v.sw.len(), n);
         assert!((v.p_step_kw - 1.0).abs() < 1e-9);
-        assert_eq!(v.n_stages, 2);
     }
 
     #[test]
@@ -777,9 +668,8 @@ mod milp_context_trait_tests {
         let n = 4;
         let ctx = make_ctx();
         let mut vars = variables!();
-        let mut pool = empty_pool(&mut vars, n);
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let cs = AssetMilpContext::constraints(&ctx, &pool, n, &vec![300.0 / 3600.0; n]);
+        let v = ctx.declare_vars(n, &mut vars);
+        let cs = ctx.constraints(&v, n, &vec![300.0 / 3600.0; n]);
         assert_eq!(
             cs.len(),
             24,
@@ -793,6 +683,10 @@ mod milp_context_trait_tests {
     fn test_terminal_reward_coefficient_stored() {
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             c_terminal_eur_kwh: 0.56,
             ..make_ctx()
         };
@@ -806,6 +700,10 @@ mod milp_context_trait_tests {
     fn test_terminal_reward_zero_disables() {
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             c_terminal_eur_kwh: 0.0,
             ..make_ctx()
         };
@@ -817,13 +715,15 @@ mod milp_context_trait_tests {
         let n = 3;
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             c_terminal_eur_kwh: 0.5,
             ..make_ctx()
         };
         let mut vars = variables!();
-        let mut pool = empty_pool(&mut vars, n);
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool.heater.as_ref().unwrap();
+        let v = &ctx.declare_vars(n, &mut vars);
 
         // Phase 1: m_low > 0, lambda_sw == 0 — terminal term should appear
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
@@ -852,6 +752,10 @@ mod milp_context_trait_tests {
         let expected = avg_imp_eur_kwh + c_ctrl_imp_malus_eur_kwh; // 0.56
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             c_terminal_eur_kwh: expected,
             ..make_ctx()
         };
@@ -869,13 +773,15 @@ mod milp_context_trait_tests {
         let n = 1;
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             lambda_sw_eur: 0.50,
             ..make_ctx()
         };
         let mut vars = variables!();
-        let mut pool = empty_pool(&mut vars, n);
-        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool.heater.as_ref().unwrap();
+        let v = &ctx.declare_vars(n, &mut vars);
 
         let dt_zone_a = vec![5.0_f64 / 60.0]; // 5-min slot
         let dt_zone_c = vec![15.0_f64 / 60.0]; // 15-min slot
@@ -907,6 +813,10 @@ mod milp_context_trait_tests {
         let n = 2;
         let ctx = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             anchored_kw: vec![Some(2.0), None], // full tier anchor on slot 0
             ..make_ctx()                        // p_step_kw=1.0, n_stages=2
         };
@@ -964,25 +874,32 @@ mod milp_context_trait_tests {
 
         let ctx_zero = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_reward_eur_kwh: 0.30,
             ..make_ctx()
         };
 
         let mut vars_zero = variables!();
-        let mut pool_zero = empty_pool(&mut vars_zero, n);
-        ctx_zero.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_zero, &mut pool_zero);
-        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 0.0, 0.0);
+        let declared_zero =
+            ctx_zero.declare(n, DeclareMode::Plan { friction: false }, &mut vars_zero);
+        let obj_zero = declared_zero.objective(ObjectivePart::Cost(&NO_WEAR), n, &dt_h);
 
         let mut vars_reward = variables!();
-        let mut pool_reward = empty_pool(&mut vars_reward, n);
-        ctx_reward.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_reward, &mut pool_reward);
-        let obj_reward =
-            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 0.0, 0.0);
+        let declared_reward =
+            ctx_reward.declare(n, DeclareMode::Plan { friction: false }, &mut vars_reward);
+        let obj_reward = declared_reward.objective(ObjectivePart::Cost(&NO_WEAR), n, &dt_h);
 
         assert_eq!(
             format!("{obj_zero:?}"),
@@ -1000,25 +917,32 @@ mod milp_context_trait_tests {
 
         let ctx_zero = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_reward_eur_kwh: 0.30,
             ..make_ctx()
         };
 
         let mut vars_zero = variables!();
-        let mut pool_zero = empty_pool(&mut vars_zero, n);
-        ctx_zero.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_zero, &mut pool_zero);
-        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 1.0, 0.05);
+        let declared_zero =
+            ctx_zero.declare(n, DeclareMode::Plan { friction: true }, &mut vars_zero);
+        let obj_zero = declared_zero.objective(ObjectivePart::Friction, n, &dt_h);
 
         let mut vars_reward = variables!();
-        let mut pool_reward = empty_pool(&mut vars_reward, n);
-        ctx_reward.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_reward, &mut pool_reward);
-        let obj_reward =
-            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 1.0, 0.05);
+        let declared_reward =
+            ctx_reward.declare(n, DeclareMode::Plan { friction: true }, &mut vars_reward);
+        let obj_reward = declared_reward.objective(ObjectivePart::Friction, n, &dt_h);
 
         assert_ne!(
             format!("{obj_zero:?}"),
@@ -1038,25 +962,32 @@ mod milp_context_trait_tests {
 
         let ctx_zero = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_co2_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_co2_reward_eur_kwh: 0.20,
             ..make_ctx()
         };
 
         let mut vars_zero = variables!();
-        let mut pool_zero = empty_pool(&mut vars_zero, n);
-        ctx_zero.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_zero, &mut pool_zero);
-        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 0.0, 0.0);
+        let declared_zero =
+            ctx_zero.declare(n, DeclareMode::Plan { friction: false }, &mut vars_zero);
+        let obj_zero = declared_zero.objective(ObjectivePart::Cost(&NO_WEAR), n, &dt_h);
 
         let mut vars_reward = variables!();
-        let mut pool_reward = empty_pool(&mut vars_reward, n);
-        ctx_reward.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_reward, &mut pool_reward);
-        let obj_reward =
-            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 0.0, 0.0);
+        let declared_reward =
+            ctx_reward.declare(n, DeclareMode::Plan { friction: false }, &mut vars_reward);
+        let obj_reward = declared_reward.objective(ObjectivePart::Cost(&NO_WEAR), n, &dt_h);
 
         assert_eq!(
             format!("{obj_zero:?}"),
@@ -1074,25 +1005,32 @@ mod milp_context_trait_tests {
 
         let ctx_zero = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_co2_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             comfort_full_co2_reward_eur_kwh: 0.20,
             ..make_ctx()
         };
 
         let mut vars_zero = variables!();
-        let mut pool_zero = empty_pool(&mut vars_zero, n);
-        ctx_zero.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_zero, &mut pool_zero);
-        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 1.0, 0.05);
+        let declared_zero =
+            ctx_zero.declare(n, DeclareMode::Plan { friction: true }, &mut vars_zero);
+        let obj_zero = declared_zero.objective(ObjectivePart::Friction, n, &dt_h);
 
         let mut vars_reward = variables!();
-        let mut pool_reward = empty_pool(&mut vars_reward, n);
-        ctx_reward.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_reward, &mut pool_reward);
-        let obj_reward =
-            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 1.0, 0.05);
+        let declared_reward =
+            ctx_reward.declare(n, DeclareMode::Plan { friction: true }, &mut vars_reward);
+        let obj_reward = declared_reward.objective(ObjectivePart::Friction, n, &dt_h);
 
         assert_ne!(
             format!("{obj_zero:?}"),
@@ -1424,32 +1362,34 @@ mod milp_context_trait_tests {
     /// declaration, with the stage index fixed to the nearest reachable stage.
     #[test]
     fn declare_pinned_vars_is_the_free_declaration_with_the_stage_fixed() {
-        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
         let ctx = make_ctx();
         let n = 4;
         let top = ctx.n_stages as f64;
-        let winning = WinningModeDecisions {
+        let winning = HeaterSolOutput {
             y_heat: vec![0.0, 1.4, 1.6, top + 3.0],
-            ..Default::default()
+            z_heat_ready: 0.0,
+            e_tank_kwh: vec![],
         };
         let shape = |pinned: bool| {
             let mut vars = variables!();
-            let mut pool = empty_pool(&mut vars, n);
-            if pinned {
-                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
-            } else {
-                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-            }
-            let v = pool.heater.expect("heater declared");
+            let v = ctx.declare_vars_with(n, &mut vars, pinned.then_some(&winning));
             (v.y_heat.len(), v.e_tank.len(), v.s_low.len(), v.sw.len())
         };
         assert_eq!(shape(true), shape(false));
 
-        let range = bound_range(|vars| {
-            let mut pool = empty_pool(vars, n);
-            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
-            pool.heater.expect("heater declared").y_heat
-        });
+        let range = bound_range(|vars| ctx.declare_vars_with(n, vars, Some(&winning)).y_heat);
         assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (top, top)]);
+    }
+
+    /// A heater that must not run (no heater in the plan) has every stage fixed to 0, so
+    /// it never draws power the plan would then have to allocate.
+    #[test]
+    fn a_heater_that_must_not_run_has_its_stage_fixed_to_zero() {
+        let ctx = HeaterMilpContext {
+            mode: HeaterMilpMode::MustNotRun,
+            ..make_ctx()
+        };
+        let range = bound_range(|vars| ctx.declare_vars(4, vars).y_heat);
+        assert_eq!(range, vec![(0.0, 0.0); 4]);
     }
 }

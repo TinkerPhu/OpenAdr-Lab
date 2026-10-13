@@ -4,19 +4,14 @@
 //! constraints, and objective terms that span multiple assets. Currently
 //! implements [`BatEvCoexistInteraction`] (McCormick envelope linearisation).
 //!
-//! Also defines the shared LP variable pool types ([`MilpVarPool`],
-//! [`GlobalMilpInputs`]) used by Step 6 of the asset-plugin refactor.
-//!
-//! ## Type-relocation note (Phase 3 refactor)
-//!
-//! `BatteryMilpVars`, `EvMilpVars`, and `HeaterMilpVars` were relocated from
-//! `crate::assets::battery`, `crate::assets::ev`, and `crate::assets::heater`
-//! into `crate::controller::milp_planner::asset_port`. This file imports them
-//! from there; it no longer imports from `crate::assets::*`.
+//! Also defines the shared LP variable pool ([`MilpVarPool`]) and the grid-level inputs
+//! ([`GlobalMilpInputs`]). The pool holds each asset as the [`DeclaredAsset`] it declared, so
+//! nothing here knows an asset's kind: an interaction couples assets by the roles they offer
+//! (a discharge leg, an on/off indicator), and the site sums their net power.
 
 use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Variable};
 
-use crate::controller::milp_planner::asset_port::{BatteryMilpVars, EvMilpVars, HeaterMilpVars};
+use crate::controller::asset_milp_port::DeclaredAsset;
 
 // ── Grid-level MILP inputs ───────────────────────────────────────────────────
 
@@ -49,29 +44,6 @@ pub struct GridMilpVars {
     pub p_pv_used: Vec<Variable>,
 }
 
-/// Per-shiftable-load LP variables and scheduling metadata.
-#[derive(Debug, Clone)]
-pub struct ShiftableLoadMilpVars {
-    pub asset_id: String,
-    pub power_kw: f64,
-    pub duration_slots: usize,
-    pub valid_start_slots: Vec<usize>,
-    /// Binary start-slot indicators — one per entry in `valid_start_slots`.
-    pub y_shift: Vec<Variable>,
-}
-
-/// Deterministic earliest-start tie-break for shiftable loads [€ per start-slot index].
-///
-/// Window offsets are measured from the ALIGNED grid start (now truncated to the
-/// Zone-A slot boundary), so a request posted mid-slot often has several
-/// cost-equal valid start slots under flat tariffs. Without a bias HiGHS's
-/// arbitrary pick can schedule the load a full slot later than necessary
-/// (found via the isolated E2E tail diagnostic, 2026-07-12). Small enough that
-/// any real per-slot cost difference dominates (2 kW × 0.5 h × 0.01 €/kWh =
-/// 0.01 € ≫ 0.001 €); applied in BOTH solver phases (and the Phase-1 cost cap)
-/// so Phase 2's epsilon budget cannot trade the early start away.
-pub const SHIFT_TIEBREAK_EUR_PER_SLOT: f64 = 0.001;
-
 /// Tiny per-kWh bias favoring full PV utilization [€/kWh]. Even though every real
 /// cost term already favors using PV over curtailing it for free (see
 /// `pv-export-curtailment` design), HiGHS's `with_mip_gap` tolerance on `u_grid`
@@ -93,27 +65,22 @@ pub fn pv_use_tiebreak_expr(grid: &GridMilpVars, dt_h: &[f64]) -> Expression {
     expr
 }
 
-/// Objective term implementing the earliest-start tie-break: a tiny cost per
-/// start-slot index on each `y_shift` binary, for every shiftable load.
-pub fn shiftable_tiebreak_expr(shiftable: &[ShiftableLoadMilpVars]) -> Expression {
-    let mut expr = Expression::from(0.0);
-    for sv in shiftable {
-        for (ji, &y) in sv.y_shift.iter().enumerate() {
-            expr += SHIFT_TIEBREAK_EUR_PER_SLOT * (sv.valid_start_slots[ji] as f64) * y;
-        }
-    }
-    expr
+/// All LP variable handles of one solve: the grid's, and each asset as it declared itself, in
+/// planner input order.
+pub struct MilpVarPool<'a> {
+    pub grid: GridMilpVars,
+    pub assets: Vec<Box<dyn DeclaredAsset + 'a>>,
 }
 
-/// All LP variable handles for one planning cycle, keyed by asset.
-/// `Option::None` means the asset is absent from the profile.
-#[derive(Debug)]
-pub struct MilpVarPool {
-    pub grid: GridMilpVars,
-    pub bat: Option<BatteryMilpVars>,
-    pub ev: Option<EvMilpVars>,
-    pub heater: Option<HeaterMilpVars>,
-    pub shiftable: Vec<ShiftableLoadMilpVars>,
+/// The site's net controllable power in slot `t` [kW], positive = import: every asset's net
+/// power summed. The power balance and the controllable-import malus both read it, so the two
+/// cannot disagree about what an asset draws.
+pub fn site_net_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
+    let mut e = Expression::from(0.0);
+    for asset in &pool.assets {
+        e += asset.net_power_expr(t);
+    }
+    e
 }
 
 // ── Cross-asset interaction trait ────────────────────────────────────────────
@@ -147,27 +114,54 @@ pub trait AssetInteraction: Send + Sync {
 
 /// Typed LP variable handles returned by each [`AssetInteraction`].
 pub enum InteractionVars {
-    /// McCormick auxiliary variables for battery-EV coexistence penalty.
-    /// `x_coexist[t]` is `None` for slots without PV surplus ≥ ev_min_kw.
-    BatEvCoexist { x_coexist: Vec<Option<Variable>> },
+    /// McCormick auxiliary variables for the coexistence penalty, one set per pair.
+    BatEvCoexist { pairs: Vec<CoexistPair> },
     /// One continuous slack per slot: excess controllable load beyond free PV surplus.
     CtrlImportMalus { p_ctrl_imp: Vec<Variable> },
 }
 
-// ── Battery-EV coexistence interaction ───────────────────────────────────────
+// ── Discharge / switched-load coexistence interaction ────────────────────────
 
-/// Penalises simultaneous battery discharge + EV charging in PV-surplus slots.
+/// One (discharging asset, switched load) pair of the coexistence penalty, by pool index.
+pub struct CoexistPair {
+    discharger: usize,
+    switched: usize,
+    /// `x_coexist[t]` linearises `p_dis[t] × z_on[t]`; `None` for slots whose PV surplus could
+    /// not cover the load at its minimum power.
+    x_coexist: Vec<Option<Variable>>,
+}
+
+/// Penalises an asset discharging into the site while a switched load charges, in slots where
+/// PV surplus alone could cover that load. Couples every asset that offers a discharge leg with
+/// every other asset that offers an on/off indicator, whatever their kinds; today that is the
+/// battery and the EV, hence the name and its config key `c_bat_ev_coexist_eur_kwh`.
 ///
-/// Linearises `p_bat_dis[t] × z_ev_on[t]` via McCormick envelopes for slots
-/// where `p_pv[t] − p_base[t] ≥ ev.p_min_kw` (i.e. PV could cover the EV on its own).
+/// Linearises `p_dis[t] × z_on[t]` via McCormick envelopes for slots where
+/// `p_pv[t] − p_base[t] ≥ p_min_kw` of the switched load.
 pub struct BatEvCoexistInteraction {
     /// Penalty coefficient [€/kWh].
     pub c_eur_kwh: f64,
 }
 
+/// Every (discharger, switched load) pair of distinct assets, in pool order.
+fn coexist_pairs(pool: &MilpVarPool) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    for (d, discharger) in pool.assets.iter().enumerate() {
+        if discharger.discharge_leg().is_none() {
+            continue;
+        }
+        for (s, switched) in pool.assets.iter().enumerate() {
+            if s != d && switched.on_indicator().is_some() {
+                pairs.push((d, s));
+            }
+        }
+    }
+    pairs
+}
+
 impl AssetInteraction for BatEvCoexistInteraction {
     fn applicable(&self, pool: &MilpVarPool) -> bool {
-        pool.bat.is_some() && pool.ev.is_some()
+        !coexist_pairs(pool).is_empty()
     }
 
     fn declare_vars(
@@ -176,21 +170,26 @@ impl AssetInteraction for BatEvCoexistInteraction {
         global: &GlobalMilpInputs,
         vars: &mut ProblemVariables,
     ) -> InteractionVars {
-        // SAFETY: its one caller, `ModelSkeleton::declare`, checks `applicable()`
-        // — which requires both `Some` — before invoking `declare_vars`.
-        let bat = pool.bat.as_ref().unwrap();
-        let ev = pool.ev.as_ref().unwrap();
-        let x_coexist = (0..global.n)
-            .map(|t| {
-                let surplus = global.p_pv_kw[t] - global.p_base_kw[t];
-                if surplus >= ev.p_min_kw {
-                    Some(vars.add(variable().min(0.0).max(bat.dis_max_kw)))
-                } else {
-                    None
-                }
+        let pairs = coexist_pairs(pool)
+            .into_iter()
+            .filter_map(|(d, s)| {
+                let leg = pool.assets[d].discharge_leg()?;
+                let on = pool.assets[s].on_indicator()?;
+                let x_coexist = (0..global.n)
+                    .map(|t| {
+                        let surplus = global.p_pv_kw[t] - global.p_base_kw[t];
+                        (surplus >= on.p_min_kw)
+                            .then(|| vars.add(variable().min(0.0).max(leg.max_kw)))
+                    })
+                    .collect();
+                Some(CoexistPair {
+                    discharger: d,
+                    switched: s,
+                    x_coexist,
+                })
             })
             .collect();
-        InteractionVars::BatEvCoexist { x_coexist }
+        InteractionVars::BatEvCoexist { pairs }
     }
 
     fn constraints(
@@ -199,41 +198,46 @@ impl AssetInteraction for BatEvCoexistInteraction {
         iv: &InteractionVars,
         global: &GlobalMilpInputs,
     ) -> Vec<Constraint> {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv else {
+        let InteractionVars::BatEvCoexist { pairs } = iv else {
             return vec![];
         };
-        // SAFETY: same call-order guarantee as declare_vars() above — every caller
-        // invokes constraints() only on interactions already filtered by applicable().
-        let bat = pool.bat.as_ref().unwrap();
-        let ev = pool.ev.as_ref().unwrap();
-        let dis_max = bat.dis_max_kw;
         let mut cs = Vec::new();
-        #[allow(clippy::needless_range_loop)]
-        // t indexes multiple arrays (x_coexist, bat.p_dis, ev.z_ev_on)
-        for t in 0..global.n {
-            if let Some(x) = x_coexist[t] {
-                // McCormick envelope for x = p_bat_dis[t] × z_ev_on[t]
-                cs.push(constraint!(x <= bat.p_dis[t]));
-                cs.push(constraint!(x <= dis_max * ev.z_ev_on[t]));
-                cs.push(constraint!(
-                    x >= bat.p_dis[t] - dis_max * (1.0 - ev.z_ev_on[t])
-                ));
+        for pair in pairs {
+            let (Some(leg), Some(on)) = (
+                pool.assets[pair.discharger].discharge_leg(),
+                pool.assets[pair.switched].on_indicator(),
+            ) else {
+                continue;
+            };
+            let dis_max = leg.max_kw;
+            for t in 0..global.n {
+                if let Some(x) = pair.x_coexist[t] {
+                    // McCormick envelope for x = p_dis[t] × z_on[t]
+                    cs.push(constraint!(x <= leg.p_dis[t]));
+                    cs.push(constraint!(x <= dis_max * on.z_on[t]));
+                    cs.push(constraint!(
+                        x >= leg.p_dis[t] - dis_max * (1.0 - on.z_on[t])
+                    ));
+                }
             }
         }
         cs
     }
 
     fn objective(&self, iv: &InteractionVars, dt_h: &[f64]) -> Expression {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv else {
+        let InteractionVars::BatEvCoexist { pairs } = iv else {
             return Expression::from(0.0);
         };
         let mut obj = Expression::from(0.0);
-        for (t, x) in x_coexist
-            .iter()
-            .enumerate()
-            .filter_map(|(t, x)| x.as_ref().map(|v| (t, v)))
-        {
-            obj += (self.c_eur_kwh * dt_h[t]) * *x;
+        for pair in pairs {
+            for (t, x) in pair
+                .x_coexist
+                .iter()
+                .enumerate()
+                .filter_map(|(t, x)| x.as_ref().map(|v| (t, v)))
+            {
+                obj += (self.c_eur_kwh * dt_h[t]) * *x;
+            }
         }
         obj
     }
@@ -243,36 +247,15 @@ impl AssetInteraction for BatEvCoexistInteraction {
 
 /// Penalises any controllable-asset import that exceeds the free PV surplus.
 ///
-/// For each slot `t`, computes `p_ctrl[t] = heat[t] + ev[t] + bat_ch[t] − bat_dis[t] + shift[t]`
-/// and enforces a continuous slack `p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t]` (≥ 0).
+/// For each slot `t`, takes the site's net controllable power `p_ctrl[t]` (every asset's net
+/// power, `site_net_power_expr`) and enforces a continuous slack
+/// `p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t]` (≥ 0).
 /// `surplus_pv[t] = max(0, p_pv[t] − p_base[t])` is a per-slot constant.
 /// The slack is penalised at `c_eur_kwh` in the Phase 1 objective, discouraging assets
 /// from importing beyond what PV provides for free — without disabling thermal pre-storage
 /// when the future-heating saving genuinely exceeds the malus.
 pub struct CtrlImportMalusInteraction {
     pub c_eur_kwh: f64,
-}
-
-/// Build the total controllable power expression at slot `t` from all asset variables.
-fn controllable_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
-    let mut e = Expression::from(0.0);
-    if let Some(v) = &pool.heater {
-        e += v.p_step_kw * v.y_heat[t];
-    }
-    if let Some(v) = &pool.ev {
-        e += v.p_ev[t];
-    }
-    if let Some(v) = &pool.bat {
-        e += v.p_ch[t] - v.p_dis[t];
-    }
-    for sv in &pool.shiftable {
-        for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
-            if t >= j && t < j + sv.duration_slots {
-                e += sv.power_kw * sv.y_shift[ji];
-            }
-        }
-    }
-    e
 }
 
 impl AssetInteraction for CtrlImportMalusInteraction {
@@ -306,7 +289,7 @@ impl AssetInteraction for CtrlImportMalusInteraction {
         // t indexes multiple arrays (p_ctrl_imp, p_pv_kw, p_base_kw)
         for t in 0..global.n {
             let surplus = (global.p_pv_kw[t] - global.p_base_kw[t]).max(0.0);
-            let p_ctrl_t = controllable_power_expr(pool, t);
+            let p_ctrl_t = site_net_power_expr(pool, t);
             // p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t], combined with min(0.0) bound
             cs.push(constraint!(p_ctrl_imp[t] >= p_ctrl_t - surplus));
         }

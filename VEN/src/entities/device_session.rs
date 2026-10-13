@@ -242,6 +242,13 @@ impl std::fmt::Display for EvReplaceRefusal {
     }
 }
 
+/// The session a plan must serve next among `sessions` (queue order): the first whose departure
+/// is still ahead of `now`, whether its window has opened yet or not. The one rule
+/// `EvSessionQueue::upcoming` and the EV's own planning context both use.
+pub fn upcoming_ev_session(sessions: &[EvSession], now: DateTime<Utc>) -> Option<&EvSession> {
+    sessions.iter().find(|s| s.departure_time > now)
+}
+
 /// An EV's charging sessions, ordered by window start and never overlapping.
 ///
 /// A newtype rather than a bare `Vec` because that invariant is the whole point:
@@ -381,7 +388,7 @@ impl EvSessionQueue {
     /// the plan entirely. What a plan wants is the next commitment it must serve,
     /// whether its window has opened yet or not.
     pub fn upcoming(&self, now: DateTime<Utc>) -> Option<&EvSession> {
-        self.0.iter().find(|s| s.departure_time > now)
+        upcoming_ev_session(&self.0, now)
     }
 
     /// Drop every session whose departure has passed; returns the ones that went.

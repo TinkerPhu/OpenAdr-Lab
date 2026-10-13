@@ -15,12 +15,12 @@ pub(crate) fn solve_phase1(
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
     probe!(begin, "solve_phase1");
     let (vars, skeleton) = ModelSkeleton::declare(inputs, p1w, asset_contexts, Declaration::Phase1);
-    let objective = skeleton.cost_expr(inputs, p1w, asset_contexts);
+    let objective = skeleton.cost_expr(inputs, p1w);
 
     probe!(vars, &vars);
     probe!(expr, "objective", &objective);
     let model = vars.minimise(&objective).using(highs);
-    let (mut model, _) = skeleton.add_constraints(model, inputs, asset_contexts);
+    let (mut model, _) = skeleton.add_constraints(model, inputs);
     model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(inputs.mip_gap_target as f32)?;
     let solution = model.solve()?;

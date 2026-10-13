@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -29,9 +29,6 @@ pub struct SolveRequest {
     pub asset_params: Vec<AssetParams>,
     pub now: DateTime<Utc>,
     pub trigger: PlanTrigger,
-    pub ev_session: Option<EvSession>,
-    pub heater_target: Option<HeaterTarget>,
-    pub shiftable_loads: Vec<ShiftableLoad>,
     pub baseline_override: Option<BaselineOverride>,
     pub objective_override: Option<PlannerObjective>,
     pub pv_forecast_override: Option<f64>,

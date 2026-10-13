@@ -52,13 +52,13 @@ otherwise.
 
 ## 3. Explicit objective parts and asset-owned costs (D3)
 
-- [ ] 3.1 Test first, per asset: `objective(ObjectivePart::Friction)` contains the startup/ramp
+- [x] 3.1 Test first, per asset: `objective(ObjectivePart::Friction)` contains the startup/ramp
       (battery, EV) or tier/switching (heater) terms and no economic term, and
       `objective(ObjectivePart::Cost(..))` the reverse. Write the tests in each asset's `*_milp.rs`
       test module and confirm they fail to compile. Then add `ObjectivePart`, `CostWeights` and
       `FrictionCosts` (set at build from `PlannerParams`; heater tier penalty from
       `w_tier_penalty_eur`). Map each existing `c_startup_eur == 0.0` branch 1:1.
-- [ ] 3.2 Replace the `match ctx.asset_kind()` blocks in `model_skeleton.rs::cost_expr` /
+- [x] 3.2 Replace the `match ctx.asset_kind()` blocks in `model_skeleton.rs::cost_expr` /
       `declare_asset` and `solver_phase2.rs::solve_phase2` with one call per asset. Delete
       `Phase2Weights` and its test fixture `make_phase2_weights` (its callers set the friction on
       the context instead), and rename `Phase1Weights.c_bat_wear_eur_kwh` to `c_storage_wear_eur_kwh`
@@ -67,12 +67,12 @@ otherwise.
 
 ## 4. Declared assets in the pool; balance and interactions over them (D1, D2, D4, D6)
 
-- [ ] 4.1 Add `DeclaredAsset` (in `controller/asset_milp_port.rs`) and
+- [x] 4.1 Add `DeclaredAsset` (in `controller/asset_milp_port.rs`) and
       `AssetMilpContext::declare(n, DeclareMode, vars)`. Implement it for battery, EV, heater and
       shiftable load by moving today's `declare_vars_with` bodies. Each impl holds its typed vars.
       Test first: each asset's `net_power_expr(t)` has the coefficients of today's balance terms
       (unit test per asset via `bound_range`-style probing). Verify: those tests green.
-- [ ] 4.2 Switch `MilpVarPool` to `{ grid, assets: Vec<Box<dyn DeclaredAsset>> }`. Build the
+- [x] 4.2 Switch `MilpVarPool` to `{ grid, assets: Vec<Box<dyn DeclaredAsset>> }`. Build the
       balance row as `p_imp + p_pv_used − Σ net_i − p_exp == p_base`. `CtrlImportMalus` sums
       `net_power_expr` and `controllable_power_expr` is deleted. Give `BatEvCoexistInteraction`
       role accessors (`discharge_leg`, `on_indicator`) with one McCormick block per pair, and
@@ -83,15 +83,15 @@ otherwise.
 
 ## 5. Per-asset readback, warm start and pinned declaration (D4, D5)
 
-- [ ] 5.1 Add `AssetSolution` / `AssetSolutionDetail` and `DeclaredAsset::read(&dyn Solution)`.
+- [x] 5.1 Add `AssetSolution` / `AssetSolutionDetail` and `DeclaredAsset::read(&dyn Solution)`.
       Each asset moves its `read_solution` into `read` and fills `net_power_kw`. `SolveOutput`
       becomes grid series + `assets`. Re-point the 1.2 test accessors to the new shape, and leave
       every test body untouched. Verify: planner tests green, goldens hold.
-- [ ] 5.2 Move the battery, EV and heater halves of `build_phase2_warm_start` into
+- [x] 5.2 Move the battery, EV and heater halves of `build_phase2_warm_start` into
       `DeclaredAsset::warm_start(&AssetSolution)` verbatim (keep the R-97 `u_bat` comment). The
       heater reads `initial_y` from its own context. Verify: the warm-start record in
       `model_fingerprints.txt` is identical.
-- [ ] 5.3 `DeclareMode::Pinned(&AssetSolution)`: each asset pins its own decisions from its own
+- [x] 5.3 `DeclareMode::Pinned(&AssetSolution)`: each asset pins its own decisions from its own
       detail. Delete `WinningModeDecisions` and `pinned_binary`'s per-kind callers outside the
       assets. While here, verify (unit test) that a `MustNotRun` heater's `y_heat` is fixed to 0;
       if it is not, apply the mode inside the heater's `read` (design Risks). Verify: marginal-cost
@@ -99,21 +99,21 @@ otherwise.
 
 ## 6. Result side reads declared facts (D7, D8)
 
-- [ ] 6.1 Allocations: add `surplus_claim_rank()` and `allocation_basis()` to `AssetMilpContext`
+- [x] 6.1 Allocations: add `surplus_claim_rank()` and `allocation_basis()` to `AssetMilpContext`
       (EV 0/Load, heater 1/Load, shiftable 2/Load, battery 3/Storage). Replace the four blocks in
       `translate_to_plan` with one loop over a stable sort of `AssetSolution`s. Verify:
       `plans.txt` byte-identical.
-- [ ] 6.2 Planned state and storage legs: each asset fills `planned_state` and (battery only)
+- [x] 6.2 Planned state and storage legs: each asset fills `planned_state` and (battery only)
       `storage` in `read`. The heater context gains `temp_min_c` / `thermal_mass_kwh_per_c`.
       Delete `planned_state.rs`. Plan `bat_charge_kw`, `bat_discharge_kw`, `soc_trajectory_kwh` and
       the wear line of `CostBreakdown` sum the storage legs in today's order. Verify: `plans.txt`
       byte-identical.
-- [ ] 6.3 Warnings: move `ev_diagnostics.rs` into `assets/` as the EV's solution warnings, and
+- [x] 6.3 Warnings: move `ev_diagnostics.rs` into `assets/` as the EV's solution warnings, and
       `ev_budget_warning` into the EV context's `input_warnings()`. Remove
       `MilpInputs.budget_warning`. Keep the warning order of design D7. Verify: `plans.txt`
       byte-identical (it includes the budget and firm-shortfall scenarios; add a scenario to 1.1's
       list first if either is missing).
-- [ ] 6.4 Session flexibility: test first. A unit test of the one generic rule over a
+- [x] 6.4 Session flexibility: test first. A unit test of the one generic rule over a
       `FlexibilityWindow` reproduces today's EV, heater and shiftable entries. Another test shows
       that the EV context's declared window comes from the same session `current_ev_session(now)`
       returns. Then add `flexibility_window()` and replace the three blocks with one loop (fallback

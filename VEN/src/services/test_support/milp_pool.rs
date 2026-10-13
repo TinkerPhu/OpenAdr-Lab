@@ -1,29 +1,7 @@
-//! Test-only helpers for declaring into, and inspecting, a MILP variable pool.
+//! Test-only helper for inspecting what an asset declares: how far each variable can move.
 
 use good_lp::solvers::highs::highs;
-use good_lp::{variable, Expression, ProblemVariables, Solution, SolverModel, Variable};
-
-use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
-
-/// A pool holding only the grid variables, so an asset test can declare its own
-/// variables into it. (Was copied verbatim into the battery, EV and heater test modules.)
-pub fn empty_pool(vars: &mut ProblemVariables, n: usize) -> MilpVarPool {
-    let grid = GridMilpVars {
-        p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
-        s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-        p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
-    };
-    MilpVarPool {
-        grid,
-        bat: None,
-        ev: None,
-        heater: None,
-        shiftable: vec![],
-    }
-}
+use good_lp::{Expression, ProblemVariables, Solution, SolverModel, Variable};
 
 /// How far each of the variables `declare` returns can move on its own bounds:
 /// `(lowest, highest)` per variable, found by minimising and maximising their sum.

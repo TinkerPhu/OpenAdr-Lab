@@ -182,8 +182,7 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
          for is all the window allows; got {ev_energy:.4} kWh from {:?}",
         out.ev().power_kw
     );
-    let warnings =
-        crate::controller::milp_planner::ev_diagnostics::ev_warnings(&site.inputs(), &out);
+    let warnings = out.warnings();
     assert!(
         warnings
             .iter()
@@ -279,6 +278,13 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
     let make_ctxs = |co2_reward_eur_kwh: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         vec![Box::new(HeaterMilpContext {
                 asset_id: "heater".into(),
+                friction: crate::controller::milp_planner::FrictionCosts {
+                    tier_penalty_eur: 0.05,
+                    ..Default::default()
+                },
+                temp_min_c: 18.0,
+                thermal_mass_kwh_per_c: 2.0,
+                target_ready_by: None,
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw: 1.0,
@@ -297,39 +303,21 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
     };
 
     let p1w = make_phase1_weights();
-    let p2w = Phase2Weights {
-        w_tier_penalty_eur: 0.05,
-        ..make_phase2_weights()
-    };
     // Full tier costs 2.0 kW * 1.0 h * 0.25 EUR/kWh = 0.50 EUR/slot extra import;
     // epsilon must cover running it in every slot (4 * 0.50 = 2.0 EUR) with margin.
     let epsilon = 2.5;
 
-    let out_no_reward = solve_milp_two_phase(
-        &site.inputs(),
-        &p1w,
-        &p2w,
-        epsilon,
-        &make_ctxs(0.0),
-        60.0,
-        60.0,
-    )
-    .expect("solver failed (no CO2 reward)")
-    .0;
+    let out_no_reward =
+        solve_milp_two_phase(&site.inputs(), &p1w, epsilon, &make_ctxs(0.0), 60.0, 60.0)
+            .expect("solver failed (no CO2 reward)")
+            .0;
     // Reward (0.50) exceeds both the tier penalty (0.05) and the real energy
     // cost (0.50) is covered separately by epsilon — net friction benefit per
     // full-tier slot is unambiguous.
-    let out_with_reward = solve_milp_two_phase(
-        &site.inputs(),
-        &p1w,
-        &p2w,
-        epsilon,
-        &make_ctxs(0.50),
-        60.0,
-        60.0,
-    )
-    .expect("solver failed (CO2 reward=0.50)")
-    .0;
+    let out_with_reward =
+        solve_milp_two_phase(&site.inputs(), &p1w, epsilon, &make_ctxs(0.50), 60.0, 60.0)
+            .expect("solver failed (CO2 reward=0.50)")
+            .0;
 
     let at_full = |o: &SolveOutput| -> f64 {
         // "at full" is the top stage now, not a dedicated indicator.
@@ -365,13 +353,11 @@ fn ev_startup_penalty_produces_contiguous_block() {
     site.ev.p_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
     site.set_ev_firm(3.0 * 7.4, n - 1); // needs 3 full slots at 1 h each
 
-    let mut weights = make_phase2_weights();
-    weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
+    site.ev.friction.startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
 
     let out = solve_milp_two_phase(
         &site.inputs(),
         &make_phase1_weights(),
-        &weights,
         1.0,
         &site.contexts(),
         60.0,
@@ -402,13 +388,13 @@ fn battery_startup_penalty_minimises_active_restarts() {
     site.grid.c_imp_eur_kwh = vec![0.10, 0.10, 0.10, 0.30, 0.30, 0.30];
     site.battery = Some(lossless_battery(6.0, 3.0, 0.6, 2.0));
 
-    let mut weights = make_phase2_weights();
-    weights.c_bat_startup_eur = 0.5; // high penalty
+    if let Some(battery) = site.battery.as_mut() {
+        battery.friction.startup_eur = 0.5; // high penalty
+    }
 
     let out = solve_milp_two_phase(
         &site.inputs(),
         &make_phase1_weights(),
-        &weights,
         1.0,
         &site.contexts(),
         60.0,
@@ -447,8 +433,9 @@ fn phase2_feasible_with_pv_and_production_epsilon() {
     site.battery = Some(lossless_battery(10.0, 5.0, 1.0, 5.0));
 
     let p1w = make_phase1_weights();
-    let mut p2w = make_phase2_weights();
-    p2w.c_bat_startup_eur = 0.01; // production default
+    if let Some(battery) = site.battery.as_mut() {
+        battery.friction.startup_eur = 0.01; // production default
+    }
 
     let contexts = site.contexts();
     let phase1_sol =
@@ -458,7 +445,6 @@ fn phase2_feasible_with_pv_and_production_epsilon() {
     let result = solve_phase2(
         &site.inputs(),
         &p1w,
-        &p2w,
         c_star,
         0.02, // production default phase2_epsilon_eur
         &phase1_sol,
@@ -512,14 +498,12 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
     site.ev.p_min_kw = 1.4;
     site.set_ev_firm(3.0 * 7.4, n - 1); // needs ~3 full slots at max
 
-    let mut weights = make_phase2_weights();
-    weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
-    weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
+    site.ev.friction.startup_eur = 0.5; // also penalise startups so EV is one block
+    site.ev.friction.ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
 
     let out = solve_milp_two_phase(
         &site.inputs(),
         &make_phase1_weights(),
-        &weights,
         1.0,
         &site.contexts(),
         60.0,
@@ -557,14 +541,14 @@ fn battery_ramp_penalty_produces_smooth_power() {
     site.grid.c_imp_eur_kwh = vec![0.08, 0.08, 0.08, 0.30, 0.30, 0.30];
     site.battery = Some(lossless_battery(6.0, 3.0, 0.6, 3.0));
 
-    let mut weights = make_phase2_weights();
-    weights.c_bat_startup_eur = 0.5; // keep blocks contiguous
-    weights.c_bat_ramp_eur_kw = 1.0; // very high — force flat power
+    if let Some(battery) = site.battery.as_mut() {
+        battery.friction.startup_eur = 0.5; // keep blocks contiguous
+        battery.friction.ramp_eur_kw = 1.0; // very high — force flat power
+    }
 
     let out = solve_milp_two_phase(
         &site.inputs(),
         &make_phase1_weights(),
-        &weights,
         1.0,
         &site.contexts(),
         60.0,
@@ -739,6 +723,10 @@ fn heater_already_above_its_ceiling_still_solves() {
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> =
         vec![Box::new(HeaterMilpContext {
             asset_id: "heater".into(),
+            friction: Default::default(),
+            temp_min_c: 18.0,
+            thermal_mass_kwh_per_c: 2.0,
+            target_ready_by: None,
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.5,
@@ -777,6 +765,10 @@ fn heater_terminal_reward_raises_end_state() {
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
             vec![Box::new(HeaterMilpContext {
                 asset_id: "heater".into(),
+                friction: Default::default(),
+                temp_min_c: 18.0,
+                thermal_mass_kwh_per_c: 2.0,
+                target_ready_by: None,
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw: 1.0,
@@ -831,6 +823,7 @@ fn battery_terminal_reward_raises_end_soc() {
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
             vec![Box::new(BatteryMilpContext {
                 asset_id: "battery".into(),
+                friction: Default::default(),
                 e_nom_kwh: 4.0,
                 e_init_kwh: 0.0,
                 e_min_kwh: 0.0,
@@ -1027,9 +1020,6 @@ fn configured_mip_gap_target_reaches_the_plan() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );

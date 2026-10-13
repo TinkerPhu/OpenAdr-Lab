@@ -2,10 +2,6 @@ use crate::entities::planner_params::{PenaltyRuleParams, PlannerObjective, Plann
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
-// MilpLoadMode is defined in asset_port.rs (the port module) and re-exported here
-// so all existing `use super::types::*` callers still resolve it.
-pub use super::asset_port::MilpLoadMode;
-
 /// Map `good_lp`'s coarse solve-quality classification to our persisted
 /// `SolveStatus` (GB-31). `good_lp::solvers::SolutionStatus` has no
 /// `Infeasible`/`Unbounded` variants of its own — those solves return
@@ -50,31 +46,15 @@ pub(crate) struct Phase1Weights {
     pub(crate) w_import: f64,
     /// Scales contractual violation penalties
     pub(crate) w_viol: f64,
-    /// Battery cycling wear cost [€/kWh charged or discharged]
-    pub(crate) c_bat_wear_eur_kwh: f64,
+    /// Wear per kWh charged or discharged by a storage asset [€/kWh]. The profile key is
+    /// `c_bat_wear_eur_kwh`; only the `Custom` objective reads it (see `build_phase1_weights`).
+    pub(crate) c_storage_wear_eur_kwh: f64,
     /// Penalty per kWh of battery discharge co-occurring with EV charging when
     /// PV surplus ≥ ev_min_kw [€/kWh]. 0.0 = disabled.
     pub(crate) c_bat_ev_coexist_eur_kwh: f64,
     /// Penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
     /// Covers all assets as a group. 0.0 = disabled.
     pub(crate) c_ctrl_imp_malus_eur_kwh: f64,
-}
-
-/// Phase 2 objective coefficients (operational friction). Used only when
-/// `phase2_epsilon_eur > 0.0`. Phase 2 minimises startup/ramp/switching/tier
-/// cost subject to a Phase 1 cost cap.
-#[derive(Debug, Clone)]
-pub(crate) struct Phase2Weights {
-    /// Penalty per battery charge/discharge mode transition [€/transition]
-    pub(crate) c_bat_startup_eur: f64,
-    /// Penalty per kW of battery net-power change between consecutive slots [€/kW]
-    pub(crate) c_bat_ramp_eur_kw: f64,
-    /// Penalty per EV charging run startup [€/run]
-    pub(crate) c_ev_startup_eur: f64,
-    /// Penalty per kW of EV power change between consecutive slots [€/kW]
-    pub(crate) c_ev_ramp_eur_kw: f64,
-    /// Soft penalty per slot for using the full power tier over mid tier [€/slot]
-    pub(crate) w_tier_penalty_eur: f64,
 }
 
 /// Fully-resolved MILP input parameters for one planning cycle.
@@ -105,9 +85,6 @@ pub(crate) struct MilpInputs {
     /// coverage — independent, since CO2 and import-tariff coverage can end
     /// at different times.
     pub(crate) co2_stale_rate_warning: Option<String>,
-    /// WP4.1-c MAX_COST: stable warning text when the session budget cannot
-    /// buy the target energy even at the cheapest slot rate.
-    pub(crate) budget_warning: Option<String>,
     /// Export tariff [€/kWh]
     pub(crate) c_exp_eur_kwh: Vec<f64>,
     /// Grid CO₂ intensity [kgCO₂/kWh] (÷1000 from stored g/kWh)
@@ -134,12 +111,6 @@ pub(crate) struct MilpInputs {
     pub(crate) mip_gap_target: f64,
     /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty = feature disabled.
     pub(crate) penalty_rules: Vec<PenaltyRuleParams>,
-
-    /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
-    pub(crate) w_tier_penalty_eur: f64,
-    /// What the asset contexts declare that the code around the solve reads (session_flexibility,
-    /// diagnostics, the result mapping). The solve itself reads each asset's own context.
-    pub(crate) assets: super::input_stages::AssetScalars,
 }
 
 /// Internal MILP descriptor for one shiftable load block. Implements
@@ -158,6 +129,11 @@ pub(crate) struct ShiftableLoadMilpContext {
     /// Valid start-slot indices within [0, n). `[0]` when the load has
     /// already started — the decision is made, not a MILP choice.
     pub(crate) valid_start_slots: Vec<usize>,
+    /// One full run [min], for the energy the plan's session flexibility reports.
+    pub(crate) duration_min: u32,
+    /// The request's own window, for the plan's session flexibility.
+    pub(crate) earliest_start: chrono::DateTime<chrono::Utc>,
+    pub(crate) latest_end: chrono::DateTime<chrono::Utc>,
 }
 
 // ── Builder functions ────────────────────────────────────────────────────────
@@ -177,7 +153,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.02,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: 0.03,
+            c_storage_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -187,7 +163,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: 0.0,
+            c_storage_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -197,7 +173,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 1.0,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: 0.0,
+            c_storage_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -207,7 +183,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.0,
             w_import: 1.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: 0.0,
+            c_storage_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -217,7 +193,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: 0.03,
+            c_storage_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -227,26 +203,15 @@ pub(crate) fn build_phase1_weights(
             w_grid: p.w_grid,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
+            c_storage_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
     }
 }
 
-pub(crate) fn build_phase2_weights(inputs: &MilpInputs, planner: &PlannerParams) -> Phase2Weights {
-    let p = planner;
-    Phase2Weights {
-        c_bat_startup_eur: p.c_bat_startup_eur,
-        c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
-        c_ev_startup_eur: p.c_ev_startup_eur,
-        c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-        w_tier_penalty_eur: inputs.w_tier_penalty_eur,
-    }
-}
-
-/// Output from the MILP solver for one planning cycle.
-/// All `Vec<f64>` fields have `len == n` except `e_bat_kwh` which has `len == n + 1`.
+/// Output from the MILP solver for one planning cycle: the grid's series, and each asset's
+/// part as the asset read it back. All per-slot series have `len == n`.
 #[derive(Debug, Clone)]
 pub(crate) struct SolveOutput {
     /// GB-31 — the real HiGHS termination reason for this solve, read from
@@ -260,48 +225,24 @@ pub(crate) struct SolveOutput {
     pub(crate) p_exp_kw: Vec<f64>,
     /// PV export decision variable solution per step [kW]; `<= p_pv_kw[t]` (§ pv-export-curtailment)
     pub(crate) p_pv_used_kw: Vec<f64>,
-    /// Battery charge power per step [kW]; all 0.0 when no battery present
-    pub(crate) p_bat_ch_kw: Vec<f64>,
-    /// Battery discharge power per step [kW]; all 0.0 when no battery present
-    pub(crate) p_bat_dis_kw: Vec<f64>,
-    /// EV charge power per step [kW]; all 0.0 when EV absent/MustNotRun
-    pub(crate) p_ev_kw: Vec<f64>,
-    /// R-93: the solved EV state-of-charge curve (0..1), len = n + 1. The plan's
-    /// own SoC trace — not reconstructed from `p_ev_kw` afterwards.
-    pub(crate) soc_ev: Vec<f64>,
-    /// Solved per-obligation shortfall [kWh], in `ev_obligations` order.
-    pub(crate) ev_shortfall_kwh: Vec<f64>,
-    /// Heater stage index (0..=n_stages) per step
-    pub(crate) y_heat: Vec<f64>,
-    /// Battery SoC trajectory [kWh], len = n + 1; index 0 = initial SoC
-    pub(crate) e_bat_kwh: Vec<f64>,
     /// Import contractual-limit violation slack [kW]
     pub(crate) s_imp_viol_kw: Vec<f64>,
     /// Export contractual-limit violation slack [kW]
     pub(crate) s_exp_viol_kw: Vec<f64>,
-    /// EV on-flag binary per step (1 = charging, 0 = off)
-    pub(crate) z_ev_on: Vec<f64>,
-    /// Total extra EV energy above core requirement [kWh]
-    pub(crate) e_ev_extra: f64,
-    /// 1.0 when EV core target is met (MayRun only); 0.0 otherwise
-    /// Energy bought from the priced bands [kWh]. Read only by the model-fingerprint golden
-    /// (`tests/model_fingerprint.rs`), which records the whole solution.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) e_seg_kwh: f64,
-    /// 1.0 when heater energy deadline is met (MayRun only); 0.0 otherwise
-    pub(crate) z_heat_ready: f64,
-    /// Tank energy above T_min [kWh] per slot; empty when heater absent
-    pub(crate) e_heat_tank_kwh: Vec<f64>,
-    /// Per-shiftable-load power schedule [kW]; outer len = num loads, inner len = n
-    pub(crate) p_shiftable_kw: Vec<Vec<f64>>,
-    /// The mode decisions as solved, for the marginal-cost pass to pin (R-98): read off
-    /// the solution, never re-derived from the power they produced.
-    pub(crate) mode_decisions: super::asset_port::WinningModeDecisions,
     /// WP6.3 (BL-09) — per-rule, per-window peak-demand penalty slack [kW].
     /// Outer len = `inputs.penalty_rules.len()` (same order), inner len = that
     /// rule's window count. `> 0.0` means that window's peak still exceeded
     /// `threshold_kw` after solving (penalty accepted).
     pub(crate) s_penalty_kw: Vec<Vec<f64>>,
+    /// Each asset's part of the solution, in planner input order.
+    pub(crate) assets: Vec<super::asset_port::AssetSolution>,
+}
+
+impl SolveOutput {
+    /// The solution of the asset with this id.
+    pub(crate) fn asset(&self, asset_id: &str) -> Option<&super::asset_port::AssetSolution> {
+        self.assets.iter().find(|a| a.asset_id == asset_id)
+    }
 }
 
 #[cfg(test)]

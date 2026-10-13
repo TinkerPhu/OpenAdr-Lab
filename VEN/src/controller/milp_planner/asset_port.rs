@@ -20,6 +20,8 @@ use std::collections::HashMap;
 pub struct BatteryMilpContext {
     /// The roster id this context was built for, reported as `asset_id()`.
     pub asset_id: String,
+    /// What this asset's friction costs in phase 2, from the planner parameters.
+    pub friction: crate::controller::asset_milp_port::FrictionCosts,
     pub e_nom_kwh: f64,
     /// Live SoC × capacity — NOT the profile's initial_soc.
     pub e_init_kwh: f64,
@@ -83,6 +85,11 @@ pub enum EvMilpMode {
 pub struct EvMilpContext {
     /// The roster id this context was built for, reported as `asset_id()`.
     pub asset_id: String,
+    /// What this asset's friction costs in phase 2, from the planner parameters.
+    pub friction: crate::controller::asset_milp_port::FrictionCosts,
+    /// Departure of the session this EV serves next (the first one not yet departed), for
+    /// the plan's session flexibility. `None` when no session is queued.
+    pub session_departure: Option<chrono::DateTime<chrono::Utc>>,
     pub mode: EvMilpMode,
     /// Live SoC at plan time, reported by the EV itself (seeds the plan's EV SoC forecast).
     pub soc_init_frac: f64,
@@ -224,6 +231,14 @@ pub enum HeaterMilpMode {
 pub struct HeaterMilpContext {
     /// The roster id this context was built for, reported as `asset_id()`.
     pub asset_id: String,
+    /// What this asset's friction costs in phase 2, from the planner parameters.
+    pub friction: crate::controller::asset_milp_port::FrictionCosts,
+    /// The tank temperature tank energy is measured above [°C].
+    pub temp_min_c: f64,
+    /// Converts tank energy back into temperature [kWh/°C].
+    pub thermal_mass_kwh_per_c: f64,
+    /// When the target this heater serves must be reached; `None` without a target.
+    pub target_ready_by: Option<chrono::DateTime<chrono::Utc>>,
     pub mode: HeaterMilpMode,
     /// Deadline step index (None = no hard deadline; autonomous MayRun path).
     pub t_dead_step: Option<usize>,
@@ -273,10 +288,8 @@ pub struct HeaterMilpVars {
     pub s_low: Vec<Variable>,
     /// Continuous ≥ 0: switching indicator per step. sw[0] measures switch from initial hardware state. len = n.
     pub sw: Vec<Variable>,
-    /// Power per stage [kW] — cached from context for cross-asset power balance.
+    /// Power per stage [kW] — cached from context for the heater's net power.
     pub p_step_kw: f64,
-    /// Number of switchable stages (1 or 2); max power = p_step_kw × n_stages.
-    pub n_stages: u8,
 }
 
 /// Per-heater MILP solution readback.
@@ -297,8 +310,10 @@ pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
 // reach into this infra module for their own port type). Re-exported here so every
 // existing `asset_port::`/`milp_planner::` import path keeps working unchanged.
 pub use crate::controller::asset_milp_port::{
-    pinned_binary, AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars,
-    HeaterScalars, MilpLoadMode, ModeDecisions, ShiftableLoadScalars, WinningModeDecisions,
+    pinned_binary, AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution,
+    AssetSolutionDetail, BatteryScalars, CostWeights, DeclareMode, DeclaredAsset, DischargeLeg,
+    EvScalars, FlexibilityWindow, FrictionCosts, HeaterScalars, MilpLoadMode, ObjectivePart,
+    OnIndicator, ShiftableLoadScalars, StorageLegs,
 };
 
 // ── Plan-result helper free functions ─────────────────────────────────────────
