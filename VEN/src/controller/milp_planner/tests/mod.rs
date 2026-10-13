@@ -902,6 +902,7 @@ mod heater;
 mod inputs_golden;
 mod model_fingerprint;
 mod modes;
+mod multi_instance;
 mod penalty;
 mod phase2_spikes;
 mod planner;
