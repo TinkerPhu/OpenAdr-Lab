@@ -51,6 +51,20 @@ pub enum DeclareMode<'a> {
     Pinned(&'a AssetSolution),
 }
 
+impl DeclareMode<'_> {
+    /// The friction an asset prices in this declaration: its own costs when phase 2 plans,
+    /// none otherwise (phase 1 declares no friction auxiliaries, and the marginal-cost pass
+    /// prices fixed decisions).
+    pub fn friction(&self, own: &FrictionCosts) -> FrictionCosts {
+        match self {
+            DeclareMode::Plan { friction: true } => *own,
+            DeclareMode::Plan { friction: false } | DeclareMode::Pinned(_) => {
+                FrictionCosts::default()
+            }
+        }
+    }
+}
+
 /// What one asset's part of a solved model is: its net power, what it plans to be in, how it
 /// stores energy if it does, what it warns about, and the kind's own detail.
 #[derive(Debug, Clone)]

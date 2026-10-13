@@ -40,7 +40,9 @@ const SHORTFALL_PENALTY_EUR: f64 = 1.0e4;
 const TIE_BREAK_LATENESS_EUR_KWH_H: f64 = 1.0e-4;
 
 impl EvMilpContext {
-    /// Declare all LP variables for this EV charger. Context-side canonical implementation.
+    /// Declare all LP variables for this EV charger, every decision free: the tests' shorthand
+    /// for `declare_vars_with` (the planner declares through `AssetMilpContext::declare`).
+    #[cfg(test)]
     pub fn declare_vars(
         &self,
         n: usize,

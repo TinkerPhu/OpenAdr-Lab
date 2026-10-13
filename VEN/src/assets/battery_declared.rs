@@ -163,18 +163,18 @@ impl AssetMilpContext for BatteryMilpContext {
         mode: DeclareMode<'_>,
         vars: &mut ProblemVariables,
     ) -> Box<dyn DeclaredAsset + 'a> {
-        let v = match mode {
-            DeclareMode::Plan { friction: false } => self.declare_vars(n, 0.0, 0.0, vars),
-            DeclareMode::Plan { friction: true } => self.declare_vars(
-                n,
-                self.friction.startup_eur,
-                self.friction.ramp_eur_kw,
-                vars,
-            ),
-            DeclareMode::Pinned(own) => {
-                self.declare_vars_with(n, 0.0, 0.0, vars, Some(own_direction(own)))
-            }
+        let priced = mode.friction(&self.friction);
+        let pinned_direction = match mode {
+            DeclareMode::Plan { .. } => None,
+            DeclareMode::Pinned(own) => Some(own_direction(own)),
         };
+        let v = self.declare_vars_with(
+            n,
+            priced.startup_eur,
+            priced.ramp_eur_kw,
+            vars,
+            pinned_direction,
+        );
         Box::new(DeclaredBattery { ctx: self, v })
     }
 
