@@ -106,7 +106,8 @@ fn inputs_for(site: &Site) -> SyntheticSite {
 }
 
 fn delivered_kwh(syn: &SyntheticSite, out: &SolveOutput) -> f64 {
-    out.p_ev_kw
+    out.ev()
+        .power_kw
         .iter()
         .zip(syn.grid.dt_h.iter())
         .map(|(p, d)| p * d)
@@ -145,7 +146,10 @@ fn dump(site: &Site, syn: &SyntheticSite, out: &SolveOutput) -> String {
     for t in 0..syn.grid.n {
         s.push_str(&format!(
             "{t:>4}  {:.2}  {:4.1}  {:5.2}  {:5.2}\n",
-            syn.grid.c_imp_eur_kwh[t], syn.grid.p_pv_kw[t], out.p_ev_kw[t], out.p_imp_kw[t],
+            syn.grid.c_imp_eur_kwh[t],
+            syn.grid.p_pv_kw[t],
+            out.ev().power_kw[t],
+            out.p_imp_kw[t],
         ));
     }
     s

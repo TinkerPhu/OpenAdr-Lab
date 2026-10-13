@@ -210,13 +210,13 @@ fn flips(on: &dyn Fn(usize) -> bool, slots: usize) -> Flips {
 fn shape(s: &SolveOutput, n: usize) -> (Flips, Flips, Flips, f64) {
     let slots = NEAR.min(n);
     let at = |v: &Vec<f64>, t: usize| v.get(t).copied().unwrap_or(0.0);
-    let net = |t: usize| at(&s.p_bat_ch_kw, t) - at(&s.p_bat_dis_kw, t);
+    let net = |t: usize| at(&s.battery().charge_kw, t) - at(&s.battery().discharge_kw, t);
     let bat = flips(
-        &|t| at(&s.p_bat_ch_kw, t) + at(&s.p_bat_dis_kw, t) > 0.05,
+        &|t| at(&s.battery().charge_kw, t) + at(&s.battery().discharge_kw, t) > 0.05,
         slots,
     );
-    let ev = flips(&|t| at(&s.p_ev_kw, t) > 0.05, slots);
-    let htr = flips(&|t| at(&s.y_heat, t) > 0.5, slots);
+    let ev = flips(&|t| at(&s.ev().power_kw, t) > 0.05, slots);
+    let htr = flips(&|t| at(&s.heater().stage, t) > 0.5, slots);
     let ramp_kw = (1..slots).map(|t| (net(t) - net(t - 1)).abs()).sum();
     (bat, ev, htr, ramp_kw)
 }
@@ -239,8 +239,10 @@ fn report(label: &str, s: &SolveOutput, n: usize, secs: f64, extra: &str) {
         let cells: String = (14..54).map(|t| format!("{:>4.1}", f(t))).collect();
         println!("      {name:>4} {cells}");
     };
-    row("bat", &|t| s.p_bat_ch_kw[t] - s.p_bat_dis_kw[t]);
-    row("ev", &|t| s.p_ev_kw[t]);
+    row("bat", &|t| {
+        s.battery().charge_kw[t] - s.battery().discharge_kw[t]
+    });
+    row("ev", &|t| s.ev().power_kw[t]);
 }
 
 #[test]
@@ -404,9 +406,14 @@ fn bench_fleet_startup_penalty() {
             // First 25 min = what reaches the hardware before the next replan.
             let at = |v: &Vec<f64>, t: usize| v.get(t).copied().unwrap_or(0.0);
             let bat25: f64 = (0..5)
-                .map(|t| (at(&s.p_bat_ch_kw, t) - at(&s.p_bat_dis_kw, t)) * inputs.dt_h[t])
+                .map(|t| {
+                    (at(&s.battery().charge_kw, t) - at(&s.battery().discharge_kw, t))
+                        * inputs.dt_h[t]
+                })
                 .sum();
-            let ev25: f64 = (0..5).map(|t| at(&s.p_ev_kw, t) * inputs.dt_h[t]).sum();
+            let ev25: f64 = (0..5)
+                .map(|t| at(&s.ev().power_kw, t) * inputs.dt_h[t])
+                .sum();
             let status = format!("{:?}", s.status);
             println!(
                 "      {:<10}{}  {secs:>5.1}s {status:<9} friction {fr:>8.4} | 25min bat {bat25:>6.3} ev {ev25:>6.3} kWh",
@@ -502,13 +509,16 @@ fn captured_instance(
 
 /// EV runs over the whole horizon (the live plan's fragmentation spans all of it).
 fn ev_runs(s: &SolveOutput, n: usize) -> Flips {
-    flips(&|t| s.p_ev_kw.get(t).copied().unwrap_or(0.0) > 0.05, n)
+    flips(
+        &|t| s.ev().power_kw.get(t).copied().unwrap_or(0.0) > 0.05,
+        n,
+    )
 }
 
 /// Each EV run as `start-slot+len@kW(bat kW)`, so a blip can be located and its
 /// battery partner seen.
 fn ev_run_list(s: &SolveOutput, n: usize) -> String {
-    let on = |t: usize| s.p_ev_kw.get(t).copied().unwrap_or(0.0) > 0.05;
+    let on = |t: usize| s.ev().power_kw.get(t).copied().unwrap_or(0.0) > 0.05;
     let mut out = Vec::new();
     let mut t = 0;
     while t < n {
@@ -517,11 +527,11 @@ fn ev_run_list(s: &SolveOutput, n: usize) -> String {
             while t < n && on(t) {
                 t += 1;
             }
-            let bat = s.p_bat_ch_kw[start] - s.p_bat_dis_kw[start];
+            let bat = s.battery().charge_kw[start] - s.battery().discharge_kw[start];
             out.push(format!(
                 "{start}+{}@{:.1}({bat:.1})",
                 t - start,
-                s.p_ev_kw[start]
+                s.ev().power_kw[start]
             ));
         } else {
             t += 1;
@@ -623,8 +633,14 @@ fn grid_eur(inputs: &MilpInputs, s: &SolveOutput) -> f64 {
 fn variant_row(inputs: &MilpInputs, s: &SolveOutput) -> String {
     let n = inputs.n;
     let ev = ev_runs(s, n);
-    let bat = flips(&|t| s.p_bat_ch_kw[t] + s.p_bat_dis_kw[t] > 0.05, n);
-    let htr = flips(&|t| s.y_heat.get(t).copied().unwrap_or(0.0) > 0.5, n);
+    let bat = flips(
+        &|t| s.battery().charge_kw[t] + s.battery().discharge_kw[t] > 0.05,
+        n,
+    );
+    let htr = flips(
+        &|t| s.heater().stage.get(t).copied().unwrap_or(0.0) > 0.5,
+        n,
+    );
     let kwh = |v: &Vec<f64>| -> f64 { (0..n).map(|t| v[t] * inputs.dt_h[t]).sum() };
     format!(
         "ev {:>2}/{:<2} bat {:>2}/{:<2} htr {:>2}/{:<2} | grid {:>7.3} EUR imp {:>5.1} exp {:>5.1} kWh  ev {:>5.1} kWh  bat end {:>4.1} kWh",
@@ -637,8 +653,8 @@ fn variant_row(inputs: &MilpInputs, s: &SolveOutput) -> String {
         grid_eur(inputs, s),
         kwh(&s.p_imp_kw),
         kwh(&s.p_exp_kw),
-        kwh(&s.p_ev_kw),
-        s.e_bat_kwh.last().copied().unwrap_or(0.0),
+        kwh(&s.ev().power_kw),
+        s.battery().energy_kwh.last().copied().unwrap_or(0.0),
     )
 }
 

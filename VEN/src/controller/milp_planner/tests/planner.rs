@@ -1266,7 +1266,7 @@ fn marginal_cost_solves_with_a_multi_slot_shiftable_load_scheduled() {
     let weights = build_phase1_weights(&profile, PlannerObjective::MinCost);
 
     let winning = solve_phase1(&inputs, &weights, &ctxs, 60.0).expect("phase1 solve failed");
-    let running = winning.p_shiftable_kw[0]
+    let running = winning.shiftable_kw()[0]
         .iter()
         .filter(|&&kw| kw > 0.01)
         .count();

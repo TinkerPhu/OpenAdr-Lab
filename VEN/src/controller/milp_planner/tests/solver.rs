@@ -28,7 +28,8 @@ fn ev_may_run_charges_when_the_bid_exceeds_cost() {
     let out = result.unwrap();
 
     let ev_energy: f64 = out
-        .p_ev_kw
+        .ev()
+        .power_kw
         .iter()
         .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
@@ -94,7 +95,8 @@ fn solve_ev_must_run_meets_its_required_energy() {
     let out = result.unwrap();
 
     let ev_energy: f64 = out
-        .p_ev_kw
+        .ev()
+        .power_kw
         .iter()
         .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
@@ -127,14 +129,14 @@ fn solve_ev_must_run_with_a_deadline_stranded_behind_a_predicted_away_window() {
     let out = result.unwrap();
 
     assert!(
-        out.p_ev_kw[1].abs() < 1e-6 && out.p_ev_kw[2].abs() < 1e-6,
+        out.ev().power_kw[1].abs() < 1e-6 && out.ev().power_kw[2].abs() < 1e-6,
         "predicted-away slots must stay at zero power, got {:?}",
-        out.p_ev_kw
+        out.ev().power_kw
     );
     assert!(
-        (out.p_ev_kw[0] - 7.4).abs() < 1e-2,
+        (out.ev().power_kw[0] - 7.4).abs() < 1e-2,
         "the one available pre-deadline slot must carry the whole core energy, got {:?}",
-        out.p_ev_kw
+        out.ev().power_kw
     );
 }
 
@@ -168,7 +170,8 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
     );
     let out = result.unwrap();
     let ev_energy: f64 = out
-        .p_ev_kw
+        .ev()
+        .power_kw
         .iter()
         .zip(site.grid.dt_h.iter())
         .map(|(p, &d)| p * d)
@@ -177,7 +180,7 @@ fn solve_ev_must_run_required_energy_beyond_what_the_available_slots_can_deliver
         (ev_energy - 7.4).abs() < 1e-2,
         "only slot 0 is home before the deadline, so 7.4 kWh of the 20 kWh asked \
          for is all the window allows; got {ev_energy:.4} kWh from {:?}",
-        out.p_ev_kw
+        out.ev().power_kw
     );
     let warnings =
         crate::controller::milp_planner::ev_diagnostics::ev_warnings(&site.inputs(), &out);
@@ -214,7 +217,7 @@ fn solve_battery_arbitrage() {
         "arbitrage objective {obj:.4} EUR should be ≈ 0.40 EUR (charge cheap, discharge expensive)"
     );
     // Battery must discharge in expensive window (at least 1 kWh)
-    let dis_in_expensive = out.p_bat_dis_kw[2] + out.p_bat_dis_kw[3];
+    let dis_in_expensive = out.battery().discharge_kw[2] + out.battery().discharge_kw[3];
     assert!(
         dis_in_expensive > 0.5,
         "battery should discharge in expensive period, got {dis_in_expensive:.4} kWh"
@@ -243,12 +246,12 @@ fn battery_arbitrage_driven_by_ghg_intensity_alone() {
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
-    let dis_in_dirty = out.p_bat_dis_kw[2] + out.p_bat_dis_kw[3];
+    let dis_in_dirty = out.battery().discharge_kw[2] + out.battery().discharge_kw[3];
     assert!(
         dis_in_dirty > 0.5,
         "battery should discharge in the high-carbon slots when w_ghg > 0, got {dis_in_dirty:.4}"
     );
-    let ch_in_clean = out.p_bat_ch_kw[0] + out.p_bat_ch_kw[1];
+    let ch_in_clean = out.battery().charge_kw[0] + out.battery().charge_kw[1];
     assert!(
         ch_in_clean > 0.5,
         "battery should charge in the low-carbon slots when w_ghg > 0, got {ch_in_clean:.4}"
@@ -329,7 +332,7 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
 
     let at_full = |o: &SolveOutput| -> f64 {
         // "at full" is the top stage now, not a dedicated indicator.
-        o.y_heat.iter().filter(|&&y| y > 1.5).count() as f64
+        o.heater().stage.iter().filter(|&&y| y > 1.5).count() as f64
     };
     let full_slots_no: f64 = at_full(&out_no_reward);
     let full_slots_with: f64 = at_full(&out_with_reward);
@@ -377,7 +380,7 @@ fn ev_startup_penalty_produces_contiguous_block() {
     .0;
 
     // Identify active slots (z_ev_on > 0.5 means EV charging committed)
-    let active: Vec<bool> = out.z_ev_on.iter().map(|&v| v > 0.5).collect();
+    let active: Vec<bool> = out.ev().on.iter().map(|&v| v > 0.5).collect();
     // Count off→on switches; with startup penalty, expect at most 1 (contiguous block).
     // Starting at slot 0 (0 startups) is also a valid contiguous block.
     let startups = active.windows(2).filter(|w| !w[0] && w[1]).count();
@@ -415,14 +418,14 @@ fn battery_startup_penalty_minimises_active_restarts() {
 
     // Count idle→active transitions (mirrors EV startup test logic)
     let active: Vec<bool> = (0..n)
-        .map(|t| out.p_bat_ch_kw[t] > 1e-3 || out.p_bat_dis_kw[t] > 1e-3)
+        .map(|t| out.battery().charge_kw[t] > 1e-3 || out.battery().discharge_kw[t] > 1e-3)
         .collect();
     let startups =
         active.windows(2).filter(|w| !w[0] && w[1]).count() + if active[0] { 1 } else { 0 }; // count slot-0 active as a startup
     assert!(
             startups <= 2,
             "expected ≤2 battery startups (charge block + discharge block), got {startups}; active={active:?} ch={:?} dis={:?}",
-            out.p_bat_ch_kw, out.p_bat_dis_kw,
+            out.battery().charge_kw, out.battery().discharge_kw,
         );
 }
 
@@ -484,9 +487,9 @@ fn solve_power_balance_holds() {
 
     for t in 0..4 {
         // p_imp + p_pv + p_bat_dis = p_base + p_bat_ch + p_exp (EV=0, heater=0)
-        let residual = out.p_imp_kw[t] + site.grid.p_pv_kw[t] + out.p_bat_dis_kw[t]
+        let residual = out.p_imp_kw[t] + site.grid.p_pv_kw[t] + out.battery().discharge_kw[t]
             - site.grid.p_base_kw[t]
-            - out.p_bat_ch_kw[t]
+            - out.battery().charge_kw[t]
             - out.p_exp_kw[t];
         assert!(
             residual.abs() < 1e-4,
@@ -524,7 +527,13 @@ fn ev_ramp_penalty_produces_flat_charging_power() {
     .expect("solver failed")
     .0;
 
-    let active_power: Vec<f64> = out.p_ev_kw.iter().copied().filter(|&v| v > 0.05).collect();
+    let active_power: Vec<f64> = out
+        .ev()
+        .power_kw
+        .iter()
+        .copied()
+        .filter(|&v| v > 0.05)
+        .collect();
     // All active slots must have the same power (within 0.1 kW rounding)
     if active_power.len() > 1 {
         let first = active_power[0];
@@ -565,7 +574,8 @@ fn battery_ramp_penalty_produces_smooth_power() {
 
     // Check charging slots are at uniform power
     let ch_power: Vec<f64> = out
-        .p_bat_ch_kw
+        .battery()
+        .charge_kw
         .iter()
         .copied()
         .filter(|&v| v > 0.05)
@@ -581,7 +591,8 @@ fn battery_ramp_penalty_produces_smooth_power() {
     }
     // Check discharging slots are at uniform power
     let dis_power: Vec<f64> = out
-        .p_bat_dis_kw
+        .battery()
+        .discharge_kw
         .iter()
         .copied()
         .filter(|&v| v > 0.05)
@@ -627,11 +638,11 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
     .expect("solver failed");
 
     for t in 0..n {
-        if out.z_ev_on[t] > 0.5 {
+        if out.ev().on[t] > 0.5 {
             assert!(
-                out.p_bat_dis_kw[t] < 0.1,
+                out.battery().discharge_kw[t] < 0.1,
                 "slot {t}: battery discharged {:.3} kW while EV charging with PV surplus",
-                out.p_bat_dis_kw[t]
+                out.battery().discharge_kw[t]
             );
         }
     }
@@ -666,7 +677,7 @@ fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
 
     for t in 0..n {
         assert!(
-                out.y_heat[t] < 1.5,
+                out.heater().stage[t] < 1.5,
                 "slot {t}: planner chose full tier despite PV exactly covering mid — import malus should prevent this"
             );
         assert!(
@@ -705,11 +716,11 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
     .expect("solver failed");
 
     // Without malus, full tier in the free slots is cheaper than paying 0.40 later.
-    let used_full = out.y_heat.iter().any(|&y| y > 1.5);
+    let used_full = out.heater().stage.iter().any(|&y| y > 1.5);
     assert!(
         used_full,
         "without malus the planner should pre-store at full tier during free slots; z_full={:?}",
-        out.y_heat
+        out.heater().stage
     );
 }
 
@@ -744,9 +755,9 @@ fn heater_already_above_its_ceiling_still_solves() {
     let out = solve_phase1(&site.inputs(), &make_phase1_weights(), &ctxs, 60.0)
         .expect("a tank above its ceiling must not make the site infeasible");
     assert!(
-        out.y_heat.iter().all(|&y| y < 0.5),
+        out.heater().stage.iter().all(|&y| y < 0.5),
         "nothing may be added to a tank above its ceiling: {:?}",
-        out.y_heat
+        out.heater().stage
     );
 }
 
@@ -795,8 +806,8 @@ fn heater_terminal_reward_raises_end_state() {
     )
     .expect("solver failed (c_terminal=0.40)");
 
-    let e_end_no = out_no.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
-    let e_end_yes = out_yes.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
+    let e_end_no = out_no.heater().tank_kwh.last().copied().unwrap_or(0.0);
+    let e_end_yes = out_yes.heater().tank_kwh.last().copied().unwrap_or(0.0);
     assert!(
         e_end_yes > e_end_no + 0.1,
         "c_terminal=0.40 should fill tank above no-reward baseline; e_end_no={e_end_no:.4} e_end_yes={e_end_yes:.4}"
@@ -844,8 +855,8 @@ fn battery_terminal_reward_raises_end_soc() {
     .expect("solver failed (c_terminal=0.40)");
 
     // e_bat_kwh has len n+1; index n is the post-horizon end state
-    let e_end_no = out_no.e_bat_kwh[n];
-    let e_end_yes = out_yes.e_bat_kwh[n];
+    let e_end_no = out_no.battery().energy_kwh[n];
+    let e_end_yes = out_yes.battery().energy_kwh[n];
     assert!(
         e_end_yes > e_end_no + 0.1,
         "c_terminal=0.40 should charge battery above no-reward baseline; e_end_no={e_end_no:.4} e_end_yes={e_end_yes:.4}"
@@ -980,9 +991,9 @@ fn marginal_cost_solves_for_an_ev_with_an_unpriced_firm_obligation() {
     let winning =
         solve_phase1(&site.inputs(), &weights, &contexts, 60.0).expect("phase1 solve failed");
     assert!(
-        winning.z_ev_on.iter().any(|&z| z > 0.5),
+        winning.ev().on.iter().any(|&z| z > 0.5),
         "the firm obligation must make the winning plan charge, z_ev_on {:?}",
-        winning.z_ev_on
+        winning.ev().on
     );
 
     let marginal = solve_marginal_costs(&site.inputs(), &weights, &contexts, &winning, 60.0);

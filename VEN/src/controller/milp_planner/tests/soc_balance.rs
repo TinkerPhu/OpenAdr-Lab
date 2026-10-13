@@ -38,24 +38,24 @@ fn soc_rises_by_the_energy_charged() {
 
     let sol = solve(&site);
 
-    assert_eq!(sol.soc_ev.len(), n + 1, "one SoC value per step boundary");
+    assert_eq!(sol.ev().soc.len(), n + 1, "one SoC value per step boundary");
     assert!(
-        (sol.soc_ev[0] - 0.0).abs() < 1e-6,
+        (sol.ev().soc[0] - 0.0).abs() < 1e-6,
         "must start at the live reading, got {}",
-        sol.soc_ev[0]
+        sol.ev().soc[0]
     );
     for t in 1..=n {
         assert!(
-            sol.soc_ev[t] >= sol.soc_ev[t - 1] - 1e-6,
+            sol.ev().soc[t] >= sol.ev().soc[t - 1] - 1e-6,
             "SoC must not fall while only charging: {:?}",
-            sol.soc_ev
+            sol.ev().soc
         );
     }
     // The obligation sits on slot n-1, so it binds the boundary after it.
     assert!(
-        (sol.soc_ev[n] - 0.5).abs() < 1e-3,
+        (sol.ev().soc[n] - 0.5).abs() < 1e-3,
         "5 kWh into a 10 kWh pack is half a pack by the deadline, got {}",
-        sol.soc_ev[n]
+        sol.ev().soc[n]
     );
 }
 
@@ -70,7 +70,7 @@ fn soc_never_exceeds_a_full_pack() {
 
     let sol = solve(&site);
 
-    for (t, &soc_frac) in sol.soc_ev.iter().enumerate() {
+    for (t, &soc_frac) in sol.ev().soc.iter().enumerate() {
         assert!(
             soc_frac <= 1.0 + 1e-6,
             "SoC must never exceed a full pack, got {soc_frac} at step {t}"
@@ -93,19 +93,19 @@ fn a_predicted_drop_lands_at_its_own_slot() {
     let sol = solve(&site);
 
     assert!(
-        (sol.soc_ev[2] - 0.80).abs() < 1e-3,
+        (sol.ev().soc[2] - 0.80).abs() < 1e-3,
         "unchanged before the drop slot, got {}",
-        sol.soc_ev[2]
+        sol.ev().soc[2]
     );
     assert!(
-        (sol.soc_ev[3] - 0.50).abs() < 1e-3,
+        (sol.ev().soc[3] - 0.50).abs() < 1e-3,
         "slot 2's drop must show at the following boundary, got {}",
-        sol.soc_ev[3]
+        sol.ev().soc[3]
     );
     assert!(
-        (sol.soc_ev[4] - 0.50).abs() < 1e-3,
+        (sol.ev().soc[4] - 0.50).abs() < 1e-3,
         "and then hold, got {}",
-        sol.soc_ev[4]
+        sol.ev().soc[4]
     );
 }
 
@@ -124,9 +124,9 @@ fn an_oversized_drop_settles_at_the_floor_rather_than_going_infeasible() {
     let sol = solve(&site);
 
     assert!(
-        (sol.soc_ev[2] - 0.05).abs() < 1e-3,
+        (sol.ev().soc[2] - 0.05).abs() < 1e-3,
         "must settle at the configured floor, got {}",
-        sol.soc_ev[2]
+        sol.ev().soc[2]
     );
 }
 
@@ -144,9 +144,9 @@ fn a_drop_the_pack_can_absorb_is_applied_in_full() {
     let sol = solve(&site);
 
     assert!(
-        (sol.soc_ev[2] - 0.50).abs() < 1e-3,
+        (sol.ev().soc[2] - 0.50).abs() < 1e-3,
         "the full 40 % must be consumed, got {}",
-        sol.soc_ev[2]
+        sol.ev().soc[2]
     );
 }
 
@@ -160,9 +160,9 @@ fn without_declared_drops_the_curve_only_reflects_charging() {
     let sol = solve(&site);
 
     assert!(
-        (sol.soc_ev[n] - 0.50).abs() < 1e-3,
+        (sol.ev().soc[n] - 0.50).abs() < 1e-3,
         "0.30 plus 2 kWh of a 10 kWh pack, got {}",
-        sol.soc_ev[n]
+        sol.ev().soc[n]
     );
 }
 
@@ -177,14 +177,14 @@ fn a_firm_obligation_is_met_at_its_deadline_step() {
     let sol = solve(&site);
 
     assert!(
-        sol.soc_ev[4] >= 0.5 - 1e-3,
+        sol.ev().soc[4] >= 0.5 - 1e-3,
         "must hold half the pack by the end of slot 3, got {}",
-        sol.soc_ev[4]
+        sol.ev().soc[4]
     );
     assert!(
-        sol.ev_shortfall_kwh.iter().all(|&kwh| kwh < 1e-3),
+        sol.ev().shortfall_kwh.iter().all(|&kwh| kwh < 1e-3),
         "a reachable target must never be traded for shortfall slack: {:?}",
-        sol.ev_shortfall_kwh
+        sol.ev().shortfall_kwh
     );
 }
 
@@ -210,14 +210,14 @@ fn two_obligations_are_each_met_at_their_own_step() {
     let sol = solve(&site);
 
     assert!(
-        sol.soc_ev[3] >= 0.25 - 1e-3,
+        sol.ev().soc[3] >= 0.25 - 1e-3,
         "first target must bind by the end of slot 2, got {}",
-        sol.soc_ev[3]
+        sol.ev().soc[3]
     );
     assert!(
-        sol.soc_ev[7] >= 0.75 - 1e-3,
+        sol.ev().soc[7] >= 0.75 - 1e-3,
         "second target must bind by the end of slot 6, got {}",
-        sol.soc_ev[7]
+        sol.ev().soc[7]
     );
 }
 
@@ -231,15 +231,15 @@ fn an_unreachable_obligation_reports_the_gap_instead_of_failing_the_solve() {
 
     let sol = solve(&site);
 
-    let short: f64 = sol.ev_shortfall_kwh.iter().copied().fold(0.0, f64::max);
+    let short: f64 = sol.ev().shortfall_kwh.iter().copied().fold(0.0, f64::max);
     assert!(
         short > 1.0,
         "the unreachable part must be reported as shortfall, got {:?}",
-        sol.ev_shortfall_kwh
+        sol.ev().shortfall_kwh
     );
     // What the window *can* deliver must still be charged.
     assert!(
-        sol.p_ev_kw.iter().sum::<f64>() > 0.0,
+        sol.ev().power_kw.iter().sum::<f64>() > 0.0,
         "the plan must still charge everything the window allows"
     );
 }
@@ -255,9 +255,9 @@ fn charging_while_away_is_never_scheduled() {
 
     for t in [2usize, 3] {
         assert!(
-            sol.p_ev_kw[t].abs() < 1e-6,
+            sol.ev().power_kw[t].abs() < 1e-6,
             "no charging while the car is away, got {} at slot {t}",
-            sol.p_ev_kw[t]
+            sol.ev().power_kw[t]
         );
     }
 }
@@ -293,12 +293,12 @@ fn beyond_target_bands_are_not_bought_after_the_last_deadline() {
     ];
 
     let sol = solve(&site);
-    let total_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots
+    let total_kwh: f64 = sol.ev().power_kw.iter().sum(); // 1 h slots
 
     assert!(
-        sol.p_ev_kw.iter().skip(2).sum::<f64>() < 1e-6,
+        sol.ev().power_kw.iter().skip(2).sum::<f64>() < 1e-6,
         "no charging may be bought after the last deadline, got {:?}",
-        sol.p_ev_kw
+        sol.ev().power_kw
     );
     assert!(
         total_kwh <= 4.0 + 1e-6,
@@ -344,22 +344,22 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
     });
 
     let sol = solve(&site);
-    let charged_kwh: f64 = sol.p_ev_kw.iter().sum(); // 1 h slots
+    let charged_kwh: f64 = sol.ev().power_kw.iter().sum(); // 1 h slots
 
     assert!(
         charged_kwh > 5.0,
         "the trip's 6 kWh must be charged back for, got {charged_kwh:.2} kWh from {:?}",
-        sol.p_ev_kw
+        sol.ev().power_kw
     );
     assert!(
-        sol.soc_ev[11] >= 0.80 - 1e-3,
+        sol.ev().soc[11] >= 0.80 - 1e-3,
         "the second session's target must still be met, got {}",
-        sol.soc_ev[11]
+        sol.ev().soc[11]
     );
     assert!(
-        sol.ev_shortfall_kwh.iter().all(|kwh| *kwh < 1e-3),
+        sol.ev().shortfall_kwh.iter().all(|kwh| *kwh < 1e-3),
         "nothing should be given up as shortfall here, got {:?}",
-        sol.ev_shortfall_kwh
+        sol.ev().shortfall_kwh
     );
 }
 

@@ -821,9 +821,13 @@ fn phase2_schedule_diff(heater: bool) {
     println!("\n── R-97: what phase 2 actually changed ──\n");
     for (name, a, b) in [
         ("p_imp_kw", &p1.p_imp_kw, &p2.p_imp_kw),
-        ("p_ev_kw", &p1.p_ev_kw, &p2.p_ev_kw),
-        ("y_heat (stage)", &p1.y_heat, &p2.y_heat),
-        ("p_bat_ch_kw", &p1.p_bat_ch_kw, &p2.p_bat_ch_kw),
+        ("p_ev_kw", &p1.ev().power_kw, &p2.ev().power_kw),
+        ("y_heat (stage)", &p1.heater().stage, &p2.heater().stage),
+        (
+            "p_bat_ch_kw",
+            &p1.battery().charge_kw,
+            &p2.battery().charge_kw,
+        ),
     ] {
         let (n, worst) = diff(a, b);
         println!(
@@ -895,8 +899,8 @@ fn bench_phase2_changes_across_instances() {
         };
         let (di, de, dh) = (
             count(&p1.p_imp_kw, &p2.p_imp_kw),
-            count(&p1.p_ev_kw, &p2.p_ev_kw),
-            count(&p1.y_heat, &p2.y_heat),
+            count(&p1.ev().power_kw, &p2.ev().power_kw),
+            count(&p1.heater().stage, &p2.heater().stage),
         );
         if di + de + dh > 0 {
             any_change = true;
@@ -984,8 +988,8 @@ fn bench_phase2_epsilon_sweep() {
                         "  {mip_gap:>8.2} {epsilon:>9.2} {p1_s:>9.2} {:>10?} {p2_s:>9.2} {:>8} {:>8} {:>8} {friction:>11.4}",
                         p1.status,
                         c(&p1.p_imp_kw, &p2.p_imp_kw),
-                        c(&p1.p_ev_kw, &p2.p_ev_kw),
-                        c(&p1.y_heat, &p2.y_heat),
+                        c(&p1.ev().power_kw, &p2.ev().power_kw),
+                        c(&p1.heater().stage, &p2.heater().stage),
                     );
                 }
                 Err(_) => println!(
@@ -1346,8 +1350,8 @@ fn bench_does_the_far_horizon_harm_execution() {
             cost_8h += (inputs.c_imp_eur_kwh[t_i] * p1.p_imp_kw[t_i]
                 - inputs.c_exp_eur_kwh[t_i] * p1.p_exp_kw[t_i])
                 * dt;
-            ev_kwh_8h += p1.p_ev_kw[t_i] * dt;
-            if t_i > 0 && (p1.y_heat[t_i] - p1.y_heat[t_i - 1]).abs() > 1e-6 {
+            ev_kwh_8h += p1.ev().power_kw[t_i] * dt;
+            if t_i > 0 && (p1.heater().stage[t_i] - p1.heater().stage[t_i - 1]).abs() > 1e-6 {
                 heater_switches += 1;
             }
             elapsed_h += dt;
@@ -1443,7 +1447,7 @@ fn bench_phase2_budget_with_real_prices() {
                 println!(
                     "  {budget:>9.0}s {secs:>8.2}s {:>8} {:>8} {friction:>11.4}  {:?}",
                     c(&p1.p_imp_kw, &p2.p_imp_kw),
-                    c(&p1.y_heat, &p2.y_heat),
+                    c(&p1.heater().stage, &p2.heater().stage),
                     p2.status
                 );
             }
@@ -1516,10 +1520,10 @@ fn bench_phase2_budget_executed_window() {
         "  {:>12} {:>11.4} {:>12} {:>12} {:>12} {:>12}",
         "phase 1 only",
         f64::NAN,
-        switches_within(&p1.y_heat, 25.0 / 60.0),
-        switches_within(&p1.y_heat, 1.0),
-        switches_within(&p1.y_heat, 8.0),
-        switches_within(&p1.y_heat, 48.0),
+        switches_within(&p1.heater().stage, 25.0 / 60.0),
+        switches_within(&p1.heater().stage, 1.0),
+        switches_within(&p1.heater().stage, 8.0),
+        switches_within(&p1.heater().stage, 48.0),
     );
     for budget in [5.0, 60.0] {
         let (p2, friction) = solve_phase2(
@@ -1536,10 +1540,10 @@ fn bench_phase2_budget_executed_window() {
         println!(
             "  {:>11.0}s {friction:>11.4} {:>12} {:>12} {:>12} {:>12}",
             budget,
-            switches_within(&p2.y_heat, 25.0 / 60.0),
-            switches_within(&p2.y_heat, 1.0),
-            switches_within(&p2.y_heat, 8.0),
-            switches_within(&p2.y_heat, 48.0),
+            switches_within(&p2.heater().stage, 25.0 / 60.0),
+            switches_within(&p2.heater().stage, 1.0),
+            switches_within(&p2.heater().stage, 8.0),
+            switches_within(&p2.heater().stage, 48.0),
         );
     }
     println!(
@@ -1584,7 +1588,7 @@ fn bench_what_is_in_phase2_friction() {
 
     let decompose = |sol: &SolveOutput| -> (usize, f64, f64, f64) {
         let switches = (1..inputs.n)
-            .filter(|&t| (sol.y_heat[t] - sol.y_heat[t - 1]).abs() > 1e-6)
+            .filter(|&t| (sol.heater().stage[t] - sol.heater().stage[t - 1]).abs() > 1e-6)
             .count();
         let pv_kwh: f64 = sol
             .p_pv_used_kw
@@ -1700,7 +1704,7 @@ fn bench_phase1_vs_tank_slack() {
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
         let switches = (1..inputs.n)
-            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
             .count();
         println!(
             "  {volume_l:>9.0} {:>12.0} {slack_kwh:>10.1} {secs:>12.2} {switches:>10} {:>14.4}  {:?}",
@@ -1806,7 +1810,7 @@ fn bench_phase1_vs_zones() {
             cost_8h += (inputs.c_imp_eur_kwh[i] * p1.p_imp_kw[i]
                 - inputs.c_exp_eur_kwh[i] * p1.p_exp_kw[i])
                 * inputs.dt_h[i];
-            if i > 0 && (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6 {
+            if i > 0 && (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6 {
                 sw_8h += 1;
             }
             elapsed += inputs.dt_h[i];
@@ -1930,7 +1934,7 @@ fn bench_bisect_ven3_gap() {
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let (p1, secs) = timed_phase1(&inputs, &p1w, &ctxs);
         let switches = (1..inputs.n)
-            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
             .count();
         println!(
             "  {label:>38} {secs:>10.2} {switches:>11} {:>13.4}  {:?}",
@@ -2032,19 +2036,19 @@ fn bench_phase2_startup_binaries() {
         println!(
             "  {label:>30} {p2_s:>9.2} {friction:>11.4} {:>10} {:>10} {:>10}  {status}",
             (1..inputs.n)
-                .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                .filter(|&i| (p2.heater().stage[i] - p2.heater().stage[i - 1]).abs() > 1e-6)
                 .count(),
-            onoff(&p2.p_ev_kw),
-            onoff(&p2.p_bat_ch_kw) + onoff(&p2.p_bat_dis_kw),
+            onoff(&p2.ev().power_kw),
+            onoff(&p2.battery().charge_kw) + onoff(&p2.battery().discharge_kw),
         );
         emit_result(&format!(
             r#"{{"params":{{"c_startup_eur":{startup},"c_ramp_eur_kw":{ramp},"mip_gap":0.06,"epsilon":1.0,"slots":{},"volume_l":200,"band_k":15}},"results":{{"phase2_s":{p2_s:.3},"friction_eur":{friction:.4},"heat_switches":{},"ev_onoff":{},"bat_onoff":{},"p2_status":"{status}"}}}}"#,
             inputs.n,
             (1..inputs.n)
-                .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                .filter(|&i| (p2.heater().stage[i] - p2.heater().stage[i - 1]).abs() > 1e-6)
                 .count(),
-            onoff(&p2.p_ev_kw),
-            onoff(&p2.p_bat_ch_kw) + onoff(&p2.p_bat_dis_kw),
+            onoff(&p2.ev().power_kw),
+            onoff(&p2.battery().charge_kw) + onoff(&p2.battery().discharge_kw),
         ));
     }
     println!(
@@ -2180,7 +2184,7 @@ fn bench_min_epsilon_by_class() {
         // Phase 1 is independent of epsilon — solve once, reuse across the sweep.
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_switches = (1..inputs.n)
-            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
             .count();
         println!(
             "  == {class}: phase 1 {:?}, {p1_switches} heater switches\n",
@@ -2209,10 +2213,10 @@ fn bench_min_epsilon_by_class() {
             match r {
                 Ok((p2, friction)) => {
                     let moved = (0..inputs.n)
-                        .filter(|&i| (p1.y_heat[i] - p2.y_heat[i]).abs() > 1e-6)
+                        .filter(|&i| (p1.heater().stage[i] - p2.heater().stage[i]).abs() > 1e-6)
                         .count();
                     let sw = (1..inputs.n)
-                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .filter(|&i| (p2.heater().stage[i] - p2.heater().stage[i - 1]).abs() > 1e-6)
                         .count();
                     println!(
                         "  {epsilon:>9.2} {secs:>9.2} {moved:>10} {sw:>12} {friction:>11.4}  {:?}",
@@ -2309,13 +2313,13 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
     let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
 
     let discharging: Vec<usize> = (0..inputs.n)
-        .filter(|&t| p1.p_bat_dis_kw[t] > 1e-6)
+        .filter(|&t| p1.battery().discharge_kw[t] > 1e-6)
         .collect();
     assert!(
         !discharging.is_empty(),
         "this test needs phase 1 to discharge the battery; it did not, so the fixture \
          no longer exercises the bug. p_bat_dis_kw = {:?}",
-        p1.p_bat_dis_kw
+        p1.battery().discharge_kw
     );
 
     // Rebuild phase 2's variable pool exactly as solve_phase2 does, then inspect the
@@ -2337,7 +2341,7 @@ fn phase2_warm_start_respects_the_battery_direction_selector() {
              'charging' and makes p_dis <= dis_max * (1 - 1) = 0 infeasible — the start \
              phase 2 is handed cannot be used, and on a heater+battery instance it then \
              reports NoSolutionFound (R-97).",
-            p1.p_bat_dis_kw[t]
+            p1.battery().discharge_kw[t]
         );
     }
 }
@@ -2388,7 +2392,7 @@ fn bench_epsilon_repeatability() {
         let p2w = build_phase2_weights(&inputs, &profile.planner);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_sw = (1..inputs.n)
-            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
             .count();
 
         println!("  == {class} at epsilon {epsilon:.2} (phase 1: {p1_sw} heater switches)");
@@ -2409,10 +2413,10 @@ fn bench_epsilon_repeatability() {
             match res {
                 Ok((p2, friction)) => {
                     let moved = (0..inputs.n)
-                        .filter(|&i| (p1.y_heat[i] - p2.y_heat[i]).abs() > 1e-6)
+                        .filter(|&i| (p1.heater().stage[i] - p2.heater().stage[i]).abs() > 1e-6)
                         .count();
                     let sw = (1..inputs.n)
-                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .filter(|&i| (p2.heater().stage[i] - p2.heater().stage[i - 1]).abs() > 1e-6)
                         .count();
                     if moved > 0 {
                         improved += 1;
@@ -2491,7 +2495,7 @@ fn bench_epsilon_across_instances() {
         let (ctxs, inputs, p1w) = phase1_setup(&profile, &sim, now, &tariffs, &cap);
         let p1 = solve_phase1(&inputs, &p1w, &ctxs, 60.0).expect("phase 1 feasible");
         let p1_sw = (1..inputs.n)
-            .filter(|&i| (p1.y_heat[i] - p1.y_heat[i - 1]).abs() > 1e-6)
+            .filter(|&i| (p1.heater().stage[i] - p1.heater().stage[i - 1]).abs() > 1e-6)
             .count();
 
         let mut cells = Vec::new();
@@ -2512,7 +2516,7 @@ fn bench_epsilon_across_instances() {
             let cell = match r {
                 Ok((p2, friction)) => {
                     let sw = (1..inputs.n)
-                        .filter(|&i| (p2.y_heat[i] - p2.y_heat[i - 1]).abs() > 1e-6)
+                        .filter(|&i| (p2.heater().stage[i] - p2.heater().stage[i - 1]).abs() > 1e-6)
                         .count();
                     emit_result(&format!(
                         r#"{{"params":{{"instance":"{label}","temp_c":{temp_c},"initial_kw":{initial_kw},"epsilon":{epsilon},"mip_gap":0.06,"p2_budget_s":{P2_BUDGET_S},"slots":{}}},"results":{{"p1_heat_switches":{p1_sw},"heat_switches":{sw},"friction_eur":{friction:.4},"p2_status":"{:?}"}}}}"#,
@@ -2643,7 +2647,10 @@ fn bench_phase2_smoothing_reaches_relay() {
             }
             n
         };
-        for (phase, y) in [("phase 1", &p1.y_heat), ("phase 2", &p2.y_heat)] {
+        for (phase, y) in [
+            ("phase 1", &p1.heater().stage),
+            ("phase 2", &p2.heater().stage),
+        ] {
             println!(
                 "  {:>26} {epsilon:>7.2} {:>9} {:>9} {:>9} {:>9} {:>9}",
                 format!("{label} / {phase}"),
@@ -2934,8 +2941,8 @@ fn bench_battery_ev_phase2_executed_window() {
         let p2_s = t1.elapsed().as_secs_f64();
 
         let bat_net = |s: &crate::controller::milp_planner::types::SolveOutput, h: f64| -> f64 {
-            energy_within(&s.p_bat_ch_kw, &inputs.dt_h, inputs.n, h)
-                - energy_within(&s.p_bat_dis_kw, &inputs.dt_h, inputs.n, h)
+            energy_within(&s.battery().charge_kw, &inputs.dt_h, inputs.n, h)
+                - energy_within(&s.battery().discharge_kw, &inputs.dt_h, inputs.n, h)
         };
 
         for (tag, s, p2s, fr) in [("p1", &p1, f64::NAN, f64::NAN), ("p2", &p2, p2_s, friction)] {
@@ -2946,7 +2953,7 @@ fn bench_battery_ev_phase2_executed_window() {
                 p2s,
                 format!("{:?}", s.status),
                 fr,
-                energy_within(&s.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+                energy_within(&s.ev().power_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
                 bat_net(s, 25.0 / 60.0),
                 bat_net(s, 48.0),
             );
@@ -2967,8 +2974,8 @@ fn bench_battery_ev_phase2_executed_window() {
             p1.status,
             p2.status,
             friction,
-            energy_within(&p1.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
-            energy_within(&p2.p_ev_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+            energy_within(&p1.ev().power_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
+            energy_within(&p2.ev().power_kw, &inputs.dt_h, inputs.n, 25.0 / 60.0),
             bat_net(&p1, 25.0 / 60.0),
             bat_net(&p2, 25.0 / 60.0),
             bat_net(&p1, 48.0),

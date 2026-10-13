@@ -62,7 +62,7 @@ fn add_penalty_constraints_splits_load_below_threshold() {
             "slot {t} imports {p:.3} kW, exceeds the 10 kW threshold"
         );
     }
-    let total_ev_kwh: f64 = out.p_ev_kw.iter().sum();
+    let total_ev_kwh: f64 = out.ev().power_kw.iter().sum();
     assert!(
         (total_ev_kwh - 12.0).abs() < 1e-3,
         "full 12 kWh demand must still be delivered, got {total_ev_kwh:.3}"
