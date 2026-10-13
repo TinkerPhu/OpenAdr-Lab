@@ -203,33 +203,33 @@ def step_plan_slots_net_import(context, cap):
 # Then: envelope assertions
 # ---------------------------------------------------------------------------
 
-@then('the plan envelopes contain an entry for asset "{asset_id}"')
+@then('the plan session_flexibility contains an entry for asset "{asset_id}"')
 def step_plan_envelopes_have_asset(context, asset_id):
     plan = context.ven_plan
-    envs = plan.get("envelopes", [])
+    envs = plan.get("session_flexibility", [])
     found = any(e.get("asset_id") == asset_id for e in envs)
     assert found, (
-        f"No envelope with asset_id='{asset_id}'. "
-        f"Envelope assets: {[e.get('asset_id') for e in envs]}"
+        f"No session flexibility entry with asset_id='{asset_id}'. "
+        f"Session flexibility assets: {[e.get('asset_id') for e in envs]}"
     )
 
 
-@then('the first envelope has field "{field}"')
+@then('the first session flexibility entry has field "{field}"')
 def step_first_envelope_has_field(context, field):
     plan = context.ven_plan
-    envs = plan.get("envelopes", [])
-    assert envs, "No envelopes in plan"
+    envs = plan.get("session_flexibility", [])
+    assert envs, "No session_flexibility in plan"
     env = envs[0]
     assert field in env, (
-        f"Envelope missing field '{field}'. Available: {list(env.keys())}"
+        f"Session flexibility entry missing field '{field}'. Available: {list(env.keys())}"
     )
 
 
-@then('the first envelope field "{field}" is greater than {threshold:f}')
+@then('the first session flexibility entry field "{field}" is greater than {threshold:f}')
 def step_first_envelope_field_gt(context, field, threshold):
     plan = context.ven_plan
-    envs = plan.get("envelopes", [])
-    assert envs, "No envelopes in plan"
+    envs = plan.get("session_flexibility", [])
+    assert envs, "No session_flexibility in plan"
     val = envs[0].get(field)
     assert isinstance(val, (int, float)), f"Field '{field}' is not a number: {val!r}"
-    assert val > threshold, f"Envelope field '{field}' = {val} is not > {threshold}"
+    assert val > threshold, f"Session flexibility field '{field}' = {val} is not > {threshold}"

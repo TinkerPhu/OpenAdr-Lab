@@ -5,7 +5,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
-use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{Plan, SiteHeadroomForecastSlot};
 use crate::simulator::capacity_headroom::{
     compute_site_capacity_curve, compute_site_headroom_forecast,
 };
@@ -28,7 +28,7 @@ pub(crate) fn compute_tick_forecasts(
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
 ) -> (
-    Vec<SiteFlexibilityForecastSlot>,
+    Vec<SiteHeadroomForecastSlot>,
     (CapacityCurve, CapacityCurve),
 ) {
     let forecast = plan_snap

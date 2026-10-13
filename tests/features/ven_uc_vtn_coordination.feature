@@ -1,5 +1,5 @@
 Feature: UC-05..UC-07 — VTN Coordination Use Cases
-  Verify that the VEN correctly coordinates with the VTN: flexible-horizon envelopes
+  Verify that the VEN correctly coordinates with the VTN: flexible-horizon session_flexibility
   are preserved and exposed, grid emergency events constrain the plan, and capacity
   state is accessible via the /capacity endpoint.
 
@@ -7,23 +7,23 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     Given the VEN is running with profile "test"
 
   # --- UC-05: Far-Horizon Flexible Pricing ---
-  # FlexibilityEnvelopes are generated for unscheduled packets and exposed via /flexibility.
+  # Session flexibility entries are generated for unscheduled packets and exposed on /plan.
 
   Scenario: UC-05a — Plan has slots covering the planning horizon
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "slots"
     And the plan.slots is a non-empty array
 
-  Scenario: UC-05c — Each flexibility envelope in /plan has energy_needed and rate range fields
+  Scenario: UC-05c — Each session flexibility entry in /plan has energy_needed and rate range fields
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /plan to have envelopes
-    Then the first envelope has field "energy_needed_kwh"
-    And the first envelope has field "max_acceptable_rate"
-    And the first envelope field "energy_needed_kwh" is greater than 0.0
+    When I wait for the VEN /plan to have session flexibility
+    Then the first session flexibility entry has field "energy_needed_kwh"
+    And the first session flexibility entry has field "max_acceptable_rate"
+    And the first session flexibility entry field "energy_needed_kwh" is greater than 0.0
 
   @phase-e
   Scenario: UC-05d — GET /flexibility returns site-level headroom with correct shape

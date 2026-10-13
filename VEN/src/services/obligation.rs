@@ -51,7 +51,7 @@ impl ObligationService {
             // Both halves are read here because the request is the pair; the
             // reporter is handed the answer, not the inputs.
             let capacity = state.capacity_state().await;
-            let reservation = state.site_envelope().await.map(|env| {
+            let reservation = state.site_headroom().await.map(|env| {
                 crate::entities::reservation_request::ReservationRequest::from_headroom(
                     &env, &capacity,
                 )

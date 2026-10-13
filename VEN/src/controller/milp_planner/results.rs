@@ -10,9 +10,9 @@ use crate::entities::plan::{
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
-use super::envelopes::build_plan_envelopes;
 use super::ev_diagnostics::ev_warnings;
 use super::planned_state;
+use super::session_flexibility::build_session_flexibility;
 use super::types::*;
 
 /// Fallback plan returned when the MILP solver fails.
@@ -86,8 +86,8 @@ pub(crate) fn fallback_plan(
             .collect(),
         None => vec![],
     };
-    let envelopes = match inputs {
-        Some(inp) => build_plan_envelopes(
+    let session_flexibility = match inputs {
+        Some(inp) => build_session_flexibility(
             ev_session,
             heater_target,
             shiftable_loads,
@@ -110,7 +110,7 @@ pub(crate) fn fallback_plan(
         horizon,
         slots,
         summary: PlanSummary::default(),
-        envelopes,
+        session_flexibility,
         warnings: vec![warning],
         objective,
         soc_trajectory_kwh: vec![],
@@ -461,7 +461,7 @@ pub(crate) fn translate_to_plan(
 
     warnings.extend(ev_warnings(inputs, sol));
     // ── Assemble plan ───────────────────────────────────────────────────
-    let envelopes = build_plan_envelopes(
+    let session_flexibility = build_session_flexibility(
         ev_session,
         heater_target,
         shiftable_loads,
@@ -480,7 +480,7 @@ pub(crate) fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes,
+        session_flexibility,
         warnings,
         objective,
         soc_trajectory_kwh,

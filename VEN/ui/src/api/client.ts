@@ -2,7 +2,7 @@ import type {
   VtnEvent, Program, Report, ReportSubmissionRecord, ReportWindowSize, SensorSnapshot, SimSnapshot, ControllerEvent,
   SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry, AssetLedgerHistory,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
-  SiteFlexibilityEnvelope, SiteFlexibilitySample, SiteFlexibilityForecastSlot,
+  SiteHeadroom, SiteHeadroomSample, SiteHeadroomForecastSlot,
   CapacityCurves,
   EvSettings, UpdateEvSettingsBody, EvUsageSimState,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
@@ -336,27 +336,27 @@ export class VenApi {
     const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/all ${r.status}`);
-    const envelope: AllTimelinesResponse = await r.json();
+    const body: AllTimelinesResponse = await r.json();
     const timelines = Object.fromEntries(
-      Object.entries(envelope.timelines).map(([id, pts]) => [id, pts.map(toAssetTimelinePoint)])
+      Object.entries(body.timelines).map(([id, pts]) => [id, pts.map(toAssetTimelinePoint)])
     );
-    return { zones: envelope.zones, timelines, now: new Date(envelope.now).getTime() };
+    return { zones: body.zones, timelines, now: new Date(body.now).getTime() };
   }
 
-  async flexibility(): Promise<SiteFlexibilityEnvelope | null> {
+  async flexibility(): Promise<SiteHeadroom | null> {
     const r = await this.getReq("/flexibility");
     if (r.status === 204) return null;
     if (!r.ok) throw new Error(`flexibility ${r.status}`);
     return r.json();
   }
 
-  async flexibilityHistory(): Promise<SiteFlexibilitySample[]> {
+  async flexibilityHistory(): Promise<SiteHeadroomSample[]> {
     const r = await this.getReq("/flexibility/history");
     if (!r.ok) throw new Error(`flexibility/history ${r.status}`);
     return r.json();
   }
 
-  async flexibilityForecast(): Promise<SiteFlexibilityForecastSlot[]> {
+  async flexibilityForecast(): Promise<SiteHeadroomForecastSlot[]> {
     const r = await this.getReq("/flexibility/forecast");
     if (!r.ok) throw new Error(`flexibility/forecast ${r.status}`);
     return r.json();

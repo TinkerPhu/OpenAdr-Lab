@@ -112,7 +112,7 @@ replaced the Phase-D-orphaned `PacketProgressBoard`, which had polled the delete
 `soc` vs `target_soc`, heater current→target temperature (deliberately no % gauge),
 deadline countdown/OVERDUE, an on-track/at-risk chip comparing the plan's
 `planned_kw_by_asset` energy up to the session deadline against the plan envelope's
-`energy_needed_kwh` (the first UI consumer of `Plan.envelopes`), and a budget bar from
+`energy_needed_kwh` (the first UI consumer of `Plan.session_flexibility`), and a budget bar from
 `estimated_cost_eur` labeled "est." (per-session accumulated cost doesn't exist —
 BL-39). A `variant="condensed"` chip strip plus a read-only objective chip sits on the
 Dashboard (`dash-session-strip`, BL-36); the objective control stays on the Planner tab.

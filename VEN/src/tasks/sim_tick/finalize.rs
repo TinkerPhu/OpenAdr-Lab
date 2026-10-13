@@ -7,12 +7,12 @@ use chrono::{DateTime, Utc};
 
 use crate::controller::SimSnapshot;
 use crate::entities::capacity_curve::CapacityCurve;
-use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{SiteHeadroom, SiteHeadroomForecastSlot};
 use crate::entities::sensor::SensorSnapshot;
 use crate::simulator;
 use crate::simulator::SimState;
 
-/// Extract snapshots, push history, update grid asset, compute envelope +
+/// Extract snapshots, push history, update grid asset, compute site headroom +
 /// both forward-looking forecasts. Returns the tuple needed for post-lock
 /// async state publishing.
 ///
@@ -27,8 +27,8 @@ pub(crate) fn finalize_tick_outputs(
 ) -> (
     SensorSnapshot,
     SimSnapshot,
-    SiteFlexibilityEnvelope,
-    Vec<SiteFlexibilityForecastSlot>,
+    SiteHeadroom,
+    Vec<SiteHeadroomForecastSlot>,
     (CapacityCurve, CapacityCurve),
 ) {
     let tick_sensor = sim.to_sensor_snapshot();
@@ -45,7 +45,7 @@ pub(crate) fn finalize_tick_outputs(
     // the flattened snapshot: needed to call `Asset::max_effort_setpoint`,
     // which the snapshot's `AssetSnapshot`/`capability()` shape can't answer
     // correctly for PV — see `site_headroom.rs`'s module doc).
-    let tick_envelope = simulator::site_headroom::compute_site_headroom(
+    let tick_site_headroom = simulator::site_headroom::compute_site_headroom(
         sim,
         now,
         ctx.grid_max_import_kw,
@@ -62,7 +62,7 @@ pub(crate) fn finalize_tick_outputs(
     (
         tick_sensor,
         tick_sim_snap,
-        tick_envelope,
+        tick_site_headroom,
         tick_forecast,
         tick_capacity_curves,
     )

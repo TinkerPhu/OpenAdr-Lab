@@ -280,7 +280,7 @@ pub(super) fn drawn_kw(setpoints: &HashMap<String, f64>, sim: &SimSnapshot, asse
 ///
 /// Absorb (surplus direction) is offered when the export marginal cost exceeds
 /// `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH` (§5.4 scenario H — routine tariff
-/// swings must never invade the safety envelope). `is_incumbent` (§4a.2):
+/// swings must never invade the safety band). `is_incumbent` (§4a.2):
 /// when the mode was already active last tick, that entry threshold is
 /// lowered by the preemption margin, making the mode "stickier" to exit than
 /// to enter — a marginal cost hovering right at the threshold cannot flip the

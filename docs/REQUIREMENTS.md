@@ -59,7 +59,7 @@ follows production-inspired design patterns.
 | **Capacity State** | — | Current grid capacity constraints parsed from a VTN subscription/reservation event: subscribed import (kW), subscribed export (kW), reserved import (kW), reserved export (kW). Distinct from per-interval capacity limits (which live in OadrEventSnapshot). |
 | **User Request** | — | An explicit energy delivery request submitted by the occupant (e.g. "charge EV to 80% by 07:00"). The planner honours these as FIRM slots. Supports `ASAP`, `BY_DEADLINE`, `MAX_COST`, `OPPORTUNISTIC` modes. |
 | **SOC target** | State-of-Charge Target | Desired battery or EV charge level (%) at a given deadline. The planner back-calculates the required charging power and window to meet it. |
-| **FlexibilityEnvelope** | — | The range of power the HEMS can flex (increase or decrease) in each time slot, as seen from the grid. Exposed to aggregators to let them predict available DR capacity. |
+| **SessionFlexibility** | — | The range of power the HEMS can flex (increase or decrease) in each time slot, as seen from the grid. Exposed to aggregators to let them predict available DR capacity. |
 | **Baseline** | Demand Baseline | The expected energy consumption without any DR intervention. Used in M&V (Measurement & Verification) calculations to measure actual load reduction. **Distinct from Forecast** (see below). |
 | **Forecast** | Planner Forecast | The planner's per-slot prediction of energy consumption or generation. May use physics models, heuristics, or historical patterns. A forward-looking planning input, not a historical M&V reference. |
 
@@ -328,7 +328,7 @@ session_id        — FK to EvSession / HeaterTarget / ShiftableLoad
 status
 ```
 
-**FlexibilityEnvelope** — per-asset headroom in FLEXIBLE horizon
+**SessionFlexibility** — per-asset headroom in FLEXIBLE horizon
 ```
 asset_id
 energy_needed_kwh, max_power_kw
@@ -341,7 +341,7 @@ window_start, window_end
 ```
 CreatedAt, TriggerCause: PlanTrigger
 FirmSlots[]    — PlanTimeSlot with PacketAllocations
-FlexSlots[]    — PlanTimeSlot with FlexibilityEnvelopes
+FlexSlots[]    — PlanTimeSlot with SessionFlexibility
 PlanWarnings[]
 EstimatedCompletion per packet
 ```
@@ -403,13 +403,13 @@ For full step-by-step observation guides see `docs/use-cases/HEMS-USE-CASE-OBSER
 | **UC-02** | Washing machine batch run | User starts wash cycle (CONTINUE policy) | Planner allocates batch window; CONTINUE policy ensures cycle completes past deadline if needed; mid-cycle interruption is avoided |
 | **UC-03** | PV surplus cascade | PV generation exceeds consumption | System self-consumes first, stores surplus in battery if available, exports residual; no unnecessary grid import while PV is generating |
 | **UC-04** | Day-ahead price update | VTN sends new PRICE event | `RATE_CHANGE` trigger fires replanning; FLEXIBLE slots are re-evaluated against new tariffs; FIRM slots within near-horizon are preserved |
-| **UC-05** | VTN sends favourable far-horizon price | VTN publishes low-price window in advance | FLEXIBLE slots firm up to that window; FlexibilityEnvelope is reported to VTN as capacity reservation |
+| **UC-05** | VTN sends favourable far-horizon price | VTN publishes low-price window in advance | FLEXIBLE slots firm up to that window; SessionFlexibility is reported to VTN as capacity reservation |
 | **UC-06** | Grid emergency alert | VTN sends `ALERT_GRID_EMERGENCY` | Planner creates high-priority synthetic packet; FIRM slots are immediately adjusted to shed or limit import; VTN receives compliance report |
-| **UC-07** | VTN capacity reservation | VTN sets import/export limits | Planner treats capacity limits as hard constraints; FlexibilityEnvelopes are computed within the remaining window and reported back |
+| **UC-07** | VTN capacity reservation | VTN sets import/export limits | Planner treats capacity limits as hard constraints; SessionFlexibility are computed within the remaining window and reported back |
 | **UC-08** | EV disconnects mid-charge | EV cable removed while packet is ACTIVE | `ASSET_STATE_CHANGE` trigger fires; packet transitions to FAILED; Planner replans without EV; user is notified |
 | **UC-09** | Tier fallback on time constraint | Packet deadline approaches with insufficient budget | Planner progresses through DeadlineTiers; switches to lower-cost / CONTINUE policy; notifies user of estimated partial completion |
 | **UC-10** | Peak demand penalty avoidance | MeasurementWindow about to breach penalty threshold | Planner evaluates penalty cost vs. avoidance cost; reschedules allocations to stay below threshold if cheaper |
-| **UC-11** | Consumption-only site | No PV, no battery | Algorithm produces valid plan using only grid import; no surplus cascade; FlexibilityEnvelope is zero export |
+| **UC-11** | Consumption-only site | No PV, no battery | Algorithm produces valid plan using only grid import; no surplus cascade; SessionFlexibility is zero export |
 | **UC-12** | VTN communication loss | VTN unreachable for extended period | Planner applies `StaleRatePolicy` (default: `HEURISTIC_FORECAST`) for unknown future slots; reports last-known state; resumes normal operation on reconnect |
 
 **Additional use cases (UC-13, UC-14 — in spec doc):**

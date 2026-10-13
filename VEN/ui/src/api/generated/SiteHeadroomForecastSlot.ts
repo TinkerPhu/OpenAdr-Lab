@@ -2,7 +2,7 @@
 
 /**
  * One future slot of the forward-looking site headroom trajectory —
- * distinct from `SiteFlexibilityEnvelope`, which is instant-only.
+ * distinct from `SiteHeadroom`, which is instant-only.
  *
  * Re-derived fresh every dispatcher tick (not read statically off
  * `PlanTimeSlot.planned_state_by_asset`, a stale solve-time-only snapshot):
@@ -14,12 +14,12 @@
  *
  * **`up_kw`/`down_kw` are ABSOLUTE, not a delta from the plan's own chosen
  * dispatch** (`unified-capacity-envelope-engine`, Spec E). **Signed now**
- * too (`site-capacity-seam-unification`), matching `SiteFlexibilityEnvelope`/
- * `CapacityCurveStep::power_kw`'s convention — see `SiteFlexibilityEnvelope`'s
+ * too (`site-capacity-seam-unification`), matching `SiteHeadroom`/
+ * `CapacityCurveStep::power_kw`'s convention — see `SiteHeadroom`'s
  * own doc comment for the sign convention and why base load (now included)
  * can push `up_kw` positive.
  */
-export type SiteFlexibilityForecastSlot = { ts: string, 
+export type SiteHeadroomForecastSlot = { ts: string, 
 /**
  * Absolute max achievable Export at this slot (kW). Always ≥ 0.
  */

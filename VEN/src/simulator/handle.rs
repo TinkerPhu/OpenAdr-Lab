@@ -21,7 +21,7 @@ use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::capacity_curve::CapacityCurves;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::ev_usage::EvUsageSimState;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::{Plan, SiteHeadroom};
 use crate::entities::timeline::TimelineSnapshot;
 use crate::entities::DomainError;
 use chrono::{DateTime, Utc};
@@ -172,7 +172,7 @@ impl HeadroomPort for SimHandle {
         now: DateTime<Utc>,
         phys_import_kw: f64,
         phys_export_kw: f64,
-    ) -> SiteFlexibilityEnvelope {
+    ) -> SiteHeadroom {
         // Computed under the lock and returned by value: nothing here awaits while it is held.
         let sim = self.sim.lock().await;
         super::site_headroom::compute_site_headroom(&sim, now, phys_import_kw, phys_export_kw)

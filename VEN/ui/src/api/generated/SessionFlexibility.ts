@@ -7,11 +7,11 @@
  * degrees of freedom — energy still needed, time window, asset power bounds,
  * max acceptable rate, budget remaining — not "unscheduled work".
  *
- * Note: this is *not* the same as `SiteFlexibilityEnvelope`, which is the
- * live site-level headroom served by `GET /flexibility`. Per-device envelopes
+ * Note: this is *not* the same as `SiteHeadroom`, which is the
+ * live site-level headroom served by `GET /flexibility`. Per-device session_flexibility
  * only refresh at plan time; site headroom refreshes every dispatcher tick.
  */
-export type FlexibilityEnvelope = { asset_id: string, 
+export type SessionFlexibility = { asset_id: string, 
 /**
  * Energy still needed in the horizon (kWh)
  */

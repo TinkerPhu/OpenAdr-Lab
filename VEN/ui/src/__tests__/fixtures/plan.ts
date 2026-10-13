@@ -62,7 +62,7 @@ export function makePlan(overrides: Partial<Plan> = {}): Plan {
     },
     slots: [makeSlot()],
     summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
-    envelopes: [],
+    session_flexibility: [],
     warnings: [],
     soc_trajectory_kwh: [],
     objective: "min_cost",

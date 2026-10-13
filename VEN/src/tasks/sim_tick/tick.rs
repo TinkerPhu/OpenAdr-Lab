@@ -55,7 +55,7 @@ pub(crate) async fn tick_once(
     let (
         tick_sensor,
         tick_sim_snap,
-        tick_envelope,
+        tick_site_headroom,
         tick_forecast,
         tick_capacity_curves,
         cleared_fields,
@@ -135,13 +135,13 @@ pub(crate) async fn tick_once(
             ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
         });
 
-        let (tick_sensor, tick_sim_snap, tick_envelope, tick_forecast, tick_capacity_curves) =
+        let (tick_sensor, tick_sim_snap, tick_site_headroom, tick_forecast, tick_capacity_curves) =
             super::finalize::finalize_tick_outputs(&mut sim_guard, &ctx, now);
 
         (
             tick_sensor,
             tick_sim_snap,
-            tick_envelope,
+            tick_site_headroom,
             tick_forecast,
             tick_capacity_curves,
             cleared_fields,
@@ -173,7 +173,7 @@ pub(crate) async fn tick_once(
     super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
-        tick_envelope,
+        tick_site_headroom,
         tick_forecast,
         tick_capacity_curves,
         &state,

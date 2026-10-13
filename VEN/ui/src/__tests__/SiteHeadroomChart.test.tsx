@@ -30,8 +30,8 @@ import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomC
 import type { AssetTimelinePoint } from "../components/controller/types";
 import type {
   CapacityCurves,
-  SiteFlexibilitySample,
-  SiteFlexibilityForecastSlot,
+  SiteHeadroomSample,
+  SiteHeadroomForecastSlot,
 } from "../api/types";
 
 describe("SiteHeadroomChart — past band renders continuously", () => {
@@ -51,7 +51,7 @@ describe("SiteHeadroomChart — past band renders continuously", () => {
     // that never exactly coincide with a grid-timeline point. Starts before
     // the earliest grid-timeline point, matching the real ring (1h of
     // history) vs. a much shorter chart window.
-    const history: SiteFlexibilitySample[] = Array.from({ length: 11 }, (_, i) => ({
+    const history: SiteHeadroomSample[] = Array.from({ length: 11 }, (_, i) => ({
       ts: new Date(nowMs - 660_000 + i * 60_000).toISOString(),
       up_kw: 1.0 + i * 0.1,
       down_kw: 2.0 + i * 0.1,
@@ -147,13 +147,13 @@ describe("SiteHeadroomChart — forecast prop feeds the future band with real pe
       { ts: nowMs + 300_000, values: { power_kw: 2.0 } },
       { ts: nowMs + 600_000, values: { power_kw: 2.0 } },
     ];
-    const history: SiteFlexibilitySample[] = [
+    const history: SiteHeadroomSample[] = [
       { ts: new Date(nowMs - 300_000).toISOString(), up_kw: 1.0, down_kw: 1.0 },
       { ts: new Date(nowMs).toISOString(), up_kw: 1.0, down_kw: 1.0 },
     ];
     // Forecast values genuinely differ per slot — if the fix regressed to flat LOCF-extending
     // the last history sample (up_kw/down_kw both 1.0), these distinct values would never appear.
-    const forecast: SiteFlexibilityForecastSlot[] = [
+    const forecast: SiteHeadroomForecastSlot[] = [
       { ts: new Date(nowMs + 300_000).toISOString(), up_kw: 3.0, down_kw: 4.0 },
       { ts: new Date(nowMs + 600_000).toISOString(), up_kw: 5.0, down_kw: 6.0 },
     ];

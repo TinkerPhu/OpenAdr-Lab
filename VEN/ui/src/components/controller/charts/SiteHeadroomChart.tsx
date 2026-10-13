@@ -2,8 +2,8 @@ import { renderTimeMarkerLine } from "@lab/charts/NowLine";
 import type { AssetTimelinePoint } from "../types";
 import type {
   CapacityCurves,
-  SiteFlexibilitySample,
-  SiteFlexibilityForecastSlot,
+  SiteHeadroomSample,
+  SiteHeadroomForecastSlot,
 } from "../../../api/types";
 import type { NamedSample, TimestampedRow } from "@lab/charts/mergeSeries";
 import {
@@ -30,10 +30,10 @@ interface SiteHeadroomChartProps {
    * structurally a `TimestampedRow[]`, used directly as the merge base. */
   gridTimeline: AssetTimelinePoint[];
   /** BL-43: the site-headroom ring (`GET /flexibility/history`), oldest first. */
-  history: SiteFlexibilitySample[];
+  history: SiteHeadroomSample[];
   /** Forward-looking per-slot trajectory (`GET /flexibility/forecast`); optional so
    * this component still works wherever only the past ring is available. */
-  forecast?: SiteFlexibilityForecastSlot[];
+  forecast?: SiteHeadroomForecastSlot[];
   /** `GET /flexibility/capacity` — all-in capability curves, `null` before the first
    * dispatcher tick or wherever unavailable; optional so this component still works
    * without it. See this component's own doc comment for how these curves relate to

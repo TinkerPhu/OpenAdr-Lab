@@ -811,7 +811,7 @@ mod tests {
         let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
             .unwrap();
-        assert_eq!(val, 0.0, "expected 0.0 W when no envelope");
+        assert_eq!(val, 0.0, "expected 0.0 when no headroom");
     }
 
     // ── USAGE_FORECAST (WP3.6, §8.8) ────────────────────────────────
@@ -865,7 +865,7 @@ mod tests {
             },
             slots: vec![slot(0, 2.0, 0.0), slot(1, 0.0, 1.5)],
             summary: PlanSummary::default(),
-            envelopes: vec![],
+            session_flexibility: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
             objective: crate::entities::PlannerObjective::MinCost,

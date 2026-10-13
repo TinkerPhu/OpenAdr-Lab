@@ -1,19 +1,19 @@
 //! Forward-looking per-slot headroom trajectory, re-derived fresh every
-//! dispatcher tick (see `SiteFlexibilityForecastSlot`'s doc comment for why).
+//! dispatcher tick (see `SiteHeadroomForecastSlot`'s doc comment for why).
 //! A plain replace-on-tick cache, not a ring like `flexibility_history.rs` —
 //! each tick already produces the whole remaining-horizon trajectory, not
 //! one more sample to retain.
 
-use crate::entities::plan::SiteFlexibilityForecastSlot;
+use crate::entities::plan::SiteHeadroomForecastSlot;
 
 use super::AppState;
 
 impl AppState {
-    pub async fn site_headroom_forecast(&self) -> Vec<SiteFlexibilityForecastSlot> {
+    pub async fn site_headroom_forecast(&self) -> Vec<SiteHeadroomForecastSlot> {
         self.hems.read().await.site_headroom_forecast.clone()
     }
 
-    pub async fn set_site_headroom_forecast(&self, forecast: Vec<SiteFlexibilityForecastSlot>) {
+    pub async fn set_site_headroom_forecast(&self, forecast: Vec<SiteHeadroomForecastSlot>) {
         self.hems.write().await.site_headroom_forecast = forecast;
     }
 }
@@ -23,8 +23,8 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn slot(up_kw: f64) -> SiteFlexibilityForecastSlot {
-        SiteFlexibilityForecastSlot {
+    fn slot(up_kw: f64) -> SiteHeadroomForecastSlot {
+        SiteHeadroomForecastSlot {
             ts: Utc::now(),
             up_kw,
             down_kw: 0.0,

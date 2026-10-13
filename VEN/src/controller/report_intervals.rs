@@ -86,7 +86,7 @@ pub(crate) fn build_forecast_intervals(
 /// payload types expect (direction is already conveyed by `payload_type`'s
 /// own name, not by the value's sign).
 ///
-/// Not a bare `.abs()`: since `capacity_envelope.rs`'s `merge_events` allows
+/// Not a bare `.abs()`: since `capacity_headroom.rs`'s `merge_events` allows
 /// a sustained-Export curve's signed total to swing positive (net importing
 /// — e.g. a non-interruptible load forced to keep drawing past its deadline,
 /// exceeding what's exportable), a bare `.abs()` would report that positive

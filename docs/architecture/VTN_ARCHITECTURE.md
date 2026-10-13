@@ -414,7 +414,7 @@ M&V, event creation optimisation) would need the same foundational abstractions 
 HEMS controller:
 - `TimeSeries<T>` with typed interpolation (Step for tariffs, Linear for power)
 - Interval arithmetic: overlap, union-of-breakpoints, time-weighted average
-- `FlexibilityEnvelope` (VEN produces it; VTN aggregates it across fleet)
+- `SessionFlexibility` (VEN produces it; VTN aggregates it across fleet)
 - Baseline model (VEN reports it; VTN uses it for M&V)
 
 The planning algorithms themselves are **not** shared — VEN does single-site greedy
@@ -432,7 +432,7 @@ deployment — both Docker build contexts moved to the repo root for the path de
 the new top-level directory did not arrive on the docker hosts' sparse checkouts, which
 `run_all_tests.sh` now pre-flights for.
 
-`FlexibilityEnvelope` and the baseline model are still VEN-only; they move if and when a
+`SessionFlexibility` and the baseline model are still VEN-only; they move if and when a
 second consumer needs them, by the same rule.
 
 See `VEN_ARCHITECTURE.md §1` (target source layout) and `docs/BACKLOG.md RF-05`.

@@ -57,7 +57,7 @@ function plannedEnergyKwh(plan: Plan, assetId: string, deadline: Date, now: Date
 
 /**
  * On-track verdict, only where the energy arithmetic is well-defined:
- * EV — plan envelope remainder vs planned energy to departure;
+ * EV — session flexibility remainder vs planned energy to departure;
  * shiftable — requested runtime energy vs planned energy in its window;
  * heater — null (current → target temperature speaks for itself).
  */
@@ -67,9 +67,9 @@ function onTrack(req: UserRequestWithSession, plan?: Plan): boolean | null {
   if (!deadline) return null;
   const now = new Date();
   if (req.session?.type === "ev") {
-    const envelope = plan.envelopes?.find((e) => e.asset_id === req.asset_id);
-    if (!envelope) return null;
-    return plannedEnergyKwh(plan, req.asset_id, deadline, now) + 1e-6 >= envelope.energy_needed_kwh;
+    const flexibility = plan.session_flexibility?.find((e) => e.asset_id === req.asset_id);
+    if (!flexibility) return null;
+    return plannedEnergyKwh(plan, req.asset_id, deadline, now) + 1e-6 >= flexibility.energy_needed_kwh;
   }
   if (req.session?.type === "shiftable_load") {
     const targetKwh = req.session.power_kw * req.session.duration_min / 60;
@@ -151,7 +151,7 @@ function SessionCard({ req, plan, sim }: { req: UserRequestWithSession; plan?: P
   const heaterTemp = req.session?.type === "heater" && sim && req.asset_id in sim.assets
     ? assetValue(sim.assets[req.asset_id], "temp_c")
     : null;
-  const envelope = plan?.envelopes?.find((e) => e.asset_id === req.asset_id);
+  const flexibility = plan?.session_flexibility?.find((e) => e.asset_id === req.asset_id);
 
   return (
     <Paper
@@ -221,8 +221,8 @@ function SessionCard({ req, plan, sim }: { req: UserRequestWithSession; plan?: P
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           <DeadlineDisplay req={req} />
           <Typography variant="caption" color="text.secondary">
-            {envelope
-              ? `needs ${envelope.energy_needed_kwh.toFixed(1)} kWh · est €${envelope.estimated_cost_eur.toFixed(2)}`
+            {flexibility
+              ? `needs ${flexibility.energy_needed_kwh.toFixed(1)} kWh · est €${flexibility.estimated_cost_eur.toFixed(2)}`
               : `${req.target_energy_kwh} kWh @ ${req.desired_power_kw} kW`}
           </Typography>
         </Stack>

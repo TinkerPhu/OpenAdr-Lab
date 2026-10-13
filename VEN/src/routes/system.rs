@@ -299,7 +299,7 @@ mod tests {
                 "total_import_kwh": 0.0,
                 "total_export_kwh": 0.0
             },
-            "envelopes": [],
+            "session_flexibility": [],
             "warnings": [],
             "solve_status": solve_status
         }))

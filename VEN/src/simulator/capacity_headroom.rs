@@ -1,7 +1,7 @@
 //! Lives in `simulator/` rather than `controller/`: it reads a `&SimState`,
 //! walks simulated trajectories and resolves concrete asset kinds, which in
 //! the domain ring was infra reached from inside. What leaves the module is
-//! entities (`CapacityCurve`, `SiteFlexibilityForecastSlot`).
+//! entities (`CapacityCurve`, `SiteHeadroomForecastSlot`).
 //!
 //! Unified capacity/headroom engine (`unified-capacity-envelope-engine`,
 //! Spec E of the asset-max-power-forecast master plan). Replaces
@@ -55,7 +55,7 @@
 //! and `reporter.rs`'s `IMPORT`/`EXPORT_RESERVATION_CAPACITY` arms); the UI
 //! (`CapacityForecastChart.tsx`, `SiteHeadroomChart.tsx`) needs no such
 //! conversion, confirmed by reading its formatters and energy calc rather
-//! than assumed. **`SiteFlexibilityEnvelope`/`SiteFlexibilityForecastSlot`'s
+//! than assumed. **`SiteHeadroom`/`SiteHeadroomForecastSlot`'s
 //! `up_kw`/`down_kw` are signed too now** (`site-capacity-seam-unification`)
 //! — they're literally this module's own `t2 = 0` point / `t1`-sweep, not a
 //! separately-converted magnitude (see those structs' own doc comments in
@@ -81,7 +81,7 @@ use crate::assets::{asset_max_power_series, AssetState, Trajectory};
 use crate::entities::capacity_curve::{
     CapacityCurve, CapacityCurveStep, CapacityCurves, CommitmentDirection, LimitTier,
 };
-use crate::entities::plan::{Plan, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{Plan, SiteHeadroomForecastSlot};
 #[cfg(test)]
 use crate::ids::ASSET_PV;
 use crate::simulator::forecast::{
@@ -373,7 +373,7 @@ pub fn compute_site_headroom_forecast(
     now: DateTime<Utc>,
     phys_imp_kw: f64,
     phys_exp_kw: f64,
-) -> Vec<SiteFlexibilityForecastSlot> {
+) -> Vec<SiteHeadroomForecastSlot> {
     let future_slots = remaining_slots(plan, now);
     if future_slots.is_empty() {
         return Vec::new();
@@ -407,7 +407,7 @@ pub fn compute_site_headroom_forecast(
                 .steps[0]
                     .power_kw
             };
-            SiteFlexibilityForecastSlot {
+            SiteHeadroomForecastSlot {
                 ts: slot.start,
                 up_kw: headroom_kw(CommitmentDirection::Export),
                 down_kw: headroom_kw(CommitmentDirection::Import),

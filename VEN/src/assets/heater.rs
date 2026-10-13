@@ -924,7 +924,7 @@ mod tests {
         );
     }
 
-    // ── emergency safety envelope (see docs/architecture/VEN_ARCHITECTURE.md) ─────
+    // ── emergency safety band (see docs/architecture/VEN_ARCHITECTURE.md) ─────
 
     #[test]
     fn curtail_mode_suppresses_emergency_heat_below_temp_min() {

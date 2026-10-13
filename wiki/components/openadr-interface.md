@@ -76,7 +76,7 @@ vocabulary struct (whose anticipated DISPATCH_SETPOINT consumer landed as typed
   interval grid via `TimeSeries::resample_uniform` — `USAGE`-family payloads as
   time-weighted-mean net site power, `STORAGE_CHARGE_LEVEL` as point-in-time SoC at
   interval ends, `IMPORT_/EXPORT_RESERVATION_CAPACITY` from the live
-  `SiteFlexibilityEnvelope` (up/down kW).
+  `SiteHeadroom` (up/down kW).
 - Obligations **recur**: each due obligation is re-armed to its next `due_at`
   (`interval_duration_s` later) after reporting instead of being permanently fulfilled,
   so `frequency: 900` produces one report per 15 min for the event's lifetime

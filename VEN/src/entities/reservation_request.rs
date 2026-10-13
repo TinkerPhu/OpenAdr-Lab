@@ -15,7 +15,7 @@
 //! that, and this module exists to fix all three in one place rather than
 //! leave the arithmetic inline in a report mapper:
 //!
-//! 1. **The directions were crossed.** `SiteFlexibilityEnvelope::up_kw` holds
+//! 1. **The directions were crossed.** `SiteHeadroom::up_kw` holds
 //!    the *Export*-commitment power and `down_kw` the *Import*-commitment
 //!    power; the `IMPORT_` payload read `up_kw` and the `EXPORT_` payload read
 //!    `down_kw`. Reproduced before fixing, by
@@ -26,7 +26,7 @@
 //! 3. **`.abs()` masked a legitimate sign flip.** `up_kw` can go positive —
 //!    net-importing even under a sustained Export commitment, when
 //!    non-exportable draw like base load exceeds what is exportable (see
-//!    `SiteFlexibilityEnvelope`'s own doc comment). Taking its magnitude
+//!    `SiteHeadroom`'s own doc comment). Taking its magnitude
 //!    reported that net *import* as export capacity. Here a direction the site
 //!    cannot serve at all contributes zero, by construction.
 //!
@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::entities::plan::SiteHeadroom;
 
 /// Additional capacity requested per direction (kW), both `>= 0`.
 ///
@@ -63,10 +63,10 @@ impl ReservationRequest {
     /// What to ask for, given what the site can do and what it is allowed.
     ///
     /// `headroom`'s fields are signed (positive = import) per
-    /// `SiteFlexibilityEnvelope`'s convention, so each direction's capability
+    /// `SiteHeadroom`'s convention, so each direction's capability
     /// is read in its own sign and floored at zero: a direction the site
     /// cannot serve is not a negative request, it is no request.
-    pub fn from_headroom(headroom: &SiteFlexibilityEnvelope, capacity: &OadrCapacityState) -> Self {
+    pub fn from_headroom(headroom: &SiteHeadroom, capacity: &OadrCapacityState) -> Self {
         Self {
             import_kw: Self::beyond(headroom.down_kw, capacity.import_allowance_kw()),
             export_kw: Self::beyond(-headroom.up_kw, capacity.export_allowance_kw()),
@@ -87,8 +87,8 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn headroom(up_kw: f64, down_kw: f64) -> SiteFlexibilityEnvelope {
-        SiteFlexibilityEnvelope {
+    fn headroom(up_kw: f64, down_kw: f64) -> SiteHeadroom {
+        SiteHeadroom {
             ts: Utc::now(),
             up_kw,
             down_kw,

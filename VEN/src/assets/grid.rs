@@ -13,7 +13,7 @@ use crate::entities::asset::{PowerAdjustability, SetpointResponse};
 /// active VTN capacity limits.
 ///
 /// Implements the full `Asset` trait so the Grid participates in trait-object
-/// queries (timelines, flexibility envelope). It is NOT added to `AssetConfig`
+/// queries (timelines, site headroom). It is NOT added to `AssetConfig`
 /// because it has no physics configuration and is not part of the controllable
 /// asset dispatch loop.
 ///

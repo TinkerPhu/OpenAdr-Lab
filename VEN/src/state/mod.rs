@@ -11,7 +11,7 @@ use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
     BaselineOverride, EvSessionQueue, HeaterTarget, ShiftableLoad,
 };
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope, SiteFlexibilitySample, SolveStatus};
+use crate::entities::plan::{Plan, SiteHeadroom, SiteHeadroomSample, SolveStatus};
 use crate::entities::sensor::SensorSnapshot;
 use crate::entities::user_request::UserRequest;
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
@@ -105,8 +105,8 @@ pub struct HemsState {
     pub report_obligations: Vec<OadrReportObligation>,
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
     pub user_requests: Vec<UserRequest>,
-    pub site_envelope: Option<SiteFlexibilityEnvelope>,
-    pub site_headroom_forecast: Vec<crate::entities::plan::SiteFlexibilityForecastSlot>, // state/site_headroom_forecast.rs
+    pub site_headroom: Option<SiteHeadroom>,
+    pub site_headroom_forecast: Vec<crate::entities::plan::SiteHeadroomForecastSlot>, // state/site_headroom_forecast.rs
     pub capacity_curves: Option<(CapacityCurve, CapacityCurve)>, // (import, export) — state/capacity_curves.rs
     /// The EV's charging sessions: ordered, non-overlapping, possibly several.
     /// `EvSessionQueue` owns that invariant - see its doc comment for why the
@@ -169,9 +169,9 @@ pub struct AppState {
     /// WP-T5 (G-5): bounded ring of report submission outcomes, newest last.
     pub report_submissions:
         bounded_log::BoundedLog<crate::entities::report_submission::ReportSubmissionRecord>,
-    /// BL-43: bounded log of `SiteFlexibilityEnvelope` snapshots (`site_envelope`
+    /// BL-43: bounded log of `SiteHeadroom` snapshots (`site_headroom`
     /// holds only the latest).
-    pub flexibility_history: bounded_log::BoundedLog<SiteFlexibilitySample>,
+    pub flexibility_history: bounded_log::BoundedLog<SiteHeadroomSample>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -388,13 +388,13 @@ impl AppState {
         self.hems.write().await.asset_ledger = ledger;
     }
 
-    pub async fn site_envelope(&self) -> Option<SiteFlexibilityEnvelope> {
-        self.hems.read().await.site_envelope.clone()
+    pub async fn site_headroom(&self) -> Option<SiteHeadroom> {
+        self.hems.read().await.site_headroom.clone()
     }
 
-    pub async fn set_site_envelope(&self, env: SiteFlexibilityEnvelope) {
+    pub async fn set_site_headroom(&self, env: SiteHeadroom) {
         self.record_flexibility_sample(&env).await;
-        self.hems.write().await.site_envelope = Some(env);
+        self.hems.write().await.site_headroom = Some(env);
     }
 
     pub async fn heater_target(&self) -> Option<HeaterTarget> {

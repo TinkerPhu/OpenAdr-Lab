@@ -56,7 +56,7 @@ pub struct GridSample {
     #[serde(default)]
     pub export_limit_kw: Option<f64>,
     /// Mean instant site-flexibility headroom (kW) over the window — see
-    /// `entities::plan::SiteFlexibilityEnvelope`. `None` before the first dispatcher tick.
+    /// `entities::plan::SiteHeadroom`. `None` before the first dispatcher tick.
     #[serde(default)]
     pub up_kw: Option<f64>,
     #[serde(default)]

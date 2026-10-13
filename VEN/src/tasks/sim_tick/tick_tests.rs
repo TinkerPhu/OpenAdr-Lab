@@ -169,7 +169,7 @@ mod tests {
             },
             slots: vec![slot],
             summary: PlanSummary::default(),
-            envelopes: vec![],
+            session_flexibility: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
             objective: crate::entities::PlannerObjective::MinCost,

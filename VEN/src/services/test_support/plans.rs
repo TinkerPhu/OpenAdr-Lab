@@ -59,7 +59,7 @@ pub fn flat_plan(step_s: u64, slots: usize, start: DateTime<Utc>) -> Plan {
         cost_breakdown: Default::default(),
         soc_trajectory_kwh: vec![],
         summary: Default::default(),
-        envelopes: vec![],
+        session_flexibility: vec![],
         warnings: vec![],
         solve_status: SolveStatus::Optimal,
         phase_report: None,

@@ -13,7 +13,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
     And the plan has field "slots"
-    And the plan has field "envelopes"
+    And the plan has field "session_flexibility"
 
   # --- Slots ---
 
@@ -49,14 +49,14 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     When I wait for the VEN /plan to have a heater allocation in slots
     Then at least one firm slot has an allocation for asset "heater"
 
-  Scenario: Plan has flexibility envelopes for far-horizon unscheduled energy
+  Scenario: Plan has session flexibility for far-horizon unscheduled energy
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     And I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /plan to have envelopes
-    Then the plan.envelopes is a non-empty array
+    When I wait for the VEN /plan to have session flexibility
+    Then the plan.session_flexibility is a non-empty array
 
   # --- Peak-demand penalty threshold (WP6.3, BL-09) ---
 

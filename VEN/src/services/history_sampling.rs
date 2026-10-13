@@ -17,7 +17,7 @@ use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity::{tightest_capacity_limit, CapacitySnapshot};
 use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
 use crate::entities::history::{GridSample, TickSample};
-use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::entities::plan::SiteHeadroom;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
 #[derive(Default, Clone)]
@@ -61,7 +61,7 @@ struct GridAcc {
     import_limit_kw: Option<f64>,
     export_limit_kw: Option<f64>,
     /// Mean instant site-flexibility headroom this window — see
-    /// `entities::plan::SiteFlexibilityEnvelope`. A mean like `import_kw`/`export_kw`
+    /// `entities::plan::SiteHeadroom`. A mean like `import_kw`/`export_kw`
     /// above, not a tightest-value tracker like the DOE limit fields.
     up_kw_sum: f64,
     down_kw_sum: f64,
@@ -93,7 +93,7 @@ impl HistorySampler {
         sim: &SimSnapshot,
         tariffs: &[TariffSnapshot],
         capacity_limits: &[CapacitySnapshot],
-        envelope: Option<&SiteFlexibilityEnvelope>,
+        site_headroom: Option<&SiteHeadroom>,
     ) -> Option<(Vec<TickSample>, GridSample)> {
         let minute = now.timestamp() / 60;
         let flushed = if self.window_minute.is_some_and(|m| m != minute) {
@@ -162,7 +162,7 @@ impl HistorySampler {
             self.grid.export_limit_kw = Some(self.grid.export_limit_kw.map_or(v, |cur| cur.min(v)));
         }
 
-        if let Some(env) = envelope {
+        if let Some(env) = site_headroom {
             self.grid.up_kw_sum += env.up_kw;
             self.grid.down_kw_sum += env.down_kw;
             self.grid.headroom_n += 1;
@@ -376,8 +376,8 @@ mod tests {
         assert_eq!(grid.export_limit_kw, Some(3.0));
     }
 
-    fn envelope(up_kw: f64, down_kw: f64) -> SiteFlexibilityEnvelope {
-        SiteFlexibilityEnvelope {
+    fn site_headroom(up_kw: f64, down_kw: f64) -> SiteHeadroom {
+        SiteHeadroom {
             up_kw,
             down_kw,
             ..Default::default()
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_record_no_envelope_ever_seen_persists_none_not_zero() {
+    fn test_record_no_headroom_ever_seen_persists_none_not_zero() {
         let mut sampler = HistorySampler::new();
         sampler.record(ts(0), &snap(ts(0), 1.0, None), &[], &[], None);
         let (_, grid) = sampler.flush().unwrap();
@@ -401,14 +401,14 @@ mod tests {
             &snap(ts(0), 1.0, None),
             &[],
             &[],
-            Some(&envelope(2.0, 4.0)),
+            Some(&site_headroom(2.0, 4.0)),
         );
         sampler.record(
             ts(30),
             &snap(ts(30), 1.0, None),
             &[],
             &[],
-            Some(&envelope(6.0, 8.0)),
+            Some(&site_headroom(6.0, 8.0)),
         );
         let (_, grid) = sampler.flush().unwrap();
         assert_eq!(grid.up_kw, Some(4.0), "mean of 2.0 and 6.0 is 4.0");

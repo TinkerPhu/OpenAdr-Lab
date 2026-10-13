@@ -3,11 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Which safety-envelope override is active for this tick, if any.
+/// Which safety-band override is active for this tick, if any.
 ///
 /// `temp_min_c`/`temp_max_c` are a comfort/service band, not the asset's true physical
 /// limits (see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section). Outside that band
-/// there is a wider safety envelope — ambient temperature on the low side (no physical harm
+/// there is a wider safety band — ambient temperature on the low side (no physical harm
 /// ever), `temp_safety_max_c` on the high side (a real hard ceiling) — that only an active VTN
 /// emergency directive should unlock. No such directive is wired in yet; today this is settable
 /// via `SimInjectState` (manual/test/demo) or automatically by the deviation arbiter's heater

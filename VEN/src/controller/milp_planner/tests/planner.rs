@@ -1089,10 +1089,10 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
 }
 
 #[test]
-fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
+fn run_planner_session_flexibility_estimated_cost_reflects_solved_schedule() {
     // Two-rate tariff: cheap first hour (0.10), expensive second (0.50).
     // A min_cost solve puts the whole 7 kWh EV charge into the cheap hour, so the
-    // envelope estimate must be the solved schedule's cost (~0.70 €), not
+    // session flexibility estimate must be the solved schedule's cost (~0.70 €), not
     // energy × average tariff (7 × 0.30 = 2.10 €).
     let now = fixed_now();
     let mut profile = make_profile_1800s();
@@ -1129,10 +1129,10 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         None,
     );
     let env = plan
-        .envelopes
+        .session_flexibility
         .iter()
         .find(|e| e.asset_id == "ev")
-        .expect("EV envelope present");
+        .expect("EV session flexibility present");
 
     // Expected: solved per-slot session cost — grid share at the slot import
     // tariff plus surplus share at its export opportunity price.
@@ -1155,7 +1155,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         .sum();
     assert!(
         (env.estimated_cost_eur - expected_eur).abs() < 1e-6,
-        "envelope estimate {:.4} must equal the solved schedule cost {:.4}",
+        "session flexibility estimate {:.4} must equal the solved schedule cost {:.4}",
         env.estimated_cost_eur,
         expected_eur
     );

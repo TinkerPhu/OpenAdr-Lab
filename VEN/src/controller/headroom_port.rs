@@ -7,17 +7,17 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::entities::capacity_curve::CapacityCurves;
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::{Plan, SiteHeadroom};
 
 #[async_trait]
 pub trait HeadroomPort: Send + Sync {
-    /// The site's flexibility envelope right now, within the physical import/export ratings.
+    /// The site headroom right now, within the physical import/export ratings.
     async fn site_headroom(
         &self,
         now: DateTime<Utc>,
         phys_import_kw: f64,
         phys_export_kw: f64,
-    ) -> SiteFlexibilityEnvelope;
+    ) -> SiteHeadroom;
 
     /// The capacity curves for a commitment starting at `start` (snapped to a plan slot
     /// boundary), or `None` when the plan has no slot left to anchor them.

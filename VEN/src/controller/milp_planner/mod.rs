@@ -46,10 +46,10 @@ use crate::entities::asset_params::{
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 pub mod asset_port;
-mod envelopes;
 mod ev_diagnostics;
 mod input_stages;
 mod inputs;
+mod session_flexibility;
 // Defines `probe!`; must precede the solver modules that use it.
 #[macro_use]
 mod model_probe;
