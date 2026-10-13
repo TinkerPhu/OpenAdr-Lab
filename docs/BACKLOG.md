@@ -30,7 +30,7 @@ debt (`R-*`) is in `docs/reference/TECHNICAL_DEBTS.md`.
 
 | Component | Result |
 |---|---|
-| VEN (Rust, 321 crates) | 0 vulnerabilities; 1 allowed warning (`chacha20` 0.10.1 yanked) |
+| VEN (Rust, 321 crates) | Re-audited 2026-10-13: 0 vulnerabilities after `quinn-proto` 0.11.16 → 0.11.19 (RUSTSEC-2026-0338 to -0342, published 2026-08/09); 2 allowed warnings (`chacha20` 0.10.1 yanked, `unsafe-libyaml` 0.2.11 unmaintained, RUSTSEC-2024-0449) |
 | VTN/bff (Rust, 367 crates) | 1 advisory, accepted (below); 2 allowed warnings (`event-listener` 5.4.1 unsound, RUSTSEC-2026-0221; `chacha20` 0.10.1 yanked) |
 | lab-core (Rust, 139 crates) | 0 vulnerabilities; 1 allowed warning (`yoke-derive` 0.8.3 yanked) |
 | npm workspace (VEN/ui + VTN/ui) | 0 vulnerabilities, with and without dev dependencies |
