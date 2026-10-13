@@ -15524,3 +15524,22 @@ imports the source, so one atomic rename was enough.
 **Issues.** The docker hosts use sparse-checkout, so a renamed top-level directory does not arrive
 on pull: each host needed `git sparse-checkout add lab-ui` before its UI images could build
 (`run_all_tests.sh`'s checkout pre-flight names the missing path).
+
+## R-35: a generated module import graph, and a diagram that cannot lose a loop (refactor/r35-module-graph)
+
+**What.** `scripts/gen_module_graph.py` writes a generated Mermaid import graph (one node per
+top-level `VEN/src` module, `controller/milp_planner/` separately, grouped by ring; one edge per
+`crate::<module>` / `lab_core::` reference in production code) into a marked section of
+`docs/architecture/module_dependency_graph.md`. `scripts/audit_module_graph.py` now also fails when
+that section is stale, or when a `tasks/` loop (`fn spawn*`) or a top-level directory is missing from
+the hand-drawn component diagram above it. Tests: `scripts/test_gen_module_graph.py`. The doc got a
+heading and ```mermaid fences, so it renders.
+
+**Why.** User decision (2026-10-13): keep the hand-drawn diagram, generate the import graph beside it
+and check both. The generator reads production lines through `audit_ven_architecture.code_lines`,
+so "production code" has one definition across the audits.
+
+**Issues.** The first run found `history_store/`, `profile/`, `services/` and the
+`spawn_base_load_window` loop missing from the hand-drawn diagram, and two statements fused onto
+one line (`graph TB      subgraph ...`), so the diagram had not been valid Mermaid. A
+`crate::AppCtx` re-export showed up as a module node until targets were restricted to real modules.
