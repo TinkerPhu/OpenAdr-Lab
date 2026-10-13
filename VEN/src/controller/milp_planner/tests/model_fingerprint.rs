@@ -19,21 +19,27 @@ use super::*;
 
 use crate::controller::milp_planner::model_probe::recorder;
 use crate::controller::milp_planner::solver_phase2::solve_milp_two_phase;
-use crate::entities::device_session::{EvSession, ShiftableLoad};
+use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::planner_params::PenaltyRuleParams;
 use rand::{rngs::StdRng, SeedableRng};
 
 const GOLDEN: &str = include_str!("golden/model_fingerprints.txt");
 
-struct Fixture {
-    name: &'static str,
-    inputs: MilpInputs,
-    ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
-    p1w: Phase1Weights,
-    p2w: Phase2Weights,
-    epsilon_eur: f64,
-    timeout_s: f64,
-    phase2_timeout_s: f64,
+/// One recorded scenario: the solver's inputs, plus the profile and the sessions `plans_golden`
+/// needs to translate the solution into a plan.
+pub(super) struct Fixture {
+    pub name: &'static str,
+    pub inputs: MilpInputs,
+    pub ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    pub p1w: Phase1Weights,
+    pub p2w: Phase2Weights,
+    pub epsilon_eur: f64,
+    pub timeout_s: f64,
+    pub phase2_timeout_s: f64,
+    pub profile: Profile,
+    pub ev_session: Option<EvSession>,
+    pub heater_target: Option<HeaterTarget>,
+    pub shiftables: Vec<ShiftableLoad>,
 }
 
 /// A snapshot of the profile's real assets with a fixed RNG and clock, so nothing in it depends on
@@ -47,7 +53,7 @@ fn snapshot(profile: &Profile) -> SimSnapshot {
     .to_sim_snapshot()
 }
 
-fn ev_session() -> EvSession {
+pub(super) fn ev_session() -> EvSession {
     let now = fixed_now();
     crate::entities::device_session::EvSession {
         id: uuid::Uuid::from_u128(1),
@@ -55,7 +61,7 @@ fn ev_session() -> EvSession {
     }
 }
 
-fn shiftable_load() -> ShiftableLoad {
+pub(super) fn shiftable_load() -> ShiftableLoad {
     let now = fixed_now();
     ShiftableLoad {
         id: uuid::Uuid::from_u128(2),
@@ -79,10 +85,34 @@ fn assemble(
     shiftables: &[ShiftableLoad],
     pv_override: Option<f64>,
 ) -> Fixture {
+    assemble_with(
+        name,
+        profile,
+        tariffs,
+        cap,
+        ev,
+        None,
+        shiftables,
+        pv_override,
+    )
+}
+
+/// `assemble` with a heater target as well.
+#[allow(clippy::too_many_arguments)] // one argument per input a scenario varies
+pub(super) fn assemble_with(
+    name: &'static str,
+    profile: &Profile,
+    tariffs: &TariffTimeSeries,
+    cap: &OadrCapacityState,
+    ev: Option<&EvSession>,
+    heater_target: Option<&HeaterTarget>,
+    shiftables: &[ShiftableLoad],
+    pv_override: Option<f64>,
+) -> Fixture {
     let now = fixed_now();
     let mut sim = snapshot(profile);
     set_ev_plugged(&mut sim, true);
-    let mut ctxs = build_asset_contexts(profile, &sim, now, ev, None, tariffs);
+    let mut ctxs = build_asset_contexts(profile, &sim, now, ev, heater_target, tariffs);
     push_shiftable_load_contexts(&mut ctxs, shiftables, profile, now);
     let inputs =
         build_milp_inputs_with_override(&ctxs, tariffs, cap, profile, now, &[], None, pv_override);
@@ -97,16 +127,20 @@ fn assemble(
         epsilon_eur: profile.planner.phase2_epsilon_eur,
         timeout_s: profile.planner.solver_timeout_s as f64,
         phase2_timeout_s: profile.planner.phase2_solver_timeout_s as f64,
+        profile: profile.clone(),
+        ev_session: ev.cloned(),
+        heater_target: heater_target.cloned(),
+        shiftables: shiftables.to_vec(),
     }
 }
 
-fn keep(profile: &mut Profile, keep: fn(&AssetParams) -> bool) {
+pub(super) fn keep(profile: &mut Profile, keep: fn(&AssetParams) -> bool) {
     profile.assets.retain(keep);
 }
 
 /// Every branch of the three solves: each asset alone and together, both cross-asset interactions,
 /// shiftable loads, a penalty rule, import and export slack, and phase 2 skipped.
-fn scenarios() -> Vec<Fixture> {
+pub(super) fn scenarios() -> Vec<Fixture> {
     let flat = make_tariffs(0.25, 0.08, 300.0);
     let two_zone = make_two_zone_tariffs(0.10, 0.40);
     let uncapped = no_capacity();
