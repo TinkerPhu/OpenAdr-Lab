@@ -269,11 +269,14 @@ pub(super) fn scenarios() -> Vec<Fixture> {
     out
 }
 
-/// Everything the solver returned, to full `f64` precision. Written field by field because
-/// `mode_decisions.y_shift` is a `HashMap`, whose `Debug` order differs from run to run.
+/// Everything the solver returned, to full `f64` precision, in the order the golden was recorded
+/// in. Read through `AssetSolutionsView`, so the text does not depend on how `SolveOutput` stores
+/// an asset's part; the heater's ready flag is written twice because the golden recorded it once
+/// as a solution value and once as a mode decision.
 fn solution_text(out: &SolveOutput) -> String {
-    let mut y_shift: Vec<_> = out.mode_decisions.y_shift.iter().collect();
-    y_shift.sort_by(|a, b| a.0.cmp(b.0));
+    let battery = out.battery();
+    let ev = out.ev();
+    let heater = out.heater();
     format!(
         "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
         out.status,
@@ -281,25 +284,25 @@ fn solution_text(out: &SolveOutput) -> String {
         out.p_imp_kw,
         out.p_exp_kw,
         out.p_pv_used_kw,
-        out.p_bat_ch_kw,
-        out.p_bat_dis_kw,
-        out.p_ev_kw,
-        out.soc_ev,
-        out.ev_shortfall_kwh,
-        out.y_heat,
-        out.e_bat_kwh,
+        battery.charge_kw,
+        battery.discharge_kw,
+        ev.power_kw,
+        ev.soc,
+        ev.shortfall_kwh,
+        heater.stage,
+        battery.energy_kwh,
         out.s_imp_viol_kw,
         out.s_exp_viol_kw,
-        out.z_ev_on,
-        out.e_ev_extra,
-        out.e_seg_kwh,
-        out.z_heat_ready,
-        out.e_heat_tank_kwh,
-        out.p_shiftable_kw,
+        ev.on,
+        ev.extra_kwh,
+        ev.bands_kwh,
+        heater.ready,
+        heater.tank_kwh,
+        out.shiftable_kw(),
         out.s_penalty_kw,
-        out.mode_decisions.u_bat,
-        out.mode_decisions.z_heat_ready,
-        y_shift,
+        battery.direction,
+        heater.ready,
+        out.shiftable_starts(),
     )
 }
 

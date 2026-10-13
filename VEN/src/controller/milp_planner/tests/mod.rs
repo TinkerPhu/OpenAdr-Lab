@@ -783,6 +783,93 @@ impl Built {
     }
 }
 
+/// One battery's solution as a test reads it: zeros of the plan's lengths when the site has none.
+struct BatteryView {
+    charge_kw: Vec<f64>,
+    discharge_kw: Vec<f64>,
+    /// Stored energy at every step boundary [kWh], len = n + 1.
+    energy_kwh: Vec<f64>,
+    /// The charge (1) / discharge (0) direction per slot, empty when the site has no battery.
+    direction: Vec<f64>,
+}
+
+/// One EV's solution as a test reads it: zeros of the plan's lengths when the site has none.
+struct EvView {
+    power_kw: Vec<f64>,
+    /// State of charge at every step boundary, len = n + 1.
+    soc: Vec<f64>,
+    /// Per-obligation shortfall [kWh].
+    shortfall_kwh: Vec<f64>,
+    on: Vec<f64>,
+    extra_kwh: f64,
+    bands_kwh: f64,
+}
+
+/// One heater's solution as a test reads it: zeros of the plan's lengths when the site has none.
+struct HeaterView {
+    stage: Vec<f64>,
+    ready: f64,
+    /// Tank energy above T_min [kWh] per slot, empty when the site has no heater.
+    tank_kwh: Vec<f64>,
+}
+
+/// How a test reads one asset's part of a solution, so no test names how `SolveOutput` stores
+/// it. Each returns the first asset of its kind, which is the only one in every single-site test.
+trait AssetSolutionsView {
+    fn battery(&self) -> BatteryView;
+    fn ev(&self) -> EvView;
+    fn heater(&self) -> HeaterView;
+    /// Each shiftable load's power per slot [kW], in context order.
+    fn shiftable_kw(&self) -> Vec<Vec<f64>>;
+    /// Each shiftable load's start choice per valid start slot, by asset id.
+    fn shiftable_starts(&self) -> Vec<(String, Vec<f64>)>;
+}
+
+impl AssetSolutionsView for SolveOutput {
+    fn battery(&self) -> BatteryView {
+        BatteryView {
+            charge_kw: self.p_bat_ch_kw.clone(),
+            discharge_kw: self.p_bat_dis_kw.clone(),
+            energy_kwh: self.e_bat_kwh.clone(),
+            direction: self.mode_decisions.u_bat.clone(),
+        }
+    }
+
+    fn ev(&self) -> EvView {
+        EvView {
+            power_kw: self.p_ev_kw.clone(),
+            soc: self.soc_ev.clone(),
+            shortfall_kwh: self.ev_shortfall_kwh.clone(),
+            on: self.z_ev_on.clone(),
+            extra_kwh: self.e_ev_extra,
+            bands_kwh: self.e_seg_kwh,
+        }
+    }
+
+    fn heater(&self) -> HeaterView {
+        HeaterView {
+            stage: self.y_heat.clone(),
+            ready: self.z_heat_ready,
+            tank_kwh: self.e_heat_tank_kwh.clone(),
+        }
+    }
+
+    fn shiftable_kw(&self) -> Vec<Vec<f64>> {
+        self.p_shiftable_kw.clone()
+    }
+
+    fn shiftable_starts(&self) -> Vec<(String, Vec<f64>)> {
+        let mut starts: Vec<_> = self
+            .mode_decisions
+            .y_shift
+            .iter()
+            .map(|(id, row)| (id.clone(), row.clone()))
+            .collect();
+        starts.sort_by(|a, b| a.0.cmp(&b.0));
+        starts
+    }
+}
+
 mod fixtures;
 use fixtures::*;
 

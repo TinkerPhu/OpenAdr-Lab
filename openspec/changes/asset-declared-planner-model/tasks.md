@@ -19,14 +19,15 @@ otherwise.
       with floats printed `{:?}`. Add an `UPDATE_PLANS_GOLDEN=1` writer. Also add a fallback-plan
       scenario. Verify: golden recorded on unmodified code and the test passes twice in a row on
       Node2.
-- [ ] 1.2 Add by-id test accessors in `controller/milp_planner/tests/mod.rs` over today's flat
-      `SolveOutput`: `sol.net_kw(id)`, `sol.storage(id) -> (ch, dis, e_kwh)`, `sol.ev(id)`,
-      `sol.heater(id)`. Migrate every test read of `p_bat_*`, `p_ev_kw`, `soc_ev`, `y_heat`,
-      `e_bat_kwh`, `e_heat_tank_kwh`, `z_ev_on` and `ev_shortfall_kwh` to them (188 reads today,
-      mostly in `solve_cost.rs`, `soc_balance.rs`, `solver.rs` and `phase2_spikes.rs`). Every
-      `pool.bat/ev/heater` read in a test (one in `tests/planner.rs`, the rest in the assets' own
-      `*_milp.rs` unit tests) moves to a `pool_vars(id)` helper. Verify: planner tests green, goldens
-      hold, and `grep -rnE "\.(p_bat_|p_ev_kw|soc_ev\b|y_heat|e_bat_kwh|e_heat_tank)" controller/milp_planner/tests`
+- [x] 1.2 Add test accessors in `controller/milp_planner/tests/mod.rs` over today's flat
+      `SolveOutput`: `AssetSolutionsView` with `sol.battery()`, `sol.ev()`, `sol.heater()`,
+      `sol.shiftable_kw()`, `sol.shiftable_starts()` (the first asset of each kind; the
+      multi-instance tests of group 7 read `AssetSolution`s by id). Migrate every test read of
+      the flat per-kind fields to them (188 reads today), `model_fingerprint`'s `solution_text`
+      included, so it prints the same text from any `SolveOutput` shape. The `pool.bat/ev/heater`
+      reads in the assets' own `*_milp.rs` unit tests change with the pool itself (task 4.2).
+      Verify: planner tests green, goldens hold, and
+      `grep -rnE "\.(p_bat_|p_ev_kw|soc_ev|y_heat|e_bat_kwh|e_heat_tank)" controller/milp_planner/tests`
       finds only `tests/mod.rs`.
 
 ## 2. Contexts carry their id and one build-parameter object (D10, D11)
