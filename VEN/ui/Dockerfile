@@ -1,6 +1,6 @@
 # The build context is the repo root: this app is one workspace of an npm
 # workspace whose dependencies hoist to the root node_modules, and it imports
-# the shared chart source at ui-charts/. A context of VEN/ui would see neither.
+# the shared UI source at lab-ui/. A context of VEN/ui would see neither.
 FROM node:20-alpine AS build
 WORKDIR /repo
 
@@ -12,7 +12,7 @@ COPY VEN/ui/package.json VEN/ui/
 COPY VTN/ui/package.json VTN/ui/
 RUN npm ci
 
-COPY ui-charts/ ui-charts/
+COPY lab-ui/ lab-ui/
 COPY VEN/ui/ VEN/ui/
 
 # Allow build-time VITE_ env vars (e.g. for test stack pointing at test containers)

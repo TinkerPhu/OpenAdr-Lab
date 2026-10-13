@@ -67,7 +67,7 @@ Diagnostics — is built from one shared primitive kit plus three named composit
 the older `StackedAreaChart`/`ComfortCurveChart` names and locations are gone, renamed and
 moved here). Full architecture (why one kit, the cursor-correctness invariant that motivated
 it, per-composition behavior): `docs/architecture/chart_diagrams.md`. Two facts worth pulling
-up here rather than just linking. (`ui-charts/` also holds the code both UIs share that is not a
+up here rather than just linking. (`lab-ui/` also holds the code both UIs share that is not a
 chart: the Prometheus parser, the toolbar's `RefreshControls`, `debugLog`, the `JsonDialog`, the
 "value or dash" formatters in `unitFormat.ts`, and the TypeScript/ESLint base configs each UI
 extends; see the same document.)
@@ -138,7 +138,7 @@ asset's `AssetTimelineChart` draws beyond its power line — its state line (SoC
 temperature) and its time-range shadings — is declared once per asset in
 `components/controller/assetChartSpecs.ts` and looked up by both the Controller cells and the
 History page; neither branches on the asset id any more. Shading is one shared primitive,
-`ui-charts/src/StateShading.tsx` (classify each point, shade every contiguous run, weight
+`lab-ui/src/StateShading.tsx` (classify each point, shade every contiguous run, weight
 folded into the fill alpha), with two declarations: PV curtailment (overlay; every source but
 the plan is "unplanned", comms-loss included) and **EV unplugged** (background, EV blue). The
 EV band marks *absence*: no band means plugged in, like every always-present asset. It reads

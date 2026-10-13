@@ -1,1 +1,1 @@
-export { default } from '../../ui-charts/eslint.base.mjs'
+export { default } from '../../lab-ui/eslint.base.mjs'

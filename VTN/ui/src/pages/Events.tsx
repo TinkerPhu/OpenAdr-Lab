@@ -8,7 +8,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
 import type { EventInput, VtnEvent } from "../api/types";
 import { useEvents, usePrograms, useCreateEvent, useUpdateEvent, useDeleteEvent } from "../api/hooks";
-import { JsonDialog } from "@lab/charts/JsonDialog";
+import { JsonDialog } from "@lab/ui/JsonDialog";
 import { EventFormDialog } from "../components/EventFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 

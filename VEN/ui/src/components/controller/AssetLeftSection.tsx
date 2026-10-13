@@ -1,5 +1,5 @@
 import { Box, Typography } from "@mui/material";
-import { CELL_LEFT_SECTION_WIDTH } from "@lab/charts/chartLayout";
+import { CELL_LEFT_SECTION_WIDTH } from "@lab/ui/chartLayout";
 import type { AssetSummary } from "./types";
 
 interface AssetLeftSectionProps {

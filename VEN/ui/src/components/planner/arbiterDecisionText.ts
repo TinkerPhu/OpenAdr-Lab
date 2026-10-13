@@ -1,5 +1,5 @@
 import type { ControllerEvent } from "../../api/types";
-import { formatKwOrDash } from "@lab/charts/unitFormat";
+import { formatKwOrDash } from "@lab/ui/unitFormat";
 
 type ArbiterDecision = Extract<ControllerEvent, { type: "ArbiterDecision" }>;
 

@@ -1,4 +1,4 @@
-import { roundedTimeTicks } from "@lab/charts/axisDomain";
+import { roundedTimeTicks } from "@lab/ui/axisDomain";
 
 /**
  * What two stacked Fleet charts must agree on to actually line up.

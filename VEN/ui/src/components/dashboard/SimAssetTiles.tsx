@@ -1,7 +1,7 @@
 import { Grid, Stack, Typography } from "@mui/material";
 import type { AssetSnapshot, SimSnapshot } from "../../api/types";
 import { ASSET_LABELS } from "../controller/types";
-import { formatFixedOrDash } from "@lab/charts/unitFormat";
+import { formatFixedOrDash } from "@lab/ui/unitFormat";
 import { assetValue } from "../../api/assetValue";
 
 type Field = (a: AssetSnapshot) => string;

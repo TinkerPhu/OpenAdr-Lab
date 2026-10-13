@@ -3,7 +3,7 @@ import {
   Alert, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { useFleetReactions } from "../api/hooks";
-import { formatKwOrDash } from "@lab/charts/unitFormat";
+import { formatKwOrDash } from "@lab/ui/unitFormat";
 
 /**
  * "Who saw this event, and what changed?" for one event id.

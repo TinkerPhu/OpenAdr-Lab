@@ -1,14 +1,14 @@
 # Chart/Diagram Architecture
 
 Every chart in this lab is built from one shared kit of primitives plus a few named
-compositions. The kit lives at the repo root in `ui-charts/`, imported by **both** UIs as
-`@lab/charts/*`; the compositions that know about a specific domain stay with the app
+compositions. The kit lives at the repo root in `lab-ui/`, imported by **both** UIs as
+`@lab/ui/*`; the compositions that know about a specific domain stay with the app
 that owns that domain.
 
 ## Directory layout
 
 ```
-ui-charts/src/                 shared by both UIs (imported as @lab/charts/*)
+lab-ui/src/                 shared by both UIs (imported as @lab/ui/*)
   chartLayout.ts          sizing constants
   axisDomain.ts            axis-domain flooring, rounded Y ticks, X-axis tick generation
   unitFormat.ts             per-physical-unit tooltip/tick formatting
@@ -43,7 +43,7 @@ VTN/ui/src/components/
 
 ### What else lives here, and what deliberately does not
 
-`ui-charts/` is the one place for source both UIs need, so it also holds the pieces above that
+`lab-ui/` is the one place for source both UIs need, so it also holds the pieces above that
 are not charts, and `unitFormat.ts` is the canonical home of every "value or dash" formatter
 (`formatFixedOrDash`, `formatKwOrDash`): a missing value or NaN is a dash, and the caller states
 the decimals. Tests for this shared source run in the VEN workspace
@@ -62,7 +62,7 @@ The VTN UI's fleet view needed exactly what the VEN UI already had — a multi-s
 chart with a toggling legend and correct tooltips. Copying it would have put 880 lines of
 subtle axis and tooltip logic in two places; writing a second one would have put the same
 concept there twice. Both are what `one-concept-one-function` exists to prevent, so the
-generic half moved out to `ui-charts/` and the VEN UI imports it like any other caller.
+generic half moved out to `lab-ui/` and the VEN UI imports it like any other caller.
 
 The repo is an **npm workspace** (root `package.json`, one `package-lock.json`, one hoisted
 `node_modules`) purely to make that resolve: shared *source* outside an app's directory has

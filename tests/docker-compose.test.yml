@@ -346,7 +346,7 @@ services:
   # ---------------------------------------------------------------------------
   test-ui:
     build:
-      # Repo root: npm workspace + the shared ui-charts/ source.
+      # Repo root: npm workspace + the shared lab-ui/ source.
       context: ..
       dockerfile: VTN/ui/Dockerfile
     volumes:
@@ -367,7 +367,7 @@ services:
   # ---------------------------------------------------------------------------
   test-ven-ui:
     build:
-      # Repo root: npm workspace + the shared ui-charts/ source.
+      # Repo root: npm workspace + the shared lab-ui/ source.
       context: ..
       dockerfile: VEN/ui/Dockerfile
       args:

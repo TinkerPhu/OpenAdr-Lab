@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
-import { RefreshControls } from "@lab/charts/RefreshControls";
+import { RefreshControls } from "@lab/ui/RefreshControls";
 
 // The auto-refresh toggle and "Refresh" button both UIs' toolbars carry. They were two verbatim
 // copies in App.tsx; these tests pin the exact sequence they performed.

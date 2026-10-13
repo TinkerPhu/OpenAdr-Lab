@@ -28,8 +28,8 @@ import { MeasurementPage } from "./pages/Measurement";
 import { DevicesPage } from "./pages/Devices";
 import { PlanHistoryPage } from "./pages/PlanHistory";
 import { CapacityForecastPage } from "./pages/CapacityForecast";
-import { debugLog } from "@lab/charts/debugLog";
-import { RefreshControls } from "@lab/charts/RefreshControls";
+import { debugLog } from "@lab/ui/debugLog";
+import { RefreshControls } from "@lab/ui/RefreshControls";
 
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();

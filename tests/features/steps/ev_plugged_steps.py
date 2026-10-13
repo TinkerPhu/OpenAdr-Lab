@@ -71,7 +71,7 @@ def step_history_rows_fraction(context, key):
 
 @then("the EV timeline chart shows an unplugged band")
 def step_ev_chart_unplugged_band(context):
-    # `state-shading-<spec key>-<kind>` is set by ui-charts/src/StateShading.tsx; the EV's
+    # `state-shading-<spec key>-<kind>` is set by lab-ui/src/StateShading.tsx; the EV's
     # declaration lives in VEN/ui/src/components/controller/assetChartSpecs.ts.
     selector = f'{tid("asset-timeline-chart-ev")} .state-shading-ev-unplugged'
     band = context.browser_page.wait_for_selector(selector, state="attached", timeout=90000)

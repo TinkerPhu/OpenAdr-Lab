@@ -9,8 +9,8 @@
  * time somebody prices one site differently, so this folds them explicitly and
  * reports who disagrees.
  */
-import { mergeTimestampedSeries, clipRowsToWindow, locfFillKeys } from "@lab/charts/mergeSeries";
-import type { NamedSample, TimestampedRow } from "@lab/charts/mergeSeries";
+import { mergeTimestampedSeries, clipRowsToWindow, locfFillKeys } from "@lab/ui/mergeSeries";
+import type { NamedSample, TimestampedRow } from "@lab/ui/mergeSeries";
 import type { FleetSignals, SignalBand } from "../api/types";
 import { compareVenNames } from "./venOrder";
 

@@ -1,4 +1,4 @@
 {
-  "extends": "../../ui-charts/tsconfig.base.json",
-  "include": ["src", "../../ui-charts/src"]
+  "extends": "../../lab-ui/tsconfig.base.json",
+  "include": ["src", "../../lab-ui/src"]
 }

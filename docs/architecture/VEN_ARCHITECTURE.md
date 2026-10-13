@@ -1376,7 +1376,7 @@ typed beside its fields, so they are `#[ts(skip)]` and the UI reads them through
 
 What `api/types.ts` still writes by hand, and why: the OpenADR objects (`Program`, `VtnEvent`, `Report`,
 `Interval`, ...) are aliases of openleadr-rs types ts-rs cannot derive on; `ZoneDef` comes from the shared
-`@lab/charts` package; and the UI-side models stated over a wire type for fields the client converts
+`@lab/ui` package; and the UI-side models stated over a wire type for fields the client converts
 on arrival (`PlanHistoryRow`, `HistoryTickSample`, `ForecastAccuracyRow`, ... — epoch ms for an ISO
 string). The `/timeline/*` bodies are generated too (`TimelinePointBody`, `TimelineZone`,
 `AllTimelinesResponse` in `routes/timeline.rs`, pinned by `all_timelines_body_wire_shape_is_pinned`):

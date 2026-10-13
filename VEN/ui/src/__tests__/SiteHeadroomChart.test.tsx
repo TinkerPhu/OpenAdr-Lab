@@ -13,13 +13,13 @@
 import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
-import type { TimestampedRow } from "@lab/charts/mergeSeries";
+import type { TimestampedRow } from "@lab/ui/mergeSeries";
 
 const { propsCalls } = vi.hoisted(() => ({
   propsCalls: [] as Array<Record<string, unknown>>,
 }));
 
-vi.mock("@lab/charts/TimeSeriesChart", () => ({
+vi.mock("@lab/ui/TimeSeriesChart", () => ({
   TimeSeriesChart: (props: Record<string, unknown>) => {
     propsCalls.push(props);
     return null as ReactNode;

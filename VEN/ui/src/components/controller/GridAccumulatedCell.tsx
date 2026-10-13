@@ -7,13 +7,13 @@ import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
-} from "@lab/charts/chartLayout";
+} from "@lab/ui/chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
 import { assetIdsWithTimelineData, buildStackedFromAllTimelines } from "./stackedTimelines";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { ZoneDef } from "../../api/types";
-import { formatSignedPowerValue } from "@lab/charts/unitFormat";
+import { formatSignedPowerValue } from "@lab/ui/unitFormat";
 
 interface GridAccumulatedCellProps {
   assetSummaries: AssetSummary[];

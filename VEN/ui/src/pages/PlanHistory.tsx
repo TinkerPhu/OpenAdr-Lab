@@ -9,7 +9,7 @@ import {
 import { useHistoryPlans } from "../api/hooks";
 import { dayRangeIso, last24hRangeIso } from "../utils/dayRange";
 import { useFrozenServerNowMs } from "../utils/useFrozenServerNowMs";
-import { niceAxis, tickFormatterForStep } from "@lab/charts/axisDomain";
+import { niceAxis, tickFormatterForStep } from "@lab/ui/axisDomain";
 import type { PlanHistoryRow, WarningKind } from "../api/types";
 
 const WARNING_KIND_LABELS: Record<WarningKind, string> = {

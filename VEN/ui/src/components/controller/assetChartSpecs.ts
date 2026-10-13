@@ -5,8 +5,8 @@
  * shading means adding to its entry here, not a branch on `assetId` at a call site
  * (`declare-dont-branch`).
  */
-import type { StateShadingSpec } from "@lab/charts/StateShading";
-import type { TimestampedRow } from "@lab/charts/mergeSeries";
+import type { StateShadingSpec } from "@lab/ui/StateShading";
+import type { TimestampedRow } from "@lab/ui/mergeSeries";
 import { ASSET_COLORS } from "./types";
 
 export interface AssetChartSpec {

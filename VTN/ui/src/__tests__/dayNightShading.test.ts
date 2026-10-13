@@ -3,7 +3,7 @@
  * approach NowLine.test.tsx takes for the other render-function primitives.
  */
 import { describe, it, expect } from "vitest";
-import { dayNightBands, nightAlphaAt, renderDayNightShading } from "@lab/charts/DayNightShading";
+import { dayNightBands, nightAlphaAt, renderDayNightShading } from "@lab/ui/DayNightShading";
 
 const LAT = 47.4491;
 const LON = 7.8081;

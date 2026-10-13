@@ -5,7 +5,7 @@
  * The VEN API endpoint GET /rates and type RateSnapshot return tariff data despite the name.
  */
 
-import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF } from "@lab/charts/types";
+import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF } from "@lab/ui/types";
 
 // ─── Asset identifiers ────────────────────────────────────────────────────────
 
@@ -15,9 +15,9 @@ export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string
 // ─── Shared UI colors ─────────────────────────────────────────────────────────
 
 /** NOW reference line / label across all timeline charts. */
-// Moved to the shared chart package with NowLine; re-exported so the
+// Moved to the shared UI source (`@lab/ui`) with NowLine; re-exported so the
 // controller components that already import it here keep working.
-export { COLOR_NOW } from "@lab/charts/types";
+export { COLOR_NOW } from "@lab/ui/types";
 
 /** Fallback color for unknown/unregistered asset IDs. */
 export const COLOR_ASSET_FALLBACK = "#888";

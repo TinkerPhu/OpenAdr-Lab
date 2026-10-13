@@ -8,7 +8,7 @@ import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
-import { formatKwOrDash } from "@lab/charts/unitFormat";
+import { formatKwOrDash } from "@lab/ui/unitFormat";
 import { byVenName } from "../utils/venOrder";
 
 /**
