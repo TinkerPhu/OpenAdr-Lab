@@ -278,6 +278,7 @@ fn heater_co2_comfort_bid_shapes_phase2_full_tier_usage() {
 
     let make_ctxs = |co2_reward_eur_kwh: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         vec![Box::new(HeaterMilpContext {
+                asset_id: "heater".into(),
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw: 1.0,
@@ -737,6 +738,7 @@ fn heater_already_above_its_ceiling_still_solves() {
     let site = make_solver_site(n, 0.5);
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> =
         vec![Box::new(HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.5,
@@ -774,6 +776,7 @@ fn heater_terminal_reward_raises_end_state() {
     let make_ctxs =
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
             vec![Box::new(HeaterMilpContext {
+                asset_id: "heater".into(),
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw: 1.0,
@@ -827,6 +830,7 @@ fn battery_terminal_reward_raises_end_soc() {
     let make_ctxs =
         |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
             vec![Box::new(BatteryMilpContext {
+                asset_id: "battery".into(),
                 e_nom_kwh: 4.0,
                 e_init_kwh: 0.0,
                 e_min_kwh: 0.0,

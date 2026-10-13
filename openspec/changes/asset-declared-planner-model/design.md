@@ -180,8 +180,10 @@ and `AssetKind` is deleted once `asset_kind()` has no caller.
 carries the id, state, grid (`n`, `cum_s`, `now`), sessions, target, comfort rates,
 `&PlannerParams`, `lambda_sw`, terminal value and anchor. The six planner scalars become reads
 from `PlannerParams`. `ev_min_charge_kw` (today taken from the *first* EV's params by
-`plan_context.rs:130`) is the EV's own `min_charge_kw`. This is the parameter object R-71 names for
-this signature.
+`plan_context.rs:130`) is the EV's own `min_charge_kw`. `lambda_sw` stays an input: it is the same
+"first heater's value" shape, but `Heater` is persisted sim state and has no switching-penalty field,
+so giving it one needs a decision about old JSON (R-141). This is the parameter object R-71 names
+for this signature.
 
 ### D12. The audit makes it structural
 `forbid()` walks its bases with `Path.rglob("*.rs")`, which finds nothing when a base is a single

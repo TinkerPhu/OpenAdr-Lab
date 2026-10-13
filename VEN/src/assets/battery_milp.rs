@@ -163,19 +163,24 @@ impl BatteryMilpContext {
     }
 
     /// Construct from a live `AssetState` and the current sim `Battery` config.
-    pub fn from_state(state: &super::AssetState, cfg: &Battery, c_terminal_eur_kwh: f64) -> Self {
+    pub fn from_state(
+        asset_id: &str,
+        state: &super::AssetState,
+        cfg: &Battery,
+        c_terminal_eur_kwh: f64,
+    ) -> Self {
         let live_soc = if let super::AssetState::Battery(s) = state {
             s.soc_frac
         } else {
             0.5
         };
-        cfg.build_milp_context(live_soc, c_terminal_eur_kwh)
+        cfg.build_milp_context(asset_id, live_soc, c_terminal_eur_kwh)
     }
 }
 
 impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
     fn asset_id(&self) -> &str {
-        crate::ids::ASSET_BATTERY
+        &self.asset_id
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
@@ -258,10 +263,16 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
 
 impl Battery {
     /// Build the MILP context from the live SoC (not the profile initial_soc).
-    pub fn build_milp_context(&self, live_soc: f64, c_terminal_eur_kwh: f64) -> BatteryMilpContext {
+    pub fn build_milp_context(
+        &self,
+        asset_id: &str,
+        live_soc: f64,
+        c_terminal_eur_kwh: f64,
+    ) -> BatteryMilpContext {
         let cap = self.capacity_kwh;
         let eff = self.round_trip_efficiency.sqrt();
         BatteryMilpContext {
+            asset_id: asset_id.to_string(),
             e_nom_kwh: cap,
             e_init_kwh: live_soc * cap,
             e_min_kwh: self.min_soc_frac * cap,
@@ -284,6 +295,7 @@ mod milp_context_trait_tests {
 
     fn make_ctx() -> BatteryMilpContext {
         BatteryMilpContext {
+            asset_id: "battery".into(),
             e_nom_kwh: 10.0,
             e_init_kwh: 5.0,
             e_min_kwh: 1.0,

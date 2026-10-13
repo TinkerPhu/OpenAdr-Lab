@@ -72,6 +72,7 @@ impl EvMilpContext {
     /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
     #[allow(clippy::too_many_arguments)]
     pub fn from_state(
+        asset_id: &str,
         state: &super::AssetState,
         cfg: &EvCharger,
         n: usize,
@@ -94,6 +95,7 @@ impl EvMilpContext {
         };
         // Idle/unplugged template — every branch below overrides only what differs.
         let base = Self {
+            asset_id: asset_id.to_string(),
             mode: EvMilpMode::MustNotRun,
             soc_init_frac: current_soc,
             // One declared ceiling for the whole context, so no arm below can plan past
@@ -400,6 +402,7 @@ mod tests {
     fn a_ev_for(session: &EvSession, n: usize, now: DateTime<Utc>) -> Vec<bool> {
         let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
         EvMilpContext::from_state(
+            "ev",
             &plugged_state(),
             &ev_cfg(),
             n,

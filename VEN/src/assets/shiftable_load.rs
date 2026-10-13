@@ -12,7 +12,6 @@ use crate::controller::milp_planner::{
 };
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
-use crate::entities::device_session::{EvSession, HeaterTarget};
 
 /// Shiftable-load config: fixed power, non-interruptible once started, hard
 /// `[earliest_start, latest_end]` window. See design.md D1/D2 of the
@@ -304,30 +303,16 @@ impl Asset for ShiftableLoadAsset {
 }
 
 impl MilpParticipant for ShiftableLoadAsset {
-    /// Only `asset_id`/`state`/`n`/`cum_s`/`now` apply here — every
-    /// EV/heater-specific parameter (shared signature, `assets/asset_trait.rs`)
-    /// is ignored, same as `Battery`'s impl already does.
-    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 4 heterogeneous asset kinds — see trait doc
-    fn build_milp_context(
-        &self,
-        asset_id: &str,
-        state: &AssetState,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        _ev_sessions: &[EvSession],
-        _heater_target: Option<&HeaterTarget>,
-        _comfort_rates: &[crate::entities::asset::ComfortRate],
-        _ev_min_charge_kw: f64,
-        _v_ev_extra_eur_kwh: f64,
-        _v_ev_core_eur_kwh: f64,
-        _asap_lateness_eur_kwh_h: f64,
-        _v_ev_free_charge_eur_kwh: f64,
-        _lambda_sw: f64,
-        _c_terminal_eur_kwh: f64,
-        _heater_anchor: Vec<Option<f64>>,
-        _w_ghg_eur_kg: f64,
-    ) -> Box<dyn AssetMilpContext> {
+    /// Only the id, the state and the cycle's grid apply here; a shiftable load reads no
+    /// session, target or planner weight.
+    fn build_milp_context(&self, inputs: &super::MilpBuildInputs<'_>) -> Box<dyn AssetMilpContext> {
+        let (asset_id, state, n, cum_s, now) = (
+            inputs.asset_id,
+            inputs.state,
+            inputs.n,
+            inputs.cum_s,
+            inputs.now,
+        );
         let s: &ShiftableLoadState = own(state);
 
         // The one slot rule the planner's own inputs use (`entities::time_grid`).

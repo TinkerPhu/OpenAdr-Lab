@@ -156,6 +156,7 @@ pub(super) fn synthetic_site(n: usize, step_s: i64, base_kw: f64) -> SyntheticSi
         battery: None,
         ev: absent_ev(n),
         heater: HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MustNotRun,
             t_dead_step: None,
             p_step_kw: 0.0,
@@ -178,6 +179,7 @@ pub(super) fn synthetic_site(n: usize, step_s: i64, base_kw: f64) -> SyntheticSi
 /// mode and a plugged window to bring it in.
 pub(super) fn absent_ev(n: usize) -> EvMilpContext {
     EvMilpContext {
+        asset_id: "ev".into(),
         mode: EvMilpMode::MustNotRun,
         soc_init_frac: 0.0,
         soc_max_frac: 1.0,
@@ -224,7 +226,7 @@ pub(super) fn battery_ctx(
         round_trip_efficiency: eff_one_way * eff_one_way,
         min_soc_frac: min_kwh / capacity_kwh,
     }
-    .build_milp_context(init_kwh / capacity_kwh, 0.0)
+    .build_milp_context("battery", init_kwh / capacity_kwh, 0.0)
 }
 
 /// `battery_ctx` without losses.

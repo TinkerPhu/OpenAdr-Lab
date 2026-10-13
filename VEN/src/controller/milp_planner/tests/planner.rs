@@ -590,6 +590,7 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
     let n = 48_usize;
     let ev_ctx: Box<dyn crate::controller::milp_planner::AssetMilpContext> =
         Box::new(EvMilpContext {
+            asset_id: "ev".into(),
             p_max_kw: 7.2,
             ..absent_ev(n)
         });

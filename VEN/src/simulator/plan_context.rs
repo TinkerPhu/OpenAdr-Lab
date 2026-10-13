@@ -12,7 +12,6 @@ use tracing::{debug, warn};
 
 use crate::assets::PvInverter;
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
-use crate::entities::asset_params::AssetParams;
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::sim_inject::SimInjectState;
@@ -113,7 +112,6 @@ pub fn build_asset_contexts(
     now: DateTime<Utc>,
     ev_sessions: &[EvSession],
     heat_tgt: Option<&HeaterTarget>,
-    asset_params: &[AssetParams],
     planner: &PlannerParams,
     lambda_sw: f64,
     // Per-asset terminal value of stored energy, keyed by asset id — built
@@ -127,49 +125,36 @@ pub fn build_asset_contexts(
     // otherwise — the same resolution the API and session creation use.
     comfort_overrides: &std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>,
 ) -> Vec<Box<dyn AssetMilpContext>> {
-    let min_ev_charge_kw = asset_params
-        .iter()
-        .find_map(|p| match p {
-            AssetParams::Ev(e) => Some(e.min_charge_kw),
-            _ => None,
-        })
-        .unwrap_or(0.0);
-
     sim_snap
         .iter_assets()
         .filter_map(|(entry, cfg)| {
-            let c_terminal = c_terminal_eur_kwh_by_asset
-                .get(&entry.id)
-                .copied()
-                .unwrap_or(0.0);
             let comfort_rates = crate::entities::comfort::effective_comfort_rates(
                 comfort_overrides,
                 &entry.id,
                 cfg.default_comfort_rates(),
             );
-            Some(cfg.as_milp_participant()?.build_milp_context(
-                &entry.id,
-                &entry.state,
-                n_slots,
+            let inputs = crate::assets::MilpBuildInputs {
+                asset_id: &entry.id,
+                state: &entry.state,
+                n: n_slots,
                 cum_s,
                 now,
                 ev_sessions,
-                heat_tgt,
-                &comfort_rates,
-                min_ev_charge_kw,
-                planner.v_ev_extra_eur_kwh,
-                planner.v_ev_core_eur_kwh,
-                planner.asap_lateness_eur_kwh_h,
-                planner.v_ev_free_charge_eur_kwh,
+                heater_target: heat_tgt,
+                comfort_rates: &comfort_rates,
+                planner,
                 lambda_sw,
-                c_terminal,
-                if cfg.accepts_dispatch_anchor() {
+                c_terminal_eur_kwh: c_terminal_eur_kwh_by_asset
+                    .get(&entry.id)
+                    .copied()
+                    .unwrap_or(0.0),
+                heater_anchor: if cfg.accepts_dispatch_anchor() {
                     heater_anchor.to_vec()
                 } else {
                     vec![]
                 },
-                planner.w_ghg,
-            ))
+            };
+            Some(cfg.as_milp_participant()?.build_milp_context(&inputs))
         })
         .collect()
 }
@@ -383,7 +368,6 @@ mod tests {
             now,
             &[],
             None,
-            &params,
             &planner,
             0.0,
             &terminal_values(),
@@ -455,7 +439,6 @@ mod tests {
                 now,
                 &[],
                 None,
-                &params,
                 &planner,
                 0.0,
                 &terminal_values(),
@@ -534,7 +517,6 @@ mod tests {
             now,
             &[],
             None,
-            &params,
             &planner,
             0.0,
             &terminal_values(),
@@ -558,7 +540,45 @@ mod tests {
     }
 
     #[test]
-    fn build_asset_contexts_extracts_min_ev_charge_kw_from_ev_asset_params() {
+    fn build_asset_contexts_reports_the_roster_id_each_context_was_built_for() {
+        use crate::entities::asset_params::{AssetParams, BatteryParams, EvParams};
+
+        let now = Utc::now();
+        let params = vec![
+            AssetParams::Battery(BatteryParams {
+                id: "bat-a".into(),
+                ..Default::default()
+            }),
+            AssetParams::Ev(EvParams {
+                id: "car-1".into(),
+                ..Default::default()
+            }),
+        ];
+        let sim_snap = SimState::from_params(&params, now);
+        let planner = PlannerParams::default();
+        let cum_s = cum_seconds(4, 600);
+
+        let contexts = build_asset_contexts(
+            &sim_snap,
+            4,
+            &cum_s,
+            now,
+            &[],
+            None,
+            &planner,
+            0.0,
+            &std::collections::HashMap::new(),
+            &[],
+            &std::collections::HashMap::new(),
+        );
+
+        let ids: Vec<&str> = contexts.iter().map(|c| c.asset_id()).collect();
+        assert_eq!(ids, vec!["bat-a", "car-1"]);
+    }
+
+    /// The EV's minimum charge power is its own, not whichever EV the roster lists first.
+    #[test]
+    fn build_asset_contexts_gives_the_ev_its_own_min_charge_kw() {
         use crate::entities::asset_params::{AssetParams, EvParams};
 
         let now = Utc::now();
@@ -578,7 +598,6 @@ mod tests {
             now,
             &[],
             None,
-            &params,
             &planner,
             0.0,
             &std::collections::HashMap::new(),
@@ -591,7 +610,7 @@ mod tests {
             AssetMilpParams::Ev(scalars) => {
                 assert!(
                     (scalars.p_min_kw - 2.2).abs() < 1e-9,
-                    "min_ev_charge_kw must be scanned out of asset_params and threaded through"
+                    "the EV context must carry the EV's own min_charge_kw"
                 );
             }
             other => panic!("expected Ev scalars, got {other:?}"),

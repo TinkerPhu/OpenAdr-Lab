@@ -5,13 +5,10 @@
 //! file without violating Rust's "one coherent impl per trait/type pair"
 //! rule.
 
-use chrono::{DateTime, Utc};
-
 use super::heater::HeaterState;
 use super::own_state::own;
 use super::{AssetState, Heater, MilpParticipant, Thermostat, TickOverridable};
 use crate::assets::TickOverrides;
-use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
 
 impl TickOverridable for Heater {
@@ -35,39 +32,23 @@ impl TickOverridable for Heater {
 }
 
 impl MilpParticipant for Heater {
-    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 4 heterogeneous asset kinds — see trait doc
     fn build_milp_context(
         &self,
-        _asset_id: &str,
-        state: &AssetState,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        _ev_sessions: &[EvSession],
-        heater_target: Option<&HeaterTarget>,
-        _comfort_rates: &[crate::entities::asset::ComfortRate],
-        _ev_min_charge_kw: f64,
-        _v_ev_extra_eur_kwh: f64,
-        _v_ev_core_eur_kwh: f64,
-        _asap_lateness_eur_kwh_h: f64,
-        _v_ev_free_charge_eur_kwh: f64,
-        lambda_sw: f64,
-        c_terminal_eur_kwh: f64,
-        heater_anchor: Vec<Option<f64>>,
-        w_ghg_eur_kg: f64,
+        inputs: &super::MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
         Box::new(
             crate::controller::milp_planner::asset_port::HeaterMilpContext::from_state(
-                state,
+                inputs.asset_id,
+                inputs.state,
                 self,
-                n,
-                cum_s,
-                now,
-                heater_target,
-                lambda_sw,
-                c_terminal_eur_kwh,
-                heater_anchor,
-                w_ghg_eur_kg,
+                inputs.n,
+                inputs.cum_s,
+                inputs.now,
+                inputs.heater_target,
+                inputs.lambda_sw,
+                inputs.c_terminal_eur_kwh,
+                inputs.heater_anchor.clone(),
+                inputs.planner.w_ghg,
             ),
         )
     }
