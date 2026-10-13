@@ -11,7 +11,9 @@ use crate::controller::milp_planner::asset_port::{
 };
 
 impl BatteryMilpContext {
-    /// Declare all LP variables for this battery, every decision free.
+    /// Declare all LP variables for this battery, every decision free: the tests' shorthand for
+    /// `declare_vars_with` (the planner declares through `AssetMilpContext::declare`).
+    #[cfg(test)]
     pub fn declare_vars(
         &self,
         n: usize,

@@ -223,7 +223,6 @@ graph LR
   M_app_ctx --> M_entities
   M_app_ctx --> M_planner_events
   M_app_ctx --> M_state
-  M_assets --> M_controller
   M_assets --> M_controller_milp_planner
   M_assets --> M_entities
   M_assets --> M_ids
