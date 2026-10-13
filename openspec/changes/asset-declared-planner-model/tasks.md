@@ -141,13 +141,13 @@ otherwise.
 
 ## 8. Make it structural (D12)
 
-- [ ] 8.1 Teach `rust_files` in `scripts/audit_ven_architecture.py` to accept a single file as a
+- [x] 8.1 Teach `rust_files` in `scripts/audit_ven_architecture.py` to accept a single file as a
       base (today `rglob` on a file yields nothing, so a rule on `milp_interactions.rs` would pass
       vacuously). Then add the `forbid` rules. First run them against a scratch copy that
       reintroduces `pool.bat` in `milp_interactions.rs` *and* in `milp_planner/` and confirm both
       fail; then confirm they pass on the branch. Verify: `python scripts/audit_ven_architecture.py`
       passes.
-- [ ] 8.2 Document the new rules in `.claude/CLAUDE.md`'s `ven-architecture` invariant list (one
+- [x] 8.2 Document the new rules in `.claude/CLAUDE.md`'s `ven-architecture` invariant list (one
       line each). Verify: the line exists and names the script.
 
 ## 9. Pre-merge checks, docs and registers

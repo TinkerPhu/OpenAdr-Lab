@@ -425,6 +425,10 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     no raw read of an incoming event value's number (`.numeric()`, `numeric_value(`,
     `PayloadValue::Number`) — read it through `lab_core::wire_contract::PayloadReader`, which
     applies what the event and its program declare
+    no asset kind in the planner core (`controller/milp_planner/`, `milp_interactions.rs`): no
+    `AssetKind`, `ids::ASSET_*`, per-kind pool slot or `bat_`/`ev_`/`heat_`/`heater_` name — the
+    planner reads only what each asset declares (`AssetMilpContext`, `DeclaredAsset`)
+    an `AssetSolutionDetail` variant is matched only in its own `assets/<kind>_declared.rs`
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md
