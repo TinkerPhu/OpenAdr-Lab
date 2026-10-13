@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # docker_host_lock.sh — cooperative lease lock for a shared docker host
-# (e.g. Node1 or Node2).
+# (e.g. Node1, Node2 or Node3).
 #
 # Multiple worktrees / AI sessions deploy and test on the same host. Anything
 # that builds or runs docker there must hold this lock first. The lock lives
@@ -15,21 +15,20 @@
 #   bash scripts/docker_host_lock.sh refresh [-l MIN]   # extend the lease (from now)
 #   bash scripts/docker_host_lock.sh status
 #
-# Semantics:
+# Semantics (scripts/lib/lease_lock_core.sh, shared with wsl_lock.sh):
 #   - The acquirer declares its own lease end (now + LEASE_MIN, stored as a UTC
 #     epoch in the lock). Once that point is past, the lock counts as dead
 #     (crashed session) and is stolen by the next acquirer, with a warning.
 #   - Re-entrant per owner: acquiring while already holding renews the lease.
 #   - acquire waits up to MAX_WAIT_SEC, then exits 2 ("rerun to keep waiting") —
 #     kept under the 10-minute tool timeout of AI sessions on purpose.
-#   - Owner identity = user@host:<worktree path>, so release/refresh only act
-#     on a lock you own.
+#   - Owner identity = user@host:<worktree path>#session-<id> (scripts/lib/
+#     lease_lock_cli.sh), so release/refresh only act on a lock you own.
 #   - Host: LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
 #     the shared default (also used by run_all_tests.sh); falls back to "Node1".
-#     This script isn't Node1-specific despite the filename — it works against
-#     any docker host reachable the same way (e.g. LOCK_HOST=Node2). The
-#     lock file's name is derived from the host, so each host gets its own
-#     independent lock automatically.
+#     The lock file has one fixed path on the host, so every SSH alias of a
+#     machine reaches the same lock; it was once named after the alias, which
+#     made two aliases of one machine two independent locks.
 #
 set -euo pipefail
 
@@ -37,115 +36,19 @@ LOCK_TARGET_HOST="${LOCK_HOST:-${OPENADR_LAB_HOST:-Node1}}"
 LEASE_MIN="${LOCK_LEASE_MIN:-60}"
 POLL_SEC="${LOCK_POLL_SEC:-20}"
 MAX_WAIT_SEC="${LOCK_MAX_WAIT_SEC:-540}"
+LOCK_PATH="${DOCKER_HOST_LOCK_PATH:-/tmp/openadr_docker_host.lock}"
+LOCK_SCRIPT_NAME="docker_host_lock.sh"
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-OWNER="$(whoami)@$(hostname):${repo_root}"
+usage() { sed -n '2,31p' "$0"; exit 1; }
 
-usage() { sed -n '2,25p' "$0"; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib/lease_lock_cli.sh"
 
-# One SSH round-trip; all check-and-act logic runs server-side so it is atomic
-# (mkdir is the mutex; the owner file is metadata). The lock path is defined
-# inside the remote script, not passed as an argument — MSYS (Git Bash on
-# Windows) rewrites arguments that look like absolute POSIX paths.
-remote_op() { # $1=op  $2=description
-    # printf %q: ssh joins remote-command args with spaces, so multi-word
-    # descriptions must be shell-escaped to survive the remote word split.
-    ssh "$LOCK_TARGET_HOST" bash -s -- $(printf '%q %q %q %q %q' "$1" "$OWNER" "$LEASE_MIN" "${2:-}" "$LOCK_TARGET_HOST") <<'REMOTE'
-op="$1"; owner="$2"; lease_min="$3"; desc="$4"; host="$5"
-lock="/tmp/openadr_$(echo "$host" | tr '[:upper:]' '[:lower:]').lock"
-now=$(date +%s)
-expiry=$(( now + lease_min * 60 ))
-# Written via a temp file and renamed: a plain `>` truncates in place, so a
-# concurrent reader can see an empty or half-written file. rename(2) is atomic
-# within one filesystem, so a reader sees the old owner or the new one, never a
-# partial record.
-write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner.$$" && mv -f "$lock/owner.$$" "$lock/owner"; }
-# True only for an expiry we actually parsed. "Could not read it" is not the
-# same answer as "it expired", and conflating the two is what let two acquirers
-# both believe they held the lock.
-valid_expiry() { case "${cur_expiry:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
-read_owner()  { cur_owner=$(sed -n 1p "$lock/owner" 2>/dev/null)
-                cur_expiry=$(sed -n 2p "$lock/owner" 2>/dev/null)
-                cur_desc=$(sed -n 3p "$lock/owner" 2>/dev/null)
-                left_min=$(( (${cur_expiry:-0} - now) / 60 ))
-                expiry_utc=$(date -u -d "@${cur_expiry:-0}" +'%Y-%m-%d %H:%MZ' 2>/dev/null || echo '?'); }
-held_msg() { echo "$1 by $cur_owner: ${cur_desc:-no description} (lease ends $expiry_utc, in ${left_min}min)"; }
-case "$op" in
-  try_acquire)
-    if mkdir "$lock" 2>/dev/null; then write_owner; echo "ACQUIRED (lease ${lease_min}min)"; exit 0; fi
-    read_owner
-    if [ "$cur_owner" = "$owner" ]; then write_owner; echo "ACQUIRED (re-entrant, lease renewed ${lease_min}min)"; exit 0; fi
-    if valid_expiry; then
-        if [ "$now" -ge "$cur_expiry" ]; then
-            write_owner
-            echo "ACQUIRED (stole dead lock from ${cur_owner:-unknown}, lease expired $(( -left_min ))min ago: ${cur_desc:-?})"
-            exit 0
-        fi
-        held_msg "HELD"; exit 1
-    fi
-    # Owner missing or unparsable. Either the winner of the mkdir is still writing
-    # it (microseconds) or it died between the mkdir and the write (forever).
-    # Waiting is right for the first and wrong for the second, so the lock's own
-    # age decides; anything younger than the grace period is a claim in flight.
-    lock_age=$(( now - $(stat -c %Y "$lock" 2>/dev/null || echo "$now") ))
-    if [ "$lock_age" -ge 120 ]; then
-        write_owner
-        echo "ACQUIRED (stole a lock whose owner was never written, ${lock_age}s old)"
-        exit 0
-    fi
-    echo "HELD by an acquirer still writing its claim (${lock_age}s old) - rerun"; exit 1 ;;
-  release)
-    [ -d "$lock" ] || { echo "NOT LOCKED"; exit 0; }
-    read_owner
-    if [ "$cur_owner" = "$owner" ]; then rm -rf "$lock"; echo "RELEASED"; exit 0; fi
-    held_msg "NOT OWNER — held"; exit 1 ;;
-  refresh)
-    [ -d "$lock" ] || { echo "NOT LOCKED — nothing to refresh"; exit 1; }
-    read_owner
-    if [ "$cur_owner" = "$owner" ]; then desc="$cur_desc"; write_owner; echo "REFRESHED (lease ${lease_min}min from now)"; exit 0; fi
-    held_msg "NOT OWNER — held"; exit 1 ;;
-  status)
-    [ -d "$lock" ] || { echo "FREE"; exit 0; }
-    read_owner
-    if ! valid_expiry; then
-        echo "HELD (owner unreadable - an acquirer mid-write, or one that died before writing)"
-    elif [ "$now" -ge "$cur_expiry" ]; then
-        echo "DEAD (stealable) — was $cur_owner: ${cur_desc:-no description} (lease expired $(( -left_min ))min ago)"
-    else
-        held_msg "HELD"
-    fi
-    exit 0 ;;
-esac
-REMOTE
+# ssh joins its command arguments with spaces and the remote shell splits them
+# again, so the arguments travel as one %q-escaped command line. Being one string
+# that starts with "bash", it also escapes MSYS's rewriting of arguments that look
+# like absolute POSIX paths (Git Bash on Windows).
+lock_op() { # $1=op  $2=description
+    ssh "$LOCK_TARGET_HOST" "bash -s -- $(printf '%q ' "$1" "$LOCK_OWNER_ID" "$LEASE_MIN" "${2:-}" "$LOCK_PATH")" < "$LEASE_LOCK_CORE"
 }
 
-cmd="${1:-}"; shift 2>/dev/null || true
-desc=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -m) desc="${2:?-m needs a description}"; shift 2 ;;
-        -l) LEASE_MIN="${2:?-l needs minutes}"
-            case "$LEASE_MIN" in *[!0-9]*|'') echo "-l needs a whole number of minutes"; exit 1 ;; esac
-            shift 2 ;;
-        *)  echo "Unknown argument: $1"; usage ;;
-    esac
-done
-
-case "$cmd" in
-    acquire)
-        [ -n "$desc" ] || desc="(no description) started $(date -u +%H:%MZ)"
-        waited=0
-        while true; do
-            if out=$(remote_op try_acquire "$desc"); then echo "$out"; exit 0; fi
-            echo "$out"
-            if [ "$waited" -ge "$MAX_WAIT_SEC" ]; then
-                echo "Still held after ${waited}s — rerun 'docker_host_lock.sh acquire' to keep waiting."
-                exit 2
-            fi
-            echo "  waiting ${POLL_SEC}s... (${waited}s so far; the lock is stealable once its lease end passes)"
-            sleep "$POLL_SEC"; waited=$((waited + POLL_SEC))
-        done ;;
-    release|refresh|status)
-        remote_op "$cmd" "" ;;
-    *) usage ;;
-esac
+lease_lock_main "$@"

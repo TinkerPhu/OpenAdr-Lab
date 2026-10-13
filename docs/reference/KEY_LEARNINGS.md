@@ -3344,3 +3344,17 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - Before giving a route a UI surface, check whether the UI already shows the same data. Both
   per-asset series routes (R-139) turned out to be a second answer: the history one duplicated the
   Controller timeline, and the forecast one was a plan-unaware extrapolation nothing else read.
+
+## A lock is only as good as its two names: the resource's and the holder's (2026-10-13)
+
+- Name a lock after the resource as the resource knows itself, never after the caller's handle
+  for it. `docker_host_lock.sh` named the lock file after the SSH alias, so two aliases of one
+  machine were two locks: a status check through the second alias read FREE while an E2E run
+  held the first, and a full suite was minutes from `compose down -v` on the running one.
+- Name the holder after the thing that can hold it twice. Owner identity was the checkout path,
+  and several AI sessions share one checkout, so a second session's acquire was "re-entrant" and
+  its release would have deleted the first session's lock. The owner now carries
+  `CLAUDE_CODE_SESSION_ID`.
+- Two scripts implementing one lock had already drifted (the WSL copy lacked the atomic owner
+  write and the unreadable-owner grace period). One core (`scripts/lib/lease_lock_core.sh`),
+  one test that drives both entry points (`scripts/test_lease_lock.sh`).
