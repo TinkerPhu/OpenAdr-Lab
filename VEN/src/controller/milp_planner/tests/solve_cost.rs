@@ -28,9 +28,9 @@ fn bench_profile(with_heater: bool) -> Profile {
     let volume_l = 200.0_f64;
     let thermal_mass = volume_l * 4.186 / 3600.0;
 
-    let mut assets: Vec<AssetProfile> = Vec::new();
+    let mut assets: Vec<AssetParams> = Vec::new();
     if with_heater {
-        assets.push(AssetProfile::Heater(HeaterParams {
+        assets.push(AssetParams::Heater(HeaterParams {
             default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 6.0,
@@ -47,7 +47,7 @@ fn bench_profile(with_heater: bool) -> Profile {
             c_terminal_eur_kwh: None,
         }));
     }
-    assets.push(AssetProfile::Ev(EvParams {
+    assets.push(AssetParams::Ev(EvParams {
         id: "ev".into(),
         max_charge_kw: 11.0,
         max_discharge_kw: 0.0,
@@ -61,13 +61,13 @@ fn bench_profile(with_heater: bool) -> Profile {
         v2g_capable: false,
         usage_sim: None,
     }));
-    assets.push(AssetProfile::Pv(PvParams {
+    assets.push(AssetParams::Pv(PvParams {
         id: "pv".into(),
         rated_kw: 6.0,
         inverter_max_kw: 6.0,
         co2_g_kwh: 0.0,
     }));
-    assets.push(AssetProfile::BaseLoad(BaseLoadParams {
+    assets.push(AssetParams::BaseLoad(BaseLoadParams {
         id: "base_load".into(),
         baseline_kw: 0.6,
         spikes: vec![],
@@ -75,7 +75,7 @@ fn bench_profile(with_heater: bool) -> Profile {
 
     Profile {
         assets,
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 300,
             plan_horizon_h: 48,
             plan_zones: vec![
@@ -94,7 +94,7 @@ fn bench_profile(with_heater: bool) -> Profile {
             ],
             c_ctrl_imp_malus_eur_kwh: 0.22,
             phase2_epsilon_eur: 0.17,
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,

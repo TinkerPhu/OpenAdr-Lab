@@ -133,7 +133,7 @@ fn pv_shorter_tau_decays_faster_in_forecast() {
 #[test]
 fn pv_zero_offset_matches_sin_model() {
     // Backward compat: when irradiance_offset=0, p_pv_kw must equal the
-    // profile's pure sin model (PvConfig::forecast_kw).
+    // profile's pure sin model (PvParams::forecast_kw).
     let now = fixed_now(); // 06:00 → natural = 0 at slot 0
     let profile = make_profile(); // rated_kw=5.0, step_s=300s
 
@@ -370,7 +370,7 @@ fn make_pv_only_profile() -> Profile {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Pv(_) | AssetParams::BaseLoad(_)));
     profile
 }
 

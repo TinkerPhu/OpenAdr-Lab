@@ -15470,3 +15470,17 @@ deletion over a UI surface.
 **Issues.** The R-133 branch's first E2E run failed on a BDD scenario still reading the deleted
 `/trace/history`: deleting a route needs a grep of `tests/features/` for its path, not only of the
 Rust and UI callers.
+
+## R-126: one type per name in the planner tests (refactor/r126-test-aliases)
+
+**What.** Deleted seven aliases in `controller/milp_planner/tests/mod.rs` (`AssetProfile`,
+`BatteryConfig`, `EvConfig`, `HeaterConfig`, `PvConfig`, `BaseLoadConfig`, `PlannerConfig`) and wrote
+the types they stood for (`AssetParams`, `BatteryParams`, …, `PlannerParams`) in the planner tests.
+
+**Why.** Each alias named a *different* real type: `profile::schema::AssetProfile` and the
+`profile::schema::*Config` structs are the YAML profile, the aliases meant the typed `entities`
+parameters. A reader grepping a name from a planner test landed in the YAML layer. The struct in
+`design_vocabulary.rs` the row first described was already gone (R-132); the alias was the second
+`AssetProfile` left. `profile::schema::AssetProfile` keeps its name: it is now the only type called
+that, and "profile" is the YAML file's own word, so the suggested `AssetSpec` rename would only
+churn.

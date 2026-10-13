@@ -229,7 +229,7 @@ fn tariff_fallback_when_series_empty() {
 
 #[test]
 fn heater_mid_kw_defaults_to_half_max() {
-    // HeaterConfig.mid_kw = None → p_heat_mid_kw = max_kw / 2.0
+    // HeaterParams.mid_kw = None → p_heat_mid_kw = max_kw / 2.0
     let now = fixed_now();
     let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
     let mut sim = make_snap_from_profile(&profile);
@@ -258,9 +258,9 @@ fn heater_single_stage_step_is_full_power() {
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Heater(mut h) => {
+            AssetParams::Heater(mut h) => {
                 h.power_stages = 1;
-                AssetProfile::Heater(h)
+                AssetParams::Heater(h)
             }
             other => other,
         })

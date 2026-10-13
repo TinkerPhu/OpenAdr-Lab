@@ -24,7 +24,7 @@ fn ev_session_with_mode(
 fn ev_only_profile() -> Profile {
     let mut p = make_profile_1800s();
     p.assets
-        .retain(|a| matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Ev(_) | AssetParams::BaseLoad(_)));
     p
 }
 
