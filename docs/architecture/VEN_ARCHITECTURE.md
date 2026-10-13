@@ -370,8 +370,11 @@ HiGHS or `run_planner` directly.
 
 - **Three tiers** with variable step sizes: fine-grained near-horizon (e.g. 5 min slots),
   coarser mid-horizon, sparse far-horizon. Controlled by `PlannerParams.plan_zones`.
-- **Assets as MILP variables**: EV continuous power `p_ev_kw[t]`, heater discrete tiers
-  (`z_heat_mid[t]`, `z_heat_full[t]`), battery SoC tracking, etc.
+- **Assets declare their own part**: each asset declares its variables, its net power in the
+  site balance, its cost and friction terms and its plan result through `AssetMilpContext`
+  (EV continuous power and SoC, heater stage index and tank energy, battery legs and stored
+  energy); the planner core names no asset kind. See "How assets take part" in the design
+  reference.
 - **Session intent as constraints**: `EvSession`/`HeaterTarget`/`ShiftableLoad` provide
   energy target, deadline, and mode; the solver iterates over asset variables, not session
   objects. See §2.3.1 below.
@@ -1005,7 +1008,8 @@ infeasible if the target were a hard bound. Each obligation therefore carries it
 `shortfall_soc` slack (`ev_milp.rs::constraints`): the target stays what was asked for, the plan
 charges everything the window allows, and the slack the solver had to buy *is* the gap — reported
 per obligation, naming the session it came from, as a `WarningKind::EvCoreEnergyUnmet` plan warning
-by `milp_planner::ev_diagnostics::firm_shortfall`. Because the model decides the gap, nothing
+by the EV itself (`EvMilpContext::firm_shortfall`, `assets/ev_declared.rs`), carried on its
+`AssetSolution`. Because the model decides the gap, nothing
 outside it re-derives the number (R-93 replaced an earlier pre-solve
 `min(required, reachable_energy_kwh)` cap, which had to be compared against afterwards to recover
 the shortfall). That is the warning's only meaning — a soft request

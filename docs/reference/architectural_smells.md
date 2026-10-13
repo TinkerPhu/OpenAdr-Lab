@@ -52,9 +52,11 @@ duplication), R-125 (SoC names without a unit). R-121 (`ui-charts/` held more th
 - Fixed since: #2 (R-128), #3 (R-129).
 - Filed: #4 R-130, #5 R-131, #7 R-132.
 - Closed without a fix: #1 (R-127). **Several assets of one kind in a VEN do not fit into this
-  project** (user decision, 2026-10-10). The plan fields are only the visible part: the MILP has one
-  variable slot each for battery, EV and heater, takes one PV and one base-load series, and about
-  70 places look an asset up by its fixed id. Lifting that is a different product, beyond what an
+  project** (user decision, 2026-10-10). Since 2026-10-13 the MILP core itself is not the
+  obstacle: it plans each asset by its own id from what the asset declares (no per-kind slot,
+  `tests/multi_instance.rs`). What remains is the rest of the way: the per-asset plan wire format,
+  PV and base load as single site series, sessions, the arbiter and the UI, and the places that
+  look an asset up by its fixed id. Lifting that is a different product, beyond what an
   OpenADR lab needs. A VEN has at most one asset of each kind (shiftable loads excepted), and the
   one-PV / one-battery plan fields are that boundary written down, not a debt. Do not re-file.
   The boundary is enforced: `profile::validate` refuses a profile with two assets of a kind
