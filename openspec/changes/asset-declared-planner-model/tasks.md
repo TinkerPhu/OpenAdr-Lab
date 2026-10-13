@@ -130,13 +130,13 @@ otherwise.
 
 ## 7. Several assets of one kind, at planner level (spec requirement 2)
 
-- [ ] 7.1 Test: two battery contexts (`"bat-a"` 10 kWh at 0.2 SoC, `"bat-b"` 5 kWh at 0.9 SoC)
+- [x] 7.1 Test: two battery contexts (`"bat-a"` 10 kWh at 0.2 SoC, `"bat-b"` 5 kWh at 0.9 SoC)
       under a two-zone tariff. Each id gets its own allocation and planned SoC, and each planned
       energy stays within its own bounds. Verify: green on Node2.
-- [ ] 7.2 Test: two EV contexts with different departures and firm targets. Each charges toward its
+- [x] 7.2 Test: two EV contexts with different departures and firm targets. Each charges toward its
       own target, and an unreachable target on one names that EV's session in the warning. Verify:
       green on Node2.
-- [ ] 7.3 Test: the coexistence interaction with two batteries and one EV declares two pairs; with
+- [x] 7.3 Test: the coexistence interaction with two batteries and one EV declares two pairs; with
       no discharger it declares nothing (spec requirement 3). Verify: green.
 
 ## 8. Make it structural (D12)
