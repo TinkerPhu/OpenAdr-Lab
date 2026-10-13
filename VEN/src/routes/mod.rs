@@ -78,10 +78,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(timeline::get_timeline_all))
         .route("/timeline/:asset_id", get(timeline::get_timeline))
-        // Asset forecast + history + capability endpoints (speckit 007 / Phase A)
-        .route("/forecast/:asset_id", get(assets::get_asset_forecast))
-        // Persistent history routes (Phase 1, WP1.4) — literal segments must
-        // precede /:asset_id so they aren't shadowed by the live-history route.
+        // Persistent history routes (Phase 1, WP1.4).
         .route("/history/ticks", get(hems::get_history_ticks))
         .route("/history/grid", get(hems::get_history_grid))
         .route("/history/events", get(hems::get_history_events))
@@ -92,7 +89,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         // GB-25: per-plan-cycle solve-quality history.
         .route("/history/plans", get(hems::get_history_plans))
-        .route("/history/:asset_id", get(assets::get_asset_history))
+        // Phase A: the asset's own feasible power range.
         .route("/capability/:asset_id", get(assets::get_asset_capability))
         .route(
             "/assets/:asset_id/comfort_curve",

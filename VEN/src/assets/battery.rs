@@ -12,7 +12,6 @@ use crate::entities::asset::{
 };
 use crate::entities::asset_params::{BatteryParams, RequestDefaults};
 use crate::entities::device_session::{EvSession, HeaterTarget};
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 /// Minimum time a direction's max rate must be sustainable to be reported as
 /// available power (see `Battery::capability_inner`).
@@ -150,62 +149,6 @@ impl Battery {
             state.soc_frac = soc_frac.clamp(0.0, 1.0);
         }
     }
-
-    pub fn forecast(
-        &self,
-        state: &BatteryState,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Linear);
-        }
-        let end = now + timespan;
-        let setpoint = state
-            .actual_power_kw
-            .clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
-
-        let mut t = now;
-        let mut soc_frac = state.soc_frac;
-
-        while t < end {
-            let kw = if (setpoint > 0.0 && soc_frac >= 1.0)
-                || (setpoint < 0.0 && soc_frac <= self.min_soc_frac)
-            {
-                0.0
-            } else {
-                setpoint
-            };
-            samples.push((t, kw));
-
-            let dt_h = 1.0 / 60.0;
-            // R-69: same symmetric sqrt(round_trip_efficiency) split as step_inner.
-            let eff = self.round_trip_efficiency.sqrt();
-            if kw > 0.0 {
-                soc_frac +=
-                    (crate::entities::units::energy_kwh(kw, dt_h) * eff) / self.capacity_kwh;
-            } else {
-                soc_frac +=
-                    (crate::entities::units::energy_kwh(kw, dt_h) / eff) / self.capacity_kwh;
-            }
-            soc_frac = soc_frac.clamp(0.0, 1.0);
-            t += Duration::seconds(60);
-        }
-        let end_kw = if (setpoint > 0.0 && soc_frac >= 1.0)
-            || (setpoint < 0.0 && soc_frac <= self.min_soc_frac)
-        {
-            0.0
-        } else {
-            setpoint
-        };
-        samples.push((end, end_kw));
-
-        TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
-        }
-    }
 }
 
 impl Asset for Battery {
@@ -310,11 +253,6 @@ impl Asset for Battery {
         Self::reset(self, s, values)
     }
 
-    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let s: &BatteryState = own(state);
-        Self::forecast(self, s, timespan, now)
-    }
-
     fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
         Some(self)
     }
@@ -409,7 +347,6 @@ impl RequestResolvable for Battery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn key_features_declare_capacity_from_the_profile() {
@@ -506,41 +443,6 @@ mod tests {
             assert_eq!(floor.min_export_kw, 0.0, "soc={soc_frac}");
             assert_eq!(floor.min_import_kw, 0.0, "soc={soc_frac}");
         }
-    }
-
-    #[test]
-    fn forecast_zero_timespan_returns_empty() {
-        let (bat, state) = make_battery_cfg(0.5);
-        let series = bat.forecast(&state, Duration::zero(), Utc::now());
-        assert!(series.samples.is_empty());
-    }
-
-    #[test]
-    fn forecast_at_full_soc_charge_setpoint_returns_zero() {
-        let (bat, mut state) = make_battery_cfg(1.0);
-        state.actual_power_kw = 5.0;
-        let series = bat.forecast(&state, Duration::seconds(300), Utc::now());
-        for (_, v) in &series.samples {
-            assert_eq!(
-                *v, 0.0,
-                "Full SoC battery with charge setpoint must return zero"
-            );
-        }
-    }
-
-    #[test]
-    fn forecast_has_boundary_point_at_exactly_now_plus_timespan() {
-        let (bat, state) = make_battery_cfg(0.5);
-        let timespan = Duration::seconds(120);
-        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
-        let series = bat.forecast(&state, timespan, now);
-        assert!(!series.samples.is_empty());
-        let last_ts = series.samples.last().unwrap().0;
-        assert_eq!(
-            last_ts,
-            now + timespan,
-            "boundary point must be exactly now+timespan, not merely close to wall-clock"
-        );
     }
 
     #[test]

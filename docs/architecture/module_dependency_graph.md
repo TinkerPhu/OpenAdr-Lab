@@ -4,7 +4,7 @@
               R_HEMS["hems.rs\nPOST /plan\nGET /obligations\n/user-requests\n/ev-session"]
               R_SIM["sim.rs\nGET/POST /sim\n/sim/inject\n/sim/schema"]
               R_TL["timeline.rs\nGET /timeline/all\n/timeline/:asset_id"]
-              R_ASSETS["assets.rs\nGET /forecast/:id\n/history/:id\n/capability/:id"]
+              R_ASSETS["assets.rs\nGET /capability/:id"]
               R_REPORTS["reports.rs\nGET/POST /reports"]
               R_TRACE["trace.rs\nGET /trace/events"]
               R_ERR["error.rs\nDomainError → HTTP status\n(the one presentation-boundary mapping)"]

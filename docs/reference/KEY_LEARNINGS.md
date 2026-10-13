@@ -3335,3 +3335,12 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   meter equals the sum of the asset powers.
 - A column rename is a usable migration guard where no schema version exists: once renamed, the
   old column is gone and the rescale cannot run twice.
+
+## A deleted route's last reader can be a BDD step (2026-10-13)
+
+- Before deleting a route, grep its path in `tests/features/` (feature files and steps), not only
+  in the Rust and UI code. Removing `/trace/history` (R-133) cleared clippy, the Rust tests and
+  `tsc`, and still cost a full E2E run: one scenario polled it.
+- Before giving a route a UI surface, check whether the UI already shows the same data. Both
+  per-asset series routes (R-139) turned out to be a second answer: the history one duplicated the
+  Controller timeline, and the forecast one was a plan-unaware extrapolation nothing else read.

@@ -113,7 +113,7 @@ pub(super) fn forecast_series(bounds: &[SlotBounds], site: &SiteInputs) -> (Vec<
         // pv-competence-consolidation section 4: `pv_live_forecast_kw`
         // (resolved by the caller from a live `PvInverter` via
         // `uncurtailed_power_kw_at` — the same weather/decay-aware method
-        // `max_effort_schedule`/`forecast()` use) is PV's own authority for
+        // `max_effort_schedule` uses) is PV's own authority for
         // this slot. `pv_forecast_override` (the deterministic-testing pin)
         // always wins over it; `weather_pv_kw` (R-50) and the static `pv_cfg`
         // sin-model curve are the fallback chain for when no live "pv" asset
@@ -133,8 +133,7 @@ pub(super) fn forecast_series(bounds: &[SlotBounds], site: &SiteInputs) -> (Vec<
         );
         // base-load-competence-consolidation: `base_load_live_forecast_kw`
         // (resolved by the caller from the live `BaseLoad`'s own
-        // `forecast_kw_at`, the same heuristic-aware method `forecast()`
-        // uses) is the base load's own answer. `flat_base_kw` (the static
+        // heuristic-aware `forecast_kw_at`) is the base load's own answer. `flat_base_kw` (the static
         // profile) is the fallback for when no live "base_load" asset exists.
         p_base.push(
             site.base_load_live_forecast_kw

@@ -1,6 +1,5 @@
 Feature: Persistent history routes (Phase 1, WP1.4)
-  Read routes over the SQLite-backed HistoryPort store — distinct from the
-  live in-memory /history/:asset_id ring-buffer endpoint.
+  Read routes over the SQLite-backed HistoryPort store.
 
   Background:
     Given the VEN is running with profile "test"
@@ -79,11 +78,6 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     Then the response JSON array's first item has field "solver_ms"
     And the response JSON array's first item has field "solve_status"
     And the response JSON array's first item has field "warning_kinds"
-
-  @history
-  Scenario: The live in-memory history route still resolves for a real asset id
-    When I GET /history/ev from the VEN
-    Then the response status is 200
 
   @history
   Scenario: GET /ledger without asset_id keeps its existing shape

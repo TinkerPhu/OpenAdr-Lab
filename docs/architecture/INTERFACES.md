@@ -93,8 +93,6 @@ Valid `:asset_id` values: `battery`, `ev`, `heater`, `pv`, `base_load`
 |--------|------|---------|
 | GET | `/timeline/all` | Timeline for all assets |
 | GET | `/timeline/:asset_id` | Timeline for one asset |
-| GET | `/forecast/:asset_id` | Forecast for one asset |
-| GET | `/history/:asset_id` | Historical data for one asset |
 | GET | `/capability/:asset_id` | Capability envelope for one asset |
 
 ---

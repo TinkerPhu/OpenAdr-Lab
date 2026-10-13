@@ -1,12 +1,11 @@
 //! What the HTTP adapters read about the simulated assets, as plain data. Each method is one
-//! short look at the live roster, answered by the assets themselves (`Asset::forecast`,
-//! `capability`, `state_values`, ...); the implementation (`simulator::SimHandle`) takes the
+//! short look at the live roster, answered by the assets themselves (`capability`,
+//! `state_values`, ...); the implementation (`simulator::SimHandle`) takes the
 //! simulator lock inside the call and releases it before returning, so a handler cannot hold it
 //! across an `.await` and never sees `SimState`, `&dyn Asset` or an asset's state enum.
 
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
-use lab_core::time_series::TimeSeries;
+use chrono::{DateTime, Utc};
 
 use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
@@ -19,25 +18,8 @@ pub trait SimReadPort: Send + Sync {
     /// values and the Grid asset, all converted before the lock is released.
     async fn timeline_snapshot(&self, now: DateTime<Utc>) -> TimelineSnapshot;
 
-    /// The asset's own forward-looking power series over `timespan`; `None` = unknown asset.
-    async fn asset_forecast(
-        &self,
-        asset_id: &str,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> Option<TimeSeries>;
-
     /// The asset's feasible power range, flexibility floor and key features; `None` = unknown asset.
     async fn asset_capability(&self, asset_id: &str) -> Option<AssetCapabilityView>;
-
-    /// The asset's recorded power over the last `timespan`, anchored by a last-observation-carried-
-    /// forward point at `now - timespan`; `None` = unknown asset.
-    async fn asset_history(
-        &self,
-        asset_id: &str,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> Option<TimeSeries>;
 
     /// The asset's built-in comfort curve; `None` = unknown asset.
     async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>>;

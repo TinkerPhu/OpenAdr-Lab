@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -13,7 +13,6 @@ use crate::entities::asset::{
 };
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 // HeaterEmergencyMode moved to heater_emergency.rs (Spec A Phase 2a, file-size split).
 pub use super::heater_emergency::HeaterEmergencyMode;
@@ -323,41 +322,6 @@ impl Heater {
         }
     }
 
-    pub fn forecast(
-        &self,
-        state: &HeaterState,
-        timespan: Duration,
-        now: DateTime<Utc>,
-    ) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Linear);
-        }
-        let end = now + timespan;
-        // Simulate uncontrolled thermostat operation (no plan overlay, setpoint = 0)
-        // through the same step the live tick uses, so the forecast's thermostat is
-        // the real one (emergency at T_min, its hysteresis, cutoff at T_max) rather
-        // than a second copy of the rule.
-        let setpoint = self.default_setpoint();
-        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
-
-        let mut t = now;
-        let mut s = state.clone();
-
-        while t < end {
-            let (next, kw) = self.step_inner(&s, setpoint, Duration::seconds(60));
-            samples.push((t, kw));
-            s = next;
-            t += Duration::seconds(60);
-        }
-        let end_kw = self.step_inner(&s, setpoint, Duration::zero()).1;
-        samples.push((end, end_kw));
-
-        TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
-        }
-    }
-
     /// Constant per-step thermal demand forecast [kW].
     /// Uses the midpoint of the comfort band as the representative tank temperature.
     /// `Q_dem = draw_kw + k_loss × (T_mid − ambient_temp_c)`
@@ -448,11 +412,6 @@ impl Asset for Heater {
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut HeaterState = own_mut(state);
         Self::reset(self, s, values)
-    }
-
-    fn forecast(&self, state: &AssetState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        let s: &HeaterState = own(state);
-        Self::forecast(self, s, timespan, now)
     }
 
     fn as_milp_participant(&self) -> Option<&dyn MilpParticipant> {
@@ -928,53 +887,6 @@ mod tests {
     }
 
     // ── forecast ─────────────────────────────────────────────────────────────
-
-    /// When the heater is at temp_max (thermostat forced off), the forecast simulates
-    /// thermostat-only operation (setpoint=0). The tank cools to T_min, the emergency
-    /// fires at max_kw, and the cycle repeats — average power ≈ heat loss at T_min.
-    #[test]
-    fn forecast_at_temp_max_gives_non_zero_average_power() {
-        let heater = default_heater();
-        let state = state_at(23.0, 0.0);
-        // thermal_mass=2.0 kWh/°C → τ=20h; T drops from 23→20°C in ~5h.
-        // Use 24h to ensure full thermostat cycling is captured.
-        let ts = heater.forecast(&state, Duration::hours(24), Utc::now());
-
-        // Compute mean power over the forecast samples
-        let n = ts.samples.len() as f64;
-        assert!(n > 0.0, "forecast produced no samples");
-        let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;
-
-        // Thermostat cycles near T_min=20°C → heat loss ≈ 0.1×(20-10) = 1.0 kW.
-        // Allow ±0.5 kW tolerance for simulation step error.
-        assert!(
-            mean > 0.5,
-            "forecast mean {mean:.3} kW is too close to 0 — old bug likely present",
-        );
-        assert!(
-            mean < 2.5,
-            "forecast mean {mean:.3} kW exceeds max_kw — something is wrong",
-        );
-    }
-
-    /// When actual_power_kw is already non-zero, both old and new code produce
-    /// similar results, but new code is consistent.
-    #[test]
-    fn forecast_at_mid_temp_gives_reasonable_oscillation() {
-        let heater = default_heater();
-        let state = state_at(21.5, 1.3);
-        // thermal_mass=2.0 kWh/°C → T drops from 21.5→20°C (T_min) in ~2.8h.
-        // Use 12h to ensure cycling is captured in the mean.
-        let ts = heater.forecast(&state, Duration::hours(12), Utc::now());
-        let n = ts.samples.len() as f64;
-        assert!(n > 0.0);
-        let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;
-        // Expect long-run equilibrium in reasonable range
-        assert!(
-            (0.5..=2.5).contains(&mean),
-            "mean {mean:.3} kW out of range"
-        );
-    }
 
     // ── step_inner physics ────────────────────────────────────────────────────
 

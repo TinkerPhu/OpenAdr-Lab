@@ -1,59 +1,15 @@
+//! The per-asset capability route. Reads the asset's own answer through `SimReadPort`
+//! and serializes it whole; never computes or adjusts a range itself.
+
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
 
 use crate::app_ctx::SimRead;
 
 use crate::routes::error::unknown_asset;
-
-/// A time series as `{"samples": [{"ts": ..., "value": ...}], "interpolation": ...}` - the one
-/// wire shape of the forecast and history routes.
-fn series_json(series: &lab_core::time_series::TimeSeries) -> axum::response::Response {
-    let samples: Vec<serde_json::Value> = series
-        .samples
-        .iter()
-        .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
-        .collect();
-    Json(serde_json::json!({
-        "samples": samples,
-        "interpolation": series.interpolation,
-    }))
-    .into_response()
-}
-
-/// Query parameters for GET /forecast/:asset_id.
-#[derive(Deserialize)]
-pub struct ForecastParams {
-    pub timespan_s: Option<f64>,
-}
-
-/// Query parameters for GET /history/:asset_id.
-#[derive(Deserialize)]
-pub struct HistoryParams {
-    pub timespan_s: Option<f64>,
-}
-
-/// GET /forecast/:asset_id — forward-looking TimeSeries for one asset (speckit 007).
-/// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
-pub async fn get_asset_forecast(
-    State(sim_read): State<SimRead>,
-    Path(asset_id): Path<String>,
-    Query(params): Query<ForecastParams>,
-) -> impl IntoResponse {
-    use chrono::Duration;
-
-    let timespan_s = params.timespan_s.unwrap_or(0.0);
-    let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
-    let now = chrono::Utc::now();
-
-    match sim_read.asset_forecast(&asset_id, timespan, now).await {
-        None => unknown_asset(&asset_id),
-        Some(series) => series_json(&series),
-    }
-}
 
 /// GET /capability/:asset_id — point-in-time feasible power range for one asset (Phase A).
 /// Returns `{"max_import_kw": ..., "max_export_kw": ..., "min_import_kw": ...,
@@ -71,24 +27,5 @@ pub async fn get_asset_capability(
         // The asset's own display facts and default request targets travel with its range
         // (`AssetCapabilityView`), serialized whole: no second list to keep in step (R-123).
         Some(view) => Json(view).into_response(),
-    }
-}
-
-/// GET /history/:asset_id — historical TimeSeries for one asset (speckit 007).
-/// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
-pub async fn get_asset_history(
-    State(sim_read): State<SimRead>,
-    Path(asset_id): Path<String>,
-    Query(params): Query<HistoryParams>,
-) -> impl IntoResponse {
-    use chrono::Duration;
-
-    let timespan_s = params.timespan_s.unwrap_or(0.0);
-    let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
-    let now = chrono::Utc::now();
-
-    match sim_read.asset_history(&asset_id, timespan, now).await {
-        None => unknown_asset(&asset_id),
-        Some(series) => series_json(&series),
     }
 }

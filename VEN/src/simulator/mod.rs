@@ -301,7 +301,7 @@ impl SimState {
     ///   PV outranks `weather_pv_kw`, BaseLoad replaces the natural profile+noise base.
     /// - `weather_pv_forecast`: the full weather-forecast series behind `weather_pv_kw`
     ///   (`pv-competence-consolidation`) — threaded onto `PvInverter` each tick so
-    ///   `max_effort_schedule`/`forecast()` can answer for points beyond `now` without a
+    ///   `max_effort_schedule` can answer for points beyond `now` without a
     ///   site-level caller supplying weather data directly.
     /// - `base_load_heuristic_kw`: BL-40's 3rd fallback tier — the site's learned
     ///   base-load heuristic (`AssetHeuristics::sample_kw`), used for `natural_base_kw`

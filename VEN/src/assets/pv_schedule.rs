@@ -1,12 +1,10 @@
 //! `PvInverter`'s weather/decay-aware forward projection — split out of
 //! `pv.rs` to stay under the file-size cap. `pv-competence-consolidation`:
-//! this is the mechanism that makes `Asset::max_effort_schedule`/`forecast()`
+//! this is the mechanism that makes `Asset::max_effort_schedule`
 //! actually authoritative for points beyond "now", replacing the site-level
 //! `pv_frames`/`pv_ceiling_kw` special-casing this phase retires.
 
 use chrono::{DateTime, Duration, Utc};
-
-use lab_core::time_series::{Interpolation, TimeSeries};
 
 use super::own_state::own;
 use super::pv::{PvInverter, PvPowerInputs, PvState};
@@ -63,9 +61,9 @@ impl PvInverter {
     }
 
     /// The uncurtailed (Physical-tier) export ceiling at a future point —
-    /// the one function `max_effort_schedule` and `forecast()` both build on
-    /// for `elapsed_s > 0`, so PV's own trait methods never disagree with
-    /// each other. `elapsed_s` (seconds since `weather_forecast` was
+    /// the one function `max_effort_schedule` and the planner's PV input
+    /// (`simulator::plan_context`) both build on for `elapsed_s > 0`, so they
+    /// never disagree with each other. `elapsed_s` (seconds since `weather_forecast` was
     /// captured this tick) is what `PvSmoothingState::decayed_offset_after`
     /// needs to correctly project the live offset forward — NOT reusable via
     /// `uncurtailed_power_kw`'s own `t=0`-only inputs, hence a distinct
@@ -81,7 +79,7 @@ impl PvInverter {
     /// itself, not stacked on top of a value already believed authoritative).
     /// Absent weather, falls back to the sin model plus the offset projected
     /// forward by `elapsed_s` — the same graceful degradation
-    /// `pv_ceiling_kw`/`forecast()` already had.
+    /// `pv_ceiling_kw` already had.
     ///
     /// A live measurement only exists for "now": at `elapsed_s == 0` it
     /// outranks the forecast exactly as in `uncurtailed_power_kw`, so the
@@ -235,45 +233,5 @@ impl PvInverter {
         (ts - self.live_inputs_at.unwrap_or(origin))
             .num_seconds()
             .max(0) as f64
-    }
-
-    /// D5: samples the same weather/decay-aware `uncurtailed_power_kw_at` path
-    /// `max_effort_schedule` uses, rather than the bare sin model. Still applies the
-    /// currently-active `generation_limit_kw` (this represents expected actual output,
-    /// curtailment included — unlike `max_effort_schedule`'s deliberately-uncurtailed
-    /// `Physical` tier).
-    pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
-        if timespan <= Duration::zero() {
-            return TimeSeries::empty(Interpolation::Linear);
-        }
-        let end = now + timespan;
-        let curtailed = |uncurtailed_kw: f64| -> f64 {
-            self.generation_limit_kw
-                .map(|lim| uncurtailed_kw.max(lim))
-                .unwrap_or(uncurtailed_kw)
-        };
-        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
-
-        let mut t = now;
-        while t < end {
-            let elapsed_s = (t - now).num_seconds() as f64;
-            samples.push((t, curtailed(self.uncurtailed_power_kw_at(t, elapsed_s))));
-            t += Duration::seconds(60);
-        }
-        let elapsed_s = (end - now).num_seconds() as f64;
-        samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
-
-        if samples.len() >= 2 {
-            let n = samples.len();
-            if (samples[n - 2].0 - samples[n - 1].0).num_seconds().abs() < 1 {
-                samples.truncate(n - 1);
-                samples.push((end, curtailed(self.uncurtailed_power_kw_at(end, elapsed_s))));
-            }
-        }
-
-        TimeSeries {
-            samples,
-            interpolation: Interpolation::Linear,
-        }
     }
 }

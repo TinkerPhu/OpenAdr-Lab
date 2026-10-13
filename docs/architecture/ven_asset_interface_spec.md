@@ -405,10 +405,6 @@ impl AssetHistoryBuffer {
 
     /// Most recent point. Used for the "current" segment of the timeline.
     pub fn latest(&self) -> Option<&HistoryPoint>;
-
-    /// Last-observation-carried-forward value at or before `t`.
-    /// Used for cross-asset aggregation: sum each asset's power_at(t) independently.
-    pub fn power_at(&self, t: DateTime<Utc>) -> Option<f64>;
 }
 ```
 
@@ -432,9 +428,8 @@ pub struct AssetEntry {
 ```
 
 `ControllerTrace.asset_history` (`HashMap<String, AssetHistoryBuffer>`) is **removed**.
-The dispatcher writes directly to `AssetEntry.history`.
-Cross-asset aggregation queries each `AssetEntry.history.power_at(t)` independently —
-no central mirror, no duplicated truth.
+The dispatcher writes directly to `AssetEntry.history`; readers slice each asset's own
+buffer — no central mirror, no duplicated truth.
 
 ---
 
