@@ -100,6 +100,22 @@ The rules, and why each exists:
      a request that attaches a token by hand has neither. Before R-135 the VEN's report POST was
      such a request, and it was the one that did not re-authenticate.
 
+  16. No asset kind in the planner core (`controller/milp_planner/`, `controller/milp_interactions.rs`):
+     no `AssetKind`, no `ids::ASSET_*`, no per-kind pool slot (`pool.bat`), no
+     `AssetSolutionDetail::` variant and no identifier starting `bat_`, `ev_`, `heat_` or
+     `heater_`. The planner composes its model and its plan from what each asset declares
+     (`AssetMilpContext`, `DeclaredAsset`, `AssetSolution`); a kind named here is a second place
+     that knows what that asset is, and the reason a second asset of the kind could not be
+     planned (openspec asset-declared-planner-model). Two exemptions: `milp_planner/asset_port.rs`
+     holds the asset-owned context, variable and readback types, there only because the domain
+     ring may not import `assets/` (R-23), and the `PlanTimeSlot` wire fields `bat_charge_kw` /
+     `bat_discharge_kw` keep their names until the plan's wire format is per asset (W2).
+
+  17. An `AssetSolutionDetail` variant is matched only in its own kind's declared-asset module
+     (`assets/<kind>_declared.rs`): the detail is the kind's private readback, used to pin its
+     own decisions and seed its own warm start. Anything else reading it is the same second copy
+     rule 16 keeps out of the planner.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -138,8 +154,11 @@ def code_lines(path: Path) -> "list[tuple[int, str]]":
 
 
 def rust_files(base: Path, skip_tests: bool = True) -> "list[Path]":
+    # A single file is a base of its own: `rglob` on a file finds nothing, so a rule naming one
+    # file would pass without having read it.
+    candidates = [base] if base.is_file() else base.rglob("*.rs")
     files = []
-    for p in base.rglob("*.rs"):
+    for p in candidates:
         rel = str(p.relative_to(REPO_ROOT))
         if skip_tests and (is_test_only_path(rel) or p.name == "tests.rs"
                            or "test_support" in p.parts):
@@ -231,6 +250,57 @@ UNIT_CONVERSION = (
 )
 
 
+# What only an asset knows about itself, named in the planner core (rule 16).
+ASSET_KIND_IN_PLANNER = (
+    r"\bAssetKind\b|\bids::ASSET_|\bAssetSolutionDetail::|\bpool\.(bat|ev|heater|shiftable)\b"
+    r"|\b(bat|ev|heat|heater)_[a-z_]+"
+)
+# The plan's wire fields that keep their names until the wire format is per asset (W2).
+PLAN_WIRE_FIELDS = r"\bbat_(charge|discharge)_kw\b"
+PLANNER_CORE = [
+    VEN_SRC / "controller" / "milp_planner",
+    VEN_SRC / "controller" / "milp_interactions.rs",
+]
+
+
+def names_asset_kind(line: str) -> bool:
+    """Whether a planner-core line names an asset kind, the plan's wire fields aside."""
+    return re.search(ASSET_KIND_IN_PLANNER, re.sub(PLAN_WIRE_FIELDS, "", line)) is not None
+
+
+def asset_kind_in_planner() -> "list[str]":
+    """Rule 16: the planner core's production lines naming an asset kind."""
+    hits = []
+    for h in forbid("asset-kind", PLANNER_CORE, ASSET_KIND_IN_PLANNER):
+        path, _, line = h.strip().partition(": ")
+        if path.replace(os.sep, "/").startswith("VEN/src/controller/milp_planner/asset_port.rs"):
+            continue
+        if names_asset_kind(line):
+            hits.append(h)
+    return hits
+
+
+# The one module allowed to read each kind's solution detail (rule 17).
+DETAIL_OWNER = {
+    "Battery": "assets/battery_declared.rs",
+    "Ev": "assets/ev_declared.rs",
+    "Heater": "assets/heater_declared.rs",
+    "ShiftableLoad": "assets/shiftable_declared.rs",
+}
+
+
+def solution_detail_outside_its_kind() -> "list[str]":
+    """Rule 17: an `AssetSolutionDetail` variant read outside its kind's own module."""
+    hits = []
+    for f in rust_files(VEN_SRC):
+        rel = f.relative_to(VEN_SRC).as_posix()
+        for n, line in code_lines(f):
+            for kind in re.findall(r"\bAssetSolutionDetail::(\w+)", line):
+                if DETAIL_OWNER.get(kind) != rel:
+                    hits.append(f"  {f.relative_to(REPO_ROOT)}:{n}: {line.strip()}")
+    return hits
+
+
 # How a request authenticates itself by hand, instead of through `ClientCredentials::send`.
 HAND_ATTACHED_TOKEN = (
     r"\bbearer_auth\(|\bbasic_auth\(|\bAUTHORIZATION\b|(?i:\"authorization\")|\"Bearer "
@@ -279,6 +349,8 @@ CHECKS = [
      lambda: [h for h in forbid("vtn-auth", [VEN_SRC, BFF_SRC, LAB_CORE_SRC],
                                 HAND_ATTACHED_TOKEN)
               if "lab-core/src/vtn_auth.rs" not in h.replace(os.sep, "/")]),
+    ("an asset kind named in the planner core", asset_kind_in_planner),
+    ("an asset's solution detail read outside its kind", solution_detail_outside_its_kind),
 ]
 
 
