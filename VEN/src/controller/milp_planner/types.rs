@@ -137,7 +137,7 @@ pub(crate) struct MilpInputs {
 
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
     pub(crate) w_tier_penalty_eur: f64,
-    /// What the asset contexts declare that the code around the solve reads (envelopes,
+    /// What the asset contexts declare that the code around the solve reads (session_flexibility,
     /// diagnostics, the result mapping). The solve itself reads each asset's own context.
     pub(crate) assets: super::input_stages::AssetScalars,
 }

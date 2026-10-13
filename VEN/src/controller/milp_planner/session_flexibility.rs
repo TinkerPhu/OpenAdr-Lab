@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 
 use crate::entities::asset_params::{EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
-use crate::entities::plan::{FlexibilityEnvelope, PlanTimeSlot};
+use crate::entities::plan::{PlanTimeSlot, SessionFlexibility};
 use crate::entities::planner_params::PlannerParams;
 
 use super::types::*;
@@ -41,7 +41,7 @@ fn solved_session_cost(
 /// are then derived from the actual allocations. Without it (fallback plan),
 /// estimates degrade to energy × average import tariff over the window.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn build_plan_envelopes(
+pub(crate) fn build_session_flexibility(
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
@@ -51,12 +51,12 @@ pub(crate) fn build_plan_envelopes(
     heat_cfg: Option<&HeaterParams>,
     now: DateTime<Utc>,
     solved_slots: Option<&[PlanTimeSlot]>,
-) -> Vec<FlexibilityEnvelope> {
+) -> Vec<SessionFlexibility> {
     let step_s = planner.plan_step_s as i64;
     let n = inputs.n;
-    let mut envelopes = Vec::new();
+    let mut session_flexibility = Vec::new();
 
-    // EV envelope
+    // EV session flexibility
     if let Some(session) = ev_session {
         if let Some(ev_cfg) = ev_cfg {
             // Remaining energy to charge
@@ -91,7 +91,7 @@ pub(crate) fn build_plan_envelopes(
                 let (estimated_cost_eur, estimated_co2_g) = solved_slots
                     .and_then(|s| solved_session_cost(s, &ev_cfg.id, window_end))
                     .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
-                envelopes.push(FlexibilityEnvelope {
+                session_flexibility.push(SessionFlexibility {
                     asset_id: ev_cfg.id.clone(),
                     energy_needed_kwh,
                     power_min_kw: ev_cfg.min_charge_kw,
@@ -109,7 +109,7 @@ pub(crate) fn build_plan_envelopes(
         }
     }
 
-    // Heater envelope
+    // Heater session flexibility
     if let Some(target) = heater_target {
         if let Some(heat_cfg) = heat_cfg {
             let energy_needed_kwh = inputs.assets.e_heat_target_kwh;
@@ -130,7 +130,7 @@ pub(crate) fn build_plan_envelopes(
                 let (estimated_cost_eur, estimated_co2_g) = solved_slots
                     .and_then(|s| solved_session_cost(s, &heat_cfg.id, window_end))
                     .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
-                envelopes.push(FlexibilityEnvelope {
+                session_flexibility.push(SessionFlexibility {
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
                     power_min_kw: 0.0,
@@ -148,7 +148,7 @@ pub(crate) fn build_plan_envelopes(
         }
     }
 
-    // Shiftable load envelopes
+    // Shiftable load session_flexibility
     for (s, sl) in shiftable_loads.iter().enumerate() {
         if s >= inputs.assets.shiftable_loads.len() {
             break;
@@ -175,7 +175,7 @@ pub(crate) fn build_plan_envelopes(
         let (estimated_cost_eur, estimated_co2_g) = solved_slots
             .and_then(|s| solved_session_cost(s, &sl.asset_id, window_end))
             .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
-        envelopes.push(FlexibilityEnvelope {
+        session_flexibility.push(SessionFlexibility {
             asset_id: sl.asset_id.clone(),
             energy_needed_kwh,
             power_min_kw: sl.power_kw,
@@ -191,5 +191,5 @@ pub(crate) fn build_plan_envelopes(
         });
     }
 
-    envelopes
+    session_flexibility
 }

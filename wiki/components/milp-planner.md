@@ -127,7 +127,7 @@ see [[milp-over-greedy]].
 - **Per-allocation cost sign convention** (BL-40, `docs/architecture/ven_milp_planner.md` §8):
   `AssetAllocation.cost_eur` (`results.rs::translate_to_plan`) prices energy covered by PV
   surplus as an **opportunity cost** (forgone export revenue, `+surplus_power_kw ×
-  export_tariff_eur_kwh × dt_h`), not a credit — matching `envelopes.rs::solved_session_cost`'s
+  export_tariff_eur_kwh × dt_h`), not a credit — matching `session_flexibility.rs::solved_session_cost`'s
   convention so the Planner tab's per-slot decision matrix and the session-total estimate never
   disagree in sign on the same energy. Applies to EV/heater/shiftable-load/battery-*charging*;
   battery-*discharging* uses an unrelated revenue formula. Post-solve reporting only — no
@@ -192,7 +192,7 @@ see [[milp-over-greedy]].
 | Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |
 | Marginal-cost dual extraction (§9) | `solver_duals.rs` |
 | Plan translation + fallback plan | `results.rs` |
-| Per-session flexibility envelopes | `envelopes.rs` |
+| Per-session flexibility envelopes | `session_flexibility.rs` |
 | Planning loop | `VEN/src/tasks/planning/mod.rs` (entry) + `cycle.rs` (terminal rewards, cycle inputs) |
 | Acceptance gate + heater anchor + cycle inputs | `VEN/src/services/planning.rs` |
 | SimState-coupled cycle helpers (sim clone, PV-inject patch, `build_asset_contexts`) | `VEN/src/simulator/plan_context.rs` |

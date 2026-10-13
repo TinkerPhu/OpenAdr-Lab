@@ -43,7 +43,7 @@ import type { EvUsageMode } from "./generated/EvUsageMode";
 import type { EvUsageSimState } from "./generated/EvUsageSimState";
 import type { EventLogEntry } from "./generated/EventLogEntry";
 import type { EventReceived } from "./generated/EventReceived";
-import type { FlexibilityEnvelope } from "./generated/FlexibilityEnvelope";
+import type { SessionFlexibility } from "./generated/SessionFlexibility";
 import type { ForecastAccuracySample } from "./generated/ForecastAccuracySample";
 import type { ForecastLeadKind } from "./generated/ForecastLeadKind";
 import type { ForecastSource } from "./generated/ForecastSource";
@@ -92,9 +92,9 @@ import type { SignalsState } from "./generated/SignalsState";
 import type { SimInjectState } from "./generated/SimInjectState";
 import type { SimSnapshot } from "./generated/SimSnapshot";
 import type { SimpleWindow } from "./generated/SimpleWindow";
-import type { SiteFlexibilityEnvelope } from "./generated/SiteFlexibilityEnvelope";
-import type { SiteFlexibilityForecastSlot } from "./generated/SiteFlexibilityForecastSlot";
-import type { SiteFlexibilitySample } from "./generated/SiteFlexibilitySample";
+import type { SiteHeadroom } from "./generated/SiteHeadroom";
+import type { SiteHeadroomForecastSlot } from "./generated/SiteHeadroomForecastSlot";
+import type { SiteHeadroomSample } from "./generated/SiteHeadroomSample";
 import type { SkyCondition } from "./generated/SkyCondition";
 import type { SolveStatus } from "./generated/SolveStatus";
 import type { StepRule } from "./generated/StepRule";
@@ -162,7 +162,7 @@ export type {
   EvUsageSimState,
   EventLogEntry,
   EventReceived,
-  FlexibilityEnvelope,
+  SessionFlexibility,
   ForecastAccuracySample,
   ForecastLeadKind,
   ForecastSource,
@@ -211,9 +211,9 @@ export type {
   SimInjectState,
   SimSnapshot,
   SimpleWindow,
-  SiteFlexibilityEnvelope,
-  SiteFlexibilityForecastSlot,
-  SiteFlexibilitySample,
+  SiteHeadroom,
+  SiteHeadroomForecastSlot,
+  SiteHeadroomSample,
   SkyCondition,
   SolveStatus,
   StepRule,
@@ -330,7 +330,7 @@ export type CapacitySchedule = CapacitySnapshot[];
 
 // ─── EV usage simulation / forecast (ev-usage-simulation, ev-usage-forecast) ──
 
-// ─── Flexibility Envelope ─────────────────────────────────────────────────────
+// ─── Session flexibility, site headroom ─────────────────────────────────────────────────────
 
 // ─── Timeline zones ───────────────────────────────────────────────────────────
 

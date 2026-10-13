@@ -196,7 +196,7 @@ pub struct OadrReport {
 
 // ── OadrReportBody and nested types ──────────────────────────────────────────
 
-/// Top-level envelope for a report submission to the VTN.
+/// Top-level body of a report submission to the VTN.
 /// `reportName` is optional per the OpenADR 3 spec (VTN field `report_name: Option<String>`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrReportBody {

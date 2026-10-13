@@ -248,7 +248,7 @@ pub(crate) struct AssetScalars {
     /// Empty = open horizon (plugged, no departure to charge for).
     pub ev_obligations: Vec<EvObligation>,
     /// Usable pack size [kWh]; 0.0 when EV absent. Turns an obligation's target
-    /// SoC into the energy the diagnostics and envelopes report.
+    /// SoC into the energy the diagnostics and session_flexibility report.
     pub ev_battery_kwh: f64,
     /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
     pub ev_segments: Vec<EvEnergySegment>,

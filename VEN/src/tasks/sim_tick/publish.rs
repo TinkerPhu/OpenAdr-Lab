@@ -9,7 +9,7 @@ use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::capacity_curve::CapacityCurve;
-use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilityForecastSlot};
+use crate::entities::plan::{SiteHeadroom, SiteHeadroomForecastSlot};
 use crate::entities::sensor::SensorSnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::SimState;
@@ -19,8 +19,8 @@ use crate::state::AppState;
 pub(crate) async fn publish_sim_tick_result(
     sensor: SensorSnapshot,
     sim_snap: SimSnapshot,
-    envelope: SiteFlexibilityEnvelope,
-    forecast: Vec<SiteFlexibilityForecastSlot>,
+    site_headroom: SiteHeadroom,
+    forecast: Vec<SiteHeadroomForecastSlot>,
     capacity_curves: (CapacityCurve, CapacityCurve),
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTriggerSignal>,
@@ -67,11 +67,11 @@ pub(crate) async fn publish_sim_tick_result(
         })
         .await;
 
-    // Refresh site envelope (computed in-lock from final sim state).
-    state.set_site_envelope(envelope).await;
+    // Refresh site headroom (computed in-lock from final sim state).
+    state.set_site_headroom(site_headroom).await;
     // Refresh the forward headroom forecast — recomputed fresh every tick,
     // anchored to the real state just published above (see
-    // `SiteFlexibilityForecastSlot`'s doc comment for why this must never
+    // `SiteHeadroomForecastSlot`'s doc comment for why this must never
     // be read statically off the plan).
     state.set_site_headroom_forecast(forecast).await;
     // Sustained-commitment capacity curves — same "recompute fresh every

@@ -180,9 +180,9 @@ describe("SessionProgressBoard", () => {
     expect(screen.queryByTestId("session-budget-req-ev-01")).not.toBeInTheDocument();
   });
 
-  it("marks an EV session on track when planned energy covers the envelope remainder", () => {
+  it("marks an EV session on track when planned energy covers the session flexibility remainder", () => {
     const plan = makePlan({ ev: 7.4 }, 2, {
-      envelopes: [{
+      session_flexibility: [{
         asset_id: "ev", energy_needed_kwh: 5, power_min_kw: 1.4, power_max_kw: 7.4,
         window_start: new Date().toISOString(), window_end: new Date(Date.now() + 2 * HOUR_MS).toISOString(),
         slots_available: 2, max_acceptable_rate: 0.35, min_acceptable_rate: 0.05,
@@ -195,7 +195,7 @@ describe("SessionProgressBoard", () => {
 
   it("marks an EV session at risk when planned energy falls short of the remainder", () => {
     const plan = makePlan({ ev: 1.0 }, 2, {
-      envelopes: [{
+      session_flexibility: [{
         asset_id: "ev", energy_needed_kwh: 5, power_min_kw: 1.4, power_max_kw: 7.4,
         window_start: new Date().toISOString(), window_end: new Date(Date.now() + 2 * HOUR_MS).toISOString(),
         slots_available: 2, max_acceptable_rate: 0.35, min_acceptable_rate: 0.05,

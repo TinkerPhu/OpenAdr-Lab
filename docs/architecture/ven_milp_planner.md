@@ -296,8 +296,8 @@ coherent coast planning from any start state).
 ## 8. Per-Allocation Cost Sign Convention
 
 `AssetAllocation.cost_eur` (`results.rs::translate_to_plan`, one value per slot per asset — the
-Planner tab's decision-matrix display) and `FlexibilityEnvelope.estimated_cost_eur`
-(`envelopes.rs::solved_session_cost`, the session-total estimate) must agree in sign on the same
+Planner tab's decision-matrix display) and `SessionFlexibility.estimated_cost_eur`
+(`session_flexibility.rs::solved_session_cost`, the session-total estimate) must agree in sign on the same
 underlying energy, since both price energy covered by PV surplus the same way — as an **opportunity
 cost** (forgone export revenue), not a credit:
 

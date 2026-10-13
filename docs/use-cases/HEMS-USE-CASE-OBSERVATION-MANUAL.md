@@ -91,7 +91,7 @@ VEN3=http://Node1:8213
 
 **Scenario:** User plugs in EV at 18:00, wants 80% SoC by 07:00, budget €3. EV skips expensive peak and charges off-peak.
 
-**What the controller should do:** Peak slots are too expensive (EffectiveCost > ComfortBid at low fill). EV defers to off-peak. FlexibilityEnvelope shows 25 kWh available 20:00–07:00. When off-peak slots enter the near-horizon (become FIRM), the EV starts charging.
+**What the controller should do:** Peak slots are too expensive (EffectiveCost > ComfortBid at low fill). EV defers to off-peak. SessionFlexibility shows 25 kWh available 20:00–07:00. When off-peak slots enter the near-horizon (become FIRM), the EV starts charging.
 
 **Suggested VEN:** VEN1 (EV SoC 40%, target 80% = 24 kWh needed)
 
@@ -262,7 +262,7 @@ Replace `TODAY_14:00:00+01:00` with today's 14:00 in ISO 8601 (e.g. `2026-03-12T
 
 **Scenario:** At 16:00, VTN publishes new prices for tomorrow. Planner replans immediately on RATE_CHANGE trigger, shifting packet allocation to the cheapest new slots.
 
-**What the controller should do:** Rate chart updates. FlexibilityEnvelopes for pending packets are recalculated. Estimated costs on packets change to reflect new rates.
+**What the controller should do:** Rate chart updates. SessionFlexibility for pending packets are recalculated. Estimated costs on packets change to reflect new rates.
 
 ### Setup
 
@@ -349,7 +349,7 @@ This builds on UC-04. If you did UC-04, add one more cheap window further in the
 - `plan_ev` should show 0 kW in the hours before the cheap window, then a spike to ~7 kW during it
 
 ### Key insight to verify
-The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 off-peak window anymore. It is waiting for the 02:00 window. This is the FlexibilityEnvelope mechanism at work.
+The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 off-peak window anymore. It is waiting for the 02:00 window. This is the SessionFlexibility mechanism at work.
 
 ---
 
@@ -598,7 +598,7 @@ The PenaltyRule entity (threshold €100, measurement window PT15M, rolling aver
 
 **Scenario:** Site has only controllable loads — EV and heater. No generation. Planning value is load shifting (off-peak only), no PV self-consumption cascade.
 
-**What the controller should do:** Power chart never goes negative (no export). No battery allocation. FlexibilityEnvelopes still work — EV shifts to off-peak. Rate chart shows the available price windows.
+**What the controller should do:** Power chart never goes negative (no export). No battery allocation. SessionFlexibility still work — EV shifts to off-peak. Rate chart shows the available price windows.
 
 ### Option A: Use VEN2 (no EV, no battery)
 

@@ -15484,3 +15484,26 @@ parameters. A reader grepping a name from a planner test landed in the YAML laye
 `AssetProfile` left. `profile::schema::AssetProfile` keeps its name: it is now the only type called
 that, and "profile" is the YAML file's own word, so the suggested `AssetSpec` rename would only
 churn.
+
+## R-77: "envelope" means the OpenADR Dynamic Operating Envelope only (refactor/r77-envelope-naming)
+
+**What.** Triaged every "envelope" in the VEN, its UI and the BDD suite into four senses and renamed
+the two internal ones after what the UI calls them:
+- the live site headroom: `SiteFlexibilityEnvelope` → `SiteHeadroom` (with `SiteHeadroomSample`,
+  `SiteHeadroomForecastSlot`, `AppState::site_headroom`, the UI prop `headroom`);
+- a device session's degrees of freedom: `FlexibilityEnvelope` → `SessionFlexibility`,
+  `Plan.envelopes` → `Plan.session_flexibility` (wire key too, UI and BDD sentences with it),
+  `milp_planner/envelopes.rs` → `session_flexibility.rs`.
+The OpenADR sense (Dynamic Operating Envelope, the capacity-limit schedule, UI "Tariff & Envelope")
+and the MILP's McCormick envelopes keep the word. A message wrapper and a heater "safety envelope"
+became "body" and "safety band".
+
+**Why.** One word meant three things, and the rule that should have prevented it
+(`naming-envelope-vs-headroom`) was cited by the architecture doc and KEY_LEARNINGS but had been lost
+from `.claude/CLAUDE.md`. It now lives in `docs/reference/GLOSSARY.md` with the terms it separates.
+
+**Issues.** The planned serde alias for old `envelopes` JSON was not needed: no stored plan is read
+back (`plan_snapshots` was dropped in v7, R-63). A blanket `envelopes` → `session_flexibility`
+substitution produced unreadable BDD sentences ("has FLEXIBLE session_flexibility"); they were
+reworded by hand and `audit_step_definitions.py` caught the one feature line that still had the
+old spelling.

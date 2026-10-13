@@ -198,7 +198,7 @@ export function ControllerPage() {
       return (
         <GridHeadroomCell
           key={cellId}
-          envelope={flexibility}
+          headroom={flexibility}
           history={flexibilityHistory}
           forecast={flexibilityForecast}
           capacity={capacityCurves}
@@ -298,7 +298,7 @@ export function ControllerPage() {
 
         {!pinnedCellIds.includes("grid:headroom") && (
           <GridHeadroomCell
-            envelope={flexibility}
+            headroom={flexibility}
             history={flexibilityHistory}
             forecast={flexibilityForecast}
             capacity={capacityCurves}

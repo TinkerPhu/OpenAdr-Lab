@@ -147,8 +147,8 @@ def step_wait_for_heater_allocation(context):
     )
 
 
-@when("I wait for the VEN /plan to have envelopes")
-def step_wait_for_envelopes(context):
+@when("I wait for the VEN /plan to have session flexibility")
+def step_wait_for_session_flexibility(context):
     def fetch():
         resp = ven_get("/plan")
         if not resp.ok:
@@ -160,7 +160,7 @@ def step_wait_for_envelopes(context):
 
     context.ven_plan = poll_until(
         fetch,
-        lambda plan: plan is not None and len(plan.get("envelopes", [])) > 0,
+        lambda plan: plan is not None and len(plan.get("session_flexibility", [])) > 0,
         timeout=150,
         interval=5,
         description="VEN /plan has at least 1 flexibility envelope",
@@ -219,12 +219,12 @@ def step_plan_slots_nonempty(context):
     )
 
 
-@then("the plan.envelopes is a non-empty array")
+@then("the plan.session_flexibility is a non-empty array")
 def step_plan_envelopes_nonempty(context):
     plan = context.ven_plan
-    envs = plan.get("envelopes", [])
+    envs = plan.get("session_flexibility", [])
     assert isinstance(envs, list) and len(envs) > 0, (
-        f"envelopes is empty or not a list. Full plan keys: {list(plan.keys())}"
+        f"session_flexibility is empty or not a list. Full plan keys: {list(plan.keys())}"
     )
 
 

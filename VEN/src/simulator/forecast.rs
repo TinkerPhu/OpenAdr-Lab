@@ -251,7 +251,7 @@ mod tests {
             cost_breakdown: Default::default(),
             soc_trajectory_kwh: vec![],
             summary: Default::default(),
-            envelopes: vec![],
+            session_flexibility: vec![],
             warnings: vec![],
             solve_status: SolveStatus::Optimal,
             phase_report: None,

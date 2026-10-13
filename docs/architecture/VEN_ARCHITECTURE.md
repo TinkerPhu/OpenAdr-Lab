@@ -107,7 +107,7 @@ See `docs/BACKLOG.md §Refactoring` for any pending layout migrations.
 | **OpenADR Interface** | `controller/openadr_interface` | `POLL_EVENTS_SECS` poll (default 30 s, env-configurable) + event-driven | `TariffSnapshot` / `TariffTimeSeries`, `OadrCapacityState`, `OadrReportObligation` |
 | **User Request Manager** | `controller/user_request` | Event-driven (API call) | `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 | **Monitor** | `controller/monitor` | 1 s tick (`tasks/sim_tick`) | Per-asset energy/cost/CO₂ ledger (`state::AssetLedgerEntry`) |
-| **Planner** | `controller/milp_planner`, reached via `SolverPort` | Watch channel + `replan_interval_s` periodic (default 300 s, profile-configurable) | `Plan`, `FlexibilityEnvelope`s, `PlanWarning`s |
+| **Planner** | `controller/milp_planner`, reached via `SolverPort` | Watch channel + `replan_interval_s` periodic (default 300 s, profile-configurable) | `Plan`, `SessionFlexibility`s, `PlanWarning`s |
 | **Dispatcher** | `controller/dispatcher` | 1 s tick (`tasks/sim_tick`) | Per-asset setpoints written to the simulator |
 | **Entities** | `entities/` | Shared state | `Plan`, `TariffSnapshot`, `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 
@@ -594,7 +594,7 @@ t=30s    OpenADR Interface polls VTN (POLL_EVENTS_SECS, default 30 s)
 t=300s   Planner (if triggered, or on replan_interval_s timeout — default 300 s)
            → Reads all state
            → Produces new Plan
-           → Emits FlexibilityEnvelopes
+           → Emits SessionFlexibility
            → Writes PlanWarnings → UserNotifications
 ```
 
@@ -836,7 +836,7 @@ start with. `ShiftableLoadAsset` does this by applying its own placement at
   relative-delta model after this module's own rewrite — a real, user-reported
   bug fixed in a 2026-09-07 follow-up that renamed both modules out of
   the "envelope" name (reserved for genuine OpenADR-spec concepts, per
-  `.claude/CLAUDE.md`'s `naming-envelope-vs-headroom` rule) into this
+  the "envelope" naming rule in `docs/reference/GLOSSARY.md`) into this
   "headroom" family, matching what the UI itself calls this panel.
   `site-capacity-seam-unification` (2026-09-11) went further: `compute_site_headroom`
   no longer has its own per-asset sum at all — it calls `compute_site_capacity_curve`
@@ -882,7 +882,7 @@ at the actual external boundary that needs it —
 direction-tagged by name and want a magnitude, floored per-direction (not a
 bare `.abs()`) so a legitimately net-importing Export-curve value reports
 `0.0` discharge capability rather than a false-positive magnitude.
-**`SiteFlexibilityEnvelope`/`SiteFlexibilityForecastSlot`'s `up_kw`/`down_kw`
+**`SiteHeadroom`/`SiteHeadroomForecastSlot`'s `up_kw`/`down_kw`
 are SIGNED too now** (`site-capacity-seam-unification`, 2026-09-11 — previously
 unsigned magnitudes, a genuinely different shape from `CapacityCurve`). This
 followed directly from including base load (below): a sustained Export
@@ -1470,8 +1470,8 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/user-requests` | 5 | All active user energy task requests |
 | POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 | DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
-| GET | `/flexibility` | 5 | `SiteFlexibilityEnvelope` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
-| GET | `/flexibility/history` | 5 | BL-43: `SiteFlexibilitySample[]` — the bounded in-memory ring (`AppState::flexibility_history`, 1h @ ~1s cadence, oldest first) every `/flexibility` write is also appended to, since the live snapshot alone has nothing to plot as a line |
+| GET | `/flexibility` | 5 | `SiteHeadroom` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
+| GET | `/flexibility/history` | 5 | BL-43: `SiteHeadroomSample[]` — the bounded in-memory ring (`AppState::flexibility_history`, 1h @ ~1s cadence, oldest first) every `/flexibility` write is also appended to, since the live snapshot alone has nothing to plot as a line |
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
@@ -1482,8 +1482,8 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET / POST / DELETE | `/baseline-override` | 5 | Read / create / clear additive baseline-load adjustments |
 
 **Sustained-commitment capacity curve** (`GET /flexibility/capacity`,
-`controller::capacity_forecast::compute_capacity_curve`) — `SiteFlexibilityEnvelope` and
-`SiteFlexibilityForecastSlot` both answer "how much power" at an instant; this answers "for how
+`controller::capacity_forecast::compute_capacity_curve`) — `SiteHeadroom` and
+`SiteHeadroomForecastSlot` both answer "how much power" at an instant; this answers "for how
 long, and how much energy." It is a closed-form computation (no MILP re-solve, no forward
 trajectory simulation) run independently for two directions — sustained-import commitment and
 sustained-export commitment — each producing an ordered list of `(elapsed_s, power_kw)` step

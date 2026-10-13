@@ -606,7 +606,7 @@ mod tests {
                 "total_import_kwh": 0.0,
                 "total_export_kwh": 0.0
             },
-            "envelopes": [],
+            "session_flexibility": [],
             "warnings": [],
             "objective_eur": objective_eur,
             "friction_eur": friction_eur
@@ -672,7 +672,7 @@ mod tests {
                 "total_import_kwh": 0.0,
                 "total_export_kwh": 0.0
             },
-            "envelopes": [],
+            "session_flexibility": [],
             "warnings": [],
             "objective_eur": objective_eur,
             "friction_eur": 0.0
@@ -883,7 +883,7 @@ mod tests {
                 "total_import_kwh": 0.0,
                 "total_export_kwh": 0.0
             },
-            "envelopes": [],
+            "session_flexibility": [],
             "warnings": [],
             "objective_eur": 0.0,
             "friction_eur": 0.0
@@ -1064,7 +1064,7 @@ mod tests {
             },
             "slots": slots,
             "summary": {"total_cost_eur": 0.0, "total_co2_g": 0.0, "total_import_kwh": 0.0, "total_export_kwh": 0.0},
-            "envelopes": [],
+            "session_flexibility": [],
             "warnings": [],
             "objective_eur": objective_eur,
             "friction_eur": 0.0

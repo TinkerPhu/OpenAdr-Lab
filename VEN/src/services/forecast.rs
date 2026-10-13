@@ -10,13 +10,13 @@ use crate::controller::{HistoryPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
 use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind, PlanHistorySample};
-use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::plan::{Plan, SiteHeadroom};
 use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
 
 /// Everything that happens after a plan cycle resolves, in one call (kept
 /// here for the tasks/ file-size cap): WP4.3 new-warning notifications (only
-/// when the plan was adopted) followed by envelope/forecast publication.
+/// when the plan was adopted) followed by site headroom/forecast publication.
 #[allow(clippy::too_many_arguments)]
 pub async fn finish_plan_cycle(
     state: &AppState,
@@ -168,20 +168,20 @@ pub fn record_forecast_accuracy_samples(
     out
 }
 
-/// Post-plan-cycle state publication: site flexibility envelope and per-asset
+/// Post-plan-cycle state publication: site headroom and per-asset
 /// forecasts (WP3.6, BL-15), both derived from the *adopted* plan — the one
 /// actually driving dispatch, never a rejected candidate.
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_post_cycle_state(
     state: &AppState,
-    site_headroom: SiteFlexibilityEnvelope,
+    site_headroom: SiteHeadroom,
     adopted_plan: &Plan,
     wall_now: DateTime<Utc>,
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
     heuristics: &HashMap<String, AssetHeuristics>,
 ) {
-    state.set_site_envelope(site_headroom).await;
+    state.set_site_headroom(site_headroom).await;
 
     let mut forecasts = build_asset_forecasts(adopted_plan, wall_now);
     // WP5.2 (BL-14): add heuristic-sourced forecasts for assets that never
@@ -386,7 +386,7 @@ mod tests {
             },
             slots,
             summary: PlanSummary::default(),
-            envelopes: vec![],
+            session_flexibility: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
             objective: crate::entities::PlannerObjective::MinCost,

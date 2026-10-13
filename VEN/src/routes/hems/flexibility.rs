@@ -15,12 +15,12 @@ use crate::app_ctx::{GridRating, Headroom};
 use crate::entities::capacity_curve::CapacityCurves;
 use crate::state::AppState;
 
-/// GET /flexibility — returns the live site-level flexibility envelope (Phase E).
+/// GET /flexibility — returns the live site headroom (Phase E).
 ///
 /// Updated every dispatcher tick (~1s) and after every planner cycle.
 /// Returns 204 No Content until the first dispatcher tick completes.
 pub async fn get_flexibility(State(state): State<AppState>) -> impl IntoResponse {
-    match state.site_envelope().await {
+    match state.site_headroom().await {
         Some(env) => Json(env).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }
@@ -37,7 +37,7 @@ pub async fn get_flexibility_history(State(state): State<AppState>) -> impl Into
 /// GET /flexibility/forecast — forward-looking per-slot headroom trajectory,
 /// re-derived fresh every dispatcher tick from the active plan's own setpoint
 /// schedule plus each asset's real current state (see
-/// `SiteFlexibilityForecastSlot`'s doc comment — its `up_kw`/`down_kw` are
+/// `SiteHeadroomForecastSlot`'s doc comment — its `up_kw`/`down_kw` are
 /// ABSOLUTE achievable power now, not a delta from planned dispatch,
 /// `unified-capacity-envelope-engine` Spec E) — distinct from both
 /// `GET /flexibility` (instant-only) and `GET /flexibility/history` (the past

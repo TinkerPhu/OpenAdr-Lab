@@ -22,7 +22,7 @@
  * Duration fields estimate how long the VEN can sustain the headroom based
  * on available storage energy. None if no storage assets are present.
  */
-export type SiteFlexibilityEnvelope = { ts: string, 
+export type SiteHeadroom = { ts: string, 
 /**
  * Net signed power (kW) under a sustained Export commitment. See this
  * struct's own doc comment for the sign convention.

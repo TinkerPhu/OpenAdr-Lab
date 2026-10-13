@@ -178,7 +178,7 @@ CREATE INDEX idx_plan_history_created_at ON plan_history(created_at);
 ";
 
 /// site-headroom-forecast Piece 3: mean instant site-flexibility headroom
-/// (`entities::plan::SiteFlexibilityEnvelope`) over the window, mean-shaped
+/// (`entities::plan::SiteHeadroom`) over the window, mean-shaped
 /// like `import_kw`/`export_kw` above (not tightest-value, unlike the DOE
 /// limit columns from SCHEMA_V9) — see `history_sampler/accumulator.rs`'s
 /// `GridAcc`. `NULL` means no dispatcher tick had run yet during this window.

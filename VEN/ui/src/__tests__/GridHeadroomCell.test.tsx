@@ -10,9 +10,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GridHeadroomCell } from "../components/controller/GridHeadroomCell";
 import type {
   CapacityCurves,
-  SiteFlexibilityEnvelope,
-  SiteFlexibilitySample,
-  SiteFlexibilityForecastSlot,
+  SiteHeadroom,
+  SiteHeadroomSample,
+  SiteHeadroomForecastSlot,
 } from "../api/types";
 
 const { chartProps, curvesAtCalls, curvesAtResponse } = vi.hoisted(() => ({
@@ -23,8 +23,8 @@ const { chartProps, curvesAtCalls, curvesAtResponse } = vi.hoisted(() => ({
 
 vi.mock("../components/controller/charts/SiteHeadroomChart", () => ({
   SiteHeadroomChart: (props: {
-    history: SiteFlexibilitySample[];
-    forecast: SiteFlexibilityForecastSlot[];
+    history: SiteHeadroomSample[];
+    forecast: SiteHeadroomForecastSlot[];
     xAxisTickIntervalMinutes?: number;
   }) => {
     chartProps.push(props);
@@ -47,7 +47,7 @@ vi.mock("../api/hooks", () => ({
   },
 }));
 
-const envelope: SiteFlexibilityEnvelope = {
+const headroom: SiteHeadroom = {
   ts: "2026-01-01T10:00:00Z",
   up_kw: 5.5,
   down_kw: 2.25,
@@ -55,20 +55,20 @@ const envelope: SiteFlexibilityEnvelope = {
   down_duration_s: null,
 };
 
-const history: SiteFlexibilitySample[] = [
+const history: SiteHeadroomSample[] = [
   { ts: "2026-01-01T09:59:00Z", up_kw: 5.0, down_kw: 2.0 },
   { ts: "2026-01-01T10:00:00Z", up_kw: 5.5, down_kw: 2.25 },
 ];
 
-const forecast: SiteFlexibilityForecastSlot[] = [
+const forecast: SiteHeadroomForecastSlot[] = [
   { ts: "2026-01-01T10:05:00Z", up_kw: 4.8, down_kw: 3.1 },
 ];
 
 describe("GridHeadroomCell", () => {
-  it("shows placeholders when no envelope is available yet", () => {
+  it("shows placeholders when no headroom is available yet", () => {
     render(
       <GridHeadroomCell
-        envelope={undefined}
+        headroom={undefined}
         history={[]}
         forecast={[]}
         gridTimeline={[]}
@@ -83,10 +83,10 @@ describe("GridHeadroomCell", () => {
     expect(screen.getByTestId("headroom-down-kw")).toHaveTextContent("—");
   });
 
-  it("renders current up_kw/down_kw and duration from the live envelope", () => {
+  it("renders current up_kw/down_kw and duration from the live headroom", () => {
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={[]}
         gridTimeline={[]}
@@ -105,7 +105,7 @@ describe("GridHeadroomCell", () => {
   it("threads the history array through to SiteHeadroomChart", () => {
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={[]}
         gridTimeline={[]}
@@ -121,7 +121,7 @@ describe("GridHeadroomCell", () => {
   it("threads the forecast array through to SiteHeadroomChart", () => {
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={forecast}
         gridTimeline={[]}
@@ -137,7 +137,7 @@ describe("GridHeadroomCell", () => {
   it("passes the default tick interval to SiteHeadroomChart when not extended", () => {
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={[]}
         gridTimeline={[]}
@@ -153,7 +153,7 @@ describe("GridHeadroomCell", () => {
   it("passes the extended tick interval to SiteHeadroomChart when extended", () => {
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={[]}
         gridTimeline={[]}
@@ -171,7 +171,7 @@ describe("GridHeadroomCell", () => {
     const onTogglePin = vi.fn();
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={history}
         forecast={[]}
         gridTimeline={[]}
@@ -191,7 +191,7 @@ describe("GridHeadroomCell — click moves the commitment start", () => {
   const nowMs = Date.parse("2026-01-01T10:00:00Z");
   // Remaining plan slots every 15 min from 10:15.
   const slotStartsMs = [1, 2, 3, 4].map((i) => nowMs + i * 15 * MIN);
-  const slots: SiteFlexibilityForecastSlot[] = slotStartsMs.map((ms) => ({
+  const slots: SiteHeadroomForecastSlot[] = slotStartsMs.map((ms) => ({
     ts: new Date(ms).toISOString(),
     up_kw: -3,
     down_kw: 4,
@@ -219,7 +219,7 @@ describe("GridHeadroomCell — click moves the commitment start", () => {
   const renderCell = () =>
     render(
       <GridHeadroomCell
-        envelope={envelope}
+        headroom={headroom}
         history={[]}
         forecast={slots}
         capacity={perTick}

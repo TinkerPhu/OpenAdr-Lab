@@ -15,7 +15,7 @@ Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
     Given I have a VTN token as "bl-client"
 
   Scenario: With no allowance declared, the VEN requests no additional capacity
-    Given I create a program named "envelope-report-test" and save its ID
+    Given I create a program named "reservation-report-test" and save its ID
     And I create an event for the saved program with a reportDescriptor of type "IMPORT_RESERVATION_CAPACITY" reporting every 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to submit an obligation-driven report for the event

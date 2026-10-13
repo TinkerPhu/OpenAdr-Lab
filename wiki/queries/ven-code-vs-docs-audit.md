@@ -137,9 +137,9 @@ should refactoring effort go?
    `VEN_ARCHITECTURE.md` §5.3 sketches, one call away.
 4. **Application ring imports axum.** `services/hems.rs:52` implements
    `From<DomainError> for (StatusCode, Json)` — HTTP mapping belongs in `routes/`.
-5. **Envelope magic numbers.** `milp_planner/envelopes.rs` hardcodes
+5. **Envelope magic numbers.** `milp_planner/session_flexibility.rs` hardcodes
    `max_acceptable_rate: 0.35`, `min_acceptable_rate: 0.05`,
-   `budget_remaining_eur: 1.0e9` in every `FlexibilityEnvelope`.
+   `budget_remaining_eur: 1.0e9` in every `SessionFlexibility`.
 6. ~~**One-shot obligations.**~~ **RESOLVED** — see doc-drift item 11 above. Relevant for
    certification readiness ([[openadr-spec-use-cases]]).
 7. **Event `priority` parsed but unused** in the rate merge (last-write-wins,

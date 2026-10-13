@@ -165,13 +165,13 @@ pub(crate) fn spawn_history_sampler(
             let snap = sim.lock().await.to_sim_snapshot();
             let tariffs_snap = state.planned_tariffs().await;
             let caps_snap = state.planned_capacity_limits().await;
-            let envelope_snap = state.site_envelope().await;
+            let headroom_snap = state.site_headroom().await;
             if let Some((ticks, grid)) = sampler.record(
                 now,
                 &snap,
                 &tariffs_snap,
                 &caps_snap,
-                envelope_snap.as_ref(),
+                headroom_snap.as_ref(),
             ) {
                 write_window(history.clone(), &notifier, &state, now, ticks, grid).await;
             }

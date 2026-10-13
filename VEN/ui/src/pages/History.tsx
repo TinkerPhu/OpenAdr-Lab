@@ -15,7 +15,7 @@ import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomC
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import { assetChartSpec } from "../components/controller/assetChartSpecs";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
-import type { ForecastAccuracyRow, SiteFlexibilitySample } from "../api/types";
+import type { ForecastAccuracyRow, SiteHeadroomSample } from "../api/types";
 
 /** History rows are one-minute means (`history_sampling.rs`). Rows further apart than this
  * mean the VEN was not sampling — a shading must not paint a state across that hole. */
@@ -189,7 +189,7 @@ export function HistoryPage() {
     () => grid.map((row) => ({ ts: row.ts, values: { power_kw: row.import_kw - row.export_kw } })),
     [grid]
   );
-  const headroomHistory: SiteFlexibilitySample[] = useMemo(
+  const headroomHistory: SiteHeadroomSample[] = useMemo(
     () =>
       grid
         .filter((row) => row.up_kw !== null && row.down_kw !== null)

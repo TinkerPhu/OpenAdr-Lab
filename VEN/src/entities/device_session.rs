@@ -377,7 +377,7 @@ impl EvSessionQueue {
     /// A *planner* asking the same question gets the wrong answer, because GB-54
     /// aligns a replan's `now` to the slot grid, so it can sit before wall-clock
     /// time: a session created at 14:20 against a plan starting at 14:00 is not yet
-    /// "current", and treating it as absent dropped its flexibility envelope from
+    /// "current", and treating it as absent dropped its session flexibility from
     /// the plan entirely. What a plan wants is the next commitment it must serve,
     /// whether its window has opened yet or not.
     pub fn upcoming(&self, now: DateTime<Utc>) -> Option<&EvSession> {
@@ -624,7 +624,7 @@ mod tests {
         assert!(q.current(ts(8)).map(|s| s.id) != Some(a_id));
     }
 
-    /// The grid-lag case that cost a plan its flexibility envelope: GB-54 aligns a
+    /// The grid-lag case that cost a plan its session flexibility: GB-54 aligns a
     /// replan's `now` to the slot grid, so it can sit *before* wall-clock time. A
     /// session created at 14:20 against a plan whose `now` is 14:00 is not yet
     /// "current", and treating that as "no session" dropped it from the plan.

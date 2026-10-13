@@ -95,4 +95,4 @@ are collected and reported together, and the process exits non-zero before touch
 
 Counter-examples that still deserve promotion to config: the flexibility-envelope
 constants (`max_acceptable_rate: 0.35`, `min_acceptable_rate: 0.05`) hardcoded in
-`milp_planner/envelopes.rs` — see [[ven-code-vs-docs-audit]].
+`milp_planner/session_flexibility.rs` — see [[ven-code-vs-docs-audit]].

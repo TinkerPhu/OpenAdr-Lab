@@ -144,7 +144,7 @@ impl ShiftableLoadAsset {
         // Encoded as unix seconds so the live snapshot API (ui-transparency)
         // exposes a shiftable load's window without needing a separate
         // `&[ShiftableLoad]` parameter (shiftable-load-as-asset proposal.md
-        // scope) — the unified capacity/envelope engine
+        // scope) — the capacity headroom engine
         // (`unified-capacity-envelope-engine`, Spec E) reads the typed
         // `AssetState::ShiftableLoad` directly instead of this flattened map.
         m.insert(

@@ -16,6 +16,6 @@ import_limit_kw: number | null,
 export_limit_kw: number | null, 
 /**
  * Mean instant site-flexibility headroom (kW) over the window — see
- * `entities::plan::SiteFlexibilityEnvelope`. `None` before the first dispatcher tick.
+ * `entities::plan::SiteHeadroom`. `None` before the first dispatcher tick.
  */
 up_kw: number | null, down_kw: number | null, };

@@ -27,7 +27,7 @@ the household this lab's VENs model) (§2.1).
 - **DER**: any small-scale generation/storage at the edge — PV, battery, EV charger,
   controllable loads (§2.4); modelled here by the [[asset-layer]].
 - **Flexibility**: the power range a site can shift per time slot, published as
-  `FlexibilityEnvelope` so aggregators can predict available DR capacity (§2.3).
+  `SessionFlexibility` so aggregators can predict available DR capacity (§2.3).
 - **Baseline vs Forecast** — deliberately distinct (§2.3): the *Baseline* is expected
   consumption **without** DR intervention, used in **M&V** to verify delivered reduction;
   the *Forecast* is the planner's forward-looking per-slot prediction. Conflating them

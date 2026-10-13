@@ -1815,8 +1815,8 @@ different (relative/reservation-request) semantics — a name that didn't read
 as "the same Site Headroom concept, one more source" the way `compute_envelope`
 should have. Renamed to `compute_site_headroom` (matching the UI's own label
 and its sibling `compute_site_headroom_forecast`) as part of the fix; the
-underlying reserved-word rule is now recorded in `.claude/CLAUDE.md`
-(`naming-envelope-vs-headroom`).
+underlying reserved-word rule is recorded in `docs/reference/GLOSSARY.md`
+("envelope" naming rule).
 
 **How to apply:** when a "unify X" change's own scope doc lists the specific
 call sites it covers, treat that list as a claim to verify, not a given —

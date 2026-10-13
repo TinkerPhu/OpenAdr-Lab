@@ -1,4 +1,4 @@
-"""Step definitions for the unified capacity/envelope engine's absolute-quantity
+"""Step definitions for the site capacity headroom engine's absolute-quantity
 behavior (`unified-capacity-envelope-engine`, Spec E) — GET /flexibility/forecast
 and GET /flexibility/capacity, exercised end-to-end (dispatcher tick ->
 controller::capacity_headroom -> HTTP), not just the Rust unit tests already

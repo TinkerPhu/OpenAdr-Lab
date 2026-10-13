@@ -3,7 +3,7 @@ use chrono::TimeZone;
 
 // ── BL-40: AssetAllocation.cost_eur must price PV-surplus consumption as
 // forgone export revenue (opportunity cost, `+`), matching
-// envelopes.rs::solved_session_cost()'s convention — not as a credit (`-`).
+// session_flexibility.rs::solved_session_cost()'s convention — not as a credit (`-`).
 
 fn noon() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap()
@@ -225,11 +225,11 @@ fn battery_charging_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() 
 }
 
 /// Cross-check per BL-40's own Verify note: the decision matrix's summed
-/// `cost_eur` and the envelope's `solved_session_cost()`-style total (recomputed
+/// `cost_eur` and the session flexibility `solved_session_cost()`-style total (recomputed
 /// directly from grid/surplus power, the reference convention) must agree in sign
 /// for a plan spanning multiple asset types with PV-surplus-covered slots.
 #[test]
-fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
+fn decision_matrix_and_session_flexibility_totals_agree_in_sign_across_asset_types() {
     let now = noon();
     let mut profile = make_profile_1800s();
     profile.assets.retain(|a| {
@@ -308,7 +308,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         .sum();
 
     // Reference total: recomputed directly from grid/surplus power using the
-    // opportunity-cost convention (mirrors envelopes.rs::solved_session_cost()).
+    // opportunity-cost convention (mirrors session_flexibility.rs::solved_session_cost()).
     let reference_total: f64 = plan
         .slots
         .iter()
@@ -329,7 +329,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
     );
     assert!(
         (matrix_total - reference_total).abs() < 1e-6,
-        "decision matrix total {matrix_total:.6} must agree with the envelope-style \
+        "decision matrix total {matrix_total:.6} must agree with the session-flexibility-style \
          opportunity-cost total {reference_total:.6}"
     );
 }

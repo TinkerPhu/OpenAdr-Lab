@@ -13,15 +13,15 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     When I wait for the VEN /plan to have an EV allocation in slots
     Then at least one firm slot has an allocation for asset "ev"
 
-  Scenario: UC-01b— EV charge plan has FLEXIBLE envelopes for far-horizon energy
+  Scenario: UC-01b— EV charge plan has session flexibility for far-horizon energy
     Given I have a VTN token as "bl-client"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     And I POST an EV session with target_soc 0.90 and departure in 8.0 hours
-    When I wait for the VEN /plan to have envelopes
-    Then the plan has field "envelopes"
-    And the plan.envelopes is a non-empty array
-    And the plan envelopes contain an entry for asset "ev"
+    When I wait for the VEN /plan to have session flexibility
+    Then the plan has field "session_flexibility"
+    And the plan.session_flexibility is a non-empty array
+    And the plan session_flexibility contains an entry for asset "ev"
 
   Scenario: UC-01c — EV packet estimated cost is tracked in the plan
     When I wait for the VEN /plan endpoint to return a plan

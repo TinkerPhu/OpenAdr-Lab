@@ -5,12 +5,12 @@
 //! `controller/sim_snapshot.rs`'s note on why the flattened `SimSnapshot`
 //! cannot answer PV's achievable range. In `controller/` that made the domain
 //! ring import infra; here it is infra computing over infra, and what leaves
-//! the module is an entity (`SiteFlexibilityEnvelope`).
+//! the module is an entity (`SiteHeadroom`).
 
 use chrono::{DateTime, Duration, Utc};
 
 use crate::entities::capacity_curve::CommitmentDirection;
-use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::entities::plan::SiteHeadroom;
 use crate::simulator::capacity_headroom::compute_site_capacity_curve;
 use crate::simulator::SimState;
 
@@ -58,7 +58,7 @@ pub fn compute_site_headroom(
     now: DateTime<Utc>,
     phys_imp_kw: f64,
     phys_exp_kw: f64,
-) -> SiteFlexibilityEnvelope {
+) -> SiteHeadroom {
     let export_curve = compute_site_capacity_curve(
         CommitmentDirection::Export,
         now,
@@ -115,7 +115,7 @@ pub fn compute_site_headroom(
         None
     };
 
-    SiteFlexibilityEnvelope {
+    SiteHeadroom {
         ts: now,
         up_kw,
         down_kw,
@@ -138,7 +138,7 @@ mod tests {
     // shape they were before phys_imp_kw/phys_exp_kw existed.
     const UNBOUNDED_KW: f64 = 1_000.0;
 
-    fn headroom(sim: &SimState, now: DateTime<Utc>) -> SiteFlexibilityEnvelope {
+    fn headroom(sim: &SimState, now: DateTime<Utc>) -> SiteHeadroom {
         compute_site_headroom(sim, now, UNBOUNDED_KW, UNBOUNDED_KW)
     }
 
@@ -319,7 +319,7 @@ mod tests {
         // real Export-direction flexibility available right now. The old
         // formula's "point-range capability" trick (capability() returning the
         // same value in both cap_max_import_kw/cap_max_export_kw fields) made
-        // this invisible to compute_envelope entirely; max_effort_setpoint's PV
+        // this invisible to the old compute_envelope entirely; max_effort_setpoint's PV
         // override reports the true achievable export magnitude instead.
         let sim = SimState::from_params(
             &[crate::entities::asset_params::AssetParams::Pv(PvParams {

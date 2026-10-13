@@ -1,10 +1,10 @@
-//! BL-43 — bounded in-memory log of `SiteFlexibilityEnvelope` snapshots so
+//! BL-43 — bounded in-memory log of `SiteHeadroom` snapshots so
 //! the UI can plot the live site-headroom band over time. Unlike
 //! `plan_history`/`forecast_accuracy` this is NOT persisted to SQLite — it's
 //! a live diagnostic like `event_log`/`notifications`, not meant for
 //! post-restart analysis.
 
-use crate::entities::plan::{SiteFlexibilityEnvelope, SiteFlexibilitySample};
+use crate::entities::plan::{SiteHeadroom, SiteHeadroomSample};
 
 use super::AppState;
 
@@ -15,14 +15,14 @@ pub const FLEXIBILITY_HISTORY_RING_CAP: usize = 3600;
 
 impl AppState {
     /// Append a sample, evicting the oldest entry past the cap.
-    pub async fn record_flexibility_sample(&self, env: &SiteFlexibilityEnvelope) {
+    pub async fn record_flexibility_sample(&self, env: &SiteHeadroom) {
         self.flexibility_history.record(env.into()).await;
     }
 
     /// All recorded samples, oldest first — this is a time series to plot, not
     /// a log to read, so it reads in the other direction from
     /// `report_submissions()`.
-    pub async fn flexibility_history(&self) -> Vec<SiteFlexibilitySample> {
+    pub async fn flexibility_history(&self) -> Vec<SiteHeadroomSample> {
         self.flexibility_history.oldest_first().await
     }
 }
@@ -32,8 +32,8 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
 
-    fn env(up_kw: f64, ts_s: i64) -> SiteFlexibilityEnvelope {
-        SiteFlexibilityEnvelope {
+    fn env(up_kw: f64, ts_s: i64) -> SiteHeadroom {
+        SiteHeadroom {
             ts: Utc.timestamp_opt(ts_s, 0).unwrap(),
             up_kw,
             down_kw: 0.0,

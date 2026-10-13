@@ -111,7 +111,7 @@ pub async fn get_signals(State(state): State<AppState>) -> impl IntoResponse {
     // shows it next to the subscription and reservation it is measured against.
     let capacity = state.capacity_state().await;
     let reservation_request = state
-        .site_envelope()
+        .site_headroom()
         .await
         .map(|env| ReservationRequest::from_headroom(&env, &capacity));
     Json(SignalsState {

@@ -143,11 +143,11 @@ pub struct PlanTimeSlot {
 /// degrees of freedom — energy still needed, time window, asset power bounds,
 /// max acceptable rate, budget remaining — not "unscheduled work".
 ///
-/// Note: this is *not* the same as `SiteFlexibilityEnvelope`, which is the
-/// live site-level headroom served by `GET /flexibility`. Per-device envelopes
+/// Note: this is *not* the same as `SiteHeadroom`, which is the
+/// live site-level headroom served by `GET /flexibility`. Per-device session_flexibility
 /// only refresh at plan time; site headroom refreshes every dispatcher tick.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct FlexibilityEnvelope {
+pub struct SessionFlexibility {
     pub asset_id: String,
     /// Energy still needed in the horizon (kWh)
     pub energy_needed_kwh: f64,
@@ -196,7 +196,7 @@ pub struct FlexibilityEnvelope {
 /// Duration fields estimate how long the VEN can sustain the headroom based
 /// on available storage energy. None if no storage assets are present.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
-pub struct SiteFlexibilityEnvelope {
+pub struct SiteHeadroom {
     pub ts: DateTime<Utc>,
     /// Net signed power (kW) under a sustained Export commitment. See this
     /// struct's own doc comment for the sign convention.
@@ -210,19 +210,19 @@ pub struct SiteFlexibilityEnvelope {
     pub down_duration_s: Option<u64>,
 }
 
-/// One historical sample of a `SiteFlexibilityEnvelope`, retained in a bounded
+/// One historical sample of a `SiteHeadroom`, retained in a bounded
 /// in-memory ring (`AppState::flexibility_history`, BL-43) so the UI can plot a
-/// live headroom band over time — `SiteFlexibilityEnvelope` itself is
+/// live headroom band over time — `SiteHeadroom` itself is
 /// instant-only and has no forward schedule (see its own doc comment).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct SiteFlexibilitySample {
+pub struct SiteHeadroomSample {
     pub ts: DateTime<Utc>,
     pub up_kw: f64,
     pub down_kw: f64,
 }
 
-impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
-    fn from(env: &SiteFlexibilityEnvelope) -> Self {
+impl From<&SiteHeadroom> for SiteHeadroomSample {
+    fn from(env: &SiteHeadroom) -> Self {
         Self {
             ts: env.ts,
             up_kw: env.up_kw,
@@ -232,7 +232,7 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 }
 
 /// One future slot of the forward-looking site headroom trajectory —
-/// distinct from `SiteFlexibilityEnvelope`, which is instant-only.
+/// distinct from `SiteHeadroom`, which is instant-only.
 ///
 /// Re-derived fresh every dispatcher tick (not read statically off
 /// `PlanTimeSlot.planned_state_by_asset`, a stale solve-time-only snapshot):
@@ -244,12 +244,12 @@ impl From<&SiteFlexibilityEnvelope> for SiteFlexibilitySample {
 ///
 /// **`up_kw`/`down_kw` are ABSOLUTE, not a delta from the plan's own chosen
 /// dispatch** (`unified-capacity-envelope-engine`, Spec E). **Signed now**
-/// too (`site-capacity-seam-unification`), matching `SiteFlexibilityEnvelope`/
-/// `CapacityCurveStep::power_kw`'s convention — see `SiteFlexibilityEnvelope`'s
+/// too (`site-capacity-seam-unification`), matching `SiteHeadroom`/
+/// `CapacityCurveStep::power_kw`'s convention — see `SiteHeadroom`'s
 /// own doc comment for the sign convention and why base load (now included)
 /// can push `up_kw` positive.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-pub struct SiteFlexibilityForecastSlot {
+pub struct SiteHeadroomForecastSlot {
     pub ts: DateTime<Utc>,
     /// Absolute max achievable Export at this slot (kW). Always ≥ 0.
     pub up_kw: f64,
@@ -383,7 +383,7 @@ pub struct Plan {
     pub summary: PlanSummary,
 
     // --- Flexibility offered to VTN ---
-    pub envelopes: Vec<FlexibilityEnvelope>,
+    pub session_flexibility: Vec<SessionFlexibility>,
 
     // --- Diagnostics ---
     pub warnings: Vec<PlanWarning>,

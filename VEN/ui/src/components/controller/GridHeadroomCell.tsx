@@ -11,9 +11,9 @@ import {
 import type { AssetTimelinePoint } from "./types";
 import type {
   CapacityCurves,
-  SiteFlexibilityEnvelope,
-  SiteFlexibilitySample,
-  SiteFlexibilityForecastSlot,
+  SiteHeadroom,
+  SiteHeadroomSample,
+  SiteHeadroomForecastSlot,
 } from "../../api/types";
 import { SiteHeadroomChart } from "./charts/SiteHeadroomChart";
 import { formatTs } from "./charts/tariffChartShared";
@@ -21,9 +21,9 @@ import { useCapacityCurvesAt } from "../../api/hooks";
 import { formatKwOrDash } from "@lab/charts/unitFormat";
 
 interface GridHeadroomCellProps {
-  envelope: SiteFlexibilityEnvelope | null | undefined;
-  history: SiteFlexibilitySample[];
-  forecast: SiteFlexibilityForecastSlot[];
+  headroom: SiteHeadroom | null | undefined;
+  history: SiteHeadroomSample[];
+  forecast: SiteHeadroomForecastSlot[];
   capacity?: CapacityCurves | null;
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
@@ -50,7 +50,7 @@ function fmtDuration(s: number | null | undefined): string {
  * server actually used, so a tap works the same on touch screens.
  */
 export function GridHeadroomCell({
-  envelope,
+  headroom,
   history,
   forecast,
   capacity = null,
@@ -97,10 +97,10 @@ export function GridHeadroomCell({
           Site Headroom
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="headroom-up-kw">
-          Up: {formatKwOrDash(envelope?.up_kw)} ({fmtDuration(envelope?.up_duration_s)})
+          Up: {formatKwOrDash(headroom?.up_kw)} ({fmtDuration(headroom?.up_duration_s)})
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="headroom-down-kw">
-          Down: {formatKwOrDash(envelope?.down_kw)} ({fmtDuration(envelope?.down_duration_s)})
+          Down: {formatKwOrDash(headroom?.down_kw)} ({fmtDuration(headroom?.down_duration_s)})
         </Typography>
       </Box>
 

@@ -8,7 +8,7 @@
 //! for the whole window: a thermostat-cycling heater spikes here every time its
 //! relay closes. The UI labels these curves "capability" for exactly that
 //! reason — calling them a commitment invites a promise the number does not
-//! make (see R-95). Distinct from `SiteFlexibilityForecastSlot`, whose
+//! make (see R-95). Distinct from `SiteHeadroomForecastSlot`, whose
 //! per-slot `up_kw`/`down_kw` are independent point-in-time counterfactuals
 //! and must never be integrated over time — see
 //! `controller::capacity_forecast` for the computation.
