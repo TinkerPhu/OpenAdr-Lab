@@ -1,19 +1,19 @@
 import { useMemo } from "react";
 import { Typography } from "@mui/material";
-import { TimeSeriesChart } from "@lab/charts/TimeSeriesChart";
-import type { TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
-import { mergeTimestampedSeries } from "@lab/charts/mergeSeries";
-import type { NamedSample } from "@lab/charts/mergeSeries";
-import { tightSpanDomain, formatPowerTick } from "@lab/charts/axisDomain";
-import { EmptyState } from "@lab/charts/EmptyState";
-import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
+import { TimeSeriesChart } from "@lab/ui/TimeSeriesChart";
+import type { TimeSeriesSeriesSpec } from "@lab/ui/TimeSeriesChart";
+import { mergeTimestampedSeries } from "@lab/ui/mergeSeries";
+import type { NamedSample } from "@lab/ui/mergeSeries";
+import { tightSpanDomain, formatPowerTick } from "@lab/ui/axisDomain";
+import { EmptyState } from "@lab/ui/EmptyState";
+import { CELL_CHART_HEIGHT } from "@lab/ui/chartLayout";
 import {
   fleetChartWindow,
   fleetChartTicks,
   FLEET_AXIS_WIDTH,
   FLEET_TICK_INTERVAL,
 } from "./fleetChartWindow";
-import { renderDayNightShading } from "@lab/charts/DayNightShading";
+import { renderDayNightShading } from "@lab/ui/DayNightShading";
 import { LAB_LOCATION } from "../utils/labLocation";
 
 import type { FleetHistory } from "../api/types";

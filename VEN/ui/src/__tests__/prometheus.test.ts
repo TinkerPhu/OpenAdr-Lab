@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatLabels, parsePrometheusText } from "@lab/charts/prometheus";
+import { formatLabels, parsePrometheusText } from "@lab/ui/prometheus";
 
 // The parser behind both UIs' Metrics pages. These pin what it does today (it was two verbatim
 // copies), so moving it to one place cannot change a page.

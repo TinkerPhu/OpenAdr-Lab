@@ -34,7 +34,7 @@ restored in `4d8b0447`). **Fixed**: the rows are deleted (by the `docs/register-
 
 R-110 (remainder: the `AppState` god object, `simulator/mod.rs`, the 1445-line `capacity_headroom.rs`),
 R-118 (functions over 100 lines), R-32 (VTN BFF / VEN client
-duplication), R-125 (SoC names without a unit), R-121 (`ui-charts/` holds more than charts).
+duplication), R-125 (SoC names without a unit). R-121 (`ui-charts/` held more than charts) was fixed 2026-10-13: the directory is `lab-ui/`.
 
 ## How it was searched
 

@@ -15,7 +15,7 @@ import type {
   LimitPassOutcome,
   UpdateArbiterSettingsBody,
 } from "../../api/types";
-import { formatKwOrDash } from "@lab/charts/unitFormat";
+import { formatKwOrDash } from "@lab/ui/unitFormat";
 
 export type ArbiterSettingsCardProps = {
   arbiterSettings: ArbiterSettings | undefined;

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBffContext } from "./bffContext";
 import type { EventInput, ProgramInput } from "./types";
-import { debugLog } from "@lab/charts/debugLog";
+import { debugLog } from "@lab/ui/debugLog";
 
 export function useHealth() {
   const { api } = useBffContext();

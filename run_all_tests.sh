@@ -173,7 +173,7 @@ fi
 # arrive on a `git pull` — it simply is not there, and the build fails deep in
 # buildkit with `"/<dir>": not found` after minutes of unrelated layers. This
 # has now cost a full suite run twice: once when `lab-core` was added, once when
-# `ui-charts` was. Both times the code was correct and the checkout was not.
+# `lab-ui` was. Both times the code was correct and the checkout was not.
 #
 # The list is derived from the Dockerfiles rather than written down, so the next
 # shared directory is covered without anyone remembering this comment exists.

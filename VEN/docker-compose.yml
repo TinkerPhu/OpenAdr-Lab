@@ -183,7 +183,7 @@ services:
 
   ui:
     build:
-      # Repo root: this UI is an npm workspace and imports ui-charts/ (D-06's
+      # Repo root: this UI is an npm workspace and imports lab-ui/ (D-06's
       # move applied to the UIs).
       context: ..
       dockerfile: VEN/ui/Dockerfile

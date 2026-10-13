@@ -1,5 +1,5 @@
 // Shared by VEN/ui and VTN/ui: each app's eslint.config.js re-exports this. `.mjs` because
-// ui-charts/ has no package.json of its own, so a plain `.js` here would not be known to be ESM.
+// lab-ui/ has no package.json of its own, so a plain `.js` here would not be known to be ESM.
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

@@ -3038,7 +3038,7 @@ Rules:
 
 - **`ReferenceArea` defaults `fillOpacity` to 0.5.** A fill of `rgba(…, 0.15)` is drawn at
   0.075. Any code that *computes* an alpha (proportional shading, a day/night wash) must set
-  `fillOpacity={1}` or every value is silently halved. `ui-charts/src/StateShading.tsx` and
+  `fillOpacity={1}` or every value is silently halved. `lab-ui/src/StateShading.tsx` and
   `DayNightShading.tsx` both pin it; moving existing colours onto such a helper means
   restating them at their real, halved value so nothing changes on screen.
 - **Shade the exception, not the normal state.** A band for "EV plugged in" tints the region

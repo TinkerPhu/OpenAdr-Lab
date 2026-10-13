@@ -4,7 +4,7 @@ import {
   TableContainer, TableHead, TableRow, Typography,
 } from "@mui/material";
 import { useMetrics } from "../api/hooks";
-import { formatLabels, parsePrometheusText, type MetricRow } from "@lab/charts/prometheus";
+import { formatLabels, parsePrometheusText, type MetricRow } from "@lab/ui/prometheus";
 
 // WP-T7 (docs/history/project_journal.md, search "WP-T"): human labels/grouping for the
 // metrics this VEN actually emits (grep-confirmed — VEN/src only calls

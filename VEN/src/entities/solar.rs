@@ -45,7 +45,7 @@ fn julian_date(t: DateTime<Utc>) -> f64 {
 
 /// Solar elevation/azimuth at time `t` for a given geo position.
 ///
-/// The elevation path is ported to TypeScript in `ui-charts/src/solarPosition.ts` so the
+/// The elevation path is ported to TypeScript in `lab-ui/src/solarPosition.ts` so the
 /// VTN Fleet charts can shade night. Accepted as a second copy (decision 2026-10-06); a
 /// change to the maths here must be mirrored there, and both are pinned to the same
 /// closed-form geometry by their tests.

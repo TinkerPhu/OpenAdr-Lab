@@ -1,4 +1,4 @@
-import { formatSignedPowerValue } from "@lab/charts/unitFormat";
+import { formatSignedPowerValue } from "@lab/ui/unitFormat";
 
 /**
  * Tooltip text for an export-capability value, shared by SiteHeadroomChart and

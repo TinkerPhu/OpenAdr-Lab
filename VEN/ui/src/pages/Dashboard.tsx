@@ -6,7 +6,7 @@ import type { OadrCapacityState, AssetLedgerEntry, AssetLedgerHistory } from "..
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
-import { formatFixedOrDash, formatKwOrDash } from "@lab/charts/unitFormat";
+import { formatFixedOrDash, formatKwOrDash } from "@lab/ui/unitFormat";
 import { OBJECTIVE_LABELS } from "../components/planner/objectiveLabels";
 
 function ModeBadge({ mode }: { mode?: string }) {

@@ -7,7 +7,7 @@ import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import {
   CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL,
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
-} from "@lab/charts/chartLayout";
+} from "@lab/ui/chartLayout";
 import type { TariffConditions, AssetTimelinePoint } from "./types";
 import { TariffEnvelopeChart } from "./charts/TariffEnvelopeChart";
 import type { ZoneDef } from "../../api/types";
@@ -15,7 +15,7 @@ import { useTariffs, useCapacitySchedule } from "../../api/hooks";
 import {
   buildTariffPricePoints, buildCapacityLimitPoints, buildPowerPoints, fillCostRateFromTariffs,
 } from "./tariffBuilders";
-import { formatFixedOrDash } from "@lab/charts/unitFormat";
+import { formatFixedOrDash } from "@lab/ui/unitFormat";
 
 interface GridTariffCellProps {
   snapshot: TariffConditions;

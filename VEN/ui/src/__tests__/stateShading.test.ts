@@ -7,8 +7,8 @@ import {
   stateShadingRuns,
   renderStateShading,
   type StateShadingSpec,
-} from "@lab/charts/StateShading";
-import type { TimestampedRow } from "@lab/charts/mergeSeries";
+} from "@lab/ui/StateShading";
+import type { TimestampedRow } from "@lab/ui/mergeSeries";
 
 const minute = 60_000;
 const row = (min: number, values: Record<string, number> | null): TimestampedRow => ({

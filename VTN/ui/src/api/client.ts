@@ -1,5 +1,5 @@
 import type { EventInput, FleetHistory, FleetLive, FleetReactions, FleetSignals, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
-import { debugLog } from "@lab/charts/debugLog";
+import { debugLog } from "@lab/ui/debugLog";
 
 let reqCounter = 0;
 function requestId(): string {

@@ -17,7 +17,7 @@ import type {
   MeasurementResponse,
   WeatherResponse,
 } from "./types";
-import { debugLog } from "@lab/charts/debugLog";
+import { debugLog } from "@lab/ui/debugLog";
 import { parseEvSessionConflict } from "./evSessionConflict";
 
 /** A wire timeline point with its ISO `ts` as epoch ms, the one conversion both timeline calls share. */

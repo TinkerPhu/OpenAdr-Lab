@@ -8,7 +8,7 @@
  * golden value copied from one of them would not be.
  */
 import { describe, it, expect } from "vitest";
-import { solarElevationDeg } from "@lab/charts/solarPosition";
+import { solarElevationDeg } from "@lab/ui/solarPosition";
 
 // Zunzgen — the lab, and the site solar.rs is calibrated against.
 const LAT = 47.4491;

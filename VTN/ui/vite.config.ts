@@ -4,12 +4,12 @@ import { resolve } from "path";
 
 export default defineConfig({
   plugins: [react()],
-  // `@lab/charts` is the shared chart package at the repo root (ui-charts/),
+  // `@lab/ui` is the shared UI source at the repo root (lab-ui/),
   // imported as source by both UIs: one implementation of "how this lab draws
   // a time series", compiled by whichever app is building. Vitest inherits
   // this resolve config, so tests need no separate setup.
   resolve: {
-    alias: { "@lab/charts": resolve(__dirname, "../../ui-charts/src") },
+    alias: { "@lab/ui": resolve(__dirname, "../../lab-ui/src") },
   },
   server: {
     port: 5174,

@@ -10,7 +10,7 @@ import {
   formatTemperatureC,
   formatFixedOrDash,
   formatKwOrDash,
-} from "@lab/charts/unitFormat";
+} from "@lab/ui/unitFormat";
 
 describe("canonical per-unit formatting", () => {
   it("power: Watts below 1kW, kW at/above, matching the axis-tick rule exactly", () => {

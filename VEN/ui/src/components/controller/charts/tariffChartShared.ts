@@ -1,6 +1,6 @@
 import type { TariffTimePoint } from "../types";
-import type { TimestampedRow } from "@lab/charts/mergeSeries";
-import { clipRowsToWindow, ensureNonEmptyRows } from "@lab/charts/mergeSeries";
+import type { TimestampedRow } from "@lab/ui/mergeSeries";
+import { clipRowsToWindow, ensureNonEmptyRows } from "@lab/ui/mergeSeries";
 
 /** X-axis tick label — shared by every Grid Signals / Grid Rates chart. */
 export function formatTs(ts: number) {

@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { Alert, Typography } from "@mui/material";
-import { TimeSeriesChart } from "@lab/charts/TimeSeriesChart";
-import type { TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
-import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH } from "@lab/charts/axisDomain";
-import { EmptyState } from "@lab/charts/EmptyState";
-import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
-import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF, TARIFF_LINE_STYLE } from "@lab/charts/types";
+import { TimeSeriesChart } from "@lab/ui/TimeSeriesChart";
+import type { TimeSeriesSeriesSpec } from "@lab/ui/TimeSeriesChart";
+import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH } from "@lab/ui/axisDomain";
+import { EmptyState } from "@lab/ui/EmptyState";
+import { CELL_CHART_HEIGHT } from "@lab/ui/chartLayout";
+import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF, TARIFF_LINE_STYLE } from "@lab/ui/types";
 import type { FleetSignals } from "../api/types";
 import { sharedTariff, tariffRows, IMPORT_KEY, EXPORT_KEY } from "../utils/fleetTariff";
 import {
@@ -14,7 +14,7 @@ import {
   FLEET_AXIS_WIDTH,
   FLEET_TICK_INTERVAL,
 } from "./fleetChartWindow";
-import { renderDayNightShading } from "@lab/charts/DayNightShading";
+import { renderDayNightShading } from "@lab/ui/DayNightShading";
 import { LAB_LOCATION } from "../utils/labLocation";
 
 

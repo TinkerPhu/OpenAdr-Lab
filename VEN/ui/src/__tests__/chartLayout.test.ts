@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CELL_CHART_HEIGHT,
   DIAGNOSTIC_CHART_HEIGHT,
-} from "@lab/charts/chartLayout";
+} from "@lab/ui/chartLayout";
 import { SERIES_COLORS, ASSET_COLORS } from "../components/controller/types";
 
 describe("chart sizing contract", () => {

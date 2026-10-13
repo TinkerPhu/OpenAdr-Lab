@@ -1,12 +1,12 @@
 import type { PlannedRates } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
-import { TARIFF_LINE_STYLE } from "@lab/charts/types";
-import { DIAGNOSTIC_CHART_HEIGHT } from "@lab/charts/chartLayout";
-import { formatCo2IntensityGKwh } from "@lab/charts/unitFormat";
-import { EmptyState } from "@lab/charts/EmptyState";
-import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH, MIN_CO2_INTENSITY_SPAN_G_KWH } from "@lab/charts/axisDomain";
-import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/charts/TimeSeriesChart";
-import type { TimestampedRow } from "@lab/charts/mergeSeries";
+import { TARIFF_LINE_STYLE } from "@lab/ui/types";
+import { DIAGNOSTIC_CHART_HEIGHT } from "@lab/ui/chartLayout";
+import { formatCo2IntensityGKwh } from "@lab/ui/unitFormat";
+import { EmptyState } from "@lab/ui/EmptyState";
+import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH, MIN_CO2_INTENSITY_SPAN_G_KWH } from "@lab/ui/axisDomain";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "@lab/ui/TimeSeriesChart";
+import type { TimestampedRow } from "@lab/ui/mergeSeries";
 
 interface TariffsLineChartProps {
   data: PlannedRates;

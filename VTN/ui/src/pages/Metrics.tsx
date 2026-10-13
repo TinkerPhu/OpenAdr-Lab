@@ -4,7 +4,7 @@ import {
   TableHead, TableRow, Typography,
 } from "@mui/material";
 import { useMetrics } from "../api/hooks";
-import { formatLabels, parsePrometheusText, type MetricRow } from "@lab/charts/prometheus";
+import { formatLabels, parsePrometheusText, type MetricRow } from "@lab/ui/prometheus";
 
 export function MetricsPage() {
   const { data: raw = "", dataUpdatedAt } = useMetrics();

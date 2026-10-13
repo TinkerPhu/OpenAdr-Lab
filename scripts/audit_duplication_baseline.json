@@ -24,7 +24,7 @@
   "VEN/ui/src/App.tsx|VTN/ui/src/App.tsx": 5,
   "VEN/ui/src/components/NotificationsBell.tsx|VEN/ui/src/pages/Notifications.tsx": 2,
   "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx": 1,
-  "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx|ui-charts/src/TimeSeriesChart.tsx": 1,
+  "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx|lab-ui/src/TimeSeriesChart.tsx": 1,
   "VEN/ui/src/components/controller/AssetLeftSection.tsx|VEN/ui/src/components/controller/dataBuilders.ts": 1,
   "VEN/ui/src/components/controller/GridAccumulatedCell.tsx|VEN/ui/src/components/controller/GridHeadroomCell.tsx|VEN/ui/src/components/controller/GridRatesCell.tsx|VEN/ui/src/components/controller/GridTariffCell.tsx": 3,
   "VEN/ui/src/components/controller/GridRatesCell.tsx|VEN/ui/src/components/controller/GridTariffCell.tsx": 7,

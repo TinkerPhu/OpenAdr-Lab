@@ -9,7 +9,7 @@ import {
   TableRow,
 } from "@mui/material";
 import { deriveAssetSummaries } from "../controller/dataBuilders";
-import { formatEnergyKwh, formatPowerValue } from "@lab/charts/unitFormat";
+import { formatEnergyKwh, formatPowerValue } from "@lab/ui/unitFormat";
 import type { SimSnapshot } from "../../api/types";
 
 interface AssetSpecsTableProps {

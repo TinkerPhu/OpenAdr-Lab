@@ -15507,3 +15507,20 @@ back (`plan_snapshots` was dropped in v7, R-63). A blanket `envelopes` → `sess
 substitution produced unreadable BDD sentences ("has FLEXIBLE session_flexibility"); they were
 reworded by hand and `audit_step_definitions.py` caught the one feature line that still had the
 old spelling.
+
+## R-121: the shared UI directory is `lab-ui/` (refactor/r121-lab-ui)
+
+**What.** Renamed `ui-charts/` to `lab-ui/` and its import alias `@lab/charts` to `@lab/ui` in one
+commit (72 importing files, both UIs' vite/tsconfig/eslint configs, both UI Dockerfiles, the
+duplication audit's roots, docs). Untracked `VEN/ui/tsconfig.tsbuildinfo`, a build artifact that had
+been committed, and ignored `*.tsbuildinfo`.
+
+**Why.** The directory is the one place for source both UIs share, so it also holds the Prometheus
+parser, RefreshControls, debugLog, JsonDialog, the formatters and the TS/ESLint base configs; a name
+that says "charts" sent a reader to the wrong place. `lab-ui/` sits beside the Rust `lab-core/` and
+matches its alias. The register proposed a transition with two aliases; nothing outside the repo
+imports the source, so one atomic rename was enough.
+
+**Issues.** The docker hosts use sparse-checkout, so a renamed top-level directory does not arrive
+on pull: each host needed `git sparse-checkout add lab-ui` before its UI images could build
+(`run_all_tests.sh`'s checkout pre-flight names the missing path).

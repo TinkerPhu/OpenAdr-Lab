@@ -72,3 +72,6 @@ openspec/changes/pv-self-consumption-reward/*
 .env.fleet.*
 **/.env.fleet.*
 
+
+# TypeScript incremental build state (generated)
+*.tsbuildinfo

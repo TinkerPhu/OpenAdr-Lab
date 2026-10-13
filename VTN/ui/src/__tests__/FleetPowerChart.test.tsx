@@ -6,7 +6,7 @@ import type { FleetHistory } from "../api/types";
 
 // The chart itself is recharts; what matters here is what gets handed to it.
 const chartProps: Record<string, unknown>[] = [];
-vi.mock("@lab/charts/TimeSeriesChart", () => ({
+vi.mock("@lab/ui/TimeSeriesChart", () => ({
   TimeSeriesChart: (props: Record<string, unknown>) => {
     chartProps.push(props);
     return null;

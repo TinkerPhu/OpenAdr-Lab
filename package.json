@@ -2,7 +2,7 @@
   "name": "openadr-lab-ui",
   "private": true,
   "version": "0.0.0",
-  "description": "npm workspace root. Exists so the two UIs and the chart source they share resolve their dependencies from one hoisted node_modules — nothing is published from here, and no application code lives here.",
+  "description": "npm workspace root. Exists so the two UIs and the UI source they share (lab-ui/) resolve their dependencies from one hoisted node_modules — nothing is published from here, and no application code lives here.",
   "workspaces": [
     "VEN/ui",
     "VTN/ui"

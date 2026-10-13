@@ -25,7 +25,7 @@ import os
 import re
 import sys
 
-ROOTS = ["VEN/src", "lab-core/src", "VTN/bff/src", "VTN/ui/src", "VEN/ui/src", "ui-charts/src"]
+ROOTS = ["VEN/src", "lab-core/src", "VTN/bff/src", "VTN/ui/src", "VEN/ui/src", "lab-ui/src"]
 EXTENSIONS = (".rs", ".ts", ".tsx")
 WINDOW = 8
 MAX_FN_LINES = 100

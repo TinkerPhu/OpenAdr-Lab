@@ -8,18 +8,18 @@ import {
   formatPowerTick,
   roundedTimeTicks,
   POWER_AXIS_WIDTH_PX,
-} from "@lab/charts/axisDomain";
+} from "@lab/ui/axisDomain";
 import {
   formatPowerValue,
   formatCostRateEurH,
   formatCo2RateGH,
   formatSocPct,
   formatTemperatureC,
-} from "@lab/charts/unitFormat";
-import { mergeTimestampedSeries, locfFillKeys, clipRowsToWindow, type TimestampedRow } from "@lab/charts/mergeSeries";
-import { CELL_CHART_HEIGHT } from "@lab/charts/chartLayout";
-import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "@lab/charts/TimeSeriesChart";
-import { renderStateShading, type StateShadingSpec } from "@lab/charts/StateShading";
+} from "@lab/ui/unitFormat";
+import { mergeTimestampedSeries, locfFillKeys, clipRowsToWindow, type TimestampedRow } from "@lab/ui/mergeSeries";
+import { CELL_CHART_HEIGHT } from "@lab/ui/chartLayout";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "@lab/ui/TimeSeriesChart";
+import { renderStateShading, type StateShadingSpec } from "@lab/ui/StateShading";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];

@@ -1,5 +1,5 @@
 import { Box } from "@mui/material";
-import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "@lab/charts/chartLayout";
+import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "@lab/ui/chartLayout";
 import type { AssetId, AssetTimelinePoint } from "./types";
 import { AssetTimelineChart } from "./charts/AssetTimelineChart";
 import { assetChartSpec } from "./assetChartSpecs";
