@@ -9,9 +9,8 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 
 use crate::controller::milp_planner::asset_port::pinned_binary;
 use crate::controller::milp_planner::{
-    AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution,
-    AssetSolutionDetail, DeclareMode, DeclaredAsset, FlexibilityWindow, ObjectivePart,
-    ShiftableLoadMilpContext, ShiftableLoadScalars,
+    AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, DeclareMode,
+    DeclaredAsset, FlexibilityWindow, ObjectivePart, ShiftableLoadMilpContext,
 };
 
 /// Deterministic earliest-start tie-break for a shiftable load [€ per start-slot index].
@@ -128,18 +127,6 @@ impl DeclaredAsset for DeclaredShiftableLoad<'_> {
 impl AssetMilpContext for ShiftableLoadMilpContext {
     fn asset_id(&self) -> &str {
         &self.asset_id
-    }
-
-    fn asset_kind(&self) -> AssetKind {
-        AssetKind::ShiftableLoad
-    }
-
-    fn milp_params(&self, _n: usize, _now: DateTime<Utc>) -> AssetMilpParams {
-        AssetMilpParams::ShiftableLoad(ShiftableLoadScalars {
-            power_kw: self.power_kw,
-            duration_slots: self.duration_slots,
-            valid_start_slots: self.valid_start_slots.clone(),
-        })
     }
 
     fn declare<'a>(

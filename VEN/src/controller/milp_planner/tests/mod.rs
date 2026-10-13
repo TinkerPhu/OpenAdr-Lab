@@ -709,7 +709,6 @@ fn bmi(
     Built {
         inputs: build_milp_inputs(tariffs, cap, profile, now, &[], None),
         ctxs,
-        now,
     }
 }
 
@@ -719,7 +718,6 @@ fn bmi(
 struct Built {
     inputs: MilpInputs,
     ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
-    now: DateTime<Utc>,
 }
 
 impl std::ops::Deref for Built {
@@ -730,33 +728,16 @@ impl std::ops::Deref for Built {
 }
 
 impl Built {
-    fn declared(&self, kind: AssetKind) -> AssetMilpParams {
-        self.ctxs
-            .iter()
-            .find(|c| c.asset_kind() == kind)
-            .unwrap_or_else(|| panic!("no {kind:?} context was built"))
-            .milp_params(self.inputs.n, self.now)
+    fn battery(&self) -> &BatteryMilpContext {
+        context(&self.ctxs)
     }
 
-    fn battery(&self) -> BatteryScalars {
-        match self.declared(AssetKind::Battery) {
-            AssetMilpParams::Battery(b) => b,
-            other => panic!("expected battery scalars, got {other:?}"),
-        }
+    fn heater(&self) -> &HeaterMilpContext {
+        context(&self.ctxs)
     }
 
-    fn heater(&self) -> HeaterScalars {
-        match self.declared(AssetKind::Heater) {
-            AssetMilpParams::Heater(h) => h,
-            other => panic!("expected heater scalars, got {other:?}"),
-        }
-    }
-
-    fn ev(&self) -> EvScalars {
-        match self.declared(AssetKind::Ev) {
-            AssetMilpParams::Ev(e) => e,
-            other => panic!("expected EV scalars, got {other:?}"),
-        }
+    fn ev(&self) -> &EvMilpContext {
+        context(&self.ctxs)
     }
 }
 

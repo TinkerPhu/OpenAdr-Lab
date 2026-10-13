@@ -211,7 +211,7 @@ impl Battery {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
+    use crate::controller::milp_planner::AssetMilpContext;
     use crate::services::test_support::milp_pool::bound_range;
     use good_lp::variables;
 
@@ -234,27 +234,6 @@ mod milp_context_trait_tests {
     #[test]
     fn asset_id_is_battery() {
         assert_eq!(make_ctx().asset_id(), "battery");
-    }
-
-    #[test]
-    fn asset_kind_is_battery() {
-        assert_eq!(make_ctx().asset_kind(), AssetKind::Battery);
-    }
-
-    #[test]
-    fn milp_params_returns_correct_battery_scalars() {
-        let ctx = make_ctx();
-        let params = ctx.milp_params(4, chrono::Utc::now());
-        match params {
-            AssetMilpParams::Battery(b) => {
-                assert!((b.e_nom_kwh - 10.0).abs() < 1e-9);
-                assert!((b.e_init_kwh - 5.0).abs() < 1e-9);
-                assert!((b.e_min_kwh - 1.0).abs() < 1e-9);
-                assert!((b.p_ch_max_kw - 5.0).abs() < 1e-9);
-                assert!((b.p_dis_max_kw - 5.0).abs() < 1e-9);
-            }
-            _ => panic!("expected AssetMilpParams::Battery"),
-        }
     }
 
     #[test]

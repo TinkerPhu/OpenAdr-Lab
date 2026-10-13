@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use good_lp::{Constraint, Expression, ProblemVariables, Solution, Variable};
 
 use crate::controller::milp_planner::asset_port::{
-    ev_future_state_at, EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
+    ev_future_state_at, EvMilpContext, EvMilpVars, EvSolOutput,
 };
 use crate::controller::milp_planner::{
     AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, DeclareMode,
@@ -153,39 +153,6 @@ impl DeclaredAsset for DeclaredEv<'_> {
 impl AssetMilpContext for EvMilpContext {
     fn asset_id(&self) -> &str {
         &self.asset_id
-    }
-
-    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
-        crate::controller::milp_planner::AssetKind::Ev
-    }
-
-    fn milp_params(
-        &self,
-        _n: usize,
-        _now: DateTime<Utc>,
-    ) -> crate::controller::milp_planner::AssetMilpParams {
-        use crate::controller::milp_planner::MilpLoadMode;
-        let mode = match self.mode {
-            EvMilpMode::MustRun => MilpLoadMode::MustRun,
-            EvMilpMode::MayRun => MilpLoadMode::MayRun,
-            EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        crate::controller::milp_planner::AssetMilpParams::Ev(
-            crate::controller::milp_planner::EvScalars {
-                mode,
-                soc_init_frac: self.soc_init_frac,
-                a_ev: self.a_ev.clone(),
-                soc_drops: self.soc_drops.clone(),
-                obligations: self.obligations.clone(),
-                p_max_kw: self.p_max_kw,
-                p_min_kw: self.p_min_kw,
-                battery_kwh: self.battery_kwh,
-                segments: self.segments.clone(),
-                e_extra_max_kwh: self.e_extra_max_kwh,
-                v_extra_eur_kwh: self.v_extra_eur_kwh,
-                budget_eur: self.budget_eur,
-            },
-        )
     }
 
     fn declare<'a>(

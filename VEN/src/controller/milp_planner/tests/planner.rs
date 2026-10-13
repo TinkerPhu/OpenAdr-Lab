@@ -611,10 +611,8 @@ fn run_planner_duplicate_asset_id_panics() {
 #[test]
 fn run_planner_infeasible_constraints_fallback_no_panic() {
     use crate::controller::milp_planner::{
-        AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution, DeclareMode,
-        DeclaredAsset, ObjectivePart,
+        AllocationBasis, AssetMilpContext, AssetSolution, DeclareMode, DeclaredAsset, ObjectivePart,
     };
-    use chrono::{DateTime, Utc};
     use good_lp::{Constraint, Expression, ProblemVariables, Solution, Variable};
 
     /// The battery, with one constraint added that it cannot meet.
@@ -648,12 +646,6 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
     impl AssetMilpContext for InfeasibleBatCtx {
         fn asset_id(&self) -> &str {
             self.inner.asset_id()
-        }
-        fn asset_kind(&self) -> AssetKind {
-            self.inner.asset_kind()
-        }
-        fn milp_params(&self, n: usize, now: DateTime<Utc>) -> AssetMilpParams {
-            self.inner.milp_params(n, now)
         }
         fn declare<'a>(
             &'a self,
@@ -1245,17 +1237,9 @@ fn marginal_cost_solves_with_every_asset_kind_active() {
         None,
     );
     let weights = build_phase1_weights(&profile, PlannerObjective::MinCost);
-    let kinds: Vec<_> = ctxs.iter().map(|c| c.asset_kind()).collect();
-    for kind in [
-        AssetKind::Battery,
-        AssetKind::Ev,
-        AssetKind::Heater,
-        AssetKind::ShiftableLoad,
-    ] {
-        assert!(
-            kinds.contains(&kind),
-            "{kind:?} must take part, got {kinds:?}"
-        );
+    let ids: Vec<&str> = ctxs.iter().map(|c| c.asset_id()).collect();
+    for id in ["battery", "ev", "heater", load.asset_id.as_str()] {
+        assert!(ids.contains(&id), "{id} must take part, got {ids:?}");
     }
 
     let winning = solve_phase1(&inputs, &weights, &ctxs, 60.0).expect("phase1 solve failed");

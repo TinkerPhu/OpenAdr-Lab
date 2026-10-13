@@ -8,110 +8,6 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-/// Discriminant for the MILP-capable asset types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AssetKind {
-    Battery,
-    Ev,
-    Heater,
-    /// Unlike the other three (one per site, `Option`-shaped pool slot), a
-    /// site can have several shiftable loads at once — `MilpVarPool.shiftable`
-    /// stays a `Vec`, not a new `Option` slot (`shiftable-load-as-asset`).
-    ShiftableLoad,
-}
-
-/// MilpLoadMode: scheduling mode shared across EV and heater scalars.
-/// Mirrors the per-asset mode enums but decoupled from concrete asset types.
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MilpLoadMode {
-    MustRun,
-    MayRun,
-    MustNotRun,
-}
-
-/// Pre-computed scalar parameters for a battery instance in one planning cycle.
-#[derive(Debug, Clone)]
-pub struct BatteryScalars {
-    pub e_nom_kwh: f64,
-    pub e_init_kwh: f64,
-    pub e_min_kwh: f64,
-    pub e_max_kwh: f64,
-    pub p_ch_max_kw: f64,
-    pub p_dis_max_kw: f64,
-    pub eff_ch: f64,
-    pub eff_dis: f64,
-}
-
-/// Pre-computed scalar parameters for an EV charger in one planning cycle.
-#[derive(Debug, Clone)]
-pub struct EvScalars {
-    pub mode: MilpLoadMode,
-    /// Live SoC at plan time, from the EV's own MILP context.
-    pub soc_init_frac: f64,
-    /// Per-step availability mask (false forces p_ev[t] = 0). len = n.
-    pub a_ev: Vec<bool>,
-    /// `ev-usage-forecast`: exogenous SoC changes to project (see
-    /// `EvMilpContext::soc_drops`). `None` when no usage forecast is configured.
-    pub soc_drops: Option<crate::controller::milp_planner::asset_port::ExogenousSocDrops>,
-    /// Every charging obligation inside the horizon (R-92). Same type as
-    /// `EvMilpContext::obligations` and `AssetScalars::ev_obligations` — the
-    /// concept has one definition, carried across these layers unchanged.
-    pub obligations: Vec<crate::controller::milp_planner::asset_port::EvObligation>,
-    pub p_max_kw: f64,
-    pub p_min_kw: f64,
-    /// Usable pack size [kWh] — converts charging power into state of charge in
-    /// the planner's SoC balance.
-    pub battery_kwh: f64,
-    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
-    pub segments: Vec<crate::controller::milp_planner::asset_port::EvEnergySegment>,
-    pub e_extra_max_kwh: f64,
-    pub v_extra_eur_kwh: f64,
-    /// WP4.1-c MAX_COST: total charging-cost ceiling [€]; None otherwise.
-    pub budget_eur: Option<f64>,
-}
-
-/// Pre-computed scalar parameters for a heater in one planning cycle.
-#[derive(Debug, Clone)]
-pub struct HeaterScalars {
-    pub mode: MilpLoadMode,
-    pub t_dead_step: Option<usize>,
-    /// Power per switchable stage [kW] = max_kw / n_stages.
-    pub p_step_kw: f64,
-    /// Number of switchable stages (1 or 2).
-    pub n_stages: u8,
-    pub e_init_kwh: f64,
-    pub e_max_kwh: f64,
-    pub q_dem_kw: f64,
-    pub e_target_kwh: f64,
-    pub lambda_sw_eur: f64,
-    /// Stage index (0..=n_stages) the heater was at on the last real tick.
-    pub initial_y: f64,
-    /// Terminal energy reward [EUR/kWh]. Mirrors HeaterMilpContext field.
-    pub c_terminal_eur_kwh: f64,
-}
-
-/// Pre-computed scalar parameters for one shiftable load in one planning
-/// cycle — the hard window already resolved to slot indices (`shiftable-load-
-/// as-asset`). `valid_start_slots == [0]` encodes an already-`started` load:
-/// the start decision is already made, not a MILP choice.
-#[derive(Debug, Clone)]
-pub struct ShiftableLoadScalars {
-    pub power_kw: f64,
-    pub duration_slots: usize,
-    pub valid_start_slots: Vec<usize>,
-}
-
-/// Unified asset MILP parameters — one variant per MILP-capable asset type.
-#[derive(Debug, Clone)]
-pub enum AssetMilpParams {
-    Battery(BatteryScalars),
-    Ev(EvScalars),
-    Heater(HeaterScalars),
-    ShiftableLoad(ShiftableLoadScalars),
-    Unknown,
-}
-
 /// Which part of its objective an asset contributes. Phase 1 minimises cost; phase 2 caps that
 /// same cost and minimises friction on top; the marginal-cost pass prices the cost alone.
 #[derive(Debug, Clone, Copy)]
@@ -280,13 +176,6 @@ pub fn pinned_binary(solved: Option<f64>) -> f64 {
 pub trait AssetMilpContext: Send + Sync {
     /// The roster id this context was built for.
     fn asset_id(&self) -> &str;
-
-    /// Discriminant, kept for the asset-side tests until they read their own context.
-    fn asset_kind(&self) -> AssetKind;
-
-    /// Phase A — scalar extraction: return all MILP parameters for this asset,
-    /// pre-computed for a planning cycle of `n` slots starting at `now`.
-    fn milp_params(&self, n: usize, now: DateTime<Utc>) -> AssetMilpParams;
 
     /// Declare this asset's variables for one solve. Every variable and bound is declared by
     /// this one function in every mode, so the planned and the priced model cannot drift apart

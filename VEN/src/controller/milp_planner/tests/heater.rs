@@ -157,7 +157,7 @@ fn heater_inputs_autonomous_e_target_is_e_max() {
 
 #[test]
 fn heater_inputs_autonomous_mode_is_may_run() {
-    // Without HeaterTarget, heater_mode == MilpLoadMode::MayRun
+    // Without HeaterTarget, heater_mode == HeaterMilpMode::MayRun
     let now = fixed_now();
     let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
     let sim = make_snap_from_profile(&profile);
@@ -170,7 +170,7 @@ fn heater_inputs_autonomous_mode_is_may_run() {
         None,
         None,
     );
-    assert_eq!(inp.heater().mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.heater().mode, HeaterMilpMode::MayRun);
 }
 
 #[test]

@@ -150,7 +150,6 @@ mod phase2a_battery_tests {
     //! assertions now that there's only one implementation to test.
 
     use super::*;
-    use crate::controller::milp_planner::{AssetKind, AssetMilpParams};
     use crate::entities::asset_params::BatteryParams;
     use chrono::Utc;
     use std::collections::HashMap;
@@ -228,7 +227,7 @@ mod phase2a_battery_tests {
     }
 
     #[test]
-    fn build_milp_context_reports_battery_kind_and_scalars() {
+    fn build_milp_context_builds_the_battery_from_its_live_soc() {
         let (boxed, state) = boxed_and_state(0.5);
         let now = Utc::now();
         let planner = crate::entities::planner_params::PlannerParams::default();
@@ -241,10 +240,10 @@ mod phase2a_battery_tests {
                 ..MilpBuildInputs::for_test("battery", &state, now, &planner)
             });
 
-        assert_eq!(ctx.asset_kind(), AssetKind::Battery);
-        let AssetMilpParams::Battery(scalars) = ctx.milp_params(4, now) else {
-            panic!("expected Battery scalars");
-        };
+        let scalars = ctx
+            .as_any()
+            .downcast_ref::<crate::controller::milp_planner::asset_port::BatteryMilpContext>()
+            .expect("a battery builds a battery context");
         assert_eq!(scalars.e_nom_kwh, 10.0);
         assert!((scalars.e_init_kwh - 5.0).abs() < 1e-9, "0.5 soc * 10 kWh");
     }
@@ -288,7 +287,6 @@ mod phase2a_ev_tests {
     //! rationale.
 
     use super::*;
-    use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::EvParams;
     use chrono::Utc;
 
@@ -378,7 +376,7 @@ mod phase2a_ev_tests {
     }
 
     #[test]
-    fn build_milp_context_reports_ev_scalars() {
+    fn build_milp_context_builds_the_ev_with_its_own_power() {
         let (boxed, state) = boxed_and_state();
         let now = Utc::now();
         let planner = crate::entities::planner_params::PlannerParams::default();
@@ -391,9 +389,10 @@ mod phase2a_ev_tests {
                 ..MilpBuildInputs::for_test("ev", &state, now, &planner)
             });
 
-        let AssetMilpParams::Ev(scalars) = ctx.milp_params(4, now) else {
-            panic!("expected Ev scalars");
-        };
+        let scalars = ctx
+            .as_any()
+            .downcast_ref::<crate::controller::milp_planner::asset_port::EvMilpContext>()
+            .expect("an EV charger builds an EV context");
         assert_eq!(scalars.p_max_kw, 7.0);
     }
 
@@ -428,7 +427,6 @@ mod phase2a_heater_tests {
     //! rationale.
 
     use super::*;
-    use crate::controller::milp_planner::AssetMilpParams;
     use crate::entities::asset_params::HeaterParams;
     use chrono::Utc;
 
@@ -496,7 +494,7 @@ mod phase2a_heater_tests {
     }
 
     #[test]
-    fn build_milp_context_reports_heater_scalars() {
+    fn build_milp_context_builds_the_heater_tank() {
         let (boxed, state) = boxed_and_state();
         let now = Utc::now();
         let planner = crate::entities::planner_params::PlannerParams::default();
@@ -510,9 +508,10 @@ mod phase2a_heater_tests {
                 ..MilpBuildInputs::for_test("heater", &state, now, &planner)
             });
 
-        let AssetMilpParams::Heater(scalars) = ctx.milp_params(4, now) else {
-            panic!("expected Heater scalars");
-        };
+        let scalars = ctx
+            .as_any()
+            .downcast_ref::<crate::controller::milp_planner::asset_port::HeaterMilpContext>()
+            .expect("a heater builds a heater context");
         assert!((scalars.e_max_kwh - 10.0).abs() < 1e-9, "(23-18)*2 kWh/C");
     }
 

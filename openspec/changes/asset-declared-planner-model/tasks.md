@@ -118,7 +118,7 @@ otherwise.
       that the EV context's declared window comes from the same session `current_ev_session(now)`
       returns. Then add `flexibility_window()` and replace the three blocks with one loop (fallback
       plan too). Verify: `plans.txt` byte-identical, including the fallback scenario.
-- [ ] 6.5 Move `AssetScalars::ev_obligation_kwh` / `ev_firm_kwh` into the EV asset unchanged, next
+- [x] 6.5 Move `AssetScalars::ev_obligation_kwh` / `ev_firm_kwh` into the EV asset unchanged, next
       to `firm_required_kwh` (do not merge them; task 2.3's row). Then delete what has no caller
       left: `AssetScalars` / `asset_scalars`, `AssetMilpParams`,
       `*Scalars`, `milp_params()`, `MilpLoadMode` (if unused), `AssetKind` / `asset_kind()`,

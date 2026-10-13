@@ -382,9 +382,7 @@ impl EvMilpContext {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_planner::{
-        AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
-    };
+    use crate::controller::milp_planner::AssetMilpContext;
     use crate::services::test_support::milp_pool::bound_range;
     use good_lp::variables;
 
@@ -966,33 +964,6 @@ mod milp_context_trait_tests {
         );
     }
 
-    /// What the context declares through `milp_params` (EvScalars) carries the drops.
-    #[test]
-    fn milp_params_carries_soc_drops_through_to_the_scalars() {
-        use crate::controller::milp_planner::AssetMilpParams;
-        use crate::entities::asset_params::EvUsageMode;
-        use chrono::{TimeZone, Utc};
-        let cfg = ev_with_usage(EvUsageMode::Forecast);
-        let now = Utc.with_ymd_and_hms(2026, 7, 20, 0, 0, 0).unwrap();
-        let n = 24;
-        // n+1 boundaries, as `milp_planner::inputs` builds: cum_s[n] is the horizon
-        // end. These fixtures used n entries, matching the forecast path's old
-        // `cum_s[n-1]` read, which was a slot short of the real horizon.
-        let cum_s: Vec<i64> = (0..=n as i64).map(|t| t * 3600).collect();
-
-        let mut ctx = make_must_run(n);
-        ctx.apply_usage_forecast(&cfg, n, &cum_s, now, &[]);
-        let AssetMilpParams::Ev(scalars) =
-            crate::controller::milp_planner::AssetMilpContext::milp_params(&ctx, n, now)
-        else {
-            panic!("expected Ev params");
-        };
-        assert_eq!(
-            scalars.soc_drops, ctx.soc_drops,
-            "milp_params must pass the drops through, not drop them"
-        );
-    }
-
     /// What the unmasked slots before `deadline_step` can physically deliver [kWh].
     ///
     /// R-93 deleted the production `reachable_energy_kwh`: the solver now decides
@@ -1146,10 +1117,10 @@ mod milp_context_trait_tests {
         assert_eq!(ctx.mode, EvMilpMode::MayRun);
     }
 
-    /// The planner seeds the EV's SoC forecast from the EV's own MILP params,
-    /// not from a raw snapshot read — for every branch, session or not.
+    /// The planner seeds the EV's SoC forecast from the EV's own context, not from a raw
+    /// snapshot read — for every branch, session or not.
     #[test]
-    fn milp_params_report_the_live_soc_in_every_branch() {
+    fn the_context_reports_the_live_soc_in_every_branch() {
         let cfg = super::EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
@@ -1191,10 +1162,7 @@ mod milp_context_trait_tests {
                 0.0,
                 0.0,
             );
-            match ctx.milp_params(4, chrono::Utc::now()) {
-                AssetMilpParams::Ev(e) => assert_eq!(e.soc_init_frac, 0.42, "plugged={plugged}"),
-                _ => panic!("expected Ev variant"),
-            }
+            assert_eq!(ctx.soc_init_frac, 0.42, "plugged={plugged}");
         }
     }
 
@@ -1278,121 +1246,6 @@ mod milp_context_trait_tests {
     #[test]
     fn asset_id_is_ev() {
         assert_eq!(make_must_run(4).asset_id(), "ev");
-    }
-
-    #[test]
-    fn asset_kind_is_ev() {
-        assert_eq!(make_must_run(4).asset_kind(), AssetKind::Ev);
-    }
-
-    #[test]
-    fn milp_params_must_run_mode() {
-        let ctx = make_must_run(4);
-        match ctx.milp_params(4, chrono::Utc::now()) {
-            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustRun),
-            _ => panic!("expected Ev variant"),
-        }
-    }
-
-    #[test]
-    fn milp_params_may_run_mode() {
-        let ctx = EvMilpContext {
-            asset_id: "ev".into(),
-            friction: Default::default(),
-            session_departure: None,
-            mode: EvMilpMode::MayRun,
-            soc_init_frac: 0.0,
-            soc_max_frac: 1.0,
-            a_ev: vec![true; 4],
-            soc_drops: None,
-            obligations: vec![],
-            battery_kwh: 60.0,
-            p_max_kw: 7.2,
-            p_min_kw: 0.0,
-            segments: vec![],
-            e_extra_max_kwh: 5.0,
-            v_extra_eur_kwh: 0.05,
-            asap_lateness_eur_kwh_h: 0.0,
-            free_only: false,
-            p_free_cap_kw: None,
-            reward_per_slot: false,
-            free_early_bias: false,
-            budget_eur: None,
-            c_imp_eur_kwh: None,
-            v_extra_co2_eur_kwh: 0.0,
-        };
-        match ctx.milp_params(4, chrono::Utc::now()) {
-            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
-            _ => panic!("expected Ev variant"),
-        }
-    }
-
-    #[test]
-    fn milp_params_must_not_run_mode() {
-        let ctx = EvMilpContext {
-            asset_id: "ev".into(),
-            friction: Default::default(),
-            session_departure: None,
-            mode: EvMilpMode::MustNotRun,
-            soc_init_frac: 0.0,
-            soc_max_frac: 1.0,
-            a_ev: vec![false; 4],
-            soc_drops: None,
-            obligations: vec![],
-            battery_kwh: 60.0,
-            p_max_kw: 7.2,
-            p_min_kw: 0.0,
-            segments: vec![],
-            e_extra_max_kwh: 5.0,
-            v_extra_eur_kwh: 0.05,
-            asap_lateness_eur_kwh_h: 0.0,
-            free_only: false,
-            p_free_cap_kw: None,
-            reward_per_slot: false,
-            free_early_bias: false,
-            budget_eur: None,
-            c_imp_eur_kwh: None,
-            v_extra_co2_eur_kwh: 0.0,
-        };
-        match ctx.milp_params(4, chrono::Utc::now()) {
-            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
-            _ => panic!("expected Ev variant"),
-        }
-    }
-
-    #[test]
-    fn milp_params_propagates_a_ev() {
-        let n = 4;
-        let a_ev = vec![true, false, true, false];
-        let ctx = EvMilpContext {
-            asset_id: "ev".into(),
-            friction: Default::default(),
-            session_departure: None,
-            mode: EvMilpMode::MayRun,
-            soc_init_frac: 0.0,
-            soc_max_frac: 1.0,
-            a_ev: a_ev.clone(),
-            soc_drops: None,
-            obligations: vec![],
-            battery_kwh: 60.0,
-            p_max_kw: 7.2,
-            p_min_kw: 0.0,
-            segments: vec![],
-            e_extra_max_kwh: 5.0,
-            v_extra_eur_kwh: 0.05,
-            asap_lateness_eur_kwh_h: 0.0,
-            free_only: false,
-            p_free_cap_kw: None,
-            reward_per_slot: false,
-            free_early_bias: false,
-            budget_eur: None,
-            c_imp_eur_kwh: None,
-            v_extra_co2_eur_kwh: 0.0,
-        };
-        match ctx.milp_params(n, chrono::Utc::now()) {
-            AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),
-            _ => panic!("expected Ev variant"),
-        }
     }
 
     #[test]

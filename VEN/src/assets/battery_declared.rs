@@ -157,29 +157,6 @@ impl AssetMilpContext for BatteryMilpContext {
         &self.asset_id
     }
 
-    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
-        crate::controller::milp_planner::AssetKind::Battery
-    }
-
-    fn milp_params(
-        &self,
-        _n: usize,
-        _now: chrono::DateTime<chrono::Utc>,
-    ) -> crate::controller::milp_planner::AssetMilpParams {
-        crate::controller::milp_planner::AssetMilpParams::Battery(
-            crate::controller::milp_planner::BatteryScalars {
-                e_nom_kwh: self.e_nom_kwh,
-                e_init_kwh: self.e_init_kwh,
-                e_min_kwh: self.e_min_kwh,
-                e_max_kwh: self.e_max_kwh,
-                p_ch_max_kw: self.p_ch_max_kw,
-                p_dis_max_kw: self.p_dis_max_kw,
-                eff_ch: self.eff_ch,
-                eff_dis: self.eff_dis,
-            },
-        )
-    }
-
     fn declare<'a>(
         &'a self,
         n: usize,
