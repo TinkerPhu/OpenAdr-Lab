@@ -9,11 +9,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::asset_port::{AssetMilpParams, EvEnergySegment, EvObligation};
 use super::inputs::{SiteInputs, StaleRateRefs};
 use super::stale_rates::apply_stale_rate_policy;
-use super::types::{MilpLoadMode, ShiftableLoadMilpContext};
-use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::capacity::tightest_capacity_limit;
 use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
@@ -234,125 +231,6 @@ pub(super) fn capacity_limits(
     }
 }
 
-/// What the asset contexts declare that the planner reads outside the solve: one EV and one
-/// heater at most (a later context of a kind replaces an earlier one), and every shiftable load
-/// in context order. Deliberately not a copy of the contexts: a parameter only the solve needs
-/// (a power limit, an efficiency, a tank size) stays in the asset's own context, which is what
-/// the solve reads.
-#[derive(Debug, Clone)]
-pub(crate) struct AssetScalars {
-    /// Per-step plugged-in availability mask. False forces p_ev[t] = 0.
-    pub a_ev: Vec<bool>,
-    pub ev_mode: MilpLoadMode,
-    /// Every charging obligation this EV must meet inside the horizon (R-92).
-    /// Empty = open horizon (plugged, no departure to charge for).
-    pub ev_obligations: Vec<EvObligation>,
-    /// Usable pack size [kWh]; 0.0 when EV absent. Turns an obligation's target
-    /// SoC into the energy the diagnostics and session_flexibility report.
-    pub ev_battery_kwh: f64,
-    /// `ev-comfort-piecewise-core`: the comfort curve as priced energy bands.
-    pub ev_segments: Vec<EvEnergySegment>,
-    /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
-    pub e_ev_extra_max_kwh: f64,
-    pub ev_budget_eur: Option<f64>,
-    /// Live SoC of the EV at plan-build time [0.0..1.0]; None when no EV is present.
-    pub soc_ev_init: Option<f64>,
-    /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
-    pub shiftable_loads: Vec<ShiftableLoadMilpContext>,
-    pub heater_mode: MilpLoadMode,
-    /// Power per heater stage [kW] = max_kw / n_stages.
-    pub p_heat_step_kw: f64,
-    /// Number of heater stages (1 or 2).
-    pub heat_n_stages: u8,
-    /// Target tank energy at deadline [kWh above T_min].
-    pub e_heat_target_kwh: f64,
-    /// Stage index the heater was at on the last real tick.
-    pub heat_initial_y: f64,
-}
-
-impl AssetScalars {
-    /// A site with no battery, EV, heater or shiftable load.
-    pub(crate) fn none(n: usize) -> Self {
-        Self {
-            a_ev: vec![false; n],
-            ev_mode: MilpLoadMode::MustNotRun,
-            ev_obligations: Vec::new(),
-            ev_battery_kwh: 0.0,
-            ev_segments: Vec::new(),
-            e_ev_extra_max_kwh: 0.0,
-            ev_budget_eur: None,
-            soc_ev_init: None,
-            shiftable_loads: Vec::new(),
-            heater_mode: MilpLoadMode::MustNotRun,
-            p_heat_step_kw: 0.0,
-            heat_n_stages: 0,
-            e_heat_target_kwh: 0.0,
-            heat_initial_y: 0.0,
-        }
-    }
-}
-
-impl AssetScalars {
-    /// The energy one obligation demands above the EV's live SoC [kWh]: an obligation states
-    /// a target SoC (R-92). Never negative.
-    pub(crate) fn ev_obligation_kwh(&self, obligation: &EvObligation) -> f64 {
-        ((obligation.target_soc_frac - self.soc_ev_init.unwrap_or(0.0)) * self.ev_battery_kwh)
-            .max(0.0)
-    }
-
-    /// The firm energy the EV must receive [kWh]: the largest demand among its obligations
-    /// when more than one departure is queued, 0 without any.
-    pub(crate) fn ev_firm_kwh(&self) -> f64 {
-        self.ev_obligations
-            .iter()
-            .map(|o| self.ev_obligation_kwh(o))
-            .fold(0.0_f64, f64::max)
-    }
-}
-
-pub(crate) fn asset_scalars(
-    asset_contexts: &[Box<dyn AssetMilpContext>],
-    n: usize,
-    now: DateTime<Utc>,
-) -> AssetScalars {
-    let mut s = AssetScalars::none(n);
-    for ctx in asset_contexts {
-        match ctx.milp_params(n, now) {
-            // A battery declares nothing the planner reads outside the solve.
-            AssetMilpParams::Battery(_) => {}
-            AssetMilpParams::Ev(e) => {
-                s.a_ev = e.a_ev;
-                s.ev_mode = e.mode;
-                s.ev_obligations = e.obligations;
-                s.ev_battery_kwh = e.battery_kwh;
-                s.ev_segments = e.segments;
-                s.e_ev_extra_max_kwh = e.e_extra_max_kwh;
-                s.ev_budget_eur = e.budget_eur;
-                s.soc_ev_init = Some(e.soc_init_frac);
-            }
-            AssetMilpParams::Heater(h) => {
-                s.heater_mode = h.mode;
-                s.p_heat_step_kw = h.p_step_kw;
-                s.heat_n_stages = h.n_stages;
-                s.e_heat_target_kwh = h.e_target_kwh;
-                s.heat_initial_y = h.initial_y;
-            }
-            // Each shiftable load declares itself through its own context
-            // (shiftable-load-as-asset), not through a bolt-on parameter.
-            AssetMilpParams::ShiftableLoad(l) => {
-                s.shiftable_loads.push(ShiftableLoadMilpContext {
-                    asset_id: ctx.asset_id().to_string(),
-                    power_kw: l.power_kw,
-                    duration_slots: l.duration_slots,
-                    valid_start_slots: l.valid_start_slots,
-                });
-            }
-            AssetMilpParams::Unknown => {}
-        }
-    }
-    s
-}
-
 /// Baseline override: additive per-slot kW adjustments, in the order the user gave them. An
 /// entry before `now` is skipped; one past the horizon lands on the last slot.
 pub(super) fn apply_baseline_override(
@@ -371,21 +249,4 @@ pub(super) fn apply_baseline_override(
             *kw += slot.add_kw;
         }
     }
-}
-
-/// WP4.1-c: even at the cheapest slot rate the target energy (all "extra"
-/// headroom in MAX_COST mode) exceeds the budget → charging will stop
-/// early. Stable text — WP4.3's notification dedup keys on it.
-pub(super) fn ev_budget_warning(
-    c_imp_eur_kwh: &[f64],
-    ev_budget_eur: Option<f64>,
-    e_ev_extra_max_kwh: f64,
-) -> Option<String> {
-    let budget_eur = ev_budget_eur?;
-    let min_rate = c_imp_eur_kwh.iter().cloned().fold(f64::INFINITY, f64::min);
-    (e_ev_extra_max_kwh * min_rate > budget_eur).then(|| {
-        "EV charging budget too low to reach the session target — \
-         charging stops at the budget (MAX_COST)"
-            .to_string()
-    })
 }

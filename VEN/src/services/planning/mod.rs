@@ -8,7 +8,7 @@ use crate::controller::SolverPort;
 use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
-use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
@@ -143,9 +143,6 @@ pub async fn build_solve_request(
     asset_params: Vec<AssetParams>,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_session: Option<EvSession>,
-    heater_target: Option<HeaterTarget>,
-    shiftable_loads: Vec<ShiftableLoad>,
     baseline_override: Option<BaselineOverride>,
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
@@ -187,9 +184,6 @@ pub async fn build_solve_request(
         asset_params,
         now,
         trigger,
-        ev_session,
-        heater_target,
-        shiftable_loads,
         baseline_override,
         objective_override,
         pv_forecast_override,
@@ -535,9 +529,6 @@ mod tests {
             asset_params: vec![],
             now: Utc::now(),
             trigger: PlanTrigger::Periodic,
-            ev_session: None,
-            heater_target: None,
-            shiftable_loads: vec![],
             baseline_override: None,
             objective_override: None,
             pv_forecast_override: None,

@@ -116,4 +116,24 @@ impl EvMilpContext {
             })
             .fold(0.0_f64, f64::max)
     }
+
+    /// The energy one obligation demands above the EV's live SoC [kWh]: an obligation states
+    /// a target SoC (R-92). Never negative. What the shortfall warning calls "guaranteed" and
+    /// session flexibility reports; `firm_required_kwh` above is what the solve enforces, and
+    /// the two disagree with a trip forecast or a target above the charge limit (R-140).
+    pub fn obligation_kwh(
+        &self,
+        obligation: &crate::controller::milp_planner::asset_port::EvObligation,
+    ) -> f64 {
+        ((obligation.target_soc_frac - self.soc_init_frac) * self.battery_kwh).max(0.0)
+    }
+
+    /// The firm energy the EV must receive [kWh] by `obligation_kwh`: the largest demand among
+    /// its obligations when more than one departure is queued, 0 without any.
+    pub fn firm_obligation_kwh(&self) -> f64 {
+        self.obligations
+            .iter()
+            .map(|o| self.obligation_kwh(o))
+            .fold(0.0_f64, f64::max)
+    }
 }

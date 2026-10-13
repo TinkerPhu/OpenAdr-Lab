@@ -25,21 +25,17 @@ use rand::{rngs::StdRng, SeedableRng};
 
 const GOLDEN: &str = include_str!("golden/model_fingerprints.txt");
 
-/// One recorded scenario: the solver's inputs, plus the profile and the sessions `plans_golden`
-/// needs to translate the solution into a plan.
+/// One recorded scenario: the solver's inputs and asset contexts, plus the profile
+/// `plans_golden` translates the solution with.
 pub(super) struct Fixture {
     pub name: &'static str,
     pub inputs: MilpInputs,
     pub ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     pub p1w: Phase1Weights,
-    pub p2w: Phase2Weights,
     pub epsilon_eur: f64,
     pub timeout_s: f64,
     pub phase2_timeout_s: f64,
     pub profile: Profile,
-    pub ev_session: Option<EvSession>,
-    pub heater_target: Option<HeaterTarget>,
-    pub shiftables: Vec<ShiftableLoad>,
 }
 
 /// A snapshot of the profile's real assets with a fixed RNG and clock, so nothing in it depends on
@@ -115,22 +111,17 @@ pub(super) fn assemble_with(
     let mut ctxs = build_asset_contexts(profile, &sim, now, ev, heater_target, tariffs);
     push_shiftable_load_contexts(&mut ctxs, shiftables, profile, now);
     let inputs =
-        build_milp_inputs_with_override(&ctxs, tariffs, cap, profile, now, &[], None, pv_override);
+        build_milp_inputs_with_override(tariffs, cap, profile, now, &[], None, pv_override);
     let p1w = build_phase1_weights(profile, PlannerObjective::MinCost);
-    let p2w = build_phase2_weights(&inputs, &profile.planner);
     Fixture {
         name,
         inputs,
         ctxs,
         p1w,
-        p2w,
         epsilon_eur: profile.planner.phase2_epsilon_eur,
         timeout_s: profile.planner.solver_timeout_s as f64,
         phase2_timeout_s: profile.planner.phase2_solver_timeout_s as f64,
         profile: profile.clone(),
-        ev_session: ev.cloned(),
-        heater_target: heater_target.cloned(),
-        shiftables: shiftables.to_vec(),
     }
 }
 
@@ -312,7 +303,6 @@ fn record(f: &Fixture) -> Vec<String> {
         solve_milp_two_phase(
             &f.inputs,
             &f.p1w,
-            &f.p2w,
             f.epsilon_eur,
             &f.ctxs,
             f.timeout_s,

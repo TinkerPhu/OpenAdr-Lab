@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use tracing::warn;
 
 use crate::entities::asset::PlanTrigger;
-use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+use crate::entities::device_session::BaselineOverride;
 use crate::entities::plan::Plan;
 
 /// The test submodules under tests/ reach their fixtures through
@@ -35,18 +35,17 @@ mod test_prelude {
 use test_prelude::*;
 
 pub use self::asset_port::{
-    AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
-    MilpLoadMode, ShiftableLoadScalars,
+    AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution,
+    AssetSolutionDetail, BatteryScalars, CostWeights, DeclareMode, DeclaredAsset, DischargeLeg,
+    EvScalars, FlexibilityWindow, FrictionCosts, HeaterScalars, MilpLoadMode, ObjectivePart,
+    OnIndicator, ShiftableLoadScalars, StorageLegs,
 };
 pub(crate) use self::types::ShiftableLoadMilpContext;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::asset_params::{
-    BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
-};
+use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 pub mod asset_port;
-mod ev_diagnostics;
 mod input_stages;
 mod inputs;
 mod session_flexibility;
@@ -55,7 +54,6 @@ mod session_flexibility;
 mod model_probe;
 mod model_skeleton;
 pub(crate) mod penalty;
-mod planned_state;
 mod results;
 mod solver_duals;
 mod solver_phase1;
@@ -73,27 +71,6 @@ use self::solver_duals::*;
 use self::solver_phase1::*;
 use self::solver_phase2::*;
 use self::types::*;
-
-fn battery_params(asset_params: &[AssetParams]) -> Option<&BatteryParams> {
-    asset_params.iter().find_map(|p| match p {
-        AssetParams::Battery(v) => Some(v),
-        _ => None,
-    })
-}
-
-fn ev_params(asset_params: &[AssetParams]) -> Option<&EvParams> {
-    asset_params.iter().find_map(|p| match p {
-        AssetParams::Ev(v) => Some(v),
-        _ => None,
-    })
-}
-
-fn heater_params(asset_params: &[AssetParams]) -> Option<&HeaterParams> {
-    asset_params.iter().find_map(|p| match p {
-        AssetParams::Heater(v) => Some(v),
-        _ => None,
-    })
-}
 
 fn pv_params(asset_params: &[AssetParams]) -> Option<&PvParams> {
     asset_params.iter().find_map(|p| match p {
@@ -122,12 +99,6 @@ pub fn run_planner(
     asset_params: &[AssetParams],
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_session: Option<&crate::entities::device_session::EvSession>,
-    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-    // No longer forwarded into `build_milp_inputs` (superseded there by
-    // `asset_contexts` — shiftable-load-as-asset), but still needed for
-    // `translate_to_plan`/`fallback_plan`'s own request-level bookkeeping.
-    shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
@@ -137,32 +108,21 @@ pub fn run_planner(
     diurnal_import_ref: Option<&lab_core::time_series::TimeSeries>,
     diurnal_co2_ref: Option<&lab_core::time_series::TimeSeries>,
 ) -> Plan {
-    // Guard: MilpVarPool has one named `Option` slot per singleton kind
-    // (Battery/EV/Heater — silently overwrites on duplicates); `ShiftableLoad`
-    // is exempt, since a site can have several shiftable loads at once,
-    // collected into `MilpVarPool.shiftable: Vec<_>` (shiftable-load-as-asset).
+    // Every asset is planned by its own id: its variables, its pinned decisions and its plan
+    // result are all looked up by it, so two contexts with one id would silently share them.
     debug_assert!(
         {
-            use std::collections::HashMap;
-            let mut counts: HashMap<AssetKind, usize> = HashMap::new();
-            for kind in asset_contexts.iter().map(|c| c.asset_kind()) {
-                *counts.entry(kind).or_insert(0) += 1;
-            }
-            counts
-                .into_iter()
-                .all(|(kind, n)| kind == AssetKind::ShiftableLoad || n <= 1)
+            let mut ids: Vec<&str> = asset_contexts.iter().map(|c| c.asset_id()).collect();
+            ids.sort_unstable();
+            ids.windows(2).all(|w| w[0] != w[1])
         },
-        "run_planner: duplicate AssetKind for a singleton kind in asset_contexts"
+        "run_planner: two asset contexts report the same asset id"
     );
 
     let objective = objective_override.unwrap_or(planner.objective);
-    let battery = battery_params(asset_params);
-    let ev = ev_params(asset_params);
-    let heater = heater_params(asset_params);
     let pv = pv_params(asset_params);
     let base_load = base_load_params(asset_params);
     let inputs = build_milp_inputs(
-        &asset_contexts,
         grid,
         planner,
         &inputs::SiteInputs {
@@ -188,11 +148,9 @@ pub fn run_planner(
         ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
     }
     let p1w = build_phase1_weights(planner, objective);
-    let p2w = build_phase2_weights(&inputs, planner);
     match solve_milp_two_phase(
         &inputs,
         &p1w,
-        &p2w,
         planner.phase2_epsilon_eur,
         &asset_contexts,
         planner.solver_timeout_s as f64,
@@ -202,19 +160,14 @@ pub fn run_planner(
             translate_to_plan(
                 &sol,
                 &inputs,
+                &asset_contexts,
                 &p1w,
                 planner,
                 now,
                 trigger,
-                ev_session,
-                heater_target,
-                shiftable_loads,
                 objective,
                 phase1_cost_eur,
                 friction_eur,
-                battery,
-                ev,
-                heater,
                 &marginal_cost_eur_per_kwh,
                 Some(phase_report),
             )
@@ -231,14 +184,10 @@ pub fn run_planner(
                 planner,
                 now,
                 trigger,
-                ev_session,
-                heater_target,
-                shiftable_loads,
+                &asset_contexts,
                 Some(&inputs),
                 format!("MILP solver failed: {e}"),
                 objective,
-                ev,
-                heater,
             )
         }
     }
@@ -261,9 +210,6 @@ impl crate::controller::SolverPort for MilpSolver {
             &req.asset_params,
             req.now,
             req.trigger,
-            req.ev_session.as_ref(),
-            req.heater_target.as_ref(),
-            &req.shiftable_loads,
             req.baseline_override.as_ref(),
             req.objective_override,
             req.pv_forecast_override,

@@ -48,12 +48,12 @@ pub(crate) fn solve_marginal_costs(
         ModelSkeleton::declare(inputs, p1w, asset_contexts, Declaration::Pinned(winning));
     // The same economic cost phase 1 minimised: the dual must reflect the real objective's
     // sensitivity, not an arbitrary one.
-    let objective = skeleton.cost_expr(inputs, p1w, asset_contexts);
+    let objective = skeleton.cost_expr(inputs, p1w);
 
     probe!(vars, &vars);
     probe!(expr, "objective", &objective);
     let model = vars.minimise(&objective).using(highs);
-    let (model, power_balance_refs) = skeleton.add_constraints(model, inputs, asset_contexts);
+    let (model, power_balance_refs) = skeleton.add_constraints(model, inputs);
     let model = model.with_time_limit(timeout_s);
     let model = model.with_mip_gap(inputs.mip_gap_target as f32)?;
     let mut solution = model.solve()?;

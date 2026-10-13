@@ -136,9 +136,6 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         a.asset_params.to_vec(),
         a.now,
         a.trigger,
-        st.ev_sessions.upcoming(a.now).cloned(), // next commitment, not just an open window
-        st.heat_tgt,
-        st.shift_loads,
         st.bl_override,
         Some(st.obj),
         st.pv_forecast_override,

@@ -1,36 +1,32 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
+use crate::controller::milp_planner::{
+    AllocationBasis, AssetMilpContext, AssetSolution, StorageLegs,
+};
 use crate::entities::asset::PlanTrigger;
-use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
-use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
     SolveStatus, WarningKind, WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
-use super::ev_diagnostics::ev_warnings;
-use super::planned_state;
 use super::session_flexibility::build_session_flexibility;
 use super::types::*;
 
 /// Fallback plan returned when the MILP solver fails.
 /// When `inputs` is `Some`, emits populated slots with zero allocations
-/// so tests asserting on per-slot fields still find data.
+/// so tests asserting on per-slot fields still find data, and each asset's session
+/// flexibility estimated without a schedule.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fallback_plan(
     planner: &PlannerParams,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_session: Option<&crate::entities::device_session::EvSession>,
-    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-    shiftable_loads: &[ShiftableLoad],
+    asset_contexts: &[Box<dyn AssetMilpContext>],
     inputs: Option<&MilpInputs>,
     reason: String,
     objective: PlannerObjective,
-    ev_cfg: Option<&EvParams>,
-    heat_cfg: Option<&HeaterParams>,
 ) -> Plan {
     let total_steps = crate::entities::time_grid::slot_count(&planner.plan_zones);
     let total_horizon_s: i64 = planner
@@ -88,13 +84,9 @@ pub(crate) fn fallback_plan(
     };
     let session_flexibility = match inputs {
         Some(inp) => build_session_flexibility(
-            ev_session,
-            heater_target,
-            shiftable_loads,
+            asset_contexts,
             inp,
             planner,
-            ev_cfg,
-            heat_cfg,
             now,
             None, // no solution — estimates fall back to energy × avg tariff
         ),
@@ -126,24 +118,101 @@ pub(crate) fn fallback_plan(
     }
 }
 
-/// Translate a MILP solution into a `Plan` with per-slot allocations.
+/// One asset's allocation in slot `t`, priced by the basis the asset declares, claiming the
+/// PV surplus still left in the slot. `None` when the asset does not run in that slot.
+fn allocation(
+    sol: &AssetSolution,
+    basis: AllocationBasis,
+    t: usize,
+    inputs: &MilpInputs,
+    surplus_remaining_kw: &mut f64,
+) -> Option<AssetAllocation> {
+    let power_kw = sol.net_power_kw[t];
+    if power_kw.abs() <= 0.01 {
+        return None;
+    }
+    let (c_imp, c_exp, dt_h) = (
+        inputs.c_imp_eur_kwh[t],
+        inputs.c_exp_eur_kwh[t],
+        inputs.dt_h[t],
+    );
+    let marginal_value = match basis {
+        AllocationBasis::Load => c_imp,
+        AllocationBasis::Storage => c_exp,
+    };
+    let discharging = basis == AllocationBasis::Storage && power_kw < 0.0;
+    let (surplus_power_kw, grid_power_kw, cost_eur, co2_g) = if discharging {
+        // Discharging: negative power_kw = net injection; revenue = negative cost
+        let dis_kw = sol
+            .storage
+            .as_ref()
+            .map_or(-power_kw, |legs| legs.discharge_kw[t]);
+        (
+            0.0,
+            power_kw,
+            -(dis_kw * c_exp * dt_h),
+            -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h),
+        )
+    } else {
+        // Consuming: PV surplus first, then grid
+        let surplus_power_kw = surplus_remaining_kw.min(power_kw);
+        let grid_power_kw = power_kw - surplus_power_kw;
+        *surplus_remaining_kw -= surplus_power_kw;
+        (
+            surplus_power_kw,
+            grid_power_kw,
+            grid_power_kw * c_imp * dt_h + surplus_power_kw * c_exp * dt_h,
+            grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+        )
+    };
+    Some(AssetAllocation {
+        asset_id: sol.asset_id.clone(),
+        power_kw,
+        surplus_power_kw,
+        grid_power_kw,
+        marginal_value,
+        cost_eur,
+        co2_g,
+    })
+}
+
+/// The site's storage legs: every storage asset's charge, discharge and stored energy summed,
+/// zeros of the plan's lengths when there is none. One storage asset's legs are its own values.
+fn site_storage(sol: &SolveOutput, n: usize) -> StorageLegs {
+    let mut legs = sol.assets.iter().filter_map(|a| a.storage.as_ref());
+    let Some(first) = legs.next() else {
+        return StorageLegs {
+            charge_kw: vec![0.0; n],
+            discharge_kw: vec![0.0; n],
+            energy_kwh: vec![0.0; n + 1],
+        };
+    };
+    let mut site = first.clone();
+    for leg in legs {
+        let add = |into: &mut Vec<f64>, from: &[f64]| {
+            into.iter_mut().zip(from).for_each(|(a, b)| *a += b);
+        };
+        add(&mut site.charge_kw, &leg.charge_kw);
+        add(&mut site.discharge_kw, &leg.discharge_kw);
+        add(&mut site.energy_kwh, &leg.energy_kwh);
+    }
+    site
+}
+
+/// Translate a MILP solution into a `Plan` with per-slot allocations. Every per-asset fact
+/// comes from what the asset declared about its own solution; nothing here knows its kind.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_to_plan(
     sol: &SolveOutput,
     inputs: &MilpInputs,
+    asset_contexts: &[Box<dyn AssetMilpContext>],
     weights: &Phase1Weights,
     planner: &PlannerParams,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_session: Option<&crate::entities::device_session::EvSession>,
-    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-    shiftable_loads: &[ShiftableLoad],
     objective: PlannerObjective,
     phase1_cost_eur: f64,
     friction_eur: f64,
-    battery_cfg: Option<&BatteryParams>,
-    ev_cfg: Option<&EvParams>,
-    heat_cfg: Option<&HeaterParams>,
     marginal_cost_eur_per_kwh: &[f64],
     phase_report: Option<crate::entities::plan::PlanPhaseReport>,
 ) -> Plan {
@@ -161,9 +230,18 @@ pub(crate) fn translate_to_plan(
         zones: planner.plan_zones.clone(),
     };
 
-    let ev_id = ev_cfg.map(|c| c.id.clone());
-    let heater_id = heat_cfg.map(|c| c.id.clone());
-    let bat_id = battery_cfg.map(|c| c.id.clone());
+    // The solution holds one AssetSolution per context, in context order. Surplus is claimed
+    // in the order the assets declare; equal ranks keep planner input order.
+    debug_assert!(
+        sol.assets
+            .iter()
+            .zip(asset_contexts)
+            .all(|(a, c)| a.asset_id == c.asset_id()),
+        "translate_to_plan: the solution's assets are not the contexts it was solved with"
+    );
+    let mut claim_order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len())).collect();
+    claim_order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
+    let storage = site_storage(sol, n);
 
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
@@ -174,106 +252,18 @@ pub(crate) fn translate_to_plan(
         let surplus_available_kw = (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
         let mut surplus_remaining_kw = surplus_available_kw;
 
-        let mut allocations = Vec::new();
-
-        // ── EV allocation ───────────────────────────────────────────────
-        if inputs.assets.ev_mode != MilpLoadMode::MustNotRun && sol.p_ev_kw[t] > 0.01 {
-            if let Some(ref eid) = ev_id {
-                let power_kw = sol.p_ev_kw[t];
-                let surplus_power_kw = surplus_remaining_kw.min(power_kw);
-                let grid_power_kw = power_kw - surplus_power_kw;
-                surplus_remaining_kw -= surplus_power_kw;
-                allocations.push(AssetAllocation {
-                    asset_id: eid.clone(),
-                    power_kw,
-                    surplus_power_kw,
-                    grid_power_kw,
-                    marginal_value: inputs.c_imp_eur_kwh[t],
-                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                        + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
-                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
-                });
-            }
-        }
-
-        // ── Heater allocation ───────────────────────────────────────────
-        if inputs.assets.heater_mode != MilpLoadMode::MustNotRun {
-            let heat_kw = sol.y_heat[t] * inputs.assets.p_heat_step_kw;
-            if heat_kw > 0.01 {
-                if let Some(ref hid) = heater_id {
-                    let surplus_power_kw = surplus_remaining_kw.min(heat_kw);
-                    let grid_power_kw = heat_kw - surplus_power_kw;
-                    surplus_remaining_kw -= surplus_power_kw;
-                    allocations.push(AssetAllocation {
-                        asset_id: hid.clone(),
-                        power_kw: heat_kw,
-                        surplus_power_kw,
-                        grid_power_kw,
-                        marginal_value: inputs.c_imp_eur_kwh[t],
-                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                            + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
-                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
-                    });
-                }
-            }
-        }
-
-        // ── Shiftable load allocations ──────────────────────────────────
-        for (s, sl) in inputs.assets.shiftable_loads.iter().enumerate() {
-            let power = sol.p_shiftable_kw[s][t];
-            if power > 0.01 {
-                let surplus_power_kw = surplus_remaining_kw.min(power);
-                let grid_power_kw = power - surplus_power_kw;
-                surplus_remaining_kw -= surplus_power_kw;
-                allocations.push(AssetAllocation {
-                    asset_id: sl.asset_id.clone(),
-                    power_kw: power,
-                    surplus_power_kw,
-                    grid_power_kw,
-                    marginal_value: inputs.c_imp_eur_kwh[t],
-                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                        + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
-                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
-                });
-            }
-        }
-
-        // ── Battery allocation ────────────────────────────────────────────
-        if let Some(ref bid) = bat_id {
-            let bat_net_kw = sol.p_bat_ch_kw[t] - sol.p_bat_dis_kw[t];
-            if bat_net_kw.abs() > 0.01 {
-                let (surplus_power_kw, grid_power_kw, cost_eur, co2_g) = if bat_net_kw > 0.0 {
-                    // Charging: consume PV surplus first, then grid
-                    let sp = surplus_remaining_kw.min(bat_net_kw);
-                    let gp = bat_net_kw - sp;
-                    (
-                        sp,
-                        gp,
-                        gp * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                            + sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
-                        gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
-                    )
-                } else {
-                    // Discharging: negative power_kw = net injection; revenue = negative cost
-                    let dis_kw = sol.p_bat_dis_kw[t];
-                    (
-                        0.0,
-                        bat_net_kw,
-                        -(dis_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t]),
-                        -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t]),
-                    )
-                };
-                allocations.push(AssetAllocation {
-                    asset_id: bid.clone(),
-                    power_kw: bat_net_kw,
-                    surplus_power_kw,
-                    grid_power_kw,
-                    marginal_value: inputs.c_exp_eur_kwh[t],
-                    cost_eur,
-                    co2_g,
-                });
-            }
-        }
+        let allocations: Vec<AssetAllocation> = claim_order
+            .iter()
+            .filter_map(|&i| {
+                allocation(
+                    &sol.assets[i],
+                    asset_contexts[i].allocation_basis(),
+                    t,
+                    inputs,
+                    &mut surplus_remaining_kw,
+                )
+            })
+            .collect();
 
         // ── Track violations ────────────────────────────────────────────
         if sol.s_imp_viol_kw[t] > 0.01 || sol.s_exp_viol_kw[t] > 0.01 {
@@ -307,25 +297,19 @@ pub(crate) fn translate_to_plan(
             net_export_kw: sol.p_exp_kw[t],
             import_flexibility_kw: 0.0,
             export_flexibility_kw: 0.0,
-            bat_charge_kw: sol.p_bat_ch_kw[t],
-            bat_discharge_kw: sol.p_bat_dis_kw[t],
-            planned_state_by_asset: std::collections::HashMap::new(),
+            bat_charge_kw: storage.charge_kw[t],
+            bat_discharge_kw: storage.discharge_kw[t],
+            // Each asset's own planned state for the slot (T008/T013/T017).
+            planned_state_by_asset: sol
+                .assets
+                .iter()
+                .filter_map(|a| Some((a.asset_id.clone(), a.planned_state.get(t)?.clone())))
+                .collect(),
         });
     }
 
-    // ── SoC trajectory ──────────────────────────────────────────────────
-    let soc_trajectory_kwh = sol.e_bat_kwh.clone();
-
-    // ── Planned state by asset (T008/T013/T017) ──────────────────────────
-    planned_state::fill_planned_state(
-        &mut slots,
-        n,
-        sol,
-        &inputs.assets.a_ev,
-        battery_cfg,
-        ev_cfg,
-        heat_cfg,
-    );
+    // ── Stored-energy trajectory ─────────────────────────────────────────
+    let soc_trajectory_kwh = storage.energy_kwh.clone();
 
     // ── Summary (raw energy economics, no weights) ──────────────────────
     let summary = PlanSummary {
@@ -371,8 +355,8 @@ pub(crate) fn translate_to_plan(
             .sum(),
         c_wear_eur: (0..n)
             .map(|t| {
-                weights.c_bat_wear_eur_kwh
-                    * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t])
+                weights.c_storage_wear_eur_kwh
+                    * (storage.charge_kw[t] + storage.discharge_kw[t])
                     * inputs.dt_h[t]
             })
             .sum(),
@@ -409,14 +393,10 @@ pub(crate) fn translate_to_plan(
             suggested_action: None,
         });
     }
-    // WP4.1-c (BL-28) MAX_COST budget shortfall — same stable-text contract.
-    if let Some(msg) = &inputs.budget_warning {
-        warnings.push(PlanWarning {
-            severity: WarningSeverity::Warning,
-            kind: WarningKind::BudgetShortfall,
-            message: msg.clone(),
-            suggested_action: Some("raise the budget or lower the target SoC".to_string()),
-        });
+    // What each asset can tell before the solve (e.g. a MAX_COST budget shortfall), in planner
+    // input order.
+    for ctx in asset_contexts {
+        warnings.extend(ctx.input_warnings(&inputs.c_imp_eur_kwh));
     }
     if violation_count > 0 {
         warnings.push(PlanWarning {
@@ -459,19 +439,13 @@ pub(crate) fn translate_to_plan(
         }
     }
 
-    warnings.extend(ev_warnings(inputs, sol));
+    // What each asset reports about its own solution, in planner input order.
+    for asset in &sol.assets {
+        warnings.extend(asset.warnings.iter().cloned());
+    }
     // ── Assemble plan ───────────────────────────────────────────────────
-    let session_flexibility = build_session_flexibility(
-        ev_session,
-        heater_target,
-        shiftable_loads,
-        inputs,
-        planner,
-        ev_cfg,
-        heat_cfg,
-        now,
-        Some(&slots),
-    );
+    let session_flexibility =
+        build_session_flexibility(asset_contexts, inputs, planner, now, Some(&slots));
     let penalty_rules_active = active_penalty_rules(&inputs.penalty_rules);
     Plan {
         id: Uuid::new_v4(),

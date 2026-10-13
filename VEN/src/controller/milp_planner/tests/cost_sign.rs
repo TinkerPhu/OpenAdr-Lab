@@ -99,9 +99,6 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -148,9 +145,6 @@ fn heater_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
         None,
-        Some(&target),
-        &[],
-        None,
         None,
     );
     assert_opportunity_cost_convention(&plan, "heater");
@@ -188,9 +182,6 @@ fn shiftable_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         crate::entities::asset::PlanTrigger::UserRequest,
         None,
         None,
-        &[load],
-        None,
-        None,
     );
     assert_opportunity_cost_convention(&plan, "wm");
 }
@@ -215,9 +206,6 @@ fn battery_charging_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() 
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -292,9 +280,6 @@ fn decision_matrix_and_session_flexibility_totals_agree_in_sign_across_asset_typ
         &profile,
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
-        Some(&ev_session),
-        Some(&heater_target),
-        &[],
         None,
         None,
     );

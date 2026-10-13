@@ -6,10 +6,7 @@ use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
 };
-use crate::controller::milp_planner::asset_port::{pinned_binary, ModeDecisions};
-use crate::controller::milp_planner::{
-    AssetKind, AssetMilpContext, AssetMilpParams, ShiftableLoadMilpContext, ShiftableLoadScalars,
-};
+use crate::controller::milp_planner::{AssetMilpContext, ShiftableLoadMilpContext};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 
@@ -349,130 +346,10 @@ impl MilpParticipant for ShiftableLoadAsset {
             power_kw: self.power_kw,
             duration_slots,
             valid_start_slots,
+            duration_min: self.duration_min,
+            earliest_start: self.earliest_start,
+            latest_end: self.latest_end,
         })
-    }
-}
-
-impl AssetMilpContext for ShiftableLoadMilpContext {
-    fn asset_id(&self) -> &str {
-        &self.asset_id
-    }
-
-    fn asset_kind(&self) -> AssetKind {
-        AssetKind::ShiftableLoad
-    }
-
-    fn milp_params(&self, _n: usize, _now: DateTime<Utc>) -> AssetMilpParams {
-        AssetMilpParams::ShiftableLoad(ShiftableLoadScalars {
-            power_kw: self.power_kw,
-            duration_slots: self.duration_slots,
-            valid_start_slots: self.valid_start_slots.clone(),
-        })
-    }
-
-    /// Declares one binary per valid start slot and pushes the resulting
-    /// `ShiftableLoadMilpVars` into `pool.shiftable` — a `Vec`, not a new
-    /// `Option` slot, since (unlike Battery/EV/Heater) a site can have
-    /// several shiftable loads. Replaces the pre-Spec-B bespoke pre-loop
-    /// construction in `solver_phase1.rs`/`solver_phase2.rs`.
-    fn declare_vars_into_pool(
-        &self,
-        _n: usize,
-        _c_startup_eur: f64,
-        _c_ramp_eur_kw: f64,
-        vars: &mut good_lp::ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        self.declare_vars_with(vars, pool, ModeDecisions::Free);
-    }
-
-    fn declare_pinned_vars_into_pool(
-        &self,
-        _n: usize,
-        winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
-        vars: &mut good_lp::ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-    ) {
-        self.declare_vars_with(vars, pool, ModeDecisions::Pinned(winning));
-    }
-
-    /// Exactly one start slot must be chosen — the hard-window requirement
-    /// (spec.md "Planner never schedules a start outside the valid window").
-    /// Replaces the pre-Spec-B bespoke `sum_y == 1` loop in each solver
-    /// phase's `add_model_constraints`.
-    fn constraints(
-        &self,
-        pool: &crate::controller::milp_interactions::MilpVarPool,
-        _n: usize,
-        _dt_h: &[f64],
-    ) -> Vec<good_lp::Constraint> {
-        use good_lp::{constraint, Expression};
-        let Some(sv) = pool
-            .shiftable
-            .iter()
-            .find(|sv| sv.asset_id == self.asset_id)
-        else {
-            return vec![];
-        };
-        let mut sum_y = Expression::from(0.0);
-        for &y in &sv.y_shift {
-            sum_y += y;
-        }
-        vec![constraint!(sum_y == 1.0)]
-    }
-
-    /// No per-instance economic term of its own — the deterministic
-    /// earliest-start tie-break (`SHIFT_TIEBREAK_EUR_PER_SLOT`) is already
-    /// applied generically over `pool.shiftable` by each solver phase,
-    /// unchanged by this migration (it was already per-instance, just called
-    /// once over the whole `Vec` rather than once per `AssetMilpContext`).
-    fn objective(
-        &self,
-        _pool: &crate::controller::milp_interactions::MilpVarPool,
-        _n: usize,
-        _dt_h: &[f64],
-        _c_wear_eur_kwh: f64,
-        _c_startup_eur: f64,
-        _c_ramp_eur_kw: f64,
-    ) -> good_lp::Expression {
-        good_lp::Expression::from(0.0)
-    }
-}
-
-impl ShiftableLoadMilpContext {
-    /// The one shiftable-load variable declaration (R-98): one start choice per valid
-    /// start slot, free for the plan, fixed to the winning *start* for the marginal-cost
-    /// pass. (The pass once re-derived starts from the slots the load ran in, which pins
-    /// two starts for a two-slot run and makes "exactly one start" infeasible.)
-    fn declare_vars_with(
-        &self,
-        vars: &mut good_lp::ProblemVariables,
-        pool: &mut crate::controller::milp_interactions::MilpVarPool,
-        modes: ModeDecisions,
-    ) {
-        use good_lp::variable;
-        let winning = match modes {
-            ModeDecisions::Free => None,
-            ModeDecisions::Pinned(w) => Some(w.y_shift.get(&self.asset_id)),
-        };
-        let y_shift = (0..self.valid_start_slots.len())
-            .map(|i| match winning {
-                None => vars.add(variable().binary()),
-                Some(row) => {
-                    let v = pinned_binary(row.and_then(|r| r.get(i).copied()));
-                    vars.add(variable().min(v).max(v))
-                }
-            })
-            .collect();
-        pool.shiftable.push(
-            crate::controller::milp_interactions::ShiftableLoadMilpVars {
-                asset_id: self.asset_id.clone(),
-                power_kw: self.power_kw,
-                duration_slots: self.duration_slots,
-                valid_start_slots: self.valid_start_slots.clone(),
-                y_shift,
-            },
-        );
     }
 }
 
@@ -787,42 +664,5 @@ mod tests {
             trajectory.points.iter().all(|p| p.power_kw == 0.0),
             "a run that can't start within the window must contribute nothing"
         );
-    }
-
-    /// R-98: the marginal-cost pass declares a shiftable load through the plan's own
-    /// declaration, with exactly the winning *start* pinned — not every slot it runs in.
-    #[test]
-    fn declare_pinned_vars_pins_the_winning_start_only() {
-        use crate::controller::milp_planner::asset_port::WinningModeDecisions;
-        use crate::services::test_support::milp_pool::{bound_range, empty_pool};
-        let ctx = ShiftableLoadMilpContext {
-            asset_id: "wm".into(),
-            power_kw: 2.0,
-            duration_slots: 2,
-            valid_start_slots: vec![0, 1, 2],
-        };
-        let n = 4;
-        let winning = WinningModeDecisions {
-            y_shift: HashMap::from([("wm".to_string(), vec![0.0, 1.0, 0.0])]),
-            ..Default::default()
-        };
-        let declared = |pinned: bool| {
-            let mut vars = good_lp::variables!();
-            let mut pool = empty_pool(&mut vars, n);
-            if pinned {
-                ctx.declare_pinned_vars_into_pool(n, &winning, &mut vars, &mut pool);
-            } else {
-                ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-            }
-            pool.shiftable.len() * 10 + pool.shiftable[0].y_shift.len()
-        };
-        assert_eq!(declared(true), declared(false));
-
-        let range = bound_range(|vars| {
-            let mut pool = empty_pool(vars, n);
-            ctx.declare_pinned_vars_into_pool(n, &winning, vars, &mut pool);
-            pool.shiftable.remove(0).y_shift
-        });
-        assert_eq!(range, vec![(0.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
     }
 }

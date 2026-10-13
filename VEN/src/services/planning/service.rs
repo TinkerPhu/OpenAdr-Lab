@@ -30,9 +30,6 @@ impl PlanningService {
         let fallback_now = req.now;
         let fallback_trigger = req.trigger.clone();
         let fallback_objective = req.objective_override.unwrap_or(req.planner.objective);
-        let fallback_ev_session = req.ev_session.clone();
-        let fallback_heater_target = req.heater_target.clone();
-        let fallback_shiftable_loads = req.shiftable_loads.clone();
         tokio::task::spawn_blocking(move || {
             let plan = solver.solve(req);
             // Return this blocking thread's freed heap pages to the OS immediately.
@@ -53,14 +50,10 @@ impl PlanningService {
                 &fallback_planner,
                 fallback_now,
                 fallback_trigger,
-                fallback_ev_session.as_ref(),
-                fallback_heater_target.as_ref(),
-                &fallback_shiftable_loads,
+                &[],
                 None,
                 format!("planner task panicked: {join_err}"),
                 fallback_objective,
-                None,
-                None,
             )
         })
     }

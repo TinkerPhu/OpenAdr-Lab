@@ -125,9 +125,9 @@ fn heater_inputs_e_target_from_heater_target() {
     );
     let expected = 30.0 * 200.0 * 4.186 / 3600.0;
     assert!(
-        (inp.assets.e_heat_target_kwh - expected).abs() < 0.01,
+        (inp.heater().e_target_kwh - expected).abs() < 0.01,
         "e_target={:.4} expected≈{:.4}",
-        inp.assets.e_heat_target_kwh,
+        inp.heater().e_target_kwh,
         expected
     );
 }
@@ -148,9 +148,9 @@ fn heater_inputs_autonomous_e_target_is_e_max() {
         None,
     );
     assert!(
-        (inp.assets.e_heat_target_kwh - inp.heater().e_max_kwh).abs() < 1e-9,
+        (inp.heater().e_target_kwh - inp.heater().e_max_kwh).abs() < 1e-9,
         "autonomous: e_target {} should equal e_max {}",
-        inp.assets.e_heat_target_kwh,
+        inp.heater().e_target_kwh,
         inp.heater().e_max_kwh
     );
 }
@@ -170,7 +170,7 @@ fn heater_inputs_autonomous_mode_is_may_run() {
         None,
         None,
     );
-    assert_eq!(inp.assets.heater_mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.heater().mode, MilpLoadMode::MayRun);
 }
 
 #[test]
@@ -214,9 +214,6 @@ fn solve_heater_dynamics_respected() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -273,9 +270,6 @@ fn solve_heater_must_run_meets_e_target() {
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
         None,
-        Some(&target),
-        &[],
-        None,
         None,
     );
     // t_dead_step = (18×300)/300 = 18; check plan.slots[18]["heater"]["temp_c"] ≥ 21.0
@@ -307,9 +301,6 @@ fn solve_heater_soft_low_positive_when_below_min() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -381,9 +372,6 @@ fn solve_heater_switching_reduces_with_penalty() {
         PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     let plan_high = run_planner(
         build_asset_contexts(&profile_high, &sim_high, now, None, None, &tariffs),
@@ -392,9 +380,6 @@ fn solve_heater_switching_reduces_with_penalty() {
         &profile_high,
         now,
         PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -445,9 +430,6 @@ fn solve_heater_upper_bound_not_exceeded() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     let thermal_mass = 2.0_f64;
     let temp_min = 18.0_f64;
@@ -483,9 +465,6 @@ fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -562,9 +541,6 @@ fn ev_planned_state_soc_populated() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -694,9 +670,6 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     // WP4.4 (+ BL-17 closeout) adds a benign informational warning when
     // tariff or CO2 (GHG) coverage ends before the horizon — this test's
@@ -743,9 +716,6 @@ fn heater_planned_state_temp_c_populated() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -798,9 +768,6 @@ fn planned_heater_kw_only_takes_reachable_stage_levels() {
             &profile,
             now,
             crate::entities::asset::PlanTrigger::Periodic,
-            None,
-            None,
-            &[],
             None,
             None,
         );

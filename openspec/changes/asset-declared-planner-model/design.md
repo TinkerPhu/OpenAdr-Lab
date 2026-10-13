@@ -85,7 +85,11 @@ which deletes `controllable_power_expr`. The two were copies of one concept.
 `ObjectivePart::Friction` is phase 2's friction. Each asset maps its existing branches 1:1:
 battery Cost = wear + terminal reward, Friction = startup + ramp; EV Cost = service reward,
 Friction = startup + ramp; heater Cost = below-minimum penalty + terminal reward, Friction = tier
-penalty + switching; shiftable load = nothing in either (its tie-break stays global).
+penalty + switching; shiftable load = its earliest-start tie-break in both parts (it was a
+separate global term applied in both solves; as the load's own term it needs no per-kind pool
+slot). As built: `Friction` is friction only for every asset. Today a battery or EV with a startup
+cost of exactly 0.0 fell into the cost branch inside phase 2's friction objective (terminal value,
+service reward); with an explicit part that cannot happen. No profile sets 0.0, so no plan changes.
 `FrictionCosts { startup_eur, ramp_eur_kw, tier_penalty_eur }` is set on the context when it is
 built, from the same `PlannerParams` fields `build_phase2_weights` reads today. `Phase2Weights` is
 deleted. `CostWeights` carries the one objective-dependent asset term, `c_storage_wear_eur_kwh`
@@ -133,6 +137,9 @@ pair. `InteractionVars::BatEvCoexist` holds one `x_coexist` vector per pair.
 - **Planned state:** each asset fills `AssetSolution.planned_state` in `read` with its existing
   future-state helper. The heater context gains `temp_min_c` and `thermal_mass_kwh_per_c`, the EV
   uses its own `a_ev` mask. `planned_state.rs` is deleted.
+  As built, the heater converts tank energy back with the `temp_min_c` its energy was measured
+  above (the live, possibly injected value) rather than the profile's, which is the same value
+  unless a `/sim/inject` comfort-band override is active.
 - **Site storage fields:** `bat_charge_kw`, `bat_discharge_kw` and `soc_trajectory_kwh` are the
   sum over assets that declare `StorageLegs` (the battery; the EV does not, as today). The wear
   line of `CostBreakdown` is `c_storage_wear_eur_kwh · Σ (charge + discharge) · dt` over the same
@@ -152,7 +159,8 @@ The heater declares its target (`ready_by`; energy = `e_target_kwh`; power 0 to
 `p_step · n_stages`). A shiftable load declares its own window and energy. `build_session_flexibility`
 becomes one loop. The window start is `max(window_start, now)`, which is `now` for EV and heater,
 so the three variants reduce to one formula. The EV and heater contexts store the session/target
-window they were built from. Consequently `run_planner` and `SolveRequest` no longer need
+window they were built from. As built, a shiftable load's entry comes from its own context (window, power,
+duration); the old code paired the request list with the contexts by index. Consequently `run_planner` and `SolveRequest` no longer need
 `ev_session`, `heater_target` or `shiftable_loads`, and those fields are removed (their only
 planner use was this function). The fallback plan uses the same windows.
 

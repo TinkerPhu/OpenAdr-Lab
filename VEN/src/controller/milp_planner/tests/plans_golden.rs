@@ -109,7 +109,6 @@ fn solved_plan(f: &Fixture) -> Plan {
     let (sol, phase1_cost_eur, friction_eur, marginal, phase_report) = solve_milp_two_phase(
         &f.inputs,
         &f.p1w,
-        &f.p2w,
         f.epsilon_eur,
         &f.ctxs,
         f.timeout_s,
@@ -119,19 +118,14 @@ fn solved_plan(f: &Fixture) -> Plan {
     translate_to_plan(
         &sol,
         &f.inputs,
+        &f.ctxs,
         &f.p1w,
         &f.profile.planner,
         fixed_now(),
         PlanTrigger::Periodic,
-        f.ev_session.as_ref(),
-        f.heater_target.as_ref(),
-        &f.shiftables,
         PlannerObjective::MinCost,
         phase1_cost_eur,
         friction_eur,
-        crate::controller::milp_planner::battery_params(&f.profile.assets),
-        crate::controller::milp_planner::ev_params(&f.profile.assets),
-        crate::controller::milp_planner::heater_params(&f.profile.assets),
         &marginal,
         Some(phase_report),
     )
@@ -143,14 +137,10 @@ fn fallback(f: &Fixture) -> Plan {
         &f.profile.planner,
         fixed_now(),
         PlanTrigger::Periodic,
-        f.ev_session.as_ref(),
-        f.heater_target.as_ref(),
-        &f.shiftables,
+        &f.ctxs,
         Some(&f.inputs),
         "MILP solver failed: recorded fallback".to_string(),
         PlannerObjective::MinCost,
-        crate::controller::milp_planner::ev_params(&f.profile.assets),
-        crate::controller::milp_planner::heater_params(&f.profile.assets),
     )
 }
 

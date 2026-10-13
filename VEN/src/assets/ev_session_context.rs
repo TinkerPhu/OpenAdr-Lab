@@ -96,6 +96,12 @@ impl EvMilpContext {
         // Idle/unplugged template — every branch below overrides only what differs.
         let base = Self {
             asset_id: asset_id.to_string(),
+            friction: Default::default(),
+            session_departure: crate::entities::device_session::upcoming_ev_session(
+                ev_sessions,
+                now,
+            )
+            .map(|s| s.departure_time),
             mode: EvMilpMode::MustNotRun,
             soc_init_frac: current_soc,
             // One declared ceiling for the whole context, so no arm below can plan past

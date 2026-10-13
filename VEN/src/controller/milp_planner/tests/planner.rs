@@ -20,9 +20,6 @@ fn run_planner_no_assets_covers_base_load() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     assert_eq!(plan.slots.len(), 4);
     for slot in &plan.slots {
@@ -52,9 +49,6 @@ fn test_plan_carries_optimal_status_and_objective_value() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -98,9 +92,6 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
         &profile.assets,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
         None,
@@ -181,9 +172,6 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             crate::entities::asset::PlanTrigger::Periodic,
             None,
             None,
-            &[],
-            None,
-            None,
             None,
             None,
             Some(&base_load_live_forecast_kw),
@@ -229,9 +217,6 @@ fn run_planner_battery_absent_no_bat_allocation() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -269,9 +254,6 @@ fn run_planner_ev_absent_no_ev_allocation() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     for slot in &plan.slots {
         assert!(
@@ -298,9 +280,6 @@ fn run_planner_battery_charges_on_cheap_tariff() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -348,9 +327,6 @@ fn run_planner_ev_must_run_energy_met() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -382,9 +358,6 @@ fn run_planner_power_balance_invariant() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -423,9 +396,6 @@ fn run_planner_absent_battery_no_panic() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -527,9 +497,6 @@ fn run_planner_n48_full_horizon() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -575,9 +542,6 @@ fn run_planner_n48_empty_asset_contexts_no_panic() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
     assert_eq!(plan.slots.len(), 48, "grid-only plan must have 48 slots");
 }
@@ -591,6 +555,8 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
     let ev_ctx: Box<dyn crate::controller::milp_planner::AssetMilpContext> =
         Box::new(EvMilpContext {
             asset_id: "ev".into(),
+            friction: Default::default(),
+            session_departure: None,
             p_max_kw: 7.2,
             ..absent_ev(n)
         });
@@ -601,9 +567,6 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -620,16 +583,17 @@ fn run_planner_n48_ev_must_not_run_no_ev_in_plan() {
     }
 }
 
-// (c) duplicate asset_kind → debug_assert! panics in debug builds
+// (c) two contexts with one asset id → debug_assert! panics in debug builds: every asset is
+// planned and reported by its id, so they would silently share variables and results.
 #[test]
 #[cfg(debug_assertions)]
-#[should_panic(expected = "duplicate AssetKind")]
-fn run_planner_duplicate_asset_kind_panics() {
+#[should_panic(expected = "two asset contexts report the same asset id")]
+fn run_planner_duplicate_asset_id_panics() {
     let now = fixed_now();
     let profile = make_profile_n48();
     let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![
         Box::new(battery_ctx(10.0, 5.0, 1.0, 5.0, 0.9487)),
-        Box::new(battery_ctx(5.0, 2.5, 0.5, 3.0, 0.9487)), // duplicate Battery kind
+        Box::new(battery_ctx(5.0, 2.5, 0.5, 3.0, 0.9487)), // same id "battery"
     ];
     let _ = run_planner(
         ctxs,
@@ -640,22 +604,46 @@ fn run_planner_duplicate_asset_kind_panics() {
         crate::entities::asset::PlanTrigger::Periodic,
         None,
         None,
-        &[],
-        None,
-        None,
     );
 }
 
 // (d) infeasible constraints → solver Err, run_planner returns fallback plan (no panic)
 #[test]
 fn run_planner_infeasible_constraints_fallback_no_panic() {
-    use crate::controller::milp_interactions::MilpVarPool;
-    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
+    use crate::controller::milp_planner::{
+        AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution, DeclareMode,
+        DeclaredAsset, ObjectivePart,
+    };
     use chrono::{DateTime, Utc};
-    use good_lp::{Constraint, Expression, ProblemVariables};
+    use good_lp::{Constraint, Expression, ProblemVariables, Solution, Variable};
 
+    /// The battery, with one constraint added that it cannot meet.
     struct InfeasibleBatCtx {
         inner: BatteryMilpContext,
+    }
+    struct Infeasible<'a>(Box<dyn DeclaredAsset + 'a>);
+    impl DeclaredAsset for Infeasible<'_> {
+        fn asset_id(&self) -> &str {
+            self.0.asset_id()
+        }
+        fn net_power_expr(&self, t: usize) -> Expression {
+            self.0.net_power_expr(t)
+        }
+        fn constraints(&self, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
+            let mut cs = self.0.constraints(n, dt_h);
+            // Contradiction: a net 9999 kW in slot 0 from a battery bounded at 5 kW.
+            cs.push(constraint!(self.0.net_power_expr(0) >= 9999.0));
+            cs
+        }
+        fn objective(&self, part: ObjectivePart<'_>, n: usize, dt_h: &[f64]) -> Expression {
+            self.0.objective(part, n, dt_h)
+        }
+        fn warm_start(&self, own: &AssetSolution, n: usize) -> Vec<(Variable, f64)> {
+            self.0.warm_start(own, n)
+        }
+        fn read(&self, solution: &dyn Solution, n: usize) -> AssetSolution {
+            self.0.read(solution, n)
+        }
     }
     impl AssetMilpContext for InfeasibleBatCtx {
         fn asset_id(&self) -> &str {
@@ -667,47 +655,22 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         fn milp_params(&self, n: usize, now: DateTime<Utc>) -> AssetMilpParams {
             self.inner.milp_params(n, now)
         }
-        fn declare_vars_into_pool(
-            &self,
+        fn declare<'a>(
+            &'a self,
             n: usize,
-            c_s: f64,
-            c_r: f64,
+            mode: DeclareMode<'_>,
             vars: &mut ProblemVariables,
-            pool: &mut MilpVarPool,
-        ) {
-            self.inner.declare_vars_into_pool(n, c_s, c_r, vars, pool);
+        ) -> Box<dyn DeclaredAsset + 'a> {
+            Box::new(Infeasible(self.inner.declare(n, mode, vars)))
         }
-        fn declare_pinned_vars_into_pool(
-            &self,
-            n: usize,
-            winning: &crate::controller::milp_planner::asset_port::WinningModeDecisions,
-            vars: &mut ProblemVariables,
-            pool: &mut MilpVarPool,
-        ) {
-            self.inner
-                .declare_pinned_vars_into_pool(n, winning, vars, pool);
+        fn surplus_claim_rank(&self) -> u8 {
+            self.inner.surplus_claim_rank()
         }
-        fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
-            let mut cs = AssetMilpContext::constraints(&self.inner, pool, n, dt_h);
-            // Contradiction: require p_ch[0] ≥ 9999 while battery bounds p_ch[0] ≤ 5 kW
-            if let Some(bat) = &pool.bat {
-                if !bat.p_ch.is_empty() {
-                    cs.push(constraint!(bat.p_ch[0] >= 9999.0));
-                }
-            }
-            cs
+        fn allocation_basis(&self) -> AllocationBasis {
+            self.inner.allocation_basis()
         }
-        fn objective(
-            &self,
-            pool: &MilpVarPool,
-            n: usize,
-            dt_h: &[f64],
-            c_wear: f64,
-            c_startup: f64,
-            c_ramp: f64,
-        ) -> Expression {
-            self.inner
-                .objective(pool, n, dt_h, c_wear, c_startup, c_ramp)
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 
@@ -724,9 +687,6 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        &[],
         None,
         None,
     );
@@ -755,10 +715,8 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
 
     let now = fixed_now();
     let profile = make_profile_1800s(); // 4 × 1800s slots, 2h horizon
-    let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
 
     // Alert covers the first hour → slots 0 and 1; slots 2 and 3 stay free.
     let alert = AlertWindow {
@@ -770,7 +728,6 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
     };
 
     let inputs = super::super::inputs::build_milp_inputs(
-        &ctxs,
         &GridSignals {
             alert_windows: (std::slice::from_ref(&alert)).to_vec(),
             ..test_grid(&tariffs, &cap)
@@ -829,9 +786,6 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         crate::entities::asset::PlanTrigger::Alert,
         None,
         None,
-        &[],
-        None,
-        None,
         None,
         None,
         None,
@@ -865,10 +819,8 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
 
     let now = fixed_now();
     let profile = make_profile_1800s(); // 4 × 1800s slots; grid contractual 25 kW
-    let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let cap = no_capacity();
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
 
     let win = |level: u8, from_slot: i64, slots: i64| SimpleWindow {
         level,
@@ -880,7 +832,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
     let simple = vec![win(1, 0, 2), win(2, 1, 1), win(3, 2, 1)];
 
     let inputs = super::super::inputs::build_milp_inputs(
-        &ctxs,
         &GridSignals {
             simple_windows: simple,
             ..test_grid(&tariffs, &cap)
@@ -909,7 +860,6 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         message: String::new(),
     };
     let inputs2 = super::super::inputs::build_milp_inputs(
-        &build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &GridSignals {
             alert_windows: (std::slice::from_ref(&alert)).to_vec(),
             simple_windows: vec![win(1, 0, 1)],
@@ -1029,9 +979,6 @@ fn run_planner_shiftable_tie_breaks_to_earliest_start() {
         crate::entities::asset::PlanTrigger::UserRequest,
         None,
         None,
-        &[load],
-        None,
-        None,
     );
     let wm = wm_kw_per_slot(&plan);
     assert!(
@@ -1078,9 +1025,6 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
         crate::entities::asset::PlanTrigger::UserRequest,
         None,
         None,
-        &[load],
-        None,
-        None,
     );
     let wm = wm_kw_per_slot(&plan);
     assert!(
@@ -1123,9 +1067,6 @@ fn run_planner_session_flexibility_estimated_cost_reflects_solved_schedule() {
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        Some(&session),
-        None,
-        &[],
         None,
         None,
     );
@@ -1186,9 +1127,6 @@ fn planned_ev_plugged(
         &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        session,
-        None,
-        &[],
         None,
         None,
     );
@@ -1256,7 +1194,6 @@ fn marginal_cost_solves_with_a_multi_slot_shiftable_load_scheduled() {
     let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
     push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let inputs = build_milp_inputs(
-        &ctxs,
         &tariffs,
         &no_capacity(),
         &profile,
@@ -1300,7 +1237,6 @@ fn marginal_cost_solves_with_every_asset_kind_active() {
     let mut ctxs = build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs);
     push_shiftable_load_contexts(&mut ctxs, std::slice::from_ref(&load), &profile, now);
     let inputs = build_milp_inputs(
-        &ctxs,
         &tariffs,
         &no_capacity(),
         &profile,

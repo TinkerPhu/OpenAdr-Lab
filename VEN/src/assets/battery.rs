@@ -286,14 +286,18 @@ impl MilpParticipant for Battery {
         &self,
         inputs: &super::MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
-        Box::new(
-            crate::controller::milp_planner::asset_port::BatteryMilpContext::from_state(
-                inputs.asset_id,
-                inputs.state,
-                self,
-                inputs.c_terminal_eur_kwh,
-            ),
-        )
+        let mut ctx = crate::controller::milp_planner::asset_port::BatteryMilpContext::from_state(
+            inputs.asset_id,
+            inputs.state,
+            self,
+            inputs.c_terminal_eur_kwh,
+        );
+        ctx.friction = crate::controller::milp_planner::FrictionCosts {
+            startup_eur: inputs.planner.c_bat_startup_eur,
+            ramp_eur_kw: inputs.planner.c_bat_ramp_eur_kw,
+            tier_penalty_eur: 0.0,
+        };
+        Box::new(ctx)
     }
 }
 

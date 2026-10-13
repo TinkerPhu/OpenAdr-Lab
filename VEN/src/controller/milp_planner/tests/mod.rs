@@ -621,7 +621,6 @@ fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase
 
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs(
-    ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     profile: &Profile,
@@ -630,7 +629,6 @@ fn build_milp_inputs(
     baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
 ) -> MilpInputs {
     build_milp_inputs_with_override(
-        ctxs,
         tariffs,
         cap,
         profile,
@@ -643,7 +641,6 @@ fn build_milp_inputs(
 
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs_with_override(
-    ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
     tariffs: &TariffTimeSeries,
     cap: &OadrCapacityState,
     profile: &Profile,
@@ -656,7 +653,6 @@ fn build_milp_inputs_with_override(
     pv_forecast_override: Option<f64>,
 ) -> MilpInputs {
     super::build_milp_inputs(
-        ctxs,
         &test_grid(tariffs, cap),
         &profile.planner,
         &SiteInputs {
@@ -677,9 +673,6 @@ fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    ev_session: Option<&crate::entities::device_session::EvSession>,
-    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
-    shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
     baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
     objective_override: Option<PlannerObjective>,
 ) -> Plan {
@@ -692,9 +685,6 @@ fn run_planner(
         &profile.assets,
         now,
         trigger,
-        ev_session,
-        heater_target,
-        shiftable_loads,
         baseline_override,
         objective_override,
         None,
@@ -717,7 +707,7 @@ fn bmi(
 ) -> Built {
     let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
     Built {
-        inputs: build_milp_inputs(&ctxs, tariffs, cap, profile, now, &[], None),
+        inputs: build_milp_inputs(tariffs, cap, profile, now, &[], None),
         ctxs,
         now,
     }
@@ -761,6 +751,21 @@ impl Built {
             other => panic!("expected heater scalars, got {other:?}"),
         }
     }
+
+    fn ev(&self) -> EvScalars {
+        match self.declared(AssetKind::Ev) {
+            AssetMilpParams::Ev(e) => e,
+            other => panic!("expected EV scalars, got {other:?}"),
+        }
+    }
+}
+
+/// The first context of type `C` among `ctxs`: what a test reads to see what an asset derived
+/// for itself (its mask, its obligations, its stages).
+fn context<C: 'static>(ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>]) -> &C {
+    ctxs.iter()
+        .find_map(|c| c.as_any().downcast_ref::<C>())
+        .unwrap_or_else(|| panic!("no {} was built", std::any::type_name::<C>()))
 }
 
 /// One battery's solution as a test reads it: zeros of the plan's lengths when the site has none.
@@ -803,50 +808,104 @@ trait AssetSolutionsView {
     fn shiftable_kw(&self) -> Vec<Vec<f64>>;
     /// Each shiftable load's start choice per valid start slot, by asset id.
     fn shiftable_starts(&self) -> Vec<(String, Vec<f64>)>;
+    /// What every asset reports about its own solution, in planner input order.
+    fn warnings(&self) -> Vec<crate::entities::plan::PlanWarning>;
 }
 
 impl AssetSolutionsView for SolveOutput {
     fn battery(&self) -> BatteryView {
-        BatteryView {
-            charge_kw: self.p_bat_ch_kw.clone(),
-            discharge_kw: self.p_bat_dis_kw.clone(),
-            energy_kwh: self.e_bat_kwh.clone(),
-            direction: self.mode_decisions.u_bat.clone(),
-        }
+        let n = self.p_imp_kw.len();
+        self.assets
+            .iter()
+            .find_map(|a| match (&a.detail, &a.storage) {
+                (AssetSolutionDetail::Battery { direction }, Some(legs)) => Some(BatteryView {
+                    charge_kw: legs.charge_kw.clone(),
+                    discharge_kw: legs.discharge_kw.clone(),
+                    energy_kwh: legs.energy_kwh.clone(),
+                    direction: direction.clone(),
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| BatteryView {
+                charge_kw: vec![0.0; n],
+                discharge_kw: vec![0.0; n],
+                energy_kwh: vec![0.0; n + 1],
+                direction: vec![],
+            })
     }
 
     fn ev(&self) -> EvView {
-        EvView {
-            power_kw: self.p_ev_kw.clone(),
-            soc: self.soc_ev.clone(),
-            shortfall_kwh: self.ev_shortfall_kwh.clone(),
-            on: self.z_ev_on.clone(),
-            extra_kwh: self.e_ev_extra,
-            bands_kwh: self.e_seg_kwh,
-        }
+        let n = self.p_imp_kw.len();
+        self.assets
+            .iter()
+            .find_map(|a| match &a.detail {
+                AssetSolutionDetail::Ev(e) => Some(EvView {
+                    power_kw: e.p_ev_kw.clone(),
+                    soc: e.soc_ev.clone(),
+                    shortfall_kwh: e.shortfall_kwh.clone(),
+                    on: e.z_ev_on.clone(),
+                    extra_kwh: e.e_ev_extra_kwh,
+                    bands_kwh: e.e_seg_kwh,
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| EvView {
+                power_kw: vec![0.0; n],
+                soc: vec![0.0; n + 1],
+                shortfall_kwh: vec![],
+                on: vec![0.0; n],
+                extra_kwh: 0.0,
+                bands_kwh: 0.0,
+            })
     }
 
     fn heater(&self) -> HeaterView {
-        HeaterView {
-            stage: self.y_heat.clone(),
-            ready: self.z_heat_ready,
-            tank_kwh: self.e_heat_tank_kwh.clone(),
-        }
+        let n = self.p_imp_kw.len();
+        self.assets
+            .iter()
+            .find_map(|a| match &a.detail {
+                AssetSolutionDetail::Heater(h) => Some(HeaterView {
+                    stage: h.y_heat.clone(),
+                    ready: h.z_heat_ready,
+                    tank_kwh: h.e_tank_kwh.clone(),
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| HeaterView {
+                stage: vec![0.0; n],
+                ready: 0.0,
+                tank_kwh: vec![],
+            })
     }
 
     fn shiftable_kw(&self) -> Vec<Vec<f64>> {
-        self.p_shiftable_kw.clone()
+        self.assets
+            .iter()
+            .filter(|a| matches!(a.detail, AssetSolutionDetail::ShiftableLoad { .. }))
+            .map(|a| a.net_power_kw.clone())
+            .collect()
     }
 
     fn shiftable_starts(&self) -> Vec<(String, Vec<f64>)> {
         let mut starts: Vec<_> = self
-            .mode_decisions
-            .y_shift
+            .assets
             .iter()
-            .map(|(id, row)| (id.clone(), row.clone()))
+            .filter_map(|a| match &a.detail {
+                AssetSolutionDetail::ShiftableLoad { starts } => {
+                    Some((a.asset_id.clone(), starts.clone()))
+                }
+                _ => None,
+            })
             .collect();
         starts.sort_by(|a, b| a.0.cmp(&b.0));
         starts
+    }
+
+    fn warnings(&self) -> Vec<crate::entities::plan::PlanWarning> {
+        self.assets
+            .iter()
+            .flat_map(|a| a.warnings.iter().cloned())
+            .collect()
     }
 }
 

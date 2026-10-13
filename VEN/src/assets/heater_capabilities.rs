@@ -36,21 +36,27 @@ impl MilpParticipant for Heater {
         &self,
         inputs: &super::MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
-        Box::new(
-            crate::controller::milp_planner::asset_port::HeaterMilpContext::from_state(
-                inputs.asset_id,
-                inputs.state,
-                self,
-                inputs.n,
-                inputs.cum_s,
-                inputs.now,
-                inputs.heater_target,
-                inputs.lambda_sw,
-                inputs.c_terminal_eur_kwh,
-                inputs.heater_anchor.clone(),
-                inputs.planner.w_ghg,
-            ),
-        )
+        let mut ctx = crate::controller::milp_planner::asset_port::HeaterMilpContext::from_state(
+            inputs.asset_id,
+            inputs.state,
+            self,
+            inputs.n,
+            inputs.cum_s,
+            inputs.now,
+            inputs.heater_target,
+            inputs.lambda_sw,
+            inputs.c_terminal_eur_kwh,
+            inputs.heater_anchor.clone(),
+            inputs.planner.w_ghg,
+        );
+        // Only the tier preference is a heater friction; relay switching is priced by
+        // `lambda_sw_eur`, which the context already carries.
+        ctx.friction = crate::controller::milp_planner::FrictionCosts {
+            startup_eur: 0.0,
+            ramp_eur_kw: 0.0,
+            tier_penalty_eur: inputs.planner.w_tier_penalty_eur,
+        };
+        Box::new(ctx)
     }
 }
 

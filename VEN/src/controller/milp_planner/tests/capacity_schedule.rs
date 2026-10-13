@@ -17,11 +17,8 @@ fn inputs_with_windows(
 ) -> MilpInputs {
     let now = fixed_now();
     let profile = make_profile_1800s();
-    let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
-    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
     super::super::inputs::build_milp_inputs(
-        &ctxs,
         &GridSignals {
             capacity_schedule: schedule.to_vec(),
             alert_windows: alerts.to_vec(),
