@@ -34,7 +34,7 @@ pub use asset_trait::{Asset, Trajectory, TrajectoryPoint};
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
 pub use capability_traits::{
-    MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
+    MilpBuildInputs, MilpParticipant, RequestResolvable, Thermostat, TickOverridable, TickOverrides,
 };
 pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
@@ -227,29 +227,15 @@ mod phase2a_battery_tests {
     fn build_milp_context_reports_battery_kind_and_scalars() {
         let (boxed, state) = boxed_and_state(0.5);
         let now = Utc::now();
+        let planner = crate::entities::planner_params::PlannerParams::default();
 
         let ctx = boxed
             .as_milp_participant()
             .expect("Battery must implement MilpParticipant")
-            .build_milp_context(
-                "battery",
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                &[],
-                None,
-                &[],
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![],
-                0.0,
-            );
+            .build_milp_context(&MilpBuildInputs {
+                c_terminal_eur_kwh: 0.05,
+                ..MilpBuildInputs::for_test("battery", &state, now, &planner)
+            });
 
         assert_eq!(ctx.asset_kind(), AssetKind::Battery);
         let AssetMilpParams::Battery(scalars) = ctx.milp_params(4, now) else {
@@ -391,29 +377,15 @@ mod phase2a_ev_tests {
     fn build_milp_context_reports_ev_scalars() {
         let (boxed, state) = boxed_and_state();
         let now = Utc::now();
+        let planner = crate::entities::planner_params::PlannerParams::default();
 
         let ctx = boxed
             .as_milp_participant()
             .expect("EvCharger must implement MilpParticipant")
-            .build_milp_context(
-                "ev",
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                &[],
-                None,
-                &[],
-                1.4,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![],
-                0.0,
-            );
+            .build_milp_context(&MilpBuildInputs {
+                c_terminal_eur_kwh: 0.05,
+                ..MilpBuildInputs::for_test("ev", &state, now, &planner)
+            });
 
         let AssetMilpParams::Ev(scalars) = ctx.milp_params(4, now) else {
             panic!("expected Ev scalars");
@@ -523,29 +495,16 @@ mod phase2a_heater_tests {
     fn build_milp_context_reports_heater_scalars() {
         let (boxed, state) = boxed_and_state();
         let now = Utc::now();
+        let planner = crate::entities::planner_params::PlannerParams::default();
 
         let ctx = boxed
             .as_milp_participant()
             .expect("Heater must implement MilpParticipant")
-            .build_milp_context(
-                "heater",
-                &state,
-                4,
-                &[300, 600, 900, 1200],
-                now,
-                &[],
-                None,
-                &[],
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.05,
-                vec![None; 4],
-                0.0,
-            );
+            .build_milp_context(&MilpBuildInputs {
+                c_terminal_eur_kwh: 0.05,
+                heater_anchor: vec![None; 4],
+                ..MilpBuildInputs::for_test("heater", &state, now, &planner)
+            });
 
         let AssetMilpParams::Heater(scalars) = ctx.milp_params(4, now) else {
             panic!("expected Heater scalars");

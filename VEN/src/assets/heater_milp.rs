@@ -293,6 +293,7 @@ impl HeaterMilpContext {
     /// Construct from a live `AssetState`, sim `Heater` config, and optional target data.
     #[allow(clippy::too_many_arguments)] // all parameters are distinct domain values with no natural grouping
     pub fn from_state(
+        asset_id: &str,
         state: &super::AssetState,
         cfg: &Heater,
         n: usize,
@@ -372,6 +373,7 @@ impl HeaterMilpContext {
                     * w_ghg_eur_kg
             };
             Self {
+                asset_id: asset_id.to_string(),
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
                 p_step_kw,
@@ -389,6 +391,7 @@ impl HeaterMilpContext {
             }
         } else {
             Self {
+                asset_id: asset_id.to_string(),
                 mode: HeaterMilpMode::MayRun,
                 t_dead_step: None,
                 p_step_kw,
@@ -410,7 +413,7 @@ impl HeaterMilpContext {
 
 impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
     fn asset_id(&self) -> &str {
-        crate::ids::ASSET_HEATER
+        &self.asset_id
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
@@ -529,6 +532,7 @@ mod milp_tests {
 
     fn make_may_run_ctx(_n: usize) -> HeaterMilpContext {
         HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.0,
@@ -599,6 +603,7 @@ mod milp_tests {
         use good_lp::variables;
         let mut vars = variables!();
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MustNotRun,
             ..make_may_run_ctx(n)
         };
@@ -694,6 +699,7 @@ mod milp_context_trait_tests {
 
     fn make_ctx() -> HeaterMilpContext {
         HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
             p_step_kw: 1.0,
@@ -740,6 +746,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_must_run_mode() {
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             mode: HeaterMilpMode::MustRun,
             ..make_ctx()
         };
@@ -785,6 +792,7 @@ mod milp_context_trait_tests {
     #[test]
     fn test_terminal_reward_coefficient_stored() {
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             c_terminal_eur_kwh: 0.56,
             ..make_ctx()
         };
@@ -797,6 +805,7 @@ mod milp_context_trait_tests {
     #[test]
     fn test_terminal_reward_zero_disables() {
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             c_terminal_eur_kwh: 0.0,
             ..make_ctx()
         };
@@ -807,6 +816,7 @@ mod milp_context_trait_tests {
     fn test_terminal_reward_in_phase1_objective_not_phase2() {
         let n = 3;
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             c_terminal_eur_kwh: 0.5,
             ..make_ctx()
         };
@@ -841,6 +851,7 @@ mod milp_context_trait_tests {
         let c_ctrl_imp_malus_eur_kwh = 0.22_f64;
         let expected = avg_imp_eur_kwh + c_ctrl_imp_malus_eur_kwh; // 0.56
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             c_terminal_eur_kwh: expected,
             ..make_ctx()
         };
@@ -857,6 +868,7 @@ mod milp_context_trait_tests {
         // Zone C (15-min slot) must cost 3× Zone A (5-min slot) for the same lambda_sw.
         let n = 1;
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             lambda_sw_eur: 0.50,
             ..make_ctx()
         };
@@ -894,6 +906,7 @@ mod milp_context_trait_tests {
         use good_lp::{solvers::highs::highs, Expression, SolverModel};
         let n = 2;
         let ctx = HeaterMilpContext {
+            asset_id: "heater".into(),
             anchored_kw: vec![Some(2.0), None], // full tier anchor on slot 0
             ..make_ctx()                        // p_step_kw=1.0, n_stages=2
         };
@@ -950,10 +963,12 @@ mod milp_context_trait_tests {
         let dt_h = vec![300.0 / 3600.0; n];
 
         let ctx_zero = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_reward_eur_kwh: 0.30,
             ..make_ctx()
         };
@@ -984,10 +999,12 @@ mod milp_context_trait_tests {
         let dt_h = vec![300.0 / 3600.0; n];
 
         let ctx_zero = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_reward_eur_kwh: 0.30,
             ..make_ctx()
         };
@@ -1020,10 +1037,12 @@ mod milp_context_trait_tests {
         let dt_h = vec![300.0 / 3600.0; n];
 
         let ctx_zero = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_co2_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_co2_reward_eur_kwh: 0.20,
             ..make_ctx()
         };
@@ -1054,10 +1073,12 @@ mod milp_context_trait_tests {
         let dt_h = vec![300.0 / 3600.0; n];
 
         let ctx_zero = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_co2_reward_eur_kwh: 0.0,
             ..make_ctx()
         };
         let ctx_reward = HeaterMilpContext {
+            asset_id: "heater".into(),
             comfort_full_co2_reward_eur_kwh: 0.20,
             ..make_ctx()
         };
@@ -1134,6 +1155,7 @@ mod milp_context_trait_tests {
         };
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
         let ctx = HeaterMilpContext::from_state(
+            "heater",
             &state,
             &cfg,
             12,
@@ -1208,6 +1230,7 @@ mod milp_context_trait_tests {
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
         // w_ghg = 0.5 EUR/kgCO2 -> 0.2 kgCO2/kWh * 0.5 EUR/kgCO2 = 0.10 EUR/kWh
         let ctx = HeaterMilpContext::from_state(
+            "heater",
             &state,
             &cfg,
             12,
@@ -1255,6 +1278,7 @@ mod milp_context_trait_tests {
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
         let ctx = HeaterMilpContext::from_state(
+            "heater",
             &state,
             &cfg,
             12,
@@ -1303,6 +1327,7 @@ mod milp_context_trait_tests {
         let now = chrono::Utc::now();
         let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
         let ctx = HeaterMilpContext::from_state(
+            "heater",
             &state,
             &cfg,
             12,
@@ -1361,6 +1386,7 @@ mod milp_context_trait_tests {
                 ceiling_latched: false,
             });
             HeaterMilpContext::from_state(
+                "heater",
                 &state,
                 &cfg,
                 4,

@@ -18,6 +18,8 @@ use std::collections::HashMap;
 /// objective methods. Avoids repeated field accesses inside tight solver loops.
 #[derive(Debug, Clone)]
 pub struct BatteryMilpContext {
+    /// The roster id this context was built for, reported as `asset_id()`.
+    pub asset_id: String,
     pub e_nom_kwh: f64,
     /// Live SoC × capacity — NOT the profile's initial_soc.
     pub e_init_kwh: f64,
@@ -79,6 +81,8 @@ pub enum EvMilpMode {
 /// Pre-computed MILP parameters for one EV charger and planning cycle.
 #[derive(Debug, Clone)]
 pub struct EvMilpContext {
+    /// The roster id this context was built for, reported as `asset_id()`.
+    pub asset_id: String,
     pub mode: EvMilpMode,
     /// Live SoC at plan time, reported by the EV itself (seeds the plan's EV SoC forecast).
     pub soc_init_frac: f64,
@@ -218,6 +222,8 @@ pub enum HeaterMilpMode {
 /// Uses a per-step tank energy state trajectory (E[t]) instead of a global energy budget.
 #[derive(Debug, Clone)]
 pub struct HeaterMilpContext {
+    /// The roster id this context was built for, reported as `asset_id()`.
+    pub asset_id: String,
     pub mode: HeaterMilpMode,
     /// Deadline step index (None = no hard deadline; autonomous MayRun path).
     pub t_dead_step: Option<usize>,

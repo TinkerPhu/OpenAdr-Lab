@@ -7,7 +7,7 @@ use crate::assets::{
     battery::{Battery, BatteryState},
     ev::{EvCharger, EvState},
     heater::{Heater, HeaterState},
-    AssetState, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
+    AssetState, MilpBuildInputs, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
 };
 use crate::controller::sim_snapshot::{AssetSnapshot, SimSnapshot};
 use crate::entities::asset_params::{
@@ -32,13 +32,6 @@ struct Profile {
 }
 
 impl Profile {
-    fn ev_config(&self) -> Option<&EvParams> {
-        self.assets.iter().find_map(|a| match a {
-            AssetParams::Ev(v) => Some(v),
-            _ => None,
-        })
-    }
-
     fn heater_config(&self) -> Option<&HeaterParams> {
         self.assets.iter().find_map(|a| match a {
             AssetParams::Heater(v) => Some(v),
@@ -412,6 +405,41 @@ fn make_two_zone_tariffs(imp_cheap: f64, imp_exp: f64) -> TariffTimeSeries {
     ])
 }
 
+/// The parts of one planning cycle every asset context of a test is built from.
+struct TestCycle<'a> {
+    n: usize,
+    cum_s: &'a [i64],
+    now: DateTime<Utc>,
+    ev_sessions: &'a [crate::entities::device_session::EvSession],
+    heater_target: Option<&'a crate::entities::device_session::HeaterTarget>,
+    planner: &'a PlannerParams,
+    lambda_sw: f64,
+}
+
+impl<'a> TestCycle<'a> {
+    fn inputs(
+        &self,
+        asset_id: &'a str,
+        state: &'a AssetState,
+        c_terminal_eur_kwh: f64,
+    ) -> MilpBuildInputs<'a> {
+        MilpBuildInputs {
+            asset_id,
+            state,
+            n: self.n,
+            cum_s: self.cum_s,
+            now: self.now,
+            ev_sessions: self.ev_sessions,
+            heater_target: self.heater_target,
+            comfort_rates: &[],
+            planner: self.planner,
+            lambda_sw: self.lambda_sw,
+            c_terminal_eur_kwh,
+            heater_anchor: vec![],
+        }
+    }
+}
+
 fn build_asset_contexts(
     profile: &Profile,
     snap: &SimSnapshot,
@@ -426,8 +454,15 @@ fn build_asset_contexts(
         .heater_config()
         .map(|h| h.switching_penalty_eur)
         .unwrap_or(0.0);
-    let v_ev_extra = profile.planner.v_ev_extra_eur_kwh;
-    let ev_min_kw = profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0);
+    let cycle = TestCycle {
+        n,
+        cum_s: &cum_s,
+        now,
+        ev_sessions: ev_session.map(std::slice::from_ref).unwrap_or(&[]),
+        heater_target,
+        planner: &profile.planner,
+        lambda_sw,
+    };
 
     let avg_imp_eur_kwh = {
         let total: f64 = (0..n)
@@ -465,23 +500,7 @@ fn build_asset_contexts(
                     .unwrap_or(avg_imp_eur_kwh * cfg.round_trip_efficiency);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
-                    "battery",
-                    &state,
-                    n,
-                    &cum_s,
-                    now,
-                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
-                    heater_target,
-                    &[],
-                    ev_min_kw,
-                    v_ev_extra,
-                    1.0,
-                    profile.planner.asap_lateness_eur_kwh_h,
-                    profile.planner.v_ev_free_charge_eur_kwh,
-                    lambda_sw,
-                    c_terminal,
-                    vec![],
-                    profile.planner.w_ghg,
+                    &cycle.inputs("battery", &state, c_terminal),
                 ));
             }
             AssetParams::Ev(cfg) => {
@@ -506,23 +525,7 @@ fn build_asset_contexts(
                 let ac = EvCharger::from_params(cfg);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
-                    "ev",
-                    &state,
-                    n,
-                    &cum_s,
-                    now,
-                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
-                    heater_target,
-                    &[],
-                    ev_min_kw,
-                    v_ev_extra,
-                    1.0,
-                    profile.planner.asap_lateness_eur_kwh_h,
-                    profile.planner.v_ev_free_charge_eur_kwh,
-                    lambda_sw,
-                    0.0,
-                    vec![],
-                    profile.planner.w_ghg,
+                    &cycle.inputs("ev", &state, 0.0),
                 ));
             }
             AssetParams::Heater(cfg) => {
@@ -543,23 +546,7 @@ fn build_asset_contexts(
                     .unwrap_or(avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
                 ctxs.push(MilpParticipant::build_milp_context(
                     &ac,
-                    "heater",
-                    &state,
-                    n,
-                    &cum_s,
-                    now,
-                    ev_session.map(std::slice::from_ref).unwrap_or(&[]),
-                    heater_target,
-                    &[],
-                    ev_min_kw,
-                    v_ev_extra,
-                    1.0,
-                    profile.planner.asap_lateness_eur_kwh_h,
-                    profile.planner.v_ev_free_charge_eur_kwh,
-                    lambda_sw,
-                    c_terminal,
-                    vec![],
-                    profile.planner.w_ghg,
+                    &cycle.inputs("heater", &state, c_terminal),
                 ));
             }
             _ => {}
@@ -612,25 +599,18 @@ fn push_shiftable_load_contexts(
             elapsed_min: 0.0,
             actual_power_kw: 0.0,
         });
+        let cycle = TestCycle {
+            n,
+            cum_s: &cum_s,
+            now,
+            ev_sessions: &[],
+            heater_target: None,
+            planner: &profile.planner,
+            lambda_sw: 0.0,
+        };
         ctxs.push(MilpParticipant::build_milp_context(
             &asset,
-            &load.asset_id,
-            &state,
-            n,
-            &cum_s,
-            now,
-            &[],
-            None,
-            &[],
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            vec![],
-            0.0,
+            &cycle.inputs(&load.asset_id, &state, 0.0),
         ));
     }
 }

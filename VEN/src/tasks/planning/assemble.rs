@@ -113,7 +113,6 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         a.now,
         st.ev_sessions.as_slice(), // the EV decides what it can serve
         st.heat_tgt.as_ref(),
-        a.asset_params,
         a.planner,
         lambda_sw,
         &c_terminal_eur_kwh_by_asset,

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -11,7 +11,6 @@ use crate::entities::asset::{
     AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
 };
 use crate::entities::asset_params::{BatteryParams, RequestDefaults};
-use crate::entities::device_session::{EvSession, HeaterTarget};
 
 /// Minimum time a direction's max rate must be sustainable to be reported as
 /// available power (see `Battery::capability_inner`).
@@ -283,32 +282,16 @@ impl Asset for Battery {
 }
 
 impl MilpParticipant for Battery {
-    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 4 heterogeneous asset kinds — see trait doc
     fn build_milp_context(
         &self,
-        _asset_id: &str,
-        state: &AssetState,
-        _n: usize,
-        _cum_s: &[i64],
-        _now: DateTime<Utc>,
-        _ev_sessions: &[EvSession],
-        _heater_target: Option<&HeaterTarget>,
-        _comfort_rates: &[crate::entities::asset::ComfortRate],
-        _ev_min_charge_kw: f64,
-        _v_ev_extra_eur_kwh: f64,
-        _v_ev_core_eur_kwh: f64,
-        _asap_lateness_eur_kwh_h: f64,
-        _v_ev_free_charge_eur_kwh: f64,
-        _lambda_sw: f64,
-        c_terminal_eur_kwh: f64,
-        _heater_anchor: Vec<Option<f64>>,
-        _w_ghg_eur_kg: f64,
+        inputs: &super::MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
         Box::new(
             crate::controller::milp_planner::asset_port::BatteryMilpContext::from_state(
-                state,
+                inputs.asset_id,
+                inputs.state,
                 self,
-                c_terminal_eur_kwh,
+                inputs.c_terminal_eur_kwh,
             ),
         )
     }

@@ -380,7 +380,7 @@ impl EvMilpContext {
 
 impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
     fn asset_id(&self) -> &str {
-        crate::ids::ASSET_EV
+        &self.asset_id
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
@@ -700,6 +700,7 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: false,
         });
         let mut ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             cfg,
             n,
@@ -808,6 +809,7 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: true,
         });
         let mut ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             &cfg,
             n,
@@ -866,6 +868,7 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: true,
         });
         let mut ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             &cfg,
             n,
@@ -1049,6 +1052,7 @@ mod milp_context_trait_tests {
             was_away_by_usage_sim: false,
         });
         let mut ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             &cfg,
             n,
@@ -1136,6 +1140,7 @@ mod milp_context_trait_tests {
 
     fn make_must_run(n: usize) -> EvMilpContext {
         EvMilpContext {
+            asset_id: "ev".into(),
             mode: EvMilpMode::MustRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1228,6 +1233,7 @@ mod milp_context_trait_tests {
         };
         let cum_s: Vec<i64> = (0..=24).map(|i| i * 300).collect();
         let ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             &cfg,
             24,
@@ -1292,6 +1298,7 @@ mod milp_context_trait_tests {
                 was_away_by_usage_sim: false,
             });
             let ctx = EvMilpContext::from_state(
+                "ev",
                 &state,
                 &cfg,
                 4,
@@ -1362,6 +1369,7 @@ mod milp_context_trait_tests {
         };
         let cum_s: Vec<i64> = (0..=24).map(|i| i * 300).collect();
         let ctx = EvMilpContext::from_state(
+            "ev",
             &state,
             &cfg,
             24,
@@ -1411,6 +1419,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_may_run_mode() {
         let ctx = EvMilpContext {
+            asset_id: "ev".into(),
             mode: EvMilpMode::MayRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1441,6 +1450,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_must_not_run_mode() {
         let ctx = EvMilpContext {
+            asset_id: "ev".into(),
             mode: EvMilpMode::MustNotRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,
@@ -1473,6 +1483,7 @@ mod milp_context_trait_tests {
         let n = 4;
         let a_ev = vec![true, false, true, false];
         let ctx = EvMilpContext {
+            asset_id: "ev".into(),
             mode: EvMilpMode::MayRun,
             soc_init_frac: 0.0,
             soc_max_frac: 1.0,

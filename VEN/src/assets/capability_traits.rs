@@ -8,44 +8,72 @@ use crate::entities::asset_params::{PvCurtailmentSource, RequestDefaults};
 use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::timeline::HeaterPlanTrajectory;
 
+/// Everything one planning cycle hands an asset to build its MILP context from: which asset it
+/// is, its live state, the cycle's grid, the sessions and targets it may serve, and the planner's
+/// own weights. One object rather than a positional list, so a kind reads the fields it needs and
+/// a new field does not touch every implementor (R-71).
+pub struct MilpBuildInputs<'a> {
+    /// The roster id this context is built for; the context reports it as its `asset_id()`.
+    pub asset_id: &'a str,
+    pub state: &'a AssetState,
+    /// Number of planning slots.
+    pub n: usize,
+    /// Cumulative slot boundary offsets from `now` [s], len = n + 1.
+    pub cum_s: &'a [i64],
+    pub now: DateTime<Utc>,
+    /// Every queued EV session; an EV decides itself which ones it can serve.
+    pub ev_sessions: &'a [EvSession],
+    pub heater_target: Option<&'a HeaterTarget>,
+    /// The asset's effective comfort curve (user override, else built-in default). Empty when
+    /// the asset has none.
+    pub comfort_rates: &'a [crate::entities::asset::ComfortRate],
+    pub planner: &'a crate::entities::planner_params::PlannerParams,
+    /// Relay switching penalty [EUR/switch] (the site heater's profile value).
+    pub lambda_sw: f64,
+    /// This asset's terminal value of stored energy [EUR/kWh]; 0.0 when it has none.
+    pub c_terminal_eur_kwh: f64,
+    /// Per-slot power the plan in force pins [kW]; empty for an asset that takes no anchor.
+    pub heater_anchor: Vec<Option<f64>>,
+}
+
+#[cfg(test)]
+impl<'a> MilpBuildInputs<'a> {
+    /// A four-slot cycle with no session, target, comfort curve, terminal value or anchor, and
+    /// `planner`'s weights: what an asset's own context test varies from.
+    pub(crate) fn for_test(
+        asset_id: &'a str,
+        state: &'a AssetState,
+        now: DateTime<Utc>,
+        planner: &'a crate::entities::planner_params::PlannerParams,
+    ) -> Self {
+        Self {
+            asset_id,
+            state,
+            n: 4,
+            cum_s: &[300, 600, 900, 1200],
+            now,
+            ev_sessions: &[],
+            heater_target: None,
+            comfort_rates: &[],
+            planner,
+            lambda_sw: 0.0,
+            c_terminal_eur_kwh: 0.0,
+            heater_anchor: vec![],
+        }
+    }
+}
+
 /// Capability: this asset participates in MILP planning. Implemented by
-/// Battery/EV/Heater — exactly `AssetMilpContext`'s existing `AssetKind` scope
-/// (`VEN/src/controller/asset_milp_port.rs`). See design.md Decision D4's
+/// Battery, EV, Heater and ShiftableLoad. See design.md Decision D4's
 /// correction note for why `default_comfort_rates`/`default_completion_policy`/
 /// `default_post_deadline_comfort_bid` are NOT here despite sounding
 /// MILP-specific — all 5 asset kinds already implement them for real, so
 /// they're universal `Asset` methods instead.
 pub trait MilpParticipant {
-    /// Build the MILP context for this asset. Signature carries the full
-    /// per-planning-cycle context every implementor needs (session/target
-    /// state, reward weights) even though most parameters apply to only one
-    /// or two asset kinds — see `AssetConfig::build_milp_context`'s existing
-    /// doc history for why this wasn't split further.
-    #[allow(clippy::too_many_arguments)] // one entry point for 4 heterogeneous asset kinds' MILP setup — see trait doc
+    /// Build this asset's MILP context for one planning cycle.
     fn build_milp_context(
         &self,
-        // Needed only by ShiftableLoadAsset (shiftable-load-as-asset): unlike
-        // Battery/EV/Heater's compile-time-fixed ids, a shiftable load's id is
-        // per-instance and not otherwise available inside this method.
-        asset_id: &str,
-        state: &AssetState,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        ev_sessions: &[EvSession],
-        heater_target: Option<&HeaterTarget>,
-        // The asset's effective comfort curve (user override, else built-in
-        // default). Empty when the asset has none.
-        comfort_rates: &[crate::entities::asset::ComfortRate],
-        ev_min_charge_kw: f64,
-        v_ev_extra_eur_kwh: f64,
-        v_ev_core_eur_kwh: f64,
-        asap_lateness_eur_kwh_h: f64,
-        v_ev_free_charge_eur_kwh: f64,
-        lambda_sw: f64,
-        c_terminal_eur_kwh: f64,
-        heater_anchor: Vec<Option<f64>>,
-        w_ghg_eur_kg: f64,
+        inputs: &MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext>;
 }
 

@@ -12,7 +12,7 @@ use crate::entities::asset::{
     AssetHistoryView, ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse,
 };
 use crate::entities::asset_params::{EvParams, EvUsageSimParams, RequestDefaults};
-use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::device_session::EvSession;
 use crate::entities::ev_usage::EvUsageSimState;
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
@@ -417,45 +417,30 @@ impl TickOverridable for EvCharger {
 }
 
 impl MilpParticipant for EvCharger {
-    #[allow(clippy::too_many_arguments)] // trait-mandated signature shared by 4 heterogeneous asset kinds — see trait doc
     fn build_milp_context(
         &self,
-        _asset_id: &str,
-        state: &AssetState,
-        n: usize,
-        cum_s: &[i64],
-        now: DateTime<Utc>,
-        ev_sessions: &[EvSession],
-        _heater_target: Option<&HeaterTarget>,
-        comfort_rates: &[crate::entities::asset::ComfortRate],
-        ev_min_charge_kw: f64,
-        v_ev_extra_eur_kwh: f64,
-        v_ev_core_eur_kwh: f64,
-        asap_lateness_eur_kwh_h: f64,
-        v_ev_free_charge_eur_kwh: f64,
-        _lambda_sw: f64,
-        _c_terminal_eur_kwh: f64,
-        _heater_anchor: Vec<Option<f64>>,
-        w_ghg_eur_kg: f64,
+        inputs: &super::MilpBuildInputs<'_>,
     ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        let planner = inputs.planner;
         let mut ctx = crate::controller::milp_planner::asset_port::EvMilpContext::from_state(
-            state,
+            inputs.asset_id,
+            inputs.state,
             self,
-            n,
-            cum_s,
-            now,
-            ev_sessions,
-            comfort_rates,
-            ev_min_charge_kw,
-            v_ev_extra_eur_kwh,
-            v_ev_core_eur_kwh,
-            asap_lateness_eur_kwh_h,
-            v_ev_free_charge_eur_kwh,
-            w_ghg_eur_kg,
+            inputs.n,
+            inputs.cum_s,
+            inputs.now,
+            inputs.ev_sessions,
+            inputs.comfort_rates,
+            self.min_charge_kw,
+            planner.v_ev_extra_eur_kwh,
+            planner.v_ev_core_eur_kwh,
+            planner.asap_lateness_eur_kwh_h,
+            planner.v_ev_free_charge_eur_kwh,
+            planner.w_ghg,
         );
         // ev-usage-forecast: the asset's own predicted availability, ANDed into
         // the mask above. No-op unless this EV declared `usage_forecast`.
-        ctx.apply_usage_forecast(self, n, cum_s, now, ev_sessions);
+        ctx.apply_usage_forecast(self, inputs.n, inputs.cum_s, inputs.now, inputs.ev_sessions);
         Box::new(ctx)
     }
 }

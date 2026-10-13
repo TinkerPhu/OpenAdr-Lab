@@ -32,19 +32,20 @@ otherwise.
 
 ## 2. Contexts carry their id and one build-parameter object (D10, D11)
 
-- [ ] 2.1 Test first: `build_asset_contexts` returns each context with the roster id it was built
+- [x] 2.1 Test first: `build_asset_contexts` returns each context with the roster id it was built
       for (a battery built as `"bat-a"` reports `"bat-a"`). Confirm it fails. Then store the id on
       `BatteryMilpContext`, `EvMilpContext` and `HeaterMilpContext` and return it from
       `asset_id()`. The test fixtures that build contexts directly (`tests/fixtures.rs`:
       `battery_ctx`, `lossless_battery`, `absent_ev`) pass the id the profile uses today, so the
       goldens see the same ids. Verify: the new test plus planner tests green, goldens hold.
-- [ ] 2.2 Introduce `MilpBuildInputs` and change `MilpParticipant::build_milp_context` to take it.
+- [x] 2.2 Introduce `MilpBuildInputs` and change `MilpParticipant::build_milp_context` to take it.
       Planner scalars are read from `&PlannerParams`. The EV's minimum charge power is its own
       `min_charge_kw`, which deletes `min_ev_charge_kw` in `simulator/plan_context.rs`. Remove the
       `#[allow(clippy::too_many_arguments)]` it no longer needs. Verify: `cargo clippy
       --all-targets --all-features -- -D warnings` clean, planner tests green, goldens hold.
-- [ ] 2.3 File the two firm-obligation energy rules (design inventory) in
-      `docs/reference/TECHNICAL_DEBTS.md` as needs-decision, with Severity, Kind and Cost, and
+- [x] 2.3 File the two firm-obligation energy rules (design inventory) in
+      `docs/reference/TECHNICAL_DEBTS.md` as needs-decision (R-140; the heater's `lambda_sw`, the
+      same first-of-kind shape, is R-141), with Severity, Kind and Cost, and
       `Affected files` naming `VEN/src/assets/ev_milp_accessors.rs` and
       `VEN/src/controller/milp_planner/input_stages.rs` (task 6.5 moves the second; update the
       row then). Verify: the row exists and `audit_debt_gate.py` accepts it.
