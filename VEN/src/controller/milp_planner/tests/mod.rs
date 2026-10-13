@@ -798,6 +798,7 @@ mod modes;
 mod penalty;
 mod phase2_spikes;
 mod planner;
+mod plans_golden;
 mod pv;
 mod soc_balance;
 mod solve_cost;

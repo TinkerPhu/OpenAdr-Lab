@@ -12,7 +12,7 @@ otherwise.
 
 ## 1. Safety net (no production change)
 
-- [ ] 1.1 Add `tests/plans_golden.rs`: for every scenario in `model_fingerprint::scenarios()`, run
+- [x] 1.1 Add `tests/plans_golden.rs`: for every scenario in `model_fingerprint::scenarios()`, run
       `solve_milp_two_phase` + `translate_to_plan` and record the whole `Plan`. That is every slot
       field, allocations, `planned_kw_by_asset`, `planned_state_by_asset` (sorted keys), session
       flexibility, warnings, summary, cost breakdown, marginal costs and `soc_trajectory_kwh`,
