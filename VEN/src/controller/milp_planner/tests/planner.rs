@@ -217,7 +217,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| !matches!(a, AssetProfile::Battery(_)));
+        .retain(|a| !matches!(a, AssetParams::Battery(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = ev_session_until(now, 0.8, now + Duration::hours(2));
@@ -257,7 +257,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
 fn run_planner_ev_absent_no_ev_allocation() {
     let now = fixed_now();
     let mut profile = make_profile_1800s();
-    profile.assets.retain(|a| !matches!(a, AssetProfile::Ev(_)));
+    profile.assets.retain(|a| !matches!(a, AssetParams::Ev(_)));
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
@@ -287,7 +287,7 @@ fn run_planner_battery_charges_on_cheap_tariff() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Battery(_) | AssetParams::BaseLoad(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.1); // low SoC → wants to charge
     let tariffs = make_two_zone_tariffs(0.05, 0.40);
@@ -321,15 +321,15 @@ fn run_planner_ev_must_run_energy_met() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| !matches!(a, AssetProfile::Heater(_) | AssetProfile::Pv(_)));
+        .retain(|a| !matches!(a, AssetParams::Heater(_) | AssetParams::Pv(_)));
     // Shrink EV battery so 7 kWh is feasible in 2h at 7.4 kW
     profile.assets = profile
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Ev(mut ev) => {
+            AssetParams::Ev(mut ev) => {
                 ev.battery_kwh = 10.0;
-                AssetProfile::Ev(ev)
+                AssetParams::Ev(ev)
             }
             other => other,
         })
@@ -413,7 +413,7 @@ fn run_planner_absent_battery_no_panic() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| !matches!(a, AssetProfile::Battery(_)));
+        .retain(|a| !matches!(a, AssetParams::Battery(_)));
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
@@ -441,7 +441,7 @@ fn run_planner_absent_battery_no_panic() {
 fn make_profile_n48() -> Profile {
     Profile {
         assets: vec![
-            AssetProfile::Battery(BatteryConfig {
+            AssetParams::Battery(BatteryParams {
                 id: "battery".into(),
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
@@ -451,7 +451,7 @@ fn make_profile_n48() -> Profile {
                 min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::Ev(EvConfig {
+            AssetParams::Ev(EvParams {
                 id: "ev".into(),
                 max_charge_kw: 7.2,
                 consumption_kwh_per_km: 0.18,
@@ -465,7 +465,7 @@ fn make_profile_n48() -> Profile {
                 v2g_capable: false,
                 usage_sim: None,
             }),
-            AssetProfile::Heater(HeaterConfig {
+            AssetParams::Heater(HeaterParams {
                 default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 2.0,
@@ -481,26 +481,26 @@ fn make_profile_n48() -> Profile {
                 switching_penalty_eur: 0.01,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::Pv(PvConfig {
+            AssetParams::Pv(PvParams {
                 id: "pv".into(),
                 rated_kw: 6.0,
                 inverter_max_kw: 6.0,
                 co2_g_kwh: 0.0,
             }),
-            AssetProfile::BaseLoad(BaseLoadConfig {
+            AssetParams::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),
                 baseline_kw: 0.5,
                 spikes: vec![],
             }),
         ],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 1800,
             plan_horizon_h: 24,
             plan_zones: vec![crate::entities::plan::PlanZone {
                 step_s: 1800,
                 slots: 48,
             }],
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,
@@ -1012,7 +1012,7 @@ fn run_planner_shiftable_tie_breaks_to_earliest_start() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::BaseLoad(_)));
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0); // flat → slots 0 and 1 cost-equal
                                                    // 30-min load, 65-min window → valid start slots {0, 1} on the 1800 s grid.
@@ -1046,7 +1046,7 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::BaseLoad(_)));
     let sim = make_snap_from_profile(&profile);
     // Slot 0 expensive, slot 1 cheap (30-min intervals).
     let tariffs = TariffTimeSeries::from_snapshots(&[
@@ -1098,14 +1098,14 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| !matches!(a, AssetProfile::Heater(_) | AssetProfile::Pv(_)));
+        .retain(|a| !matches!(a, AssetParams::Heater(_) | AssetParams::Pv(_)));
     profile.assets = profile
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Ev(mut ev) => {
+            AssetParams::Ev(mut ev) => {
                 ev.battery_kwh = 10.0;
-                AssetProfile::Ev(ev)
+                AssetParams::Ev(ev)
             }
             other => other,
         })
@@ -1247,7 +1247,7 @@ fn marginal_cost_solves_with_a_multi_slot_shiftable_load_scheduled() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::BaseLoad(_)));
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     // 60-min load, 120-min window -> valid starts {0, 1, 2}; flat tariff -> starts at 0.

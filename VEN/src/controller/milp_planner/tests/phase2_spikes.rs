@@ -51,7 +51,7 @@ fn ven1_profile() -> Profile {
     };
     Profile {
         assets: vec![
-            AssetProfile::Ev(EvParams {
+            AssetParams::Ev(EvParams {
                 id: "ev".into(),
                 max_charge_kw: 11.0,
                 max_discharge_kw: 0.0,
@@ -71,13 +71,13 @@ fn ven1_profile() -> Profile {
                     min_soc_after_drop_pct: 5.0,
                 }),
             }),
-            AssetProfile::Pv(PvParams {
+            AssetParams::Pv(PvParams {
                 id: "pv".into(),
                 rated_kw: 14.4,
                 inverter_max_kw: 12.5,
                 co2_g_kwh: 0.0,
             }),
-            AssetProfile::Battery(BatteryParams {
+            AssetParams::Battery(BatteryParams {
                 id: "battery".into(),
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
@@ -87,13 +87,13 @@ fn ven1_profile() -> Profile {
                 min_soc_frac: 0.10,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::BaseLoad(BaseLoadParams {
+            AssetParams::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),
                 baseline_kw: 0.4,
                 spikes: vec![],
             }),
         ],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 300,
             plan_horizon_h: 48,
             plan_zones: vec![
@@ -110,7 +110,7 @@ fn ven1_profile() -> Profile {
                     slots: 96,
                 },
             ],
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 12.5,
@@ -351,10 +351,10 @@ fn bench_fleet_startup_penalty() {
             .assets
             .iter()
             .filter_map(|a| match a {
-                AssetProfile::Battery(_) => Some("bat"),
-                AssetProfile::Ev(_) => Some("ev"),
-                AssetProfile::Heater(_) => Some("htr"),
-                AssetProfile::Pv(_) => Some("pv"),
+                AssetParams::Battery(_) => Some("bat"),
+                AssetParams::Ev(_) => Some("ev"),
+                AssetParams::Heater(_) => Some("htr"),
+                AssetParams::Pv(_) => Some("pv"),
                 _ => None,
             })
             .collect();
@@ -487,9 +487,9 @@ fn captured_instance(
     let mut profile = fleet_profile(name);
     for asset in profile.assets.iter_mut() {
         match asset {
-            AssetProfile::Battery(b) => b.initial_soc_frac = state.battery_soc,
-            AssetProfile::Ev(e) => e.initial_soc_frac = state.ev_soc,
-            AssetProfile::Heater(h) => {
+            AssetParams::Battery(b) => b.initial_soc_frac = state.battery_soc,
+            AssetParams::Ev(e) => e.initial_soc_frac = state.ev_soc,
+            AssetParams::Heater(h) => {
                 if let Some(t) = state.heater_temp_c {
                     h.temp_initial_c = t;
                 }

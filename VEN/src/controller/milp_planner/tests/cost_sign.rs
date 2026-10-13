@@ -16,10 +16,10 @@ fn boost_pv(profile: &mut Profile, rated_kw: f64) {
     profile.assets = std::mem::take(&mut profile.assets)
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Pv(mut pv) => {
+            AssetParams::Pv(mut pv) => {
                 pv.rated_kw = rated_kw;
                 pv.inverter_max_kw = rated_kw;
-                AssetProfile::Pv(pv)
+                AssetParams::Pv(pv)
             }
             other => other,
         })
@@ -69,7 +69,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     profile.assets.retain(|a| {
         matches!(
             a,
-            AssetProfile::Ev(_) | AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)
+            AssetParams::Ev(_) | AssetParams::Pv(_) | AssetParams::BaseLoad(_)
         )
     });
     boost_pv(&mut profile, 20.0);
@@ -77,11 +77,11 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Ev(mut ev) => {
+            AssetParams::Ev(mut ev) => {
                 // Small pack so the (soc_target - soc) energy need is achievable
                 // within the 2h departure window at max_charge_kw.
                 ev.battery_kwh = 10.0;
-                AssetProfile::Ev(ev)
+                AssetParams::Ev(ev)
             }
             other => other,
         })
@@ -115,14 +115,14 @@ fn heater_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     profile.assets.retain(|a| {
         matches!(
             a,
-            AssetProfile::Heater(_) | AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)
+            AssetParams::Heater(_) | AssetParams::Pv(_) | AssetParams::BaseLoad(_)
         )
     });
     boost_pv(&mut profile, 20.0);
-    if let Some(AssetProfile::Heater(ref mut h)) = profile
+    if let Some(AssetParams::Heater(ref mut h)) = profile
         .assets
         .iter_mut()
-        .find(|a| matches!(a, AssetProfile::Heater(_)))
+        .find(|a| matches!(a, AssetParams::Heater(_)))
     {
         h.temp_initial_c = 19.0;
         h.k_loss_kw_per_c = 0.0;
@@ -162,7 +162,7 @@ fn shiftable_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     let mut profile = make_profile_1800s();
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Pv(_) | AssetParams::BaseLoad(_)));
     boost_pv(&mut profile, 20.0);
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
@@ -202,7 +202,7 @@ fn battery_charging_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() 
     profile.assets.retain(|a| {
         matches!(
             a,
-            AssetProfile::Battery(_) | AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)
+            AssetParams::Battery(_) | AssetParams::Pv(_) | AssetParams::BaseLoad(_)
         )
     });
     boost_pv(&mut profile, 20.0);
@@ -235,11 +235,11 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
     profile.assets.retain(|a| {
         matches!(
             a,
-            AssetProfile::Ev(_)
-                | AssetProfile::Heater(_)
-                | AssetProfile::Battery(_)
-                | AssetProfile::Pv(_)
-                | AssetProfile::BaseLoad(_)
+            AssetParams::Ev(_)
+                | AssetParams::Heater(_)
+                | AssetParams::Battery(_)
+                | AssetParams::Pv(_)
+                | AssetParams::BaseLoad(_)
         )
     });
     boost_pv(&mut profile, 20.0);
@@ -247,17 +247,17 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Ev(mut ev) => {
+            AssetParams::Ev(mut ev) => {
                 ev.battery_kwh = 10.0;
-                AssetProfile::Ev(ev)
+                AssetParams::Ev(ev)
             }
             other => other,
         })
         .collect();
-    if let Some(AssetProfile::Heater(ref mut h)) = profile
+    if let Some(AssetParams::Heater(ref mut h)) = profile
         .assets
         .iter_mut()
-        .find(|a| matches!(a, AssetProfile::Heater(_)))
+        .find(|a| matches!(a, AssetParams::Heater(_)))
     {
         h.temp_initial_c = 19.0;
         h.k_loss_kw_per_c = 0.0;

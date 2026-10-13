@@ -100,7 +100,7 @@ fn assemble(
     }
 }
 
-fn keep(profile: &mut Profile, keep: fn(&AssetProfile) -> bool) {
+fn keep(profile: &mut Profile, keep: fn(&AssetParams) -> bool) {
     profile.assets.retain(keep);
 }
 
@@ -139,7 +139,7 @@ fn scenarios() -> Vec<Fixture> {
     keep(&mut battery, |a| {
         matches!(
             a,
-            AssetProfile::Battery(_) | AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)
+            AssetParams::Battery(_) | AssetParams::Pv(_) | AssetParams::BaseLoad(_)
         )
     });
     out.push(assemble(
@@ -154,7 +154,7 @@ fn scenarios() -> Vec<Fixture> {
 
     let mut ev_only = make_profile();
     keep(&mut ev_only, |a| {
-        matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_))
+        matches!(a, AssetParams::Ev(_) | AssetParams::BaseLoad(_))
     });
     out.push(assemble(
         "ev_with_session",
@@ -177,7 +177,7 @@ fn scenarios() -> Vec<Fixture> {
     ));
 
     let mut shift = make_profile_1800s();
-    keep(&mut shift, |a| matches!(a, AssetProfile::BaseLoad(_)));
+    keep(&mut shift, |a| matches!(a, AssetParams::BaseLoad(_)));
     out.push(assemble(
         "shiftable_load",
         &shift,

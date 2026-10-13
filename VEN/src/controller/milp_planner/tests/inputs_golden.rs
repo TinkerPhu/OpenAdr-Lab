@@ -315,7 +315,7 @@ fn scenarios() -> Vec<(&'static str, MilpInputs)> {
     // No PV and no base load in the profile: both series are zero.
     let mut bare = make_profile();
     bare.assets
-        .retain(|a| !matches!(a, AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| !matches!(a, AssetParams::Pv(_) | AssetParams::BaseLoad(_)));
     out.push(("no_pv_no_base_load", build(&bare, &Case::default())));
 
     // Baseline override: two entries on one slot, one before `now` (skipped), one beyond the

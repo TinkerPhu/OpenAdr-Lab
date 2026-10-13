@@ -26,21 +26,17 @@ VEN/src/
     ...
   simulator/
     mod.rs            ← SimState, AssetEntry  (AssetEntry gains history field)
-  profile.rs          ← AssetProfile enum (YAML loading) — NOTE: was named AssetConfig
-                        before Phase A; renamed to avoid conflict with assets::AssetConfig
+  profile/schema.rs   ← AssetProfile enum (YAML loading)
 ```
 
-### Naming note: `AssetProfile` vs `AssetConfig`
+### Naming note: `AssetProfile` vs `AssetParams`
 
-`profile.rs` contains an enum for loading asset configuration from YAML.
-It was originally named `AssetConfig` but is renamed to **`AssetProfile`** in Phase A
-to avoid a naming collision with the runtime `assets::AssetConfig` enum introduced
-in Phase A. The two types have distinct roles:
+Each name means one type; tests use the same names, never an alias for another type.
 
 | Type | Location | Role |
 |---|---|---|
-| `AssetProfile` | `profile.rs` | YAML-loaded profile entry; carries `id` + profile fields |
-| `AssetConfig` | `assets/mod.rs` | Runtime enum; dispatches `step()`, `capability()` etc. |
+| `AssetProfile` (and `BatteryConfig`, `HeaterConfig`, …) | `profile/schema.rs` | YAML-loaded profile entry; carries `id` + profile fields |
+| `AssetParams` (and `BatteryParams`, `HeaterParams`, …) | `entities/asset_params.rs` | Typed parameters the profile layer builds and injects into assets and the planner (profile rule: no `use crate::profile` in the inner rings) |
 
 ---
 

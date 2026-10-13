@@ -175,7 +175,7 @@ fn heater_inputs_autonomous_mode_is_may_run() {
 
 #[test]
 fn heater_inputs_switching_penalty_defaults() {
-    // HeaterConfig with no switching_penalty_eur → lambda_heat_sw_eur == 0.01
+    // HeaterParams with no switching_penalty_eur → lambda_heat_sw_eur == 0.01
     let now = fixed_now();
     let profile = make_profile(); // heater has no switching_penalty_eur set
     let sim = make_snap_from_profile(&profile);
@@ -201,7 +201,7 @@ fn solve_heater_dynamics_respected() {
     // Use k_loss=0 and draw_kw=0 so q_dem=0 and the math is exact.
     let now = fixed_now();
     let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
-    if let Some(AssetProfile::Heater(ref mut h)) = profile.assets.get_mut(0) {
+    if let Some(AssetParams::Heater(ref mut h)) = profile.assets.get_mut(0) {
         h.k_loss_kw_per_c = 0.0;
         h.draw_kw = 0.0;
     }
@@ -250,7 +250,7 @@ fn solve_heater_must_run_meets_e_target() {
     // with e_init=(20-18)×2=4 kWh: total possible = 4 + 4.5 = 8.5 kWh > 6 kWh → feasible.
     let now = fixed_now();
     let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
-    if let Some(AssetProfile::Heater(ref mut h)) = profile.assets.get_mut(0) {
+    if let Some(AssetParams::Heater(ref mut h)) = profile.assets.get_mut(0) {
         h.k_loss_kw_per_c = 0.0;
         h.draw_kw = 0.0;
     }
@@ -358,7 +358,7 @@ fn solve_heater_switching_reduces_with_penalty() {
     // Net gain per [on,off] pair ≈ +0.075 kWh → alternating schedule is feasible.
     let make_profile_lambda = |lambda: f64| -> Profile {
         let mut p = make_heater_only_profile(None, 18.0, 23.0, 18.5);
-        if let Some(AssetProfile::Heater(ref mut h)) = p.assets.get_mut(0) {
+        if let Some(AssetParams::Heater(ref mut h)) = p.assets.get_mut(0) {
             h.switching_penalty_eur = lambda;
         }
         // epsilon=2.0 gives Phase 2 enough room to consolidate 12 expensive slots
@@ -472,7 +472,7 @@ fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
     // Battery-only + base load to keep the problem simple
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Battery(_) | AssetParams::BaseLoad(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
     let tariffs = make_two_zone_tariffs(0.05, 0.40);
@@ -525,14 +525,14 @@ fn ev_planned_state_soc_populated() {
     // EV + base load only (no battery, no heater, no PV)
     profile
         .assets
-        .retain(|a| matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_)));
+        .retain(|a| matches!(a, AssetParams::Ev(_) | AssetParams::BaseLoad(_)));
     profile.assets = profile
         .assets
         .into_iter()
         .map(|a| match a {
-            AssetProfile::Ev(mut ev) => {
+            AssetParams::Ev(mut ev) => {
                 ev.battery_kwh = 10.0;
-                AssetProfile::Ev(ev)
+                AssetParams::Ev(ev)
             }
             other => other,
         })
@@ -605,7 +605,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
     let thermal_mass = volume_l * 4.186 / 3600.0; // ≈ 0.2326 kWh/K
     let profile = Profile {
         assets: vec![
-            AssetProfile::Heater(HeaterParams {
+            AssetParams::Heater(HeaterParams {
                 default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 6.0,
@@ -621,7 +621,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 switching_penalty_eur: 0.50,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::Ev(EvParams {
+            AssetParams::Ev(EvParams {
                 id: "ev".into(),
                 max_charge_kw: 11.0,
                 max_discharge_kw: 0.0,
@@ -635,19 +635,19 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 v2g_capable: false,
                 usage_sim: None,
             }),
-            AssetProfile::Pv(PvParams {
+            AssetParams::Pv(PvParams {
                 id: "pv".into(),
                 rated_kw: 6.0,
                 inverter_max_kw: 6.0,
                 co2_g_kwh: 0.0,
             }),
-            AssetProfile::BaseLoad(BaseLoadParams {
+            AssetParams::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),
                 baseline_kw: 0.6,
                 spikes: vec![],
             }),
         ],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 300,
             plan_horizon_h: 48,
             plan_zones: vec![
@@ -666,7 +666,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
             ],
             c_ctrl_imp_malus_eur_kwh: 0.22,
             phase2_epsilon_eur: 0.17,
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,
@@ -770,9 +770,9 @@ fn planned_heater_kw_only_takes_reachable_stage_levels() {
             .assets
             .into_iter()
             .map(|a| match a {
-                AssetProfile::Heater(mut h) => {
+                AssetParams::Heater(mut h) => {
                     h.power_stages = stages;
-                    AssetProfile::Heater(h)
+                    AssetParams::Heater(h)
                 }
                 other => other,
             })

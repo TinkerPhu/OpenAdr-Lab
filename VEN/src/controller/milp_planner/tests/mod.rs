@@ -10,22 +10,13 @@ use crate::assets::{
     AssetState, MilpParticipant, ShiftableLoadAsset, ShiftableLoadState,
 };
 use crate::controller::sim_snapshot::{AssetSnapshot, SimSnapshot};
-use crate::entities::asset_params::AssetParams;
 use crate::entities::asset_params::{
-    BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
+    AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
 use crate::entities::device_session::HeaterTarget;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffSnapshot;
-
-type AssetProfile = AssetParams;
-type BatteryConfig = BatteryParams;
-type EvConfig = EvParams;
-type HeaterConfig = HeaterParams;
-type PvConfig = PvParams;
-type BaseLoadConfig = BaseLoadParams;
-type PlannerConfig = PlannerParams;
 
 #[derive(Debug, Clone)]
 struct GridConfig {
@@ -35,29 +26,29 @@ struct GridConfig {
 
 #[derive(Debug, Clone)]
 struct Profile {
-    assets: Vec<AssetProfile>,
-    planner: PlannerConfig,
+    assets: Vec<AssetParams>,
+    planner: PlannerParams,
     grid: GridConfig,
 }
 
 impl Profile {
     fn ev_config(&self) -> Option<&EvParams> {
         self.assets.iter().find_map(|a| match a {
-            AssetProfile::Ev(v) => Some(v),
+            AssetParams::Ev(v) => Some(v),
             _ => None,
         })
     }
 
     fn heater_config(&self) -> Option<&HeaterParams> {
         self.assets.iter().find_map(|a| match a {
-            AssetProfile::Heater(v) => Some(v),
+            AssetParams::Heater(v) => Some(v),
             _ => None,
         })
     }
 
     fn pv_config(&self) -> Option<&PvParams> {
         self.assets.iter().find_map(|a| match a {
-            AssetProfile::Pv(v) => Some(v),
+            AssetParams::Pv(v) => Some(v),
             _ => None,
         })
     }
@@ -105,7 +96,7 @@ fn site_inputs(profile: &Profile) -> SiteInputs<'_> {
         grid_max_export_kw: profile.grid.max_export_kw,
         pv_cfg: profile.pv_config(),
         base_load: profile.assets.iter().find_map(|a| match a {
-            AssetProfile::BaseLoad(v) => Some(v),
+            AssetParams::BaseLoad(v) => Some(v),
             _ => None,
         }),
         baseline_override: None,
@@ -129,7 +120,7 @@ fn no_capacity() -> OadrCapacityState {
 fn make_profile() -> Profile {
     Profile {
         assets: vec![
-            AssetProfile::Battery(BatteryConfig {
+            AssetParams::Battery(BatteryParams {
                 id: "battery".into(),
                 capacity_kwh: 10.0,
                 max_charge_kw: 5.0,
@@ -139,7 +130,7 @@ fn make_profile() -> Profile {
                 min_soc_frac: 0.1,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::Ev(EvConfig {
+            AssetParams::Ev(EvParams {
                 id: "ev".into(),
                 max_charge_kw: 7.4,
                 consumption_kwh_per_km: 0.18,
@@ -153,7 +144,7 @@ fn make_profile() -> Profile {
                 v2g_capable: false,
                 usage_sim: None,
             }),
-            AssetProfile::Heater(HeaterConfig {
+            AssetParams::Heater(HeaterParams {
                 default_target_temp_c: None,
                 id: "heater".into(),
                 max_kw: 3.0,
@@ -169,19 +160,19 @@ fn make_profile() -> Profile {
                 switching_penalty_eur: 0.01,
                 c_terminal_eur_kwh: None,
             }),
-            AssetProfile::Pv(PvConfig {
+            AssetParams::Pv(PvParams {
                 id: "pv".into(),
                 rated_kw: 5.0,
                 inverter_max_kw: 5.0,
                 co2_g_kwh: 0.0,
             }),
-            AssetProfile::BaseLoad(BaseLoadConfig {
+            AssetParams::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),
                 baseline_kw: 0.5,
                 spikes: vec![],
             }),
         ],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 300,
             plan_horizon_h: 2,
             plan_zones: vec![crate::entities::plan::PlanZone {
@@ -191,7 +182,7 @@ fn make_profile() -> Profile {
             // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
             // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
             c_ctrl_imp_malus_eur_kwh: 0.0,
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,
@@ -332,7 +323,7 @@ fn make_heater_only_profile(
 ) -> Profile {
     let thermal_mass = volume_l.map(|v| v * 4.186 / 3600.0).unwrap_or(2.0);
     Profile {
-        assets: vec![AssetProfile::Heater(HeaterConfig {
+        assets: vec![AssetParams::Heater(HeaterParams {
             default_target_temp_c: None,
             id: "heater".into(),
             max_kw: 3.0,
@@ -348,7 +339,7 @@ fn make_heater_only_profile(
             switching_penalty_eur: 0.01,
             c_terminal_eur_kwh: None,
         })],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 300,
             plan_horizon_h: 2,
             plan_zones: vec![crate::entities::plan::PlanZone {
@@ -358,7 +349,7 @@ fn make_heater_only_profile(
             // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
             // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
             c_ctrl_imp_malus_eur_kwh: 0.0,
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,
@@ -370,19 +361,19 @@ fn make_heater_only_profile(
 /// A site with nothing but a 1 kW base load, planned in 4 x 1800 s slots on a 25 kW / 10 kW grid.
 fn base_load_only_profile() -> Profile {
     Profile {
-        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
+        assets: vec![AssetParams::BaseLoad(BaseLoadParams {
             id: "base_load".into(),
             baseline_kw: 1.0,
             spikes: vec![],
         })],
-        planner: PlannerConfig {
+        planner: PlannerParams {
             plan_step_s: 1800,
             plan_horizon_h: 2,
             plan_zones: vec![crate::entities::plan::PlanZone {
                 step_s: 1800,
                 slots: 4,
             }],
-            ..PlannerConfig::default()
+            ..PlannerParams::default()
         },
         grid: GridConfig {
             max_import_kw: 25.0,
@@ -458,7 +449,7 @@ fn build_asset_contexts(
     let mut ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
     for ap in &profile.assets {
         match ap {
-            AssetProfile::Battery(cfg) => {
+            AssetParams::Battery(cfg) => {
                 let soc_frac = snap
                     .assets
                     .get("battery")
@@ -493,7 +484,7 @@ fn build_asset_contexts(
                     profile.planner.w_ghg,
                 ));
             }
-            AssetProfile::Ev(cfg) => {
+            AssetParams::Ev(cfg) => {
                 let soc_frac = snap
                     .assets
                     .get("ev")
@@ -534,7 +525,7 @@ fn build_asset_contexts(
                     profile.planner.w_ghg,
                 ));
             }
-            AssetProfile::Heater(cfg) => {
+            AssetParams::Heater(cfg) => {
                 let heater_snap = snap.assets.get("heater");
                 let temp_c = heater_snap
                     .and_then(|s| s.val("temp_c"))
