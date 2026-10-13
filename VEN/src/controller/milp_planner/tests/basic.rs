@@ -92,7 +92,7 @@ fn ev_mask_plugged_no_session_all_true() {
         None,
     );
     assert!(inp.ev().a_ev.iter().all(|&v| v));
-    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
+    assert_eq!(inp.ev().mode, EvMilpMode::MustNotRun); // no session → MustNotRun (but mask is true)
     assert!(inp.ev().obligations.is_empty());
 }
 
@@ -143,7 +143,7 @@ fn ev_mask_unplugged_all_false() {
         None,
     );
     assert!(inp.ev().a_ev.iter().all(|&v| !v));
-    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun);
+    assert_eq!(inp.ev().mode, EvMilpMode::MustNotRun);
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.ev().mode, MilpLoadMode::MustRun);
+    assert_eq!(inp.ev().mode, EvMilpMode::MustRun);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn ev_mode_may_run_for_soft_deadline_session() {
         Some(&session),
         None,
     );
-    assert_eq!(inp.ev().mode, MilpLoadMode::MayRun);
+    assert_eq!(inp.ev().mode, EvMilpMode::MayRun);
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn ev_mode_must_not_run_for_no_session() {
         None,
         None,
     );
-    assert_eq!(inp.ev().mode, MilpLoadMode::MustNotRun);
+    assert_eq!(inp.ev().mode, EvMilpMode::MustNotRun);
 }
 
 #[test]

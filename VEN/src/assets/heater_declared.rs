@@ -8,8 +8,7 @@ use chrono::{DateTime, Utc};
 use good_lp::{Constraint, Expression, ProblemVariables, Solution, Variable};
 
 use crate::controller::milp_planner::asset_port::{
-    heater_future_state, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
-    M_LOW_EUR_PER_KWH,
+    heater_future_state, HeaterMilpContext, HeaterMilpVars, HeaterSolOutput, M_LOW_EUR_PER_KWH,
 };
 use crate::controller::milp_planner::{
     AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, DeclareMode,
@@ -114,38 +113,6 @@ impl AssetMilpContext for HeaterMilpContext {
         &self.asset_id
     }
 
-    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
-        crate::controller::milp_planner::AssetKind::Heater
-    }
-
-    fn milp_params(
-        &self,
-        _n: usize,
-        _now: DateTime<Utc>,
-    ) -> crate::controller::milp_planner::AssetMilpParams {
-        use crate::controller::milp_planner::MilpLoadMode;
-        let mode = match self.mode {
-            HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
-            HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
-            HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        crate::controller::milp_planner::AssetMilpParams::Heater(
-            crate::controller::milp_planner::HeaterScalars {
-                mode,
-                t_dead_step: self.t_dead_step,
-                p_step_kw: self.p_step_kw,
-                n_stages: self.n_stages,
-                e_init_kwh: self.e_init_kwh,
-                e_max_kwh: self.e_max_kwh,
-                q_dem_kw: self.q_dem_kw,
-                e_target_kwh: self.e_target_kwh,
-                lambda_sw_eur: self.lambda_sw_eur,
-                initial_y: self.initial_y,
-                c_terminal_eur_kwh: self.c_terminal_eur_kwh,
-            },
-        )
-    }
-
     /// A heater has no friction auxiliaries: its friction is priced on the stage index and the
     /// switching indicators every declaration carries.
     fn declare<'a>(
@@ -193,6 +160,7 @@ impl AssetMilpContext for HeaterMilpContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::milp_planner::asset_port::HeaterMilpMode;
     use crate::controller::milp_planner::{CostWeights, FrictionCosts};
     use good_lp::IntoAffineExpression;
 

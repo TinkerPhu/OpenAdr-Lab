@@ -571,9 +571,7 @@ mod milp_tests {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use crate::controller::milp_planner::{
-        AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
-    };
+    use crate::controller::milp_planner::AssetMilpContext;
     use crate::controller::milp_planner::{CostWeights, DeclareMode, ObjectivePart};
     use crate::services::test_support::milp_pool::bound_range;
 
@@ -610,44 +608,6 @@ mod milp_context_trait_tests {
     #[test]
     fn asset_id_is_heater() {
         assert_eq!(make_ctx().asset_id(), "heater");
-    }
-
-    #[test]
-    fn asset_kind_is_heater() {
-        assert_eq!(make_ctx().asset_kind(), AssetKind::Heater);
-    }
-
-    #[test]
-    fn milp_params_returns_heater_scalars() {
-        let ctx = make_ctx();
-        match ctx.milp_params(4, chrono::Utc::now()) {
-            AssetMilpParams::Heater(h) => {
-                assert_eq!(h.mode, MilpLoadMode::MayRun);
-                assert!((h.p_step_kw - 1.0).abs() < 1e-9);
-                assert_eq!(h.n_stages, 2);
-                assert!((h.e_init_kwh - 2.5).abs() < 1e-9);
-                assert!((h.lambda_sw_eur - 0.01).abs() < 1e-9);
-                assert!(h.t_dead_step.is_none());
-            }
-            _ => panic!("expected AssetMilpParams::Heater"),
-        }
-    }
-
-    #[test]
-    fn milp_params_must_run_mode() {
-        let ctx = HeaterMilpContext {
-            asset_id: "heater".into(),
-            friction: Default::default(),
-            temp_min_c: 18.0,
-            thermal_mass_kwh_per_c: 2.0,
-            target_ready_by: None,
-            mode: HeaterMilpMode::MustRun,
-            ..make_ctx()
-        };
-        match ctx.milp_params(4, chrono::Utc::now()) {
-            AssetMilpParams::Heater(h) => assert_eq!(h.mode, MilpLoadMode::MustRun),
-            _ => panic!("expected Heater variant"),
-        }
     }
 
     #[test]

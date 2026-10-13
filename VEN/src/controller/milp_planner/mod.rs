@@ -35,10 +35,9 @@ mod test_prelude {
 use test_prelude::*;
 
 pub use self::asset_port::{
-    AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution,
-    AssetSolutionDetail, BatteryScalars, CostWeights, DeclareMode, DeclaredAsset, DischargeLeg,
-    EvScalars, FlexibilityWindow, FrictionCosts, HeaterScalars, MilpLoadMode, ObjectivePart,
-    OnIndicator, ShiftableLoadScalars, StorageLegs,
+    AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, CostWeights,
+    DeclareMode, DeclaredAsset, DischargeLeg, FlexibilityWindow, FrictionCosts, ObjectivePart,
+    OnIndicator, StorageLegs,
 };
 pub(crate) use self::types::ShiftableLoadMilpContext;
 use crate::entities::asset_params::AssetParams;

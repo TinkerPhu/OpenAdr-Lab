@@ -304,16 +304,14 @@ pub struct HeaterSolOutput {
 /// Below-minimum tank violation penalty [€/kWh]. Used by heater objective (Phase 1).
 pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
 
-// R-23: `AssetKind`, `AssetMilpParams`, its variant payload structs, `MilpLoadMode`,
-// and the `AssetMilpContext` trait itself now live in the domain-ring
+// R-23: the `AssetMilpContext` trait and its contract types live in the domain-ring
 // `controller::asset_milp_port` (domain-level `SolveRequest`/`SolverPort` must not
 // reach into this infra module for their own port type). Re-exported here so every
 // existing `asset_port::`/`milp_planner::` import path keeps working unchanged.
 pub use crate::controller::asset_milp_port::{
-    pinned_binary, AllocationBasis, AssetKind, AssetMilpContext, AssetMilpParams, AssetSolution,
-    AssetSolutionDetail, BatteryScalars, CostWeights, DeclareMode, DeclaredAsset, DischargeLeg,
-    EvScalars, FlexibilityWindow, FrictionCosts, HeaterScalars, MilpLoadMode, ObjectivePart,
-    OnIndicator, ShiftableLoadScalars, StorageLegs,
+    pinned_binary, AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail,
+    CostWeights, DeclareMode, DeclaredAsset, DischargeLeg, FlexibilityWindow, FrictionCosts,
+    ObjectivePart, OnIndicator, StorageLegs,
 };
 
 // ── Plan-result helper free functions ─────────────────────────────────────────

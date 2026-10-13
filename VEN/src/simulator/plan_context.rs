@@ -162,7 +162,24 @@ pub fn build_asset_contexts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::milp_planner::asset_port::{AssetKind, AssetMilpParams};
+    use crate::controller::milp_planner::asset_port::{
+        BatteryMilpContext, EvMilpContext, HeaterMilpContext,
+    };
+
+    /// Which kind of context each built context is, by asset id: what a test reads to see
+    /// that a roster entry became the right planner participant.
+    fn kind_of(ctx: &dyn crate::controller::milp_planner::AssetMilpContext) -> &'static str {
+        let any = ctx.as_any();
+        if any.is::<BatteryMilpContext>() {
+            "battery"
+        } else if any.is::<EvMilpContext>() {
+            "ev"
+        } else if any.is::<HeaterMilpContext>() {
+            "heater"
+        } else {
+            "other"
+        }
+    }
     use chrono::TimeZone;
 
     /// Distinct per-asset terminal values, so a test can tell which one an
@@ -380,17 +397,17 @@ mod tests {
             3,
             "base_load is not MILP-capable and must be skipped, not produce a context"
         );
-        let mut got: Vec<(String, AssetKind)> = contexts
+        let mut got: Vec<(String, &str)> = contexts
             .iter()
-            .map(|c| (c.asset_id().to_string(), c.asset_kind()))
+            .map(|c| (c.asset_id().to_string(), kind_of(c.as_ref())))
             .collect();
         got.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
             got,
             vec![
-                ("battery".to_string(), AssetKind::Battery),
-                ("ev".to_string(), AssetKind::Ev),
-                ("heater".to_string(), AssetKind::Heater),
+                ("battery".to_string(), "battery"),
+                ("ev".to_string(), "ev"),
+                ("heater".to_string(), "heater"),
             ]
         );
     }
@@ -447,16 +464,12 @@ mod tests {
             );
             let ev = contexts
                 .iter()
-                .find(|c| c.asset_kind() == AssetKind::Ev)
+                .find_map(|c| c.as_any().downcast_ref::<EvMilpContext>())
                 .expect("an EV context");
-            match ev.milp_params(24, now) {
-                AssetMilpParams::Ev(scalars) => scalars
-                    .segments
-                    .iter()
-                    .map(|s| s.eur_per_kwh)
-                    .collect::<Vec<_>>(),
-                other => panic!("expected EV scalars, got {other:?}"),
-            }
+            ev.segments
+                .iter()
+                .map(|s| s.eur_per_kwh)
+                .collect::<Vec<_>>()
         };
 
         let by_default = segments_with(&std::collections::HashMap::new());
@@ -526,17 +539,12 @@ mod tests {
 
         let heater_ctx = contexts
             .iter()
-            .find(|c| c.asset_kind() == AssetKind::Heater)
+            .find_map(|c| c.as_any().downcast_ref::<HeaterMilpContext>())
             .expect("heater context must be present");
-        match heater_ctx.milp_params(4, now) {
-            AssetMilpParams::Heater(scalars) => {
-                assert!(
-                    (scalars.c_terminal_eur_kwh - 0.07).abs() < 1e-9,
-                    "heater must receive heater_c_terminal_eur_kwh, not battery's value"
-                );
-            }
-            other => panic!("expected Heater scalars, got {other:?}"),
-        }
+        assert!(
+            (heater_ctx.c_terminal_eur_kwh - 0.07).abs() < 1e-9,
+            "heater must receive heater_c_terminal_eur_kwh, not battery's value"
+        );
     }
 
     #[test]
@@ -605,15 +613,13 @@ mod tests {
             &std::collections::HashMap::new(),
         );
 
-        let ev_ctx = &contexts[0];
-        match ev_ctx.milp_params(4, now) {
-            AssetMilpParams::Ev(scalars) => {
-                assert!(
-                    (scalars.p_min_kw - 2.2).abs() < 1e-9,
-                    "the EV context must carry the EV's own min_charge_kw"
-                );
-            }
-            other => panic!("expected Ev scalars, got {other:?}"),
-        }
+        let ev_ctx = contexts[0]
+            .as_any()
+            .downcast_ref::<EvMilpContext>()
+            .expect("an EV context");
+        assert!(
+            (ev_ctx.p_min_kw - 2.2).abs() < 1e-9,
+            "the EV context must carry the EV's own min_charge_kw"
+        );
     }
 }
