@@ -15556,3 +15556,22 @@ regression guard would have stopped running.
 
 **R-95.** Closed as not wanted for now (user): no "held over a window" series beside the capability
 curves until something consumes it. GB-56's row carries the constraint the reverted attempt taught.
+## The lease lock: one lock per machine, one owner per session (fix/lock-host-identity)
+
+**What.** `docker_host_lock.sh` and `wsl_lock.sh` now share one lock core
+(`scripts/lib/lease_lock_core.sh`, runs on the lock's machine) and one caller side
+(`scripts/lib/lease_lock_cli.sh`: owner identity, arguments, acquire loop); each script only says
+where the lock lives and how to reach it. The docker host lock lives at the fixed path
+`/tmp/openadr_docker_host.lock` instead of `/tmp/openadr_<alias>.lock`, and the owner is
+`user@host:<checkout>#session-<id>` from `CLAUDE_CODE_SESSION_ID`. `scripts/test_lease_lock.sh`
+runs both scripts with stubbed `ssh`/`wsl`. Node3 joined as a third docker host, being evaluated
+as a dedicated CI host.
+
+**Why.** While benchmarking Node3, a full suite was started on Node2 through its other SSH alias:
+that alias's lock file was free, Node2's real one was held by another session's running E2E. The
+run was stopped in its Rust phase, before the E2E phase's `compose down -v` on the shared project.
+With the right alias it would have been worse: both sessions shared the primary checkout, so the
+acquire would have counted as re-entrant.
+
+**Issues.** The fix was merged only after the other session's lease had ended: changing the lock
+path while a lock is held under the old path makes that lock invisible.

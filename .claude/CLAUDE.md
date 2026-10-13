@@ -46,14 +46,21 @@ docker commands on Node1 while another owner holds an unexpired lock.
 
 node2-lock: Node2 (192.168.1.104) is a second docker host, used to take build/test load
 off Node1. It shares the same lock script and mechanism as Node1 (docker_host_lock.sh isn't
-Node1-specific despite the name — the lock file is derived from the target host, so
-each host gets its own independent lock). Set LOCK_HOST=Node2 to target it
+Node1-specific despite the name — the lock is one fixed path on the target host itself, so
+each machine gets its own independent lock and every SSH alias of a machine reaches the same
+one; the owner is the AI session (CLAUDE_CODE_SESSION_ID), not just the checkout, so two
+sessions in one checkout exclude each other — scripts/test_lease_lock.sh pins both). Set
+LOCK_HOST=Node2 to target it
 directly, or run `DOCKER_HOST=Node2 bash run_all_tests.sh ...`, which sets this
 automatically. Node1 and Node2 can be used concurrently by different sessions without
 contention, since each holds its own lock. Same lease semantics and default
 (60min) as Node1. Node2 also has `tests`/`VTN` in its sparse-checkout and openleadr-rs
 submodule initialized, so all four suites (`--rust`, `--e2e`, `--resilience`, and the
 full run_all_tests.sh) run there too, not just `--rust`.
+
+node3: Node3 (192.168.1.106) is a third docker host, same hardware class as Node1/Node2 but
+running nothing else, under evaluation as a dedicated CI host. Same sparse checkout,
+submodule and lock mechanism (LOCK_HOST=Node3, `DOCKER_HOST=Node3 bash run_all_tests.sh ...`).
 
 one-checkout-per-host: each docker host has a SINGLE working tree at
 /srv/docker/openadr_lab, and `run_all_tests.sh` does NOT switch it to your branch: it
