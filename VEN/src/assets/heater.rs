@@ -1192,6 +1192,43 @@ mod tests {
     }
 
     #[test]
+    fn an_uncontrolled_heater_cycles_at_its_floor_and_draws_its_heat_loss() {
+        // No setpoint for 24 h: the tank cools to temp_min_c, the emergency runs it
+        // back up to temp_min_c + delta, releases, and repeats. Over the day the mean
+        // draw is the heat loss at the band (0.1 kW/°C x (20..23 - 10) °C = 1.0..1.3 kW).
+        let h = default_heater();
+        let mut state = state_at(23.0, 0.0);
+        let (mut energy_kwh, mut cycles, mut was_on) = (0.0, 0, false);
+        let (mut lowest_c, mut highest_c) = (f64::MAX, f64::MIN);
+        for _ in 0..(24 * 60) {
+            let (next, power) = h.step_inner(&state, 0.0, Duration::seconds(60));
+            energy_kwh += power / 60.0;
+            if power > 0.0 && !was_on {
+                cycles += 1;
+            }
+            was_on = power > 0.0;
+            lowest_c = lowest_c.min(next.temperature_c);
+            highest_c = highest_c.max(next.temperature_c);
+            state = next;
+        }
+        let mean_kw = energy_kwh / 24.0;
+        // One cycle (cool 23 -> 20 °C, reheat 20 -> 23 °C) takes about 10 h; without
+        // the latch the heater would pulse at the floor every few minutes instead.
+        assert!(
+            (2..=4).contains(&cycles),
+            "expected a few long cycles, got {cycles}"
+        );
+        assert!(
+            (0.9..=1.4).contains(&mean_kw),
+            "mean draw {mean_kw:.3} kW is not the heat loss at the band"
+        );
+        assert!(
+            lowest_c > h.temp_min_c - 0.1 && highest_c <= h.temp_max_c + 0.1,
+            "the tank left its band: {lowest_c:.2}..{highest_c:.2} °C"
+        );
+    }
+
+    #[test]
     fn the_floor_deadband_reads_the_same_parameter() {
         // The emergency's hysteresis is this same delta, not a second constant:
         // widen it and the emergency runs correspondingly further above the floor.
