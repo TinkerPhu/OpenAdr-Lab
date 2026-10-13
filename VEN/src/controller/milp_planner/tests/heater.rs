@@ -666,6 +666,13 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
             ],
             c_ctrl_imp_malus_eur_kwh: 0.22,
             phase2_epsilon_eur: 0.17,
+            // R-103: the invariant is feasibility, and the T019 failure was a presolve
+            // contradiction (32 ms), so a short budget still catches it. Proving optimality
+            // on this slack-poor tank takes over 60 s in a debug build (R-97), which kept
+            // the guard out of fast runs. A timed-out solve keeps its incumbent and adds
+            // no warning; only an infeasible one fails below.
+            solver_timeout_s: 10,
+            phase2_solver_timeout_s: 3,
             ..PlannerParams::default()
         },
         grid: GridConfig {
@@ -697,6 +704,11 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
     // it. Both messages share this suffix by construction (stale_rates.rs's
     // `apply_stale_rate_policy` is parameterized by `label` but not the rest
     // of the sentence).
+    assert_ne!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Infeasible,
+        "ven-3 heater MILP must not be infeasible"
+    );
     let blocking: Vec<_> = plan
         .warnings
         .iter()
