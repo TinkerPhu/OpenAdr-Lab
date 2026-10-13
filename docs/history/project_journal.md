@@ -15543,3 +15543,16 @@ so "production code" has one definition across the audits.
 `spawn_base_load_window` loop missing from the hand-drawn diagram, and two statements fused onto
 one line (`graph TB      subgraph ...`), so the diagram had not been valid Mermaid. A
 `crate::AppCtx` re-export showed up as a module node until targets were restricted to real modules.
+
+## R-103 and R-95: two decisions (fix/r103-r95-decisions)
+
+**R-103.** `solve_ven3_heater_three_tier_zones_feasible` took over 60 s in a debug build, so it was
+skipped in fast runs. Decision (user, 2026-10-13): keep ven-3's real three-tier layout and give the
+test's solve a 10 s phase-1 / 3 s phase-2 budget. Its invariant is feasibility, and a time-limited
+solve keeps its incumbent without adding a warning, so only an infeasible solve fails it (now also
+asserted on `solve_status`). 14 s, and the full `cargo test -p ven-app` includes it again.
+`#[ignore]` was considered and rejected: nothing in the project runs ignored tests routinely, so the
+regression guard would have stopped running.
+
+**R-95.** Closed as not wanted for now (user): no "held over a window" series beside the capability
+curves until something consumes it. GB-56's row carries the constraint the reverted attempt taught.
