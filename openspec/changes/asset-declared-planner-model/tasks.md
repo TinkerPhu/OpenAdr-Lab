@@ -152,14 +152,14 @@ otherwise.
 
 ## 9. Pre-merge checks, docs and registers
 
-- [ ] 9.1 `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+- [x] 9.1 `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
       `cargo audit`, `python scripts/audit_file_sizes.py`, `python scripts/audit_duplication.py`
       (expect fewer clusters: session flexibility and allocation blocks; run `--update` only after
       it reports a reduction), `python scripts/audit_ven_architecture.py`,
       `python scripts/gen_module_graph.py` then `python scripts/audit_module_graph.py` (files move
       and disappear, so the generated import graph changes), `python scripts/audit_debt_gate.py`.
       Verify: all pass.
-- [ ] 9.2 Fold into current-state docs: `docs/architecture/ven_milp_planner.md` gets a section on
+- [x] 9.2 Fold into current-state docs: `docs/architecture/ven_milp_planner.md` gets a section on
       how assets contribute to the model (pool, net power, objective parts, roles, readback,
       declared result facts), pointing at `plans_golden.rs` and `model_fingerprint.rs` rather than
       restating them. Update `docs/architecture/VEN_ARCHITECTURE.md` (the planner/`SolveOutput`
@@ -168,7 +168,7 @@ otherwise.
       `build_variables()` / `extract_solution()`, which no longer exist) and `docs/architecture/ven_asset_interface_spec.md` (the asset's MILP surface).
       Verify: `grep -rn "MilpVarPool\|declare_vars_into_pool\|WinningModeDecisions" docs/architecture`
       shows only current names.
-- [ ] 9.3 Update `docs/reference/architectural_smells.md` (#1, R-127). Keep the decision that a VEN
+- [x] 9.3 Update `docs/reference/architectural_smells.md` (#1, R-127). Keep the decision that a VEN
       has one asset per kind, but correct the facts: the MILP no longer has one slot per kind, and
       the boundary is now the profile check plus W2–W7.
 - [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md`: file the `MinCost`/`MaxRevenue` hard-coded wear

@@ -63,7 +63,7 @@ graph TB
           subgraph CTRL["controller/"]
               C_PORT_SIM["sim_snapshot.rs\nSimSnapshot\n(SimState::to_sim_snapshot)"]
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()\nupdate_report()"]
-              C_PORT_MILP["≪trait≫\nAssetMilpContext\nbuild_variables()\nextract_solution()"]
+              C_PORT_MILP["≪trait≫\nAssetMilpContext\ndeclare() → DeclaredAsset\nread() → AssetSolution"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
               C_COMMSLOSS["comms_loss.rs\nCommsLossState\npv_generation_limit()"]
               C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]

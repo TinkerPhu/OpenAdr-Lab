@@ -17,7 +17,8 @@ Key source files:
 | Concern | File |
 |---|---|
 | Entry point | `VEN/src/controller/milp_planner/mod.rs` |
-| Input tensors | `VEN/src/controller/milp_planner/inputs.rs` (the stage order and the one full spelling of `MilpInputs`), `input_stages.rs` (one function per field group: tariffs, forecasts, capacity limits, asset scalars, baseline override, budget warning). `MilpInputs.assets` (`AssetScalars`) holds only what the code around the solve reads from the asset contexts (envelopes, diagnostics, result mapping); a parameter only the solve needs stays in the asset's own context. Planner tests state an asset the same way, as its context (`tests/fixtures.rs::SyntheticSite`), the battery's built by the real `Battery` |
+| Input tensors | `VEN/src/controller/milp_planner/inputs.rs` (the stage order and the one full spelling of `MilpInputs`), `input_stages.rs` (one function per field group: tariffs, forecasts, capacity limits, baseline override). `MilpInputs` carries the site and the grid only; everything about a schedulable asset is in that asset's own context. Planner tests state an asset the same way, as its context (`tests/fixtures.rs::SyntheticSite`), the battery's built by the real `Battery` |
+| Asset port | `VEN/src/controller/asset_milp_port.rs` (`AssetMilpContext`, `DeclaredAsset`, `AssetSolution` and their contract types); each kind implements it in `VEN/src/assets/<kind>_declared.rs`, its model maths in `<kind>_milp.rs` |
 | Time grid | `VEN/src/entities/time_grid.rs` (`TimeGrid::from_zones`, `slot_at`: the one slot layout and the one "which slot holds this instant" rule, shared with the assets' MILP contexts and the plan-cycle inputs) |
 | Phase 1 solver | `VEN/src/controller/milp_planner/solver_phase1.rs` |
 | Phase 2 solver | `VEN/src/controller/milp_planner/solver_phase2.rs` |
@@ -35,6 +36,41 @@ only statement of how the solves differ (assets declared with or without startup
 decisions free or pinned). `cost_expr` is phase 1's objective, phase 2's cost cap and the dual
 pass's objective, so the cap equals `c_star` term for term by construction. A new grid variable
 or objective term is added in `model_skeleton.rs`, once.
+
+**How assets take part.** The planner core knows no asset kind; it plans whatever contexts it is
+handed, each by its own roster id, and `scripts/audit_ven_architecture.py` (rules 16 and 17) fails
+when a kind is named in `controller/milp_planner/` or `controller/milp_interactions.rs`.
+
+- *Declaration.* `AssetMilpContext::declare(n, DeclareMode, vars)` returns the asset's variables
+  for one solve as a `DeclaredAsset`, held in `MilpVarPool.assets` in input order.
+  `DeclareMode::Plan { friction }` declares every decision free, with the friction auxiliaries
+  only phase 2 prices; `DeclareMode::Pinned(&own AssetSolution)` fixes the asset's own winning
+  mode decisions for the marginal-cost pass (§9). One function declares all three, so the solves
+  cannot drift apart (R-98).
+- *Balance.* Each asset states its net power per slot (`net_power_expr`, positive = import). The
+  power balance is `p_imp + p_pv_used − Σ net − p_exp = p_base`, and the controllable-import malus
+  reads the same sum (`site_net_power_expr`).
+- *Objective.* Each asset contributes `ObjectivePart::Cost` (its economics: wear, rewards,
+  penalties for a missed promise) to `cost_expr`, and `ObjectivePart::Friction` (startups, ramps,
+  relay switching, tier preference) to phase 2's objective, priced by the `FrictionCosts` its
+  context was built with from `PlannerParams`.
+- *Interactions* couple roles, not kinds: the coexistence penalty pairs every asset offering a
+  discharge leg with every one offering an on/off indicator.
+- *Readback.* Each asset reads its part of the solution into an `AssetSolution` (net power,
+  planned state, storage legs, warnings, its own detail) and seeds phase 2 from its own phase-1
+  solution (§4.1).
+- *Plan.* Allocations claim PV surplus in the order each asset declares (`surplus_claim_rank`),
+  priced by its `AllocationBasis` (§8); the site's `bat_charge_kw`, `bat_discharge_kw` and
+  `soc_trajectory_kwh` are the summed storage legs; planned state and warnings come from the
+  asset, the budget warning from `input_warnings`; session flexibility is one rule over each
+  asset's `FlexibilityWindow`.
+
+Several assets of one kind are therefore planned like any other assets
+(`tests/multi_instance.rs`: two batteries, two EVs, coexistence pairs). A VEN profile still holds
+one asset per kind (`validate_asset_roster`); that limit, sessions, the arbiter and the UI are the
+rest of the way to several assets of a kind on a real VEN. `tests/plans_golden.rs` records the
+whole translated `Plan` of every scenario, so a change to how the plan is assembled shows field by
+field.
 
 The order in which variables, expressions and constraints are created is part of the contract:
 `good_lp` keeps coefficients in an `FnvHashMap`, so what HiGHS receives is a function of that order.
@@ -194,7 +230,7 @@ adopt       = improvement > threshold_eur + surcharge
 
 ### 4.1 Phase 2 from Phase 1 (existing)
 
-After Phase 1 solves, `build_phase2_warm_start()` converts Phase 1's `SolveOutput` into a `Vec<(Variable, f64)>` and passes it to Phase 2 via `.with_initial_solution()`. Phase 2 starts at a known feasible point, typically solving in far fewer branch-and-bound nodes.
+After Phase 1 solves, `ModelSkeleton::warm_start` turns Phase 1's `SolveOutput` into a `Vec<(Variable, f64)>`: the grid's values, then each asset's `DeclaredAsset::warm_start` from its own phase-1 `AssetSolution` (the battery seeds its direction selector from the direction, R-97). Phase 2 gets it via `.with_initial_solution()`, starts at a known feasible point, and typically solves in far fewer branch-and-bound nodes.
 
 ### 4.2 Phase 1 from previous plan (planned)
 
@@ -306,8 +342,9 @@ cost_eur = grid_power_kw * import_tariff_eur_kwh * dt_h
          + surplus_power_kw * export_tariff_eur_kwh * dt_h
 ```
 
-Applies to the EV, heater, shiftable-load, and battery-*charging* allocation blocks in
-`translate_to_plan`; the battery-*discharging* branch uses an unrelated revenue formula. This is a
+Applies to every allocation priced `AllocationBasis::Load` and to `AllocationBasis::Storage` while
+charging (`results.rs::allocation`, the one pricing rule); a storage asset *discharging* is priced
+as export revenue instead. This is a
 post-solve reporting computation only — no solver objective/constraint depends on it. Regression
 coverage: `controller/milp_planner/tests/cost_sign.rs`.
 
@@ -319,11 +356,10 @@ the winning MILP solve: the same problem is re-solved as a pure LP with every bi
 fixed to the winning solution's values, and the constraint's dual value is read off that solve.
 
 - **Same model, decisions pinned** (`controller/milp_planner/solver_duals.rs`): every asset
-  declares its own variables for the pass through the required
-  `AssetMilpContext::declare_pinned_vars_into_pool`, which calls the same `declare_vars_with`
-  the plan used with `ModeDecisions::Pinned` — the mode decisions (battery `u_bat`, EV
-  `z_ev_on`, heater stage and ready flag, each shiftable load's start) become continuous
-  variables fixed to `SolveOutput::mode_decisions`, read off the winning solution. Every other
+  declares its own variables for the pass through the same `AssetMilpContext::declare` the plan
+  used, with `DeclareMode::Pinned` and its own winning `AssetSolution` — its mode decisions
+  (battery direction, EV on/off, heater stage and ready flag, a shiftable load's start) become
+  continuous variables fixed to the values it read off the winning solution. Every other
   variable and bound is the plan's own, and the grid variables, objective and constraints come from
   the same `ModelSkeleton` the plan was built on (`Declaration::Pinned`), so the priced model cannot
   drift from the planned one.

@@ -19,7 +19,8 @@ VEN/src/
     base_load.rs      ← BaseLoad (implements Asset)
     grid.rs           ← Grid virtual asset (NEW — implements Asset, read-only)
   controller/
-    milp_planner.rs   ← run_planner(), MilpSolution
+    asset_milp_port.rs ← AssetMilpContext, DeclaredAsset, AssetSolution (the planner's asset port)
+    milp_planner/     ← run_planner(), SolveOutput (plans whatever contexts it is handed)
     dispatcher.rs     ← setpoint overlay, AssetLedger
     site_headroom.rs  ← compute_site_headroom(), SiteHeadroom
     openadr_interface.rs ← parse_rate_snapshots(), parse_capacity_state()
