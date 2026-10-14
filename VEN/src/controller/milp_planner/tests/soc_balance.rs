@@ -368,7 +368,7 @@ fn a_stated_trip_between_two_sessions_is_charged_back_for() {
 #[test]
 fn ev_firm_kwh_is_the_largest_demand_above_the_live_soc() {
     let mut site = ev_inputs(4, 50.0, 0.40);
-    assert_eq!(site.ev.firm_obligation_kwh(), 0.0, "no obligation");
+    assert_eq!(site.ev.firm_required_kwh(), 0.0, "no obligation");
 
     site.ev.obligations = [0.30, 0.60, 0.80]
         .iter()
@@ -383,9 +383,37 @@ fn ev_firm_kwh_is_the_largest_demand_above_the_live_soc() {
         .ev
         .obligations
         .iter()
-        .map(|o| site.ev.obligation_kwh(o))
+        .map(|o| site.ev.required_kwh(o))
         .collect();
     assert_eq!(per_obligation[0], 0.0, "already above 30 %");
     assert!((per_obligation[1] - 10.0).abs() < 1e-9);
-    assert!((site.ev.firm_obligation_kwh() - 20.0).abs() < 1e-9);
+    assert!((site.ev.firm_required_kwh() - 20.0).abs() < 1e-9);
+}
+
+/// R-140: the energy an obligation needs is measured against what the car can hold (its charge
+/// limit) and includes what a predicted trip uses before the deadline. The solve, the shortfall
+/// warning and the session flexibility all read this one rule.
+#[test]
+fn an_obligations_energy_stops_at_the_charge_limit_and_includes_the_trip() {
+    let mut site = ev_inputs(4, 60.0, 0.20);
+    site.ev.soc_max_frac = 0.90;
+    site.ev.obligations = vec![EvObligation {
+        deadline_step: 2,
+        target_soc_frac: 0.80,
+        session_id: None,
+    }];
+    // A trip uses 5 % in slot 1, before the deadline: (0.80 - 0.20 + 0.05) x 60 = 39 kWh.
+    site.ev.soc_drops = Some(ExogenousSocDrops {
+        drop_frac_per_slot: vec![0.0, 0.05, 0.0, 0.0],
+        floor_frac: 0.0,
+    });
+    let ob = site.ev.obligations[0].clone();
+    assert!((site.ev.required_kwh(&ob) - 39.0).abs() < 1e-9);
+
+    // Above the limit: only what the car can hold, (0.90 - 0.20) x 60 = 42 kWh, not 45.
+    site.ev.soc_drops = None;
+    site.ev.obligations[0].target_soc_frac = 0.95;
+    let ob = site.ev.obligations[0].clone();
+    assert!((site.ev.required_kwh(&ob) - 42.0).abs() < 1e-9);
+    assert!((site.ev.firm_required_kwh() - 42.0).abs() < 1e-9);
 }

@@ -308,6 +308,47 @@ fn a_firm_requirement_beyond_the_window_charges_all_it_can_and_reports_the_gap()
     );
 }
 
+/// R-140: a firm target above the charge limit is planned to the limit, which the window holds
+/// easily. That is no shortfall of the window: the plan says the target is above the limit
+/// (before the solve) and reports no unmet guarantee.
+#[test]
+fn a_firm_target_above_the_charge_limit_charges_to_the_limit_and_says_so() {
+    let site = &SITES[0];
+    let mut syn = inputs_for(site);
+    syn.ev.mode = EvMilpMode::MustRun;
+    syn.ev.soc_max_frac = SOC_TARGET; // the charge limit: 80 %
+    let last = syn.grid.n - 1;
+    syn.set_ev_firm(BATTERY_KWH * (0.95 - SOC_START), last); // asks for 95 %
+    syn.ev.segments = bands(0.0, 0.0);
+
+    let out = solve(&syn, &realistic_weights(), site);
+    let kwh = delivered_kwh(&syn, &out);
+    assert!(
+        (kwh - TO_TARGET_KWH).abs() < 0.5,
+        "charges to the limit ({TO_TARGET_KWH:.1} kWh){}",
+        dump(site, &syn, &out)
+    );
+    let unmet: Vec<_> = out
+        .warnings()
+        .into_iter()
+        .filter(|w| w.kind == crate::entities::plan::WarningKind::EvCoreEnergyUnmet)
+        .collect();
+    assert!(unmet.is_empty(), "the window held all it could: {unmet:?}");
+
+    let before_solve = syn.ev.input_warnings(&syn.grid.c_imp_eur_kwh);
+    let above = before_solve
+        .iter()
+        .find(|w| w.kind == crate::entities::plan::WarningKind::TargetAboveLimit)
+        .unwrap_or_else(|| {
+            panic!("the plan must say the target is above the limit: {before_solve:?}")
+        });
+    assert!(
+        above.message.contains("95 %") && above.message.contains("80 %"),
+        "names the target and the limit: {}",
+        above.message
+    );
+}
+
 /// The mirror of the test above: a **soft** request that charges less than its
 /// target reports nothing, because it promised nothing.
 #[test]

@@ -104,7 +104,13 @@ impl EvMilpContext {
         let shortfall_soc = self
             .obligations
             .iter()
-            .map(|o| vars.add(variable().min(0.0).max(o.target_soc_frac.max(0.0))))
+            .map(|o| {
+                vars.add(
+                    variable()
+                        .min(0.0)
+                        .max(self.reachable_target_frac(o).max(0.0)),
+                )
+            })
             .collect();
         let z_ev_on = (0..n)
             .map(|t| {
@@ -255,8 +261,9 @@ impl EvMilpContext {
             // (`0..=t_dead_step` inclusive). Binding at `deadline_step` instead
             // would quietly move every existing deadline one slot earlier.
             let step = ob.deadline_step + 1;
+            let target_frac = self.reachable_target_frac(ob);
             cs.push(constraint!(
-                v.soc_ev[step] + v.shortfall_soc[k] >= ob.target_soc_frac
+                v.soc_ev[step] + v.shortfall_soc[k] >= target_frac
             ));
         }
         for i in 0..v.delta_ev.len() {

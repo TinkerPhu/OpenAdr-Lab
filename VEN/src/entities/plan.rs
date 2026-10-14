@@ -311,6 +311,10 @@ pub enum WarningKind {
     /// case: a soft request that charges less than its target is the comfort curve working as
     /// asked, not an unmet obligation (GB-41).
     EvCoreEnergyUnmet,
+    /// A request's target is above what the asset may reach (an EV's charge limit): the plan
+    /// holds it to the limit and says so, rather than reporting the gap as an unmet guarantee
+    /// (R-140).
+    TargetAboveLimit,
     /// Reserved for future warning sites not yet classified above.
     Other,
 }

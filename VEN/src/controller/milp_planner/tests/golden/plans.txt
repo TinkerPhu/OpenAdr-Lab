@@ -37,7 +37,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":137.37640388507654,"cost_eur":0.12
 solve_status "OPTIMAL"
 summary {"total_co2_g":4003.662554315595,"total_cost_eur":3.3363854619296633,"total_export_kwh":0.0,"total_import_kwh":13.345541847718653}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## all_assets_both_interactions
 cost_breakdown {"c_energy_eur":2.7550990207796886,"c_ghg_eur":0.996705535911338,"c_grid_eur":0.33223517863711266,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.15174373795807775,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -77,7 +77,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":137.37640388507654,"cost_eur":0.19
 solve_status "GAP_LIMIT"
 summary {"total_co2_g":4983.527679556691,"total_cost_eur":2.7550990207796886,"total_export_kwh":0.0,"total_import_kwh":16.611758931855633}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## battery_with_pv
 cost_breakdown {"c_energy_eur":0.07907329428203452,"c_ghg_eur":0.048664613342835235,"c_grid_eur":0.017386697965632532,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.06621831096282686,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -157,7 +157,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":185.0,"cost_eur":0.246666666666666
 solve_status "OPTIMAL"
 summary {"total_co2_g":4740.0,"total_cost_eur":3.9499999999999984,"total_export_kwh":0.0,"total_import_kwh":15.799999999999999}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## heater_only
 cost_breakdown {"c_energy_eur":0.27499999999999997,"c_ghg_eur":0.16500000000000004,"c_grid_eur":0.05499999999999998,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -257,7 +257,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":137.37640388507654,"cost_eur":0.12
 solve_status "OPTIMAL"
 summary {"total_co2_g":4003.662554315595,"total_cost_eur":3.3363854619296633,"total_export_kwh":0.0,"total_import_kwh":13.345541847718653}
 trigger "PERIODIC"
-warnings [{"kind":"PEAK_PENALTY_EXCEEDED","message":"Penalty rule 'peak-3kw' exceeded in window 06:00–07:00: peak 7.9 kW > threshold 3.0 kW (€24.52 accepted)","severity":"WARNING","suggested_action":"Increase available flexible capacity or raise the threshold if this recurs"},{"kind":"PEAK_PENALTY_EXCEEDED","message":"Penalty rule 'peak-3kw' exceeded in window 07:00–08:00: peak 6.6 kW > threshold 3.0 kW (€18.03 accepted)","severity":"WARNING","suggested_action":"Increase available flexible capacity or raise the threshold if this recurs"},{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"PEAK_PENALTY_EXCEEDED","message":"Penalty rule 'peak-3kw' exceeded in window 06:00–07:00: peak 7.9 kW > threshold 3.0 kW (€24.52 accepted)","severity":"WARNING","suggested_action":"Increase available flexible capacity or raise the threshold if this recurs"},{"kind":"PEAK_PENALTY_EXCEEDED","message":"Penalty rule 'peak-3kw' exceeded in window 07:00–08:00: peak 6.6 kW > threshold 3.0 kW (€18.03 accepted)","severity":"WARNING","suggested_action":"Increase available flexible capacity or raise the threshold if this recurs"},{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## import_and_export_slack
 cost_breakdown {"c_energy_eur":3.4499999999999984,"c_ghg_eur":0.8279999999999996,"c_grid_eur":0.2760000000000001,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -297,7 +297,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":172.5,"cost_eur":0.147083333333333
 solve_status "OPTIMAL"
 summary {"total_co2_g":4140.0,"total_cost_eur":3.4499999999999984,"total_export_kwh":0.0,"total_import_kwh":13.799999999999994}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## phase2_skipped
 cost_breakdown {"c_energy_eur":3.3363854619296633,"c_ghg_eur":0.8007325108631193,"c_grid_eur":0.26691083695437307,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -337,7 +337,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":137.3764038850766,"cost_eur":0.127
 solve_status "OPTIMAL"
 summary {"total_co2_g":4003.6625543155956,"total_cost_eur":3.3363854619296633,"total_export_kwh":0.0,"total_import_kwh":13.345541847718653}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## heater_with_target
 cost_breakdown {"c_energy_eur":0.27499999999999997,"c_ghg_eur":0.16500000000000004,"c_grid_eur":0.054999999999999986,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -417,7 +417,7 @@ slot {"allocations":[{"asset_id":"ev","co2_g":137.37640388507654,"cost_eur":0.19
 solve_status "GAP_LIMIT"
 summary {"total_co2_g":5128.662554315596,"total_cost_eur":3.597263439535831,"total_export_kwh":0.0,"total_import_kwh":17.095541847718653}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh              before the deadline — the plan delivers 14.8 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 21.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 14.8 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## ev_budget_too_low
 cost_breakdown {"c_energy_eur":3.9489293132615284,"c_ghg_eur":0.9477430351827669,"c_grid_eur":0.3159143450609223,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
@@ -461,15 +461,15 @@ warnings [{"kind":"BUDGET_SHORTFALL","message":"EV charging budget too low to re
 ## ev_firm_shortfall
 cost_breakdown {"c_energy_eur":0.7124999999999992,"c_ghg_eur":0.171,"c_grid_eur":0.05699999999999997,"c_peak_penalty_eur":-0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"
-friction_eur 7691.703689791667
+friction_eur 5691.703689791667
 horizon {"end_time":"2026-04-11T08:00:00Z","far_horizon":"2026-04-11T08:00:00Z","num_steps":24,"start_time":"2026-04-11T06:00:00Z","step_size_s":300,"zones":[{"slots":24,"step_s":300}]}
 mip_gap_target 0.02
 objective "min_cost"
-objective_eur 7690.757189791667
+objective_eur 5690.757189791667
 penalty_rules_active []
 phase_report {"phase1_status":"OPTIMAL","phase2_status":"OPTIMAL"}
 planned_asset_ids ["ev"]
-session_flexibility [{"asset_id":"ev","budget_remaining_eur":1000000000.0,"energy_needed_kwh":48.0,"estimated_co2_g":555.0,"estimated_cost_eur":0.4625,"max_acceptable_rate":0.35,"min_acceptable_rate":0.05,"power_max_kw":7.4,"power_min_kw":1.4,"slots_available":3,"window_end":"2026-04-11T06:15:00Z","window_start":"2026-04-11T06:00:00Z"}]
+session_flexibility [{"asset_id":"ev","budget_remaining_eur":1000000000.0,"energy_needed_kwh":36.00000000000001,"estimated_co2_g":555.0,"estimated_cost_eur":0.4625,"max_acceptable_rate":0.35,"min_acceptable_rate":0.05,"power_max_kw":7.4,"power_min_kw":1.4,"slots_available":3,"window_end":"2026-04-11T06:15:00Z","window_start":"2026-04-11T06:00:00Z"}]
 slot {"allocations":[{"asset_id":"ev","co2_g":185.0,"cost_eur":0.15416666666666667,"grid_power_kw":7.4,"marginal_value":0.25,"power_kw":7.4,"surplus_power_kw":0.0}],"baseline_kw":0.5,"co2_g_kwh":300.0,"end":"2026-04-11T06:05:00Z","export_cap_kw":10.0,"export_flexibility_kw":0.0,"export_tariff_eur_kwh":0.08,"grid_effective_cost":0.25,"import_cap_kw":25.0,"import_flexibility_kw":0.0,"import_tariff_eur_kwh":0.25,"marginal_cost_export_eur_per_kwh":0.0275,"marginal_cost_import_eur_per_kwh":0.0275,"net_export_kw":0.0,"net_import_kw":7.9,"planned_kw_by_asset":{"ev":7.4},"planned_state_by_asset":{"ev":{"plugged":1.0,"soc":0.2}},"pv_forecast_kw":0.0,"pv_used_kw":0.0,"rate_estimated":false,"slot_index":0,"start":"2026-04-11T06:00:00Z","surplus_available_kw":0.0}
 slot {"allocations":[{"asset_id":"ev","co2_g":185.0,"cost_eur":0.15416666666666667,"grid_power_kw":7.4,"marginal_value":0.25,"power_kw":7.4,"surplus_power_kw":0.0}],"baseline_kw":0.5,"co2_g_kwh":300.0,"end":"2026-04-11T06:10:00Z","export_cap_kw":10.0,"export_flexibility_kw":0.0,"export_tariff_eur_kwh":0.08,"grid_effective_cost":0.25,"import_cap_kw":25.0,"import_flexibility_kw":0.0,"import_tariff_eur_kwh":0.25,"marginal_cost_export_eur_per_kwh":0.0275,"marginal_cost_import_eur_per_kwh":0.0275,"net_export_kw":0.0,"net_import_kw":7.9,"planned_kw_by_asset":{"ev":7.4},"planned_state_by_asset":{"ev":{"plugged":1.0,"soc":0.21027777777777779}},"pv_forecast_kw":0.0,"pv_used_kw":0.0,"rate_estimated":false,"slot_index":1,"start":"2026-04-11T06:05:00Z","surplus_available_kw":0.0}
 slot {"allocations":[{"asset_id":"ev","co2_g":185.0,"cost_eur":0.15416666666666667,"grid_power_kw":7.4,"marginal_value":0.25,"power_kw":7.4,"surplus_power_kw":0.0}],"baseline_kw":0.5,"co2_g_kwh":300.0,"end":"2026-04-11T06:15:00Z","export_cap_kw":10.0,"export_flexibility_kw":0.0,"export_tariff_eur_kwh":0.08,"grid_effective_cost":0.25,"import_cap_kw":25.0,"import_flexibility_kw":0.0,"import_tariff_eur_kwh":0.25,"marginal_cost_export_eur_per_kwh":0.0275,"marginal_cost_import_eur_per_kwh":0.0275,"net_export_kw":0.0,"net_import_kw":7.9,"planned_kw_by_asset":{"ev":7.4},"planned_state_by_asset":{"ev":{"plugged":1.0,"soc":0.22055555555555556}},"pv_forecast_kw":0.0,"pv_used_kw":0.0,"rate_estimated":false,"slot_index":2,"start":"2026-04-11T06:10:00Z","surplus_available_kw":0.0}
@@ -497,7 +497,7 @@ slot {"allocations":[],"baseline_kw":0.5,"co2_g_kwh":300.0,"end":"2026-04-11T08:
 solve_status "OPTIMAL"
 summary {"total_co2_g":855.0,"total_cost_eur":0.7124999999999992,"total_export_kwh":0.0,"total_import_kwh":2.849999999999997}
 trigger "PERIODIC"
-warnings [{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 46.1 kWh short of its guaranteed 48.0 kWh              before the deadline — the plan delivers 1.9 kWh, which is all the              available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"}]
+warnings [{"kind":"TARGET_ABOVE_LIMIT","message":"EV target for request 00000000-0000-0000-0000-000000000001 of 100 % is above the charge limit of 80 % — the plan charges to 80 %","severity":"WARNING","suggested_action":"raise the charge limit or lower the target"},{"kind":"EV_CORE_ENERGY_UNMET","message":"EV charging for request 00000000-0000-0000-0000-000000000001 falls 34.2 kWh short of its guaranteed 36.0 kWh before the deadline — the plan delivers 1.9 kWh, which is all the available window allows","severity":"WARNING","suggested_action":"move the deadline later, lower the target, or check whether the car is predicted away for part of the window"}]
 ## fallback_all_sessions
 cost_breakdown {"c_energy_eur":0.0,"c_ghg_eur":0.0,"c_grid_eur":0.0,"c_peak_penalty_eur":0.0,"c_violations_eur":0.0,"c_wear_eur":0.0,"v_services_eur":0.0}
 created_at "2026-04-11T06:00:00Z"

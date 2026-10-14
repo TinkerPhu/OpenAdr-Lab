@@ -100,40 +100,36 @@ impl EvMilpContext {
         self.soc_max_frac.clamp(0.0, 1.0).max(self.soc_init_frac)
     }
 
-    /// Energy a firm obligation needs, measured against what the vehicle can actually
-    /// hold. An obligation above the charge limit is not quietly turned into extra
-    /// energy to buy: the requirement stops at the ceiling, and the gap between what
-    /// was asked and what is reachable surfaces through `shortfall_soc` instead.
-    pub fn firm_required_kwh(&self) -> f64 {
-        self.obligations
-            .iter()
-            .map(|o| {
-                let consumed: f64 = (0..o.deadline_step.saturating_add(1))
-                    .map(|t| self.drop_frac_at(t))
-                    .sum();
-                let reachable = o.target_soc_frac.min(self.soc_ceiling());
-                ((reachable - self.soc_init_frac + consumed) * self.battery_kwh).max(0.0)
-            })
-            .fold(0.0_f64, f64::max)
-    }
-
-    /// The energy one obligation demands above the EV's live SoC [kWh]: an obligation states
-    /// a target SoC (R-92). Never negative. What the shortfall warning calls "guaranteed" and
-    /// session flexibility reports; `firm_required_kwh` above is what the solve enforces, and
-    /// the two disagree with a trip forecast or a target above the charge limit (R-140).
-    pub fn obligation_kwh(
+    /// The state of charge an obligation can actually be held to: its target, at most the
+    /// charge limit. A target above the limit is planned to the limit and reported as such
+    /// (`DeclaredEv::input_warnings`), never bought as a shortfall of the window (R-140).
+    pub fn reachable_target_frac(
         &self,
         obligation: &crate::controller::milp_planner::asset_port::EvObligation,
     ) -> f64 {
-        ((obligation.target_soc_frac - self.soc_init_frac) * self.battery_kwh).max(0.0)
+        obligation.target_soc_frac.min(self.soc_ceiling())
     }
 
-    /// The firm energy the EV must receive [kWh] by `obligation_kwh`: the largest demand among
-    /// its obligations when more than one departure is queued, 0 without any.
-    pub fn firm_obligation_kwh(&self) -> f64 {
+    /// The energy one obligation needs [kWh]: from the live SoC to its reachable target, plus
+    /// what predicted trips use before its deadline. Never negative. The one rule the solve's
+    /// guaranteed band, the shortfall warning and session flexibility all read (R-140).
+    pub fn required_kwh(
+        &self,
+        obligation: &crate::controller::milp_planner::asset_port::EvObligation,
+    ) -> f64 {
+        let consumed: f64 = (0..obligation.deadline_step.saturating_add(1))
+            .map(|t| self.drop_frac_at(t))
+            .sum();
+        let reachable = self.reachable_target_frac(obligation);
+        ((reachable - self.soc_init_frac + consumed) * self.battery_kwh).max(0.0)
+    }
+
+    /// The firm energy the EV must receive [kWh]: the largest `required_kwh` among its
+    /// obligations when more than one departure is queued, 0 without any.
+    pub fn firm_required_kwh(&self) -> f64 {
         self.obligations
             .iter()
-            .map(|o| self.obligation_kwh(o))
+            .map(|o| self.required_kwh(o))
             .fold(0.0_f64, f64::max)
     }
 }

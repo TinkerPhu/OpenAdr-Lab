@@ -1005,14 +1005,20 @@ measured. Nothing is substituted: the EV converts a *stated* distance into a SoC
 
 Masking can leave a goal that no remaining slot can reach, which would make the entire site solve
 infeasible if the target were a hard bound. Each obligation therefore carries its own penalised
-`shortfall_soc` slack (`ev_milp.rs::constraints`): the target stays what was asked for, the plan
-charges everything the window allows, and the slack the solver had to buy *is* the gap — reported
+`shortfall_soc` slack (`ev_milp.rs::constraints`): the target stays what was asked for, held to
+the charge limit (`EvMilpContext::reachable_target_frac`), the plan charges everything the window
+allows, and the slack the solver had to buy *is* the gap — reported
 per obligation, naming the session it came from, as a `WarningKind::EvCoreEnergyUnmet` plan warning
 by the EV itself (`EvMilpContext::firm_shortfall`, `assets/ev_declared.rs`), carried on its
 `AssetSolution`. Because the model decides the gap, nothing
 outside it re-derives the number (R-93 replaced an earlier pre-solve
 `min(required, reachable_energy_kwh)` cap, which had to be compared against afterwards to recover
-the shortfall). That is the warning's only meaning — a soft request
+the shortfall). The energy an obligation needs is one rule, `EvMilpContext::required_kwh` (from
+the live SoC to the reachable target, plus what predicted trips use before the deadline): the
+solve's guaranteed band, the warning's "guaranteed" kWh and the session-flexibility energy all
+read it (R-140). A target above the charge limit is therefore not a shortfall of the window: the
+EV reports it before the solve as its own `WarningKind::TargetAboveLimit` warning
+(`DeclaredEv::input_warnings`) and the plan charges to the limit. That is the warning's only meaning — a soft request
 charging less than its target is the comfort curve working as asked, not an unmet obligation. The
 cap guards a real session's target too, which the same mask can strand. Both classes report
 themselves on `GET /ev-usage-sim` via a `mode` field (`simulated` /

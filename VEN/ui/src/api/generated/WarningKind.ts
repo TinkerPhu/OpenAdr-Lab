@@ -9,4 +9,4 @@
  * dedups new-vs-carried-over warnings on `kind` (not `message`, which can
  * carry per-cycle interpolated numbers).
  */
-export type WarningKind = "SOLVER_INFEASIBLE" | "STALE_RATE_ESTIMATE" | "BUDGET_SHORTFALL" | "CAPACITY_VIOLATION" | "PEAK_PENALTY_EXCEEDED" | "EV_CORE_ENERGY_UNMET" | "OTHER";
+export type WarningKind = "SOLVER_INFEASIBLE" | "STALE_RATE_ESTIMATE" | "BUDGET_SHORTFALL" | "CAPACITY_VIOLATION" | "PEAK_PENALTY_EXCEEDED" | "EV_CORE_ENERGY_UNMET" | "TARGET_ABOVE_LIMIT" | "OTHER";
