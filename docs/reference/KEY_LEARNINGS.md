@@ -3374,3 +3374,19 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - Edit scripts: never `open(p, "w").write(open(p).read())`, which truncates before reading. Watch a
   count that should not move (here ignored tests): it caught a file emptied twice. Do not name a
   scratch script after a stdlib module (`types.py`), and run scripts with `python -I`.
+
+## A warm build is only as warm as the step that never caches (2026-10-14)
+
+- Layer caching keyed on `Cargo.lock` is all-or-nothing: one dependency bump rebuilt HiGHS and
+  every crate (~50 min on a Pi). BuildKit cache mounts on the registry and `target/` let cargo
+  decide what is stale instead.
+- Cache mounts barely helped the common case, a source edit (265 s -> 245 s): cargo never builds
+  the `release` profile incrementally, so the large `ven-app` crate recompiled from scratch every
+  time. A `ci` profile (own crates opt-level 1 + incremental, dependencies at opt-level 3) took it
+  to 24 s, and the E2E main pass did not get slower — the CPU time is in HiGHS, which keeps its
+  optimisation.
+- A gate that reads `/proc/loadavg` waits for an average, not for the load: the 1-minute average
+  took ~4 min to decay after the build had already finished. Sample busy % over a few seconds.
+- Measure where a slow test waits before tuning its polling. The 45-76 s "plan reflects the event"
+  waits were not polling and not the solver (median cycle 3.4 s): they were GB-55's deliberate
+  rate-change hold, applied to capacity events it was never meant for.

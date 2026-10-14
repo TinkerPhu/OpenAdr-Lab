@@ -128,6 +128,16 @@ docker compose -f tests/docker-compose.test.yml run --build --rm test-runner
 docker compose -f tests/docker-compose.test.yml down -v
 ```
 
+**What keeps a rebuild short.** The VEN and BFF images keep the cargo registry and `target/`
+in BuildKit cache mounts, so cargo rebuilds only what changed — a `Cargo.lock` change no longer
+rebuilds HiGHS and every other dependency. The E2E stack builds them with the `ci` cargo profile
+(`VEN/Cargo.toml`): our own crates at opt-level 1 and incremental, every dependency (the solver
+included) at release optimisation; production images build `release`. npm and pip downloads are
+cached the same way, and the healthchecks probe every second during start-up. Measured on a
+Node-class Pi (2026-10-14): a one-line VEN edit rebuilds the test images in 24 s instead of
+265 s; the first build into empty caches takes about an hour. Before each timing-sensitive
+pass, `tests/settle.sh` waits until the host's CPU has drained, sampled from `/proc/stat`.
+
 **Run specific tags:**
 
 ```bash
