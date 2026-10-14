@@ -976,7 +976,8 @@ mod tests {
         assert_eq!(
             state.sensor().await.temperature_c,
             Some(21.5),
-            "the sensor reading must survive too — it sits beside the events,              not inside them"
+            "the sensor reading must survive too — it sits beside the events, \
+             not inside them"
         );
     }
 

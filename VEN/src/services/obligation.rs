@@ -371,7 +371,8 @@ mod tests {
         assert_eq!(
             second_intervals.len(),
             first_count + 1,
-            "the second submission must carry the earlier interval as well as              the newly closed one, not replace it"
+            "the second submission must carry the earlier interval as well as \
+             the newly closed one, not replace it"
         );
         let earliest = submitted[0].resources[0].intervals[0]
             .intervalPeriod

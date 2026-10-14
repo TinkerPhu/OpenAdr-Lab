@@ -57,7 +57,8 @@ pub fn validate_curve(rates: &[ComfortRate]) -> Result<(), String> {
         if let Some(prev) = prev_price {
             if r.max_marginal_price_eur_kwh > prev {
                 return Err(format!(
-                    "point {i}: max_marginal_price {} rises above the previous {prev} —                      bids must not increase with fill",
+                    "point {i}: max_marginal_price {} rises above the previous {prev} — \
+                     bids must not increase with fill",
                     r.max_marginal_price_eur_kwh
                 ));
             }

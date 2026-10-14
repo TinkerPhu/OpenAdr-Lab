@@ -128,7 +128,8 @@ pub fn shadow_parse_events(items: &[serde_json::Value]) {
             .map(|r| r.describe())
             .collect::<Vec<_>>()
             .join("; "),
-        "shadow parse: the strict 3.1 types would refuse these events (measurement only,          nothing was dropped)"
+        "shadow parse: the strict 3.1 types would refuse these events (measurement only, \
+         nothing was dropped)"
     );
 }
 

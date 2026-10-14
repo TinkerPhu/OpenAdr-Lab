@@ -39,7 +39,8 @@ impl Profile {
         // phase 2 is what `phase2_epsilon_eur = 0.0` is for; say that instead.
         if self.planner.phase2_solver_timeout_s == 0 {
             errors.push(
-                "planner.phase2_solver_timeout_s must be ≥ 1 s; to disable phase 2                  entirely set planner.phase2_epsilon_eur = 0.0"
+                "planner.phase2_solver_timeout_s must be ≥ 1 s; to disable phase 2 \
+                 entirely set planner.phase2_epsilon_eur = 0.0"
                     .to_string(),
             );
         }
@@ -1242,7 +1243,9 @@ planner:
         let cfg = PlannerConfig::default();
         assert_eq!(
             cfg.phase2_solver_timeout_s, 15,
-            "phase 2's value plateaus at 5-20 s and is nil below ~5 s (R-97), so its              default sits on the plateau with margin — not at phase 1's budget, and              not pinned at the threshold where host load would cost all smoothing"
+            "phase 2's value plateaus at 5-20 s and is nil below ~5 s (R-97), so its \
+             default sits on the plateau with margin — not at phase 1's budget, and \
+             not pinned at the threshold where host load would cost all smoothing"
         );
         assert!(
             cfg.phase2_solver_timeout_s < cfg.solver_timeout_s,

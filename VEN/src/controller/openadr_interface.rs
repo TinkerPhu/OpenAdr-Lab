@@ -248,7 +248,8 @@ fn report_timing(event: &OadrEvent, d: &WireReportDescriptor) -> (u64, u64) {
             event_id = %event.id,
             payload_type = %d.payload_type.wire_name(),
             default_s = DEFAULT_REPORT_CADENCE_S,
-            "event declares no bounded interval and the descriptor does not              open the grid; applying the profile default report cadence"
+            "event declares no bounded interval and the descriptor does not \
+             open the grid; applying the profile default report cadence"
         );
         return (DEFAULT_REPORT_CADENCE_S, DEFAULT_REPORT_CADENCE_S);
     };
