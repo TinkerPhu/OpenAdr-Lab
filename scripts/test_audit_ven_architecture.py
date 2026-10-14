@@ -69,5 +69,24 @@ class AssetKindInPlanner(unittest.TestCase):
         self.assertIn("pub bat_charge_kw: f64,", hits[0])
 
 
+class CollapsedContinuation(unittest.TestCase):
+    def test_a_lost_continuation_is_found(self):
+        with tempfile.TemporaryDirectory(dir=audit.REPO_ROOT) as tmp:
+            rs = Path(tmp) / "m.rs"
+            rs.write_text(
+                'fn f() -> &\'static str {\n    "does not              open the grid"\n}\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(len(audit.collapsed_continuations(rs)), 1)
+            rs.write_text(
+                'fn f() -> &\'static str {\n    "does not \\\n     open the grid"\n}\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(audit.collapsed_continuations(rs), [])
+
+    def test_the_ven_has_none_today(self):
+        self.assertEqual(audit.collapsed_continuations(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

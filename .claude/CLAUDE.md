@@ -430,6 +430,8 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     `bat_`/`ev_`/`heat_`/`heater_` name — the planner reads only what each asset declares
     (`AssetMilpContext`, `DeclaredAsset`), and the plan keys each asset's part by its id
     an `AssetSolutionDetail` variant is matched only in its own `assets/<kind>_declared.rs`
+    no string literal with a run of 6+ spaces between words in production code: a lost `\`
+    line continuation (an edit script through a shell heredoc drops the backslash)
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
   docs/architecture/module_dependency_graph.md
