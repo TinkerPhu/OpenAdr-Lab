@@ -103,6 +103,7 @@ fn heater_snap_in(
         thermal_mass_kwh_per_c: 2.0,
         k_loss_kw_per_c: 0.1,
         draw_kw: 0.0,
+        switching_penalty_eur: 0.0,
         ambient_temp_c: 10.0,
     };
     let state = crate::assets::AssetState::Heater(HeaterState {

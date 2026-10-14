@@ -44,7 +44,7 @@ impl MilpParticipant for Heater {
             inputs.cum_s,
             inputs.now,
             inputs.heater_target,
-            inputs.lambda_sw,
+            self.switching_penalty_eur,
             inputs.c_terminal_eur_kwh,
             inputs.heater_anchor.clone(),
             inputs.planner.w_ghg,

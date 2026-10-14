@@ -82,7 +82,6 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         tariff_ts,
         n_slots,
         cum_s,
-        lambda_sw,
         c_terminal_eur_kwh_by_asset,
         heater_anchor,
     } = crate::services::planning::build_plan_cycle_inputs(
@@ -114,7 +113,6 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         st.ev_sessions.as_slice(), // the EV decides what it can serve
         st.heat_tgt.as_ref(),
         a.planner,
-        lambda_sw,
         &c_terminal_eur_kwh_by_asset,
         &heater_anchor,
         &a.state.comfort_overrides_map().await,

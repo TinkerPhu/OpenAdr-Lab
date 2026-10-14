@@ -202,7 +202,6 @@ pub struct PlanCycleInputs {
     pub tariff_ts: TariffTimeSeries,
     pub n_slots: usize,
     pub cum_s: Vec<i64>,
-    pub lambda_sw: f64,
     /// Terminal value of stored energy per asset id, from
     /// `AssetParams::terminal_value_eur_kwh`. A map rather than one named
     /// scalar per storage kind: the consumer looks its asset up, so adding a
@@ -226,14 +225,6 @@ pub fn build_plan_cycle_inputs(
     } = crate::entities::time_grid::TimeGrid::from_zones(&planner.plan_zones);
 
     let heater_anchor = build_heater_anchor(current_plan, anchor_until, now, n_slots);
-
-    let lambda_sw = asset_params
-        .iter()
-        .find_map(|p| match p {
-            AssetParams::Heater(h) => Some(h.switching_penalty_eur),
-            _ => None,
-        })
-        .unwrap_or(0.0);
 
     let avg_imp_eur_kwh = {
         let total: f64 = (0..n_slots)
@@ -266,7 +257,6 @@ pub fn build_plan_cycle_inputs(
         tariff_ts,
         n_slots,
         cum_s,
-        lambda_sw,
         c_terminal_eur_kwh_by_asset,
         heater_anchor,
     }
@@ -1273,33 +1263,6 @@ mod tests {
             inputs.cum_s,
             vec![0, 300, 600, 900, 1200, 2100, 3000],
             "cum_s must accumulate zone-A step (300s x4) then zone-B step (900s x2)"
-        );
-    }
-
-    #[test]
-    fn test_build_plan_cycle_inputs_lambda_sw_default_when_no_heater() {
-        let now = fixed_now();
-        let planner = PlannerParams::default();
-        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
-        assert_eq!(
-            inputs.lambda_sw, 0.0,
-            "no heater in asset_params → lambda_sw defaults to 0.0"
-        );
-    }
-
-    #[test]
-    fn test_build_plan_cycle_inputs_lambda_sw_from_heater_params() {
-        let now = fixed_now();
-        let planner = PlannerParams::default();
-        let asset_params = vec![AssetParams::Heater(HeaterParams {
-            switching_penalty_eur: 0.05,
-            ..HeaterParams::default()
-        })];
-        let inputs = build_plan_cycle_inputs(&[], &planner, &asset_params, None, None, now);
-        assert!(
-            (inputs.lambda_sw - 0.05).abs() < 1e-9,
-            "lambda_sw must be read from HeaterParams.switching_penalty_eur, got {}",
-            inputs.lambda_sw
         );
     }
 

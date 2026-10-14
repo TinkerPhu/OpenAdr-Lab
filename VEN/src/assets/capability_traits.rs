@@ -28,8 +28,6 @@ pub struct MilpBuildInputs<'a> {
     /// the asset has none.
     pub comfort_rates: &'a [crate::entities::asset::ComfortRate],
     pub planner: &'a crate::entities::planner_params::PlannerParams,
-    /// Relay switching penalty [EUR/switch] (the site heater's profile value).
-    pub lambda_sw: f64,
     /// This asset's terminal value of stored energy [EUR/kWh]; 0.0 when it has none.
     pub c_terminal_eur_kwh: f64,
     /// Per-slot power the plan in force pins [kW]; empty for an asset that takes no anchor.
@@ -56,7 +54,6 @@ impl<'a> MilpBuildInputs<'a> {
             heater_target: None,
             comfort_rates: &[],
             planner,
-            lambda_sw: 0.0,
             c_terminal_eur_kwh: 0.0,
             heater_anchor: vec![],
         }
