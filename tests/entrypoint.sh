@@ -27,60 +27,8 @@ echo "Provisioning ven-2 via API..."
 python provision_ven.py ven-2
 echo "Provisioning done."
 
-# Both timing-sensitive @isolated scenarios and the resilience suite
-# (features/ven_resilience.feature, run separately via `--tags=@resilience`)
-# flake under Node1 resource contention from whatever ran just before this
-# container started (a prior E2E/rust/UI section in the same run_all_tests.sh
-# invocation). Containers share the host kernel, so /proc/loadavg is the real
-# Node1 load. Wait for it to settle (1-min load < 2.0), capped at 8 minutes,
-# before any behave pass that hasn't already paid this cost this invocation.
-wait_for_load_to_settle() {
-  label="$1"
-  echo "=== Waiting for host load to settle before $label ==="
-  SETTLE_DEADLINE=$(( $(date +%s) + 480 ))
-  prev1=""
-  prev2=""
-  while :; do
-    LOAD1=$(cut -d' ' -f1 /proc/loadavg)
-    LOAD15=$(cut -d' ' -f3 /proc/loadavg)
-
-    # Fast path: a host that really is idle. Node1 reaches this.
-    if [ "$(awk -v l="$LOAD1" 'BEGIN { print (l < 2.0) ? 1 : 0 }')" = "1" ]; then
-      echo "Host load settled at $LOAD1."
-      break
-    fi
-
-    # A host with a standing fleet never reaches 2.0 — Node2 idles at ~2.7 with
-    # 17 VENs resident, so the absolute threshold above made this gate
-    # unsatisfiable there: it burned the full 8 minutes every pass and then ran
-    # the timing-sensitive scenarios under load anyway, which is the coupling
-    # the gate exists to remove.
-    #
-    # What it actually wants to know is "has the previous section's load
-    # drained", and that shows as the 1-minute average flattening out at the
-    # host's own floor rather than as any particular number. Flat *and* no
-    # higher than the 15-minute average: during a heavy section the 1-minute
-    # average sits above the 15-minute one, so that comparison is what
-    # separates "calmed down" from "steadily busy".
-    if [ -n "$prev2" ] \
-      && [ "$(awk -v a="$LOAD1" -v b="$prev1" -v c="$prev2" -v l15="$LOAD15" \
-           'BEGIN { m = (a < b ? a : b); m = (m < c ? m : c);
-                    M = (a > b ? a : b); M = (M > c ? M : c);
-                    print (M - m < 0.1 * M && a <= l15) ? 1 : 0 }')" = "1" ]; then
-      echo "Host load plateaued at $LOAD1 (floor for this host; 15-min avg $LOAD15)."
-      break
-    fi
-
-    if [ "$(date +%s)" -ge "$SETTLE_DEADLINE" ]; then
-      echo "Host load still $LOAD1 after 8 min — proceeding anyway."
-      break
-    fi
-    echo "  load $LOAD1 (15-min $LOAD15) — waiting 15 s"
-    prev2="$prev1"
-    prev1="$LOAD1"
-    sleep 15
-  done
-}
+# The load-settle gate before each timing-sensitive pass (see settle.sh).
+. ./settle.sh
 
 # Structural gate before the expensive passes. `--dry-run` resolves every step
 # in every feature without touching the stack, so an undefined or misspelled
