@@ -38,7 +38,7 @@ confirmed by `git log -1`.
 
 ## 4. Enforcement
 
-- [ ] 4.1 `scripts/audit_ven_architecture.py` rule 16: add `entities/plan.rs`, delete the
+- [x] 4.1 `scripts/audit_ven_architecture.py` rule 16: add `entities/plan.rs`, delete the
       `PLAN_WIRE_FIELDS` exemption, update the rule text; `scripts/test_audit_ven_architecture.py`
       plants `bat_charge_kw` in a copy of `entities/plan.rs` and expects a hit; `.claude/CLAUDE.md`
       invariant line.

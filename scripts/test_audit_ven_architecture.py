@@ -2,7 +2,9 @@
 """Tests for audit_ven_architecture.py — run: python -m unittest scripts/test_audit_ven_architecture.py"""
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 import audit_ven_architecture as audit  # noqa: E402
@@ -31,11 +33,14 @@ class AssetKindInPlanner(unittest.TestCase):
         ]:
             self.assertTrue(audit.names_asset_kind(line), line)
 
-    def test_the_plans_wire_fields_and_kind_free_names_are_not(self):
+    def test_a_kind_named_plan_field_is_found(self):
+        for line in ["pub bat_charge_kw: f64,", "bat_discharge_kw: 0.0,"]:
+            self.assertTrue(audit.names_asset_kind(line), line)
+
+    def test_kind_free_names_are_not(self):
         for line in [
-            "bat_charge_kw: storage.charge_kw[t],",
-            "bat_discharge_kw: 0.0,",
             "c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,",
+            "pub planned_asset_ids: Vec<String>,",
             "let net_power_kw = asset.net_power_expr(t);",
         ]:
             self.assertFalse(audit.names_asset_kind(line), line)
@@ -43,6 +48,25 @@ class AssetKindInPlanner(unittest.TestCase):
     def test_the_planner_core_names_no_kind_today(self):
         self.assertEqual(audit.asset_kind_in_planner(), [])
         self.assertEqual(audit.solution_detail_outside_its_kind(), [])
+
+    def test_the_plans_wire_types_are_checked(self):
+        self.assertIn(audit.VEN_SRC / "entities" / "plan.rs", audit.KIND_FREE_PATHS)
+
+    def test_a_battery_field_planted_in_the_plan_is_found(self):
+        plan_rs = (audit.VEN_SRC / "entities" / "plan.rs").read_text(encoding="utf-8")
+        anchor = "pub struct PlanTimeSlot {\n"
+        self.assertIn(anchor, plan_rs)
+        with tempfile.TemporaryDirectory(dir=audit.REPO_ROOT) as tmp:
+            copy = Path(tmp) / "plan.rs"
+            copy.write_text(plan_rs, encoding="utf-8")
+            self.assertEqual(audit.asset_kind_in_planner([copy]), [], "the plan is kind-free")
+            copy.write_text(
+                plan_rs.replace(anchor, anchor + "    pub bat_charge_kw: f64,\n", 1),
+                encoding="utf-8",
+            )
+            hits = audit.asset_kind_in_planner([copy])
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("pub bat_charge_kw: f64,", hits[0])
 
 
 if __name__ == "__main__":
