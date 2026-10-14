@@ -43,8 +43,6 @@ pub fn flat_plan(step_s: u64, slots: usize, start: DateTime<Utc>) -> Plan {
             export_flexibility_kw: 0.0,
             planned_kw_by_asset: Map::new(),
             planned_state_by_asset: Map::new(),
-            bat_charge_kw: 0.0,
-            bat_discharge_kw: 0.0,
         })
         .collect();
     Plan {
@@ -57,7 +55,6 @@ pub fn flat_plan(step_s: u64, slots: usize, start: DateTime<Utc>) -> Plan {
         objective_eur: 0.0,
         friction_eur: 0.0,
         cost_breakdown: Default::default(),
-        soc_trajectory_kwh: vec![],
         planned_asset_ids: vec![],
         summary: Default::default(),
         session_flexibility: vec![],

@@ -182,8 +182,6 @@ fn test_slot(
         net_export_kw,
         import_flexibility_kw: 0.0,
         export_flexibility_kw: 0.0,
-        bat_charge_kw: 0.0,
-        bat_discharge_kw: 0.0,
         planned_kw_by_asset: StdHashMap::new(),
         planned_state_by_asset: StdHashMap::new(),
     }

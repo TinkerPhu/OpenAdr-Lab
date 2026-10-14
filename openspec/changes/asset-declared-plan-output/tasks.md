@@ -19,17 +19,17 @@ confirmed by `git log -1`.
 
 ## 2. Delete the battery fields
 
-- [ ] 2.1 Move the planner tests off `bat_charge_kw`, `bat_discharge_kw` and `soc_trajectory_kwh`
+- [x] 2.1 Move the planner tests off `bat_charge_kw`, `bat_discharge_kw` and `soc_trajectory_kwh`
       (`tests/planner.rs`, `tests/heater.rs`, `tests/multi_instance.rs`) to the battery's own
       `planned_kw_by_asset`, allocation, planned state or `AssetSolution.storage`.
-- [ ] 2.2 Delete the three fields from `entities/plan.rs`, `results.rs` and every literal; reduce
+- [x] 2.2 Delete the three fields from `entities/plan.rs`, `results.rs` and every literal; reduce
       `site_storage` to the throughput series the wear figure needs.
-- [ ] 2.3 Regenerate `tests/golden/plans.txt`; check it against the old golden with the
+- [x] 2.3 Regenerate `tests/golden/plans.txt`; check it against the old golden with the
       transformation in design.md; `model_fingerprints.txt` and `milp_inputs.txt` hold unchanged.
 
 ## 3. UI
 
-- [ ] 3.1 Regenerate the ts-rs bindings (`Plan.ts`, `PlanTimeSlot.ts`); update
+- [x] 3.1 Regenerate the ts-rs bindings (`Plan.ts`, `PlanTimeSlot.ts`); update
       `__tests__/fixtures/plan.ts`.
 - [ ] 3.2 Test first in `PlanDecisionMatrix.test.tsx`: an idle planned asset gets a row; a plan
       without `planned_asset_ids` still shows its allocated assets; then rows come from

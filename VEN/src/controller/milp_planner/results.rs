@@ -1,9 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::controller::milp_planner::{
-    AllocationBasis, AssetMilpContext, AssetSolution, StorageLegs,
-};
+use crate::controller::milp_planner::{AllocationBasis, AssetMilpContext, AssetSolution};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
@@ -74,8 +72,6 @@ pub(crate) fn fallback_plan(
                 net_export_kw: 0.0,
                 import_flexibility_kw: 0.0,
                 export_flexibility_kw: 0.0,
-                bat_charge_kw: 0.0,
-                bat_discharge_kw: 0.0,
                 planned_kw_by_asset: std::collections::HashMap::new(),
                 planned_state_by_asset: std::collections::HashMap::new(),
             })
@@ -106,7 +102,6 @@ pub(crate) fn fallback_plan(
         session_flexibility,
         warnings: vec![warning],
         objective,
-        soc_trajectory_kwh: vec![],
         objective_eur: 0.0,
         friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
@@ -185,27 +180,16 @@ fn allocation(
     })
 }
 
-/// The site's storage legs: every storage asset's charge, discharge and stored energy summed,
-/// zeros of the plan's lengths when there is none. One storage asset's legs are its own values.
-fn site_storage(sol: &SolveOutput, n: usize) -> StorageLegs {
-    let mut legs = sol.assets.iter().filter_map(|a| a.storage.as_ref());
-    let Some(first) = legs.next() else {
-        return StorageLegs {
-            charge_kw: vec![0.0; n],
-            discharge_kw: vec![0.0; n],
-            energy_kwh: vec![0.0; n + 1],
-        };
-    };
-    let mut site = first.clone();
-    for leg in legs {
-        let add = |into: &mut Vec<f64>, from: &[f64]| {
-            into.iter_mut().zip(from).for_each(|(a, b)| *a += b);
-        };
-        add(&mut site.charge_kw, &leg.charge_kw);
-        add(&mut site.discharge_kw, &leg.discharge_kw);
-        add(&mut site.energy_kwh, &leg.energy_kwh);
+/// Every storage asset's throughput per slot, charge plus discharge [kW], summed over the assets:
+/// what the cost breakdown prices as wear. Zeros when there is no storage asset.
+fn storage_throughput_kw(sol: &SolveOutput, n: usize) -> Vec<f64> {
+    let mut throughput_kw = vec![0.0; n];
+    for legs in sol.assets.iter().filter_map(|a| a.storage.as_ref()) {
+        for (t, kw) in throughput_kw.iter_mut().enumerate() {
+            *kw += legs.charge_kw[t] + legs.discharge_kw[t];
+        }
     }
-    site
+    throughput_kw
 }
 
 /// Translate a MILP solution into a `Plan` with per-slot allocations. Every per-asset fact
@@ -250,7 +234,7 @@ pub(crate) fn translate_to_plan(
     );
     let mut claim_order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len())).collect();
     claim_order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
-    let storage = site_storage(sol, n);
+    let storage_throughput_kw = storage_throughput_kw(sol, n);
 
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
@@ -306,8 +290,6 @@ pub(crate) fn translate_to_plan(
             net_export_kw: sol.p_exp_kw[t],
             import_flexibility_kw: 0.0,
             export_flexibility_kw: 0.0,
-            bat_charge_kw: storage.charge_kw[t],
-            bat_discharge_kw: storage.discharge_kw[t],
             // Each asset's own planned state for the slot (T008/T013/T017).
             planned_state_by_asset: sol
                 .assets
@@ -316,9 +298,6 @@ pub(crate) fn translate_to_plan(
                 .collect(),
         });
     }
-
-    // ── Stored-energy trajectory ─────────────────────────────────────────
-    let soc_trajectory_kwh = storage.energy_kwh.clone();
 
     // ── Summary (raw energy economics, no weights) ──────────────────────
     let summary = PlanSummary {
@@ -363,11 +342,7 @@ pub(crate) fn translate_to_plan(
             .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * inputs.dt_h[t])
             .sum(),
         c_wear_eur: (0..n)
-            .map(|t| {
-                weights.c_storage_wear_eur_kwh
-                    * (storage.charge_kw[t] + storage.discharge_kw[t])
-                    * inputs.dt_h[t]
-            })
+            .map(|t| weights.c_storage_wear_eur_kwh * storage_throughput_kw[t] * inputs.dt_h[t])
             .sum(),
         c_violations_eur: (0..n)
             .map(|t| {
@@ -467,7 +442,6 @@ pub(crate) fn translate_to_plan(
         session_flexibility,
         warnings,
         objective,
-        soc_trajectory_kwh,
         objective_eur: phase1_cost_eur,
         friction_eur,
         cost_breakdown,

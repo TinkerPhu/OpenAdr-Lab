@@ -210,6 +210,34 @@ fn refresh_from_asset(
     };
 }
 
+/// Asset `asset_id`'s planned power in slot `slot` [kW] (positive = import), 0.0 where the plan
+/// keeps it idle.
+fn planned_kw(slot: &crate::entities::plan::PlanTimeSlot, asset_id: &str) -> f64 {
+    slot.planned_kw_by_asset
+        .get(asset_id)
+        .copied()
+        .unwrap_or(0.0)
+}
+
+/// The site's power balance in every slot of `plan`, over every asset it planned:
+/// `p_imp + p_pv_used − p_exp = p_base + Σ asset net power`, within `tolerance_kw` (an allocation
+/// under 0.01 kW is not reported, so the sum can miss that much per asset).
+fn assert_site_balance(plan: &Plan, tolerance_kw: f64) {
+    for (t, slot) in plan.slots.iter().enumerate() {
+        let assets_kw: f64 = plan
+            .planned_assets()
+            .iter()
+            .map(|id| planned_kw(slot, id))
+            .sum();
+        let supply_kw = slot.net_import_kw + slot.pv_used_kw - slot.net_export_kw;
+        let demand_kw = slot.baseline_kw + assets_kw;
+        assert!(
+            (supply_kw - demand_kw).abs() < tolerance_kw,
+            "power balance violated at slot {t}: supply {supply_kw:.4} kW, demand {demand_kw:.4} kW"
+        );
+    }
+}
+
 fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
     set_ev_state(snap, Some(plugged), None);
 }

@@ -486,7 +486,7 @@ fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
         .map(|s| s.planned_state_by_asset["battery"]["soc"])
         .collect();
     for t in 1..socs.len() {
-        if plan.slots[t - 1].bat_charge_kw > 0.01 {
+        if planned_kw(&plan.slots[t - 1], "battery") > 0.01 {
             assert!(
                     socs[t] >= socs[t - 1] - 1e-6,
                     "SoC must be non-decreasing in charging slot: slot {t} soc={:.4} < slot {} soc={:.4}",

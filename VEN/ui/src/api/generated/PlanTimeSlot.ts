@@ -82,14 +82,6 @@ import_flexibility_kw: number,
  */
 export_flexibility_kw: number, 
 /**
- * Planned battery charge power in this slot (kW, ≥ 0). Set by MILP solver.
- */
-bat_charge_kw: number, 
-/**
- * Planned battery discharge power in this slot (kW, ≥ 0). Set by MILP solver.
- */
-bat_discharge_kw: number, 
-/**
  * Power allocated to each asset in this slot (kW), keyed by asset_id.
  * Positive = consumption/charging, negative = discharge/generation.
  * Built from `allocations` for easy lookup without iteration.
