@@ -46,8 +46,9 @@ pub(crate) struct Phase1Weights {
     pub(crate) w_import: f64,
     /// Scales contractual violation penalties
     pub(crate) w_viol: f64,
-    /// Wear per kWh charged or discharged by a storage asset [€/kWh]. The profile key is
-    /// `c_bat_wear_eur_kwh`; only the `Custom` objective reads it (see `build_phase1_weights`).
+    /// Wear per kWh charged or discharged by a storage asset [€/kWh]: the profile's
+    /// `c_bat_wear_eur_kwh` under the objectives that price money (MinCost, MaxRevenue, Custom),
+    /// 0 under those that do not (see `build_phase1_weights`).
     pub(crate) c_storage_wear_eur_kwh: f64,
     /// Penalty per kWh of battery discharge co-occurring with EV charging when
     /// PV surplus ≥ ev_min_kw [€/kWh]. 0.0 = disabled.
@@ -153,7 +154,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.02,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_storage_wear_eur_kwh: 0.03,
+            c_storage_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
@@ -193,7 +194,7 @@ pub(crate) fn build_phase1_weights(
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: p.w_viol,
-            c_storage_wear_eur_kwh: 0.03,
+            c_storage_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },

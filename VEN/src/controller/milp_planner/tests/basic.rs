@@ -292,6 +292,24 @@ fn weights_preset_min_cost() {
     assert!((w.c_storage_wear_eur_kwh - 0.03).abs() < 1e-9);
 }
 
+/// R-142: the money-pricing presets price storage wear at the profile's `c_bat_wear_eur_kwh`,
+/// not at a constant; the presets that do not price money keep wear free.
+#[test]
+fn weights_presets_that_price_money_use_the_configured_wear() {
+    let mut profile = make_profile();
+    profile.planner.c_bat_wear_eur_kwh = 0.08;
+    for objective in [PlannerObjective::MinCost, PlannerObjective::MaxRevenue] {
+        let w = build_phase1_weights(&profile, objective);
+        assert!(
+            (w.c_storage_wear_eur_kwh - 0.08).abs() < 1e-12,
+            "{objective:?}: wear {}",
+            w.c_storage_wear_eur_kwh
+        );
+    }
+    let w = build_phase1_weights(&profile, PlannerObjective::MinGhg);
+    assert_eq!(w.c_storage_wear_eur_kwh, 0.0);
+}
+
 #[test]
 fn weights_preset_min_ghg() {
     let profile = make_profile();
