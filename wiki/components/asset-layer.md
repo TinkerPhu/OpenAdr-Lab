@@ -2,7 +2,7 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-08-21
+updated: 2026-10-14
 synced_commit: 6a5a678
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
@@ -144,10 +144,12 @@ it up, R-62 deleted the file outright — its only genuinely-referenced type, `P
 ## Planning-side counterpart
 
 For the [[milp-planner]], each controllable asset provides an `AssetMilpContext` —
-its constraints and variables in solver terms. The trait is declared at the planner
-boundary (`controller/milp_planner/asset_port.rs`) and implemented in `assets/battery.rs`,
-`assets/ev.rs`, `assets/heater.rs` (cross-file inherent impls), so the solver only ever
-sees trait objects ([[ven-hexagonal-architecture]]). PV and base load are not
+its variables, constraints, cost and friction, and its own plan result, in solver terms. The
+trait is declared in the domain ring (`controller/asset_milp_port.rs`) and implemented per kind in
+`assets/<kind>_declared.rs` (battery, EV, heater, shiftable load), with the model maths in
+`assets/<kind>_milp.rs`; each context is built from one `MilpBuildInputs`
+(`assets/capability_traits.rs`) and carries its roster id, so the solver only ever sees trait
+objects ([[ven-hexagonal-architecture]]). PV and base load are not
 MILP-controllable; their forecasts enter as per-slot input arrays.
 
 Sign convention for all power values crossing this interface: positive = import,
