@@ -31,10 +31,10 @@ confirmed by `git log -1`.
 
 - [x] 3.1 Regenerate the ts-rs bindings (`Plan.ts`, `PlanTimeSlot.ts`); update
       `__tests__/fixtures/plan.ts`.
-- [ ] 3.2 Test first in `PlanDecisionMatrix.test.tsx`: an idle planned asset gets a row; a plan
+- [x] 3.2 Test first in `PlanDecisionMatrix.test.tsx`: an idle planned asset gets a row; a plan
       without `planned_asset_ids` still shows its allocated assets; then rows come from
       `planned_asset_ids` ∪ allocation ids, and the `"battery"`, `"pv"`, `"base_load"` literals go.
-- [ ] 3.3 `npm test`, `npm run lint` and `npm run build` in `VEN/ui`.
+- [x] 3.3 `npm test`, `npm run lint` and `npm run build` in `VEN/ui`.
 
 ## 4. Enforcement
 

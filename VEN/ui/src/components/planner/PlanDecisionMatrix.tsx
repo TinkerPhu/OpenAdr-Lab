@@ -62,17 +62,14 @@ export function PlanDecisionMatrix({ plan, selectedSlotStart = null, onSlotSelec
   const [collapsed, setCollapsed] = useState(false);
   const [selectedAlloc, setSelectedAlloc] = useState<{ alloc: AssetAllocation; slotStart: string } | null>(null);
 
-  // Derive sorted unique asset IDs from allocations; always include "battery" so the
-  // row is visible even when all its allocations are idle.
-  // Exclude uncontrollable assets (pv, base_load) — covered by forecast rows below.
+  // One row per asset the plan scheduled, in the plan's order, idle ones included. A plan
+  // stored before `planned_asset_ids` existed lacks it, so the assets its allocations name
+  // follow (sorted), as in `Plan::planned_assets` on the VEN.
   const assetIds = useMemo(() => {
     if (!plan) return [];
-    const UNCONTROLLABLE = new Set(["pv", "base_load"]);
-    const ids = new Set(
-      plan.slots.flatMap((s) => s.allocations).map((a) => a.asset_id).filter((id) => !UNCONTROLLABLE.has(id))
-    );
-    ids.add("battery");
-    return [...ids].sort();
+    const planned = plan.planned_asset_ids ?? [];
+    const allocated = new Set(plan.slots.flatMap((s) => s.allocations).map((a) => a.asset_id));
+    return [...planned, ...[...allocated].filter((id) => !planned.includes(id)).sort()];
   }, [plan]);
 
   const allSlots: PlanTimeSlot[] = useMemo(() => {

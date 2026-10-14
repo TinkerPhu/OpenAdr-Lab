@@ -59,6 +59,30 @@ describe("PlanDecisionMatrix", () => {
     expect(screen.getByTestId("matrix-row-ev")).toBeInTheDocument();
   });
 
+  it("shows a row for every planned asset, idle ones included, in the plan's order", () => {
+    const plan = { ...makePlan([makeAlloc({ asset_id: "ev" })]), planned_asset_ids: ["ev", "heater", "battery"] };
+    render(<PlanDecisionMatrix plan={plan} />);
+    const rows = screen.getAllByTestId(/^matrix-row-(ev|heater|battery)$/).map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["matrix-row-ev", "matrix-row-heater", "matrix-row-battery"]);
+  });
+
+  it("shows no row for an asset the plan did not plan", () => {
+    const plan = { ...makePlan([makeAlloc({ asset_id: "ev" })]), planned_asset_ids: ["ev"] };
+    render(<PlanDecisionMatrix plan={plan} />);
+    expect(screen.queryByTestId("matrix-row-battery")).toBeNull();
+  });
+
+  it("an older plan without planned_asset_ids still shows the assets it allocates", () => {
+    const older: Partial<Plan> = makePlan([
+      makeAlloc({ asset_id: "battery" }),
+      makeAlloc({ asset_id: "ev" }),
+    ]);
+    delete older.planned_asset_ids;
+    render(<PlanDecisionMatrix plan={older as Plan} />);
+    expect(screen.getByTestId("matrix-row-battery")).toBeInTheDocument();
+    expect(screen.getByTestId("matrix-row-ev")).toBeInTheDocument();
+  });
+
   it("renders matrix cell for each allocation", () => {
     render(<PlanDecisionMatrix plan={makePlan([makeAlloc({ asset_id: "battery" })])} />);
     expect(screen.getByTestId("matrix-cell-battery-0")).toBeInTheDocument();
