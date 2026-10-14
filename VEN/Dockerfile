@@ -10,43 +10,27 @@ FROM rust:1.91-bookworm AS builder
 WORKDIR /repo/VEN
 
 # HiGHS bindings build native C++ code via cmake + bindgen (needs libclang).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        cmake \
-        pkg-config \
-        libclang-dev \
-        libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+# mold links the large ven-app binary several times faster than the default ld.
+RUN apt-get update     && apt-get install -y --no-install-recommends         build-essential         cmake         pkg-config         libclang-dev         libssl-dev         mold     && rm -rf /var/lib/apt/lists/*
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 
 # The build context is the repo root, not VEN/, because `lab-core` is a path
 # dependency living beside VEN/ -- the rules the VEN shares with the VTN's BFF
 # (D-06). Everything below is therefore VEN/-prefixed, and the root
 # .dockerignore keeps the context small.
-
-# Cache dependency compilation (including the slow HiGHS C++ build).
-# This layer is reused on source-only changes.
-#
-# `lab-core` is stubbed alongside the app: cargo needs a path dependency to
-# exist to resolve the graph, but copying its *source* here would mean every
-# edit to it rebuilt HiGHS from scratch. Its manifest rarely changes; its
-# source changes land in the cheap layer below.
 COPY VEN/Cargo.toml VEN/Cargo.lock ./
 COPY lab-core/Cargo.toml /repo/lab-core/Cargo.toml
-RUN mkdir -p src /repo/lab-core/src     && echo 'fn main() {}' > src/main.rs     && : > /repo/lab-core/src/lib.rs
-RUN cargo build --release     && rm -rf src /repo/lab-core/src         target/release/deps/ven_app* target/release/deps/lab_core*
-
-# Build the actual application
 COPY lab-core/src /repo/lab-core/src
 COPY VEN/src ./src
 COPY VEN/profiles ./profiles
-# `cargo clean -p` rather than deleting artefacts by glob: the stub layer above
-# compiled an empty `lab-core`, and a glob for `lab_core*` misses the `lib`
-# prefix cargo gives a library's rlib. The stale stub then satisfied the
-# dependency and the real source was never compiled -- a build that succeeded
-# through every expensive step and failed on `could not find time_window`.
-# Asking cargo which artefacts belong to a package cannot miss one.
-RUN cargo clean --release -p lab-core -p ven-app && cargo build --release
+
+# The cargo registry and `target/` live in BuildKit cache mounts, which survive
+# between builds while image layers do not: cargo itself decides what is stale,
+# so a source edit recompiles only the crates it touches, and a Cargo.lock change
+# rebuilds only the dependencies that changed -- not HiGHS and every other crate,
+# as a layer keyed on the lockfile would. The binary is copied out in the same
+# step because a cache mount is not part of the image.
+RUN --mount=type=cache,id=ven-cargo-registry,target=/usr/local/cargo/registry     --mount=type=cache,id=ven-cargo-git,target=/usr/local/cargo/git     --mount=type=cache,id=ven-target,target=/repo/VEN/target,sharing=locked     cargo build --release && cp target/release/ven-app /ven-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \
@@ -65,7 +49,7 @@ RUN groupadd -g ${gid} ${group} && \
     useradd -u ${uid} -g ${group} -s /bin/sh -M ${user}
 
 WORKDIR /app
-COPY --from=builder --chown=nonroot:nonroot /repo/VEN/target/release/ven-app /app/ven-app
+COPY --from=builder --chown=nonroot:nonroot /ven-app /app/ven-app
 RUN chmod 755 /app/ven-app
 
 # Persistence volume mount point

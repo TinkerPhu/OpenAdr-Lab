@@ -33,6 +33,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 30s
+      start_interval: 1s
 
   # Throwaway broker. From 3.1 the VTN connects to MQTT at startup and exits
   # 101 if it cannot -- and because openleadr-rs tracks a `.env` carrying
@@ -49,6 +51,8 @@ services:
       interval: 3s
       timeout: 3s
       retries: 10
+      start_period: 30s
+      start_interval: 1s
 
   vtn:
     build:
@@ -77,6 +81,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
+      start_interval: 1s
 
   seed:
     image: postgres:16-alpine
