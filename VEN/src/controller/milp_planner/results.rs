@@ -134,6 +134,27 @@ fn planned_asset_ids(asset_contexts: &[Box<dyn AssetMilpContext>]) -> Vec<String
         .collect()
 }
 
+/// The dispatched assets' positions in the order they claim a slot's PV surplus: the rank each
+/// declares, equal ranks in planner input order. The solution holds one `AssetSolution` per
+/// context, in context order.
+fn surplus_claim_order(
+    sol: &SolveOutput,
+    asset_contexts: &[Box<dyn AssetMilpContext>],
+) -> Vec<usize> {
+    debug_assert!(
+        sol.assets
+            .iter()
+            .zip(asset_contexts)
+            .all(|(a, c)| a.asset_id == c.asset_id()),
+        "translate_to_plan: the solution's assets are not the contexts it was solved with"
+    );
+    let mut order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len()))
+        .filter(|&i| dispatched(asset_contexts[i].as_ref()))
+        .collect();
+    order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
+    order
+}
+
 /// The generation the plan uses per slot [kW]: every generating forecast participant's own
 /// used generation (minus its net power), summed. A single participant's value passes through
 /// unchanged; 0 kW without one.
@@ -264,19 +285,7 @@ pub(crate) fn translate_to_plan(
         zones: planner.plan_zones.clone(),
     };
 
-    // The solution holds one AssetSolution per context, in context order. Surplus is claimed
-    // in the order the assets declare; equal ranks keep planner input order.
-    debug_assert!(
-        sol.assets
-            .iter()
-            .zip(asset_contexts)
-            .all(|(a, c)| a.asset_id == c.asset_id()),
-        "translate_to_plan: the solution's assets are not the contexts it was solved with"
-    );
-    let mut claim_order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len()))
-        .filter(|&i| dispatched(asset_contexts[i].as_ref()))
-        .collect();
-    claim_order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
+    let claim_order = surplus_claim_order(sol, asset_contexts);
     let storage_throughput_kw = storage_throughput_kw(sol, n);
 
     let forecast_surplus_kw = inputs.forecast_surplus_kw();

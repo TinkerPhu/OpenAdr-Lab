@@ -53,13 +53,13 @@
   "VEN/src/assets/ev_trip_series.rs::plan_inputs": 104,
   "VEN/src/assets/heater_milp.rs::from_state": 125,
   "VEN/src/controller/arbiter.rs::apply_ranked_levers": 101,
-  "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 257,
+  "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 249,
   "VEN/src/controller/milp_planner/solver_phase2.rs::solve_milp_two_phase": 105,
   "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 175,
   "VEN/src/profile/validate.rs::validate": 355,
   "VEN/src/routes/mod.rs::build_router": 115,
   "VEN/src/services/obligation.rs::check_and_report": 106,
-  "VEN/src/tasks/planning/cycle.rs::run_plan_cycle": 128,
+  "VEN/src/tasks/planning/cycle.rs::run_plan_cycle": 125,
   "VEN/src/tasks/planning/mod.rs::spawn_planning": 110,
   "VEN/src/tasks/poll_events/detect.rs::detect_event_changes": 107,
   "VEN/src/tasks/poll_events/mod.rs::spawn_event_poll": 158,
@@ -68,6 +68,6 @@
   "VTN/bff/src/main.rs::main": 134
  },
  "test_duplicated_windows": {
-  "VEN/src/controller/milp_planner/tests": 163
+  "VEN/src/controller/milp_planner/tests": 160
  }
 }

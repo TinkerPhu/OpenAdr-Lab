@@ -214,11 +214,11 @@ impl<'c> ModelSkeleton<'c> {
         let weights = CostWeights {
             c_storage_wear_eur_kwh: p1w.c_storage_wear_eur_kwh,
         };
-        let cost = |asset: &&Box<dyn DeclaredAsset + 'c>| {
+        let cost = |asset: &(dyn DeclaredAsset + 'c)| {
             asset.objective(ObjectivePart::Cost(&weights), n, &inputs.dt_h)
         };
         for asset in self.pool.assets.iter().filter(|a| a.dispatched()) {
-            objective += cost(&asset);
+            objective += cost(asset.as_ref());
         }
         for active in &self.interactions {
             objective += active.interaction.objective(&active.vars, &inputs.dt_h);
@@ -227,7 +227,7 @@ impl<'c> ModelSkeleton<'c> {
         // receives the terms in, and so the evaluated objective, stays what it was when the
         // tie-break was a grid term.
         for asset in self.pool.assets.iter().filter(|a| !a.dispatched()) {
-            objective += cost(&asset);
+            objective += cost(asset.as_ref());
         }
         objective
     }
