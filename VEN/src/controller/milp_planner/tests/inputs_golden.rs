@@ -511,4 +511,19 @@ fn scenarios_take_their_branches() {
     );
     assert_eq!(s["two_zones"].n, 9);
     assert_eq!(s["two_zones"].cum_s[9], 6 * 300 + 3 * 1800);
+    // W3: one forecast surplus, PV over the base load after the override, signed (a deficit is
+    // negative); every reader floors it where it needs to.
+    for (name, inputs) in &s {
+        for t in 0..inputs.n {
+            assert_eq!(
+                inputs.forecast_surplus_kw()[t],
+                inputs.p_pv_kw[t] - inputs.p_base_kw[t],
+                "{name} slot {t}"
+            );
+        }
+    }
+    assert!(
+        over.forecast_surplus_kw()[3] < plain.forecast_surplus_kw()[3],
+        "the override lowers it"
+    );
 }

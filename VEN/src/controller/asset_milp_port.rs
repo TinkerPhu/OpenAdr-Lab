@@ -221,11 +221,11 @@ pub trait AssetMilpContext: Send + Sync {
     }
 
     /// Phase A2 — optional per-slot grid-context injection, called after the
-    /// global MILP inputs are built (so tariff / PV-forecast / baseline arrays
+    /// global MILP inputs are built (so the import rates and the forecast surplus
     /// exist) and before variable declaration. Lets a context derive slot data
     /// it cannot know at construction time — e.g. the OPPORTUNISTIC free-energy
-    /// charge cap (WP4.1). Default: no-op.
-    fn inject_grid_slots(&mut self, _c_imp_eur_kwh: &[f64], _p_pv_kw: &[f64], _p_base_kw: &[f64]) {}
+    /// charge cap (WP4.1). `forecast_surplus_kw` is signed (`MilpInputs`). Default: no-op.
+    fn inject_grid_slots(&mut self, _c_imp_eur_kwh: &[f64], _forecast_surplus_kw: &[f64]) {}
 
     /// Lets a test read the concrete context it built, e.g. what an EV derived from a session.
     #[cfg(test)]

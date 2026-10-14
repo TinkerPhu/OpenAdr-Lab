@@ -49,33 +49,36 @@ pub(crate) fn fallback_plan(
         suggested_action: None,
     };
     let slots: Vec<PlanTimeSlot> = match inputs {
-        Some(inp) => (0..inp.n)
-            .map(|t| PlanTimeSlot {
-                slot_index: t,
-                start: now + Duration::seconds(inp.cum_s[t]),
-                end: now + Duration::seconds(inp.cum_s[t + 1]),
-                import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
-                export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
-                co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
-                grid_effective_cost: inp.c_imp_eur_kwh[t],
-                rate_estimated: inp.rate_stale[t],
-                import_cap_kw: inp.p_imp_max_cont_kw[t],
-                export_cap_kw: inp.p_exp_max_cont_kw[t],
-                baseline_kw: inp.p_base_kw[t],
-                pv_forecast_kw: inp.p_pv_kw[t],
-                pv_used_kw: inp.p_pv_kw[t],
-                surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t]).max(0.0),
-                marginal_cost_import_eur_per_kwh: 0.0,
-                marginal_cost_export_eur_per_kwh: 0.0,
-                allocations: vec![],
-                net_import_kw: 0.0,
-                net_export_kw: 0.0,
-                import_flexibility_kw: 0.0,
-                export_flexibility_kw: 0.0,
-                planned_kw_by_asset: std::collections::HashMap::new(),
-                planned_state_by_asset: std::collections::HashMap::new(),
-            })
-            .collect(),
+        Some(inp) => {
+            let surplus_kw = inp.forecast_surplus_kw();
+            (0..inp.n)
+                .map(|t| PlanTimeSlot {
+                    slot_index: t,
+                    start: now + Duration::seconds(inp.cum_s[t]),
+                    end: now + Duration::seconds(inp.cum_s[t + 1]),
+                    import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
+                    export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
+                    co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
+                    grid_effective_cost: inp.c_imp_eur_kwh[t],
+                    rate_estimated: inp.rate_stale[t],
+                    import_cap_kw: inp.p_imp_max_cont_kw[t],
+                    export_cap_kw: inp.p_exp_max_cont_kw[t],
+                    baseline_kw: inp.p_base_kw[t],
+                    pv_forecast_kw: inp.p_pv_kw[t],
+                    pv_used_kw: inp.p_pv_kw[t],
+                    surplus_available_kw: surplus_kw[t].max(0.0),
+                    marginal_cost_import_eur_per_kwh: 0.0,
+                    marginal_cost_export_eur_per_kwh: 0.0,
+                    allocations: vec![],
+                    net_import_kw: 0.0,
+                    net_export_kw: 0.0,
+                    import_flexibility_kw: 0.0,
+                    export_flexibility_kw: 0.0,
+                    planned_kw_by_asset: std::collections::HashMap::new(),
+                    planned_state_by_asset: std::collections::HashMap::new(),
+                })
+                .collect()
+        }
         None => vec![],
     };
     let session_flexibility = match inputs {
@@ -236,13 +239,14 @@ pub(crate) fn translate_to_plan(
     claim_order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
     let storage_throughput_kw = storage_throughput_kw(sol, n);
 
+    let forecast_surplus_kw = inputs.forecast_surplus_kw();
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
 
     for t in 0..n {
         let slot_start = now + Duration::seconds(cum_s[t]);
         let slot_end = now + Duration::seconds(cum_s[t + 1]);
-        let surplus_available_kw = (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
+        let surplus_available_kw = forecast_surplus_kw[t].max(0.0);
         let mut surplus_remaining_kw = surplus_available_kw;
 
         let allocations: Vec<AssetAllocation> = claim_order

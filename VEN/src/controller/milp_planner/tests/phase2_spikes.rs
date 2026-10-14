@@ -185,7 +185,7 @@ fn instance_from(profile: Profile, now: DateTime<Utc>, slots: &[Slot]) -> Instan
         inputs.p_base_kw[i] = base;
     }
     for ctx in ctxs.iter_mut() {
-        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.forecast_surplus_kw());
     }
     Instance {
         inputs,
@@ -386,7 +386,7 @@ fn bench_fleet_startup_penalty() {
         let mut ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
         let inputs = build_milp_inputs(&tariffs, &cap, &profile, now, &[], None);
         for ctx in ctxs.iter_mut() {
-            ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+            ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.forecast_surplus_kw());
         }
         let p1w = build_phase1_weights(&profile, PlannerObjective::MinCost);
         let eps = profile.planner.phase2_epsilon_eur;
@@ -412,7 +412,7 @@ fn bench_fleet_startup_penalty() {
             priced.planner.c_ev_startup_eur = startup;
             let mut priced_ctxs = build_asset_contexts(&priced, &sim, now, None, None, &tariffs);
             for ctx in priced_ctxs.iter_mut() {
-                ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+                ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.forecast_surplus_kw());
             }
             let t = Instant::now();
             let r = solve_phase2(
