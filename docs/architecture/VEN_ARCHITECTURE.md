@@ -1246,10 +1246,9 @@ Curtailment: if `ExportCapacityLimit` is set and `|P_pv| > limit`, the inverter 
 **Forecast:** `PvAsset.forecast(horizon)` applies the same irradiation model over future
 time slots. The planner calls this — it does not contain a PV formula of its own.
 
-**Export curtailment as a planner decision**: the MILP has a real decision variable,
-`p_pv_used[t]` (`GridMilpVars`, `controller/milp_interactions.rs`), bounded
-`0 <= p_pv_used[t] <= p_pv_kw[t]` and substituted for the raw forecast in the power-balance
-constraint in both solver phases. No cost term is attached to curtailment itself — every real
+**Export curtailment as a planner decision**: the PV declares its own used generation per
+slot (`assets/forecast_declared.rs`, a curtailable forecast participant), bounded by its forecast
+and standing in for the raw forecast in the power balance in every solve. No cost term is attached to curtailment itself — every real
 cost term already favors using PV, so the solver only curtails when doing so relieves an active
 export-capacity constraint. A small `PV_USE_TIEBREAK_EUR_PER_KWH` bias (mirroring the
 pre-existing `SHIFT_TIEBREAK_EUR_PER_SLOT` pattern) keeps HiGHS's MIP-gap tolerance and Phase 2's
@@ -1518,19 +1517,18 @@ Dashboard's instantaneous Site Headroom chart.
 
 **PV's forward ceiling — `PvInverter`'s own methods are the sole authority**
 (`pv-competence-consolidation`, `asset-competence-assurance`). Every
-forward-looking PV value — the planner's `p_pv_kw` solver input
-(`simulator::plan_context::resolve_pv_forecast_kw`, threaded into
-`controller::milp_planner::inputs::build_milp_inputs` as `pv_live_forecast_kw`)
-and the site-headroom/capacity forecasts above (`asset_max_power_series`/
+forward-looking PV value — the planner's PV forecast (the PV's own MILP context,
+`MilpParticipant for PvInverter` in `assets/pv_schedule.rs`) and the site-headroom/capacity
+forecasts above (`asset_max_power_series`/
 `simulated_trajectory`) — resolves through `PvInverter::uncurtailed_power_kw_at`,
 the one method `max_effort_schedule`/`simulate_forward` both build
 on. Precedence: deterministic pin (`pv_forecast_override`, always wins) →
 `PvInverter`'s own weather-aware projection (its `weather_forecast` field,
 populated each tick from the same weather feed R-50 always used) → sin-model
 snapshot with the decaying manual-inject offset, clipped to `inverter_max_kw`.
-The static `weather_pv_kw`/`pv_cfg` fallback chain in `build_milp_inputs`
-only applies when no live `"pv"` asset exists at all (a site described, not
-simulated). Two properties matter and are regression-tested:
+There is no planner-side fallback: a site without a PV asset plans no PV, and a profile with a
+`weather_pv` section must have a PV asset (`profile::validate`). Two properties matter and are
+regression-tested:
 
 - **Each slot/future point is evaluated at its own timestamp**, using
   cumulative elapsed seconds — never a slot index times a nominal step. The

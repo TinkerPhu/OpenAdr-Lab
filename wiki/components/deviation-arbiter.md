@@ -2,7 +2,7 @@
 title: Deviation Arbiter
 type: component
 created: 2026-07-28
-updated: 2026-07-30
+updated: 2026-10-14
 synced_commit: dfdb62b
 sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/arbiter_levers.rs, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
 tags: [arbiter, deviation, real-time, marginal-cost, ven]
@@ -76,7 +76,7 @@ stale marginal-cost numbers.
 | EV | Adjust opportunistic/session charging | Session target SoC |
 | Heater pause | Suppress in-progress heating | Zero-cost only when mid-cycle toward `temp_max_c` |
 | Heater emergency curtail/absorb | Drift below `temp_min_c` / heat above `temp_max_c` toward `temp_safety_max_c` | [[asset-layer]]'s `HeaterEmergencyMode` |
-| PV curtailment | Reduce `p_pv_used` below forecast | Only relieves an active export cap |
+| PV curtailment | Reduce the plan's `pv_used_kw` below forecast | Only relieves an active export cap |
 
 ## Runtime toggle and diagnostics surface
 

@@ -47,9 +47,25 @@ when a kind is named in `controller/milp_planner/` or `controller/milp_interacti
   only phase 2 prices; `DeclareMode::Pinned(&own AssetSolution)` fixes the asset's own winning
   mode decisions for the marginal-cost pass (§9). One function declares all three, so the solves
   cannot drift apart (R-98).
+- *Participation.* A context declares whether the plan dispatches it or only follows its
+  forecast (`Participation::{Dispatched, Forecast { role, forecast_kw }}`). PV and base load are
+  forecast participants (W3): each builds one `ForecastMilpContext` from its own forecast
+  (`PvInverter::uncurtailed_power_kw_at`, or the sim-inject pin; `BaseLoad::forecast_kw_at`) in
+  `assets/forecast_declared.rs`. PV is curtailable: it declares its used generation, bounded by
+  its forecast, with the full-use tie-break in both objective parts; base load contributes its
+  forecast as fixed net power. Forecast participants get no allocation, no planned power, no
+  place among the planned assets and no share of the malus; the plan's `pv_forecast_kw`,
+  `pv_used_kw` and `baseline_kw` are their site totals. `build_milp_inputs` sums their forecasts
+  into `generation_forecast_kw` and `load_forecast_kw`; nothing else in the planner holds a PV or
+  base-load series.
 - *Balance.* Each asset states its net power per slot (`net_power_expr`, positive = import). The
-  power balance is `p_imp + p_pv_used − Σ net − p_exp = p_base`, and the controllable-import malus
-  reads the same sum (`site_net_power_expr`).
+  power balance is `p_imp − Σ forecast net − Σ dispatched net − p_exp = load_adjust` (the user's
+  baseline override, a site statement); the controllable-import malus reads the dispatched sum
+  (`dispatched_net_power_expr`). The forecast PV surplus over the base load has one computation,
+  `MilpInputs::forecast_surplus_kw` (coexistence, malus, EV free-PV cap, `surplus_available_kw`).
+  Forecast participants are declared first, where the grid's own PV variable used to be, and their
+  rows and objective parts are placed where its terms were, so a site with PV sends HiGHS the same
+  model in the same order as before W3 (`tests/plans_golden.rs`).
 - *Objective.* Each asset contributes `ObjectivePart::Cost` (its economics: wear, rewards,
   penalties for a missed promise) to `cost_expr`, and `ObjectivePart::Friction` (startups, ramps,
   relay switching, tier preference) to phase 2's objective, priced by the `FrictionCosts` its

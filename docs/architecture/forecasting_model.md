@@ -16,15 +16,15 @@ code. **Every asset has both an exogenous driver and an endogenous response:**
 
 | | Exogenous driver (from outside) | Endogenous response (decided by us) |
 |---|---|---|
-| PV | Weather forecast → `weather_pv_kw` | Curtailment (`p_pv_used` decision variable) |
+| PV | Weather forecast → the PV's own forecast | Curtailment (the PV's used-generation variable) |
 | Heater | Ambient temperature, user comfort setpoints | Dispatch within the comfort envelope |
 | EV | Plug-in/plug-out times, user energy request | Charge schedule within the deadline |
 | Battery | — (no external driver) | Charge/discharge schedule |
 | Base load | Occupant behaviour (unobservable) | — (non-controllable) |
 
 PV is the clearest case and the reference implementation: the weather feed supplies the
-natural generation trajectory (`controller/milp_planner/inputs.rs`, `weather_pv_kw`), and the
-solver's own curtailment variable modifies it. Neither half alone is the forecast.
+natural generation trajectory (through the `PvInverter`'s `weather_forecast`, into its own
+planner context), and the solver's curtailment variable, which the PV declares, modifies it. Neither half alone is the forecast.
 
 **Why the endogenous half can never be outsourced:** an external forecaster cannot know our
 dispatch plan. The moment the planner decides to charge the EV at 13:00, the site's projected

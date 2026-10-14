@@ -44,8 +44,16 @@ The plan's wire format followed (`refactor/asset-declared-plan-output`, W2): the
 storage asset's net power and SoC already travel under its own id), and `Plan.planned_asset_ids`
 names the assets a plan scheduled, idle ones included (`VEN/src/entities/plan.rs`). Readers ask
 `Plan::planned_assets()`, which also covers plans stored before the list existed; the forecast
-service and the [[ven-ui]] Decision Matrix do. Audit rule 16 now covers `entities/plan.rs`. PV and
-base load remain site series on the slot until they take part as assets.
+service and the [[ven-ui]] Decision Matrix do. Audit rule 16 now covers `entities/plan.rs`.
+
+PV and base load take part too (`refactor/pv-base-load-participants`, W3): each builds a
+`ForecastMilpContext` from its own forecast (`VEN/src/assets/forecast_declared.rs`), declared as a
+forecast participant (`Participation::Forecast`), never dispatched. PV owns its curtailment
+variable; base load is fixed net power. The plan keeps `pv_forecast_kw`, `pv_used_kw`,
+`baseline_kw` as site totals, and the forecast surplus has one computation
+(`MilpInputs::forecast_surplus_kw`). The planner reads weather only through the PV's own forecast
+([[weather-forecast]]); per-array forecasts and per-asset measurement topics are not built, as a
+profile holds one PV ([[asset-layer]]).
 
 ## Key mechanics
 

@@ -194,14 +194,14 @@ method) → DC power (`poa/1000 × rated_kwp`) → cell-temp derate →
 `× performance_ratio` → clamp to `ac_limit_kw` → snow-cover override (applied
 last — see below).
 
-`entities::solar::resolve_weather_pv_kw`/`weather_pv_forecast_series` are the
-single entry point all three consumers of this math share, so none of them
-can silently diverge on what a `WeatherForecast` implies for PV output:
+`entities::solar::weather_pv_forecast_series` is the one translation of a
+`WeatherForecast` into PV output and `fresh_weather_pv_series` the one staleness
+gate on it, so no consumer can silently diverge on what a forecast implies:
 
 1. **`GET /weather`** (read-only diagnostic).
-2. **The planner's PV input** (`SolveRequest.weather_pv_kw` → `run_planner` →
-   `controller::milp_planner::inputs::build_milp_inputs`, precedence
-   `pv_forecast_override` > `weather_pv_kw` > sin-model fallback).
+2. **The planner's PV input**: the live `PvInverter` receives the gated series each tick
+   (`tasks::sim_tick::feeds`) and plans with its own forecast (`uncurtailed_power_kw_at`), so the
+   planner reads weather only through the PV (W3). The sim-inject pin `pv_plan_kw` still wins.
 3. **The simulator's own PV ground truth** (`PvInverter::step_inner` via
    `SimState::tick`'s `weather_pv_kw` parameter, and its read-only preview
    counterpart `SimState::peek_pv_kw`) — everything derived from the sim

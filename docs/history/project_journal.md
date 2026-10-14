@@ -15689,3 +15689,40 @@ more scenarios change only in the repaired warning whitespace.
 plan" (the profile default is 0.03 and no profile sets it) and R-141's "persisted Heater state
 needs a default" (asset configs are rebuilt from the profile at every load). The whitespace damage
 predates W1; the same heredoc escaping that caused it broke two edit scripts in this branch too.
+
+## W3: PV and base load take part in the planner (refactor/pv-base-load-participants)
+
+**What.** PV and base load are planner participants. Each builds a `ForecastMilpContext` from its
+own forecast (`PvInverter::uncurtailed_power_kw_at` or the sim-inject pin; `BaseLoad::forecast_kw_at`),
+implemented once in `assets/forecast_declared.rs` with the role (generation or load) and whether the
+plan may use less (curtailable) as data. The port gains `Participation { Dispatched, Forecast }`:
+forecast participants count in the balance and the surplus but get no allocation, planned power,
+planned-asset entry or malus share. PV's used-generation variable, bound and full-use tie-break moved
+from the grid into the PV. "Forecast PV surplus over base load", computed in four places, is
+`MilpInputs::forecast_surplus_kw`. The plan's `pv_forecast_kw`, `pv_used_kw`, `baseline_kw` stay as
+site totals (D1); the baseline override stays a site statement (`load_adjust_kw`, D3). Deleted: the
+fixed-id lookups `resolve_pv_forecast_kw`/`resolve_base_load_forecast_kw`, the forecast chain
+(weather PV and the sin model, which ran only without a live PV), the SolveRequest/SiteInputs fields
+that carried it, `p_pv_used`. The weather-PV staleness gate exists once
+(`entities::solar::fresh_weather_pv_series`), which the tick now calls instead of its own copy. A
+profile with `weather_pv` but no PV asset is refused (D6). Audit rule 18 refuses a string literal
+with a run of 6+ spaces, the shape of a lost line continuation. Out of scope (D4): per-array
+forecasts from `PvArrayGeometry`, per-array curtailment on the wire, per-asset measurement topics;
+they add nothing while a profile holds one PV.
+
+**Why.** The planner still answered "what will PV and base load do" itself, by fixed id, through a
+chain the asset did not own (`asset-competence-assurance`), and its PV curtailment was not the PV's
+decision.
+
+**How it was proven.** Goldens classified by script. `plans.txt` byte-identical for every scenario
+with PV; the four without a PV asset differ by at most 2e-12 (their model lost 24 PV columns fixed
+at 0), no decision changed. Fingerprints: PV scenarios differ only in the warm-start record's order.
+`milp_inputs.txt`: renamed and split series, every value identical; the three chain scenarios went
+with the chain. Byte identity needed the old order kept on purpose: forecast participants declared
+where `p_pv_used` was, PV's bound rows beside each balance row (`DeclaredAsset::slot_constraints`),
+the balance as two sums, their objective parts last.
+
+**Issues.** A fixture pinned PV in the inputs but not in the PV context: the two sources disagreed
+until both read the pin (found by the fingerprint classification). Hand-built test contexts lost the
+profile's base load, which the deleted site path had supplied; the test wrapper now adds the
+profile's participants. The heredoc backslash trap struck once more, hence rule 18.
