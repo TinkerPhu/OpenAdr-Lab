@@ -250,6 +250,7 @@ mod tests {
             friction_eur: 0.0,
             cost_breakdown: Default::default(),
             soc_trajectory_kwh: vec![],
+            planned_asset_ids: vec![],
             summary: Default::default(),
             session_flexibility: vec![],
             warnings: vec![],

@@ -7,14 +7,14 @@ confirmed by `git log -1`.
 
 ## 1. The plan names the assets it planned
 
-- [ ] 1.1 Test first: `results.rs` unit tests that a solved plan and a fallback plan built from
+- [x] 1.1 Test first: `results.rs` unit tests that a solved plan and a fallback plan built from
       the same three contexts carry their ids in input order, and that an idle asset is named
       without an allocation; `entities/plan.rs` tests for `Plan::planned_assets()` (list first,
       then ids only the slot maps name; empty-list JSON loads).
-- [ ] 1.2 Add `Plan.planned_asset_ids` (`#[serde(default)]`) and `Plan::planned_assets()`; write
+- [x] 1.2 Add `Plan.planned_asset_ids` (`#[serde(default)]`) and `Plan::planned_assets()`; write
       the list in `translate_to_plan` and `fallback_plan`; add the field to every hand-built
       `Plan` literal.
-- [ ] 1.3 `services/forecast.rs::build_asset_forecasts` enumerates `plan.planned_assets()`; a unit
+- [x] 1.3 `services/forecast.rs::build_asset_forecasts` enumerates `plan.planned_assets()`; a unit
       test pins that a planned idle asset with no state gets a zero `Optimization` forecast.
 
 ## 2. Delete the battery fields

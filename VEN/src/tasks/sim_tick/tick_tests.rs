@@ -172,6 +172,7 @@ mod tests {
             session_flexibility: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
+            planned_asset_ids: vec![],
             objective: crate::entities::PlannerObjective::MinCost,
             objective_eur: 0.0,
             friction_eur: 0.0,

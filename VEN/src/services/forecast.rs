@@ -3,7 +3,7 @@
 //! stored in `AppState` by the planning task and served at `GET /forecast`.
 
 use chrono::{DateTime, Utc};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::controller::{HistoryPort, WeatherForecastPort};
@@ -295,8 +295,8 @@ pub fn build_heuristic_forecasts(
         .collect()
 }
 
-/// Build one `AssetForecast` per asset that appears in the plan's slot
-/// allocations (`planned_kw_by_asset`), tagged `ForecastSource::Optimization`.
+/// Build one `AssetForecast` per asset the plan covers (`Plan::planned_assets`, idle
+/// ones included), tagged `ForecastSource::Optimization`.
 ///
 /// `power_kw[t]` is the planned power in slot `t` (0.0 where the asset has no
 /// allocation in that slot). `soc` is included only for assets whose
@@ -304,13 +304,7 @@ pub fn build_heuristic_forecasts(
 /// missing per-slot values carry the last known one forward (never NaN —
 /// serde_json cannot serialize NaN).
 pub fn build_asset_forecasts(plan: &Plan, now: DateTime<Utc>) -> Vec<AssetForecast> {
-    let mut asset_ids: BTreeSet<&str> = BTreeSet::new();
-    for slot in &plan.slots {
-        asset_ids.extend(slot.planned_kw_by_asset.keys().map(String::as_str));
-        asset_ids.extend(slot.planned_state_by_asset.keys().map(String::as_str));
-    }
-
-    asset_ids
+    plan.planned_assets()
         .into_iter()
         .map(|asset_id| {
             let power_kw: Vec<f64> = plan
@@ -389,6 +383,7 @@ mod tests {
             session_flexibility: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
+            planned_asset_ids: vec![],
             objective: crate::entities::PlannerObjective::MinCost,
             objective_eur: 0.0,
             friction_eur: 0.0,
@@ -537,6 +532,21 @@ mod tests {
         let plan = make_plan_with_slots(vec![slot(0, &[("heater", 3.0)], &[])]);
         let forecasts = build_asset_forecasts(&plan, ts(0));
         assert_eq!(forecasts[0].soc_frac, None);
+    }
+
+    /// A planned asset the plan keeps idle, with no planned state (a shiftable load waiting for
+    /// its window), is still forecast by the plan: zero power, from the optimisation.
+    #[test]
+    fn build_asset_forecasts_covers_a_planned_idle_asset_without_state() {
+        let mut plan = make_plan_with_slots(vec![slot(0, &[("ev", 7.0)], &[]), slot(1, &[], &[])]);
+        plan.planned_asset_ids = vec!["ev".into(), "wm".into()];
+        let forecasts = build_asset_forecasts(&plan, ts(0));
+
+        let ids: Vec<&str> = forecasts.iter().map(|f| f.asset_id.as_str()).collect();
+        assert_eq!(ids, ["ev", "wm"]);
+        assert_eq!(forecasts[1].power_kw, vec![0.0, 0.0]);
+        assert_eq!(forecasts[1].source, ForecastSource::Optimization);
+        assert_eq!(forecasts[1].soc_frac, None);
     }
 
     #[test]

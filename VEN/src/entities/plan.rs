@@ -378,6 +378,13 @@ pub struct Plan {
     pub trigger: PlanTrigger,
     pub horizon: PlanningHorizon,
 
+    /// The roster id of every asset this plan scheduled, in planner input order, including an
+    /// asset it keeps idle in every slot (which has no allocation anywhere). Fallback plans carry
+    /// it too. Read it through `Plan::planned_assets`, which also covers plans stored before this
+    /// field existed (`#[serde(default)]` reads them as empty).
+    #[serde(default)]
+    pub planned_asset_ids: Vec<String>,
+
     // --- All time slots (uniform, full horizon) ---
     pub slots: Vec<PlanTimeSlot>,
     pub summary: PlanSummary,
@@ -473,6 +480,31 @@ impl Plan {
     pub fn current_slot(&self, now: DateTime<Utc>) -> Option<&PlanTimeSlot> {
         covering(&self.slots, now)
     }
+
+    /// The assets this plan covers: `planned_asset_ids` in its order, then, sorted, any id a
+    /// slot names (allocation, planned power or planned state) that the list lacks. For a plan
+    /// from the planner the tail is empty; for one stored before the list existed it is all
+    /// there is to go on. The one answer to "which assets does this plan cover".
+    pub fn planned_assets(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.planned_asset_ids.iter().map(String::as_str).collect();
+        let named_by_slots: std::collections::BTreeSet<&str> = self
+            .slots
+            .iter()
+            .flat_map(|s| {
+                s.allocations
+                    .iter()
+                    .map(|a| a.asset_id.as_str())
+                    .chain(s.planned_kw_by_asset.keys().map(String::as_str))
+                    .chain(s.planned_state_by_asset.keys().map(String::as_str))
+            })
+            .collect();
+        let tail: Vec<&str> = named_by_slots
+            .into_iter()
+            .filter(|id| !out.contains(id))
+            .collect();
+        out.extend(tail);
+        out
+    }
 }
 
 /// R-97 — per-phase outcome of a two-phase MILP solve, so operators and the UI can
@@ -494,6 +526,63 @@ pub struct PlanPhaseReport {
     /// runs on a deliberately short budget and its result is capped so it can never
     /// be costlier than phase 1.
     pub phase2_status: Option<SolveStatus>,
+}
+
+#[cfg(test)]
+mod planned_assets_tests {
+    use crate::services::test_support::plans::flat_plan;
+    use chrono::{TimeZone, Utc};
+
+    fn plan() -> super::Plan {
+        flat_plan(900, 2, Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap())
+    }
+
+    /// The plan's own list comes first, in its order, idle assets included.
+    #[test]
+    fn planned_assets_lists_the_planned_ids_in_their_order() {
+        let mut p = plan();
+        p.planned_asset_ids = vec!["ev".into(), "heater".into(), "battery".into()];
+        p.slots[0].planned_kw_by_asset.insert("ev".into(), 7.4);
+        assert_eq!(p.planned_assets(), ["ev", "heater", "battery"]);
+    }
+
+    /// A plan stored before the list existed: the ids its slots name, each once, sorted.
+    #[test]
+    fn planned_assets_falls_back_to_the_ids_an_older_plan_names_in_its_slots() {
+        let mut p = plan();
+        p.slots[0].planned_kw_by_asset.insert("wm".into(), 2.0);
+        p.slots[0]
+            .planned_state_by_asset
+            .insert("battery".into(), Default::default());
+        p.slots[1].planned_kw_by_asset.insert("ev".into(), 7.4);
+        p.slots[1].allocations.push(super::AssetAllocation {
+            asset_id: "ev".into(),
+            power_kw: 7.4,
+            surplus_power_kw: 0.0,
+            grid_power_kw: 7.4,
+            marginal_value: 0.25,
+            cost_eur: 0.0,
+            co2_g: 0.0,
+        });
+        assert_eq!(p.planned_assets(), ["battery", "ev", "wm"]);
+    }
+
+    /// An id the list lacks but a slot names still shows, after the listed ones.
+    #[test]
+    fn planned_assets_appends_ids_only_the_slots_name() {
+        let mut p = plan();
+        p.planned_asset_ids = vec!["heater".into()];
+        p.slots[1].planned_kw_by_asset.insert("ev".into(), 7.4);
+        assert_eq!(p.planned_assets(), ["heater", "ev"]);
+    }
+
+    #[test]
+    fn a_plan_without_planned_asset_ids_still_deserializes_with_an_empty_list() {
+        let mut v = serde_json::to_value(plan()).expect("serializes");
+        v.as_object_mut().unwrap().remove("planned_asset_ids");
+        let p: super::Plan = serde_json::from_value(v).expect("absent field is allowed");
+        assert!(p.planned_asset_ids.is_empty());
+    }
 }
 
 #[cfg(test)]
