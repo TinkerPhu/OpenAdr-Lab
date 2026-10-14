@@ -63,6 +63,10 @@ pub struct Heater {
     pub k_loss_kw_per_c: f64,
     /// Constant simulated hot water draw (kW thermal). Defaults to 0.0.
     pub draw_kw: f64,
+    /// What one relay switch costs this heater in the plan [EUR/switch] (profile
+    /// `switching_penalty_eur`). Rebuilt from the profile at every start (`persist::load_with_params`).
+    #[serde(default)]
+    pub switching_penalty_eur: f64,
     /// Set each tick by sim from SimInjectState.ambient_temp_c; NOT from YAML.
     pub ambient_temp_c: f64,
 }
@@ -128,6 +132,7 @@ impl Heater {
             thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
             k_loss_kw_per_c: cfg.k_loss_kw_per_c,
             draw_kw: cfg.draw_kw,
+            switching_penalty_eur: cfg.switching_penalty_eur,
             ambient_temp_c: 10.0,
         }
     }
@@ -482,6 +487,7 @@ mod tests {
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
             ambient_temp_c: 10.0,
         }
     }
@@ -504,6 +510,7 @@ mod tests {
             thermal_mass_kwh_per_c: 200.0 * 4.186 / 3600.0, // ≈ 0.233 kWh/°C
             k_loss_kw_per_c: 0.003,
             draw_kw: 0.5,
+            switching_penalty_eur: 0.0,
             ambient_temp_c: 20.0,
         }
     }

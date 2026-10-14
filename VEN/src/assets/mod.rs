@@ -515,6 +515,32 @@ mod phase2a_heater_tests {
         assert!((scalars.e_max_kwh - 10.0).abs() < 1e-9, "(23-18)*2 kWh/C");
     }
 
+    /// R-141: each heater prices its relay switching by its own profile value, so two heaters
+    /// with different penalties keep them apart (it was the first heater's for every context).
+    #[test]
+    fn build_milp_context_prices_switching_by_the_heaters_own_penalty() {
+        use crate::controller::milp_planner::asset_port::HeaterMilpContext;
+        let now = Utc::now();
+        let planner = crate::entities::planner_params::PlannerParams::default();
+        for penalty_eur in [0.05, 0.01] {
+            let params = HeaterParams {
+                switching_penalty_eur: penalty_eur,
+                ..HeaterParams::default()
+            };
+            let heater = crate::assets::heater::Heater::from_params(&params);
+            let state = AssetState::Heater(crate::assets::heater::Heater::initial_state(&params));
+            let ctx = heater.build_milp_context(&MilpBuildInputs {
+                heater_anchor: vec![None; 4],
+                ..MilpBuildInputs::for_test("heater", &state, now, &planner)
+            });
+            let heater_ctx = ctx
+                .as_any()
+                .downcast_ref::<HeaterMilpContext>()
+                .expect("a heater builds a heater context");
+            assert_eq!(heater_ctx.lambda_sw_eur, penalty_eur);
+        }
+    }
+
     /// The confirmed `heater_events` bug this whole primitive exists to fix
     /// by construction (asset-max-power-primitive design.md's Context): a
     /// heater's Export extreme must be `0.0` (turn off), not its current

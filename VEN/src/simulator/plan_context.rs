@@ -113,7 +113,6 @@ pub fn build_asset_contexts(
     ev_sessions: &[EvSession],
     heat_tgt: Option<&HeaterTarget>,
     planner: &PlannerParams,
-    lambda_sw: f64,
     // Per-asset terminal value of stored energy, keyed by asset id — built
     // by `services::planning::build_plan_cycle_inputs` from each asset's own
     // params. Looked up, not branched on: which kinds have one is declared
@@ -143,7 +142,6 @@ pub fn build_asset_contexts(
                 heater_target: heat_tgt,
                 comfort_rates: &comfort_rates,
                 planner,
-                lambda_sw,
                 c_terminal_eur_kwh: c_terminal_eur_kwh_by_asset
                     .get(&entry.id)
                     .copied()
@@ -386,7 +384,6 @@ mod tests {
             &[],
             None,
             &planner,
-            0.0,
             &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
@@ -457,7 +454,6 @@ mod tests {
                 &[],
                 None,
                 &planner,
-                0.0,
                 &terminal_values(),
                 &[],
                 overrides,
@@ -531,7 +527,6 @@ mod tests {
             &[],
             None,
             &planner,
-            0.0,
             &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
@@ -574,7 +569,6 @@ mod tests {
             &[],
             None,
             &planner,
-            0.0,
             &std::collections::HashMap::new(),
             &[],
             &std::collections::HashMap::new(),
@@ -607,7 +601,6 @@ mod tests {
             &[],
             None,
             &planner,
-            0.0,
             &std::collections::HashMap::new(),
             &[],
             &std::collections::HashMap::new(),

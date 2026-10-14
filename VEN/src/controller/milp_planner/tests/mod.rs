@@ -318,6 +318,7 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
             thermal_mass_kwh_per_c: v("thermal_mass_kwh_per_c"),
             k_loss_kw_per_c: 0.0,
             draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
             ambient_temp_c: 10.0,
         };
         let state = AssetState::Heater(HeaterState {
@@ -441,7 +442,6 @@ struct TestCycle<'a> {
     ev_sessions: &'a [crate::entities::device_session::EvSession],
     heater_target: Option<&'a crate::entities::device_session::HeaterTarget>,
     planner: &'a PlannerParams,
-    lambda_sw: f64,
 }
 
 impl<'a> TestCycle<'a> {
@@ -461,7 +461,6 @@ impl<'a> TestCycle<'a> {
             heater_target: self.heater_target,
             comfort_rates: &[],
             planner: self.planner,
-            lambda_sw: self.lambda_sw,
             c_terminal_eur_kwh,
             heater_anchor: vec![],
         }
@@ -478,10 +477,6 @@ fn build_asset_contexts(
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
     let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
         crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
-    let lambda_sw = profile
-        .heater_config()
-        .map(|h| h.switching_penalty_eur)
-        .unwrap_or(0.0);
     let cycle = TestCycle {
         n,
         cum_s: &cum_s,
@@ -489,7 +484,6 @@ fn build_asset_contexts(
         ev_sessions: ev_session.map(std::slice::from_ref).unwrap_or(&[]),
         heater_target,
         planner: &profile.planner,
-        lambda_sw,
     };
 
     let avg_imp_eur_kwh = {
@@ -634,7 +628,6 @@ fn push_shiftable_load_contexts(
             ev_sessions: &[],
             heater_target: None,
             planner: &profile.planner,
-            lambda_sw: 0.0,
         };
         ctxs.push(MilpParticipant::build_milp_context(
             &asset,
