@@ -15895,3 +15895,9 @@ the same file; the reservation scenario now waits for a `CAPACITY_CHANGE` plan.
 run, and the capacity scenarios each waited 45-76 s for a plan whose solve took 1 s. The
 documented rule was already "only RateChange is delayed"; the architecture doc described the
 old behaviour as intended.
+
+**Issues.** One Node3 run failed the EV usage forecast scenario because the suite reached it in
+the hour slot holding the predicted return. The planner counts that slot as chargeable on purpose
+(GB-54, `assets/ev_trip_series.rs`), while the BDD step judged every slot by its start; the step
+now applies the planner's rule. Whether a slot the car is away for most of should carry full
+charge power is a separate question the rule already answers by design.
