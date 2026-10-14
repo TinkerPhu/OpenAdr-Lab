@@ -22,10 +22,8 @@ use crate::controller::asset_milp_port::DeclaredAsset;
 pub struct GlobalMilpInputs {
     pub n: usize,
     pub dt_h: Vec<f64>,
-    /// PV generation forecast [kW]
-    pub p_pv_kw: Vec<f64>,
-    /// Non-controllable baseline load [kW]
-    pub p_base_kw: Vec<f64>,
+    /// Forecast PV surplus over the base load [kW], signed (`MilpInputs::forecast_surplus_kw`).
+    pub forecast_surplus_kw: Vec<f64>,
 }
 
 // ── Typed LP variable pool ───────────────────────────────────────────────────
@@ -177,7 +175,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
                 let on = pool.assets[s].on_indicator()?;
                 let x_coexist = (0..global.n)
                     .map(|t| {
-                        let surplus = global.p_pv_kw[t] - global.p_base_kw[t];
+                        let surplus = global.forecast_surplus_kw[t];
                         (surplus >= on.p_min_kw)
                             .then(|| vars.add(variable().min(0.0).max(leg.max_kw)))
                     })
@@ -286,9 +284,9 @@ impl AssetInteraction for CtrlImportMalusInteraction {
         };
         let mut cs = Vec::new();
         #[allow(clippy::needless_range_loop)]
-        // t indexes multiple arrays (p_ctrl_imp, p_pv_kw, p_base_kw)
+        // t indexes multiple arrays (p_ctrl_imp, forecast_surplus_kw)
         for t in 0..global.n {
-            let surplus = (global.p_pv_kw[t] - global.p_base_kw[t]).max(0.0);
+            let surplus = global.forecast_surplus_kw[t].max(0.0);
             let p_ctrl_t = site_net_power_expr(pool, t);
             // p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t], combined with min(0.0) bound
             cs.push(constraint!(p_ctrl_imp[t] >= p_ctrl_t - surplus));

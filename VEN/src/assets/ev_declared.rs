@@ -263,7 +263,7 @@ impl AssetMilpContext for EvMilpContext {
         warnings
     }
 
-    fn inject_grid_slots(&mut self, c_imp_eur_kwh: &[f64], p_pv_kw: &[f64], p_base_kw: &[f64]) {
+    fn inject_grid_slots(&mut self, c_imp_eur_kwh: &[f64], forecast_surplus_kw: &[f64]) {
         // WP4.1-c MAX_COST: keep the per-slot import rates for the budget constraint.
         if self.budget_eur.is_some() {
             self.c_imp_eur_kwh = Some(c_imp_eur_kwh.to_vec());
@@ -275,13 +275,12 @@ impl AssetMilpContext for EvMilpContext {
         // opened fully when the grid pays (or charges nothing) for import.
         let cap: Vec<f64> = c_imp_eur_kwh
             .iter()
-            .zip(p_pv_kw)
-            .zip(p_base_kw)
-            .map(|((&c_imp, &pv), &base)| {
+            .zip(forecast_surplus_kw)
+            .map(|(&c_imp, &surplus_kw)| {
                 if c_imp <= 0.0 {
                     self.p_max_kw
                 } else {
-                    (pv - base).max(0.0).min(self.p_max_kw)
+                    surplus_kw.max(0.0).min(self.p_max_kw)
                 }
             })
             .collect();

@@ -36,9 +36,9 @@ single plan, and without touching dispatch, the simulator or the plan's wire for
 | `assets/ev_declared.rs::inject_grid_slots` (free-PV cap) | `max(0, pv − base)` |
 | `results.rs` `surplus_available_kw` (twice: solved and fallback) | `max(0, p_pv − p_base)` |
 
-All become reads of `MilpInputs.forecast_surplus_kw`, computed once in `inputs.rs` from the
-forecast participants and the baseline override. The coexistence test `surplus >= p_min` is
-unchanged by the floor because `p_min > 0`.
+All become calls of `MilpInputs::forecast_surplus_kw()`: PV minus the base load after the
+baseline override, signed, each reader flooring it where it did. Signed because the coexistence
+test compares the unfloored value with the EV's minimum power, which some fixtures set to 0.
 
 **Plan output:** `results.rs` writes `baseline_kw`, `pv_forecast_kw`, `pv_used_kw` from the site
 series. Readers: `dispatcher::resolve_pv_generation_limit_kw`, `arbiter_levers::pv_curtailment_lever`,

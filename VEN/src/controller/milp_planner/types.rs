@@ -114,6 +114,20 @@ pub(crate) struct MilpInputs {
     pub(crate) penalty_rules: Vec<PenaltyRuleParams>,
 }
 
+impl MilpInputs {
+    /// Forecast PV surplus over the base load (after the baseline override) per slot [kW],
+    /// signed: a deficit is negative. The one computation of "free PV"; every reader (the
+    /// coexistence interaction, the import malus, the EV free-PV cap, the plan's
+    /// `surplus_available_kw`) calls it and floors it where it needs a non-negative surplus.
+    pub(crate) fn forecast_surplus_kw(&self) -> Vec<f64> {
+        self.p_pv_kw
+            .iter()
+            .zip(&self.p_base_kw)
+            .map(|(pv_kw, base_kw)| pv_kw - base_kw)
+            .collect()
+    }
+}
+
 /// Internal MILP descriptor for one shiftable load block. Implements
 /// `AssetMilpContext` (impl in `assets/shiftable_load.rs`, matching the
 /// Battery/EV/Heater cross-file convention) — `shiftable-load-as-asset`,

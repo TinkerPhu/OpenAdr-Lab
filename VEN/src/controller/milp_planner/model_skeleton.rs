@@ -109,8 +109,7 @@ impl<'c> ModelSkeleton<'c> {
         let global = GlobalMilpInputs {
             n,
             dt_h: inputs.dt_h.clone(),
-            p_pv_kw: inputs.p_pv_kw.clone(),
-            p_base_kw: inputs.p_base_kw.clone(),
+            forecast_surplus_kw: inputs.forecast_surplus_kw(),
         };
 
         let mut vars = variables!();

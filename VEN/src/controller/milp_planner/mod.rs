@@ -143,8 +143,9 @@ pub fn run_planner(
     );
     // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
     // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
+    let forecast_surplus_kw = inputs.forecast_surplus_kw();
     for ctx in asset_contexts.iter_mut() {
-        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &forecast_surplus_kw);
     }
     let p1w = build_phase1_weights(planner, objective);
     match solve_milp_two_phase(

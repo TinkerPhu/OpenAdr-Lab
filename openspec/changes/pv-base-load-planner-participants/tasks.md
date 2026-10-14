@@ -6,12 +6,12 @@ otherwise.
 
 ## 1. One forecast surplus
 
-- [ ] 1.1 Test first: `forecast_surplus_kw` is `max(0, pv − base − adjust)` per slot, and the
-      coexistence interaction, the import malus, the EV free-PV cap and `surplus_available_kw`
-      read it.
-- [ ] 1.2 Add `MilpInputs.forecast_surplus_kw`, computed in `inputs.rs`; replace the four
-      `pv − base` computations; give `inject_grid_slots` the surplus instead of the two series.
-      Goldens hold except `milp_inputs.txt` (one added series).
+- [x] 1.1 Test first: `forecast_surplus_kw` is PV minus the base load after the override, signed,
+      per slot (`tests/inputs_golden.rs`).
+- [x] 1.2 `MilpInputs::forecast_surplus_kw()` (a method, so hand-built test inputs cannot hold a
+      stale copy; signed, because the coexistence test compares the unfloored value with the EV's
+      minimum power); the four `pv − base` computations call it; `inject_grid_slots` takes it
+      instead of the two series. All goldens hold.
 
 ## 2. The dispatched role and forecast readback
 

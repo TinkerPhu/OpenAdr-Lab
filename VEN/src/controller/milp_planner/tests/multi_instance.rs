@@ -243,8 +243,7 @@ fn coexist_pairs(ctxs: &[&dyn crate::controller::milp_planner::AssetMilpContext]
     let global = GlobalMilpInputs {
         n,
         dt_h: vec![0.5; n],
-        p_pv_kw: vec![6.0; n],
-        p_base_kw: vec![1.0; n],
+        forecast_surplus_kw: vec![6.0 - 1.0; n],
     };
     let interaction = BatEvCoexistInteraction { c_eur_kwh: 0.05 };
     if !interaction.applicable(&pool) {
