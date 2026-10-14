@@ -35,6 +35,56 @@ pub(crate) struct EventChanges {
     pub wire_audit: WireAudit,
 }
 
+/// What this VEN reads about capacity after one poll: the limits, reservations and
+/// subscriptions in force, and the limit schedule. Two polls with equal pictures
+/// leave the planner's capacity inputs unchanged. The poll's own timestamp is left
+/// out, or every poll would differ.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CapacityPicture {
+    state: entities::capacity::OadrCapacityState,
+    schedule: Vec<entities::capacity::CapacitySnapshot>,
+}
+
+impl CapacityPicture {
+    fn of(
+        state: &entities::capacity::OadrCapacityState,
+        schedule: &[entities::capacity::CapacitySnapshot],
+    ) -> Self {
+        let mut state = state.clone();
+        state.last_updated = None;
+        Self {
+            state,
+            schedule: schedule.to_vec(),
+        }
+    }
+}
+
+impl EventChanges {
+    /// This poll's capacity picture, the `prev_capacity` of the next poll.
+    pub fn capacity_picture(&self) -> CapacityPicture {
+        CapacityPicture::of(&self.capacity, &self.capacity_schedule)
+    }
+
+    /// The replan this poll asks for, if anything changed. A capacity change wins:
+    /// GB-55 holds a `RateChange` replan for a jittered moment, and a limit or
+    /// reservation is a contractual constraint whose value is reacting now.
+    pub fn plan_trigger(&self) -> Option<entities::asset::PlanTrigger> {
+        use controller::trace::ControllerEvent::CapacityChange;
+        use entities::asset::PlanTrigger;
+        if self.trace_events.is_empty() {
+            None
+        } else if self
+            .trace_events
+            .iter()
+            .any(|e| matches!(e, CapacityChange { .. }))
+        {
+            Some(PlanTrigger::CapacityChange)
+        } else {
+            Some(PlanTrigger::RateChange)
+        }
+    }
+}
+
 /// `events` as this VEN acts on them: each declared start moved by the VEN's own
 /// `randomizeStart` offset (R-86, `lab_core::event_timing::with_randomized_start`). What the
 /// poll parses into windows, rates and limits comes from this; the declared events, the report
@@ -57,7 +107,7 @@ pub(crate) fn detect_event_changes(
     reader: &PayloadReader,
     prev_ids: &std::collections::HashSet<String>,
     prev_tariff_count: usize,
-    prev_import_limit: Option<f64>,
+    prev_capacity: &CapacityPicture,
     now: DateTime<Utc>,
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, reader);
@@ -139,8 +189,8 @@ pub(crate) fn detect_event_changes(
         }
     }
 
-    // CapacityChange — import limit changed
-    if capacity.import_limit_kw != prev_import_limit {
+    // CapacityChange — a limit, reservation or subscription appeared, moved or lifted
+    if CapacityPicture::of(&capacity, &capacity_schedule) != *prev_capacity {
         trace_events.push(controller::trace::ControllerEvent::CapacityChange {
             ts: now,
             import_limit_kw: capacity.import_limit_kw,
@@ -197,7 +247,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             ts(),
         );
         let arrived: Vec<_> = changes
@@ -230,7 +280,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             ts(),
         );
         let controller::trace::ControllerEvent::OpenAdrArrived {
@@ -258,8 +308,14 @@ mod event_poll_tests {
         let mut prev_ids = empty_ids();
         prev_ids.insert("gone".to_string());
         let events = vec![make_event("fresh", "New", "PRICE", 0.2)];
-        let changes =
-            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            &CapacityPicture::default(),
+            ts(),
+        );
 
         let causes: Vec<String> = changes
             .trace_events
@@ -288,8 +344,14 @@ mod event_poll_tests {
     fn expired_carries_the_event_id() {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes =
-            detect_event_changes(&[], &PayloadReader::default(), &prev_ids, 0, None, ts());
+        let changes = detect_event_changes(
+            &[],
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            &CapacityPicture::default(),
+            ts(),
+        );
         let expired = changes
             .trace_events
             .iter()
@@ -312,7 +374,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             ts(),
         );
         assert_eq!(changes.event_records.len(), 1);
@@ -329,8 +391,14 @@ mod event_poll_tests {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes =
-            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            &CapacityPicture::default(),
+            ts(),
+        );
         assert!(changes.event_records.is_empty());
     }
 
@@ -339,8 +407,14 @@ mod event_poll_tests {
     fn removed_event_emits_expired() {
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string());
-        let changes =
-            detect_event_changes(&[], &PayloadReader::default(), &prev_ids, 0, None, ts());
+        let changes = detect_event_changes(
+            &[],
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            &CapacityPicture::default(),
+            ts(),
+        );
         let expired: Vec<_> = changes
             .trace_events
             .iter()
@@ -367,8 +441,14 @@ mod event_poll_tests {
         }));
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
-        let changes =
-            detect_event_changes(&events, &PayloadReader::default(), &prev_ids, 0, None, ts());
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &prev_ids,
+            0,
+            &CapacityPicture::default(),
+            ts(),
+        );
         // Only assert if the parser actually produced rates (depends on parser internals)
         if !changes.rates.is_empty() {
             let rate_changes: Vec<_> = changes
@@ -395,16 +475,16 @@ mod event_poll_tests {
         }));
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen
-        let prev_limit: Option<f64> = None;
+        let prev_capacity = CapacityPicture::default();
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
             &prev_ids,
             0,
-            prev_limit,
+            &prev_capacity,
             ts(),
         );
-        if changes.capacity.import_limit_kw != prev_limit {
+        if changes.capacity_picture() != prev_capacity {
             let cap_changes: Vec<_> = changes
                 .trace_events
                 .iter()
@@ -426,7 +506,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &prev_ids,
             999,
-            None,
+            &CapacityPicture::default(),
             ts(),
         );
         let no_arrived = !changes
@@ -477,7 +557,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             now,
         );
         state.retire_obligations_not_in(&first.current_ids).await;
@@ -493,7 +573,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &first.current_ids,
             0,
-            None,
+            &CapacityPicture::default(),
             now,
         );
         state.retire_obligations_not_in(&second.current_ids).await;
@@ -523,7 +603,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             ts(),
         )
         .signals
@@ -596,7 +676,7 @@ mod event_poll_tests {
             &PayloadReader::default(),
             &empty_ids(),
             0,
-            None,
+            &CapacityPicture::default(),
             ts(),
         );
         assert_eq!(
@@ -611,5 +691,95 @@ mod event_poll_tests {
             Some(4.0),
             "the undeclared limit still applies"
         );
+    }
+}
+
+#[cfg(test)]
+mod plan_trigger_tests {
+    //! Which replan an event poll asks for. GB-55 holds a `RateChange` replan for a
+    //! jittered moment; a capacity limit or reservation must not wait in that queue.
+    use super::*;
+    use crate::entities::asset::PlanTrigger;
+    use chrono::TimeZone;
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, 21, 10, 0, 0).unwrap()
+    }
+
+    fn event(id: &str, payload_type: &str, value: f64, start: &str) -> OadrEvent {
+        lab_core::test_fixtures::events_from_json(serde_json::json!({
+            "id": id,
+            "programID": "prog",
+            "eventName": id,
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": {"start": start, "duration": "PT1H"},
+                "payloads": [{"type": payload_type, "values": [value]}]
+            }]
+        }))
+        .remove(0)
+    }
+
+    /// One poll of `events` after a poll that saw `before`.
+    fn poll_after(before: &[OadrEvent], events: &[OadrEvent]) -> EventChanges {
+        let reader = PayloadReader::default();
+        let first = detect_event_changes(
+            before,
+            &reader,
+            &std::collections::HashSet::new(),
+            0,
+            &CapacityPicture::default(),
+            now(),
+        );
+        detect_event_changes(
+            events,
+            &reader,
+            &first.current_ids,
+            first.rates.len(),
+            &first.capacity_picture(),
+            now(),
+        )
+    }
+
+    #[test]
+    fn plan_trigger_an_announced_capacity_limit_is_a_capacity_replan() {
+        let limit = event("lim", "IMPORT_CAPACITY_LIMIT", 2.0, "2026-03-21T12:00:00Z");
+        let changes = poll_after(&[], &[limit]);
+        assert_eq!(changes.plan_trigger(), Some(PlanTrigger::CapacityChange));
+    }
+
+    #[test]
+    fn plan_trigger_a_capacity_reservation_is_a_capacity_replan() {
+        let reservation = event(
+            "res",
+            "IMPORT_CAPACITY_RESERVATION",
+            3.0,
+            "2026-03-21T10:00:00Z",
+        );
+        let changes = poll_after(&[], &[reservation]);
+        assert_eq!(changes.plan_trigger(), Some(PlanTrigger::CapacityChange));
+    }
+
+    #[test]
+    fn plan_trigger_a_lifted_capacity_limit_is_a_capacity_replan() {
+        let limit = event("lim", "IMPORT_CAPACITY_LIMIT", 2.0, "2026-03-21T10:00:00Z");
+        let changes = poll_after(&[limit], &[]);
+        assert_eq!(changes.plan_trigger(), Some(PlanTrigger::CapacityChange));
+    }
+
+    #[test]
+    fn plan_trigger_a_new_price_event_is_a_rate_replan() {
+        let price = event("price", "PRICE", 0.25, "2026-03-21T10:00:00Z");
+        let changes = poll_after(&[], &[price]);
+        assert_eq!(changes.plan_trigger(), Some(PlanTrigger::RateChange));
+    }
+
+    #[test]
+    fn plan_trigger_an_unchanged_event_list_asks_for_no_replan() {
+        let limit = event("lim", "IMPORT_CAPACITY_LIMIT", 2.0, "2026-03-21T12:00:00Z");
+        let price = event("price", "PRICE", 0.25, "2026-03-21T10:00:00Z");
+        let both = [limit, price];
+        let changes = poll_after(&both, &both);
+        assert_eq!(changes.plan_trigger(), None);
     }
 }

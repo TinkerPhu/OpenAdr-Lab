@@ -11,7 +11,7 @@ use tracing::{error, info};
 
 use crate::controller;
 use crate::controller::VtnPort;
-use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
+use crate::entities::asset::PlanTriggerSignal;
 use crate::state::AppState;
 use crate::tasks::backoff::Backoff;
 use detect::{detect_event_changes, events_this_ven_acts_on};
@@ -32,10 +32,10 @@ async fn read_events(
     state: &AppState,
     notifier: &crate::services::notify::Notifier,
     events: &[controller::vtn_port::OadrEvent],
-    (prev_ids, prev_tariff_count, prev_import_limit): (
+    (prev_ids, prev_tariff_count, prev_capacity): (
         &std::collections::HashSet<String>,
         usize,
-        Option<f64>,
+        &detect::CapacityPicture,
     ),
     now: chrono::DateTime<Utc>,
 ) -> detect::EventChanges {
@@ -45,7 +45,7 @@ async fn read_events(
         &reader,
         prev_ids,
         prev_tariff_count,
-        prev_import_limit,
+        prev_capacity,
         now,
     );
     crate::services::notify::notify_unit_audit(notifier, state, now, &changes.wire_audit).await;
@@ -74,7 +74,7 @@ pub(crate) fn spawn_event_poll(
         let mut prev_event_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         let mut prev_tariff_count: usize = 0;
-        let mut prev_import_limit: Option<f64> = None;
+        let mut prev_capacity = detect::CapacityPicture::default();
         let mut signal_prevs = super::poll_signals::SignalPrevs::default();
         let mut announced_staggered: std::collections::HashSet<String> =
             std::collections::HashSet::new();
@@ -109,11 +109,12 @@ pub(crate) fn spawn_event_poll(
                         &mut announced_staggered,
                     )
                     .await;
-                    let prevs = (&prev_event_ids, prev_tariff_count, prev_import_limit);
+                    let prevs = (&prev_event_ids, prev_tariff_count, &prev_capacity);
                     let changes = read_events(&state, &notifier, &acted_on, prevs, now).await;
 
-                    // Check before the trace_events vec is consumed by the for loop.
-                    let any_change = !changes.trace_events.is_empty();
+                    // Read before the trace_events vec is consumed by the for loop.
+                    let plan_trigger = changes.plan_trigger();
+                    let next_capacity = changes.capacity_picture();
                     // Same reason, same place: which events moved, so a replan
                     // can be attributed to them rather than to "something
                     // changed around then" (§6.3). The trace entries already
@@ -137,9 +138,9 @@ pub(crate) fn spawn_event_poll(
                     for evt in changes.trace_events {
                         state.push_controller_event(evt).await;
                     }
+                    prev_capacity = next_capacity;
                     prev_event_ids = changes.current_ids;
                     prev_tariff_count = changes.rates.len();
-                    prev_import_limit = changes.capacity.import_limit_kw;
 
                     state.set_planned_tariffs(changes.rates).await;
                     state.set_capacity_state(changes.capacity).await;
@@ -184,18 +185,17 @@ pub(crate) fn spawn_event_poll(
                     // Signal planner only when something actually changed (new/expired event,
                     // tariff count change, or capacity change). Firing on every poll caused
                     // continuous replanning at the poll interval (~30s) regardless of whether
-                    // rates changed, which destabilised the plan.
+                    // rates changed, which destabilised the plan. A capacity change is sent as
+                    // CapacityChange, so GB-55's rate-change hold never delays a limit.
                     // trigger_tx is a watch channel (latest wins) — don't overwrite
-                    // an Alert/CapacityChange trigger sent above with RateChange.
-                    if any_change && !signal_trigger_sent {
+                    // an Alert/CapacityChange trigger sent above.
+                    if let Some(trigger) = plan_trigger.filter(|_| !signal_trigger_sent) {
                         // Which events moved, so a replan can be attributed to
                         // them rather than to "something changed around then"
                         // (§6.3). The trace entries already carry the ids;
                         // reading them here keeps one source for both.
-                        let _ = trigger_tx.send(PlanTriggerSignal::caused_by(
-                            PlanTrigger::RateChange,
-                            trigger_causes,
-                        ));
+                        let _ =
+                            trigger_tx.send(PlanTriggerSignal::caused_by(trigger, trigger_causes));
                     }
                     super::backoff::record_success(&mut backoff, &state, now).await;
                     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;

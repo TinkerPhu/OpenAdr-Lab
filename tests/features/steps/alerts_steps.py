@@ -166,22 +166,38 @@ def _fetch_plan():
     return body if isinstance(body, dict) else None
 
 
+def _any_slot_capped(plan, cap):
+    if plan is None:
+        return False
+    return any(
+        slot.get("import_cap_kw", float("inf")) <= cap + 0.01
+        for slot in plan.get("slots", [])
+    )
+
+
 @when("I wait for the VEN /plan to have at least one slot with import_cap_kw at most {cap:f}")
 def step_wait_any_slot_capped(context, cap):
-    def any_capped(plan):
-        if plan is None:
-            return False
-        return any(
-            slot.get("import_cap_kw", float("inf")) <= cap + 0.01
-            for slot in plan.get("slots", [])
-        )
-
     context.ven_plan = poll_until(
         _fetch_plan,
-        any_capped,
+        lambda plan: _any_slot_capped(plan, cap),
         timeout=300,
         interval=5,
         description=f"VEN /plan has at least one slot with import_cap_kw ≤ {cap}",
+    )
+
+
+# A capacity event replans as CAPACITY_CHANGE, which GB-55's rate-change hold
+# never delays. A plan carrying the cap but adopted under another trigger means
+# the event reached the planner as something else.
+@when("I wait for a capacity-change replan with at least one slot capped at {cap:g} kW")
+def step_wait_capacity_change_replan(context, cap):
+    context.ven_plan = poll_until(
+        _fetch_plan,
+        lambda plan: _any_slot_capped(plan, cap)
+        and plan.get("trigger") == "CAPACITY_CHANGE",
+        timeout=120,
+        interval=2,
+        description=f"a CAPACITY_CHANGE plan with a slot capped at ≤ {cap} kW",
     )
 
 

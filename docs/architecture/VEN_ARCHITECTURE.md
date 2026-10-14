@@ -368,10 +368,13 @@ a trigger; the Planner processes them in order. This prevents redundant replanni
 every relevant event causes exactly one new plan.
 
 Trigger senders in code today: HTTP routes (`PlanTrigger::UserRequest`), `POST /plan/trigger`
-and sim state injection (`PlanTrigger::AssetStateChange`), the event poll loop
-(`PlanTrigger::RateChange` — fired for **any** detected change, including capacity changes),
-and shiftable-load completion (`PlanTrigger::UserRequest`). `PlanTrigger::Alert` and
-`::CapacityChange` are defined but never sent — see the OpenADR Interface event table above.
+and sim state injection (`PlanTrigger::AssetStateChange`), the event poll loop, and
+shiftable-load completion (`PlanTrigger::UserRequest`). The event poll sends
+`PlanTrigger::CapacityChange` when any capacity limit, reservation or subscription — in force or
+scheduled — appeared, moved or lifted, otherwise `PlanTrigger::RateChange`
+(`EventChanges::plan_trigger` in `tasks/poll_events/detect.rs`); alert windows send
+`PlanTrigger::Alert` and SIMPLE windows `PlanTrigger::CapacityChange` (`tasks/poll_signals.rs`).
+Only `RateChange` is held by GB-55 (`ven_milp_planner.md`).
 
 ### 2.3 Planning Algorithm
 
@@ -612,8 +615,8 @@ t=0.1s   Monitor
 
 t=30s    OpenADR Interface polls VTN (POLL_EVENTS_SECS, default 30 s)
            → New events → translate to TariffSnapshot, OadrCapacityState
-           → PlanTrigger::RateChange if anything changed (see §2.2 — this fires for
-             capacity changes too; there is no separate CapacityChange trigger in use)
+           → PlanTrigger::CapacityChange if the capacity picture changed, else
+             PlanTrigger::RateChange if anything changed (see §2.2)
 
 t=300s   Planner (if triggered, or on replan_interval_s timeout — default 300 s)
            → Reads all state
