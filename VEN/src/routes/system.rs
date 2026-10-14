@@ -423,7 +423,8 @@ mod tests {
         assert_eq!(telemetry.status, "degraded");
         assert_eq!(
             resp.status, "ok",
-            "the fleet view going dark is an observability problem, not an              operational one"
+            "the fleet view going dark is an observability problem, not an \
+             operational one"
         );
     }
 

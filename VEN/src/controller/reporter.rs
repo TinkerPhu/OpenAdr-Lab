@@ -611,7 +611,8 @@ mod tests {
             let end = start + Duration::seconds(300);
             assert!(
                 end <= now,
-                "interval [{start}, {end}) has not finished at {now}; a report                  must not describe a window still being measured"
+                "interval [{start}, {end}) has not finished at {now}; a report \
+                 must not describe a window still being measured"
             );
         }
     }
