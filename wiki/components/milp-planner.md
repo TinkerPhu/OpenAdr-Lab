@@ -39,6 +39,14 @@ the model fingerprint's sorted digests. Details: `docs/architecture/ven_milp_pla
 assets take part"; the ring rule it enforces is in [[ven-hexagonal-architecture]] (audit rules 16
 and 17).
 
+The plan's wire format followed (`refactor/asset-declared-plan-output`, W2): the battery-named
+`bat_charge_kw`, `bat_discharge_kw` and `soc_trajectory_kwh` are gone (nothing read them; each
+storage asset's net power and SoC already travel under its own id), and `Plan.planned_asset_ids`
+names the assets a plan scheduled, idle ones included (`VEN/src/entities/plan.rs`). Readers ask
+`Plan::planned_assets()`, which also covers plans stored before the list existed; the forecast
+service and the [[ven-ui]] Decision Matrix do. Audit rule 16 now covers `entities/plan.rs`. PV and
+base load remain site series on the slot until they take part as assets.
+
 ## Key mechanics
 
 - **Grid-signal import caps** (Phase 3): alerts, SIMPLE levels 1–3, and capacity
