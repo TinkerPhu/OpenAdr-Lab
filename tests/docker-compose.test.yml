@@ -107,6 +107,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -157,6 +159,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -191,6 +195,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -225,6 +231,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -259,6 +267,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -293,6 +303,8 @@ services:
     build:
       context: ..
       dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
@@ -327,6 +339,8 @@ services:
       # The repo root: the BFF depends on `lab-core` by path (D-06).
       context: ..
       dockerfile: VTN/bff/Dockerfile
+      args:
+        CARGO_PROFILE: ci
     environment:
       BFF_LISTEN_ADDR: "0.0.0.0:8090"
       VTN_BASE_URL: "http://test-vtn:3000"

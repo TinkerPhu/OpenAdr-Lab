@@ -11,7 +11,15 @@ WORKDIR /repo/VEN
 
 # HiGHS bindings build native C++ code via cmake + bindgen (needs libclang).
 # mold links the large ven-app binary several times faster than the default ld.
-RUN apt-get update     && apt-get install -y --no-install-recommends         build-essential         cmake         pkg-config         libclang-dev         libssl-dev         mold     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        libclang-dev \
+        libssl-dev \
+        mold \
+    && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 
 # The build context is the repo root, not VEN/, because `lab-core` is a path
@@ -30,7 +38,12 @@ COPY VEN/profiles ./profiles
 # rebuilds only the dependencies that changed -- not HiGHS and every other crate,
 # as a layer keyed on the lockfile would. The binary is copied out in the same
 # step because a cache mount is not part of the image.
-RUN --mount=type=cache,id=ven-cargo-registry,target=/usr/local/cargo/registry     --mount=type=cache,id=ven-cargo-git,target=/usr/local/cargo/git     --mount=type=cache,id=ven-target,target=/repo/VEN/target,sharing=locked     cargo build --release && cp target/release/ven-app /ven-app
+# `release` for production; the E2E stack passes `ci` (see Cargo.toml).
+ARG CARGO_PROFILE=release
+RUN --mount=type=cache,id=ven-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=ven-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=ven-target,target=/repo/VEN/target,sharing=locked \
+    cargo build --profile "$CARGO_PROFILE" && cp "target/$CARGO_PROFILE/ven-app" /ven-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \

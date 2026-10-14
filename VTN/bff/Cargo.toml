@@ -34,3 +34,20 @@ rumqttc = { version = "0.25", default-features = false }
 # dependency, which is why this crate's Docker build context is the repo root.
 lab-core = { path = "../../lab-core" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
+
+# `ci`: the profile the E2E test images build with (tests/docker-compose.test.yml).
+# Only our own crates drop to opt-level 1 and build incrementally, so a source edit
+# recompiles quickly; every dependency -- HiGHS (C++, built by cmake from this
+# opt-level) and the rest of the solver path -- keeps release optimisation.
+# Production images build `release`.
+[profile.ci]
+inherits = "release"
+opt-level = 1
+incremental = true
+codegen-units = 256
+
+[profile.ci.package."*"]
+opt-level = 3
+
+[profile.ci.package.lab-core]
+opt-level = 1

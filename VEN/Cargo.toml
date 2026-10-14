@@ -64,3 +64,20 @@ rumqttc = { version = "0.25", default-features = false }
 # Linux/glibc only (matches the debian:bookworm-slim runtime image); cfg-gated at the
 # call site for other targets (local dev on Windows/macOS).
 libc = "0.2"
+
+# `ci`: the profile the E2E test images build with (tests/docker-compose.test.yml).
+# Only our own crates drop to opt-level 1 and build incrementally, so a source edit
+# recompiles quickly; every dependency -- HiGHS (C++, built by cmake from this
+# opt-level) and the rest of the solver path -- keeps release optimisation.
+# Production images build `release`.
+[profile.ci]
+inherits = "release"
+opt-level = 1
+incremental = true
+codegen-units = 256
+
+[profile.ci.package."*"]
+opt-level = 3
+
+[profile.ci.package.lab-core]
+opt-level = 1
