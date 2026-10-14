@@ -172,7 +172,9 @@ are never set in production profiles and all run at their code defaults. They
 add profile surface area but are purely additive — omitting them never causes
 silent misbehaviour, unlike the `c_ctrl_imp_malus_eur_kwh` trap above. They
 serve as documented escape hatches for future tuning without requiring code
-changes.
+changes. Under a preset objective most of them are fixed by the preset;
+`c_bat_wear_eur_kwh` is read by every objective that prices money (`min_cost`,
+`max_revenue`, `custom`) and is 0 under the others (`build_phase1_weights`).
 
 ---
 
