@@ -2,7 +2,7 @@
 title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
-updated: 2026-08-03
+updated: 2026-10-14
 synced_commit: fab41e9
 sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
@@ -30,13 +30,14 @@ the Zunzgen site, published by a separate `data_acquisition` project from SRF Me
 
 ## Two consumers, one resolution path
 
-Both the planner and the live simulator resolve PV power through the same function,
-`entities::solar::resolve_weather_pv_kw` (weather-sourced when fresh, sin-model fallback
-otherwise) — this is what stops the two views from silently diverging (closed as
+Weather reaches PV through one gate, `entities::solar::fresh_weather_pv_series` (the
+forecast series when fresh and configured, nothing otherwise), which the sim tick hands to the
+live `PvInverter` — this is what stops the two views from silently diverging (closed as
 TECHNICAL_DEBTS.md R-50):
 
-- **Planner input**: `SolveRequest.weather_pv_kw` → `run_planner` → `inputs::build_milp_inputs`,
-  precedence `pv_forecast_override` > `weather_pv_kw` > sin-model. See [[milp-planner]].
+- **Planner input** (W3): the PV plans with its own forecast (`uncurtailed_power_kw_at`), so the
+  planner reads weather only through the PV; the sim-inject pin `pv_plan_kw` still wins. See
+  [[milp-planner]].
 - **Simulator ground truth**: `PvInverter.weather_power_kw`, resolved once per tick in
   `tasks::sim_tick::tick_once` and used by `step_inner` in place of the sin model —
   precedence manual sim-inject override > **measured** > weather > sin model (measured added

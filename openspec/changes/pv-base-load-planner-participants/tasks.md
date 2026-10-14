@@ -50,6 +50,6 @@ otherwise.
 
 - [ ] 5.1 fmt, clippy, `cargo audit`, file sizes, duplication, architecture, module graph, debt
       gate; all four suites on Node2.
-- [ ] 5.2 Docs: `ven_milp_planner.md` (participants, the dispatched role, the surplus),
+- [x] 5.2 Docs: `ven_milp_planner.md` (participants, the dispatched role, the surplus),
       `VEN_ARCHITECTURE.md` §3.0d, journal (including D4's remaining part), key learnings, wiki.
 - [ ] 5.3 Delete this change; rebase, fast-forward merge, clean up Node2 and the worktree.

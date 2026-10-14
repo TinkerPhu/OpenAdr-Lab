@@ -80,7 +80,8 @@ limit). The live-simulator generation limit lives on per-tick `PvState.generatio
 historical reconstruction reports the limit that was actually active at that tick, not the
 current one. `dispatcher::resolve_pv_generation_limit_kw` computes the live limit as the most
 restrictive of four candidates — VTN/sim-inject capacity cap, the [[milp-planner]]'s own
-`p_pv_used[t]` curtailment target, and a new **manual operator override**
+curtailment target (the plan's `pv_used_kw`, the PV's own used-generation variable since W3), and
+a new **manual operator override**
 (`pv_generation_limit_kw` sim-inject field, `PvCurtailmentSource::Manual`, wins exact ties as
 the most deliberate/explicit source) — this is what makes VTN `EXPORT_CAPACITY_LIMIT` events
 physically take effect, not just appear in the plan.

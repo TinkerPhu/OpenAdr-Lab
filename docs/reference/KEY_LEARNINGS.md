@@ -3419,3 +3419,16 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   line continuation became a run of spaces in nine user-visible strings. Write such scripts with
   the editor to a file and run them with `python -I`; a grep for 6+ spaces inside a literal finds
   the damage.
+
+## Byte-identical after a model refactor means keeping the order, not just the meaning (2026-10-14)
+
+- good_lp keeps expression terms in a hash map, and HiGHS's answer depends on column and row order:
+  moving one variable family (PV's used generation) from the grid block to the asset list changed
+  `objective_eur` in the 13th digit. Declaring it where it was, adding its rows beside the same
+  balance row and its objective terms at the same point restored the exact plans. Plan the order
+  as part of the design when a golden must stay byte-identical.
+- When a refactor removes a variable family that was fixed at 0 in some scenarios, those
+  scenarios cannot stay byte-identical; classify them separately (structure: exactly the removed
+  columns and rows; plans: numeric noise only) instead of loosening the whole comparison.
+- A test fixture that derives the same fact twice (the PV pin in the inputs and in the context)
+  will disagree as soon as one path changes; derive both from one function.
