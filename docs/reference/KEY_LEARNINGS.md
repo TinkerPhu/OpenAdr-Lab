@@ -3404,3 +3404,18 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - "Absent" and "zero" were one case on the wire: an idle asset has no allocation, and the
   dispatcher reads that as "no say" (default setpoint, thermostat). Naming the planned assets
   separately makes the difference expressible without changing what dispatch does.
+
+## A slack bounded by what is unreachable is a constant in the objective (2026-10-14)
+
+- The EV obligation was stated against the raw target while the SoC was capped at the charge
+  limit, so any target above the limit forced the shortfall slack to the gap in every solve. The
+  solution did not move, but the warning blamed the window and `objective_eur` carried a constant
+  1e4 EUR/SoC penalty, which matters wherever objectives are compared. State a constraint against
+  what the model can reach, and report what it cannot reach as its own fact.
+- Check a register row's "why it needs a decision" against the code before presenting options:
+  two of three were wrong (a default equal to the hard-coded value; a persisted struct that is
+  rebuilt from the profile at load).
+- Edit scripts passed through a bash heredoc lose backslashes and escaped quotes: a Rust `\`
+  line continuation became a run of spaces in nine user-visible strings. Write such scripts with
+  the editor to a file and run them with `python -I`; a grep for 6+ spaces inside a literal finds
+  the damage.

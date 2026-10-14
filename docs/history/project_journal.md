@@ -15661,3 +15661,31 @@ shiftable load waiting for its window) now gets a zero `Optimization` forecast, 
 no longer takes its place; forecasts come in plan order instead of sorted. Dispatch is unchanged:
 an asset with no allocation in a slot still runs at its default or thermostat, which is why "planned
 idle" stays a reader-side fact for now. Deferred: R-141 (a test fixture in its file was touched).
+
+## R-140, R-141, R-142: three planner decisions (fix/r140-r141-r142-decisions)
+
+**What.** R-142 (option A): MinCost and MaxRevenue price storage wear at the profile's
+`c_bat_wear_eur_kwh` instead of a hard-coded 0.03; the other presets keep wear at 0. R-141
+(option B): the `Heater` asset carries its own `switching_penalty_eur` and prices relay switching
+with it; the first-heater lookup and `lambda_sw` are gone from `PlanCycleInputs`,
+`MilpBuildInputs` and `build_asset_contexts`. R-140 (option B): one rule for the energy a firm
+EV obligation needs (`EvMilpContext::required_kwh`, on `reachable_target_frac`) feeds the solve,
+the shortfall warning and session flexibility; the obligation is stated against the reachable
+target, and a target above the charge limit is reported before the solve as
+`WarningKind::TargetAboveLimit`. Nine message strings had lost their line continuation and read
+with a run of spaces; restored.
+
+**Why.** User decisions of 2026-10-14 on the three needs-decision rows W1 filed.
+
+**How it was proven.** Test first for each; the R-140 solve test was run against the old model and
+failed with exactly the reported symptom ("falls 7.5 kWh short … all the available window
+allows" for a window with room). Goldens: R-141 and R-142 change nothing (the wear default equals
+the old constant, and the planner tests build the heater from its profile). R-140 changes one plan
+scenario (`ev_firm_shortfall`, 100 % against an 80 % limit): new warning, shortfall 34.2 of 36 kWh
+instead of 46.1 of 48, flexibility 36 kWh, objective 2000 EUR lower; no slot moved anywhere. Seven
+more scenarios change only in the repaired warning whitespace.
+
+**Issues.** Two register reasons were wrong once checked against the code: R-142's "changes every
+plan" (the profile default is 0.03 and no profile sets it) and R-141's "persisted Heater state
+needs a default" (asset configs are rebuilt from the profile at every load). The whitespace damage
+predates W1; the same heredoc escaping that caused it broke two edit scripts in this branch too.
