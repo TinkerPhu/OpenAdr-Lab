@@ -15,6 +15,15 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     And the plan has field "slots"
     And the plan has field "session_flexibility"
 
+  # --- Planned assets ---
+
+  Scenario: The plan names every asset it planned, in roster order
+    # The Planner tab's Decision Matrix shows one row per planned asset from this list, so an
+    # asset the plan keeps idle (no allocation in any slot) still has its row.
+    When I wait for the VEN /plan endpoint to return a plan
+    Then the plan names the planned assets "ev, heater, battery"
+    And every allocation in the plan belongs to a planned asset
+
   # --- Slots ---
 
   Scenario: Plan slots cover the planning horizon

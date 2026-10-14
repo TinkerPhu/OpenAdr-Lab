@@ -45,7 +45,7 @@ confirmed by `git log -1`.
 
 ## 5. Use case
 
-- [ ] 5.1 BDD in `tests/features/ven_planner.feature`: on the test profile, the plan names the
+- [x] 5.1 BDD in `tests/features/ven_planner.feature`: on the test profile, the plan names the
       battery, the EV and the heater as planned, and every allocation belongs to one of them; run
       `python scripts/audit_step_definitions.py`.
 

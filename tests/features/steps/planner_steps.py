@@ -210,6 +210,24 @@ def step_plan_has_field(context, field):
     assert field in plan, f"Plan missing field '{field}'. Keys: {list(plan.keys())}"
 
 
+@then('the plan names the planned assets "{asset_ids}"')
+def step_plan_names_planned_assets(context, asset_ids):
+    expected = [a.strip() for a in asset_ids.split(",")]
+    planned = context.ven_plan.get("planned_asset_ids")
+    assert planned == expected, f"planned_asset_ids {planned!r}, expected {expected!r}"
+
+
+@then("every allocation in the plan belongs to a planned asset")
+def step_every_allocation_planned(context):
+    planned = set(context.ven_plan.get("planned_asset_ids") or [])
+    strays = {
+        a.get("asset_id")
+        for slot in context.ven_plan.get("slots", [])
+        for a in slot.get("allocations", [])
+    } - planned
+    assert not strays, f"allocations for assets the plan does not name: {sorted(strays)}"
+
+
 @then("the plan.slots is a non-empty array")
 def step_plan_slots_nonempty(context):
     plan = context.ven_plan
