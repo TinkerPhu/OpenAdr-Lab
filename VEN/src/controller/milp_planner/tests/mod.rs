@@ -32,13 +32,6 @@ struct Profile {
 }
 
 impl Profile {
-    fn heater_config(&self) -> Option<&HeaterParams> {
-        self.assets.iter().find_map(|a| match a {
-            AssetParams::Heater(v) => Some(v),
-            _ => None,
-        })
-    }
-
     fn pv_config(&self) -> Option<&PvParams> {
         self.assets.iter().find_map(|a| match a {
             AssetParams::Pv(v) => Some(v),
