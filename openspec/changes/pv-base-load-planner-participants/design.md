@@ -89,6 +89,10 @@ numbers. Production builds from the live `PvInverter` as `resolve_pv_forecast_kw
 **D6. A profile with a `weather_pv` section must have a PV asset** (`profile::validate`). That
 makes the dropped "weather PV without a PV asset" planner path unreachable by construction; all 14
 profiles with the section already have one.
+The rule ties only the panel geometry to a PV asset, not the weather feed: the feed (and its
+`temperature_c`) keeps working without `weather_pv`, which the heater's heat-loss forecast (GB-57)
+needs. The site's coordinates live inside `weather_pv` today; when an asset other than PV needs
+them, they move to a site-level section rather than making `weather_pv` a site setting.
 
 **D7. Model order.** PV and base-load contexts come after the schedulable ones in
 `build_asset_contexts`, which keeps every existing variable's position; the PV variable moves from
